@@ -15,8 +15,19 @@ function page({ relayMounted = true } = {}) {
   const listeners = new Map();
   const nodes = [];
   const publications = [];
+  const observers = [];
+  const frames = [];
+  const list = {};
   const win = { Event: class {
     constructor(type, options) { Object.assign(this, { type }, options); }
+  }, requestAnimationFrame(callback) { frames.push(callback); }, MutationObserver: class {
+    constructor(callback) { this.callback = callback; this.connected = false; observers.push(this); }
+    observe(target, options) {
+      assert.equal(target, list);
+      assert.deepEqual(options, { childList: true });
+      this.connected = true;
+    }
+    disconnect() { this.connected = false; }
   } };
   const relay = {
     mounted: relayMounted,
@@ -31,6 +42,9 @@ function page({ relayMounted = true } = {}) {
   };
   const doc = {
     activeElement: null,
+    body: {},
+    focused: true,
+    hasFocus() { return this.focused; },
     addEventListener(type, listener, capture) {
       assert.equal(capture, true);
       if (!listeners.has(type)) listeners.set(type, []);
@@ -61,11 +75,17 @@ function page({ relayMounted = true } = {}) {
       focusable: true,
       focusCalls: 0,
       focusOptions: [],
+      menuToggle: false,
+      matches(selector) {
+        assert.equal(selector, ".session-row-menu");
+        return this.menuToggle;
+      },
       getAttribute(name) {
         assert.equal(name, "data-menu-focus");
         return this.key;
       },
       closest(selector) {
+        if (selector === ".session-list") return this.menuToggle ? list : null;
         if (selector === "[data-menu-focus]") {
           return this.key !== undefined ? this : this.parentElement?.closest(selector) || null;
         }
@@ -85,12 +105,93 @@ function page({ relayMounted = true } = {}) {
     nodes.push(node);
     return node;
   }
-  return { doc, win, relay, publications, listeners, element, dispatch,
+  return { doc, win, relay, publications, listeners, element, dispatch, observers,
+    reinsert(toggle, removed = false) {
+      const observer = observers.at(-1);
+      assert.ok(observer?.connected, "a focused toggle must own a live list observer");
+      doc.activeElement = doc.body;
+      dispatch("focusout", toggle);
+      toggle.isConnected = !removed;
+      observer.callback([{ removedNodes: [{ contains: node => node === toggle }] }]);
+    },
+    frame() { for (const callback of frames.splice(0)) callback(); },
     epoch() { return JSON.parse(relay.value)[0]; },
     key(target, key = "ArrowDown") { dispatch("keydown", target, key); },
     move(target, pointerType = "mouse") { dispatch("pointermove", target, undefined, { pointerType }); },
     install() { return installMenuFocus(doc, win); } };
 }
+
+/** A manual pin move can reinsert the focused keyed row. The actual mutation,
+ * rather than an HTTP reply or a timer, is the boundary at which focus is lost. */
+test("reinserted session toggles regain focus without scrolling or duplicate observers", () => {
+  const p = page();
+  p.install();
+  const toggle = p.element(undefined, false);
+  toggle.menuToggle = true;
+  toggle.focus();
+  p.reinsert(toggle);
+  p.frame();
+  assert.equal(p.doc.activeElement, toggle);
+  assert.deepEqual(toggle.focusOptions.at(-1), { preventScroll: true });
+  assert.equal(p.observers.filter(observer => observer.connected).length, 1);
+});
+
+/** Removing a row or leaving its focus must not return focus to stale work,
+ * including a previously queued mutation callback delivered after that choice. */
+test("toggle preservation yields to independent focus, removal and window blur", () => {
+  for (const boundary of ["independent", "removed", "window"]) {
+    const p = page();
+    p.install();
+    const toggle = p.element(undefined, false);
+    toggle.menuToggle = true;
+    toggle.focus();
+    const observer = p.observers.at(-1);
+    if (boundary === "independent") {
+      p.element(undefined, false).focus();
+      assert.equal(observer.connected, false);
+    } else if (boundary === "removed") {
+      toggle.isConnected = false;
+    } else p.doc.focused = false;
+    p.doc.activeElement = p.doc.body;
+    observer.callback([{ removedNodes: [{ contains: node => node === toggle }] }]);
+    assert.equal(p.doc.activeElement, p.doc.body);
+    assert.equal(toggle.focusCalls, 1);
+    if (boundary === "removed") assert.equal(observer.connected, false);
+  }
+  const p = page();
+  p.install();
+  const old = p.element(undefined, false);
+  const current = p.element(undefined, false);
+  old.menuToggle = current.menuToggle = true;
+  old.focus();
+  const retired = p.observers.at(-1);
+  current.focus();
+  const live = p.observers.at(-1);
+  old.isConnected = false;
+  retired.callback([{ removedNodes: [{ contains: node => node === old }] }]);
+  p.dispatch("focusout", old);
+  p.frame();
+  assert.equal(p.doc.activeElement, current);
+  assert.equal(live.connected, true, "a retired observer cannot disconnect the next focused row's observer");
+});
+
+/** Body blur has no replacement focusin. It must retire at the render
+ * boundary so a much later pin reorder cannot revive the abandoned toggle. */
+test("intentional body blur retires preservation without replacement focus", () => {
+  const p = page();
+  p.install();
+  const toggle = p.element(undefined, false);
+  toggle.menuToggle = true;
+  toggle.focus();
+  const observer = p.observers.at(-1);
+  p.doc.activeElement = p.doc.body;
+  p.dispatch("focusout", toggle);
+  p.frame();
+  assert.equal(observer.connected, false);
+  observer.callback([{ removedNodes: [{ contains: node => node === toggle }] }]);
+  assert.equal(p.doc.activeElement, p.doc.body);
+  assert.equal(toggle.focusCalls, 1);
+});
 
 // Hover must enter the same independent-focus path as a click or a screen
 // reader, rather than granting an old desktop navigation call new authority.

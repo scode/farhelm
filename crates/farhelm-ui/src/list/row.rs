@@ -168,6 +168,9 @@ enum MenuAction {
     MarkSeen,
     /// Helm-owned metadata, offered even on ended or unreachable rows.
     TogglePin,
+    /// Relative ordering within the displayed movable pin run only.
+    MoveUp,
+    MoveDown,
     Clone,
     /// "Replace with": clone's editable form, seeded from this row, with
     /// replace's create-then-delete-the-source action on launch — the third
@@ -199,10 +202,12 @@ enum MenuAction {
 /// first" (ReplaceWith) to "swap this one out, unedited" (Replace) —
 /// putting them beside each other is what lets a user compare the three
 /// without hunting across the menu.
-const MENU_ACTIONS: [MenuAction; 8] = [
+const MENU_ACTIONS: [MenuAction; 10] = [
     MenuAction::Rename,
     MenuAction::MarkSeen,
     MenuAction::TogglePin,
+    MenuAction::MoveUp,
+    MenuAction::MoveDown,
     MenuAction::Clone,
     MenuAction::ReplaceWith,
     MenuAction::Replace,
@@ -226,11 +231,15 @@ type MenuOrder = menu_panel::MenuOrder<MenuAction, { MENU_ACTIONS.len() }>;
 /// `Clone`, `ReplaceWith`, and `Replace` all answer `true` unconditionally
 /// rather than reading a `RowControlVisibility` field. They seed a new
 /// session from metadata and do not require the source's process to be alive.
-fn session_menu_order(controls: RowControlVisibility) -> MenuOrder {
+/// Move availability instead comes from displayed neighbors: a held or
+/// filtered list cannot use an off-screen pin as its destination.
+fn session_menu_order(controls: RowControlVisibility, move_up: bool, move_down: bool) -> MenuOrder {
     MenuOrder::pack(MENU_ACTIONS, |action| match action {
         MenuAction::Rename => controls.rename,
         MenuAction::MarkSeen => controls.mark_seen,
         MenuAction::TogglePin => true,
+        MenuAction::MoveUp => move_up,
+        MenuAction::MoveDown => move_down,
         MenuAction::Clone => true,
         MenuAction::ReplaceWith => true,
         MenuAction::Replace => true,
@@ -366,6 +375,8 @@ fn MenuActionIcon(action: MenuAction) -> Element {
         MenuAction::Rename => ActionGlyph::Edit,
         MenuAction::MarkSeen => ActionGlyph::MarkSeen,
         MenuAction::TogglePin => ActionGlyph::Pin,
+        MenuAction::MoveUp => ActionGlyph::MoveUp,
+        MenuAction::MoveDown => ActionGlyph::MoveDown,
         MenuAction::Clone => ActionGlyph::Clone,
         MenuAction::ReplaceWith => ActionGlyph::Adjust,
         MenuAction::Replace => ActionGlyph::Replace,
@@ -1032,6 +1043,12 @@ pub(super) fn SessionRow(
     on_mark_seen: EventHandler<(String, Option<i64>)>,
     /// Explicit shared pin target. The list owns the request and refresh.
     on_pin: EventHandler<(String, bool)>,
+    /// Visible relative target, owned and refreshed by the list like Pin.
+    on_move_pin: EventHandler<(String, String, bool)>,
+    /// `None` means ineligible (outside the leading run, legacy ordering,
+    /// or newly pinned while held). Missing neighbors hide end actions.
+    #[props(default)]
+    pin_neighbors: Option<crate::rows::PinNeighbors>,
     /// A boundary computed from the held display, not the served ordering.
     #[props(default)]
     pin_separator: bool,
@@ -1222,7 +1239,10 @@ pub(super) fn SessionRow(
     let menu_id = session.id.raw().to_owned();
     // This render's item list is also the source of every focus position,
     // so the rendered and navigable menus cannot disagree.
-    let menu_order = session_menu_order(controls);
+    let pin_neighbors = pin_neighbors.unwrap_or_default();
+    let move_up = pin_neighbors.up.is_some();
+    let move_down = pin_neighbors.down.is_some();
+    let menu_order = session_menu_order(controls, move_up, move_down);
     // Whether the panel is currently showing its item list rather than a
     // confirmation prompt. Rename immediately closes this panel and mounts
     // ListView's stable dialog, so it is not a panel sub-state.
@@ -1253,6 +1273,14 @@ pub(super) fn SessionRow(
     let rename_key_id = session.id.raw().to_owned();
     let mark_seen_key_id = session.id.raw().to_owned();
     let pin_key_id = session.id.raw().to_owned();
+    let move_up_key_id = session.id.raw().to_owned();
+    let move_down_key_id = session.id.raw().to_owned();
+    let move_up_target = pin_neighbors
+        .up
+        .map(|neighbor| (session.id.raw().to_owned(), neighbor, true));
+    let move_down_target = pin_neighbors
+        .down
+        .map(|neighbor| (session.id.raw().to_owned(), neighbor, false));
     let pin_target = (session.id.raw().to_owned(), !session.pinned);
     let pin_label = pin_menu_label(session.pinned);
     let clone_key_id = session.id.raw().to_owned();
@@ -1471,9 +1499,10 @@ pub(super) fn SessionRow(
         close_menu: on_menu_toggle,
         instance: menu_instance,
     };
-    // Ending a session withdraws mark-seen from an open menu. Losing the
-    // seen-state field would do the same; the predicate does not assume it
-    // stays present, even though an old-helm transition is not reachable here.
+    // Ending a session withdraws mark-seen from an open menu; a pin reaching
+    // an end or becoming ineligible withdraws its Move items. Losing the
+    // seen-state field would also withdraw mark-seen; the predicate does not
+    // assume it stays present, though an old-helm transition is unreachable here.
     // Rename and
     // delete keep their DOM nodes across that change (Dioxus diffs them
     // in place), so nothing re-registers them and the withdrawn items'
@@ -1483,70 +1512,73 @@ pub(super) fn SessionRow(
     // click path because no click is involved — the listing simply
     // reports a different session.
     //
-    // `use_reactive` because `offers_mark_seen` is a plain
-    // prop-derived value: an effect body that merely closed over it would
-    // run once with the first render's answer and never again.
+    // `use_reactive` because availability comes from plain prop-derived
+    // values: merely closing over them would keep the first render's answer.
     //
     // Stale FOCUS is reconciled by ACTION identity rather than by comparing
     // the stored position against the new list's length — see
     // `menu_panel::reconcile_menu_focus`'s own doc for why a length check
-    // misses a withdrawal from the middle of the list. Removing MarkSeen
-    // shifts the surviving actions even when focus stays within the new bounds.
+    // misses a withdrawal from the middle of the list. Removing MarkSeen or
+    // a Move item shifts surviving actions while focus may remain in bounds.
     let withdrawal_close_id = session.id.raw().to_owned();
-    use_effect(use_reactive(&offers_mark_seen, move |offers_mark_seen| {
-        let order = session_menu_order(row_control_visibility(offers_mark_seen));
-        let mut focused_position = *menu_focus.peek();
-        if order != *previous_menu_order.peek() {
-            // Preserve the latest keyboard target across a withdrawal and
-            // any older focus event still in flight. A withdrawn target
-            // has no new slot, so the reconciled focus becomes the fallback.
-            // Publish the origin even if its slot stays unchanged; a
-            // withdrawn target still supplies focus-return bookkeeping to
-            // the existing dismissal path (see `carry_menu_request`).
-            let (origin, requested) = menu_panel::carry_menu_request(
+    use_effect(use_reactive(
+        (&offers_mark_seen, &move_up, &move_down),
+        move |(offers_mark_seen, move_up, move_down)| {
+            let order =
+                session_menu_order(row_control_visibility(offers_mark_seen), move_up, move_down);
+            let mut focused_position = *menu_focus.peek();
+            if order != *previous_menu_order.peek() {
+                // Preserve the latest keyboard target across a withdrawal and
+                // any older focus event still in flight. A withdrawn target
+                // has no new slot, so the reconciled focus becomes the fallback.
+                // Publish the origin even if its slot stays unchanged; a
+                // withdrawn target still supplies focus-return bookkeeping to
+                // the existing dismissal path (see `carry_menu_request`).
+                let (origin, requested) = menu_panel::carry_menu_request(
+                    *previous_menu_order.peek(),
+                    order,
+                    *menu_requested.peek(),
+                    focused_position,
+                );
+                focused_position = origin;
+                menu_focus.set(focused_position);
+                menu_requested.set(requested);
+            }
+            item_handles
+                .write()
+                .retain(|action, _| order.position(*action).is_some());
+            // `menu_open` is this render's own belief about whether THIS row's
+            // menu is the open one — passed through so `reconcile_menu_focus`
+            // can gate `Withdrawn` on it (F4/COR-SESSION-WITHDRAWAL-REOPEN):
+            // `on_menu_toggle` below is an ordinary click TOGGLE, not an
+            // idempotent close, and calling it when some OTHER dismissal (a
+            // layout closer, a newer host-menu choice) has already closed this
+            // row's menu since this prop was computed would reopen it instead.
+            match menu_panel::reconcile_menu_focus(
                 *previous_menu_order.peek(),
                 order,
-                *menu_requested.peek(),
                 focused_position,
-            );
-            focused_position = origin;
-            menu_focus.set(focused_position);
-            menu_requested.set(requested);
-        }
-        item_handles
-            .write()
-            .retain(|action, _| order.position(*action).is_some());
-        // `menu_open` is this render's own belief about whether THIS row's
-        // menu is the open one — passed through so `reconcile_menu_focus`
-        // can gate `Withdrawn` on it (F4/COR-SESSION-WITHDRAWAL-REOPEN):
-        // `on_menu_toggle` below is an ordinary click TOGGLE, not an
-        // idempotent close, and calling it when some OTHER dismissal (a
-        // layout closer, a newer host-menu choice) has already closed this
-        // row's menu since this prop was computed would reopen it instead.
-        match menu_panel::reconcile_menu_focus(
-            *previous_menu_order.peek(),
-            order,
-            focused_position,
-            menu_open,
-        ) {
-            menu_panel::MenuFocusReconciliation::Unchanged => {}
-            menu_panel::MenuFocusReconciliation::Moved(position) => {
-                menu_focus.set(Some(position));
+                menu_open,
+            ) {
+                menu_panel::MenuFocusReconciliation::Unchanged => {}
+                menu_panel::MenuFocusReconciliation::Moved(position) => {
+                    menu_focus.set(Some(position));
+                }
+                // No surviving item to aim focus at. Left as-is rather than
+                // cleared here: closing through `on_menu_toggle` is what the
+                // dismissal effect below keys its focus-return on
+                // (`was_inside`), and clearing `menu_focus` first would make
+                // that check see nothing to return focus FROM. Only ever
+                // reached while `menu_open` is true (see the call above), so
+                // this toggle call is always a genuine close of THIS row's own
+                // open menu, never a reopen.
+                menu_panel::MenuFocusReconciliation::Withdrawn => {
+                    on_menu_toggle.call(withdrawal_close_id.clone());
+                }
             }
-            // No surviving item to aim focus at. Left as-is rather than
-            // cleared here: closing through `on_menu_toggle` is what the
-            // dismissal effect below keys its focus-return on
-            // (`was_inside`), and clearing `menu_focus` first would make
-            // that check see nothing to return focus FROM. Only ever
-            // reached while `menu_open` is true (see the call above), so
-            // this toggle call is always a genuine close of THIS row's own
-            // open menu, never a reopen.
-            menu_panel::MenuFocusReconciliation::Withdrawn => {
-                on_menu_toggle.call(withdrawal_close_id.clone());
-            }
-        }
-        previous_menu_order.set(order);
-    }));
+            previous_menu_order.set(order);
+        },
+    ));
     // Every close funnels through here, whichever path caused it —
     // Escape, Tab, a click on the toggle, or one of `ListView`'s
     // automatic dismissals (a sidebar scroll or resize, the hosts panel
@@ -2460,6 +2492,62 @@ pub(super) fn SessionRow(
                                         },
                                     }
                                 }
+                                if let Some(target) = move_up_target.clone() {
+                                    button {
+                                        r#type: "button",
+                                        class: "btn menu-item session-row-menu-item session-row-move-up",
+                                        role: "menuitem",
+                                        aria_label: "Move up",
+                                        aria_describedby: "session-menu-move-up-description",
+                                        aria_disabled: if busy { "true" },
+                                        tabindex: if menu_tab_stop == Some(MenuAction::MoveUp) { "0" } else { "-1" },
+                                        "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::MoveUp),
+                                        onmounted: move |element| remember_menu_item(menu_wiring, MenuAction::MoveUp, element.data()),
+                                        onfocusin: move |_| record_menu_item_focus(menu_wiring, MenuAction::MoveUp),
+                                        onfocusout: move |_| menu_focus.set(None),
+                                        onkeydown: move |evt| handle_menu_key(&evt, menu_order.position(MenuAction::MoveUp), menu_wiring, &move_up_key_id),
+                                        onclick: move |_| {
+                                            if !busy {
+                                                on_move_pin.call(target.clone());
+                                                focus_menu_toggle("data-session-id", &target.0, ".session-row-menu");
+                                            }
+                                        },
+                                        MenuActionIcon { action: MenuAction::MoveUp }
+                                        menu_panel::MenuItemCopy {
+                                            label: rsx! { "Move up" },
+                                            description_id: "session-menu-move-up-description",
+                                            description: rsx! { "Place before the pinned session above" },
+                                        }
+                                    }
+                                }
+                                if let Some(target) = move_down_target.clone() {
+                                    button {
+                                        r#type: "button",
+                                        class: "btn menu-item session-row-menu-item session-row-move-down",
+                                        role: "menuitem",
+                                        aria_label: "Move down",
+                                        aria_describedby: "session-menu-move-down-description",
+                                        aria_disabled: if busy { "true" },
+                                        tabindex: if menu_tab_stop == Some(MenuAction::MoveDown) { "0" } else { "-1" },
+                                        "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::MoveDown),
+                                        onmounted: move |element| remember_menu_item(menu_wiring, MenuAction::MoveDown, element.data()),
+                                        onfocusin: move |_| record_menu_item_focus(menu_wiring, MenuAction::MoveDown),
+                                        onfocusout: move |_| menu_focus.set(None),
+                                        onkeydown: move |evt| handle_menu_key(&evt, menu_order.position(MenuAction::MoveDown), menu_wiring, &move_down_key_id),
+                                        onclick: move |_| {
+                                            if !busy {
+                                                on_move_pin.call(target.clone());
+                                                focus_menu_toggle("data-session-id", &target.0, ".session-row-menu");
+                                            }
+                                        },
+                                        MenuActionIcon { action: MenuAction::MoveDown }
+                                        menu_panel::MenuItemCopy {
+                                            label: rsx! { "Move down" },
+                                            description_id: "session-menu-move-down-description",
+                                            description: rsx! { "Place after the pinned session below" },
+                                        }
+                                    }
+                                }
                                 menu_panel::MenuSeparator { class: "session-row-menu-separator" }
                                 // Offered on every row, unconditionally —
                                 // see `RowControlVisibility`'s own doc for
@@ -2804,6 +2892,7 @@ pub(super) fn row_specimen(id: &str) -> Session {
         // overrides it via `..row_specimen(id)`.
         seen_activity_at: None,
         pinned: false,
+        pin_position: None,
         notifications: Vec::new(),
         notifications_read_through: 0,
         agent_terminal: None,
@@ -3005,10 +3094,38 @@ mod tests {
     fn pin_menu_label_tracks_shared_membership() {
         assert_eq!(pin_menu_label(false), "Pin to top");
         assert_eq!(pin_menu_label(true), "Unpin");
-        let menu = session_menu_order(row_control_visibility(false));
+        let menu = session_menu_order(row_control_visibility(false), false, false);
         assert_eq!(menu.get(1), Some(MenuAction::TogglePin));
     }
     use crate::peer::detail_text;
+
+    /// Reordering belongs immediately after Unpin in both rendered and
+    /// keyboard order. Each missing neighbor removes just that end action;
+    /// an ineligible or unpinned row supplies neither neighbor.
+    #[farhelm_testtrace::test]
+    fn move_items_follow_pin_and_pack_only_available_directions() {
+        for (up, down, moves) in [
+            (false, false, vec![]),
+            (true, false, vec![MenuAction::MoveUp]),
+            (false, true, vec![MenuAction::MoveDown]),
+            (true, true, vec![MenuAction::MoveUp, MenuAction::MoveDown]),
+        ] {
+            let menu = session_menu_order(row_control_visibility(true), up, down);
+            let actions: Vec<_> = menu.actions().collect();
+            assert_eq!(
+                &actions[..3],
+                &[
+                    MenuAction::Rename,
+                    MenuAction::MarkSeen,
+                    MenuAction::TogglePin
+                ]
+            );
+            assert_eq!(&actions[3..3 + moves.len()], moves);
+            assert_eq!(actions[3 + moves.len()], MenuAction::Clone);
+            assert_eq!(menu.position(MenuAction::MoveUp).is_some(), up);
+            assert_eq!(menu.position(MenuAction::MoveDown).is_some(), down);
+        }
+    }
 
     /// The header must report stored structured choices, not infer them from
     /// an invocation that can disagree with the saved launch selection.
@@ -3049,7 +3166,7 @@ mod tests {
     /// when the helm cannot answer the seen-state write.
     #[farhelm_testtrace::test]
     fn mark_seen_sits_right_after_rename_when_offered() {
-        let offered = session_menu_order(row_control_visibility(true));
+        let offered = session_menu_order(row_control_visibility(true), false, false);
         assert_eq!(offered.len(), 8);
         assert_eq!(offered.get(0), Some(MenuAction::Rename));
         assert_eq!(offered.get(1), Some(MenuAction::MarkSeen));
@@ -3058,7 +3175,7 @@ mod tests {
         assert_eq!(offered.get(4), Some(MenuAction::ReplaceWith));
         assert_eq!(offered.position(MenuAction::MarkSeen), Some(1));
 
-        let withdrawn = session_menu_order(row_control_visibility(false));
+        let withdrawn = session_menu_order(row_control_visibility(false), false, false);
         assert_eq!(
             withdrawn.position(MenuAction::MarkSeen),
             None,
@@ -3110,6 +3227,7 @@ mod tests {
             let on_replace_with = use_callback(|_: Session| {});
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
             let on_pin = use_callback(|_: (String, bool)| {});
+            let on_move_pin = use_callback(|_: (String, String, bool)| {});
             let on_replace = use_callback(|_: Session| {});
             let on_confirm_replace = use_callback(|_: (Session, ConfirmToken<RowQuestion>)| {});
             let on_cancel_replace = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
@@ -3168,6 +3286,7 @@ mod tests {
                     on_replace_with,
                     on_mark_seen,
                     on_pin,
+                    on_move_pin,
                     on_replace,
                     on_confirm_replace,
                     on_cancel_replace,
@@ -3401,6 +3520,7 @@ mod tests {
             let on_replace_with = use_callback(|_: Session| {});
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
             let on_pin = use_callback(|_: (String, bool)| {});
+            let on_move_pin = use_callback(|_: (String, String, bool)| {});
             let on_replace = use_callback(|_: Session| {});
             let on_confirm_replace =
                 use_callback(|(session, token): (Session, ConfirmToken<RowQuestion>)| {
@@ -3465,6 +3585,7 @@ mod tests {
                     on_replace_with,
                     on_mark_seen,
                     on_pin,
+                    on_move_pin,
                     on_replace,
                     on_confirm_replace,
                     on_cancel_replace,
@@ -3617,6 +3738,7 @@ mod tests {
             let on_replace_with = use_callback(|_: Session| {});
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
             let on_pin = use_callback(|_: (String, bool)| {});
+            let on_move_pin = use_callback(|_: (String, String, bool)| {});
             let on_replace = use_callback(|_: Session| {});
             let on_confirm_replace = use_callback(|_: (Session, ConfirmToken<RowQuestion>)| {});
             let on_cancel_replace = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
@@ -3661,6 +3783,7 @@ mod tests {
                     on_replace_with,
                     on_mark_seen,
                     on_pin,
+                    on_move_pin,
                     on_replace,
                     on_confirm_replace,
                     on_cancel_replace,
@@ -3719,6 +3842,7 @@ mod tests {
             let on_replace_with = use_callback(|_: Session| {});
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
             let on_pin = use_callback(|_: (String, bool)| {});
+            let on_move_pin = use_callback(|_: (String, String, bool)| {});
             let on_replace = use_callback(|_: Session| {});
             let on_confirm_replace = use_callback(|_: (Session, ConfirmToken<RowQuestion>)| {});
             let on_cancel_replace = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
@@ -3766,6 +3890,7 @@ mod tests {
                         on_replace_with,
                         on_mark_seen,
                         on_pin,
+                        on_move_pin,
                         on_replace,
                         on_confirm_replace,
                         on_cancel_replace,
@@ -3873,6 +3998,7 @@ mod tests {
                     on_replace_with: |_: Session| {},
                     on_mark_seen: |_: (String, Option<i64>)| {},
                     on_pin: |_: (String, bool)| {},
+                    on_move_pin: |_: (String, String, bool)| {},
                     on_replace: |_: Session| {},
                     on_confirm_replace: |_: (Session, ConfirmToken<RowQuestion>)| {},
                     on_cancel_replace: |_: (String, ConfirmToken<RowQuestion>)| {},

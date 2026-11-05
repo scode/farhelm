@@ -390,6 +390,7 @@ mod tests {
             working_copy: None,
             seen_activity_at: None,
             pinned: false,
+            pin_position: None,
             notifications: Vec::new(),
             notifications_read_through: 0,
         }

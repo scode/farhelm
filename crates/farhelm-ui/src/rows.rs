@@ -1,5 +1,6 @@
 //! What the session list SHOWS, derived from what the helm sent: the
-//! optimistic-rename overlay, and the count banner above the rows.
+//! optimistic-rename overlay, shared pin ordering and pointer holds, and the
+//! count banner above the rows.
 //!
 //! Everything here is a pure function of a listing reply plus `ListView`'s
 //! own pending corrections and the current host/error state — no signals,
@@ -448,32 +449,89 @@ pub(crate) fn has_detail_line(session: &Session) -> bool {
         || session.stale
 }
 
-/// The order the session list DISPLAYS while its order is held under the
-/// pointer: `held` is the id order captured when the hold began, `served` is
-/// the current listing after the sidebar's shared-pin partition.
-///
-/// The hold exists so a row does not move out from under the pointer on its
-/// way to a click. So every session still in `held` keeps its held position
-/// relative to the others, in `held`'s order, whatever `served` says now. A
-/// session that left `served` is dropped at once rather than kept: a deleted
-/// session must never stay clickable, even if its disappearance shifts the
-/// rows below it. A session new to `served` is appended at the bottom, in
-/// `served`'s order, so it is visible straight away without moving any row
-/// above it; it takes its real place when the hold ends.
-///
-/// This only reorders. Every returned session is `served`'s copy, so status,
-/// title, and times keep updating in place during a hold. An empty `held` is
-/// no hold: the result is `served` as is.
-pub(crate) fn held_display_order(held: &[String], served: &[Session]) -> Vec<Session> {
-    if held.is_empty() {
-        return served.to_vec();
+/// A pointer hold remembers both displayed slots and the original pins.
+/// Reconciliation adopts new rows' slots without admitting new pins to the
+/// manual-order exception. Recapturing membership on each reply would let a
+/// second reply move the very row the first reply held under the pointer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HeldOrder {
+    ids: Vec<String>,
+    pinned: HashSet<String>,
+}
+
+impl HeldOrder {
+    /// Capture the committed display when the pointer first takes the hold.
+    /// Even an empty snapshot is a hold: rows arriving later are new to it.
+    pub(crate) fn capture(shown: &[Session]) -> Self {
+        Self {
+            ids: shown.iter().map(|row| row.id.raw().to_owned()).collect(),
+            pinned: shown
+                .iter()
+                .filter(|row| row.pinned)
+                .map(|row| row.id.raw().to_owned())
+                .collect(),
+        }
     }
+
+    /// Adopt displayed slots while retaining only original, still-present
+    /// pin provenance. A vanished ID cannot recover an old slot if it returns.
+    pub(crate) fn reconcile(&self, served: &[Session]) -> Self {
+        let ids: Vec<String> = held_display_order(Some(self), served)
+            .into_iter()
+            .map(|row| row.id.raw().to_owned())
+            .collect();
+        let pinned = ids
+            .iter()
+            .filter(|id| self.pinned.contains(*id))
+            .cloned()
+            .collect();
+        Self { ids, pinned }
+    }
+}
+
+/// The signed store key, independent of selected sort and display escaping.
+/// Real list rows carry a numeric host and full reference. Legacy/synthetic
+/// rows degrade deterministically instead of comparing entry UUIDs as hosts.
+fn pin_order_key(row: &Session) -> (i64, i64, String) {
+    let bare = row
+        .id
+        .raw()
+        .parse::<farhelm_proto::SessionRef>()
+        .map(|reference| reference.bare_id().to_owned())
+        .unwrap_or_else(|_| row.id.raw().to_owned());
+    (
+        row.pin_position.unwrap_or_default(),
+        row.host.unwrap_or(i64::MAX),
+        bare,
+    )
+}
+
+/// Only a complete pin-position projection establishes the manual ordering
+/// capability. Older helms keep their existing stable pin partition; a mixed
+/// reply cannot silently acquire invented ranks or unsupported Move controls.
+fn has_manual_pin_order(sessions: &[Session]) -> bool {
+    sessions
+        .iter()
+        .filter(|row| row.pinned)
+        .all(|row| row.pin_position.is_some())
+}
+
+/// Show current row data in held slots, except that original pins still
+/// pinned now follow stored order within their own slots. Other pin changes
+/// remain in place; removed rows vanish and new rows append in served order.
+/// `None` releases the hold, including one originally captured over no rows.
+pub(crate) fn held_display_order(held: Option<&HeldOrder>, served: &[Session]) -> Vec<Session> {
+    let Some(held) = held else {
+        return served.to_vec();
+    };
     let by_id: HashMap<&str, &Session> = served
         .iter()
         .map(|session| (session.id.raw(), session))
         .collect();
-    let held_ids: std::collections::HashSet<&str> = held.iter().map(String::as_str).collect();
-    held.iter()
+    let held_ids: HashSet<&str> = held.ids.iter().map(String::as_str).collect();
+    let mut shown: Vec<Session> = held
+        .ids
+        .iter()
         .filter_map(|id| by_id.get(id.as_str()).map(|session| (*session).clone()))
         .chain(
             served
@@ -481,13 +539,75 @@ pub(crate) fn held_display_order(held: &[String], served: &[Session]) -> Vec<Ses
                 .filter(|session| !held_ids.contains(session.id.raw()))
                 .cloned(),
         )
-        .collect()
+        .collect();
+    if has_manual_pin_order(served) {
+        let mut pins: Vec<Session> = shown
+            .iter()
+            .filter(|row| row.pinned && held.pinned.contains(row.id.raw()))
+            .cloned()
+            .collect();
+        pins.sort_by_cached_key(pin_order_key);
+        let mut pins = pins.into_iter();
+        for row in &mut shown {
+            if row.pinned && held.pinned.contains(row.id.raw()) {
+                *row = pins
+                    .next()
+                    .expect("one original pin per eligible held slot");
+            }
+        }
+    }
+    shown
 }
 
-/// Put shared pins first without changing either group's selected sort.
-/// This is sidebar presentation only: the quick switcher keeps helm order.
+/// Put pins in their shared manual order and leave unpinned rows in served
+/// order. This is sidebar presentation only; the quick switcher keeps helm
+/// order. An older helm without positions retains its stable pin partition.
 pub(crate) fn pinned_first(sessions: &mut [Session]) {
     sessions.sort_by_key(|session| !session.pinned);
+    if has_manual_pin_order(sessions) {
+        let leading = sessions.iter().take_while(|row| row.pinned).count();
+        sessions[..leading].sort_by_cached_key(pin_order_key);
+    }
+}
+
+/// Visible adjacent targets for a movable pin. Absence on one side hides
+/// that end action; an empty pair still identifies a movable single-pin run.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PinNeighbors {
+    pub(crate) up: Option<String>,
+    pub(crate) down: Option<String>,
+}
+
+/// Moves never cross the displayed leading pin run or use a newly pinned
+/// held row as a target. Such a row cannot show its changed position under
+/// the original snapshot, even if it has become contiguous with that run.
+/// The separator remains a separate question about all displayed pins.
+pub(crate) fn pin_move_neighbors(
+    held: Option<&HeldOrder>,
+    shown: &[Session],
+) -> HashMap<String, PinNeighbors> {
+    if !has_manual_pin_order(shown) {
+        return HashMap::new();
+    }
+    let movable: Vec<_> = shown
+        .iter()
+        .take_while(|row| row.pinned && held.is_none_or(|held| held.pinned.contains(row.id.raw())))
+        .collect();
+    movable
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            (
+                row.id.raw().to_owned(),
+                PinNeighbors {
+                    up: index
+                        .checked_sub(1)
+                        .map(|previous| movable[previous].id.raw().to_owned()),
+                    down: movable.get(index + 1).map(|next| next.id.raw().to_owned()),
+                },
+            )
+        })
+        .collect()
 }
 
 /// The last row of the displayed leading pin block, only when an unpinned
@@ -513,14 +633,14 @@ pub(crate) fn pin_separator_after(sessions: &[Session]) -> Option<&str> {
 /// reordering listing would.
 ///
 /// "Moved" is judged on the DISPLAYED order, `held` being the list's order
-/// hold (empty when there is none; see [`held_display_order`]). Under a hold
+/// hold (`None` when there is none; see [`held_display_order`]). Under a hold
 /// the served order is not what is on screen, and a removal can move the
 /// menu's row on screen without moving it in `sessions`, or the reverse.
 pub(crate) fn remove_row_reporting_menu_move(
     sessions: &mut Vec<Session>,
     removed: &str,
     open_id: Option<&str>,
-    held: &[String],
+    held: Option<&HeldOrder>,
 ) -> bool {
     let Some(open_id) = open_id else {
         sessions.retain(|session| session.id.raw() != removed);
@@ -809,8 +929,8 @@ mod tests {
         sessions.iter().map(|session| session.id.raw()).collect()
     }
 
-    /// Pinning must preserve the chosen sort within both groups, including
-    /// stale pins ahead of live work. The hold then keeps displayed positions
+    /// An older helm without positions preserves its chosen sort within both
+    /// groups, including stale pins ahead of live work. The hold keeps positions
     /// while pin data changes; only its leading pin run earns a separator.
     #[farhelm_testtrace::test]
     fn pins_partition_stably_and_separator_follows_the_held_display() {
@@ -826,22 +946,27 @@ mod tests {
         pinned_first(&mut served);
         assert_eq!(ids(&served), ["b", "d", "a", "c"]);
         assert_eq!(pin_separator_after(&served), Some("d"));
-        let held = ["a", "b", "c"].map(str::to_string);
-        let displayed = held_display_order(&held, &served);
+        let held = HeldOrder::capture(&[session("a", "a"), session("b", "b"), session("c", "c")]);
+        let displayed = held_display_order(Some(&held), &served);
         assert_eq!(ids(&displayed), ["a", "b", "c", "d"]);
         assert_eq!(
             pin_separator_after(&displayed),
             None,
             "isolated pins do not form a leading block"
         );
-        let held = ["b", "a", "d", "c"].map(str::to_string);
+        let held = HeldOrder::capture(&[
+            session("b", "b"),
+            session("a", "a"),
+            session("d", "d"),
+            session("c", "c"),
+        ]);
         assert_eq!(
-            pin_separator_after(&held_display_order(&held, &served)),
+            pin_separator_after(&held_display_order(Some(&held), &served)),
             Some("b")
         );
         served[0].pinned = false;
         assert_eq!(
-            pin_separator_after(&held_display_order(&held, &served)),
+            pin_separator_after(&held_display_order(Some(&held), &served)),
             None,
             "an unpin inside a held block shortens it immediately"
         );
@@ -880,7 +1005,7 @@ mod tests {
     /// served copy; and no hold means the served order unchanged.
     #[farhelm_testtrace::test]
     fn held_display_order_keeps_held_rows_drops_removed_and_appends_new() {
-        let held = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let held = HeldOrder::capture(&[session("a", "a"), session("b", "b"), session("c", "c")]);
         // Served reordered c, a, b; b was removed; d and e are new; a's title
         // changed.
         let served = vec![
@@ -889,14 +1014,224 @@ mod tests {
             session("a", "a renamed"),
             session("e", "new e"),
         ];
-        let shown = held_display_order(&held, &served);
+        let shown = held_display_order(Some(&held), &served);
         assert_eq!(ids(&shown), vec!["a", "c", "d", "e"]);
         assert_eq!(
             shown[0].title.raw(),
             "a renamed",
             "rows show the served data"
         );
-        assert_eq!(ids(&held_display_order(&[], &served)), ids(&served));
+        assert_eq!(ids(&held_display_order(None, &served)), ids(&served));
+    }
+
+    /// Manual pins ignore every served permutation, including title/activity
+    /// choices, while unpinned rows retain it. Replace ties use numeric hosts
+    /// and the exact opaque suffix, not UUID spelling or escaped visible text.
+    #[farhelm_testtrace::test]
+    fn manual_pins_use_store_order_and_leave_unpinned_sort_intact() {
+        let early = positioned("00000000-0000-4000-8000-000000000099:z", 10, -4);
+        let small = positioned("ffffffff-ffff-4fff-8fff-ffffffffffff:z", 2, 7);
+        let a = positioned("00000000-0000-4000-8000-000000000099:a:tail", 10, 7);
+        let z = positioned("00000000-0000-4000-8000-000000000099:z", 10, 7);
+        // Use a different ID for the negative rank: two list rows never share a full ID.
+        let early = Session {
+            id: "00000000-0000-4000-8000-000000000099:early".into(),
+            ..early
+        };
+        for mut served in [
+            vec![
+                z.clone(),
+                session("u-z", "Z"),
+                small.clone(),
+                a.clone(),
+                early.clone(),
+                session("u-a", "A"),
+            ],
+            vec![
+                session("u-z", "Z"),
+                early.clone(),
+                a.clone(),
+                z.clone(),
+                session("u-a", "A"),
+                small.clone(),
+            ],
+        ] {
+            pinned_first(&mut served);
+            assert_eq!(
+                ids(&served),
+                [
+                    early.id.raw(),
+                    small.id.raw(),
+                    a.id.raw(),
+                    z.id.raw(),
+                    "u-z",
+                    "u-a"
+                ]
+            );
+            assert!(served[..4].iter().all(|row| row.pinned));
+        }
+        let mut mixed = vec![z.clone(), session("legacy", "legacy"), early];
+        mixed[1].pinned = true;
+        let expected = ids(&mixed)
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        pinned_first(&mut mixed);
+        assert_eq!(ids(&mixed), expected);
+        assert!(
+            pin_move_neighbors(None, &mixed).is_empty(),
+            "mixed capability must not invent an order"
+        );
+    }
+
+    /// A move is visible during the pointer hold by sorting original pins
+    /// only into their existing slots. Pin/unpin, current row data, removals
+    /// and appended rows still obey the ordinary hold rather than regrouping.
+    #[farhelm_testtrace::test]
+    fn held_original_pins_reorder_only_their_slots() {
+        let a = positioned("a", 1, 0);
+        let b = positioned("b", 1, 1);
+        let c = positioned("c", 1, 2);
+        let held = HeldOrder::capture(&[a.clone(), b.clone(), c.clone(), session("u", "u")]);
+        let mut a = a;
+        let mut b = b;
+        let mut c = c;
+        a.pin_position = Some(2);
+        a.title = "fresh A".into();
+        b.pinned = false;
+        b.pin_position = None;
+        c.pin_position = Some(0);
+        let mut served = vec![
+            a.clone(),
+            session("new", "new"),
+            b.clone(),
+            c.clone(),
+            session("u", "u"),
+        ];
+        pinned_first(&mut served);
+        let shown = held_display_order(Some(&held), &served);
+        assert_eq!(ids(&shown), ["c", "b", "a", "u", "new"]);
+        assert_eq!(shown[2].title.raw(), "fresh A");
+        assert_eq!(pin_separator_after(&shown), Some("c"));
+        let moves = pin_move_neighbors(Some(&held), &shown);
+        assert_eq!(
+            moves.len(),
+            1,
+            "the unpinned gap bounds the movable leading run"
+        );
+        assert_eq!(moves["c"], PinNeighbors::default());
+        assert!(menu_row_reordered(
+            Some(&[a.clone(), b.clone(), c.clone()]),
+            &shown[..3],
+            "a",
+            false
+        ));
+        let reconciled = held.reconcile(&served);
+        assert_eq!(
+            ids(&held_display_order(Some(&reconciled), &served)),
+            ids(&shown)
+        );
+        let repinned = vec![positioned("b", 1, -1), c, a, session("u", "u")];
+        assert_eq!(
+            ids(&held_display_order(Some(&reconciled), &repinned)),
+            ["b", "c", "a", "u"]
+        );
+        served.retain(|row| row.id.raw() != "b");
+        let shown = held_display_order(Some(&reconciled), &served);
+        assert_eq!(ids(&shown), ["c", "a", "u", "new"]);
+        assert_eq!(
+            pin_move_neighbors(Some(&reconciled), &shown)["c"]
+                .down
+                .as_deref(),
+            Some("a")
+        );
+        assert_eq!(ids(&held_display_order(None, &served)), ids(&served));
+    }
+
+    /// A pin made during a hold cannot be admitted by a second reply. This
+    /// includes a contiguous new tail: showing Move there would accept an
+    /// intent whose result the fixed snapshot cannot display. Release admits it.
+    #[farhelm_testtrace::test]
+    fn new_pins_wait_through_reconciliation_even_when_contiguous() {
+        let a = positioned("a", 1, 0);
+        let b = positioned("b", 1, 1);
+        let before = vec![
+            a.clone(),
+            b.clone(),
+            session("new-pin", "new"),
+            session("gap", "gap"),
+        ];
+        let mut held = HeldOrder::capture(&before);
+        let mut served = vec![
+            a.clone(),
+            b.clone(),
+            positioned("new-pin", 1, 2),
+            session("gap", "gap"),
+        ];
+        for _ in 0..2 {
+            let shown = held_display_order(Some(&held), &served);
+            assert_eq!(ids(&shown), ["a", "b", "new-pin", "gap"]);
+            assert_eq!(pin_separator_after(&shown), Some("new-pin"));
+            held = held.reconcile(&served);
+            let shown = held_display_order(Some(&held), &served);
+            let moves = pin_move_neighbors(Some(&held), &shown);
+            assert!(!moves.contains_key("new-pin"));
+            assert_eq!(moves["a"].down.as_deref(), Some("b"));
+            assert_eq!(
+                moves["b"].down, None,
+                "an original pin cannot target the new tail"
+            );
+            served
+                .iter_mut()
+                .find(|row| row.id.raw() == "new-pin")
+                .unwrap()
+                .pin_position = Some(-1);
+            pinned_first(&mut served);
+        }
+        let released = held_display_order(None, &served);
+        assert_eq!(ids(&released), ["new-pin", "a", "b", "gap"]);
+        assert_eq!(
+            pin_move_neighbors(None, &released)["new-pin"]
+                .down
+                .as_deref(),
+            Some("a")
+        );
+
+        let gap = vec![a.clone(), session("gap", "gap"), session("new-pin", "new")];
+        let held = HeldOrder::capture(&gap);
+        let served = vec![positioned("new-pin", 1, -1), a, session("gap", "gap")];
+        let held = held.reconcile(&served).reconcile(&served);
+        let shown = held_display_order(Some(&held), &served);
+        assert_eq!(ids(&shown), ["a", "gap", "new-pin"]);
+        assert_eq!(pin_separator_after(&shown), Some("a"));
+        assert!(!pin_move_neighbors(Some(&held), &shown).contains_key("new-pin"));
+    }
+
+    /// Empty capture still owns a hold, and disappearance discards original
+    /// provenance. Reappearing pins append rather than recovering a slot or
+    /// Move eligibility from an earlier, no-longer-present row.
+    #[farhelm_testtrace::test]
+    fn empty_holds_and_reappearing_pins_remain_new_until_release() {
+        let a = positioned("a", 1, 0);
+        let empty = HeldOrder::capture(&[]).reconcile(std::slice::from_ref(&a));
+        assert!(pin_move_neighbors(Some(&empty), std::slice::from_ref(&a)).is_empty());
+        assert!(pin_move_neighbors(None, std::slice::from_ref(&a)).contains_key("a"));
+        let held = HeldOrder::capture(std::slice::from_ref(&a)).reconcile(&[session("u", "u")]);
+        let served = vec![a, session("u", "u")];
+        let shown = held_display_order(Some(&held), &served);
+        assert_eq!(ids(&shown), ["u", "a"]);
+        assert!(pin_move_neighbors(Some(&held), &shown).is_empty());
+    }
+
+    /// Explicit rank and host values make ordering fixtures independent of
+    /// title/activity defaults. Raw references remain the identity under test.
+    fn positioned(id: &str, host: i64, position: i64) -> Session {
+        Session {
+            pinned: true,
+            pin_position: Some(position),
+            host: Some(host),
+            ..session(id, id)
+        }
     }
 
     /// A session with the given id and title; every other field is
@@ -928,6 +1263,7 @@ mod tests {
             working_copy: None,
             seen_activity_at: None,
             pinned: false,
+            pin_position: None,
             notifications: Vec::new(),
             notifications_read_through: 0,
             agent_terminal: None,
@@ -950,7 +1286,7 @@ mod tests {
             &mut sessions,
             "a",
             Some("b"),
-            &[]
+            None
         ));
         assert_eq!(sessions.len(), 2, "the row is removed either way");
 
@@ -959,7 +1295,7 @@ mod tests {
             &mut sessions,
             "c",
             Some("b"),
-            &[]
+            None
         ));
 
         let mut sessions = listing();
@@ -967,7 +1303,7 @@ mod tests {
             &mut sessions,
             "b",
             Some("b"),
-            &[]
+            None
         ));
 
         let mut sessions = listing();
@@ -975,7 +1311,7 @@ mod tests {
             &mut sessions,
             "a",
             None,
-            &[]
+            None
         ));
         assert_eq!(sessions.len(), 2);
     }
@@ -988,21 +1324,21 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_held_removal_reports_moves_in_displayed_order() {
         let served = || vec![session("b", "B"), session("a", "A"), session("c", "C")];
-        let held = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let held = HeldOrder::capture(&[session("a", "a"), session("b", "b"), session("c", "c")]);
 
         let mut sessions = served();
         assert!(remove_row_reporting_menu_move(
             &mut sessions,
             "a",
             Some("b"),
-            &held
+            Some(&held)
         ));
         let mut sessions = served();
         assert!(!remove_row_reporting_menu_move(
             &mut sessions,
             "c",
             Some("b"),
-            &held
+            Some(&held)
         ));
     }
 
@@ -1384,17 +1720,17 @@ mod tests {
     fn content_comparison_uses_displayed_hold_without_freezing_detail_updates() {
         let before = vec![ended("a"), session("b", "b"), session("c", "c")];
         let served = vec![before[2].clone(), before[1].clone(), before[0].clone()];
-        let held: Vec<_> = ids(&before).into_iter().map(str::to_owned).collect();
+        let held = HeldOrder::capture(&before);
         let errors = HashMap::from([("a".into(), "refusal".into())]);
-        let shown = held_display_order(&held, &served);
+        let shown = held_display_order(Some(&held), &served);
         assert_eq!(ids(&shown), ids(&before));
         assert!(content_moves(&before, &shown, &errors, false).is_empty());
         let mut updated = served.clone();
         updated[2].annotation = Some("changed while held".into());
-        let shown = held_display_order(&held, &updated);
+        let shown = held_display_order(Some(&held), &updated);
         assert!(content_moves(&before, &shown, &errors, false).contains(&"b".into()));
         assert!(
-            content_moves(&before, &held_display_order(&[], &served), &errors, true)
+            content_moves(&before, &held_display_order(None, &served), &errors, true)
                 .contains(&"b".into()),
             "a new query ends the hold before its rows are displayed"
         );

@@ -189,6 +189,12 @@ function menuTooltipPage(menuFirst) {
       getAttribute(name) { return attributes[name] ?? null; },
       setAttribute(name, value) { attributes[name] = value; },
       matches(selector) {
+        // menu-focus.js asks whether a focused element is a session row's menu
+        // toggle before it watches the session list; these fixtures model menu
+        // items, so only an element given that class answers yes.
+        if (selector === ".session-row-menu") {
+          return (attributes.class ?? "").split(" ").includes("session-row-menu");
+        }
         assert.equal(selector, ":focus-visible");
         return true;
       },

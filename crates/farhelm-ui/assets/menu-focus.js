@@ -9,6 +9,7 @@
     if (win.__farhelmMenuFocus) return win.__farhelmMenuFocus;
     let independent = 0;
     let focusing = null;
+    let toggleOwner = null;
     // The ordinary input bridge publishes the current event's source before
     // Rust handles focus-in. Epoch equality alone cannot identify an old but
     // legitimate ungated opening; mounting and key events report no own move.
@@ -22,6 +23,44 @@
       const appOwned = event.target === focusing;
       if (!appOwned) independent++;
       win.__farhelmMenuFocusSync(appOwned);
+      toggleOwner?.observer.disconnect();
+      toggleOwner = null;
+      const toggle = event.target;
+      const list = toggle?.matches?.(".session-row-menu") && toggle.closest(".session-list");
+      if (!list) return;
+      // Keyed rows retain their nodes, but ordinary DOM reinsertion drops
+      // native focus. Observe only this list's direct children while its
+      // toggle owns focus; terminal rendering never enters this observer.
+      const epoch = independent;
+      const observer = new win.MutationObserver(records => {
+        if (toggleOwner?.observer !== observer) return;
+        if (!toggle.isConnected) {
+          observer.disconnect();
+          toggleOwner = null;
+          return;
+        }
+        const moved = records.some(record => [...record.removedNodes]
+          .some(node => node === toggle || node.contains(toggle)));
+        // A later independent focus choice wins even if it subsequently
+        // leaves focus on body. Repair only our actual detached subtree.
+        if (moved && independent === epoch && doc.activeElement === doc.body && doc.hasFocus()) {
+          toggle.focus({ preventScroll: true });
+        }
+      });
+      toggleOwner = { toggle, observer };
+      observer.observe(list, { childList: true });
+    }, true);
+    doc.addEventListener("focusout", event => {
+      const owner = toggleOwner;
+      if (!owner || event.target !== owner.toggle) return;
+      // Reinsertion's mutation callback runs before the next frame and may
+      // restore the toggle. An intentional blur to body has no replacement
+      // focusin, so retire its observation here instead of keeping it armed.
+      win.requestAnimationFrame(() => {
+        if (toggleOwner !== owner || doc.activeElement === owner.toggle) return;
+        owner.observer.disconnect();
+        toggleOwner = null;
+      });
     }, true);
     doc.addEventListener("keydown", event => {
       if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key) &&

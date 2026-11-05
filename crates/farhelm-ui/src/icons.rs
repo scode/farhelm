@@ -74,6 +74,9 @@ pub(crate) enum ActionGlyph {
     Add,
     Templates,
     ChevronDown,
+    /// Reorder an item within its current group, without changing membership.
+    MoveUp,
+    MoveDown,
     ZoomOut,
     ZoomIn,
     Restart,
@@ -154,6 +157,8 @@ pub(crate) fn ActionIcon(
             },
         ),
         ActionGlyph::ChevronDown => ("chevron-down", rsx! { path { d: "M3 5l4 4 4-4" } }),
+        ActionGlyph::MoveUp => ("move-up", rsx! { path { d: "M7 12V2M3 6l4-4 4 4" } }),
+        ActionGlyph::MoveDown => ("move-down", rsx! { path { d: "M7 2v10M3 8l4 4 4-4" } }),
         ActionGlyph::ZoomOut | ActionGlyph::ZoomIn => (
             if glyph == ActionGlyph::ZoomOut {
                 "zoom-out"
