@@ -6,6 +6,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight af0397] `unlikely-races-nov4.md` — terminals: fix four very unlikely races where straightforward, accept the rest in FILTER.md
 - [in-flight 03f5f7] `durability-revocations.md` — power loss: write host permission revocations durably, key retries by host entry, and spec the accepted losses
 - [in-flight 69b35b] `printed-link-mismatch.md` — printed links: no lasting mismatch between the shown and opened address; spec the hover warning
-- [pending] `delete-unreadable-terminals.md` — Delete: keep warning about and reaping work after a terminal stops responding
+- [in-flight 3e6ee9] `delete-unreadable-terminals.md` — Delete: keep warning about and reaping work after a terminal stops responding
 - [pending] `terminal-text-drops.md` — new terminals: state the invisible-formatting drop, print Kirat Rai vowel signs again
 - [pending] `triage-misc-nov4.md` — template card shows the container, escape host text in helm logs, paste-after-gap clause, one discard
