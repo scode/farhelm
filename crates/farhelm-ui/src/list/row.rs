@@ -932,6 +932,15 @@ std::thread_local! {
 /// Reopening the panel remounts a retained prompt, so each appearance restores
 /// the same eligible answer without the fallible `MountedData::set_focus` path.
 ///
+/// ## Pin dragging
+///
+/// An eligible pin has a pointer grip beside the open button, never inside
+/// it. Eligibility comes from the list's original-pin projection; absence
+/// differs from an eligible lone pin with no Move neighbors. The grip respects
+/// operation/navigation locks and this row's rename, deletion and confirmation
+/// state. It stays outside the sequential Tab order because the menu already
+/// supplies keyboard reordering. The list owns capture cleanup and acceptance.
+///
 /// ## Keyboard
 ///
 /// The item list is a real `role="menu"` of `role="menuitem"` buttons,
@@ -1239,6 +1248,12 @@ pub(super) fn SessionRow(
     let menu_id = session.id.raw().to_owned();
     // This render's item list is also the source of every focus position,
     // so the rendered and navigable menus cannot disagree.
+    // An empty pair is an eligible lone pin; None also excludes new pins
+    // held below (or contiguous with) the original run. Keep that distinction
+    // before menu rendering reduces absent directions to hidden actions.
+    let pin_drag_eligible = pin_neighbors.is_some();
+    let pin_drag_disabled =
+        busy || nav_disabled || deleting || renaming || confirming || confirming_replace;
     let pin_neighbors = pin_neighbors.unwrap_or_default();
     let move_up = pin_neighbors.up.is_some();
     let move_down = pin_neighbors.down.is_some();
@@ -1672,6 +1687,7 @@ pub(super) fn SessionRow(
             "data-session-stale": "{session.stale}",
             "data-session-pinned": "{session.pinned}",
             "data-session-selected": "{selected}",
+            "data-pin-drag-eligible": "{pin_drag_eligible}",
             // The browser suite's hook for the locality glyph, the same
             // role `data-host-kind` plays on a host panel row: a stable
             // string the markup carries independent of which icon (if any)
@@ -1685,6 +1701,17 @@ pub(super) fn SessionRow(
             // buttons — hence the extra wrapper rather than putting
             // everything directly under `.session-row`.
             div { class: "session-row-main",
+                if pin_drag_eligible {
+                    button {
+                        r#type: "button",
+                        class: "session-pin-grip",
+                        tabindex: "-1",
+                        disabled: pin_drag_disabled,
+                        aria_label: "Drag pinned session",
+                        "data-tooltip": "Drag to reorder pinned sessions",
+                        span { "aria-hidden": "true", class: "session-pin-grip-dots" }
+                    }
+                }
                 button {
                     r#type: "button",
                     class: "session-row-open",

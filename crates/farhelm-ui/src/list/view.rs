@@ -3452,6 +3452,32 @@ pub(crate) fn ListView(
             }
         });
     });
+    // Capture stays in the DOM; acceptance uses this list's current held
+    // display and source locks. Preserve the dropped neighbor even when a
+    // reply changed adjacency while the intent crossed the eval bridge.
+    let on_drag_pin = use_callback(move |intent: crate::pin_drag::Intent| {
+        if hosts_panel_open()
+            || ops.busy_now()
+            || !row_pending.peek().is_empty()
+            || deleting.peek().contains(&intent.id)
+            || row_questions.current(&intent.id).is_some()
+            || rename_editor
+                .peek()
+                .as_ref()
+                .is_some_and(|editor| editor.id == intent.id)
+        {
+            return;
+        }
+        let current = listing.peek();
+        let Some(Ok(current)) = current.as_ref() else {
+            return;
+        };
+        let held = order_hold.peek();
+        let shown = rows::held_display_order(held.as_ref(), &current.sessions);
+        if intent.is_eligible(held.as_ref(), &shown) {
+            on_move_pin.call((intent.id, intent.neighbor, intent.before));
+        }
+    });
     let mark_seen_base = base.clone();
     // The row's read/unread toggle — the menu item and the dot both funnel
     // here (SPEC.md, Status). Routed through `queue_seen_write` rather than
@@ -4710,26 +4736,16 @@ pub(crate) fn ListView(
                             },
                         }
                     }
-                    div { class: "session-list", hidden: hosts_panel_open(),
-                        onpointerenter: {
+                    crate::pin_drag::PinDragList {
+                        hidden: hosts_panel_open(),
+                        on_move: on_drag_pin,
+                        on_activity: {
                             let mut note = note_list_pointer.clone();
-                            move |_| note()
+                            move |()| note()
                         },
-                        onpointermove: {
-                            let mut note = note_list_pointer.clone();
-                            move |_| note()
-                        },
-                        onpointerdown: {
-                            let mut note = note_list_pointer.clone();
-                            move |_| note()
-                        },
-                        onwheel: {
-                            let mut note = note_list_pointer.clone();
-                            move |_| note()
-                        },
-                        onpointerleave: {
+                        on_leave: {
                             let mut leave = leave_list.clone();
-                            move |_| leave()
+                            move |()| leave()
                         },
                         // The rows are the server's listing with this
                         // view's own just-landed renames painted over it,
@@ -4740,8 +4756,8 @@ pub(crate) fn ListView(
                         // `on_open` carries into the session view.
                         //
                         // NOTE: this div does not itself scroll (it has no
-                        // height constraint of its own — `.app-sidebar` is
-                        // the real vertical scroller, see `app.css`), so an
+                        // height constraint of its own — `.sidebar-content`
+                        // around it is the vertical scroller, see `app.css`), so an
                         // `onscroll` handler here would never fire; closing
                         // an open menu on scroll (or resize, or an internal
                         // layout change) is `layout_epoch`'s job instead —
@@ -4970,6 +4986,94 @@ fn listed_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Give bridge acceptance tests explicit manual-order capability. These
+    /// rows carry raw routing identities, independent of their visible title.
+    fn pin_drag_row(id: &str, position: i64) -> Session {
+        Session {
+            pinned: true,
+            pin_position: Some(position),
+            ..super::super::row::row_specimen(id)
+        }
+    }
+
+    /// A newly pinned held tail cannot be a drag source or target, even
+    /// when it is contiguous with the original pins and has a valid rank.
+    /// Accepting it would send a move whose result the current hold cannot show.
+    #[farhelm_testtrace::test]
+    fn pin_drag_intents_reuse_original_pin_provenance() {
+        let mut tail = super::super::row::row_specimen("new-tail");
+        let a = pin_drag_row("A", 0);
+        let b = pin_drag_row("B", 1);
+        let held = rows::HeldOrder::capture(&[a.clone(), b.clone(), tail.clone()]);
+        tail.pinned = true;
+        tail.pin_position = Some(2);
+        let shown = rows::held_display_order(Some(&held), &[a, b, tail]);
+        for (id, neighbor, accepted) in [
+            ("A", "B", true),
+            ("A", "new-tail", false),
+            ("new-tail", "B", false),
+        ] {
+            let intent = crate::pin_drag::Intent {
+                id: id.to_string(),
+                neighbor: neighbor.to_string(),
+                before: false,
+            };
+            assert_eq!(intent.is_eligible(Some(&held), &shown), accepted);
+            assert!(intent.is_eligible(None, &shown));
+        }
+    }
+
+    /// Membership can change between the DOM release and bridge delivery.
+    /// Reject disappeared/unpinned references and legacy projections without
+    /// inventing ranks, while preserving ordinary eligible relative moves.
+    #[farhelm_testtrace::test]
+    fn pin_drag_intents_require_current_visible_eligibility() {
+        let shown = [pin_drag_row("A", 0), pin_drag_row("B", 1)];
+        let intent = crate::pin_drag::Intent {
+            id: "A".to_string(),
+            neighbor: "B".to_string(),
+            before: true,
+        };
+        assert!(intent.is_eligible(None, &shown));
+        assert!(!intent.is_eligible(None, &shown[..1]));
+        assert!(!intent.is_eligible(None, &shown[1..]));
+        let mut unpinned = shown.clone();
+        unpinned[1].pinned = false;
+        assert!(!intent.is_eligible(None, &unpinned));
+        let mut legacy = shown.clone();
+        legacy[1].pin_position = None;
+        assert!(!intent.is_eligible(None, &legacy));
+        let self_move = crate::pin_drag::Intent {
+            neighbor: "A".to_string(),
+            ..intent
+        };
+        assert!(!self_move.is_eligible(None, &shown));
+    }
+
+    /// A delivered relative target stays meaningful after an unrelated move.
+    /// Requiring fresh adjacency or choosing a new neighbor would reinterpret
+    /// the user's gesture. Opaque full references must also survive JSON intact.
+    #[farhelm_testtrace::test]
+    fn pin_drag_intents_preserve_captured_target_and_direction() {
+        let id = "00000000-0000-4000-8000-000000000001:A\"\\[]";
+        let neighbor = "00000000-0000-4000-8000-000000000002:B:tail\n";
+        let shown = [
+            pin_drag_row(id, 0),
+            pin_drag_row("intervening", 1),
+            pin_drag_row(neighbor, 2),
+        ];
+        for before in [true, false] {
+            let intent: crate::pin_drag::Intent = serde_json::from_value(serde_json::json!({
+                "id": id, "neighbor": neighbor, "before": before,
+            }))
+            .expect("the bridge's JSON intent decodes");
+            assert!(intent.is_eligible(None, &shown));
+            assert_eq!(intent.id, id);
+            assert_eq!(intent.neighbor, neighbor);
+            assert_eq!(intent.before, before);
+        }
+    }
 
     /// A switcher widens only when host or status hides the accepted pick.
     /// Ended and unclassified sessions cannot match a live-only segment.

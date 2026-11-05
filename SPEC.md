@@ -1914,6 +1914,12 @@ waiting work. The quick switcher keeps its existing activity order and does not 
 removes its pin; Replace and Replace with carry the pin and its position to the new session, and Restart keeps it on the
 same id.
 
+Hovering an eligible pinned row reveals a grip beside its name. Dragging that grip within the pinned group shows the row
+lifted and a drop line; release moves it relative to the pin at that line. Escape, interrupted pointer capture or
+releasing outside the pinned group cancels. Dragging never pins or unpins a row, crosses the separator, or rearranges
+unpinned rows. The row menu remains the keyboard way to rearrange pins. A newly pinned row waiting for the order hold to
+end has neither a grip nor Move actions until it joins the movable group.
+
 Among unpinned sessions, the option labelled most recent activity sorts connected running and waiting sessions first,
 then every other session — idle, unclassified, ended, and anything on an unreachable host. Inside each group the order
 is the most recent observed START of a work burst: a session promotes when it moves from known idle or waiting into

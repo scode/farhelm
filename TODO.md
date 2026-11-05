@@ -24,8 +24,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Allow the user to manually reorder pinned sessions. Plan: `plans/queue/pinned-session-order.md`.
-
 - Allow shift selection of multiple sessions for bulk actions such as closing them. Plan:
   `plans/queue/bulk-session-actions.md`.
 
