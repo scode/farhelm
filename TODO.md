@@ -428,7 +428,30 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     keeps its identity).
 - **`gh:owner/repo` launches can land in a session in the wrong repository.** When launching a GitHub managed checkout
   by typing `gh:owner/repo`, the string is sometimes treated as a session name instead, so the launch lands in a session
-  in the wrong repo. Keeps happening to the maintainer; cause unknown at recording time. TBD.
+  in the wrong repo. Keeps happening to the maintainer. The fingerprint: the session's title is literally the typed
+  `gh:owner/repo`, and it runs in a managed checkout of whatever was last launched (or the default). The maintainer
+  types blind and only notices afterwards, so what the screen showed at the time is unknown.
+
+  Findings from code inspection (2026-11-05, not reproduced): the New-session launcher (⌘N) does not appear able to do
+  this. Its search parses `gh:` as the GitHub scope, and that scope never offers "Set session name"; a name row is only
+  offered for unscoped text with no other matches. Enter there is guarded against stale rows and an empty box, and no
+  timing race turned up. The quick switcher (⌘K) does offer "New session named …" for any unmatched text, but the
+  maintainer is confident that is not the surface in use.
+
+  Speculation: the text goes into the "Rename session" prompt that opens after a quick launch, not into the launcher.
+  When "Name sessions on quick launch" is on (the default), any launch where the New-session form never appeared (⚡
+  quick launch ⌘P, a numbered template ⌘1–⌘0, a ⌘X sequence, or a template launched from Templates ⌘J or the quick
+  switcher) opens that prompt once the create succeeds, takes focus unconditionally, and selects the whole title. Typing
+  `gh:owner/repo` and Enter there renames the session to exactly that string while it stays in the template's
+  destination, which matches the fingerprint. For a managed checkout the create can take a moment, so the prompt may pop
+  up mid-typing. This only holds if the key pressed was not actually ⌘N; the maintainer will watch the next occurrence
+  to tell. Ways to confirm: look for the "Rename session" heading with the old name highlighted, or turn the setting off
+  for a while and see whether the wrong-repo sessions stop.
+
+  If confirmed, fix ideas: show the launched destination in the prompt and word it so it cannot pass for the launcher
+  ("Name the session you just launched"); warn when the text looks like a launcher query (`gh:`, `tl:`, `host:`) that
+  this only renames, and offer to open New session with it; possibly stop the prompt from stealing focus from typing
+  that is already under way elsewhere.
 
 ## Doc todo
 
