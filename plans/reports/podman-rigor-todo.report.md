@@ -54,3 +54,47 @@ to complete this bookkeeping plan.
 
 The required fresh-context gpt-6.1-sol reviewer at high effort passed the change with no findings. The independent
 commit-message cold read passed after a rewrite made the review-queue source and agreed future-work motivation clear.
+
+### Landing
+
+Landed with no fixes at landing. The eight review findings about experimental containerized sessions now sit in one Near
+term TODO entry, "Podman rigor: review findings for containerized sessions", and their review-queue files and index
+lines are gone. Each of the eight triage outcomes now names #3017 as where it went.
+
+- #3017: the TODO entry, the eight triage outcomes' Execution lines, and the removed review-queue files.
+
+#### What landed since the stack was based, and whether it interacted
+
+Three changes landed on main after the plan's base and before this round started. Two fixed the tests behind three test
+failures earlier landings reported on main: two tests of sessions whose tmux server vanished while the supervisor was
+down now expect such a session to list without a terminal (#3012), and a supervisor unit test's fake tmux now answers in
+the format the supervisor reads today (#3013). The third recorded a browser flake in FLAKES.md and TODO.md's Deflake
+section (#3014). Only #3014 touched a file this plan touches, TODO.md, in a different section, and the plan's entry
+neither repeats nor contradicts it. A fresh-context review read the plan against these and agreed. While the landing
+ran, an approved planning PR (#3016) also landed, adding plan pointers to other TODO.md entries (pinned session order,
+bulk actions, the host attention list, Tensorlake fixes, host filter feedback). It touched none of the lines this plan
+adds, so #3017 merged on top of it unchanged, and main differs from the tested tree only by #3016's pointers.
+
+#### Things you should know
+
+- The proxy-settings item asks to make "the spec's" list of what a container receives accurate. The triage assessment
+  behind it notes that the implementation spec (SPEC_impl.md) has the same incomplete list, so whoever takes the item up
+  should correct both.
+- In the review queue's index these eight sat under "Highest priority". The TODO entry keeps each item's trigger and
+  caveats but not that label, since the maintainer asked for all eight to go into one Near term entry.
+
+#### Checks
+
+This round landed only this plan, stacked on main `0a50c784`, and it changes only TODO.md, TRIAGE_OUTCOMES.md and the
+review queue's files. On the stack:
+
+- `dprint check` over the whole repository and `python3 scripts/check-agents-md.py` (removed Markdown files can break
+  cited headings): both passed, the second with no errors and the same three warnings about older text that main already
+  had.
+- Skipped: every build and runtime test, Rust, JavaScript, desktop, installer and browser alike. The change is ordinary
+  Markdown bookkeeping that no build, test or generated artifact reads, which `AGENTS.md`, "Tests and validation", rules
+  out running them for.
+
+The executor's report calls #3017 a draft; it landed rebased onto current main with its content unchanged. The eight
+triage outcomes also link #3017 as a draft PR and name its branch, which was true when they were written. Nothing else
+in the report became untrue at landing.
