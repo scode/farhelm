@@ -10,6 +10,8 @@ running and billing you when you do not want them to.
 You can now add a Tensorlake sandbox as a host from a saved recipe, with setup progress in Hosts. Creating it confirms
 that it bills while running; deleting it also deletes its snapshots.
 
+Hovering or focusing the SSH and Tensorlake choices in Add host explains how each adds a host.
+
 Tensorlake hosts can be suspended and resumed without restarting their sessions, with progress until Tensorlake confirms
 the change. The session launcher shows progress while resuming and connecting to a suspended host; a fresh GitHub
 checkout asks you to review its refreshed preview and launch again.
