@@ -614,16 +614,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   check's 20 iterations also include command latency. This did not reproduce the historical leak; retain the markers and
   investigate a retained failure before treating interruptible startup commands as its fix.
 
-- **Feedback dialog's disabled Send color on WebKit.** `the dialog refuses blank and over-long messages without sending`
-  in `e2e/tests/feedback.spec.ts` keeps a dark-palette color on the disabled Send button through its light-scheme check:
-  text color `rgb(155, 165, 184)` instead of `rgb(90, 101, 121)` in full browser runs
-  `0a494db0-73b5-462c-8e8d-33510baf9df6` and `8f80714f-9f10-46f5-af67-be60e573be31`, and background `rgb(29, 34, 44)`
-  instead of `rgb(233, 237, 244)` in `a4a4ad3b-56c1-426f-8377-149f23f29d12` on a Tensorlake sandbox, all on stacks that
-  did not touch the dialog. Alone it passed five of five in `756ea4b1-29d9-4954-b8a0-31d9cae25dee` but failed one of
-  three in `7b4a27da-01e2-4721-aef3-c5c6c201ae50`. Hypothesis: WebKit leaves the existing button's style on the dark
-  palette after the test switches the emulated color scheme to light (FLAKES.md, 2026-10-30 and 2026-10-31). On Chromium
-  too, the other way round, in `e1ea38c4-f840-4bc6-8813-ab0c139a5b56` (FLAKES.md, 2026-11-04).
-
 - **Trash dialog's PageDown check on Chromium.** `trash header and global confirmation remain reachable` (both widths)
   in `e2e/tests/trash-dialog.spec.ts` sometimes leaves the Delete all confirmation's scroll area at the top after
   PageDown: sandbox runs `1a264a30-cd27-4f6e-bd2c-f3c3853fe0b6`, `e57f9fe2-36de-43f7-aade-46eadb89f6ee`,
