@@ -634,12 +634,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `443ebd09-f5c5-4cd3-8ad1-d27e96a75532`). Hypothesis: a focus handoff in the page takes focus back (FLAKES.md,
   2026-11-05).
 
-- **The Tensorlake lifecycle spec's activity read misses its own session on WebKit.** Three tests in
-  `e2e/tests/tensorlake-lifecycle.spec.ts` found their session absent from an intercepted activity read (runs
-  `4a0618c3-d05d-437b-92c0-1918b3fbfbc7`, `f14c83fa-5bfc-49cc-b78f-415857edbd33`,
-  `c57979d2-fb33-4824-a370-dfc0ebe24286`); each passed three re-runs. Hypothesis: the intercepted read predates the
-  session's listing (FLAKES.md, 2026-11-05).
-
 ### Difficult deflake
 
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes

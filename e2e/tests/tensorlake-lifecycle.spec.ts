@@ -8,6 +8,7 @@ import {
   cleanupSession,
   createSession,
   openHostsPanel,
+  listSessions,
   patchPreferences,
   pinAutoSelect,
   readPreferences,
@@ -254,9 +255,19 @@ for (
   test(`suspending an agent with ${activity.name} status asks before sending the request`, async ({ page, request }) => {
     const fixture = await fleet(page, request, false);
     const session = await createSession(request, { title: "working-suspend", host: fixture.remote.id });
+    let stopActivity: (() => Promise<void>) | undefined;
     try {
+      // The consent scenario needs a listed agent. Establish that premise
+      // through the same host-scoped listing before controlling its activity.
+      await expect.poll(async () => (await listSessions(request, `host=${fixture.remote.id}`)).sessions
+        .some((row) => row.id === session.id)).toBe(true);
       let observed = false;
-      await page.route("**/api/sessions?**", async (route) => {
+      stopActivity = await drainedRoute(page, "**/api/sessions?**", async (route) => {
+        // The sidebar and other readers may ask for a different host. Only
+        // Suspend's host-scoped read establishes the activity this test claims.
+        if (new URL(route.request().url()).searchParams.get("host") !== String(fixture.remote.id)) {
+          return route.continue();
+        }
         const response = await route.fetch();
         const json = await response.json();
         expect(json.sessions.some((s: any) => s.id === session.id), "owned agent is present in the activity read").toBe(
@@ -286,6 +297,9 @@ for (
       await dialog.getByRole("button", { name: "Suspend", exact: true }).click();
       await expect.poll(() => fixture.calls).toEqual(["suspend"]);
     } finally {
+      // A deletion can trigger another read. Retire this premise while the
+      // session it requires still exists, before publishing that deletion.
+      await stopActivity?.();
       await cleanupSession(request, session.id);
     }
   });
@@ -297,9 +311,15 @@ for (const state of ["idle", "waiting"]) {
   test(`suspending a current ${state} agent acts immediately`, async ({ page, request }) => {
     const fixture = await fleet(page, request, false);
     const session = await createSession(request, { title: `inactive-${state}`, host: fixture.remote.id });
+    let stopActivity: (() => Promise<void>) | undefined;
     try {
+      await expect.poll(async () => (await listSessions(request, `host=${fixture.remote.id}`)).sessions
+        .some((row) => row.id === session.id)).toBe(true);
       let observed = false;
-      await page.route("**/api/sessions?**", async (route) => {
+      stopActivity = await drainedRoute(page, "**/api/sessions?**", async (route) => {
+        if (new URL(route.request().url()).searchParams.get("host") !== String(fixture.remote.id)) {
+          return route.continue();
+        }
         const response = await route.fetch();
         const json = await response.json();
         expect(json.sessions.some((s: any) => s.id === session.id)).toBe(true);
@@ -319,6 +339,9 @@ for (const state of ["idle", "waiting"]) {
       expect(observed).toBe(true);
       await expect(page.getByRole("dialog", { name: "Suspend Sandbox test?", exact: true })).toHaveCount(0);
     } finally {
+      // Match the uncertain-activity fixture's lifetime: no assertion about
+      // this agent may outlive the agent's own listing entry.
+      await stopActivity?.();
       await cleanupSession(request, session.id);
     }
   });
