@@ -21252,7 +21252,8 @@
   filesystem, and its outcomes are accepted.
 - Completion criteria: SPEC.md "Healthy local filesystems" says a full disk is covered, including losing durable state
   such as a Resume offer when a write fails. No code change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/durability-revocations.md`.
+- Execution: implemented in jj change `yknsnyntwwqvnukmwprwvtsmqywzpswt`, bookmark
+  `plan/durability-revocations/05-full-disk-spec`; draft PR https://github.com/scode/farhelm/pull/3034/changes.
 
 ## rolled-back-host-number-transfers-retained-approval.md
 
