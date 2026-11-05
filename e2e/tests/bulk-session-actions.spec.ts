@@ -5,9 +5,12 @@ import { chooseSort, chooseStatus } from "./helpers/list-header";
 import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { type InputFrame, programInput, recordInput } from "./helpers/program-input";
 import { requireHelmBuild } from "./helpers/helm-build";
+import { routeGate } from "./helpers/route-gate";
+import { terminalInput, waitForTermText } from "./helpers/term";
 import {
   cleanupSession,
   createSession,
+  listHosts,
   listSessions,
   observeFeedReaders,
   openRowMenu,
@@ -674,3 +677,548 @@ test("bulk metadata acts only on displayed eligible rows", async ({ page, reques
     ]);
   }
 });
+
+/** Mark explicit owned references, preserving the open session as the range anchor. */
+async function markRows(page: Page, ids: string[]) {
+  for (const id of ids) await row(page, id).locator(".session-row-open").click({ modifiers: ["Control"] });
+  await expect(page.locator(".marked-bar")).toHaveAttribute("data-marked-count", String(ids.length));
+}
+
+/** An already open row question must refuse just that target. Activating the
+ * toolbar programmatically intentionally avoids a pointer's outside-dismissal;
+ * the question is asserted first, so a missing engagement cannot pass this test. */
+test("bulk Stop reports an engaged row without skipping its eligible sibling", async ({ page, request }) => {
+  const ids: string[] = [];
+  let bodyFailed = false;
+  await resetPreferences(request);
+  try {
+    for (let n = 0; n < 2; n++) {
+      ids.push((await createSession(request, { title: `bulk-engaged-${n}-${Date.now()}` })).id);
+    }
+    await pinAutoSelect(page, ids[0]);
+    await page.goto("/");
+    for (const id of ids) await establishStarted(page, id);
+    await markRows(page, ids);
+    await openRowMenu(row(page, ids[0]));
+    await row(page, ids[0]).locator(".session-row-delete").click();
+    await expect(row(page, ids[0]).locator(".confirm-delete")).toBeVisible();
+    const sent: string[] = [];
+    page.on("request", (candidate) => {
+      const path = new URL(candidate.url()).pathname;
+      if (candidate.method() === "POST" && path.endsWith("/stop")) sent.push(decodeURIComponent(path.split("/")[3]));
+    });
+    await page.locator(".marked-stop").evaluate((button: HTMLButtonElement) => button.click());
+    await expect(row(page, ids[0]).locator(".action-error")).toContainText("Stop: not started");
+    await expect(page.locator(".marked-bar")).toHaveCount(0, { timeout: 30_000 });
+    expect(sent).toEqual([ids[1]]);
+    await expect(row(page, ids[1]).locator(".status-badge")).toContainText("Exited");
+    expect((await listSessions(request)).sessions.find((entry) => entry.id === ids[0])?.status?.state).toMatch(
+      /^(running|waiting|idle)$/,
+    );
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ...ids.map((id): [string, () => Promise<void>] => ["owned session", () => cleanupSession(request, id)]),
+      ["preferences", () => resetPreferences(request)],
+    ]);
+  }
+});
+
+/** The ordinary Delete shortcut must keep its open-session target while the
+ * marked set names only another session. Rename has the same target distinction. */
+test("session shortcuts keep acting on the open session while another is marked", async ({ page, request }) => {
+  const ids: string[] = [];
+  let bodyFailed = false;
+  await resetPreferences(request);
+  try {
+    for (let n = 0; n < 2; n++) {
+      ids.push((await createSession(request, { title: `bulk-shortcut-${n}-${Date.now()}` })).id);
+    }
+    await pinAutoSelect(page, ids[0]);
+    await page.goto("/");
+    await establishStarted(page, ids[0]);
+    await markRows(page, [ids[1]]);
+    const input = terminalInput(page);
+    await input.focus();
+    await expect(input).toBeFocused();
+    await page.keyboard.press("Control+Shift+Backspace");
+    await expect(page.locator(".header-delete-confirm")).toBeVisible();
+    await expect(page.locator(".bulk-delete-dialog")).toHaveCount(0);
+    await expect(row(page, ids[0])).toHaveAttribute("data-session-selected", "true");
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".header-delete-confirm")).toHaveCount(0);
+    await expect(input).toBeFocused();
+    await page.keyboard.press("Control+Shift+l");
+    const rename = page.getByRole("dialog", { name: "Rename session", exact: true });
+    await expect(rename).toBeVisible();
+    await expect(rename.getByRole("textbox", { name: "New session title", exact: true })).toHaveValue(
+      (await listSessions(request)).sessions.find((entry) => entry.id === ids[0])!.title,
+    );
+    await page.keyboard.press("Escape");
+    await expect(rename).toHaveCount(0);
+    await expect(input).toBeFocused();
+    const marker = `bulk-shortcut-alive-${Date.now()}`;
+    await page.keyboard.type(marker);
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, `echo:${marker}`);
+    await expect(row(page, ids[1])).toHaveAttribute("data-session-marked", "true");
+    expect((await listSessions(request)).sessions.filter((entry) => ids.includes(entry.id))).toHaveLength(2);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ...ids.map((id): [string, () => Promise<void>] => ["owned session", () => cleanupSession(request, id)]),
+      ["preferences", () => resetPreferences(request)],
+    ]);
+  }
+});
+
+/** Controlled listings make disappearance and changed wording deterministic.
+ * They retain real owned references, while only destructive replies are refused.
+ * Native token tests separately prove that the replaced opening rejects an old
+ * queued answer; this browser case proves the actual modal redraw and wire guard. */
+test(
+  "bulk Delete rewords and shrinks its structured question without gaining targets",
+  async ({ page, request }, info) => {
+    const ids: string[] = [];
+    let bodyFailed = false;
+    await resetPreferences(request);
+    try {
+      for (let n = 0; n < 3; n++) {
+        ids.push(
+          (await createSession(request, { title: `bulk-drawn-${n}-${Date.now()}` })).id,
+        );
+      }
+      await pinAutoSelect(page, ids[2]);
+      const response = await request.get("/api/sessions");
+      expect(response.ok()).toBe(true);
+      const build = requireHelmBuild(response, "bulk drawn consent");
+      const listing = await response.json();
+      const sources = ids.map((id) => listing.sessions.find((entry: { id: string }) => entry.id === id));
+      expect(sources.every(Boolean)).toBe(true);
+      const fullHost = `a-very-long-host-alias (destination-with-a-long-name.example.test)`;
+      const hostileTitle = "long title <b>literal</b> \u202e" + "readable-name-".repeat(8);
+      let stage = 0;
+      await page.route((url) => url.pathname === "/api/sessions", async (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        const first = {
+          ...sources[0],
+          title: hostileTitle,
+          host_name: fullHost,
+          status: { state: "unknown" },
+          stale: false,
+          working_copy: {
+            id: "drawing-only",
+            repo: { owner: "example", name: "repo" },
+            canonical_path: "/work/example",
+            origin_session_id: "drawing-only",
+          },
+        };
+        const second = {
+          ...sources[1],
+          host_name: fullHost,
+          status: stage === 0 ? { state: "running" } : { state: "exited", exit_code: 0 },
+          annotation: null,
+          tabs: [],
+        };
+        const sessions = stage === 0 ? [first, second, sources[2]] : [second, sources[2]];
+        await route.fulfill({
+          headers: { "x-farhelm-build": build },
+          json: { ...listing, sessions, total: sessions.length, matching: sessions.length, truncated: false },
+        });
+      });
+      await observeFeedReaders(page);
+      const feed = await stubFeed(page);
+      feed.notifyOnConnect(1);
+      await page.addInitScript(() => localStorage.setItem("farhelm.sidebar-width", "240"));
+      await page.goto("/");
+      await feed.waitForConnection(1);
+      await waitForFeedReadersSettled(page);
+      await markRows(page, ids.slice(0, 2));
+      for (const selector of [".marked-stop", ".marked-delete"]) {
+        await expect(page.locator(selector)).toHaveAttribute("data-tooltip", /marked sessions currently shown/);
+      }
+      await expect.poll(() =>
+        page.locator(".app-sidebar").evaluate((element) => parseFloat(getComputedStyle(element).width))
+      ).toBe(296);
+      for (const palette of ["dark", "light"] as const) {
+        await page.emulateMedia({ colorScheme: palette });
+        await expect(page.locator("html")).toHaveAttribute("data-appearance", palette);
+        const bar = (await page.locator(".marked-bar").boundingBox())!;
+        for (
+          const selector of [".marked-count", ".marked-stop", ".marked-delete", ".marked-menu-toggle", ".marked-clear"]
+        ) {
+          const box = (await page.locator(selector).boundingBox())!;
+          expect(box.x).toBeGreaterThanOrEqual(bar.x);
+          expect(box.x + box.width).toBeLessThanOrEqual(bar.x + bar.width + 1);
+        }
+        await info.attach(`bulk-narrow-sidebar-${palette}`, {
+          body: await page.locator(".app-sidebar").screenshot(),
+          contentType: "image/png",
+        });
+      }
+      await page.locator(".marked-delete").click();
+      const dialog = page.locator(".bulk-delete-dialog");
+      await expect(dialog.locator(".bulk-delete-row")).toHaveCount(2);
+      for (const selector of [".dialog-close", ".bulk-delete-cancel", ".bulk-delete-confirm"]) {
+        await expect(dialog.locator(selector)).toHaveAttribute("data-tooltip", /\S/);
+      }
+      await expect(dialog.locator(".status-badge.unknown")).toHaveText("Unknown");
+      // Text content alone passed while flex shrinking painted only "U…".
+      // The destructive question must keep its uncertainty label readable.
+      await expect.poll(() =>
+        dialog.locator(".status-badge.unknown").evaluate((element) => element.scrollWidth <= element.clientWidth)
+      ).toBe(true);
+      await expect(dialog.locator(".bulk-delete-title").first()).toContainText("<b>literal</b> <U+202E>");
+      await expect(dialog.locator(".bulk-delete-title b")).toHaveCount(0);
+      await expect(dialog.locator(".bulk-delete-host").first()).toHaveText(fullHost);
+      await expect(dialog.locator(".bulk-delete-consequence").filter({ hasText: "The managed checkout stays" }))
+        .toHaveCount(1);
+      for (const palette of ["dark", "light"] as const) {
+        await page.emulateMedia({ colorScheme: palette });
+        await expect(page.locator("html")).toHaveAttribute("data-appearance", palette);
+        await info.attach(`bulk-delete-dialog-${palette}`, {
+          body: await dialog.screenshot(),
+          contentType: "image/png",
+        });
+      }
+      await page.setViewportSize({ width: 380, height: 640 });
+      await expect(dialog).toBeVisible();
+      await expect.poll(() =>
+        dialog.locator(".status-badge.unknown").evaluate((element) => element.scrollWidth <= element.clientWidth)
+      ).toBe(true);
+      expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+      await expect(dialog.locator(".bulk-delete-confirm")).toBeInViewport();
+      await info.attach("bulk-delete-dialog-narrow", { body: await dialog.screenshot(), contentType: "image/png" });
+      await dialog.locator(".bulk-delete-cancel").click();
+      await expect(dialog).toHaveCount(0);
+      await expect(page.locator(".marked-menu-toggle")).toBeFocused();
+      await expect(page.locator(".marked-bar")).toHaveAttribute("data-marked-count", "2");
+      await page.locator(".marked-delete").click();
+      await expect(dialog.locator(".bulk-delete-row")).toHaveCount(2);
+      stage = 1;
+      feed.notify(2);
+      await expect(dialog.locator(".bulk-delete-row")).toHaveCount(1);
+      await expect(dialog.locator(`[data-delete-target="${ids[1]}"] .bulk-delete-consequence`)).toHaveText(
+        "Delete anyway:",
+      );
+      await expect(dialog.locator(`[data-delete-target="${ids[2]}"]`)).toHaveCount(0);
+      const sent: URL[] = [];
+      await page.route(
+        (url) => ids.some((id) => url.pathname === `/api/sessions/${encodeURIComponent(id)}`),
+        async (route) => {
+          if (route.request().method() !== "DELETE") return route.fallback();
+          sent.push(new URL(route.request().url()));
+          await route.fulfill({ status: 409, headers: { "x-farhelm-build": build }, body: "drawn guard fixture" });
+        },
+      );
+      await dialog.locator(".bulk-delete-confirm").click();
+      await expect(dialog).toHaveCount(0);
+      await expect(row(page, ids[1]).locator(".action-error")).toContainText("drawn guard fixture");
+      expect(sent).toHaveLength(1);
+      expect(decodeURIComponent(sent[0].pathname.split("/")[3])).toBe(ids[1]);
+      expect(sent[0].searchParams.get("only_if_nothing_alive")).toBe("true");
+      await expect(page.locator(".marked-bar")).toHaveCount(0);
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["routes", () => page.unrouteAll({ behavior: "wait" })],
+        ...ids.map((id): [string, () => Promise<void>] => ["owned session", () => cleanupSession(request, id)]),
+        ["preferences", () => resetPreferences(request)],
+      ]);
+    }
+  },
+);
+
+/** Creation's provisional live status is insufficient for a Stop fixture.
+ * Observe the actual fake agent through this page's own revealed attachment. */
+async function establishStarted(page: Page, id: string) {
+  const target = row(page, id);
+  await expect(target).toBeVisible({ timeout: 20_000 });
+  if (await target.getAttribute("data-session-selected") !== "true") await target.locator(".session-row-open").click();
+  await waitForSessionRevealed(page, id);
+  await waitForTermText(page, "FAKE-AGENT READY");
+  await expect(target.locator(".status-badge")).toHaveText(/^(Running|Waiting|Idle(?: — new output)?)$/);
+}
+
+/** More than the supervisor's admission limit must succeed without a burst.
+ * Holding the first request on each real host proves simultaneous host lanes;
+ * counting each request through its server reply distinguishes dispatch pacing
+ * from sequential result collection. Queued rows must already lock navigation. */
+test("bulk Stop paces nine rows on one host while another host progresses", async ({ page, request }) => {
+  test.setTimeout(180_000);
+  const ids: string[] = [];
+  const release = routeGate();
+  let bodyFailed = false;
+  await resetPreferences(request);
+  try {
+    const hosts = await listHosts(request);
+    const local = hosts.find((host) => host.kind === "local")!;
+    const remote = hosts.find((host) => host.kind !== "local" && host.state.phase === "connected")!;
+    expect(local, "local host is registered").toBeTruthy();
+    expect(remote, "a second real connected host is required").toBeTruthy();
+    const hostById = new Map<string, number>();
+    for (let n = 0; n < 10; n++) {
+      const host = n < 9 ? local.id : remote.id;
+      const created = await createSession(request, { title: `bulk-stop-${n}-${Date.now()}`, host });
+      ids.push(created.id);
+      hostById.set(created.id, host);
+    }
+    await pinAutoSelect(page, ids[0]);
+    await page.goto("/");
+    for (const id of ids) await establishStarted(page, id);
+    await markRows(page, ids);
+    const drawn = await markedIds(page);
+    const started: string[] = [];
+    const active = new Map<number, number>();
+    const maximum = new Map<number, number>();
+    let globalMaximum = 0;
+    const replies: number[] = [];
+    await page.route((url) => /^\/api\/sessions\/[^/]+\/stop$/.test(url.pathname), async (route) => {
+      const id = decodeURIComponent(new URL(route.request().url()).pathname.split("/")[3]);
+      const host = hostById.get(id);
+      if (host === undefined) return route.fallback();
+      expect(route.request().method()).toBe("POST");
+      started.push(id);
+      active.set(host, (active.get(host) ?? 0) + 1);
+      maximum.set(host, Math.max(maximum.get(host) ?? 0, active.get(host)!));
+      globalMaximum = Math.max(globalMaximum, [...active.values()].reduce((a, b) => a + b, 0));
+      await release.wait();
+      const reply = await route.fetch({ maxRetries: 0 });
+      replies.push(reply.status());
+      // The browser can send its next request before fulfill's promise returns.
+      // The server reply is the end of this request's observable lifetime.
+      active.set(host, active.get(host)! - 1);
+      await route.fulfill({ response: reply });
+    });
+    await page.locator(".marked-stop").click();
+    await expect.poll(() => started.length).toBe(2);
+    expect(new Set(started.map((id) => hostById.get(id)))).toEqual(new Set([local.id, remote.id]));
+    for (const id of ids) await expect(row(page, id).locator(".session-row-open")).toBeDisabled();
+    for (const action of [".marked-stop", ".marked-delete", ".marked-menu-toggle", ".marked-clear"]) {
+      await expect(page.locator(action)).toBeDisabled();
+    }
+    release.release();
+    await expect(page.locator(".marked-bar")).toHaveCount(0, { timeout: 60_000 });
+    expect(started).toHaveLength(10);
+    expect(replies).toHaveLength(10);
+    expect(replies.every((status) => status >= 200 && status < 300)).toBe(true);
+    expect(maximum).toEqual(new Map([[local.id, 1], [remote.id, 1]]));
+    expect(globalMaximum).toBe(2);
+    for (const host of [local.id, remote.id]) {
+      expect(started.filter((id) => hostById.get(id) === host)).toEqual(
+        drawn.filter((id) => hostById.get(id) === host),
+      );
+    }
+    await expect.poll(async () => {
+      const listing = await listSessions(request);
+      return ids.map((id) => listing.sessions.find((entry) => entry.id === id)?.status?.state);
+    }, { timeout: 30_000 }).toEqual(ids.map(() => "exited"));
+    for (const id of ids) await expect(row(page, id).locator(".action-error")).toHaveCount(0);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    release.release();
+    await cleanupOwnedSteps(bodyFailed, [
+      ["routes", () => page.unrouteAll({ behavior: "wait" })],
+      ...ids.map((id): [string, () => Promise<void>] => ["owned session", () => cleanupSession(request, id)]),
+      ["preferences", () => resetPreferences(request)],
+    ]);
+  }
+});
+
+/** A mixed question carries three different guards, and a fast host deleting
+ * the open session must not select a queued target on a slower host. Keep the
+ * second host held after the local success and local refusal have settled. */
+test("bulk Delete keeps drawn guards, row errors and cross-host selection exclusion", async ({ page, request }) => {
+  const ids: string[] = [];
+  const localRelease = routeGate();
+  const remoteRelease = routeGate();
+  const selectionRelease = routeGate();
+  const selectionReached = routeGate();
+  let bodyFailed = false;
+  await resetPreferences(request);
+  try {
+    const hosts = await listHosts(request);
+    const local = hosts.find((host) => host.kind === "local")!;
+    const remote = hosts.find((host) => host.kind !== "local" && host.state.phase === "connected")!;
+    expect(local).toBeTruthy();
+    expect(remote).toBeTruthy();
+    const live = (await createSession(request, { title: `a-bulk-delete-${Date.now()}`, host: local.id })).id;
+    ids.push(live);
+    const ended =
+      (await createSession(request, { title: `b-bulk-delete-${Date.now()}`, host: remote.id, invocation: "true" })).id;
+    ids.push(ended);
+    const tabbed =
+      (await createSession(request, { title: `c-bulk-delete-${Date.now()}`, host: local.id, invocation: "true" })).id;
+    ids.push(tabbed);
+    await expect.poll(async () => {
+      const listing = await listSessions(request);
+      return [ended, tabbed].map((id) => listing.sessions.find((entry) => entry.id === id)?.status?.state);
+    }, { timeout: 20_000 }).toEqual(["exited", "exited"]);
+    const openedTab = await request.post(`/api/sessions/${encodeURIComponent(tabbed)}/tabs`);
+    expect(openedTab.ok(), await openedTab.text()).toBe(true);
+    await pinAutoSelect(page, live);
+    await page.goto("/");
+    await establishStarted(page, live);
+    await chooseSort(page, "title");
+    await markRows(page, ids);
+    const build = requireHelmBuild(await request.get("/api/hosts"), "bulk Delete refusal");
+    const sent: URL[] = [];
+    const newAttachments: string[] = [];
+    page.on("websocket", (socket) => {
+      const path = new URL(socket.url()).pathname;
+      if (/\/term(?:\/unowned)?$/.test(path)) newAttachments.push(decodeURIComponent(path.split("/")[3]));
+    });
+    await page.route(
+      (url) => ids.some((id) => url.pathname === `/api/sessions/${encodeURIComponent(id)}`),
+      async (route) => {
+        if (route.request().method() !== "DELETE") return route.fallback();
+        const url = new URL(route.request().url());
+        const id = decodeURIComponent(url.pathname.split("/")[3]);
+        sent.push(url);
+        await (id === ended ? remoteRelease : localRelease).wait();
+        if (id === tabbed) {
+          await route.fulfill({ status: 409, headers: { "x-farhelm-build": build }, body: "bulk fixture refusal" });
+        } else {
+          const reply = await route.fetch({ maxRetries: 0 });
+          expect(reply.ok(), await reply.text()).toBe(true);
+          await route.fulfill({ response: reply });
+        }
+      },
+    );
+    await page.locator(".marked-delete").click();
+    const dialog = page.locator(".bulk-delete-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator(".bulk-delete-row")).toHaveCount(3);
+    await expect(dialog.locator(`[data-delete-target="${live}"] .bulk-delete-consequence`)).toContainText(
+      "Still running",
+    );
+    await expect(dialog.locator(`[data-delete-target="${ended}"] .bulk-delete-consequence`)).toHaveText(
+      "Delete anyway:",
+    );
+    await expect(dialog.locator(`[data-delete-target="${tabbed}"] .bulk-delete-consequence`)).toContainText("1");
+    await expect(dialog.locator(".bulk-delete-confirm")).toBeFocused();
+    await dialog.locator(".bulk-delete-confirm").click();
+    await expect(dialog).toHaveCount(0);
+    await expect.poll(() => sent.length).toBe(2);
+    await expect(page.locator(".marked-count")).toBeFocused();
+    for (const action of [".marked-stop", ".marked-delete", ".marked-menu-toggle", ".marked-clear"]) {
+      await expect(page.locator(action)).toBeDisabled();
+    }
+    localRelease.release();
+    await expect(row(page, live)).toHaveCount(0, { timeout: 20_000 });
+    await expect(row(page, tabbed).locator(".action-error")).toContainText("Delete: bulk fixture refusal");
+    await expect(page.locator('.session-row[data-session-selected="true"]')).toHaveCount(0);
+    await expect(row(page, ended)).toBeVisible();
+    await expect(row(page, ended).locator(".session-row-open")).toBeDisabled();
+    expect(newAttachments.filter((id) => ids.includes(id)), "no still-deleting target may be opened").toEqual([]);
+    await expect(page.locator(".marked-bar")).toBeVisible();
+    // Isolate the toolbar's completion handback from the later legitimate
+    // focus handoff when automatic selection reveals a surviving terminal.
+    await page.route((url) => url.pathname === "/api/preferences", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      selectionReached.release();
+      await selectionRelease.wait();
+      await route.continue();
+    });
+    remoteRelease.release();
+    await expect(row(page, ended)).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.locator(".marked-bar")).toHaveCount(0);
+    await selectionReached.wait();
+    await expect.poll(() => page.evaluate(() => document.activeElement?.outerHTML.slice(0, 500)), {
+      message: "completion returns toolbar focus before the held automatic-selection read finishes",
+    }).toContain("sort-title");
+    selectionRelease.release();
+    expect(sent).toHaveLength(3);
+    for (
+      const [id, guard] of [[live, null], [ended, "only_if_nothing_alive"], [tabbed, "only_if_agent_ended"]] as const
+    ) {
+      const url = sent.find((url) => decodeURIComponent(url.pathname.split("/")[3]) === id)!;
+      expect(url, "each drawn target got a request").toBeTruthy();
+      expect(url.searchParams.get("only_if_nothing_alive")).toBe(guard === "only_if_nothing_alive" ? "true" : null);
+      expect(url.searchParams.get("only_if_agent_ended")).toBe(guard === "only_if_agent_ended" ? "true" : null);
+    }
+    await expect(row(page, tabbed)).toBeVisible();
+    await expect(row(page, tabbed).locator(".action-error")).toContainText("bulk fixture refusal");
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    localRelease.release();
+    remoteRelease.release();
+    selectionRelease.release();
+    await cleanupOwnedSteps(bodyFailed, [
+      ["routes", () => page.unrouteAll({ behavior: "wait" })],
+      ...ids.map((id): [string, () => Promise<void>] => ["owned session", () => cleanupSession(request, id)]),
+      ["preferences", () => resetPreferences(request)],
+    ]);
+  }
+});
+
+/** Direct batches must preserve narrower consent even when the setting skips
+ * the question. A held request makes the absence of a transient dialog visible. */
+for (const skip of [false, true]) {
+  test(`bulk Delete ${skip ? "skips the live question" : "directly removes ended rows"}`, async ({ page, request }) => {
+    const ids: string[] = [];
+    const release = routeGate();
+    let bodyFailed = false;
+    await resetPreferences(request);
+    try {
+      await patchPreferences(request, { skip_session_confirmations: skip });
+      for (let n = 0; n < 2; n++) {
+        ids.push(
+          (await createSession(request, {
+            title: `bulk-direct-${n}-${Date.now()}`,
+            ...(skip ? {} : { invocation: "true" }),
+          })).id,
+        );
+      }
+      if (!skip) {
+        await expect.poll(async () => {
+          const listing = await listSessions(request);
+          return ids.map((id) => listing.sessions.find((entry) => entry.id === id)?.status?.state);
+        }, { timeout: 20_000 }).toEqual(["exited", "exited"]);
+      }
+      await pinAutoSelect(page, ids[0]);
+      await page.goto("/");
+      if (skip) { for (const id of ids) await establishStarted(page, id); }
+      await markRows(page, ids);
+      const sent: URL[] = [];
+      await page.route(
+        (url) => ids.some((id) => url.pathname === `/api/sessions/${encodeURIComponent(id)}`),
+        async (route) => {
+          if (route.request().method() !== "DELETE") return route.fallback();
+          sent.push(new URL(route.request().url()));
+          await release.wait();
+          await route.continue();
+        },
+      );
+      await page.locator(".marked-delete").click();
+      await expect.poll(() => sent.length).toBe(1);
+      await expect(page.locator(".bulk-delete-dialog")).toHaveCount(0);
+      await expect(page.locator(".marked-delete")).toBeDisabled();
+      release.release();
+      await expect(page.locator(".marked-bar")).toHaveCount(0, { timeout: 30_000 });
+      expect(sent).toHaveLength(2);
+      for (const url of sent) expect(url.searchParams.get("only_if_nothing_alive")).toBe(skip ? null : "true");
+      for (const id of ids) await expect(row(page, id)).toHaveCount(0);
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      release.release();
+      await cleanupOwnedSteps(bodyFailed, [
+        ["routes", () => page.unrouteAll({ behavior: "wait" })],
+        ...ids.map((id): [string, () => Promise<void>] => ["owned session", () => cleanupSession(request, id)]),
+        ["preferences", () => resetPreferences(request)],
+      ]);
+    }
+  });
+}

@@ -43,6 +43,7 @@ use super::create_form::{
     COMPOSER_DIALOG, CreatePrefill, CreateSessionForm, CreateTarget, CreatedSession,
     mark_replace_with, mark_restart_with, prefill_from,
 };
+use super::lifecycle::{self, DeleteSnapshot, LifecycleAction, RowWork};
 use super::marking::{self, Gesture, MetadataAction};
 use super::row::{IdentityFlow, SessionRow, session_identity_flow};
 use super::shared::{
@@ -656,6 +657,34 @@ fn admit_row_op(pending: &mut HashSet<String>, asking: bool, id: &str) -> bool {
     true
 }
 
+/// Reserve a row and publish its cross-pane claim in the same synchronous turn.
+/// Queued bulk work uses this same admission as ordinary row actions; no future
+/// may be polled before its count already excludes navigation and pane claims.
+pub(super) fn begin_row_operation(
+    ops: OpLock,
+    mut pending: Signal<HashSet<String>>,
+    mut count: Signal<u32>,
+    asking: bool,
+    id: &str,
+) -> bool {
+    if ops.busy_now() || !admit_row_op(&mut pending.write(), asking, id) {
+        return false;
+    }
+    count += 1;
+    true
+}
+
+/// Release exactly one admitted row, preserving the count while others wait.
+pub(super) fn end_row_operation(
+    mut pending: Signal<HashSet<String>>,
+    mut count: Signal<u32>,
+    id: &str,
+) {
+    if pending.write().remove(id) {
+        count -= 1;
+    }
+}
+
 /// The flat session list: host, title, cwd, invocation, and a truthful
 /// status badge per row; the filter and search surface above them, the hosts
 /// panel, the "new session" form and the per-row stop/delete actions
@@ -832,7 +861,7 @@ pub(crate) fn ListView(
     header_delete: Signal<Option<HeaderDeleteRequest>>,
     /// One-shot attended listing demand from a successful header mutation.
     header_refresh: Signal<bool>,
-    /// Sessions with a delete in flight, written only by `do_delete` and
+    /// Sessions with an admitted delete, written only by the shared Delete core and
     /// read by the rows here and by the session header. AppBody owns it
     /// because the header is this view's sibling.
     deleting: Signal<HashSet<String>>,
@@ -850,7 +879,6 @@ pub(crate) fn ListView(
     // Capture the preference with this render's action handlers, alongside
     // the row snapshots they act on. A skipped question still carries consent.
     let skip_session_confirmations = preferences.0.read().skip_session_confirmations == Some(true);
-    let mut row_ops = row_ops;
     let mut deleting = deleting;
     let mut listing = use_signal(|| None::<Result<SessionListing, String>>);
     // A confirmed local archive and an observed managed row disappearing both
@@ -941,7 +969,7 @@ pub(crate) fn ListView(
     // disabling a button is not synchronous with its click handler. Entered
     // only through `begin_row_op` and left only through `end_row_op`; see
     // `admit_row_op` for why it is held apart from the questions below.
-    let mut row_pending = use_signal(HashSet::<String>::new);
+    let row_pending = use_signal(HashSet::<String>::new);
     // Each row's open inline question (Delete or Replace), one lane per row,
     // so several rows can hold a question at once and each answer is bound
     // to the opening its render drew. Opening identity is all this holds:
@@ -958,6 +986,9 @@ pub(crate) fn ListView(
     // authoritative-listing boundary below prunes stored marks; every target
     // projection intersects them with the existing held display instead.
     let mut marked = use_signal(HashSet::<String>::new);
+    // This opening belongs to the list, not the conditional marked toolbar:
+    // accepted listings can conceal every effective mark while it is open.
+    let mut bulk_delete_question = use_confirm_slot::<Vec<DeleteSnapshot>, ()>();
     // `row_pending`'s entry and exit, with the cross-pane bookkeeping attached:
     // every row operation must (a) refuse to start while the SHARED token
     // is held — the session view or a page operation is mid-write, and a
@@ -970,21 +1001,12 @@ pub(crate) fn ListView(
     // Borrow raw identity so decoded references and local action snapshots
     // enter the same gate without changing the set's owned keys. A row with
     // its question open is refused too (`admit_row_op`).
-    let mut begin_row_op = move |id: &str| -> bool {
-        if ops.busy_now() {
-            return false;
-        }
+    let begin_row_op = move |id: &str| -> bool {
         let asking = row_questions.peek_key(id).is_some();
-        if !admit_row_op(&mut row_pending.write(), asking, id) {
-            return false;
-        }
-        row_ops += 1;
-        true
+        begin_row_operation(ops, row_pending, row_ops, asking, id)
     };
-    let mut end_row_op = move |id: &String| {
-        if row_pending.write().remove(id) {
-            row_ops -= 1;
-        }
+    let end_row_op = move |id: &String| {
+        end_row_operation(row_pending, row_ops, id);
     };
     // At most one row's actions menu is open, and this parent owns which.
     // A per-row boolean would let two menus fight, and the parent is the
@@ -1538,6 +1560,31 @@ pub(crate) fn ListView(
             // carries none at all, so it can neither confirm nor contradict
             // an optimistic rename.
             settle_optimistic_renames(&mut renamed.write(), &listing.sessions, index);
+            // A changed consequence is a replacement question, not authority
+            // for an answer already queued from the previous rendered opening.
+            if let Some(drawn) = bulk_delete_question.peek_key() {
+                let local = host_options(hosts.peek().hosts().unwrap_or_default())
+                    .into_iter()
+                    .find(|host| host.local)
+                    .map(|host| host.id);
+                // The question shares the displayed rename overlay. A read
+                // predating a successful rename must not restore its old name
+                // here while the ordinary row correctly keeps the new one.
+                let shown = apply_optimistic_renames(&listing.sessions, &renamed.peek());
+                let reconciled = lifecycle::reconcile(
+                    &drawn,
+                    &shown,
+                    authoritative && absence_is_evidence(listing),
+                    local,
+                );
+                if reconciled.is_empty() {
+                    bulk_delete_question.clear();
+                    crate::modal_dialog::DialogHandle::new(lifecycle::DIALOG)
+                        .close(lifecycle::CANCEL_FOCUS);
+                } else if reconciled != drawn {
+                    bulk_delete_question.open(reconciled, ());
+                }
+            }
             // An open actions menu closes the moment its row leaves the
             // RENDERED list — any committed reply counts, filtered or
             // not, unlike the fleet-absence retains below (a title filter
@@ -2166,7 +2213,7 @@ pub(crate) fn ListView(
     // `Session` clone (and a second, redundant id clone off of it) would
     // only be dead weight — see `SessionRow`'s call site for the mirrored
     // simplification on the caller's side.
-    let on_stop = move |id: String| {
+    let mut admit_stop = move |id: String| -> Option<RowWork> {
         // Cross-guard against an open row question, not just
         // `row_pending`: the stop/delete buttons are only ABSENT from the
         // DOM once a rerender following the question's opening has landed
@@ -2194,7 +2241,7 @@ pub(crate) fn ListView(
                 .map(|editor| editor.id.as_str())
                 == Some(id.as_str())
         {
-            return;
+            return None;
         }
         // Re-entry guard for the per-session in-flight set: a disabled
         // button should already stop this, but the click and the
@@ -2203,7 +2250,7 @@ pub(crate) fn ListView(
         // already running and while the shared token is held (see
         // `begin_row_op`).
         if !begin_row_op(&id) {
-            return;
+            return None;
         }
         // Acceptance completes the menu interaction; a later stop failure
         // belongs in the row's error line. Close here so async completion
@@ -2216,7 +2263,7 @@ pub(crate) fn ListView(
         // captures, and this handler runs once per stop click.
         let stop_recovery = stop_recovery.clone();
         let mut commit_listing = stop_commit_listing.clone();
-        spawn(async move {
+        Some(Box::pin(async move {
             // No optimistic flip (PLAN_M2.md design note): the row's
             // badge only ever reflects what the NEXT poll observes, so a
             // stop that silently failed can never leave the UI claiming a
@@ -2295,30 +2342,35 @@ pub(crate) fn ListView(
                     end_row_op(&id);
                 }
             }
-        });
+        }))
+    };
+    let mut bulk_admit_stop = admit_stop.clone();
+    let on_stop = move |id: String| {
+        if let Some(work) = admit_stop(id) {
+            spawn(work);
+        }
     };
 
     let delete_base = base.clone();
-    // The actual DELETE call, shared by both ways a delete can be
-    // decided on: immediately for an Exited session, or after the user
-    // hits "confirm delete" on the inline prompt for a live or `Unknown`
-    // one (see `on_delete` and `confirm_delete` below, both of which
-    // clone this closure rather than each reimplementing the request/
-    // pending/error bookkeeping). Mirrors `on_stop`'s shape exactly,
-    // `delete_session` and `errors`'/`pending`'s "delete:"-prefixed entry
-    // in place of `on_stop`'s "stop:" one.
+    // Every Delete, whether single or bulk and confirmed or direct, shares
+    // this admission and its whole completion. Reserving a row does not poll
+    // its request: bulk queues keep that claim while earlier rows finish.
     let delete_refresh = request_listing.clone();
     let delete_popovers = popovers.clone();
-    // `guard` is what the prompt the user answered covered, or
-    // `NothingAlive` for the one caller that deletes without asking (see
-    // `on_delete`): the row it decided from can be stale, and the supervisor
-    // then refuses rather than kills what nobody confirmed.
+    // `guard` comes from the rendered question or direct-click snapshot,
+    // including when questions are skipped. A queued request must not expand
+    // that authority from a fresh read when its host is finally ready.
     //
-    // Returns whether the delete started. Only the header path reads it: the
-    // row's own callers refuse busy rows before they get here.
-    let mut do_delete = move |id: String, guard: crate::DeleteGuard| -> bool {
-        if !begin_row_op(&id) {
-            return false;
+    // The single-action wrapper below preserves the header's synchronous
+    // started/not-started answer while bulk callers await the returned core.
+    let mut admit_delete = move |id: String, guard: crate::DeleteGuard| -> Option<RowWork> {
+        if rename_editor
+            .peek()
+            .as_ref()
+            .is_some_and(|editor| editor.id == id)
+            || !begin_row_op(&id)
+        {
+            return None;
         }
         // Shown from here until the reply: the row and, if this session is
         // open, the header switch to their in-progress state. Cleared beside
@@ -2328,7 +2380,7 @@ pub(crate) fn ListView(
         let base = delete_base.clone();
         let refresh = delete_refresh.clone();
         let popovers = delete_popovers.clone();
-        spawn(async move {
+        Some(Box::pin(async move {
             let outcome = delete_session(&base, &id, guard).await;
             let archived = outcome.as_ref().is_ok_and(|reply| reply.archived);
             super::trash::finish_row_cue(&id, archived);
@@ -2410,8 +2462,18 @@ pub(crate) fn ListView(
                     refresh(Trigger::Explicit);
                 }
             }
-        });
-        true
+        }))
+    };
+    let mut bulk_admit_delete = admit_delete.clone();
+    // The header still receives synchronous started/not-started acceptance.
+    // Both callers own exactly the completion returned by the same admission.
+    let mut do_delete = move |id: String, guard: crate::DeleteGuard| -> bool {
+        if let Some(work) = admit_delete(id, guard) {
+            spawn(work);
+            true
+        } else {
+            false
+        }
     };
 
     // The delete button's initial click: decides whether this id needs
@@ -3558,6 +3620,110 @@ pub(crate) fn ListView(
         );
     };
     let on_mark_seen = use_callback(on_mark_seen);
+    // Admission is synchronous across ALL hosts. Unpolled row completions own
+    // queued claims, so neither the request gap nor a fast host's completion
+    // can allow automatic selection to open a session still being deleted.
+    let bulk_run = use_callback(
+        move |(action, drawn): (LifecycleAction, Vec<DeleteSnapshot>)| {
+            let targets = {
+                let current = listing.peek();
+                let visible = current
+                    .as_ref()
+                    .and_then(|reply| reply.as_ref().ok())
+                    .map(|current| {
+                        rows::held_display_order(order_hold.peek().as_ref(), &current.sessions)
+                    })
+                    .unwrap_or_default();
+                lifecycle::admitted_targets(drawn, &visible, &marked.peek())
+            };
+            if targets.is_empty() {
+                return;
+            }
+            if ops.busy_now() || !row_pending.peek().is_empty() || hosts_panel_open() {
+                for target in targets {
+                    errors
+                        .write()
+                        .insert(target.id.raw().to_owned(), action.not_started());
+                }
+                return;
+            }
+            let work = lifecycle::admit_batch(
+                targets,
+                |id, guard| match action {
+                    LifecycleAction::Stop => bulk_admit_stop(id),
+                    LifecycleAction::Delete => bulk_admit_delete(id, guard),
+                },
+                |id| {
+                    errors.write().insert(id, action.not_started());
+                },
+            );
+            // Spawn from the persistent ListView callback, never the MarkedBar
+            // whose effective projection can vanish during an accepted listing.
+            spawn(async move {
+                lifecycle::run_paced(work).await;
+                marking::return_header_focus();
+                marked.write().clear();
+            });
+        },
+    );
+    let bulk_lifecycle = use_callback(move |(action, drawn): (LifecycleAction, Vec<Session>)| {
+        let targets = {
+            let current = listing.peek();
+            let Some(Ok(current)) = current.as_ref() else {
+                return;
+            };
+            let displayed = rows::held_display_order(order_hold.peek().as_ref(), &current.sessions);
+            marking::admitted_targets(drawn, &displayed, &marked.peek())
+        };
+        let local = host_options(hosts.peek().hosts().unwrap_or_default())
+            .into_iter()
+            .find(|host| host.local)
+            .map(|host| host.id);
+        let targets: Vec<_> = targets
+            .iter()
+            .map(|row| DeleteSnapshot::for_session(row, local))
+            .collect();
+        if targets.is_empty() {
+            return;
+        }
+        if bulk_delete_question.peek_key().is_some() {
+            // A second click queued before modal isolation cannot replace the
+            // opening or start another lifecycle action behind the question.
+            return;
+        }
+        if ops.busy_now() || !row_pending.peek().is_empty() || hosts_panel_open() {
+            bulk_run.call((action, targets));
+            return;
+        }
+        if action == LifecycleAction::Delete
+            && lifecycle::needs_confirmation(&targets, skip_session_confirmations)
+        {
+            bulk_delete_question.open(targets, ());
+        } else {
+            bulk_run.call((action, targets));
+        }
+    });
+    let bulk_confirm = use_callback(move |shown: ConfirmToken<Vec<DeleteSnapshot>>| {
+        if !bulk_delete_question.is_current(&shown) {
+            return;
+        }
+        if ops.busy_now() || !row_pending.peek().is_empty() || hosts_panel_open() {
+            return;
+        }
+        if bulk_delete_question.take(&shown).is_none() {
+            return;
+        }
+        bulk_run.call((LifecycleAction::Delete, shown.key().clone()));
+        // Accepted row claims disable the action buttons before modal close's
+        // deferred handback. The nonsequential count remains focusable instead.
+        crate::modal_dialog::DialogHandle::new(lifecycle::DIALOG).close(lifecycle::ACCEPTED_FOCUS);
+    });
+    let bulk_cancel = use_callback(move |shown: ConfirmToken<Vec<DeleteSnapshot>>| {
+        if bulk_delete_question.take(&shown).is_some() {
+            crate::modal_dialog::DialogHandle::new(lifecycle::DIALOG)
+                .close(lifecycle::CANCEL_FOCUS);
+        }
+    });
     // Metadata accepts a drawn subset, then only removes keys that stopped
     // being visible or marked. The existing row callbacks remain responsible
     // for requests and failures; this caller owns no second write lifecycle.
@@ -4444,6 +4610,7 @@ pub(crate) fn ListView(
                     marking::MarkedBar {
                         targets: effective_marks.clone(), disabled: nav_locked,
                         layout_epoch, on_action: bulk_metadata, on_clear: clear_marks,
+                        on_lifecycle: bulk_lifecycle,
                     }
                     if let Some(Ok(listing)) = &*listing.read() {
                         // Marking replaces the ordinary count, never its
@@ -4981,6 +5148,11 @@ pub(crate) fn ListView(
                     }
                 }
             },
+        }
+        if let Some(shown) = bulk_delete_question.current() {
+            lifecycle::DeleteDialog {
+                shown, disabled: nav_locked, on_confirm: bulk_confirm, on_cancel: bulk_cancel,
+            }
         }
         if let Some(editor) = rename_editor() {
             RenameDialog {

@@ -24,9 +24,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Allow shift selection of multiple sessions for bulk actions such as closing them. Plan:
-  `plans/queue/bulk-session-actions.md`.
-
 - **The desktop smoke's appearance leg on grid terminals.** The optional appearance leg of the Linux desktop smoke
   (`DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh`) checks each light/dark case's terminal too: its background
   color, that typing reaches the agent, and that a 512-line burst arrives whole and in order on the same attachment.

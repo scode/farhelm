@@ -1418,6 +1418,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   gap: 6px;
   width: 100%;
   min-width: 0;
+  flex-wrap: wrap;
 }
 
 .marked-count {
@@ -1425,6 +1426,48 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   font: 600 13px var(--font-ui);
   white-space: nowrap;
 }
+
+.marked-bar .marked-stop,
+.marked-bar .marked-delete {
+  height: 26px;
+  padding: 3px 7px;
+  font-size: 12px;
+}
+
+/* Consequences and host identity stay readable independently of long titles.
+   Only the body scrolls; the shared modal frame keeps both answers in reach. */
+.bulk-delete-dialog {
+  width: min(620px, calc(100vw - 32px));
+  box-sizing: border-box;
+  max-width: 100%;
+  max-height: calc(100dvh - 2 * var(--dialog-vertical-margin));
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-0);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-dialog);
+  color: var(--fg-0);
+}
+
+.bulk-delete-row { padding-block: 14px; }
+.bulk-delete-body { gap: 0; }
+.bulk-delete-row + .bulk-delete-row { border-top: 1px solid var(--border-dim); }
+.bulk-delete-identity { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; min-width: 0; }
+/* A long name must not consume the status label's shrink budget. Wide ended
+   badges can occupy their own line; the title wraps in the remaining space. */
+.bulk-delete-identity .status-badge { flex: none; max-width: min(32ch, 100%); }
+.bulk-delete-title { flex: 1 1 18ch; min-width: 0; overflow-wrap: anywhere; }
+.bulk-delete-host { margin-top: 4px; color: var(--fg-2); overflow-wrap: anywhere; }
+/* The ordinary host span trades width with a folder. This question has a
+   dedicated host line, so its full identity wraps instead of ellipsizing. */
+.bulk-delete-host .session-host {
+  max-width: none;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+.bulk-delete-consequence { margin: 8px 0 0; overflow-wrap: anywhere; }
 
 .marked-bar .marked-menu-toggle,
 .marked-bar .marked-clear {

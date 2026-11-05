@@ -1640,10 +1640,10 @@ submission and focus-return behavior.
   again. The terminal's own "Detached" notice, which the delete itself causes, is held back meanwhile; if the delete
   fails, the row and header come back with the refusal shown, and a held notice appears.
 
-The off-by-default **Skip session confirmations** switch in Settings skips session row Delete and Replace, header
-Restart, Replace and Delete, interrupted-card Replace, and terminal-tab Close. Each runs on the first click through the
-ordinary action path, with consent from the state shown by that render. It does not skip YOLO, host or trash questions,
-nor the Restart with or Replace with launcher. Host setup and removal retain their separate choices.
+The off-by-default **Skip session confirmations** switch in Settings skips session row and bulk Delete, row Replace,
+header Restart, Replace and Delete, interrupted-card Replace, and terminal-tab Close. Each runs on the first click
+through the ordinary action path, with consent from the state shown by that render. It does not skip YOLO, host or trash
+questions, nor the Restart with or Replace with launcher. Host setup and removal retain their separate choices.
 
 After a user explicitly opens a confirmation, keyboard focus starts on its enabled confirming button, so a new Enter
 goes ahead; if that button is disabled, focus starts on Cancel instead. This covers session Delete, Replace, Restart and
@@ -1802,15 +1802,36 @@ displayed now. Filtering or opening Hosts retains hidden marks but never counts 
 no targets. A complete authoritative listing prunes vanished session keys, while a partial, filtered, failed or
 non-authoritative reply does not establish disappearance.
 
-With any effective marks, **N marked**, a metadata menu and Clear replace the ordinary title, count and icon buttons;
-the filters and any truncation or unsupported-filter warning remain available. **Pin** applies only to unpinned marked
-rows and **Unpin** only to pinned ones. **Mark read** and **Mark unread** apply only to marked rows whose own menus
-offer that action. They reuse the ordinary metadata writes and row-local errors; marks clear once the eligible choices
-have been dispatched. A row engaged by its own question or rename shows the ordinary not-started refusal rather than
-being silently omitted. Open buttons, marking, Clear and bulk actions obey the existing live operation lock. Escape
-clears marks only from the session list, without preventing default handling, and yields to a menu, dialog or terminal
-that owns the key. Quick switching and shortcuts keep their existing meaning, and each row's menu still acts only on
-itself.
+With any effective marks, **N marked**, **Stop**, **Delete**, a metadata menu and Clear replace the ordinary title,
+count and icon buttons; the filters and any truncation or unsupported-filter warning remain available. Stop and Delete
+apply to every marked row displayed at acceptance. **Pin** applies only to unpinned marked rows and **Unpin** only to
+pinned ones. **Mark read** and **Mark unread** apply only to marked rows whose own menus offer that action. Metadata
+choices reuse the ordinary writes and row-local errors, and clear marks once their eligible writes have been dispatched.
+
+Bulk Stop and Delete run one request at a time on each host, with different hosts progressing independently. Accepted
+queued rows remain pending until their completions finish; filtering or a listing failure does not cancel accepted work
+or add new targets. A failure remains on its own row without undoing successful siblings. Each refused row gets the
+ordinary action-specific not-started message, including a row engaged by its own question or rename. An old toolbar
+action reaching a globally locked page starts nothing and keeps the marks; an accepted batch clears all stored marks
+when every completion has finished, including when some rows failed or were refused. Open buttons, marking, Clear and
+bar actions obey the same live navigation lock. Automatic selection after Delete waits until the accepted batch has
+settled and cannot open a session still being deleted by that batch, including on another host.
+
+Bulk Delete asks once when any target would need its ordinary confirmation, unless **Skip session confirmations** is on.
+Its structured modal lists one row per target: status, name, full host and what Delete will do, with the same
+conditional managed-checkout consequence as a single Delete. The answer authorizes only those listed identities and
+drawn consequences. An accepted changed target rewords the question and replaces its opening; authoritative
+disappearance can remove it, while a filtered, partial, failed or non-authoritative omission cannot. An old answer
+cannot authorize a replacement question, and answer-time admission may only remove targets no longer displayed or
+marked. Changed facts or confirmation preferences never dispatch a destructive action by themselves. Cancel, Close and
+Escape dismiss their current question without clearing marks. After confirmation closes the question, keyboard focus
+returns to the marked count, which remains programmatically focusable while the action buttons are locked. Completion
+and failures use the ordinary rows and open-session surfaces.
+
+Escape clears marks only from the session list, without preventing default handling, and yields to a menu, dialog or
+terminal that owns the key. Quick switching and shortcuts keep their existing meaning: session shortcuts act only on the
+open session, whatever is marked. Each row's menu still acts only on itself. Rename, Clone, Replace, Replace with and
+Restart remain single-session actions.
 
 Below the list title, a single-status segmented choice offers **All**, **Running**, **Waiting** and **Idle**, without
 counts. It combines with the host choice in the helm's query and is not persisted. Ended sessions appear only under All.

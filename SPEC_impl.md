@@ -1077,6 +1077,30 @@ confirmations retain their panel so the user can finish the interaction. Rename 
 mounts the list-owned dialog SPEC.md specifies, whose lifetime belongs to the list rather than to the popup — the edit
 survives the panel, the row, and listing failures.
 
+`ListView` owns page-local marked session keys beside its row-question slots. The displayed held-order projection
+defines counts and drawn targets; only the same authoritative absence boundary that prunes questions prunes marks.
+Neither filters nor the toolbar own a second copy. The marked toolbar can unmount during an accepted operation, so the
+batch futures and combined confirmation belong to the persistent list owner. Ordinary header owners also stay mounted:
+only their triggers are hidden, preserving Trash's active dialog, queues and operation guard.
+
+Single and bulk Stop/Delete share synchronous admission and an owned, initially unpolled completion future. Admission
+does not spawn its request. A batch admits every eligible row before driving any host queue, then awaits one future at a
+time per routing host while different hosts run concurrently. Rows without a known host share a conservative sequential
+lane. The existing row-operation claims cover queued and sending work continuously. No shared page token blocks its own
+row admission, and no second batch lock or automatic-selection exclusion set is needed: ordinary selection already waits
+for the count and rechecks it after its preference read. Stop's completion includes its gated status refetch and
+recovery demand; Delete's includes the ordinary cues, notices, removal, read fence, row error and removal callback
+before another request proceeds.
+
+The combined `ConfirmSlot` freezes original identities and consequence-bearing displayed facts, including the status
+annotation and displayed rename overlay. Reconciliation does not reset consent for unrelated activity or notification
+changes. Changed drawn facts mint a replacement opening; authoritative absence permanently drops a target from that
+question. Every handler carries its rendered token, and every `DeleteGuard` comes from its answered snapshot. Live
+admission can shrink visibility or mark membership but never retarget a question or strengthen its guard from a newer
+read. The modal uses the existing dialog frame, focus and scrolling facilities. Confirming-close focus targets the
+nonsequential marked count while action buttons are locked; cancellation uses the enabled toolbar menu button. Batch
+completion uses the ordinary conditional header handback before clearing marks, preserving independently moved focus.
+
 Clone reuses the create form rather than a second submit path: the click builds a `CreatePrefill` snapshot of the row's
 `Session` and hands it to the SAME `CreateSessionForm`, tagged with a monotonic generation the list view mints per
 click. A `use_effect` inside the form compares that generation against the last one it applied and reseeds the form
