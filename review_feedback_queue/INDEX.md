@@ -82,10 +82,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   when nothing was alive can later end a newly opened tab without asking about that work if its host becomes unreadable
   between two status reads. The conditional approval and status sequence is established.
 
-- [`stationary-hover-omits-canonical-ancestor-dependencies.md`](stationary-hover-omits-canonical-ancestor-dependencies.md)
-  — A terminal redraw can leave a required hyperlink mismatch warning absent through a click. The actual target stays
-  correctly disclosed; priority remains highest because independent consultation could not settle the security boundary.
-
 - [`selector-policy-drops-ordinary-formatting-input.md`](selector-policy-drops-ordinary-formatting-input.md) — New
   terminals discard formatting codepoints even without selectors, changing stored and copied text. Priority remains
   highest because independent consultation could not settle whether this retained-text loss is outside user-data loss.

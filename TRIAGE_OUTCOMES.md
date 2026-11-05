@@ -21321,7 +21321,11 @@
 - Completion criteria: SPEC.md (the hyperlink mismatch warning in "Terminal experience") or SPEC_impl.md says the
   warning is judged when the hover starts and need not follow later redraws of other rows while the pointer rests; the
   destination display stays authoritative. No code change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/printed-link-mismatch.md`.
+- Execution: `complete`; SPEC.md, "Terminal experience", states that the warning is judged when hovering starts and need
+  not follow redraws of other rows while the pointer rests. The destination display remains authoritative. No code
+  change. jj change `owpxnuknnxopwytqlzkyypnwxztstwok`, bookmark
+  `plan/printed-link-mismatch/03-warning-judged-at-hover-start`; draft PR
+  [#3021](https://github.com/scode/farhelm/pull/3021/changes).
 
 ## hidden-live-tmux-tabs-escape-delete-consent.md
 

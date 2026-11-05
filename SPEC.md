@@ -2490,14 +2490,15 @@ whatever the agent renders is what you see. There is no composer, no message abs
   hyperlink is judged on its whole text. Repeated complete addresses that each independently match the target keep the
   ordinary display. If an adjacent continuation cannot be joined unambiguously within the bounds, a piece that looks
   like a web address warns rather than counting as a match. If the terminal library's link tag cannot be read, the
-  previous hovered-line comparison applies (see SPEC_impl.md). The warning is an aid, not a guarantee: unlinked text
-  around the hyperlink is outside the comparison, a program that chooses its own line breaks can still split a lookalike
-  into pieces that are not joined (separate hyperlinks, say) and that do not look like web addresses on their own, and
-  the ordinary display, which always names the real host, is what remains. The hover display is the whole safeguard: it
-  counts as disclosing the target only while fully visible, inside the window and not covered by another Farhelm surface
-  such as an approval card or tunnel-error notice. A click whose hover is not fully visible is refused with an
-  explanation; this also applies to Cmd-click tunnel opens. Plain URLs printed as text need no such display, because
-  what is shown is what opens, apart from the remote-localhost tunnel hint below.
+  previous hovered-line comparison applies (see SPEC_impl.md). The warning is judged when the hover starts and need not
+  follow later redraws of other rows while the pointer rests; the destination display stays authoritative. The warning
+  is an aid, not a guarantee: unlinked text around the hyperlink is outside the comparison, a program that chooses its
+  own line breaks can still split a lookalike into pieces that are not joined (separate hyperlinks, say) and that do not
+  look like web addresses on their own, and the ordinary display, which always names the real host, is what remains. The
+  hover display is the whole safeguard: it counts as disclosing the target only while fully visible, inside the window
+  and not covered by another Farhelm surface such as an approval card or tunnel-error notice. A click whose hover is not
+  fully visible is refused with an explanation; this also applies to Cmd-click tunnel opens. Plain URLs printed as text
+  need no such display, because what is shown is what opens, apart from the remote-localhost tunnel hint below.
 
 - In the Mac app, a loopback link in a remote session's terminal offers Cmd-click to tunnel and open it in the browser.
   Its hover names the host and port, explains that a plain click still opens on the Mac, and preserves any OSC hyperlink
