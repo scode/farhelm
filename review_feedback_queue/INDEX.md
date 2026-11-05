@@ -54,11 +54,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   moves to a terminal host and its host is lost, independent old terminal tabs can disappear from the live-work count.
   Delete can then end those tabs without the required warning, although they may still hold work.
 
-- [`displaced-input-pump-can-submit-replacement-typing.md`](displaced-input-pump-can-submit-replacement-typing.md) —
-  After another attachment takes control, the old input pump can still enqueue an Enter. It can submit text the
-  replacement attachment is typing into a shell. The source supports the conditional ordering; no harmful command was
-  constructed.
-
 - [`async-process-verification-leaves-stale-signal-authority.md`](async-process-verification-leaves-stale-signal-authority.md)
   — A process can exit and its number be reused after asynchronous identity verification but before Farhelm sends its
   signal, allowing unrelated work to be signalled. The accepted adjacent synchronous window explicitly excludes this

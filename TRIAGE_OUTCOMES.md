@@ -21173,7 +21173,11 @@
   straightforward (over about 100 lines of diff, not counting this ledger, the queue removal or a changelog fragment, or
   it needs a design choice), add a FILTER.md entry accepting this specific case instead. Remove the feedback file and
   its index entry.
-- Execution: planned in `plans/queue/unlikely-races-nov4.md`.
+- Execution: took the approved fallback in jj change `styrpsnzkuruxpqsylkwpprvqtpqplkz`, bookmark
+  `plan/unlikely-races-nov4/03-takeover-joins-input`. The 99-line candidate missed other detach paths; four further
+  connection teardowns brought it to 103 lines, still without the restart and tab-close ownership fences. A complete fix
+  exceeds about 100 lines. Removed the partial implementation and added the specific in-progress input-handoff filter
+  instead. Draft PR: https://github.com/scode/farhelm/pull/3026/changes.
 
 ## resize-journal-exhaustion-does-not-trigger-checkpoint.md
 
