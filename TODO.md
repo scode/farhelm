@@ -551,6 +551,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **A full browser report exceeded the recorder's inspection bound.** Browser sweep run
+  `b0269440-1711-4470-8e18-f6f7ef88bec3` on clean main `2146e607ea9227579740704f2e120ee6192c2525` retained a
+  33,090,209-byte `playwright.json`, above `scripts/test_run_playwright.py`'s 16 MiB report limit. Its metadata
+  therefore has `runner.report.complete = false` and no validated aggregate counts, although the console reports 3,037
+  passed, 18 skipped and three failed. The three isolated menu-test classification reports are complete; this is a
+  tooling finding, not another flake. Decide how to retain validated full-suite counts while keeping inspection bounded,
+  by reducing report payload or changing the inspection strategy. Raw report and console evidence remain in the retained
+  run and expire with temporary-file cleanup; do not turn an over-limit report into a claimed validation pass.
+
 - **Host menu fixture sometimes never opens before an expanded setup failure.**
   `expanded setup failure closes the menu below it` in `e2e/tests/provisioning.spec.ts` failed in Chromium browser sweep
   run `b0269440-1711-4470-8e18-f6f7ef88bec3`: the second host's menu flyout was absent through a five-second wait,
