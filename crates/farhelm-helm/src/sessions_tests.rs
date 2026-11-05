@@ -1523,9 +1523,16 @@ async fn pin_route_round_trip_changes_only_on_real_writes() {
         assert_eq!(harness.manager.events().revision() > before, changes);
         let (_, body) = get_json(&harness, "/api/sessions").await;
         assert_eq!(body["sessions"][0]["pinned"], pinned);
+        let position = if pinned {
+            serde_json::json!(0)
+        } else {
+            serde_json::Value::Null
+        };
+        assert_eq!(body["sessions"][0]["pin_position"], position);
         let (_, detail) =
             get_json(&harness, &harness.local_session_uri("/api/sessions/sess-1")).await;
         assert_eq!(detail["pinned"], pinned);
+        assert_eq!(detail["pin_position"], position);
     }
     let before = harness.manager.events().revision();
     let (status, _) = put_json(
@@ -1557,6 +1564,137 @@ async fn pin_route_round_trip_changes_only_on_real_writes() {
     );
 }
 
+/// The move route publishes changed order through the same fleet revision as
+/// pinning, while leaving the helm's served creation order intact. Repeats
+/// and stale/malformed requests must neither change positions nor wake clients.
+#[farhelm_testtrace::test]
+async fn pin_order_route_moves_relative_to_a_neighbor_and_notifies_once() {
+    let harness = rest_harness::helm_listing(vec![
+        rest_harness::session("a", 100),
+        rest_harness::session("b", 200),
+        rest_harness::session("c", 300),
+        rest_harness::session("unpinned", 400),
+    ])
+    .await;
+    for id in ["a", "b", "c"] {
+        let (status, body) = put_json(
+            &harness,
+            &harness.local_session_uri(&format!("/api/sessions/{id}/pin")),
+            serde_json::json!({"pinned": true}),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    }
+    let host = rest_harness::local_id(&harness.store).await;
+    let keys = ["a", "b", "c"].map(|id| store::SessionKey::new(host, id));
+    assert_eq!(
+        harness.store.pin_positions(&keys).await.unwrap(),
+        std::collections::HashMap::from([
+            (keys[0].clone(), 0),
+            (keys[1].clone(), 1),
+            (keys[2].clone(), 2)
+        ]),
+        "premise: the route appended each new pin in request order"
+    );
+    for (moved, neighbor, placement, expected, changed) in [
+        ("c", "a", "before", [1, 2, 0], true),
+        ("c", "a", "before", [1, 2, 0], false),
+        ("c", "b", "after", [0, 1, 2], true),
+        ("a", "a", "after", [0, 1, 2], false),
+    ] {
+        let before = harness.manager.events().revision();
+        let (status, body) = put_json(
+            &harness,
+            &harness.local_session_uri(&format!("/api/sessions/{moved}/pin-order")),
+            serde_json::json!({"neighbor": harness.local_session_ref(neighbor), "placement": placement}),
+        ).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        assert_eq!(
+            harness.manager.events().revision(),
+            before + u64::from(changed)
+        );
+        for (key, position) in keys.iter().zip(expected) {
+            assert_eq!(
+                harness
+                    .store
+                    .pin_positions(std::slice::from_ref(key))
+                    .await
+                    .unwrap()
+                    .get(key),
+                Some(&position)
+            );
+            let (status, detail) = get_json(
+                &harness,
+                &harness.local_session_uri(&format!("/api/sessions/{}", key.session_id)),
+            )
+            .await;
+            assert_eq!(status, axum::http::StatusCode::OK);
+            assert_eq!(detail["pin_position"], position);
+        }
+    }
+    let (status, list) = get_json(&harness, "/api/sessions?sort=created").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        list["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["unpinned", "c", "b", "a"].map(|id| harness.local_session_ref(id)),
+        "the quick switcher's served sort must ignore manual pin positions"
+    );
+    let before = harness.manager.events().revision();
+    let positions = harness.store.pin_positions(&keys).await.unwrap();
+    for (moved, body, expected_status) in [
+        (
+            "a",
+            serde_json::json!({"neighbor": harness.local_session_ref("unpinned"), "placement": "before"}),
+            axum::http::StatusCode::CONFLICT,
+        ),
+        (
+            "unpinned",
+            serde_json::json!({"neighbor": harness.local_session_ref("a"), "placement": "after"}),
+            axum::http::StatusCode::CONFLICT,
+        ),
+        (
+            "a",
+            serde_json::json!({"neighbor": harness.local_session_ref("absent"), "placement": "before"}),
+            axum::http::StatusCode::NOT_FOUND,
+        ),
+        (
+            "absent",
+            serde_json::json!({"neighbor": harness.local_session_ref("a"), "placement": "before"}),
+            axum::http::StatusCode::NOT_FOUND,
+        ),
+        (
+            "a",
+            serde_json::json!({"neighbor": harness.local_session_ref("b"), "placement": "sideways"}),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            "a",
+            serde_json::json!({"neighbor": harness.local_session_ref("b")}),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            "a",
+            serde_json::json!({"placement": "before"}),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+    ] {
+        let (status, reply) = put_json(
+            &harness,
+            &harness.local_session_uri(&format!("/api/sessions/{moved}/pin-order")),
+            body,
+        )
+        .await;
+        assert_eq!(status, expected_status, "{reply}");
+        assert_eq!(harness.manager.events().revision(), before);
+        assert_eq!(harness.store.pin_positions(&keys).await.unwrap(), positions);
+    }
+}
+
 /// Pinning an unreachable row is a local metadata edit, not a supervisor
 /// operation. Prove the host is down before the PUT so a reachable fixture
 /// cannot accidentally make a routed implementation pass.
@@ -1568,7 +1706,10 @@ async fn pin_route_succeeds_on_an_unreachable_host() {
             "user@breaks",
             rest_harness::HostScript {
                 identity: Some("pin-identity".into()),
-                sessions: vec![rest_harness::session("owned-pin", 100)],
+                sessions: vec![
+                    rest_harness::session("owned-pin", 100),
+                    rest_harness::session("neighbor-pin", 200),
+                ],
                 ..rest_harness::HostScript::default()
             },
         )
@@ -1593,6 +1734,28 @@ async fn pin_route_succeeds_on_an_unreachable_host() {
     .await;
     assert_eq!(body["stale"], true);
     assert_eq!(body["pinned"], true);
+    let (status, _) = put_json(
+        &harness,
+        &harness.session_uri(host, "/api/sessions/neighbor-pin/pin"),
+        serde_json::json!({"pinned": true}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let before = harness.manager.events().revision();
+    let (status, body) = put_json(
+        &harness,
+        &harness.session_uri(host, "/api/sessions/neighbor-pin/pin-order"),
+        serde_json::json!({"neighbor": harness.session_ref(host, "owned-pin"), "placement": "before"}),
+    ).await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    assert_eq!(harness.manager.events().revision(), before + 1);
+    let (_, detail) = get_json(
+        &harness,
+        &harness.session_uri(host, "/api/sessions/neighbor-pin"),
+    )
+    .await;
+    assert_eq!(detail["stale"], true);
+    assert_eq!(detail["pin_position"], 0);
 }
 
 /// A syntactically valid reference to an unknown session on a known entry is
