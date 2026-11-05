@@ -21287,7 +21287,10 @@
   test edits only the neighbouring row. Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/printed-link-mismatch.md`.
+- Execution: `complete`; plain-URL hovers retain their search window and its boundary rows, so neighboring edits
+  invalidate the old address. Both browser engines reproduced the old-prefix opening and pass the regression after the
+  fix. jj change `tqqovlxmoqsyvqzxumtqlmswmowpmuql`, bookmark `plan/printed-link-mismatch/01-plain-url-evidence-rows`;
+  draft PR [#3018](https://github.com/scode/farhelm/pull/3018/changes).
 
 ## plain-url-click-can-bind-before-text-paints.md
 

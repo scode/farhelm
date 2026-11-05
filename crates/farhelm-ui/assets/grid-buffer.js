@@ -354,8 +354,8 @@
 
   /**
    * Every link touching line `abs`, in xterm.js's precedence order (OSC 8
-   * links first, then URLs printed as text): `{kind, uri, ranges}` (an OSC 8
-   * link also has its `id` and its hover's `evidence` lines) where
+   * links first, then URLs printed as text): `{kind, uri, ranges, evidence}`
+   * (an OSC 8 link also has its `id`) where
    * `kind` is "osc" (a program's hyperlink) or "text", and `ranges` are the
    * `[start, end)` cell ranges it covers, one per line, for the hover
    * underline. An OSC 8 link is one contiguous stretch of runs of the same
@@ -363,7 +363,9 @@
    * stretch), including a generated-id continuation chain. A chain's tag
    * replaces later pieces' tags, so a later piece continued by cursor
    * movement onto an unwrapped row no longer joins that row by its own id.
-   * A text URL's ranges may cross soft wraps.
+   * A text URL's ranges may cross soft wraps. Its evidence includes the
+   * search window and its boundaries: an edit outside the matched cells
+   * can extend or remove the address while leaving those cells unchanged.
    */
   function rowLinks(source, abs) {
     const line = source.line(abs);
@@ -392,6 +394,8 @@
     }));
     const window = urlWindow(source, abs);
     const { text, chars } = mappedText(source, window.first, window.last);
+    const evidence = [];
+    for (let at = window.first - 1; at <= window.last + 1; at++) evidence.push(at);
     URL_PATTERN.lastIndex = 0;
     for (let match; (match = URL_PATTERN.exec(text));) {
       const a = match.index;
@@ -401,7 +405,7 @@
       if (!hostPrefixed(match[0])) continue;
       // An OSC 8 hyperlink keeps the cells it covers.
       if (cells.some((c) => { const l = source.line(c.abs); return l && oscLinkAt(l.row, c.col); })) continue;
-      links.push({ kind: "text", uri: match[0], ranges: splitByLine(charsRange(chars, a, b), source) });
+      links.push({ kind: "text", uri: match[0], ranges: splitByLine(charsRange(chars, a, b), source), evidence });
     }
     return links;
   }
