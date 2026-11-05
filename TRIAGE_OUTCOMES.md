@@ -20983,7 +20983,9 @@
   findings from this Q1 group, each with enough of its assessment to act on later (this item: the Stop card, and the
   session menu's Stop text, should say a containerized Stop ends the whole container, tabs included). No code or spec
   change. Remove the feedback file and its index entry. The eight Q1 items share that one entry and one change.
-- Execution: planned in `plans/queue/podman-rigor-todo.md`.
+- Execution: moved to the shared Near term Podman rigor TODO entry in jj change `pzmssmxrxxtmxxxpyktutmkvktmyvtts`,
+  bookmark `plan/podman-rigor-todo/01-podman-rigor-todo`;
+  [draft PR #3017](https://github.com/scode/farhelm/pull/3017/changes).
 
 ## wrapper-guide-stop-promises-tab-preservation.md
 
@@ -20996,7 +20998,9 @@
   rigor TODO entry.
 - Completion criteria: the shared Podman rigor TODO entry lists this item (the wrapper guide's Stop sentence needs the
   container exception). No docs change now. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/podman-rigor-todo.md`.
+- Execution: moved to the shared Near term Podman rigor TODO entry in jj change `pzmssmxrxxtmxxxpyktutmkvktmyvtts`,
+  bookmark `plan/podman-rigor-todo/01-podman-rigor-todo`;
+  [draft PR #3017](https://github.com/scode/farhelm/pull/3017/changes).
 
 ## detached-container-client-hides-live-agent-and-tab-work.md
 
@@ -21011,7 +21015,9 @@
   rigor TODO entry.
 - Completion criteria: the shared Podman rigor TODO entry lists this item (turn off Podman's detach keys for the agent
   and tab connections). Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/podman-rigor-todo.md`.
+- Execution: moved to the shared Near term Podman rigor TODO entry in jj change `pzmssmxrxxtmxxxpyktutmkvktmyvtts`,
+  bookmark `plan/podman-rigor-todo/01-podman-rigor-todo`;
+  [draft PR #3017](https://github.com/scode/farhelm/pull/3017/changes).
 
 ## checkout-token-path-rereads-host-files.md
 
@@ -21026,7 +21032,9 @@
   rigor TODO entry.
 - Completion criteria: the shared Podman rigor TODO entry lists this item (refuse a token path inside the checkout and
   read the file without following links, regular files only). Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/podman-rigor-todo.md`.
+- Execution: moved to the shared Near term Podman rigor TODO entry in jj change `pzmssmxrxxtmxxxpyktutmkvktmyvtts`,
+  bookmark `plan/podman-rigor-todo/01-podman-rigor-todo`;
+  [draft PR #3017](https://github.com/scode/farhelm/pull/3017/changes).
 
 ## container-inherits-host-proxy-credentials.md
 
@@ -21041,7 +21049,9 @@
 - Completion criteria: the shared Podman rigor TODO entry lists this item (decide whether containers inherit host proxy
   settings; either way, make the spec's list of what the container receives and the code comment accurate). Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/podman-rigor-todo.md`.
+- Execution: moved to the shared Near term Podman rigor TODO entry in jj change `pzmssmxrxxtmxxxpyktutmkvktmyvtts`,
+  bookmark `plan/podman-rigor-todo/01-podman-rigor-todo`;
+  [draft PR #3017](https://github.com/scode/farhelm/pull/3017/changes).
 
 ## retained-container-startup-reaches-replacement-checkout.md
 
@@ -21055,7 +21065,9 @@
   rigor TODO entry.
 - Completion criteria: the shared Podman rigor TODO entry lists this item (decide whether the tab-path acceptance covers
   containerized tabs, and say so). Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/podman-rigor-todo.md`.
+- Execution: moved to the shared Near term Podman rigor TODO entry in jj change `pzmssmxrxxtmxxxpyktutmkvktmyvtts`,
+  bookmark `plan/podman-rigor-todo/01-podman-rigor-todo`;
+  [draft PR #3017](https://github.com/scode/farhelm/pull/3017/changes).
 
 ## pending-create-retry-deletes-initialized-container-files.md
 
@@ -21070,7 +21082,9 @@
   rigor TODO entry.
 - Completion criteria: the shared Podman rigor TODO entry lists this item (decide whether an existing container counts
   as launch evidence on a retried create, or accept the loss in the spec). Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/podman-rigor-todo.md`.
+- Execution: moved to the shared Near term Podman rigor TODO entry in jj change `pzmssmxrxxtmxxxpyktutmkvktmyvtts`,
+  bookmark `plan/podman-rigor-todo/01-podman-rigor-todo`;
+  [draft PR #3017](https://github.com/scode/farhelm/pull/3017/changes).
 
 ## checkpoint-image-inspection-restores-unowned-workload.md
 
@@ -21083,7 +21097,9 @@
   rigor TODO entry.
 - Completion criteria: the shared Podman rigor TODO entry lists this item (optionally refuse checkpoint images and a
   root supervisor). Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/podman-rigor-todo.md`.
+- Execution: moved to the shared Near term Podman rigor TODO entry in jj change `pzmssmxrxxtmxxxpyktutmkvktmyvtts`,
+  bookmark `plan/podman-rigor-todo/01-podman-rigor-todo`;
+  [draft PR #3017](https://github.com/scode/farhelm/pull/3017/changes).
 
 ## colliding-start-cleanup-ends-winning-terminal.md
 

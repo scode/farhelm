@@ -20,27 +20,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`container-policy-missing-from-approvals.md`](container-policy-missing-from-approvals.md) — An agent's approved
   template change can alter container isolation without showing that change in its approval card.
 
-- [`pending-create-retry-deletes-initialized-container-files.md`](pending-create-retry-deletes-initialized-container-files.md)
-  — After a crash and reboot during initial creation, a failed retry can remove a container that already holds the
-  agent's files.
-
-- [`container-stop-approval-omits-tab-work.md`](container-stop-approval-omits-tab-work.md) — An agent Stop approval
-  describes stopping the agent, although it can also terminate independent work in that container's terminal tabs.
-
-- [`checkout-token-path-rereads-host-files.md`](checkout-token-path-rereads-host-files.md) — If the configured token
-  path lies in the writable checkout, a later container tab can receive a readable host file selected through that path.
-
-- [`detached-container-client-hides-live-agent-and-tab-work.md`](detached-container-client-hides-live-agent-and-tab-work.md)
-  — Detaching the container client can leave the agent running while Farhelm treats it as gone; Delete can then stop it
-  without the live-agent warning, and automatic tab cleanup can stop inner tab work.
-
-- [`container-inherits-host-proxy-credentials.md`](container-inherits-host-proxy-credentials.md) — Container creation
-  can expose host proxy credentials to the contained workload without an explicit credential-sharing choice.
-
-- [`retained-container-startup-reaches-replacement-checkout.md`](retained-container-startup-reaches-replacement-checkout.md)
-  — Opening a new tab in a retained container can give its old startup state access to a replacement checkout at the
-  saved path.
-
 - [`normal-durability-restores-revoked-grants.md`](normal-durability-restores-revoked-grants.md) — A power loss can
   restore a host command grant or browser network/tunnel permission after Farhelm acknowledged its revocation.
 
@@ -61,13 +40,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`stored-wrapper-breaks-new-prompt-literalness.md`](stored-wrapper-breaks-new-prompt-literalness.md) — A previously
   stored wrapper can make a new initial prompt acquire shell meaning instead of remaining literal data.
-
-- [`checkpoint-image-inspection-restores-unowned-workload.md`](checkpoint-image-inspection-restores-unowned-workload.md)
-  — Choosing a compatible local checkpoint image can restore its old workload and host mounts during account inspection,
-  then report preparation failed without owning the restored container.
-
-- [`wrapper-guide-stop-promises-tab-preservation.md`](wrapper-guide-stop-promises-tab-preservation.md) — The wrapper
-  guide promises Stop leaves independent tabs running, but built-in container Stop terminates their work too.
 
 - [`gap-recovery-stale-input-modes-submit-pasted-command.md`](gap-recovery-stale-input-modes-submit-pasted-command.md) —
   If recovery loses the output that enabled bracketed paste in Bash, a later pasted newline can submit a command without
