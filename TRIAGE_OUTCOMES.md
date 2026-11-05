@@ -21468,4 +21468,7 @@
 - Decision: on the 2026-11-04 highest-bucket triage page (Q8) the user picked "Discard: only old templates", having said
   "I don't care about pre-change templates".
 - Completion criteria: remove the feedback file and its index entry. No code or spec change.
-- Execution: planned in `plans/queue/triage-misc-nov4.md`.
+- Execution: discarded in jj change `zlktotoplwonxtqvvrwmzysyvnmvpypp`, bookmark
+  `plan/triage-misc-nov4/04-discard-old-wrapper-finding`; removed the feedback file and index entry under the recorded
+  decision to leave old templates unchanged. No code or specification change. Draft PR
+  [#3039](https://github.com/scode/farhelm/pull/3039/changes).
