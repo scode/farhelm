@@ -12,10 +12,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
   same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.
 
-- [`emoji-continuation-drops-standalone-kirat-characters.md`](emoji-continuation-drops-standalone-kirat-characters.md) —
-  Standalone printable Kirat Rai characters disappear from stored terminal output and copied text. Priority remains
-  highest on the independently unresolved user-data boundary; no file corruption is claimed.
-
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
