@@ -20944,7 +20944,9 @@
   test flips a tab from running to unreadable between the two reads and expects refusal. Size gate: about 100 lines of
   diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over it, block and
   bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/delete-unreadable-terminals.md`.
+- Execution: implemented in change `qrukvuwpmtulpwkoomyvyvzruqtotxwv` on bookmark
+  `plan/delete-unreadable-terminals/01-guard-one-liveness-read`;
+  [draft PR #3024](https://github.com/scode/farhelm/pull/3024/changes).
 
 ## container-policy-missing-from-approvals.md
 

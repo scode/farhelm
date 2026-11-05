@@ -911,6 +911,9 @@ fault_hooks! {
     /// past Delete's deadline for ending them and show what the deadline
     /// does. `None` in production.
     delete_host_end_gate: SinkReservationGate,
+    /// Hold Delete between its uncertainty check and live-tab count, so a
+    /// test can make a running tab unreadable during the tmux round trip.
+    delete_tab_count_gate: SinkReservationGate,
     /// Called before a tab's close ends its host (`host_tabs`); an error
     /// stands for an end that could not be confirmed (a host that survives
     /// its signals, a process table that cannot be read), so a test can show
@@ -14747,7 +14750,17 @@ impl Supervisor {
             }
             None => 0,
         };
-        Ok(match tmux_tabs + hosts.live_tabs() {
+        if let Some(gate) = self.seams.faults.delete_tab_count_gate() {
+            gate().await;
+        }
+        let live_tabs = tmux_tabs + hosts.live_tabs();
+        // A running tab can become unreadable during the tmux round trip.
+        // Count first, then refuse uncertainty, so it cannot escape both
+        // the earlier check and this count without renewed consent.
+        if let Some(untold) = hosts.untold() {
+            return Ok((Some(untold), None));
+        }
+        Ok(match live_tabs {
             0 => (None, Some(hosts)),
             1 => (
                 Some("this session has 1 terminal tab open".to_string()),
