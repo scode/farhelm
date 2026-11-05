@@ -202,3 +202,19 @@ A finding matches when all of these hold:
 This covers that specific collision-and-interruption route, including loss of the winning terminal's work. It does not
 cover cleanup choosing another terminal without that random-name collision, deliberate replacement of private
 socket-directory contents, or a shutdown applied to the wrong target by another route.
+
+### A displaced input task resumes inside an in-progress handoff
+
+Added 2026-11-04; accepted by the maintainer.
+
+A finding matches when all of these hold:
+
+- Takeover, same-lease replacement or detach cancels the old attachment's input task without joining it.
+- A worker was already polling that task's send: it observed cancellation as pending and was stalled before handing the
+  old input to the terminal runtime.
+- Replacement input reaches that runtime first, and the stalled old send then resumes, so the old input follows the
+  replacement's typing. An old Enter can submit a command prefix the replacement had not chosen to submit.
+
+This covers that specific already-running-poll ordering gap. It does not cover newly received input being accepted after
+its attachment lost ownership, input routed to another terminal, or input interleaving within a whole paste by another
+mechanism.
