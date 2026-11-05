@@ -20967,7 +20967,9 @@
   wrapper-prefix rows, with a card test. Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/triage-misc-nov4.md`.
+- Execution: implemented in jj change `voltlmzostvlzmsmmtnronmxqmlkpqtt`, bookmark
+  `plan/triage-misc-nov4/01-template-card-container`; the template card shows the image, proxy port and token-file path,
+  or an explicit removal. Draft PR [#3035](https://github.com/scode/farhelm/pull/3035/changes).
 
 ## container-stop-approval-omits-tab-work.md
 
