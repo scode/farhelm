@@ -1284,7 +1284,8 @@ fn launch_rows(launch: &SessionLaunch, runs: Runs, rows: &mut Vec<CardRow>) {
     }
 }
 
-/// Every field a template sets, command text included.
+/// Expose every template choice the approval authorizes, including isolation.
+/// Omitted fields set nothing; explicit removals must remain visible as "none".
 fn template_rows(fields: &TemplateFields, host_name: Option<&str>, rows: &mut Vec<CardRow>) {
     if let Some(prompt) = &fields.prompt {
         rows.push(CardRow::Block("initial prompt", prompt.clone()));
@@ -1319,6 +1320,22 @@ fn template_rows(fields: &TemplateFields, host_name: Option<&str>, rows: &mut Ve
         match wrapper {
             Some(words) => rows.push(CardRow::Block("wrapper prefix", words.join(" "))),
             None => rows.push(CardRow::Note("wrapper prefix", "none")),
+        }
+    }
+    if let Some(container) = &fields.container {
+        match container {
+            Some(config) => {
+                rows.push(CardRow::Value("container image", config.image.clone()));
+                rows.push(CardRow::Value(
+                    "container proxy port",
+                    config.api_proxy_port.to_string(),
+                ));
+                rows.push(match &config.github_token_file {
+                    Some(path) => CardRow::Value("container GitHub token file", path.clone()),
+                    None => CardRow::Note("container GitHub token file", "none"),
+                });
+            }
+            None => rows.push(CardRow::Note("container", "none")),
         }
     }
     if let Some(command) = &fields.command {
@@ -1969,6 +1986,55 @@ mod tests {
             )),
             "{rows:?}"
         );
+    }
+
+    /// Template approval must expose isolation and its removal, since an agent's
+    /// write can change what a later launch runs with. The token path is data;
+    /// the card never reads or displays the credential it names.
+    #[test]
+    fn a_template_card_shows_container_choices_and_removal() {
+        let mut fields = TemplateFields {
+            container: Some(Some(farhelm_proto::ContainerConfig {
+                engine: farhelm_proto::ContainerEngine::Podman,
+                image: "localhost/agent:latest".into(),
+                api_proxy_port: 42000,
+                github_token_file: Some("~/.config/agent-token".into()),
+            })),
+            ..Default::default()
+        };
+        let card = |fields| {
+            action_rows(&ApprovalAction::TemplateWrite {
+                name: "isolated".into(),
+                replaces_existing: true,
+                fields,
+                host_name: None,
+            })
+        };
+        let rows = card(fields.clone());
+        for (label, value) in [
+            ("container image", "localhost/agent:latest"),
+            ("container proxy port", "42000"),
+            ("container GitHub token file", "~/.config/agent-token"),
+        ] {
+            assert!(
+                rows.contains(&CardRow::Value(label, value.into())),
+                "{rows:?}"
+            );
+        }
+        fields
+            .container
+            .as_mut()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .github_token_file = None;
+        assert!(
+            card(fields.clone()).contains(&CardRow::Note("container GitHub token file", "none"))
+        );
+        fields.container = Some(None);
+        assert!(card(fields.clone()).contains(&CardRow::Note("container", "none")));
+        fields.container = None;
+        assert!(!card(fields).contains(&CardRow::Note("container", "none")));
     }
 
     /// Spec: an agent launch's card names its permission mode in one line,

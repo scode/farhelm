@@ -12,9 +12,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
   same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.
 
-- [`container-policy-missing-from-approvals.md`](container-policy-missing-from-approvals.md) — An agent's approved
-  template change can alter container isolation without showing that change in its approval card.
-
 - [`stored-wrapper-breaks-new-prompt-literalness.md`](stored-wrapper-breaks-new-prompt-literalness.md) — A previously
   stored wrapper can make a new initial prompt acquire shell meaning instead of remaining literal data.
 
