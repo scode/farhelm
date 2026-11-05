@@ -2425,7 +2425,10 @@ whatever the agent renders is what you see. There is no composer, no message abs
   takeover detach, with reattach behaving exactly as any reconnect does. Flow control never drops terminal output:
   whatever bound it degrades to is the same replay floor above, never a silent gap. A new terminal's skipped screens are
   no exception, since the screen a viewer is sent is the program's current one and the scrollback arrives whole, and no
-  viewer can cause a new terminal's gap (above): those come only from the supervisor falling behind the program.
+  viewer can cause a new terminal's gap (above): those come only from the supervisor falling behind the program. One
+  exception, accepted 2026-11-04, is extreme cumulative applied resizes on a quiet terminal: they can exhaust its
+  recovery journal without triggering a save, so a later crash or an orderly stop that skips its save can lose terminal
+  history (SPEC_impl.md, "Across supervisor restarts"). This does not relax the slow-viewer or flow-control guarantees.
 - A terminal that loses its CONNECTION recovers by itself, without the session ever being closed and reopened by hand.
   That covers the connection dropping visibly and the connection dying silently — a sleeping laptop or a timed-out
   network path leaves a terminal that looks connected and carries nothing, which is checked for rather than left for the

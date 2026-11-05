@@ -2036,17 +2036,18 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   terminal is if it is clean there, else none, so that the host keeps its last accepted snapshot and the tail after it,
   which a recovery replays; an encode the deadline cuts short is finished and sent as an ordinary checkpoint, unless the
   runtime is stopped first, which cancels every encode it runs (the encoder gives up between rows, keeping nothing). A
-  host's **journal cap** is 32 MiB by default: checkpoints keep the tail below a quarter of it, which leaves about four
-  minutes of an agent's heaviest redraw traffic, and hours of a shell's, for a supervisor's absence before the oldest of
-  that output is trimmed into a **gap**. A gap never resets a healthy emulator: the runtime carries on after it, marks
-  the history trimmed for the viewer (for as long as that runtime runs: a snapshot cannot carry the mark), and, once any
-  replay is over, asks the program to redraw by resizing the terminal one row smaller and back, since Linux sends no
-  `SIGWINCH` for a resize to the size in force (checked on Linux 6.8; the BSD tty code macOS uses compares the same way,
-  read from its source, not tested). It asks the same after restoring a snapshot that left out the screens or was drawn
-  with another character width table. A redraw cannot bring back the scrollback in the gap, or a mode or other terminal
-  setting (title, palette, character set, scroll region, cursor style) the lost output set until the program sets it
-  again; nothing makes a program do that on `SIGWINCH`, and many set their modes only at startup, so the setting can
-  stay wrong until the program restarts. Unverified either way: no test covers what real programs resend on a resize.
+  host's **journal cap** is 32 MiB by default: output-only checkpoint thresholds are at most a quarter of it; resize
+  records consume that cap independently. This normally leaves about four minutes of an agent's heaviest redraw traffic,
+  and hours of a shell's, for a supervisor's absence before the oldest output is trimmed into a **gap**. A gap never
+  resets a healthy emulator: the runtime carries on after it, marks the history trimmed for the viewer (for as long as
+  that runtime runs: a snapshot cannot carry the mark), and, once any replay is over, asks the program to redraw by
+  resizing the terminal one row smaller and back, since Linux sends no `SIGWINCH` for a resize to the size in force
+  (checked on Linux 6.8; the BSD tty code macOS uses compares the same way, read from its source, not tested). It asks
+  the same after restoring a snapshot that left out the screens or was drawn with another character width table. A
+  redraw cannot bring back the scrollback in the gap, or a mode or other terminal setting (title, palette, character
+  set, scroll region, cursor style) the lost output set until the program sets it again; nothing makes a program do that
+  on `SIGWINCH`, and many set their modes only at startup, so the setting can stay wrong until the program restarts.
+  Unverified either way: no test covers what real programs resend on a resize.
 - **The terminal switch points** (`service/terminals.rs`'s `Terminal`, one variant per kind, matched exhaustively
   wherever behavior differs) answer for a session whose agent runs in a host from its runtime, never from tmux. Status
   reads the same three classes of evidence for both kinds: a running child is live, a processed exit record is an exit
@@ -2412,20 +2413,24 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   encodes whenever it ends, also when the process's tokio runtime drops its task (it does so before waiting for the
   blocking pool), so a stop that could not take the session map's lock in time still exits within one encode's look at
   its cancel. A host whose checkpoint was skipped, did not finish, never got a core, or could not be taken (a sequence
-  left open, a runtime still replaying) keeps its previous snapshot and all the output after it, which the next
-  supervisor replays: a slower recovery, the same terminal. The skip counts only processed output bytes, not resizes or
-  output journaled but not yet read. Its threshold is separate from the automatic checkpoint threshold and is clamped to
-  a quarter of the journal cap for a smaller-cap host. Each encode is of the whole terminal ("Recovery and checkpoints"
-  gives the measured cost). Closing the connection right after the checkpoint limits the output the stopping supervisor
-  counts as delivered without acting on it to what the host had already written to the connection, which the next
-  supervisor replays without side effects (the delivery ambiguity above); output after the close is unseen, and its
-  queries are answered. A crash or a kill leaves each host its latest checkpoint and the tail after it, the same way. A
-  starting supervisor reloads its sessions only once it holds its state directory and has opened, and checked, its
-  database, so a build that cannot read the database refuses before contacting any host. Host rows never go through
-  tmux's pane lookup, since their `pane` holds a socket name: reload scans the socket directory (discovery, above) and
-  matches each host row to a host by its tag (session and launch generation), else by the socket the row names (its
-  `pane`, or for a launch never confirmed, the launch record of its own generation, never an earlier one's). A host at
-  the row's `pane` whose tag names the same session's agent at an earlier generation is the row's own: only a
+  left open, a runtime still replaying) keeps its previous snapshot and the journal still retained after it, subject to
+  the host's cap, for the next supervisor to replay. The skip counts only processed output bytes, not resizes or output
+  journaled but not yet read. Decided 2026-11-04: extreme cumulative resizes on a quiet terminal can exhaust that
+  journal without making a checkpoint due, since each applied resize costs 64 bytes at the host but counts toward
+  neither checkpoint threshold. The default 32 MiB cap takes about 524,288 applied resizes to fill. If those records
+  evict output the live emulator still holds, a later crash or an orderly stop that skips its save can lose that
+  terminal history on recovery; this specific case is accepted. The skip threshold is separate from the automatic one
+  and is clamped to a quarter of the journal cap for a smaller-cap host. Each encode is of the whole terminal ("Recovery
+  and checkpoints" gives the measured cost). Closing the connection right after the checkpoint limits the output the
+  stopping supervisor counts as delivered without acting on it to what the host had already written to the connection,
+  which the next supervisor replays without side effects (the delivery ambiguity above); output after the close is
+  unseen, and its queries are answered. A crash or a kill leaves each host its latest checkpoint and the tail after it,
+  the same way. A starting supervisor reloads its sessions only once it holds its state directory and has opened, and
+  checked, its database, so a build that cannot read the database refuses before contacting any host. Host rows never go
+  through tmux's pane lookup, since their `pane` holds a socket name: reload scans the socket directory (discovery,
+  above) and matches each host row to a host by its tag (session and launch generation), else by the socket the row
+  names (its `pane`, or for a launch never confirmed, the launch record of its own generation, never an earlier one's).
+  A host at the row's `pane` whose tag names the same session's agent at an earlier generation is the row's own: only a
   confirmation writes `pane`, a Restart empties it, and one that failed definitively puts back the `pane` of the host
   that stays the session's terminal. A host found is adopted as recovered (its snapshot restored, the tail replayed
   under the replay policy) and taken as a found pane is: an unconfirmed launch found by its tag is confirmed with its
