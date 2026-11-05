@@ -4101,10 +4101,12 @@ refusal. No global geometry cache or new asset file is introduced.
   last commits. Host-identity creation temporarily uses FULL and commits before the identity can be reported to a helm;
   losing that source identity after a helm recorded it would leave an installation refusing to start. The connection
   returns to its previous sync setting before the identity is returned. If conversion left a rollback journal, this
-  critical write uses EXTRA instead, which also synchronizes journal removal. Schema migrations are atomic database-only
-  operations: a lost migration leaves a complete earlier schema to migrate again. Older builds' SQLite versions can
-  still open a WAL database. The `-wal` journal and `-shm` index live beside each database; copying only the `.db` file
-  while Farhelm is running can omit committed changes.
+  critical write uses EXTRA instead, which also synchronizes journal removal. On macOS, FULL and EXTRA make these writes
+  durable only up to the drive's cache: SQLite does not request `F_FULLFSYNC`. The maintainer accepted this limit,
+  judging the additional protection marginal and expecting most Macs running Farhelm to have batteries. Schema
+  migrations are atomic database-only operations: a lost migration leaves a complete earlier schema to migrate again.
+  Older builds' SQLite versions can still open a WAL database. The `-wal` journal and `-shm` index live beside each
+  database; copying only the `.db` file while Farhelm is running can omit committed changes.
 - Host identity: generated once at first run and committed with FULL sync before publication, stored in the db.
 - The interrupted-session surface is a centered neutral card in the empty terminal area: it explains that a host restart
   paused the session and keeps the terminal absent until the user intentionally chooses Restart or confirms Replace.
@@ -5110,11 +5112,13 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   whose revocation was acknowledged (EXTRA if the file still uses a rollback journal). It restores the connection's
   prior sync setting afterwards. Host command, YOLO and both browser-link permission setters, and patches that set or
   clear tunnel consent, use the same barrier so a power loss cannot restore acknowledged trust revocations. Unrelated
-  preference patches remain NORMAL. First-contact identity recording can remain NORMAL: a forgotten consumer copy is
-  learned again from the supervisor's durable source identity. Schema and local-row setup are atomic or repeatable
-  database-only work. The separate checkout-config CLI opener is unchanged and keeps FULL. Backup and restore must keep
-  each database with the `-wal` and `-shm` files its backup includes and remove current sidecars absent from that backup
-  before restoring, so unrelated journal data is not replayed.
+  preference patches remain NORMAL. On macOS, FULL and EXTRA make these writes durable only up to the drive's cache:
+  SQLite does not request `F_FULLFSYNC`. The maintainer accepted this limit, judging the additional protection marginal
+  and expecting most Macs running Farhelm to have batteries. First-contact identity recording can remain NORMAL: a
+  forgotten consumer copy is learned again from the supervisor's durable source identity. Schema and local-row setup are
+  atomic or repeatable database-only work. The separate checkout-config CLI opener is unchanged and keeps FULL. Backup
+  and restore must keep each database with the `-wal` and `-shm` files its backup includes and remove current sidecars
+  absent from that backup before restoring, so unrelated journal data is not replayed.
 - Helm schema 36 drops the `profiles` catalog and its remembered default with no conversion (SPEC.md, the launch-kinds
   upgrade paragraph). Cached session rows may still carry the removed `source_profile` member; serde ignores it, so they
   keep listing without a rewrite. Helm schema 37 converts every cached session for launch kinds (see "Launch kinds: one

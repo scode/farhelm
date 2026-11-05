@@ -21288,7 +21288,8 @@
   store's paragraph), says that on macOS they are durable only up to the drive's cache (no `F_FULLFSYNC`), and why: a
   borderline benefit, since most Macs running Farhelm have batteries. No code change. Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/durability-revocations.md`.
+- Execution: implemented in jj change `rtrxnpztnlmvluovonznsqryypqqnvkx`, bookmark
+  `plan/durability-revocations/03-mac-flush-caveat`; draft PR https://github.com/scode/farhelm/pull/3028/changes.
 
 ## plain-url-hover-omits-neighbor-dependencies.md
 
