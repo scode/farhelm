@@ -11,14 +11,14 @@
 //! Every host lives in the test's own `farhelm_teststate` state directory,
 //! whose drop ends every host in its `hosts` directory (`Shutdown`, never a
 //! signal), so a failing assertion leaves nothing running. The one signal a
-//! test sends goes to a host it started, found by the command line naming
-//! its own socket. Every socket name here is random, as a real host's is:
-//! the process search matches a socket's file name in any directory, so a
-//! fixed name could find the host of a run of this test in another checkout.
+//! test sends goes to the peer of a connection to its own exact socket,
+//! after that peer answers `Info`. The basename-only process search below
+//! supplies non-destructive liveness assertions, never signal authority:
+//! random names make a cross-run match unlikely, but cannot rule one out.
 
 mod terminal_host_support;
 
-use farhelm_supervisor::hosts::client::ClientDeadlines;
+use farhelm_supervisor::hosts::client::{ClientDeadlines, HostConnection};
 use farhelm_supervisor::hosts::process::socket_process;
 use farhelm_supervisor::hosts::{
     Gone, HostName, HostProcess, HostRegistry, HostRole, HostTag, ScanOptions, SocketRemoval,
@@ -59,7 +59,8 @@ async fn start_with_raw_tag(state: &Path, tag: &[u8]) -> PathBuf {
     socket
 }
 
-/// The process serving `socket`, found by its command line.
+/// A liveness candidate for assertions, never a process safe to signal.
+/// The search matches only a basename and can name another directory's host.
 fn host_process(socket: &Path) -> HostProcess {
     socket_process(socket)
         .expect("searching the process table")
@@ -128,8 +129,18 @@ async fn a_scan_of_real_hosts_finds_them_by_their_tags() {
         },
     )
     .await;
-    let killed_process = host_process(&killed.socket);
-    // SAFETY: the pid was found serving this test's own socket just above.
+    let mut connection = HostConnection::connect(&killed.socket)
+        .await
+        .expect("connect to the test's exact socket");
+    let killed_process = connection.peer().expect("the connection's pinned peer");
+    let info = connection
+        .info()
+        .await
+        .expect("the peer is still answering");
+    assert_eq!(info.host_pid, killed_process.pid);
+    drop(connection);
+    // SAFETY: this peer answered on the test's exact socket, rather than
+    // merely sharing its random basename with a host in another directory.
     assert_eq!(
         unsafe { libc::kill(killed_process.pid as libc::pid_t, libc::SIGKILL) },
         0
