@@ -5107,7 +5107,9 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   loss without weakening database consistency; process crashes preserve commits. Web-token rotation temporarily uses
   FULL for its token replacement and device-credential deletion transaction, so a power loss cannot restore credentials
   whose revocation was acknowledged (EXTRA if the file still uses a rollback journal). It restores the connection's
-  prior sync setting afterwards. First-contact identity recording can remain NORMAL: a forgotten consumer copy is
+  prior sync setting afterwards. Host command, YOLO and both browser-link permission setters, and patches that set or
+  clear tunnel consent, use the same barrier so a power loss cannot restore acknowledged trust revocations. Unrelated
+  preference patches remain NORMAL. First-contact identity recording can remain NORMAL: a forgotten consumer copy is
   learned again from the supervisor's durable source identity. Schema and local-row setup are atomic or repeatable
   database-only work. The separate checkout-config CLI opener is unchanged and keeps FULL. Backup and restore must keep
   each database with the `-wal` and `-shm` files its backup includes and remove current sidecars absent from that backup

@@ -20,9 +20,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`container-policy-missing-from-approvals.md`](container-policy-missing-from-approvals.md) — An agent's approved
   template change can alter container isolation without showing that change in its approval card.
 
-- [`normal-durability-restores-revoked-grants.md`](normal-durability-restores-revoked-grants.md) — A power loss can
-  restore a host command grant or browser network/tunnel permission after Farhelm acknowledged its revocation.
-
 - [`critical-mac-commits-omit-media-flush.md`](critical-mac-commits-omit-media-flush.md) — On Mac storage with volatile
   drive caches, a power failure can undo acknowledged credential changes or lose a protected source identity despite the
   stronger SQL durability setting.
