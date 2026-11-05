@@ -65,3 +65,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`unlikely-races-nov4`](reports/unlikely-races-nov4.report.md) landed 2026-11-05 in #3020, #3022, #3026, #3030, #3033: terminals: fix four very unlikely races where straightforward, accept the rest in FILTER.md
 - [`durability-revocations`](reports/durability-revocations.report.md) landed 2026-11-05 in #3023, #3025, #3028, #3031, #3034: power loss: write host permission revocations durably, key retries by host entry, and spec the accepted losses
 - [`delete-unreadable-terminals`](reports/delete-unreadable-terminals.report.md) landed 2026-11-05 in #3024, #3040, #3032: Delete: keep warning about and reaping work after a terminal stops responding
+- [`triage-misc-nov4`](reports/triage-misc-nov4.report.md) landed 2026-11-05 in #3035, #3036, #3037, #3039: template card shows the container, escape host text in helm logs, paste-after-gap clause, one discard

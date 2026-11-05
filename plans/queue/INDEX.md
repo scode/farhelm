@@ -3,7 +3,6 @@
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
 - [complete] `terminal-text-drops.md` — new terminals: state the invisible-formatting drop, print Kirat Rai vowel signs again
-- [landing bf1288] `triage-misc-nov4.md` — template card shows the container, escape host text in helm logs, paste-after-gap clause, one discard
 - [in-flight 21354e] `pinned-session-order.md` — Pinned sessions keep one shared manual order: new pins go to the bottom, and the user rearranges them by dragging or with Move up / Move down in the row menu
 - [pending] `bulk-session-actions.md` — Shift+click and Cmd/Ctrl+click select several sessions; a bar offers Stop, Delete, Pin/Unpin and Mark read/unread, with one structured confirmation for a bulk Delete
 - [complete] `host-attention-list.md` — A list above the sessions shows every host with a problem, an update, or setup/update in progress, with its action; it replaces the update banner and card
