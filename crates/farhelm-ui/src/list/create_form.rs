@@ -101,6 +101,38 @@ impl LaunchAttempt {
     }
 }
 
+/// Preparation belongs to one form and one host, through both the vendor
+/// request and SSH recovery. It grants no launch authority: fresh checkouts
+/// still need a reviewed preview and a second press after the host connects.
+#[derive(Clone, PartialEq)]
+struct HostResumePreparation {
+    host: HostId,
+    /// Display-escaped and phase-free, captured before suspension changes the row.
+    name: String,
+    review_checkout: bool,
+}
+
+/// Keep preparation distinct from session creation in both the normal form
+/// and the floating quick-launch surface. The captured name has no phase suffix.
+#[component]
+fn HostResumeProgress(preparation: HostResumePreparation) -> Element {
+    rsx! {
+        div { class: "host-resume-progress", role: "status",
+            span { class: "delete-spinner", aria_hidden: "true" }
+            span {
+                "Resuming "
+                bdi { "{preparation.name}" }
+                ", then connecting… "
+                if preparation.review_checkout {
+                    "you’ll review the checkout and launch again"
+                } else {
+                    "the session starts when it’s ready"
+                }
+            }
+        }
+    }
+}
+
 /// Shared by visible invalidation and both submission checks so an explicit
 /// destination correction can retire only this refusal, not an unrelated error.
 const REMEMBERED_DESTINATION_CHANGED: &str = "The remembered folder belongs to a different installation; choose the host or folder again before launching";
@@ -210,6 +242,47 @@ impl CreateTarget {
     pub(crate) fn new(host: HostId, fingerprint: String) -> CreateTarget {
         CreateTarget { host, fingerprint }
     }
+}
+
+/// One pending display snapshot, not a claim that this connection is usable.
+/// A successful Resume can finish before the form's independent host reader
+/// catches up. Its receipt suppresses only that snapshot's obsolete warning;
+/// any token, installation, selection, or settled-phase change retires it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResumeDisplayHandoff {
+    target: CreateTarget,
+    connection: u64,
+}
+
+/// Reduce the currently displayed target to the facts a Resume handoff needs.
+/// Settled failures, Suspended, Connected and removed hosts are ineligible, so
+/// a receipt cannot conceal their current state even if their token is unchanged.
+fn resume_display_observation(
+    hosts: &[HostOption],
+    selected: Option<HostId>,
+) -> Option<ResumeDisplayHandoff> {
+    let host = hosts.iter().find(|host| Some(host.id) == selected)?;
+    host.connection_pending.then(|| ResumeDisplayHandoff {
+        target: CreateTarget::new(host.id, host.incarnation.clone()),
+        connection: host.connection,
+    })
+}
+
+/// A successful helper may bridge only its unchanged target's lagging display.
+/// The returned connection proves preparation finished; it never replaces the
+/// shared snapshot used for submit admission or checkout-preview authority.
+fn completed_resume_display_handoff(
+    target: Option<&CreateTarget>,
+    displayed: Option<&ResumeDisplayHandoff>,
+    fresh: &[HostOption],
+) -> Option<ResumeDisplayHandoff> {
+    let target = target?;
+    let displayed = displayed.filter(|displayed| &displayed.target == target)?;
+    let connected = fresh
+        .iter()
+        .find(|host| host.id == target.host && host.phase.is_none())?;
+    (CreateTarget::new(connected.id, connected.incarnation.clone()) == *target)
+        .then(|| displayed.clone())
 }
 
 /// A recent folder choice carries the installation that offered it. A retained mouse
@@ -2873,6 +2946,11 @@ pub(super) fn CreateSessionForm(
     // Only this launch API call owns the snapshot. Launcher preparation and
     // another page operation may be busy too, but neither is this request's wait.
     let mut pending_launch = use_signal(|| None::<PendingLaunch>);
+    // Set only around this form's explicit Resume and reconnect wait. Other
+    // viewers' shared Resuming phase must not make a target launchable here.
+    // Form unmount cancels the future and retires this signal with its owner.
+    let mut resuming_host = use_signal(|| None::<HostResumePreparation>);
+    let mut resume_display_handoff = use_signal(|| None::<ResumeDisplayHandoff>);
     // A YOLO launch the helm refused because its host asks before YOLO launches, and the
     // user's confirmation of one (see `yolo_confirm`). Both are tied to the intent key the
     // refused request carried, not to "the next submit": the key is bound to the whole
@@ -3052,6 +3130,22 @@ pub(super) fn CreateSessionForm(
     let mut live_destination = use_signal(|| None::<CreateTarget>);
     if *live_destination.peek() != destination_now {
         live_destination.set(destination_now.clone());
+        resume_display_handoff.set(None);
+    }
+    // Keep only live target/token facts for the async completion to inspect.
+    // Synchronous publication follows live_destination's existing render fence;
+    // an effect would leave one more stale observation at the handoff boundary.
+    let displayed_resume = resume_display_observation(&hosts, selected);
+    let mut live_resume_display = use_signal(|| None::<ResumeDisplayHandoff>);
+    if *live_resume_display.peek() != displayed_resume {
+        live_resume_display.set(displayed_resume.clone());
+    }
+    if resume_display_handoff
+        .peek()
+        .as_ref()
+        .is_some_and(|receipt| Some(receipt) != displayed_resume.as_ref())
+    {
+        resume_display_handoff.set(None);
     }
     let inherited_destination = initial_cwd.as_ref().and(destination_now.clone());
     // An opening that brings a folder (the selected session's on this install,
@@ -3734,12 +3828,22 @@ pub(super) fn CreateSessionForm(
     // when the helm already knows that destination cannot accept it.
     let selected_host_suspended =
         selected.is_some_and(|id| hosts.iter().any(|host| host.id == id && host.suspended));
+    let own_resume_host = resuming_host
+        .read()
+        .as_ref()
+        .map(|preparation| preparation.host);
+    // This is presentation only. In particular, a completed resume receipt
+    // never makes Launch or its automatic-submit readiness available sooner.
+    let hide_lagging_host_note = resume_display_handoff
+        .read()
+        .as_ref()
+        .is_some_and(|receipt| Some(receipt) == displayed_resume.as_ref());
     let selected_host_available = restart_host_confirmed
         && selected.is_some_and(|id| {
             hosts
                 .iter()
                 .find(|host| host.id == id)
-                .is_some_and(|host| host.phase.is_none() || host.suspended)
+                .is_some_and(|host| host.available_for_launch(own_resume_host))
         });
     // A stored structured snapshot is provenance, rather than a promise that
     // a later release still supports every combination it named. Keep its
@@ -4844,7 +4948,9 @@ pub(super) fn CreateSessionForm(
                  one selected now"
             }
         }
-        if selected.is_some() && !selected_host_available {
+        if let Some(preparation) = resuming_host().filter(|preparation| Some(preparation.host) == selected) {
+            HostResumeProgress { preparation }
+        } else if selected.is_some() && !selected_host_available && !hide_lagging_host_note {
             div { class: "create-session-host-note",
                 "The selected host is unavailable; choose a connected host before launching"
             }
@@ -5130,7 +5236,7 @@ pub(super) fn CreateSessionForm(
                 hosts
                     .iter()
                     .find(|host| host.id == id)
-                    .is_some_and(|host| host.phase.is_none() || host.suspended)
+                    .is_some_and(|host| host.available_for_launch(None))
             }) {
                 drop(op_guard);
                 return;
@@ -5144,10 +5250,35 @@ pub(super) fn CreateSessionForm(
             {
                 let host = selected_now.expect("the suspended host was found");
                 let base = base.clone();
+                resume_display_handoff.set(None);
+                resuming_host.set(Some(HostResumePreparation {
+                    host,
+                    name: hosts
+                        .iter()
+                        .find(|row| row.id == host)
+                        .map(HostOption::display_name)
+                        .unwrap_or_else(|| "host".into()),
+                    review_checkout: true,
+                }));
+                launch_attempted.set(LaunchAttempt::None);
+                error.set(None);
                 spawn(async move {
-                    error.set(match api::resume_host_connected(&base, host).await {
+                    let result = api::resume_host_connected(&base, host).await;
+                    let handoff = result.as_ref().ok().and_then(|fresh| {
+                        completed_resume_display_handoff(
+                            target_now.as_ref(),
+                            live_resume_display.peek().as_ref(),
+                            &super::shared::host_options(fresh),
+                        )
+                    });
+                    resume_display_handoff.set(handoff);
+                    resuming_host.set(None);
+                    error.set(match result {
                         Ok(_) => Some("The host resumed. Review the refreshed checkout preview, then launch again".into()),
-                        Err(reason) => Some(reason),
+                        Err(reason) => {
+                            launch_attempted.set(LaunchAttempt::Refused);
+                            Some(format!("Resuming the host failed: {reason}"))
+                        },
                     });
                     drop(op_guard);
                 });
@@ -5597,22 +5728,39 @@ pub(super) fn CreateSessionForm(
                     // Both failures below happen before any create is sent, so
                     // the launch is Refused, never Unknown: whatever the
                     // resume did, no session can have started from it.
-                    let fresh = match api::resume_host_connected(&base, binding.host).await {
+                    resume_display_handoff.set(None);
+                    resuming_host.set(Some(HostResumePreparation {
+                        host: binding.host,
+                        name: yolo_host_name.clone(),
+                        review_checkout: false,
+                    }));
+                    let result = api::resume_host_connected(&base, binding.host).await;
+                    let fresh = match result {
                         Ok(hosts) => super::shared::host_options(&hosts),
                         Err(reason) => {
+                            resume_display_handoff.set(None);
+                            resuming_host.set(None);
                             launch_attempted.set(LaunchAttempt::Refused);
-                            error.set(Some(reason));
+                            error.set(Some(format!("Resuming the host failed: {reason}")));
                             drop(op_guard);
                             return;
                         }
                     };
                     let current = fresh.iter().find(|host| host.id == binding.host);
                     if current.map(|host| &host.incarnation) != Some(&binding.incarnation) {
+                        resume_display_handoff.set(None);
+                        resuming_host.set(None);
                         launch_attempted.set(LaunchAttempt::Refused);
                         error.set(Some("The host installation changed while resuming; review the target and launch again".into()));
                         drop(op_guard);
                         return;
                     }
+                    resume_display_handoff.set(completed_resume_display_handoff(
+                        target_now.as_ref(),
+                        live_resume_display.peek().as_ref(),
+                        &fresh,
+                    ));
+                    resuming_host.set(None);
                     let connection = connection_claim(&fresh, binding.host);
                     let identity = current.map(|host| host.identity.clone());
                     (fresh, connection, identity)
@@ -6218,7 +6366,11 @@ pub(super) fn CreateSessionForm(
                 }
             },
             if quick_launch_hidden() {
-                if let Some(pending) = pending_launch() {
+                if let Some(preparation) = resuming_host() {
+                    div { class: "launch-progress-pill", "data-modal-exempt": "",
+                        HostResumeProgress { preparation }
+                    }
+                } else if let Some(pending) = pending_launch() {
                     div { class: "launch-progress-pill", "data-modal-exempt": "",
                         LaunchProgress { pending }
                     }
@@ -9013,6 +9165,106 @@ mod tests {
                     checkout: None,
                 })
                 .expect("still selectable")
+        );
+    }
+
+    /// A successful Resume may finish before the form's host reader, even
+    /// when a pending fixture already carries the returned token. Suppress
+    /// only that same pending snapshot; a later token or settled state ends
+    /// the handoff, without making the stale target available to submit.
+    #[farhelm_testtrace::test]
+    fn resumed_host_display_handoff_is_bound_to_one_pending_snapshot() {
+        let mut connected = option(1, "sandbox", false);
+        connected.connection = 9;
+        let target = CreateTarget::new(1, connected.incarnation.clone());
+        for token in [7, 9] {
+            let mut pending = connected.clone();
+            pending.connection = token;
+            pending.phase = Some("Resuming…".into());
+            pending.connection_pending = true;
+            assert!(!pending.available_for_launch(None));
+            let observation = resume_display_observation(std::slice::from_ref(&pending), Some(1));
+            let receipt = completed_resume_display_handoff(
+                Some(&target),
+                observation.as_ref(),
+                std::slice::from_ref(&connected),
+            )
+            .expect("the same installation completed resume");
+            assert_eq!(Some(&receipt), observation.as_ref());
+            pending.phase = Some("Connecting".into());
+            assert_eq!(
+                Some(receipt.clone()),
+                resume_display_observation(std::slice::from_ref(&pending), Some(1))
+            );
+            assert!(!pending.available_for_launch(None));
+            pending.connection = 10;
+            assert_ne!(
+                Some(receipt.clone()),
+                resume_display_observation(std::slice::from_ref(&pending), Some(1))
+            );
+            for phase in [
+                None,
+                Some("Unreachable, retrying"),
+                Some("Suspended"),
+                Some("Retired"),
+            ] {
+                pending.phase = phase.map(str::to_string);
+                pending.connection_pending = false;
+                assert_eq!(
+                    resume_display_observation(std::slice::from_ref(&pending), Some(1)),
+                    None
+                );
+            }
+        }
+    }
+
+    /// A target change or missing row retires display evidence rather than
+    /// carrying one installation's successful Resume to its successor. An
+    /// unsuccessful helper result must never manufacture a handoff receipt.
+    #[farhelm_testtrace::test]
+    fn resume_display_handoff_requires_success_on_the_unchanged_target() {
+        let connected = option(1, "sandbox", false);
+        let target = CreateTarget::new(1, connected.incarnation.clone());
+        let mut pending = connected.clone();
+        pending.phase = Some("Connecting".into());
+        pending.connection_pending = true;
+        let observation =
+            resume_display_observation(std::slice::from_ref(&pending), Some(1)).unwrap();
+        assert!(
+            completed_resume_display_handoff(
+                Some(&target),
+                Some(&observation),
+                std::slice::from_ref(&pending)
+            )
+            .is_none()
+        );
+        assert!(
+            completed_resume_display_handoff(Some(&target), None, std::slice::from_ref(&connected))
+                .is_none()
+        );
+        assert_eq!(resume_display_observation(&[], Some(1)), None);
+        assert_eq!(
+            resume_display_observation(std::slice::from_ref(&pending), Some(2)),
+            None
+        );
+        pending.incarnation = "successor-installation".into();
+        let successor = resume_display_observation(std::slice::from_ref(&pending), Some(1));
+        assert_ne!(Some(&observation), successor.as_ref());
+        assert!(
+            completed_resume_display_handoff(
+                Some(&target),
+                successor.as_ref(),
+                std::slice::from_ref(&connected)
+            )
+            .is_none()
+        );
+        let replaced = HostOption {
+            incarnation: pending.incarnation.clone(),
+            ..connected
+        };
+        assert!(
+            completed_resume_display_handoff(Some(&target), Some(&observation), &[replaced])
+                .is_none()
         );
     }
 

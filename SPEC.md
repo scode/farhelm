@@ -273,15 +273,28 @@ the sandbox runs again; it never resumes a sandbox on its own. A sandbox Tensorl
 unreachable with the advice to delete it. When Tensorlake cannot answer at all (no key, an outage), Farhelm dials anyway
 rather than cutting off a sandbox that may be running.
 
-The hosts panel offers **Suspend** for Tensorlake hosts in every non-suspended state, including when the supervisor is
-unreachable, and **Resume** in both the menu and the suspended row. Suspend asks first when an agent on that host is
-working, its status is unknown or stale, or activity cannot be checked completely. Immediate Suspend requires a
-connected host after the activity read and a complete listing with conclusive non-working statuses. An offline or
-unknown host asks even when its cached listing is empty. Suspension preserves running processes and sessions. A session
-on a suspended host says **&lt;host&gt; is suspended; this session continues when it resumes** and offers **Resume
-host**. Launching on a suspended host resumes it first and waits for a fresh connection. For a fresh GitHub checkout,
-Resume refreshes the checkout preview; the user reviews it and launches again, since the preview from the old connection
-cannot authorize work on the new one. Farhelm does not suspend automatically.
+The hosts panel offers **Suspend** for Tensorlake hosts unless they are suspended, suspending or resuming, including
+when the supervisor is unreachable. **Resume** appears in both the menu and the suspended row. Suspend asks first when
+an agent on that host is working, its status is unknown or stale, or activity cannot be checked completely. Immediate
+Suspend requires a connected host after the activity read and a complete listing with conclusive non-working statuses.
+An offline or unknown host asks even when its cached listing is empty. Suspension preserves running processes and
+sessions. A session on a suspended host says **&lt;host&gt; is suspended; this session continues when it resumes** and
+offers **Resume host**. Launching on a suspended host resumes it first and waits for a fresh connection. For a fresh
+GitHub checkout, Resume refreshes the checkout preview; the user reviews it and launches again, since the preview from
+the old connection cannot authorize work on the new one. Farhelm does not suspend automatically.
+
+An explicit Suspend shows **Suspending…**, with a spinner and how long ago Tensorlake was asked, until Tensorlake
+confirms suspension. Only then does the host show **Suspended**, with Farhelm's own completion time. A failed or
+timed-out request shows its error and reconnects rather than claiming the sandbox is suspended. Resume similarly shows
+**Resuming…** during the Tensorlake call, then **Connecting…** while a fresh connection is established. Neither
+transition offers a competing lifecycle action or host setup/update. Repeating Resume on an already-running, connected
+sandbox preserves its live sessions' connections.
+
+The session launcher shows its own **Resuming** preparation through both the Tensorlake call and reconnection, including
+quick launch. On the existing-directory path it says the session starts when the host is ready; on the fresh-checkout
+path it says to review the checkout and launch again. A failed preparation says the session was not launched, without
+the uncertain-outcome promise reserved for a create that may have been sent. A host another surface is suspending or
+resuming remains unavailable to this launcher.
 
 Tensorlake supervisor connections opt into a two-minute input-silence limit when the remote helper supports it. The helm
 sends a lightweight heartbeat every 30 seconds independently of session refreshes or storage work. If the helm vanishes
@@ -2082,10 +2095,10 @@ Problem rows offer **Details**: Unreachable (worded **Unreachable, retrying**), 
 Duplicate, Retired, Unrecognized, a protocol skew without an available Update or with the host's higher protocol, a
 Tensorlake resume or tunnel failure, or an unacknowledged setup or Update warning. That last case reads **Setup or
 update needs attention**. Without another warning, tunnel failure or live work, Connecting, a connected current host, a
-usable connected host running a newer build, and an ordinarily suspended Tensorlake host do not need a row. A host
-leaves when its condition clears. **Details**, or choosing a row outside its action button, opens Hosts with that host's
-row in view and its menu button focused, without changing the session filter. This uses the existing acknowledgement of
-warnings when Hosts opens; Hosts never opens by itself.
+usable connected host running a newer build, and a Tensorlake host ordinarily suspended, suspending or resuming do not
+need a row. A host leaves when its condition clears. **Details**, or choosing a row outside its action button, opens
+Hosts with that host's row in view and its menu button focused, without changing the session filter. This uses the
+existing acknowledgement of warnings when Hosts opens; Hosts never opens by itself.
 
 Update rows use the rail's available-update test and offer **Update** for that host. Required updates say that sessions
 on the host stay unreachable until it is updated. The header reads **N hosts need attention** and offers **Update all**

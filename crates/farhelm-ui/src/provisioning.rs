@@ -3796,7 +3796,12 @@ pub(crate) fn ProvisioningPanel(
     // A host running a newer farhelm than the helm is never offered Update:
     // it would install the helm's older build (`hosts::runs_newer_version`).
     let menu_too_new = crate::hosts::runs_newer_version(&host.state);
-    let menu_suspended = matches!(host.state, crate::HostPhase::Suspended { .. });
+    // A lifecycle hold may remain published until the next connection probe.
+    // Neither setup nor Update may treat that gap as a usable sandbox.
+    let menu_suspended = matches!(
+        host.state,
+        crate::HostPhase::Suspended { .. } | crate::HostPhase::TensorlakeChanging { .. }
+    );
     use_effect(use_reactive(
         (
             &local_setup,

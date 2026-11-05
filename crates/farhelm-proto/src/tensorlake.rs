@@ -18,6 +18,16 @@ pub mod recipes;
 
 use serde::{Deserialize, Serialize};
 
+/// The explicit lifecycle operation Farhelm is still handling under a hold.
+/// This is a display direction, not the vendor's sandbox status: a suspended
+/// sandbox stays suspended until Farhelm asks to resume it.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LifecycleDirection {
+    Suspending,
+    Resuming,
+}
+
 /// The non-secret snapshot returned after loading or saving the settings.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Settings {

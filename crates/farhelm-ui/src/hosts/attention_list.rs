@@ -154,7 +154,11 @@ fn problem_words(host: &Host, update: Option<bool>, unseen: bool) -> Option<Stri
         HostPhase::Suspended { resume_failed, .. } => {
             resume_failed.as_ref().map(|_| "Resume failed")
         }
-        HostPhase::Connecting { .. } | HostPhase::Connected { .. } => None,
+        // An explicit lifecycle request is routine work. Unseen setup warnings
+        // still qualify below; live tunnel failures retain their connected-host gate.
+        HostPhase::TensorlakeChanging { .. }
+        | HostPhase::Connecting { .. }
+        | HostPhase::Connected { .. } => None,
     };
     let mut words: Vec<_> = phase.into_iter().collect();
     if crate::tensorlake::tunnels::failed(host) {
@@ -448,6 +452,45 @@ mod tests {
         assert_eq!(rows[1].words, "Too new; update the helm");
         assert_eq!(rows.last().unwrap().words, "Resume failed");
         assert!(rows.iter().all(|row| row.kind == AttentionKind::Problem));
+    }
+
+    /// Routine lifecycle work cannot hide a durable unseen setup warning.
+    /// Stale forwarding health is ignored while the connection is held: its
+    /// stopped forwards are not evidence of a current connected-host failure.
+    #[test]
+    fn tensorlake_transitions_preserve_independent_attention() {
+        use farhelm_proto::tensorlake::LifecycleDirection;
+        for direction in [LifecycleDirection::Suspending, LifecycleDirection::Resuming] {
+            let mut host = host(
+                1,
+                HostPhase::TensorlakeChanging {
+                    direction,
+                    requested_at: 1,
+                },
+            );
+            assert_eq!(problem_words(&host, None, false), None);
+            assert_eq!(
+                problem_words(&host, None, true).as_deref(),
+                Some("Setup or update needs attention")
+            );
+            host.kind = HostKind::Tensorlake;
+            host.tensorlake = Some(TensorlakeHost {
+                sandbox: "sandbox".into(),
+                recipe: "recipe".into(),
+                size: None,
+                tunnels: Some(TunnelView {
+                    state: TunnelState::Failed {
+                        reason: "refused".into(),
+                    },
+                    tunnels: Vec::new(),
+                }),
+            });
+            assert_eq!(problem_words(&host, None, false), None);
+            assert_eq!(
+                problem_words(&host, None, true).as_deref(),
+                Some("Setup or update needs attention")
+            );
+        }
     }
 
     /// A live operation wins even over a refusal or unseen failure. Grouping is

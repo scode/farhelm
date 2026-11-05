@@ -221,12 +221,22 @@ pub(crate) enum HostStateView {
     /// this one's destination, then presses Retry.
     #[serde(rename = "duplicate")]
     Duplicate { twin: HostId, identity: String },
+    /// Farhelm is handling an explicit lifecycle request under a hold. The
+    /// direction records intent, not a confirmed suspension. The unix-ms
+    /// request time is display metadata; reconnection after Resume uses the
+    /// ordinary Connecting phase.
+    #[serde(rename = "tensorlake-changing")]
+    TensorlakeChanging {
+        direction: farhelm_proto::tensorlake::LifecycleDirection,
+        requested_at: i64,
+    },
     /// A Tensorlake host whose sandbox Tensorlake reports suspended (or
     /// failed to resume); nothing is dialed until it runs again. Times are
     /// unix ms: `observed_at` is when this helm first saw the suspension,
-    /// `suspended_by_farhelm_at` when Farhelm's own Suspend finished (from
-    /// the host row, so it survives a helm restart; `None` when Farhelm did
-    /// not suspend it, which is how the UI tells "suspended from Farhelm"
+    /// `suspended_by_farhelm_at` when Farhelm's own Suspend finished (carried
+    /// by the confirmed state and persisted on the host row for recovery;
+    /// `None` when Farhelm did not suspend it, which is how the UI tells
+    /// "suspended from Farhelm"
     /// from an idle timeout). `resume_failed` is Tensorlake's diagnosis of a
     /// failed resume.
     #[serde(rename = "suspended")]
@@ -243,7 +253,7 @@ pub(crate) enum HostStateView {
 }
 
 impl HostStateView {
-    /// This state's stable phase label — the same nine strings
+    /// This state's stable phase label — the same strings
     /// [`HostState::phase`] produces and the same strings the `#[serde(
     /// rename)]`s above put on the wire.
     ///
@@ -266,6 +276,7 @@ impl HostStateView {
             HostStateView::IdentityMismatch { .. } => "identity-mismatch",
             HostStateView::IdentityUnverified { .. } => "identity-unverified",
             HostStateView::Duplicate { .. } => "duplicate",
+            HostStateView::TensorlakeChanging { .. } => "tensorlake-changing",
             HostStateView::Suspended { .. } => "suspended",
             HostStateView::Retired { .. } => "retired",
         }
@@ -368,14 +379,20 @@ impl From<&HostState> for HostStateView {
                 twin: *twin,
                 identity: identity.clone(),
             },
-            // Farhelm's own suspend time is on the host row, not the
-            // state; `host_views` fills it in.
+            HostState::TensorlakeChanging {
+                direction,
+                requested_at,
+            } => HostStateView::TensorlakeChanging {
+                direction: *direction,
+                requested_at: *requested_at,
+            },
             HostState::Suspended {
                 observed_at,
+                suspended_by_farhelm_at,
                 resume_failed,
             } => HostStateView::Suspended {
                 observed_at: *observed_at,
-                suspended_by_farhelm_at: None,
+                suspended_by_farhelm_at: *suspended_by_farhelm_at,
                 resume_failed: resume_failed.clone(),
             },
             HostState::Retired { reason } => HostStateView::Retired {
@@ -515,21 +532,22 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
         .collect())
 }
 
-/// A host's state as the list shows it: the actor's state, with what only
-/// the registry row knows filled in. Today that is one fact, when Farhelm's
-/// own Suspend of a Tensorlake host finished, which the actor never holds
-/// (a helm restart would otherwise lose it).
+/// A host's state with persisted suspension attribution as a recovery fallback.
+/// The state snapshot wins: the registry read precedes the manager snapshots,
+/// so its completion time can be older than a just-published confirmation.
 fn state_view(state: &HostState, registry: Option<&HostRow>) -> HostStateView {
     match HostStateView::from(state) {
         HostStateView::Suspended {
             observed_at,
+            suspended_by_farhelm_at,
             resume_failed,
-            ..
         } => HostStateView::Suspended {
             observed_at,
-            suspended_by_farhelm_at: registry
-                .and_then(|row| row.tensorlake.as_ref())
-                .and_then(|binding| binding.suspended_at),
+            suspended_by_farhelm_at: suspended_by_farhelm_at.or_else(|| {
+                registry
+                    .and_then(|row| row.tensorlake.as_ref())
+                    .and_then(|binding| binding.suspended_at)
+            }),
             resume_failed,
         },
         view => view,
@@ -1467,18 +1485,19 @@ mod tests {
     use super::{HostStateView, RefreshView};
 
     /// Spec: a suspended Tensorlake host's view carries the actor's
-    /// observation time and diagnosis plus the registry row's own suspend
-    /// time (`None` when Farhelm did not suspend it, or with no row); every
-    /// other state converts unchanged.
+    /// observation time, diagnosis and confirmed own suspend time. The row
+    /// fills missing attribution after recovery; an older row cannot erase
+    /// or replace the completion carried by a newer confirmed snapshot.
     ///
     /// Why: the UI says "suspended from Farhelm at …" or "Tensorlake
     /// suspended it" from exactly this field (goal 3.1), and the time lives
     /// on the row so a helm restart keeps it.
     #[farhelm_testtrace::test]
-    fn a_suspended_view_takes_farhelms_suspend_time_from_the_row() {
+    fn a_suspended_view_preserves_confirmation_and_recovers_attribution_from_the_row() {
         use crate::manager::HostState;
         let suspended = HostState::Suspended {
             observed_at: 20,
+            suspended_by_farhelm_at: None,
             resume_failed: Some("restore failed".into()),
         };
         let mut row = crate::store::HostRow {
@@ -1518,6 +1537,24 @@ mod tests {
         assert_eq!(super::state_view(&suspended, None), expected(None));
         row.tensorlake.as_mut().unwrap().suspended_at = None;
         assert_eq!(super::state_view(&suspended, Some(&row)), expected(None));
+        let confirmed = HostState::Suspended {
+            observed_at: 20,
+            suspended_by_farhelm_at: Some(30),
+            resume_failed: Some("restore failed".into()),
+        };
+        // These are controlled snapshots of the host-list race: a row read
+        // before Suspend completed, joined to the state read afterwards.
+        assert_eq!(
+            super::state_view(&confirmed, Some(&row)),
+            expected(Some(30))
+        );
+        row.tensorlake.as_mut().unwrap().suspended_at = Some(10);
+        assert_eq!(
+            super::state_view(&confirmed, Some(&row)),
+            expected(Some(30))
+        );
+        assert_eq!(super::state_view(&confirmed, None), expected(Some(30)));
+        assert_eq!(HostStateView::from(&confirmed), expected(Some(30)));
         let retired = HostState::Retired {
             reason: "gone".into(),
         };
@@ -1577,6 +1614,14 @@ mod tests {
                 twin: 1,
                 identity: "a".to_string(),
             },
+            HostStateView::TensorlakeChanging {
+                direction: farhelm_proto::tensorlake::LifecycleDirection::Suspending,
+                requested_at: 1,
+            },
+            HostStateView::TensorlakeChanging {
+                direction: farhelm_proto::tensorlake::LifecycleDirection::Resuming,
+                requested_at: 2,
+            },
             HostStateView::Suspended {
                 observed_at: 1,
                 suspended_by_farhelm_at: None,
@@ -1591,6 +1636,38 @@ mod tests {
                 encoded["phase"],
                 state.phase(),
                 "the phase word and the wire tag disagree for {state:?}"
+            );
+        }
+    }
+
+    /// Explicit lifecycle intent must survive projection without suspension
+    /// metadata: clients may only claim Suspended after vendor confirmation.
+    /// Pin both direction spellings and the unix-ms request time on the wire.
+    #[farhelm_testtrace::test]
+    fn tensorlake_lifecycle_intent_projects_without_claiming_suspension() {
+        use crate::manager::HostState;
+        use farhelm_proto::tensorlake::LifecycleDirection;
+        for (direction, word) in [
+            (LifecycleDirection::Suspending, "suspending"),
+            (LifecycleDirection::Resuming, "resuming"),
+        ] {
+            let state = HostState::TensorlakeChanging {
+                direction,
+                requested_at: 1_700_000_000_000,
+            };
+            let view = HostStateView::from(&state);
+            assert_eq!(state.phase(), view.phase());
+            assert_eq!(
+                serde_json::to_value(&view).unwrap(),
+                serde_json::json!({
+                    "phase": "tensorlake-changing",
+                    "direction": word,
+                    "requested_at": 1_700_000_000_000_i64,
+                })
+            );
+            assert_eq!(
+                serde_json::from_value::<LifecycleDirection>(serde_json::json!(word)).unwrap(),
+                direction
             );
         }
     }

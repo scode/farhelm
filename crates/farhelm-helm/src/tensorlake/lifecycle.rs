@@ -1,6 +1,8 @@
 //! Explicit suspend/resume operations. The provisioning lock serializes them
 //! with setup, updates and removal; the connection hold prevents a concurrent
-//! retry from reopening an ssh channel while the sandbox is being suspended.
+//! retry from reopening an ssh channel during an explicit lifecycle request.
+//! The held display state records intent until Tensorlake confirms the target;
+//! after Resume releases the hold, ordinary connection progress takes over.
 
 use super::api::{ApiKey, SandboxStatus, TensorlakeError};
 use crate::{AppState, manager::HostState, store::HostId};
@@ -8,7 +10,7 @@ use axum::{
     extract::{Path, State},
     response::{IntoResponse, Response},
 };
-use farhelm_proto::ErrorKind;
+use farhelm_proto::{ErrorKind, tensorlake::LifecycleDirection};
 use std::{sync::Arc, time::Duration};
 
 /// Suspend only after every connection owned by this helm has been released.
@@ -40,6 +42,10 @@ fn answer(result: anyhow::Result<()>) -> Response {
 /// Keep the registry binding stable across the API operation. Take the same
 /// lock as removal before loading the row, and release any connection hold on
 /// every outcome, including a storage failure after Tensorlake has answered.
+/// An already-connected Resume first checks whether work is needed, preserving
+/// live viewers when the sandbox is already running. A real resume still
+/// withdraws that old connection before success, even if the actor missed an
+/// external suspension.
 async fn change(state: &AppState, host: HostId, resume: bool) -> anyhow::Result<()> {
     let _lock = state.manager.try_host_provision_lock(host).ok_or_else(|| {
         refusal(
@@ -60,17 +66,24 @@ async fn change(state: &AppState, host: HostId, resume: bool) -> anyhow::Result<
         .await
         .map_err(|reason| refusal(ErrorKind::Conflict, &reason))?;
     let sandbox = binding.sandbox_id.as_deref().unwrap_or(&binding.sandbox);
-    if !resume {
-        state
+    let changing = HostState::TensorlakeChanging {
+        direction: if resume {
+            LifecycleDirection::Resuming
+        } else {
+            LifecycleDirection::Suspending
+        },
+        requested_at: now_ms(),
+    };
+    // An already-running, connected host must keep its viewers when Resume
+    // is repeated. Every other caller publishes its intent before the API
+    // request, while the hold prevents a retry from racing the operation.
+    let held_before_request = !resume
+        || !state
             .manager
-            .hold_connection(
-                host,
-                HostState::Suspended {
-                    observed_at: now_ms(),
-                    resume_failed: None,
-                },
-            )
-            .await;
+            .status(host)
+            .is_some_and(|status| status.state.is_connected());
+    if held_before_request {
+        state.manager.hold_connection(host, changing.clone()).await;
         state
             .manager
             .transport()
@@ -79,47 +92,52 @@ async fn change(state: &AppState, host: HostId, resume: bool) -> anyhow::Result<
     }
     let result = async {
         let transitioned = transition(&state.tensorlake, &key, sandbox, resume).await?;
-        if resume && transitioned {
+        if resume && transitioned && !held_before_request {
             // An external suspension may precede the actor's next refresh.
             // Its still-published Connected label then describes the old
             // channel, not recovery. Withdraw it before returning success,
             // and discard both masters so launchers must await a fresh token.
-            state
-                .manager
-                .hold_connection(
-                    host,
-                    HostState::Suspended {
-                        observed_at: now_ms(),
-                        resume_failed: None,
-                    },
-                )
-                .await;
+            state.manager.hold_connection(host, changing).await;
             state
                 .manager
                 .transport()
                 .release_shared_connections(&row)
                 .await;
         }
+        let suspended_at = if resume {
+            None
+        } else {
+            Some(if transitioned {
+                now_ms()
+            } else {
+                binding.suspended_at.unwrap_or_else(now_ms)
+            })
+        };
         if !state
             .store
-            .set_tensorlake_suspended_at(
-                host,
-                if resume {
-                    None
-                } else {
-                    Some(if transitioned {
-                        now_ms()
-                    } else {
-                        binding.suspended_at.unwrap_or_else(now_ms)
-                    })
-                },
-            )
+            .set_tensorlake_suspended_at(host, suspended_at)
             .await?
         {
             return Err(refusal(
                 ErrorKind::Conflict,
                 "This Tensorlake host is no longer registered",
             ));
+        }
+        if let Some(observed_at) = suspended_at {
+            // Persist for recovery, and carry attribution in the published
+            // state too: a host-list read may have captured the old row
+            // before this write and then observe the new confirmation.
+            state
+                .manager
+                .hold_connection(
+                    host,
+                    HostState::Suspended {
+                        observed_at,
+                        suspended_by_farhelm_at: Some(observed_at),
+                        resume_failed: None,
+                    },
+                )
+                .await;
         }
         Ok(())
     }

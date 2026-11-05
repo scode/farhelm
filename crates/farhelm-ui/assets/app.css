@@ -5338,6 +5338,23 @@ a:any-link,
 .host-row-main > .host-status.updating { grid-column: 2; grid-row: 2; }
 .host-status.updating > .status-dot { display: none; }
 
+/* Confirmation may take a minute. Keep its timer readable below the name,
+   with Resume and the real menu anchor still reachable on the first line. */
+.host-row-main:has(.host-lifecycle-progress) {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto auto;
+  row-gap: 2px;
+}
+.host-row-main:has(.host-lifecycle-progress) > .host-name { grid-column: 2; grid-row: 1; }
+.host-row-main:has(.host-lifecycle-progress) > .host-resume { grid-column: 3; grid-row: 1; }
+.host-row-main:has(.host-lifecycle-progress) > .host-row-menu { grid-column: 4; grid-row: 1; }
+.host-row-main:has(.host-lifecycle-progress) > .host-status { grid-column: 2 / -1; grid-row: 2; }
+.host-status:has(.host-lifecycle-progress) > .status-dot { display: none; }
+.host-status > .host-status-label:has(.host-lifecycle-progress) { white-space: normal; overflow: visible; }
+.host-lifecycle-progress { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.host-lifecycle-elapsed { color: var(--fg-2); font-size: 11px; font-variant-numeric: tabular-nums; }
+.host-rail-state.connecting > .delete-spinner { width: 8px; height: 8px; flex-basis: 8px; }
+
 /* Same shrink discipline as the session row's fields: an ssh destination
    is user data of unbounded length, and without a floor plus ellipsis it
    would push `.host-row-main`'s status, optional update button, and
@@ -6293,7 +6310,8 @@ a:any-link,
   max-width: calc(100vw - 40px);
   pointer-events: none;
 }
-.launch-progress-pill .launch-progress {
+.launch-progress-pill .launch-progress,
+.launch-progress-pill .host-resume-progress {
   padding: 10px 14px;
   border: 1px solid var(--border-dialog);
   border-radius: var(--radius-pill);
@@ -6305,6 +6323,14 @@ a:any-link,
   max-width: 100%;
   color: var(--fg-0);
   font-size: 12px;
+}
+.host-resume-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-0);
+  font-size: 12px;
+  min-width: 0;
 }
 .launch-progress .delete-spinner {
   border-color: color-mix(in srgb, currentColor 30%, transparent);
