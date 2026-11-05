@@ -933,6 +933,12 @@ test("an unlabeled folder result replaces fresh intent without cloning", async (
  * Stop retains a reference after ending its process. Only Delete of the
  * final borrower may move the complete checkout, including dirty work. */
 test("borrowers retain the checkout until the final stopped session is deleted", async ({ page, request }) => {
+  // This scenario creates several borrowers and proves each through a fresh
+  // terminal attachment before exercising the final Stop/Delete boundary.
+  // WebKit can spend the default minute on that work without any one wait
+  // stalling. Keep the individual readiness bounds; allow the whole lifecycle
+  // and its owned cleanup to finish inside a separate two-minute budget.
+  test.setTimeout(120_000);
   const fixture = await checkoutFixture("browser-lifetime", request);
   const ids: string[] = [];
   let bodyFailed = false;

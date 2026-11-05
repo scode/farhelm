@@ -3790,3 +3790,34 @@ was clean. Run UUIDs address retained temporary evidence, which expires with cle
 Class: unknown
 
 Cause: hypothesis
+
+## 2026-11-05 — shared-checkout lifecycle scenario budget (e2e/tests/github-checkouts.spec.ts)
+
+`borrowers retain the checkout until the final stopped session is deleted` failed three of three WebKit attempts in
+known-flake selection `d22a6787-f6bc-4d36-b7aa-38e2de618d27`; Chromium passed three of three. Each failed at the
+60-second overall deadline near the final borrower's Stop. The retained trace shows successive successful launches,
+attachments, echoes and deletions; no completed test-body call took more than 3.4 seconds. The scenario now allows two
+minutes for its several real launches and fresh terminal attachments, with the existing individual readiness limits and
+all lifecycle assertions retained. Serial rerun `f931e347-7e49-441e-8915-d0a67d80881b` passed three of three per engine
+(Chromium 24.8–24.9 seconds, WebKit 39.2–40.7 seconds). This addresses the observed aggregate-budget failure; it does
+not establish that every historical timeout had the same cause. The TODO entry and sweep exclusion are removed by this
+change.
+
+```text
+Test timeout of 60000ms exceeded.
+```
+
+Evidence: clean baseline `ce630ce7a18a69f8a58fec5786778fdbafd9b3a5`; the serial rerun had this budget edit and unrelated
+browser-test fixture edits uncommitted. Shared x86_64 Linux, Node 26.13.0, Playwright 1.64.0, three browser workers with
+one stack each, zero retries. The baseline selected the 23 already known browser tests with three repetitions per engine
+(135 passed, only these three failed); the rerun selected this exact test with three repetitions per engine. Concurrent
+builds and other browser runs were present on the host; observed load averages during the baseline ranged from about 26
+to 43, and memory pressure was not measured. Verified tmux 3.7c executable SHA256
+`ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`, locale C.UTF-8, ambient Farhelm variables scrubbed
+and recorder-owned `FARHELM_TEST_TRACE_DIR`. Private reports, traces and screenshots are retained by run UUID and expire
+with temporary-file cleanup. Earlier overlapping follow-up runs shared the checkout's browser harness files; their
+cleanup/authentication results are discarded as invalid evidence, not classified as product flakes.
+
+Class: budget
+
+Cause: established
