@@ -116,6 +116,9 @@ remove the interception while that read was in flight, and the callback then try
 case passed on Chromium in that run and on WebKit in the earlier browser sweep `8cb83a8d-7220-4997-9c9c-23e8e1927ed4` at
 a different commit. Open and excluded from future sweeps.
 
+Follow-up: fixed in #3043 by draining the host-list callback before removing its interception. Cancellation and recovery
+still exercise the same assertions; the test is enabled again in sweeps.
+
 ```text
 Error: route.fulfill: Route is already handled!
 ```

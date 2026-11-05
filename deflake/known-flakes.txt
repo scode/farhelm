@@ -10,7 +10,6 @@
 #
 # Seeded on 2026-09-12 from the TODO.md Deflake bucket as it stood then.
 
-playwright quick-launch.spec.ts a host-read fallback permits keyboard cancellation before recovery  # quick-launch-host-route-cleanup
 playwright settings.spec.ts an untouched checkout folder save writes nothing and edited paths are trimmed  # checkout-folder-save-cleanup
 playwright sidebar.spec.ts visit history chooses and remembers the next session after row deletion  # visit-history-stopped-session-error
 playwright github-checkouts.spec.ts borrowers retain the checkout until the final stopped session is deleted  # shared-checkout-browser-timeout-and-fixture-cleanup
