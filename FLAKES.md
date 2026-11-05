@@ -3936,3 +3936,118 @@ addressed by run UUID and expire with temporary-file cleanup.
 Class: fixture-premise
 
 Cause: established
+
+## 2026-11-05 — bounded follow-up of the remaining known browser flakes (e2e/tests)
+
+This pass selected already known failures. Ordinary baseline `d22a6787-f6bc-4d36-b7aa-38e2de618d27` ran all 23 then
+excluded browser cases three times per engine. Host-terminal follow-up `6c3945cf-9c27-4f04-b5a1-be4b3ea9d5b6` ran the 16
+cases its configuration admits twice per engine. The checkout-budget and folder-visibility failures from those runs are
+addressed in the separate entries above. The following cases remain open. A pass here is a bounded non-reproduction, not
+evidence that their historical defects are fixed:
+
+- `visit history chooses and remembers the next session after row deletion` (`sidebar.spec.ts`): 0 failures in 5
+  attempts per engine, three ordinary and two host-terminal. No fresh error-status detail was captured.
+- `native tunnel preview keeps ports and actions inside a 650px pane` (`header.spec.ts`): 0/5 per engine. WebKit took
+  45.9–56.6 seconds, still close to its 60-second case budget. No deadline change is claimed as a fix.
+- `don't ask again on a refused YOLO replace marks the host, then replaces with the override`
+  (`terminal-restart.spec.ts`): 0/5 per engine. The earlier raw-session-ID/background-read hypothesis remains unproved;
+  neither clicks nor confirmation assertions were bypassed.
+- `plain Replace keeps a newer same-source key after old header YOLO cancellation` (`replace.spec.ts`): 0/5 per engine.
+  The previously diagnosed pointer/layout race still needs its product decision. Explicitly closing the other menu in
+  the test would hide that race and was not added.
+- Both `trash header and global confirmation remain reachable at width 1000` and the width-360 case
+  (`trash-dialog.spec.ts`): 0/5 each per engine. The same native focus, Home/PageDown and scroll assertions remain.
+- `create-intent-key-rebinds-on-host-change: a new target is a new intent` and
+  `create-intent-key-rebinds-on-retarget: a moved host is a new intent` (`terminal-multihost.spec.ts`), plus
+  `editing the working directory after a failed create mints a new intent key` (`terminal-create-idempotency.spec.ts`):
+  0/5 each per engine. No new missed-checkbox transition was observed; `answerYolo` still uses its real checked-state
+  assertion, without retrying a lost click.
+- `changed-host advice while following: identity`, `a first identity learned while following: replacement` and
+  `a first identity learned while following: completion` (`provisioning.spec.ts`): 0/8 each per engine. The baseline's
+  three attempts were followed by five exact repetitions in `997991b6-0f5d-4c32-b513-8f457a8629f9` (all 30 passed).
+  Inspection suggests a controlled feed could retain an initial all-pending progress snapshot, but no fresh failure
+  established that mechanism. The step-name checks and five-second assertion budgets remain.
+- `a sequence refused at its prefix leaves later sequences their own bindings` and
+  `typed page refusals are atomic and empty Enter leaves later bindings paired` (`quick-launch.spec.ts`): 0/5 each per
+  engine. A delayed focus handoff remains a hypothesis; the body-focus premise was not weakened.
+- `view-changes-do-not-postpone-a-recovery` (`terminal-reconnect.spec.ts`): 0/5 per engine. The original elapsed-time
+  observation includes driver and deferred terminal-mount work, so it still cannot distinguish a rearmed retry from late
+  observation. No timing-budget increase or unproved page-clock rewrite was made.
+
+All fifteen browser exclusions remain. The reconnect case again has a matching TODO entry; its exclusion had outlived
+that board entry. The other open TODO entries now carry these counts. No new failure occurred in these cases to quote;
+the earlier dated entries preserve their original excerpts.
+
+Evidence: shared x86_64 Linux, Node 26.13.0, Playwright 1.64.0, three browser workers with one owned stack each, zero
+retries. Baseline source was clean `ce630ce7a18a69f8a58fec5786778fdbafd9b3a5`; the host follow-up started at
+`e7fb5df7f4f26c315a6845e28c1261de40e91b6a` with the unrelated fixture repairs dirty, and the extra provisioning run used
+`8a48531f8c662f469b6228714f53458be64cc51f` with unrelated pending test/documentation edits. These unresolved cases' code
+and product assets were unchanged. Verified tmux 3.7c executable SHA256
+`ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`, locale C.UTF-8. The recorder scrubbed ambient
+Farhelm variables and supplied `FARHELM_TEST_TRACE_DIR`; the host follow-up also retained `FARHELM_E2E_SUITE_TERMINALS`.
+Other builds and browser workloads were active on the shared host; sampled load during the baseline was about 26–43, and
+case-level load and memory pressure were not measured. Private reports and any failure traces remain addressed by UUID
+and expire with temporary-file cleanup. Follow-up browser runs that accidentally overlapped in this checkout are
+excluded from these counts; their shared harness-file interference is not a product flake.
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-11-05 — shallow-pause reset recurs; attribution still incomplete (crates/farhelm/tests/e2e/terminal_backpressure.rs)
+
+The exact `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` selection passed twice and failed once
+in batch `ef5851af-9d04-48d0-a378-9c256e2c10a7`. The passes were `ff56f4c9-367e-4590-8acf-722d5da587f1` and
+`fa13ce85-b0df-49a8-9075-b662bd7d6808`; failure `dfecb8be-7208-44be-b9bf-047950e05e5c` took 12.1 seconds versus
+12.4–12.5-second passes. The bounded trace reports 48,818 evicted in-memory events and 49,226 rotated persistent events.
+Inspection of its retained head/tail did not recover the pause/resume/reset attribution needed to decide whether the
+client pause or a later legitimate tmux pause caused the reset. The test still rejects every reset over its ten-second
+post-resume drain. A shorter arbitrary window or record-count seam could conceal a queued pause-caused reset, so neither
+was substituted. The 2026-10-17 diagnosis remains open: obtain a bounded per-channel reset-cause observable and prove
+the shallow timing premise before changing the oracle. The exclusion remains, and its missing TODO partner is restored.
+
+```text
+a pause lifted inside tmux's pause-after window must not trigger a catch-up reset
+```
+
+Evidence: exact nextest filter `test(=terminal_backpressure::shallow_pause_resumes_without_reset_or_replay)`, four-slot
+runner budget with only this test selected, zero retries, clean base `ce630ce7a18a69f8a58fec5786778fdbafd9b3a5` with
+unrelated browser-test edits during the batch, no Rust change. Shared x86_64 Linux with other builds/browser workloads;
+load at the failed attempt and memory pressure were not measured. Verified tmux 3.7c executable SHA256
+`ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`, locale C.UTF-8; ambient Farhelm variables scrubbed,
+only recorder-owned `FARHELM_TEST_TRACE_DIR` supplied. The failed UUID directory retains its raw trace and JUnit report
+and expires with temporary-file cleanup. Earlier attempts that expired during cold compilation or fixture setup did not
+execute an assertion and are retained separately as incomplete setup, not counted in these three.
+
+Class: ambiguous-observable
+
+Cause: hypothesis
+
+## 2026-11-05 — older RSS, sentinel and spawner-cleanup reports not reproduced
+
+`terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled` (`terminal_backpressure.rs`) and
+`launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail`
+(`launch_sentinel_error_status.rs`), both under `crates/farhelm/tests/e2e/`, passed all three exact-selection attempts
+in batch `51c6a652-7437-4d1a-a579-920a936cc00b`: `e781a1c8-ad13-4011-aa21-5d7f80bb66a5`,
+`e6928d5c-c81e-483d-b3d1-5c16bd113c67` and `e4da5b3a-e06d-450c-af2c-34d809e2d09e`. RSS took 21.1–22.0 seconds; the
+sentinel case took 0.77–0.90 seconds. The recorded output contains no runtime `SKIPPED` marker. These passes leave the
+old reports unresolved. The Difficult deflake board now distinguishes them from the already corrected binary-output loss
+and 1x1 READY matcher; the release integration exclusion is unchanged.
+
+The complete `bash scripts/test-start-stack-cleanup.sh` passed in `6f2eff90-c59c-4602-8283-489747b8a36d` in 22.2
+seconds. The sweep canary, spawner SIGKILL, spawner SIGTERM, script SIGTERM, replacement and stale-replacement phases
+all passed while their decoys survived. This is one complete scripted attempt, not a new reproduction of the earlier
+leak; the existing startup/signal markers and open TODO remain. No new failure occurred to quote for any of these cases.
+
+Evidence: shared x86_64 Linux, four nextest slots with zero retries (RSS reserves all four within its invocation), and
+one owned cleanup-script scenario at a time. Other host workloads remained; case-level load and memory pressure were not
+measured. Rust source was `ce630ce7a18a69f8a58fec5786778fdbafd9b3a5` with unrelated browser edits; cleanup used
+`a2d05035aac82c7ed06a05646f6c3d5411df151e` with unrelated test/documentation edits. Matching CLI/web artifacts built
+from the original base were reused because product sources were unchanged. Verified tmux 3.7c executable SHA256
+`ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`, locale C.UTF-8; ambient Farhelm variables scrubbed
+and recorder-owned `FARHELM_TEST_TRACE_DIR` supplied. UUID reports/output remain private and expire with temporary-file
+cleanup; cold setup attempts with no executed assertions remain separate, incomplete observations.
+
+Class: unknown
+
+Cause: unknown
