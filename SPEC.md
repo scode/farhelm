@@ -3789,6 +3789,9 @@ failures or halt progress on that host. Do not add complexity to recover from or
 affected host making progress; those outcomes are accepted, not defects requiring additional recovery machinery. This
 applies to each supervisor host as well as the machine running the helm.
 
+Confirmed 2026-11-04: a full disk is included in this allowance. Accepted outcomes include losing durable state, such as
+a Resume offer whose restoration after a failed Restart with also fails.
+
 The boundary is host isolation: a remote host's broken filesystem must not freeze or break the helm or prevent it from
 serving other hosts. Requests involving the affected host may fail or remain pending, but the helm must otherwise
 continue to function. This allowance concerns filesystem errors and hangs, not ordinary cancellation or disconnection

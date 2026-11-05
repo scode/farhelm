@@ -20,10 +20,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`container-policy-missing-from-approvals.md`](container-policy-missing-from-approvals.md) — An agent's approved
   template change can alter container isolation without showing that change in its approval card.
 
-- [`failed-restart-restoration-loses-valid-resume.md`](failed-restart-restoration-loses-valid-resume.md) — A named
-  Restart that never starts its replacement can permanently remove the previous Resume offer if the database restoration
-  write also fails.
-
 - [`stored-wrapper-breaks-new-prompt-literalness.md`](stored-wrapper-breaks-new-prompt-literalness.md) — A previously
   stored wrapper can make a new initial prompt acquire shell meaning instead of remaining literal data.
 
