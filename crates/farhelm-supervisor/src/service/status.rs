@@ -472,8 +472,7 @@ pub(super) fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
 /// now-uncommittable fallback. Replies never touch launch artifacts themselves.
 ///
 /// `pane_states` must be the map the caller's own liveness probe returned;
-/// an empty map is correct only for an entry with no terminal (the restart
-/// gap), whose status comes entirely from its recorded outcome.
+/// terminal-less entries still need the session's tmux facts for surviving tabs.
 ///
 pub(crate) fn entry_info(
     entry: &SessionEntry,
@@ -515,9 +514,8 @@ pub(crate) fn entry_info(
             .expect("notification cell poisoned"),
     );
     // Tabs are not stored anywhere at all (`SessionInfo::tabs`), so this
-    // rediscovery IS the tab list. A terminal-less entry has no tmux
-    // session and therefore no tabs, which the empty default states
-    // honestly. Dead tabs are omitted: SPEC.md reaps a tab whose process
+    // rediscovery IS the tab list, including old tmux tabs whose agent
+    // terminal is gone. Dead tabs are omitted: SPEC.md reaps a tab whose process
     // exited, and the ticker's reap may lag this reply by a tick — hiding
     // the corpse here is what keeps the listing honest in that window.
     //
@@ -539,7 +537,14 @@ pub(crate) fn entry_info(
                 .map(DiscoveredTab::tab_info)
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_else(|| {
+            let name = super::core::session_tmux_name(&entry.info.id);
+            tabs_from_pane_states(pane_states.values(), &name, None)
+                .into_iter()
+                .filter(|tab| !tab.dead)
+                .map(DiscoveredTab::tab_info)
+                .collect()
+        });
     info.tabs.extend(super::core::listed_host_tabs(
         &entry.session.host_tabs,
         false,

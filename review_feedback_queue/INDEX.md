@@ -32,10 +32,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   debug tracing enabled, a remote tab identifier can put terminal control bytes into the operator's log display. This is
   a conditional trust-boundary issue; no payload or runtime exploitation was attempted.
 
-- [`hidden-live-tmux-tabs-escape-delete-consent.md`](hidden-live-tmux-tabs-escape-delete-consent.md) — After the agent
-  moves to a terminal host and its host is lost, independent old terminal tabs can disappear from the live-work count.
-  Delete can then end those tabs without the required warning, although they may still hold work.
-
 - [`selector-policy-drops-ordinary-formatting-input.md`](selector-policy-drops-ordinary-formatting-input.md) — New
   terminals discard formatting codepoints even without selectors, changing stored and copied text. Priority remains
   highest because independent consultation could not settle whether this retained-text loss is outside user-data loss.

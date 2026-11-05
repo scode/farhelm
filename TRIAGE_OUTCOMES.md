@@ -21365,7 +21365,9 @@
   tmux tabs and no agent terminal. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
   the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its index
   entry.
-- Execution: planned in `plans/queue/delete-unreadable-terminals.md`.
+- Execution: implemented in change `xypuqzwwtysrkwqsruntmrpkntztzpto` on bookmark
+  `plan/delete-unreadable-terminals/02-old-tmux-tabs-by-session`;
+  [draft PR #3040](https://github.com/scode/farhelm/pull/3040/changes).
 
 ## failed-tab-recovery-loses-delete-child-root.md
 
