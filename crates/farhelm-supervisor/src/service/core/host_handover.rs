@@ -1676,8 +1676,16 @@ impl Supervisor {
             });
             current.map(|current| {
                 let terminal = match &outcome {
-                    RowHost::Adopted(host) | RowHost::Unavailable(host) => {
-                        Some(Terminal::Host(host.clone()))
+                    RowHost::Adopted(host) => Some(Terminal::Host(host.clone())),
+                    RowHost::Unavailable(host) => {
+                        // A failed reconnect disproves neither pinned process.
+                        let host = match host.liveness() {
+                            Liveness::Unavailable { reason, peer } => {
+                                old.unavailable_again(reason, peer)
+                            }
+                            _ => host.clone(),
+                        };
+                        Some(Terminal::Host(host))
                     }
                     RowHost::Absent => None,
                 };

@@ -67,7 +67,8 @@
 //!   known (the connection's peer credentials, or the process naming the
 //!   socket): a guarded Delete cannot tell what runs there and refuses; an
 //!   unconditional one, after the sweep, ends that process with the
-//!   verified signal, without connecting again. It has no sweep root: its
+//!   verified signal, without connecting again. Unless a prior runtime pinned
+//!   its child (retained through failed retries), it has no sweep root: its
 //!   program is reached by the marker sweep, the scope kill and its hangup.
 //!   A host that answers with a valid `Info` but a tag this build cannot
 //!   read is treated the same way rather than shut down over the
@@ -201,6 +202,8 @@ pub(crate) struct SessionHosts {
     /// The session's tab runtimes (not startup placeholders), whose records
     /// were left to them, as the agent's runtime's is.
     tabs: Vec<HostTab>,
+    /// Failed retries retain child roots for Delete; their hosts are settled from records.
+    placeholder_tabs: Vec<HostTab>,
     /// The budget [`Self::end`] gets for ending the hosts, counted from
     /// when it starts: the same length as settling's own, which it does not
     /// share, so that the sweep and the rest of the teardown between the
@@ -241,10 +244,8 @@ impl Supervisor {
         };
         // A tab's runtime holds its host as the agent's does; a tab's
         // placeholder, like the agent's, is settled from its record.
-        let tabs: Vec<HostTab> = tabs
-            .into_iter()
-            .filter(|tab| !tab.host.is_placeholder())
-            .collect();
+        let (placeholder_tabs, tabs): (Vec<HostTab>, Vec<HostTab>) =
+            tabs.into_iter().partition(|tab| tab.host.is_placeholder());
         let held_tabs: Vec<&std::ffi::OsStr> = tabs
             .iter()
             .filter_map(|tab| tab.host.socket().file_name())
@@ -319,6 +320,7 @@ impl Supervisor {
             session_id: session_id.to_owned(),
             hosts,
             tabs,
+            placeholder_tabs,
             budget,
         })
     }
@@ -498,7 +500,7 @@ impl SessionHosts {
     /// `hosts::terminal::pin_child`), so the sweep reaches the program's
     /// whole tree even where no process in it carries a marker. A host
     /// whose child has been reaped gives no root, never its old pid; an
-    /// unreadable host gives none (module docs).
+    /// unreadable host gives none without a previously pinned root (module docs).
     ///
     /// A tab runtime's child is a root as its runtime pinned it at
     /// adoption, checked against the process table whatever the host now
@@ -509,7 +511,7 @@ impl SessionHosts {
     /// is unexamined, and the caller refuses rather than sweep without it.
     pub(crate) async fn sweep_roots(&mut self) -> anyhow::Result<Vec<(u32, u64)>> {
         let mut roots = Vec::new();
-        for tab in &self.tabs {
+        for tab in self.tabs.iter().chain(&self.placeholder_tabs) {
             match tab.host.status().pinned_child_root() {
                 Ok(Some(root)) => roots.push((root.pid, root.start)),
                 Ok(None) => {}

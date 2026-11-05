@@ -21385,7 +21385,9 @@
   live terminal. A unit test covers a failed retry followed by Delete. Size gate: about 100 lines of diff (code, tests
   and docs, not counting this ledger, the queue removal or a changelog fragment); over it, block and bring it back.
   Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/delete-unreadable-terminals.md`.
+- Execution: implemented in change `rtoklvzymowlsnvuwysytspwvwutmmry` on bookmark
+  `plan/delete-unreadable-terminals/03-keep-child-root-on-failed-retry`;
+  [draft PR #3032](https://github.com/scode/farhelm/pull/3032/changes).
 
 ## selector-policy-drops-ordinary-formatting-input.md
 

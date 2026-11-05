@@ -8,11 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`failed-tab-recovery-loses-delete-child-root.md`](failed-tab-recovery-loses-delete-child-root.md) — On macOS, a
-  failed tab or agent recovery can discard the child identity Delete needs, leaving its foreground program running
-  untracked after session deletion. The conditional source route is established; the exact sequence is not
-  runtime-reproduced.
-
 - [`tunnel-reuses-custom-helm-credential-origin.md`](tunnel-reuses-custom-helm-credential-origin.md) — A desktop tunnel
   can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
   same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.
