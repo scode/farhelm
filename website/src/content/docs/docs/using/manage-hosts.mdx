@@ -17,6 +17,10 @@ The **Hosts** button at the foot of the rail swaps the session list for the host
 **Local (this machine)** and everything on this page happens; choose a host or **All** on the rail to go back. Adding a
 host is covered in [Add a remote host](/docs/get-started/add-a-remote-host/).
 
+Hosts with a problem, an update, or setup still running also appear above your sessions, so you can keep track of them
+while you work. Select a row or its **Details** button to open the host list at that host. The list disappears when
+nothing needs attention and while the full host list is open.
+
 ## The host menu
 
 <Screenshot
@@ -73,18 +77,20 @@ they reload.
 ## Update a host
 
 When a host has an update, its mark on the navigation rail and the **Hosts** button at the rail's foot show an
-up-arrow. While the host list is closed, the session list also shows a card for optional updates, or a banner when a
-host must be updated before you can use it. Both let you update those hosts or open the host list with **Show hosts**;
-you can dismiss the optional card.
+up-arrow. Above your sessions, each update row offers **Update**. If several listed hosts have updates, **Update all**
+updates those hosts. You can dismiss optional update reminders; required updates stay visible because that host's
+sessions cannot be reached until it is updated. The reminders return when another host gains an update, Farhelm changes
+version, or you reload the interface.
 
 When a remote host runs an older version of Farhelm than your Mac, an **↑ Update** button appears beside its name: amber
 when updating is optional, red when the host cannot connect until it is updated. Hover over it to see both versions.
 Clicking it updates the host straight away, without asking, and shows the progress in its place. **Update all** at the
-top of the host list updates every remote host at once.
+top of the full host list updates every remote host whose Update action is available.
 
 Updating a host does not interrupt its sessions: they keep running through the update.
-If Farhelm cannot plan an update, a dialog shows the reason before anything changes. If an update fails while the host
-list is closed, the host's mark on the rail shows a warning until you open **Hosts**, where its row shows what happened.
+If Farhelm cannot plan an update, a dialog shows the reason before anything changes. While the update runs, its progress
+appears above your sessions. A failed update appears there with **Details**, and the host's mark on the rail shows a
+warning until you open the host list, where its row shows what happened.
 
 To have Farhelm update remote hosts as soon as updates are available, turn on **Update remote hosts automatically** in
 Settings, under **Hosts**. It starts off. Once on, it works whenever Farhelm is running, which on your Mac means while

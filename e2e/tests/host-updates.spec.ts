@@ -1,10 +1,10 @@
 /**
- * Update reminders must use the rail's actual update set, not the broader
- * Hosts-panel Update all offer. Browser routes supply the same explicit age
- * flags as the existing host-version tests: a development helm deliberately
- * does not infer optional updates from version strings.
+ * Hosts needing attention share one surface, while Update keeps the rail's
+ * narrower eligibility. Routed registry and progress facts exercise the real
+ * mounted readers without registering or updating a remote machine.
  */
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { drainedRoute } from "./helpers/drained-route";
@@ -14,6 +14,7 @@ import {
   observeFeedReaders,
   patchPreferences,
   readPreferences,
+  showHostsPanel,
   showSessionsPanel,
   stubFeed,
   waitForFeedReadersSettled,
@@ -69,16 +70,20 @@ function remote(id: number, name: string, age: Age, build: string): FixtureHost 
   };
 }
 
-/** Find the same rail identity that the reminder classifier must agree with. */
+/** Find the rail identity whose Update arrow must retain its old meaning. */
 function avatar(page: Page, id: number) {
   return page.locator(`.host-rail-avatar[data-rail-host-id="${id}"]`);
 }
 
+/** Attention identities have their own hook; management keeps data-host-id. */
+function attentionRow(page: Page, id: number) {
+  return page.locator(`.host-attention-row[data-attention-host-id="${id}"]`);
+}
+
 /**
  * Freeze host/provisioning facts without registering or updating any real host.
- * The real local row is retained, and every fake host gets a complete progress
- * reply so a 404 cannot accidentally suppress its Update offer. A generation
- * marker on the current host proves each later publication reached the DOM.
+ * The local row stays real. Complete progress replies prevent incidental 404s
+ * from suppressing Update; a hidden management name proves feed publication.
  */
 async function prepare(page: Page, request: APIRequestContext) {
   const preferences = await readPreferences(request);
@@ -89,10 +94,10 @@ async function prepare(page: Page, request: APIRequestContext) {
   await patchPreferences(request, { welcome_seen: true });
   const response = await request.get("/api/hosts");
   expect(response.ok(), await response.text()).toBe(true);
-  const originalBuild = requireHelmBuild(response, "host-update reminders");
+  const originalBuild = requireHelmBuild(response, "host attention");
   const registry = await response.json() as { hosts: FixtureHost[] };
   const local = registry.hosts.find((host) => host.kind === "local");
-  expect(local, "fixture must preserve the real reserved local host").toBeTruthy();
+  expect(local, "fixture must preserve the reserved local host").toBeTruthy();
   expect(local!.state.phase, "the retained local fixture must be connected").toBe("connected");
   expect(Object.values(IDS)).not.toContain(local!.id);
   let build = originalBuild;
@@ -114,6 +119,10 @@ async function prepare(page: Page, request: APIRequestContext) {
     [IDS.busy, "busy"],
   ]);
   const busy = new Set<number>([IDS.busy]);
+  // Completed history must retain its run identity. Returning idle after a
+  // known Running view would intentionally raise uncertainty in HostAttention.
+  const knownRuns = new Set<number>(busy);
+  const completed = new Map<number, number>();
   const updates: { id: number; method: string; body: string | null }[] = [];
   const admission = routeGate();
   releases.push(admission.release);
@@ -126,19 +135,14 @@ async function prepare(page: Page, request: APIRequestContext) {
   cleanup.push([
     "listing build stamps",
     await drainedRoute(page, (url) => url.pathname === "/api/sessions", async (route) => {
-      const response = await route.fetch();
-      await route.fulfill({ response, headers: { ...response.headers(), "x-farhelm-build": build } });
+      const reply = await route.fetch();
+      await route.fulfill({ response: reply, headers: { ...reply.headers(), "x-farhelm-build": build } });
     }),
   ]);
   const hosts = () => [
     local!,
     ...[...ages].map(([id, age]) =>
-      remote(
-        id,
-        id === IDS.current ? `current-${generation}` : names.get(id)!,
-        age,
-        originalBuild,
-      )
+      remote(id, id === IDS.current ? `current-${generation}` : names.get(id)!, age, originalBuild)
     ),
   ];
   cleanup.push([
@@ -154,15 +158,20 @@ async function prepare(page: Page, request: APIRequestContext) {
       expect(route.request().method()).toBe("GET");
       const id = Number(new URL(route.request().url()).pathname.split("/")[3]);
       expect([local!.id, ...ages.keys()]).toContain(id);
+      const done = busy.has(id) ? completed.get(id) ?? 0 : 3;
       await route.fulfill({
         headers: headers(),
         json: {
           host_id: id,
-          run_id: busy.has(id) ? `busy-${id}` : null,
-          operation: busy.has(id) ? "add" : null,
+          run_id: knownRuns.has(id) ? `busy-${id}` : null,
+          operation: knownRuns.has(id) ? "add" : null,
           status: busy.has(id) ? "running" : "completed",
-          steps: busy.has(id)
-            ? [{ step: "attach-supervisor", name: "connect to the supervisor", status: "running" }]
+          steps: knownRuns.has(id)
+            ? Array.from({ length: 3 }, (_, index) => ({
+              step: `fixture-step-${index}`,
+              name: `setup step ${index + 1}`,
+              status: index < done ? "completed" : index === done ? "running" : "pending",
+            }))
             : [],
           message: null,
         },
@@ -179,11 +188,7 @@ async function prepare(page: Page, request: APIRequestContext) {
         body: outgoing.postData(),
       });
       await admission.wait();
-      await route.fulfill({
-        status: 409,
-        headers: headers(),
-        body: JSON.stringify({ error: "fixture stops at Update planning" }),
-      });
+      await route.fulfill({ status: 409, headers: headers(), json: { error: "fixture stops at Update planning" } });
     }),
   ]);
   await page.goto("/");
@@ -194,6 +199,7 @@ async function prepare(page: Page, request: APIRequestContext) {
     "data-provisioning-status",
     "running",
   );
+  await expect(avatar(page, IDS.busy)).toHaveAttribute("data-host-progress", "true");
   await expect(avatar(page, IDS.busy).locator(".host-rail-update")).toHaveCount(0);
   let revision = 1;
   return {
@@ -209,7 +215,16 @@ async function prepare(page: Page, request: APIRequestContext) {
     setBuild(next: string) {
       build = next;
     },
-    /** A real filter action still reads through Rust after skew withdraws the feed. */
+    setBusy(id: number, running: boolean) {
+      if (running) {
+        busy.add(id);
+        knownRuns.add(id);
+      } else busy.delete(id);
+    },
+    setCompleted(id: number, done: number) {
+      completed.set(id, done);
+    },
+    /** An attended filter read still observes new build stamps after skew stops the feed. */
     async observeBuildThroughFilter(hostId?: number) {
       const reply = page.waitForResponse((response) =>
         new URL(response.url()).pathname === "/api/sessions" &&
@@ -233,7 +248,7 @@ async function prepare(page: Page, request: APIRequestContext) {
   };
 }
 
-/** The badge's urgency is visible paint, not just a classifier attribute. */
+/** The unchanged Hosts arrow names all available updates, even dismissed ones. */
 async function expectBadge(page: Page, count: number, urgency: "optional" | "required") {
   const toggle = page.locator(".hosts-panel-toggle");
   const phrase = count === 1 ? "1 host has an update" : `${count} hosts have updates`;
@@ -244,7 +259,6 @@ async function expectBadge(page: Page, count: number, urgency: "optional" | "req
   await expect(badge).toHaveText("↑");
   await expect(badge).toHaveAttribute("data-update-kind", urgency);
   const paint = await badge.evaluate((node, kind) => {
-    const style = getComputedStyle(node);
     const token = getComputedStyle(document.documentElement).getPropertyValue(
       kind === "required" ? "--danger-strong" : "--warn",
     ).trim();
@@ -253,7 +267,7 @@ async function expectBadge(page: Page, count: number, urgency: "optional" | "req
     document.body.append(probe);
     const expected = getComputedStyle(probe).color;
     probe.remove();
-    return { actual: style.color, expected, token };
+    return { actual: getComputedStyle(node).color, expected, token };
   }, urgency);
   expect(paint.token, "the urgency palette token must exist").not.toBe("");
   expect(paint.actual, "the rendered arrow must carry its urgency tone").toBe(paint.expected);
@@ -275,96 +289,37 @@ async function narrowSidebar(page: Page): Promise<void> {
   await page.evaluate(() => document.fonts.ready);
 }
 
-/**
- * A visible button can still be clipped or covered. At the supported 240px
- * content minimum, require contained geometry and the actual pointer target.
- * Screenshots retained by the callers also expose the card-to-Hosts arrow.
- */
-async function expectReminderFits(page: Page, reminder: Locator): Promise<void> {
-  await expect(reminder).toBeVisible();
+/** Hidden scrolled rows need not be hit-testable; the pinned header actions do. */
+async function expectAttentionFits(page: Page): Promise<void> {
+  const list = page.locator(".host-attention-list");
+  await expect(list).toBeVisible();
   const sidebar = (await page.locator(".app-sidebar").boundingBox())!;
-  const bounds = (await reminder.boundingBox())!;
+  const bounds = (await list.boundingBox())!;
   expect(bounds.x).toBeGreaterThanOrEqual(sidebar.x);
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(sidebar.x + sidebar.width);
-  expect(await reminder.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
-  for (const button of await reminder.getByRole("button").all()) {
+  expect(await list.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+  for (const button of await list.getByRole("button").all()) {
+    const inBody = await button.evaluate((node) => !!node.closest(".host-attention-body"));
+    if (inBody) continue;
     await expect(button).toBeVisible();
-    const box = (await button.boundingBox())!;
-    expect(box.x).toBeGreaterThanOrEqual(bounds.x);
-    expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width);
-    expect(box.y).toBeGreaterThanOrEqual(bounds.y);
-    expect(box.y + box.height).toBeLessThanOrEqual(bounds.y + bounds.height);
     expect(
       await button.evaluate((node) => {
         const box = node.getBoundingClientRect();
         return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
       }),
-      "each reminder action must be hit-testable",
+      "each fixed attention action must remain hit-testable",
     ).toBe(true);
   }
-  await expect(page.locator(".hosts-panel-toggle")).toBeVisible();
+  const placement = await list.evaluate((node) => ({
+    inSessionScroller: !!node.closest(".sidebar-content"),
+    bottom: node.getBoundingClientRect().bottom,
+    heading: document.querySelector(".list-header")!.getBoundingClientRect().top,
+  }));
+  expect(placement.inSessionScroller, "attention stays outside the session-content scroller").toBe(false);
+  expect(placement.bottom).toBeLessThanOrEqual(placement.heading + 1);
 }
 
-/**
- * The card belongs at the sidebar's bottom, with its arrow pointing at Hosts
- * even when the names region grows. Derive the transformed arrow tip from
- * its actual CSS box rather than assuming a fixed card height. Two pixels
- * allow border/subpixel rounding without accepting a misplaced reminder.
- */
-async function expectCardPlacement(page: Page, card: Locator): Promise<void> {
-  const placement = await card.evaluate((node) => {
-    const sidebar = document.querySelector(".app-sidebar")!;
-    const toggle = document.querySelector(".hosts-panel-toggle")!;
-    const box = node.getBoundingClientRect();
-    const outer = sidebar.getBoundingClientRect();
-    const target = toggle.getBoundingClientRect();
-    const style = getComputedStyle(node);
-    const parent = getComputedStyle(sidebar);
-    const arrow = getComputedStyle(node, "::before");
-    const pixels = (value: string) => Number.parseFloat(value) || 0;
-    const width = pixels(arrow.width) +
-      (arrow.boxSizing === "border-box"
-        ? 0
-        : pixels(arrow.paddingLeft) + pixels(arrow.paddingRight) + pixels(arrow.borderLeftWidth) +
-          pixels(arrow.borderRightWidth));
-    const height = pixels(arrow.height) +
-      (arrow.boxSizing === "border-box"
-        ? 0
-        : pixels(arrow.paddingTop) + pixels(arrow.paddingBottom) + pixels(arrow.borderTopWidth) +
-          pixels(arrow.borderBottomWidth));
-    // The decorated left/bottom corner is the tip of the rotated square.
-    const tip = new DOMPoint(-width / 2, height / 2).matrixTransform(new DOMMatrix(arrow.transform));
-    const tipY = box.bottom - pixels(style.borderBottomWidth) - pixels(arrow.bottom) - height / 2 + tip.y;
-    return {
-      inContentScroller: !!node.closest(".sidebar-content"),
-      actualBottom: box.bottom,
-      expectedBottom: outer.bottom - pixels(parent.borderBottomWidth) - pixels(parent.paddingBottom) -
-        pixels(style.marginBottom),
-      tipY,
-      hostsCenterY: target.y + target.height / 2,
-      arrowContent: arrow.content,
-      arrowWidth: width,
-      arrowHeight: height,
-    };
-  });
-  expect(placement.inContentScroller, "the complete card must not scroll with session content").toBe(false);
-  expect(placement.arrowContent).not.toBe("none");
-  expect(placement.arrowWidth).toBeGreaterThan(0);
-  expect(placement.arrowHeight).toBeGreaterThan(0);
-  expect(
-    Math.abs(placement.actualBottom - placement.expectedBottom),
-    "card bottom must follow the sidebar bottom margin",
-  ).toBeLessThanOrEqual(2);
-  expect(Math.abs(placement.tipY - placement.hostsCenterY), "the arrow tip must align vertically with Hosts")
-    .toBeLessThanOrEqual(2);
-}
-
-/**
- * Measure usable session access through the actual content viewport, whose
- * height is independent of the intrinsic height of one row. The row must be
- * backed by the real registry/listing and remain fully visible with its open
- * and menu targets reachable after ordinary scrolling and hover.
- */
+/** Real session controls must stay usable beside a bounded attention region. */
 async function expectSessionAccess(page: Page, request: APIRequestContext, localId: number): Promise<void> {
   const response = await request.get("/api/sessions");
   expect(response.ok(), await response.text()).toBe(true);
@@ -375,29 +330,6 @@ async function expectSessionAccess(page: Page, request: APIRequestContext, local
   await expect(row).toBeVisible();
   await row.scrollIntoViewIfNeeded();
   await row.hover();
-  const access = await row.evaluate((node) => {
-    const content = document.querySelector(".sidebar-content")!;
-    const viewport = content.getBoundingClientRect();
-    const box = node.getBoundingClientRect();
-    return {
-      clientWidth: content.clientWidth,
-      clientHeight: content.clientHeight,
-      top: box.top,
-      bottom: box.bottom,
-      left: box.left,
-      right: box.right,
-      viewportTop: viewport.top,
-      viewportBottom: viewport.bottom,
-      viewportLeft: viewport.left,
-      viewportRight: viewport.right,
-    };
-  });
-  expect(access.clientWidth).toBeGreaterThan(0);
-  expect(access.clientHeight).toBeGreaterThan(0);
-  expect(access.top).toBeGreaterThanOrEqual(access.viewportTop - 1);
-  expect(access.bottom).toBeLessThanOrEqual(access.viewportBottom + 1);
-  expect(access.left).toBeGreaterThanOrEqual(access.viewportLeft - 1);
-  expect(access.right).toBeLessThanOrEqual(access.viewportRight + 1);
   for (const selector of [".session-row-open", ".session-row-menu"]) {
     const control = row.locator(selector);
     await expect(control).toBeVisible();
@@ -412,110 +344,14 @@ async function expectSessionAccess(page: Page, request: APIRequestContext, local
 }
 
 /**
- * Current, unreachable, local and busy rows can all have broad panel offers;
- * only the two rail arrows authorize this narrower batch. Hold planning so
- * the exact sent identities and bodyless Update contract stay observable.
+ * Freeze the measured local session so progress cannot borrow a concurrent
+ * sort, status or identity change as an explanation for closing its menu.
  */
-test("optional reminder lists and updates exactly the rail update set", async ({ page, request }, info) => {
-  const fixture = await prepare(page, request);
-  await expectBadge(page, 2, "optional");
-  const card = page.locator(".host-update-card");
-  await expect(card).toBeVisible();
-  await expect(card).toContainText("2 hosts have updates");
-  await expect(card.locator(".host-update-names .peer-value")).toHaveText(["build-one", "build-two"]);
-  await expect(page.locator(".host-update-banner")).toHaveCount(0);
-  for (const id of [fixture.localId, IDS.current, IDS.unreachable, IDS.newer, IDS.busy]) {
-    await expect(avatar(page, id).locator(".host-rail-update")).toHaveCount(0);
-  }
-  await narrowSidebar(page);
-  await expectReminderFits(page, card);
-  await expectCardPlacement(page, card);
-  await info.attach("optional-reminder-minimum-sidebar", {
-    body: await page.locator(".app-sidebar").screenshot(),
-    contentType: "image/png",
-  });
-  await card.getByRole("button", { name: "Show hosts", exact: true }).click();
-  await expect(page.locator(".hosts-panel-toggle")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("region", { name: "Host management", exact: true })).toBeVisible();
-  await expect(card).toHaveCount(0);
-  await expect(page.locator(".host-update-banner")).toHaveCount(0);
-  await expectBadge(page, 2, "optional");
-  await showSessionsPanel(page);
-  await expect(card).toBeVisible();
-  await card.getByRole("button", { name: "Update all now", exact: true }).click();
-  await expect.poll(() => fixture.updates.map((sent) => sent.id).sort()).toEqual([IDS.one, IDS.two]);
-  for (const id of [IDS.one, IDS.two]) {
-    await expect(page.locator(`[data-host-id="${id}"] .host-update-pending`)).toBeAttached();
-  }
-  expect(fixture.updates).toEqual(expect.arrayContaining([
-    { id: IDS.one, method: "POST", body: null },
-    { id: IDS.two, method: "POST", body: null },
-  ]));
-  expect(fixture.updates).toHaveLength(2);
-});
-
-/**
- * Dismissal remembers the shown identities, rather than count or current
- * membership. Removing and restoring an acknowledged host is still quiet;
- * another host, a page restart or a different helm build is new attention.
- */
-test("optional dismissal retains its badge until new attention or reload", async ({ page, request }) => {
-  const fixture = await prepare(page, request);
-  const card = page.locator(".host-update-card");
-  const dismiss = () => card.getByRole("button", { name: "Dismiss host update reminder", exact: true }).click();
-  await expect(card).toBeVisible();
-  await dismiss();
-  await expect(card).toHaveCount(0);
-  await expectBadge(page, 2, "optional");
-  fixture.setAge(IDS.two, "current");
-  await fixture.publish();
-  await expectBadge(page, 1, "optional");
-  await expect(card).toHaveCount(0);
-  fixture.setAge(IDS.two, "optional");
-  await fixture.publish();
-  await expectBadge(page, 2, "optional");
-  await expect(card).toHaveCount(0);
-  fixture.setAge(IDS.unreachable, "optional");
-  await fixture.publish();
-  await expect(card).toBeVisible();
-  await expect(card).toContainText("3 hosts have updates");
-  await expect(card.locator(".host-update-names .peer-value")).toHaveText(["build-one", "build-two", "offline"]);
-  await dismiss();
-  await expect(card).toHaveCount(0);
-  await page.reload();
-  await expect(card).toBeVisible();
-  await expectBadge(page, 3, "optional");
-  await dismiss();
-  await expect(card).toHaveCount(0);
-  fixture.setBuild(`${fixture.originalBuild}-reminder-fixture`);
-  await fixture.publish();
-  await expect(page.locator(".build-skew")).toBeVisible();
-  await expect(card).toBeVisible();
-  await expectBadge(page, 3, "optional");
-  // The mismatch notice deliberately remembers B forever. A later attended
-  // reply naming C must independently retire the dismissal remembered for B.
-  await fixture.observeBuildThroughFilter(fixture.localId);
-  await dismiss();
-  await expect(card).toHaveCount(0);
-  fixture.setBuild(`${fixture.originalBuild}-another-reminder-fixture`);
-  await fixture.observeBuildThroughFilter();
-  await expect(card).toBeVisible();
-  await expectBadge(page, 3, "optional");
-  await expect(page.locator(".build-skew")).toContainText(`${fixture.originalBuild}-reminder-fixture`);
-  expect(fixture.updates).toEqual([]);
-});
-
-/**
- * Banner insertion and removal move even compact local rows, despite the
- * unrelated remote host changing no displayed session detail. Freeze actual
- * listing facts to exclude sorting/status changes, and keep the pointer out
- * of the list so the menu's movement lifecycle is the only dismissal cause.
- */
-test("required banner movement retires existing compact session menus and preserves fresh openings", async ({ page, request }) => {
-  const session = await createSession(request, { title: "update-banner-anchor", invocation: "sleep 300" });
+async function prepareSessionMenu(page: Page, request: APIRequestContext) {
+  const session = await createSession(request, { title: "attention-menu-anchor", invocation: "sleep 300" });
   cleanup.push(["remove anchor session", () => cleanupSession(request, session.id)]);
-  const previous = await readPreferences(request);
-  cleanup.push(["restore density", () => patchPreferences(request, { compact: previous.compact ?? null })]);
+  const preferences = await readPreferences(request);
+  cleanup.push(["restore density", () => patchPreferences(request, { compact: preferences.compact ?? null })]);
   await patchPreferences(request, { compact: true });
   await observeFeedReaders(page);
   const fixture = await prepare(page, request);
@@ -523,8 +359,8 @@ test("required banner movement retires existing compact session menus and preser
   expect(reply.ok(), await reply.text()).toBe(true);
   const listing = await reply.json();
   const owned = listing.sessions.find((candidate: { id: string; host: number }) => candidate.id === session.id);
-  expect(owned, "the real session must exist before freezing its listing").toBeTruthy();
-  expect(owned.host, "remote update changes must not change the measured local session").toBe(fixture.localId);
+  expect(owned, "the owned session must exist before its listing is frozen").toBeTruthy();
+  expect(owned.host).toBe(fixture.localId);
   cleanup.push([
     "frozen anchor listing",
     await drainedRoute(page, (url) => url.pathname === "/api/sessions", async (route) => {
@@ -541,37 +377,321 @@ test("required banner movement retires existing compact session menus and preser
   const panel = row.locator(".session-row-menu-panel");
   const viewport = page.viewportSize()!;
   await page.mouse.move(viewport.width - 8, viewport.height - 8);
-  /** A real keyboard opening measures the row without taking a pointer hold. */
-  const open = async () => {
-    expect(await page.locator(".session-list").evaluate((node) => node.matches(":hover"))).toBe(false);
-    await toggle.focus();
-    await expect(toggle).toBeFocused();
-    await toggle.press("ArrowDown");
-    await expect(row.locator(".session-row-rename")).toBeFocused();
-    await expect(row.locator(".session-row-menu-flyout")).toHaveCSS("opacity", "1");
-    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  return {
+    fixture,
+    row,
+    toggle,
+    panel,
+    /** Keyboard opening measures this row without taking a pointer order hold. */
+    async open() {
+      expect(await page.locator(".session-list").evaluate((node) => node.matches(":hover"))).toBe(false);
+      await toggle.focus();
+      await expect(toggle).toBeFocused();
+      await toggle.press("ArrowDown");
+      await expect(row.locator(".session-row-rename")).toBeFocused();
+      await expect(row.locator(".session-row-menu-flyout")).toHaveCSS("opacity", "1");
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    },
+    /** Capture scroll, order and outer geometry beside the actual anchor coordinate. */
+    geometry: () =>
+      row.evaluate((node) => {
+        const outer = document.querySelector(".app-sidebar")!.getBoundingClientRect();
+        const box = node.getBoundingClientRect();
+        return {
+          y: box.y,
+          x: box.x,
+          width: box.width,
+          outerWidth: outer.width,
+          outerHeight: outer.height,
+          scroll: document.querySelector(".sidebar-content")!.scrollTop,
+          listScroll: document.querySelector(".session-list")!.scrollTop,
+          index: [...document.querySelectorAll(".session-row")].indexOf(node),
+        };
+      }),
   };
-  /** Capture competing movement inputs beside the actual anchor coordinate. */
-  const geometry = () =>
-    row.evaluate((node) => {
-      const sidebar = document.querySelector(".app-sidebar")!;
-      const scroll = document.querySelector(".sidebar-content")!;
-      const list = document.querySelector(".session-list")!;
-      const box = node.getBoundingClientRect();
-      const outer = sidebar.getBoundingClientRect();
-      return {
-        y: box.y,
-        x: box.x,
-        width: box.width,
-        outerWidth: outer.width,
-        outerHeight: outer.height,
-        scroll: scroll.scrollTop,
-        listScroll: list.scrollTop,
-        index: [...document.querySelectorAll(".session-row")].indexOf(node),
-      };
+}
+
+/** Distinct classifications must coexist; opening one never changes the host filter. */
+test("attention groups problems, work and updates and opens the exact host", async ({ page, request }) => {
+  const fixture = await prepare(page, request);
+  const list = page.locator(".host-attention-list");
+  const rows = list.locator(".host-attention-row");
+  await expect(rows).toHaveCount(4);
+  expect(await rows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-attention-host-id"))))
+    .toEqual([IDS.unreachable, IDS.busy, IDS.one, IDS.two].map(String));
+  await expect(list).toContainText("4 hosts need attention");
+  await expect(attentionRow(page, IDS.unreachable)).toHaveAttribute("data-attention-kind", "problem");
+  await expect(attentionRow(page, IDS.unreachable)).toContainText("Unreachable, retrying");
+  await expect(attentionRow(page, IDS.unreachable).getByRole("button", { name: "Details", exact: true })).toBeVisible();
+  await expect(attentionRow(page, IDS.busy)).toHaveAttribute("data-attention-kind", "working");
+  await expect(attentionRow(page, IDS.busy)).toContainText("Setting up");
+  await expect(attentionRow(page, IDS.busy).getByRole("button", { name: /^(Details|Update)$/ })).toHaveCount(0);
+  await expect(attentionRow(page, IDS.busy).getByRole("progressbar")).toHaveAttribute("aria-valuemax", "3");
+  await expect(attentionRow(page, IDS.one)).toHaveAttribute("data-attention-kind", "update");
+  await expect(attentionRow(page, IDS.one)).toHaveAttribute("data-update-kind", "optional");
+  for (const id of [fixture.localId, IDS.current, IDS.newer]) await expect(attentionRow(page, id)).toHaveCount(0);
+  await expect(page.locator(".host-update-banner, .host-update-card")).toHaveCount(0);
+  await expectBadge(page, 2, "optional");
+  await expect(page.locator(".host-rail-all")).toHaveAttribute("aria-pressed", "true");
+  await attentionRow(page, IDS.unreachable).getByRole("button", { name: "Details", exact: true }).click();
+  await expect(page.locator(".hosts-panel-toggle")).toHaveAttribute("aria-pressed", "true");
+  await expect(list).toHaveCount(0);
+  const target = page.locator(`[data-host-id="${IDS.unreachable}"] .host-row-menu`);
+  await expect(target).toBeFocused();
+  await expect(target).toBeInViewport();
+  await expect(page.locator(".host-rail-all")).toHaveAttribute("aria-pressed", "true");
+  await showSessionsPanel(page);
+  await attentionRow(page, IDS.two).getByText("build-two", { exact: true }).click();
+  await expect(page.locator(`[data-host-id="${IDS.two}"] .host-row-menu`)).toBeFocused();
+  expect(fixture.updates).toEqual([]);
+});
+
+/**
+ * Scrolling a whole expanded host with nearest can leave its focused header
+ * above the viewport when the row spans both edges. Preserve that exact
+ * geometry across the Sessions handoff, rather than testing a short row that
+ * either scrolling target would reveal correctly.
+ */
+test("attention opens the menu header of an expanded host spanning the viewport", async ({ page, request }) => {
+  await page.setViewportSize({ width: 1024, height: 420 });
+  const fixture = await prepare(page, request);
+  const selected = page.locator('.session-row[data-session-selected="true"]');
+  await expect(selected).toHaveCount(1);
+  const selectedId = await selected.getAttribute("data-session-id");
+  const reply = await request.get("/api/sessions");
+  expect(reply.ok(), await reply.text()).toBe(true);
+  const listing = await reply.json();
+  const template = listing.sessions.find((session: { id: string }) => session.id === selectedId);
+  expect(template, "the selected session must be real before adding display-only filler").toBeTruthy();
+  expect(selectedId, "filler identities need the real host-entry prefix").toContain(":");
+  const prefix = selectedId!.slice(0, selectedId!.indexOf(":"));
+  // Both modes use the same content scroller. Without enough ordinary session
+  // rows, concealing management would clamp its offset to zero and erase the
+  // regression premise. These valid count-only rows are never opened or acted on.
+  listing.sessions.push(...Array.from({ length: 48 }, (_, index) => ({
+    ...template,
+    id: `${prefix}:${randomUUID()}`,
+    title: `attention-scroll-filler-${index}`,
+    created_at: 0,
+    last_activity_at: 0,
+    seen_activity_at: 0,
+    pinned: false,
+    notifications: [],
+    notifications_read_through: 0,
+  })));
+  listing.total = listing.sessions.length;
+  listing.matching = listing.sessions.length;
+  cleanup.push([
+    "tall-row scroll budget",
+    await drainedRoute(page, (url) => url.pathname === "/api/sessions", async (route) => {
+      await route.fulfill({ headers: { "x-farhelm-build": fixture.originalBuild }, json: listing });
+    }),
+  ]);
+  cleanup.push([
+    "expanded host progress",
+    await drainedRoute(page, (url) => url.pathname === `/api/hosts/${IDS.busy}/provisioning`, async (route) => {
+      expect(route.request().method()).toBe("GET");
+      await route.fulfill({
+        headers: { "x-farhelm-build": fixture.originalBuild },
+        json: {
+          host_id: IDS.busy,
+          run_id: `busy-${IDS.busy}`,
+          operation: "add",
+          status: "running",
+          steps: Array.from({ length: 40 }, (_, index) => ({
+            step: `tall-step-${index}`,
+            name: `host setup diagnostic step ${index + 1}`,
+            status: index === 0 ? "running" : "pending",
+          })),
+          message: null,
+        },
+      });
+    }),
+  ]);
+  await fixture.publish();
+  await expect(page.locator(".session-row")).toHaveCount(listing.sessions.length);
+  await expect(page.locator(`[data-session-id="${selectedId}"]`)).toHaveAttribute("data-session-selected", "true");
+  await showHostsPanel(page);
+  await page.locator(".host-details-toggle").check();
+  const row = page.locator(`[data-host-id="${IDS.busy}"]`);
+  const steps = row.locator(".provisioning-step");
+  await expect(steps).toHaveCount(40);
+  await steps.nth(19).scrollIntoViewIfNeeded();
+  const before = await row.evaluate((node) => {
+    const viewport = document.querySelector(".sidebar-content")!;
+    const port = viewport.getBoundingClientRect();
+    const bounds = node.getBoundingClientRect();
+    const menu = node.querySelector(".host-row-main .host-row-menu")!.getBoundingClientRect();
+    return {
+      tall: bounds.height > port.height,
+      above: bounds.top < port.top,
+      below: bounds.bottom > port.bottom,
+      menuAbove: menu.bottom < port.top,
+      scroll: viewport.scrollTop,
+    };
+  });
+  expect(before, "the expanded host must straddle the viewport with its menu offscreen").toMatchObject({
+    tall: true,
+    above: true,
+    below: true,
+    menuAbove: true,
+  });
+  expect(before.scroll).toBeGreaterThan(0);
+  await showSessionsPanel(page);
+  await expect.poll(() => page.locator(".sidebar-content").evaluate((node) => node.scrollTop), {
+    message: "the ordinary session list must preserve the management scroll offset",
+  }).toBe(before.scroll);
+  const witness = await page.evaluateHandle((host) => {
+    const panel = document.querySelector<HTMLElement>(".hosts-panel")!;
+    const observed = { seen: false, tall: false, above: false, below: false, menuAbove: false };
+    // Mutation delivery precedes the next animation frame. This read-only
+    // witness captures the revealed layout before the handoff's focus/scroll,
+    // so a mode switch that accidentally resets scroll cannot make the test pass.
+    const observer = new MutationObserver(() => {
+      if (panel.dataset.panelVisible !== "true") return;
+      const target = panel.querySelector(`[data-host-id="${host}"]`)!;
+      const bounds = target.getBoundingClientRect();
+      const port = document.querySelector(".sidebar-content")!.getBoundingClientRect();
+      const menu = target.querySelector(".host-row-main .host-row-menu")!.getBoundingClientRect();
+      Object.assign(observed, {
+        seen: true,
+        tall: bounds.height > port.height,
+        above: bounds.top < port.top,
+        below: bounds.bottom > port.bottom,
+        menuAbove: menu.bottom < port.top,
+      });
+      observer.disconnect();
     });
-  for (const age of ["required", "optional"] as const) {
-    await waitForFeedReadersSettled(page);
+    observer.observe(panel, { attributes: true, attributeFilter: ["data-panel-visible"] });
+    return { observed, disconnect: () => observer.disconnect() };
+  }, IDS.busy);
+  try {
+    await attentionRow(page, IDS.busy).locator(".host-attention-name").click();
+    await expect.poll(() => witness.evaluate(({ observed }) => observed), {
+      message: "the visible-transition witness must prove the pre-scroll straddling premise",
+    }).toEqual({ seen: true, tall: true, above: true, below: true, menuAbove: true });
+    const menu = row.locator(".host-row-main .host-row-menu");
+    await expect(menu).toBeFocused();
+    await expect(menu).toBeInViewport();
+    await expect(page.locator(`[data-session-id="${selectedId}"]`)).toHaveAttribute("data-session-selected", "true");
+  } finally {
+    await witness.evaluate(({ disconnect }) => disconnect());
+    await witness.dispose();
+  }
+  expect(fixture.updates).toEqual([]);
+});
+
+/** A batch includes every listed Update, even when required and optional coexist. */
+test("Update all includes required and optional rows but no other attention", async ({ page, request }) => {
+  const fixture = await prepare(page, request);
+  fixture.setAge(IDS.one, "required");
+  fixture.setAge(IDS.busy, "unreachable");
+  await fixture.publish();
+  const list = page.locator(".host-attention-list");
+  await expectBadge(page, 2, "required");
+  await expect(attentionRow(page, IDS.one)).toHaveAttribute("data-update-kind", "required");
+  await expect(attentionRow(page, IDS.one)).toContainText(/sessions.*unreachable.*updated/i);
+  await expect(attentionRow(page, IDS.two)).toHaveAttribute("data-update-kind", "optional");
+  await expect(attentionRow(page, IDS.busy)).toHaveAttribute("data-attention-kind", "working");
+  await list.getByRole("button", { name: "Update all", exact: true }).click();
+  await expect.poll(() => fixture.updates.map((sent) => sent.id).sort()).toEqual([IDS.one, IDS.two]);
+  expect(fixture.updates).toHaveLength(2);
+  expect(fixture.updates.every((sent) => sent.method === "POST" && sent.body === null)).toBe(true);
+  for (const id of [IDS.one, IDS.two]) {
+    await expect(page.locator(`[data-host-id="${id}"] .host-update-pending`)).toBeAttached();
+  }
+});
+
+/** A single Update remains directly actionable rather than offering an oversized batch. */
+test("one listed update uses its own Update action", async ({ page, request }) => {
+  const fixture = await prepare(page, request);
+  fixture.setAge(IDS.two, "current");
+  await fixture.publish();
+  const list = page.locator(".host-attention-list");
+  await expect(list.getByRole("button", { name: "Update all", exact: true })).toHaveCount(0);
+  await attentionRow(page, IDS.one).getByRole("button", { name: "Update", exact: true }).click();
+  await expect.poll(() => fixture.updates).toEqual([{ id: IDS.one, method: "POST", body: null }]);
+});
+
+/** Dismissal remembers update identities, while required, working and problem rows persist. */
+test("optional dismissal leaves other attention visible and revives only for new updates", async ({ page, request }) => {
+  const fixture = await prepare(page, request);
+  const list = page.locator(".host-attention-list");
+  const dismiss = () => list.getByRole("button", { name: "Dismiss optional host updates", exact: true }).click();
+  await dismiss();
+  await expect(list.locator('[data-attention-kind="update"]')).toHaveCount(0);
+  await expect(attentionRow(page, IDS.unreachable)).toBeVisible();
+  await expect(attentionRow(page, IDS.busy)).toBeVisible();
+  await expectBadge(page, 2, "optional");
+  fixture.setAge(IDS.one, "required");
+  await fixture.publish();
+  await expect(attentionRow(page, IDS.one)).toHaveAttribute("data-update-kind", "required");
+  await expect(attentionRow(page, IDS.two)).toHaveCount(0);
+  fixture.setAge(IDS.one, "optional");
+  fixture.setAge(IDS.unreachable, "current");
+  fixture.setAge(IDS.busy, "current");
+  fixture.setBusy(IDS.busy, false);
+  await fixture.publish();
+  await expect(list).toHaveCount(0);
+  fixture.setAge(IDS.two, "current");
+  await fixture.publish();
+  await expectBadge(page, 1, "optional");
+  fixture.setAge(IDS.two, "optional");
+  await fixture.publish();
+  await expect(list).toHaveCount(0);
+  fixture.setAge(IDS.unreachable, "optional");
+  await fixture.publish();
+  await expect(list.locator('[data-attention-kind="update"]')).toHaveCount(3);
+  await dismiss();
+  await expect(list).toHaveCount(0);
+  await page.reload();
+  await expect(list.locator('[data-attention-kind="update"]')).toHaveCount(3);
+  await dismiss();
+  await expect(list).toHaveCount(0);
+  fixture.setBuild(`${fixture.originalBuild}-attention-fixture`);
+  await fixture.publish();
+  await expect(page.locator(".build-skew")).toBeVisible();
+  await expect(list.locator('[data-attention-kind="update"]')).toHaveCount(3);
+  await fixture.observeBuildThroughFilter(fixture.localId);
+  await dismiss();
+  await expect(list).toHaveCount(0);
+  fixture.setBuild(`${fixture.originalBuild}-another-attention-fixture`);
+  await fixture.observeBuildThroughFilter();
+  await expect(list.locator('[data-attention-kind="update"]')).toHaveCount(3);
+  await expect(page.locator(".build-skew")).toContainText(`${fixture.originalBuild}-attention-fixture`);
+  expect(fixture.updates).toEqual([]);
+});
+
+/** Polling work must not invalidate a session menu measured against the same layout. */
+test("progress-only publications preserve an open session menu", async ({ page, request }) => {
+  const { fixture, open, geometry, panel, toggle } = await prepareSessionMenu(page, request);
+  const progress = attentionRow(page, IDS.busy).getByRole("progressbar");
+  await expect(progress).toHaveAttribute("aria-valuenow", "0");
+  await expect(progress).toHaveAttribute("aria-valuemax", "3");
+  await open();
+  const before = await geometry();
+  fixture.setCompleted(IDS.busy, 1);
+  await fixture.publish();
+  await expect(progress).toHaveAttribute("aria-valuenow", "1");
+  await waitForFeedReadersSettled(page);
+  expect(await geometry(), "a progress-only update must leave the anchor unchanged").toEqual(before);
+  await expect(panel).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+});
+
+/** Real insertion/removal retires old openings, without borrowing a sort or scroll change. */
+test("attention insertion and removal retire existing compact session menus", async ({ page, request }) => {
+  const { fixture, open, geometry, panel, toggle } = await prepareSessionMenu(page, request);
+  fixture.setAge(IDS.two, "current");
+  fixture.setAge(IDS.unreachable, "current");
+  fixture.setAge(IDS.busy, "current");
+  fixture.setBusy(IDS.busy, false);
+  await fixture.publish();
+  await expect(page.locator(".host-attention-row")).toHaveCount(1);
+  await waitForFeedReadersSettled(page);
+  for (const age of ["current", "optional"] as const) {
     await open();
     const before = await geometry();
     expect(before.scroll).toBe(0);
@@ -579,16 +699,14 @@ test("required banner movement retires existing compact session menus and preser
     fixture.setAge(IDS.one, age);
     await fixture.publish();
     await waitForFeedReadersSettled(page);
-    await expect(page.locator(".host-update-banner")).toHaveCount(age === "required" ? 1 : 0);
+    await expect(page.locator(".host-attention-list")).toHaveCount(age === "current" ? 0 : 1);
     const after = await geometry();
-    expect(after.y, "the banner must actually move this row").not.toBe(before.y);
-    expect({ ...after, y: before.y }, "no competing scroll, row order or outer resize may explain dismissal").toEqual(
+    expect(after.y, "the attention region must actually move this row").not.toBe(before.y);
+    expect({ ...after, y: before.y }, "no competing scroll, order or outer resize may explain dismissal").toEqual(
       before,
     );
     await expect(panel).toHaveCount(0);
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    // A fresh menu must survive the completed publication and a later host
-    // read with identical prompt content; deferred reports cannot borrow it.
     await open();
     await fixture.publish();
     await waitForFeedReadersSettled(page);
@@ -600,102 +718,70 @@ test("required banner movement retires existing compact session menus and preser
   expect(fixture.updates).toEqual([]);
 });
 
-/**
- * Several valid maximum-length aliases can exhaust a short window. Names
- * must scroll through a real Tab stop while fixed actions and the session
- * list retain usable space; merely rendering the buttons is insufficient.
- */
-test("long update names scroll in a short narrow sidebar without hiding actions", async ({ page, request }, info) => {
+/** A bounded host scroller must preserve ordinary session access in both palettes. */
+test("many attention rows scroll above usable sessions in a short narrow sidebar", async ({ page, request }, info) => {
   const fixture = await prepare(page, request);
-  const ids = [IDS.one, IDS.two, IDS.unreachable, IDS.newer, 9417, 9418];
-  const names = ids.map((id) => `host-${id}-` + "long-alias-".repeat(6)).map((name) => name.slice(0, 64));
-  expect(names.every((name) => name.length === 64), "aliases exercise the supported 64-character maximum").toBe(true);
+  const ids = [IDS.one, IDS.two, IDS.unreachable, IDS.newer, ...Array.from({ length: 8 }, (_, i) => 9417 + i)];
+  const names = ids.map((id) => (`host-${id}-` + "long-alias-".repeat(6)).slice(0, 64));
+  expect(names.every((name) => name.length === 64), "aliases exercise their supported maximum").toBe(true);
+  fixture.setAge(IDS.busy, "current");
+  fixture.setBusy(IDS.busy, false);
   for (const [index, id] of ids.entries()) {
     fixture.setName(id, names[index]);
     fixture.setAge(id, "optional");
   }
   await fixture.publish();
-  const card = page.locator(".host-update-card");
-  await expect(card.locator(".host-update-names .peer-value")).toHaveText(names);
-  await expectBadge(page, ids.length, "optional");
+  await expect(page.locator(".host-attention-row")).toHaveCount(ids.length);
   await page.setViewportSize({ width: 1024, height: 420 });
   await narrowSidebar(page);
-  await expectReminderFits(page, card);
-  const body = card.locator(".host-update-body");
-  await expectKeyboardScroll(
-    page,
-    card.getByRole("button", { name: "Dismiss host update reminder", exact: true }),
-    body,
-  );
-  await page.keyboard.press("End");
-  await expect.poll(() => body.evaluate((node) => node.scrollTop + node.clientHeight >= node.scrollHeight - 1)).toBe(
-    true,
-  );
-  const last = (await card.locator(".host-update-names .peer-value").last().boundingBox())!;
-  const port = (await body.boundingBox())!;
-  expect(last.y + last.height, "keyboard scrolling must reveal the last listed host").toBeLessThanOrEqual(
-    port.y + port.height + 1,
-  );
-  await expectSessionAccess(page, request, fixture.localId);
-  await expectReminderFits(page, card);
-  await expectCardPlacement(page, card);
-  await info.attach("long-update-names-short-sidebar", {
-    body: await page.locator(".app-sidebar").screenshot(),
-    contentType: "image/png",
-  });
-  await card.getByRole("button", { name: "Show hosts", exact: true }).click();
-  await expect(page.locator(".hosts-panel-toggle")).toHaveAttribute("aria-pressed", "true");
-  expect(fixture.updates).toEqual([]);
-});
-
-/**
- * A required update takes priority over optional advice and has no dismissal.
- * Its batch must exclude optional hosts even though the toggle counts both.
- */
-test("required banner replaces optional advice and updates only required hosts", async ({ page, request }, info) => {
-  const fixture = await prepare(page, request);
-  fixture.setAge(IDS.one, "required");
-  await fixture.publish();
-  const banner = page.locator(".host-update-banner");
-  await expectBadge(page, 2, "required");
-  await expect(banner).toBeVisible();
-  await expect(banner).toContainText("build-one must be updated before you can use it");
-  await expect(banner).toContainText(/older protocol/);
-  await expect(banner).toContainText(/unreachable/);
-  await expect(banner.getByRole("button")).toHaveCount(2);
-  await expect(banner.getByRole("button", { name: "↑ Update now", exact: true })).toBeVisible();
-  await expect(page.locator(".host-update-card")).toHaveCount(0);
-  await narrowSidebar(page);
-  await expectReminderFits(page, banner);
-  await info.attach("required-reminder-minimum-sidebar", {
-    body: await page.locator(".app-sidebar").screenshot(),
-    contentType: "image/png",
-  });
-  await page.keyboard.press("Escape");
-  await expect(banner).toBeVisible();
-  await banner.getByRole("button", { name: "Show hosts", exact: true }).click();
-  await expect(page.locator(".hosts-panel-toggle")).toHaveAttribute("aria-pressed", "true");
-  await expect(banner).toHaveCount(0);
-  await expect(page.locator(".host-update-card")).toHaveCount(0);
-  await showSessionsPanel(page);
-  await expect(banner).toBeVisible();
-  // Resolution restores optional advice without requiring a page restart.
-  fixture.setAge(IDS.one, "current");
-  await fixture.publish();
-  await expect(banner).toHaveCount(0);
-  await expect(page.locator(".host-update-card")).toContainText("1 host has an update");
-  await expectBadge(page, 1, "optional");
-  fixture.setAge(IDS.one, "required");
-  fixture.setAge(IDS.unreachable, "required");
-  await fixture.publish();
-  await expectBadge(page, 3, "required");
-  await expect(banner).toContainText("2 hosts must be updated before you can use them");
-  await expect(banner.getByRole("button")).toHaveCount(2);
-  await banner.getByRole("button", { name: "↑ Update all two", exact: true }).click();
-  await expect.poll(() => fixture.updates.map((sent) => sent.id).sort()).toEqual([IDS.one, IDS.unreachable]);
-  for (const id of [IDS.one, IDS.unreachable]) {
-    await expect(page.locator(`[data-host-id="${id}"] .host-update-pending`)).toBeAttached();
+  const list = page.locator(".host-attention-list");
+  const body = list.locator(".host-attention-body");
+  for (const palette of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: palette });
+    await expect(page.locator("html")).toHaveAttribute("data-appearance", palette);
+    await expectAttentionFits(page);
+    const fixed = (await list.boundingBox())!;
+    await expectKeyboardScroll(
+      page,
+      list.getByRole("button", { name: "Dismiss optional host updates", exact: true }),
+      body,
+    );
+    await page.keyboard.press("End");
+    await expect.poll(() => body.evaluate((node) => node.scrollTop + node.clientHeight >= node.scrollHeight - 1)).toBe(
+      true,
+    );
+    const last = (await attentionRow(page, ids.at(-1)!).boundingBox())!;
+    const port = (await body.boundingBox())!;
+    expect(last.y + last.height, "keyboard scrolling must expose the last host row").toBeLessThanOrEqual(
+      port.y + port.height + 1,
+    );
+    await expectSessionAccess(page, request, fixture.localId);
+    expect((await list.boundingBox())!.y, "session scrolling cannot carry attention out of view").toBe(fixed.y);
+    await expectAttentionFits(page);
+    await info.attach(`attention-short-sidebar-${palette}`, {
+      body: await page.locator(".app-sidebar").screenshot(),
+      contentType: "image/png",
+    });
+    // Restore the scroll premise before checking the next palette's Tab path.
+    await body.focus();
+    await page.keyboard.press("Home");
+    await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBe(0);
   }
-  expect(fixture.updates).toHaveLength(2);
-  expect(fixture.updates.every((sent) => sent.method === "POST" && sent.body === null)).toBe(true);
+  // The last host cannot fit in this short management panel without scrolling.
+  // Opening from its attention identity must perform that handoff itself.
+  const lastHost = ids.at(-1)!;
+  await attentionRow(page, lastHost).locator(".host-attention-name").click();
+  const target = page.locator(`[data-host-id="${lastHost}"] .host-row-menu`);
+  await expect(target).toBeFocused();
+  await expect(target).toBeInViewport();
+  expect(
+    await target.evaluate((node) => {
+      for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+        if (parent.scrollTop > 0) return true;
+      }
+      return false;
+    }),
+    "opening the last host must scroll its management row into view",
+  ).toBe(true);
+  expect(fixture.updates).toEqual([]);
 });

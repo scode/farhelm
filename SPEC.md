@@ -139,8 +139,8 @@ the same failed setup run. Hosts never opens by itself. The Hosts header's `Upda
 Update request for each remote host whose individual Update action is available at the click. A host already busy with
 setup or another run is skipped rather than queued for a later update; the local host is excluded. Each remote host
 keeps its own validation, progress, and result, so one failure does not hide or delay the others. Having an available
-Update action does not itself mean the host needs an update: the rail's update badge and the session-list update prompts
-require a compatible older build or a lower protocol, as well as an available remote Update action.
+Update action does not itself mean the host needs an update: the rail's update badge and the attention list's Update
+rows require a compatible older build or a lower protocol, as well as an available remote Update action.
 
 **Update remote hosts automatically** in Settings is off by default for new and existing installations. While on, the
 helm starts that same authorized Update for each host with an update by the badge's test, including required protocol
@@ -149,9 +149,9 @@ hosts and newer builds are excluded; busy hosts are reconsidered when their work
 ordinary Update progress and failure in Hosts. A failed automatic attempt is not retried until that host's connection
 incarnation changes after failure or the helm restarts; switching the preference off and on does not clear this memory.
 A planning refusal starts no run: the helm logs the reason and remembers that failed attempt under the same no-retry
-rule. The badge and prompt remain, so a manual Update can show the refusal. There is no separate automatic failure
-surface. Turning the switch off prevents new automatic starts, including planning still in flight; it does not cancel an
-accepted run.
+rule. The badge remains, and a manual Update from the host menu can show the refusal. There is no separate automatic
+failure surface. Turning the switch off prevents new automatic starts, including planning still in flight; it does not
+cancel an accepted run.
 
 V1 provisioning targets any Linux host with a usable systemd user manager, on the two architectures cross-compiled
 supervisor binaries exist for. The distribution is not a requirement — nothing provisioning does is
@@ -1750,6 +1750,10 @@ boundary, including hyperlinks to filenames containing spaces. Web hyperlinks re
 
 ### Session list
 
+When hosts need attention, a compact host list sits below the app bar and above the session list's title and status
+filter. It stays visible while sessions scroll; its own bounded row region scrolls when needed. It is absent when
+nothing needs attention and while Hosts is open.
+
 The chosen order is the list's title: **Recently active**, **Newest created** or **Title A–Z**, with a menu offering
 those orders and **Compact**. Trash with its count, Templates and New are compact icon buttons beside the title; their
 hover text and accessible names explain the actions, and New remains the sidebar's one filled control.
@@ -1776,14 +1780,15 @@ in local storage, independently of the helm; a fresh device starts collapsed. To
 Choosing a host sends a server-side query immediately and is not persisted, while All widens it again. Status, sort and
 the selected session remain unchanged. Unavailable hosts retain their last-known sessions; a removed selected host
 remains explicitly selected and unavailable until another host or All is chosen. The **Hosts** control above Settings
-and Help swaps session content for host management. Sessions is shown initially; opening or closing Hosts keeps the
-current query, sort, selected session and details choice. The control keeps focus and exposes its pressed and expanded
-state. All or a host avatar returns to Sessions, as does an accepted quick-switcher pick or New handoff; a refused
-handoff leaves the panel as it was. Host reading, session reading, sounds and in-flight host work continue while their
-ordinary content is concealed. Rail menus and host dialogs remain available over Sessions. The list can be ordered
-independently by most recent activity, by creation time, or by title; the order someone picks is remembered by the helm
-as one preference shared by every client, together with the last-selected session, visit history and compact-row choice,
-and most recent activity is what a client shows until someone picks otherwise. The same shared preference row carries
+and Help swaps session content for complete host management; hosts needing attention remain visible in the compact list
+above sessions while management is closed. Sessions is shown initially; opening or closing Hosts keeps the current
+query, sort, selected session and details choice. The control keeps focus and exposes its pressed and expanded state.
+All or a host avatar returns to Sessions, as does an accepted quick-switcher pick or New handoff; a refused handoff
+leaves the panel as it was. Host reading, session reading, sounds and in-flight host work continue while their ordinary
+content is concealed. Rail menus and host dialogs remain available over Sessions. The list can be ordered independently
+by most recent activity, by creation time, or by title; the order someone picks is remembered by the helm as one
+preference shared by every client, together with the last-selected session, visit history and compact-row choice, and
+most recent activity is what a client shows until someone picks otherwise. The same shared preference row carries
 terminal web-link click ownership, the quick-launch template name and number-key bindings, the session-confirmation
 opt-out, the quick-launch naming choice, terminal-frame coloring, the desktop download-opening types, automatic
 remote-host updates, and whether host setup or host removal confirmation should be skipped after an explicit permanent
@@ -2051,19 +2056,34 @@ knowledge (which survives helm restarts), with a neutral cause mark such as `Wai
 `Host needs update`, rather than vanishing. Compact rows carry the same cause in accessible text and hover help.
 
 The Hosts control at the foot of the rail carries an `↑` whenever any rail avatar has an available-update badge. It is
-red when any update is required, amber otherwise; its accessible name and hover help give the number of hosts. While
-Hosts is closed and only optional updates are available, a card at the bottom of the session list points toward that
-control, names the hosts, and offers **Update all now**, **Show hosts**, and a close control. Update all now sends the
-ordinary authorized Update request for exactly the named hosts, independently; Show hosts opens management. Closing the
-card leaves the badge and hides the card until a host outside the dismissed set gains an update or the helm build
-changes. This dismissal lives only in interface memory, so reloading shows the card again.
+red when any update is required, amber otherwise; its accessible name and hover help give the number of hosts.
 
-When any host requires an update, a danger-toned banner at the top of the session list replaces that card. It names a
-single host or gives the count, explains that an older supervisor protocol makes its sessions unreachable, and offers
-**Update now** (or **Update all three**, with the count spelled out through nine) and **Show hosts**. It cannot be
-dismissed and updates exactly the required hosts. Optional updates return to the card once none is required. Neither
-surface shows while Hosts is open. These prompts use the same available-update test as the rail; up-to-date, newer,
-local, busy and not-yet-loaded hosts do not contribute.
+The attention list above sessions has one row per host, with its rail mark and short name, its state, and the action
+that state offers. Live setup, update or uninstall progress takes precedence over a problem, which takes precedence over
+an available update. Working rows say **Setting up**, **Updating** or **Uninstalling** and show a progress bar when a
+step count is available; they have no action button. A connection interruption during that work does not replace its
+progress with a problem. Problems appear first, then working hosts, then updates, in rail order within each group.
+
+Problem rows offer **Details**: Unreachable (worded **Unreachable, retrying**), Identity mismatch, Identity unverified,
+Duplicate, Retired, Unrecognized, a protocol skew without an available Update or with the host's higher protocol, a
+Tensorlake resume or tunnel failure, or an unacknowledged setup or Update warning. That last case reads **Setup or
+update needs attention**. Without another warning, tunnel failure or live work, Connecting, a connected current host, a
+usable connected host running a newer build, and an ordinarily suspended Tensorlake host do not need a row. A host
+leaves when its condition clears. **Details**, or choosing a row outside its action button, opens Hosts with that host's
+row in view and its menu button focused, without changing the session filter. This uses the existing acknowledgement of
+warnings when Hosts opens; Hosts never opens by itself.
+
+Update rows use the rail's available-update test and offer **Update** for that host. Required updates say that sessions
+on the host stay unreachable until it is updated. The header reads **N hosts need attention** and offers **Update all**
+only when more than one displayed row offers Update; it sends the ordinary authorized Update request for exactly those
+displayed Update hosts, independently. The broader **Update all** inside Hosts still considers every remote host whose
+individual Update action is available. These actions retain their existing confirmations and refusals.
+
+A close control dismisses only the optional Update rows; required updates, problems and working hosts cannot be
+dismissed. The dismissal leaves the rail badges and hides those reminders until a host outside the dismissed update set
+gains an update or the helm build changes. It lives only in interface memory, so reloading shows optional reminders
+again. If no undismissed host needs attention, the list disappears. This list replaces the required-update banner and
+optional-update card.
 
 Lifecycle operations against an unreachable host are refused with a clear error; nothing queues for later delivery in
 v1. Such a session shows one calm accent card naming the cause, with the helm's remedy and smaller diagnostics beneath

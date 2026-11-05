@@ -374,11 +374,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   value as the default. Today the only per-host override is `farhelm helm checkout-config set-root --host <id>`, which
   takes a numeric host ID that nothing shows the user.
 
-- **Always show a host list for hosts needing attention.** While hosts are installing or updating it is hard to find
-  where to look; today you must click the separate host-list icon. Restore an always-present host list at the top,
-  populated with any host that currently has a problem, needs an update, or is updating, so nothing needing the user's
-  attention is hidden. Plan: `plans/queue/host-attention-list.md`.
-
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
