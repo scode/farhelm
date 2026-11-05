@@ -6047,6 +6047,10 @@ unavailable note for that exact pending target and connection token until the di
 launch or checkout-preview authority, and retires on a changed token, target, or settled state, so it cannot hide a
 later connection failure.
 
+The Suspend question uses the shared framed-dialog header, scroll body and footer as direct siblings; its existing
+lifecycle callback still owns acceptance and dispatch. Dismissal releases that modal before returning focus to the
+host's control. Sandbox metadata reuses the ordinary `host-detail` style rather than a separate type scale.
+
 The remote `internal stdio` proxy has no input deadline by default. Only Tensorlake's steady-state SSH command opts in
 with `--stdin-idle-limit-secs 120`, after probing that executable's `internal stdio --help` for the advertised option.
 The probe's stdout is captured, not forwarded into the protocol. A helper without the option receives the legacy

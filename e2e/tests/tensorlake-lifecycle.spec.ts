@@ -61,7 +61,7 @@ async function fleet(
             state: publishedState ?? (suspended
               ? { phase: "suspended", observed_at: Date.now(), suspended_by_farhelm_at: null, resume_failed: null }
               : runningState ?? h.state),
-            tensorlake: { sandbox: "farhelm-host-test", recipe: "test", cpus: 2, memory_gb: 4, disk_gb: 20 },
+            tensorlake: { sandbox: "farhelm-host-test", recipe: "test", size: { cpus: 2, memory_gb: 4, disk_gb: 20 } },
           }
           : h
       );
@@ -210,7 +210,7 @@ test("a suspended host has inline Resume and can suspend from its menu", async (
   await row.locator(".host-row-menu").click();
   await row.getByRole("menuitem", { name: "Suspend", exact: true }).click();
   await expect.poll(() => fixture.calls).toEqual(["resume", "suspend"]);
-  await expect(page.getByRole("dialog", { name: "Suspend host", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Suspend Sandbox test?", exact: true })).toHaveCount(0);
   await expect(row).toContainText("Suspended");
 });
 
@@ -274,7 +274,7 @@ for (
       await expect(row).toContainText("Connected");
       await row.locator(".host-row-menu").click();
       await row.getByRole("menuitem", { name: "Suspend", exact: true }).click();
-      const dialog = page.getByRole("dialog", { name: "Suspend host", exact: true });
+      const dialog = page.getByRole("dialog", { name: "Suspend Sandbox test?", exact: true });
       await expect(dialog).toContainText("continues when you resume the host");
       expect(observed, "confirmation consumed the controlled session activity").toBe(true);
       expect(fixture.calls).toEqual([]);
@@ -317,7 +317,7 @@ for (const state of ["idle", "waiting"]) {
       await row.getByRole("menuitem", { name: "Suspend", exact: true }).click();
       await expect.poll(() => fixture.calls).toEqual(["suspend"]);
       expect(observed).toBe(true);
-      await expect(page.getByRole("dialog", { name: "Suspend host", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("dialog", { name: "Suspend Sandbox test?", exact: true })).toHaveCount(0);
     } finally {
       await cleanupSession(request, session.id);
     }
@@ -353,7 +353,7 @@ test("an unreachable supervisor still offers Suspend for its running sandbox", a
   await expect(row).toContainText("Unreachable");
   await row.locator(".host-row-menu").click();
   await row.getByRole("menuitem", { name: "Suspend", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Suspend host", exact: true });
+  const dialog = page.getByRole("dialog", { name: "Suspend Sandbox test?", exact: true });
   await expect(dialog).toBeVisible();
   expect(guardRead, "Suspend checked this host's unavailable session listing").toBe(true);
   expect(fixture.calls).toEqual([]);
@@ -403,7 +403,7 @@ for (const duringRead of [false, true]) {
         await expect(row).toContainText("Unreachable");
         release();
       }
-      const dialog = page.getByRole("dialog", { name: "Suspend host", exact: true });
+      const dialog = page.getByRole("dialog", { name: "Suspend Sandbox test?", exact: true });
       await expect(dialog).toBeVisible();
       expect(fixture.calls).toEqual([]);
       await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -845,3 +845,100 @@ test("a fresh checkout resumes first and requests a new preview", async ({ page,
     await stop();
   }
 });
+
+/** Suspension consent needs the same readable frame as other host questions.
+ * Capture the real dialog and details in each palette, prove its actions are
+ * outside the scroll body, and keep every dismissal free of lifecycle calls. */
+for (const palette of ["dark", "light"] as const) {
+  test(
+    `suspend confirmation and sandbox details use the standard frame in ${palette}`,
+    async ({ page, request }, info) => {
+      await page.emulateMedia({ colorScheme: palette });
+      await page.setViewportSize({ width: 1280, height: 800 });
+      const fixture = await fleet(page, request, false);
+      const session = await createSession(request, { title: `suspend-frame-${palette}`, host: fixture.remote.id });
+      let reads = 0;
+      let bodyFailed = false;
+      const stopActivity = await drainedRoute(page, "**/api/sessions?**", async (route) => {
+        if (new URL(route.request().url()).searchParams.get("host") !== String(fixture.remote.id)) {
+          return route.continue();
+        }
+        const response = await route.fetch();
+        expect(response.ok(), "the consent fixture has a readable host listing").toBe(true);
+        const json = await response.json();
+        expect(json.sessions.some((row: any) => row.id === session.id), "the owned session participates in the guard")
+          .toBe(true);
+        json.sessions = json.sessions.map((row: any) =>
+          row.id === session.id ? { ...row, stale: false, status: { state: "unknown" } } : row
+        );
+        reads++;
+        await route.fulfill({ response, json });
+      });
+      try {
+        await page.goto("/");
+        await expect(page.locator("html")).toHaveAttribute("data-appearance", palette);
+        await openHostsPanel(page);
+        await page.getByRole("checkbox", { name: "Details", exact: true }).check();
+        const row = page.locator(`.host-row[data-host-id="${fixture.remote.id}"]`);
+        await expect(row).toContainText("Connected");
+        const details = row.locator(".host-tensorlake-detail");
+        await expect(details).toContainText("Sandbox: farhelm-host-test · Recipe: test · 2 CPUs · 4 GB memory");
+        await expect(details).toHaveCSS("font-size", "12px");
+        await expect(details).toHaveCSS("padding-left", "12px");
+        await info.attach(`sandbox-details-${palette}`, {
+          body: await page.locator(".hosts-panel").screenshot(),
+          contentType: "image/png",
+        });
+        /** Each dismissal retires its question; reopening must read activity
+         * again and install Cancel focus for that new modal opening. */
+        const openQuestion = async () => {
+          await row.locator(".host-row-menu").click();
+          await row.getByRole("menuitem", { name: "Suspend", exact: true }).click();
+          const dialog = page.getByRole("dialog", { name: "Suspend Sandbox test?", exact: true });
+          await expect(dialog).toBeVisible();
+          await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
+          return dialog;
+        };
+        const dialog = await openQuestion();
+        expect(reads, "the unknown session made the consent question necessary").toBeGreaterThan(0);
+        const header = dialog.locator(":scope > .dialog-header");
+        const body = dialog.locator(":scope > .host-settings-body");
+        const footer = dialog.locator(":scope > .dialog-footer");
+        await expect(header.getByRole("heading", { level: 2 })).toHaveText("Suspend Sandbox test?");
+        await expect(body).toContainText("continues when you resume the host");
+        await expect(body.getByRole("button")).toHaveCount(0);
+        await expect(footer.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
+        await expect(footer.getByRole("button", { name: "Suspend", exact: true })).toBeVisible();
+        const frameBox = await dialog.boundingBox();
+        const footerBox = await footer.boundingBox();
+        expect(frameBox).not.toBeNull();
+        expect(footerBox).not.toBeNull();
+        expect(footerBox!.y + footerBox!.height).toBeLessThanOrEqual(frameBox!.y + frameBox!.height + 1);
+        expect(footerBox!.y + footerBox!.height).toBeLessThanOrEqual(800);
+        await page.keyboard.press("Tab");
+        await expect(footer.getByRole("button", { name: "Suspend", exact: true })).toBeFocused();
+        await info.attach(`suspend-confirmation-${palette}`, {
+          body: await dialog.screenshot(),
+          contentType: "image/png",
+        });
+        await footer.getByRole("button", { name: "Cancel", exact: true }).click();
+        await expect(dialog).toHaveCount(0);
+        await openQuestion();
+        await page.keyboard.press("Escape");
+        await expect(dialog).toHaveCount(0);
+        await openQuestion();
+        await header.getByRole("button", { name: "Close", exact: true }).click();
+        await expect(dialog).toHaveCount(0);
+        expect(fixture.calls, "Cancel, Escape and Close never authorize suspension").toEqual([]);
+      } catch (error) {
+        bodyFailed = true;
+        throw error;
+      } finally {
+        await cleanupOwnedSteps(bodyFailed, [["activity route", stopActivity], [
+          "owned session",
+          () => cleanupSession(request, session.id),
+        ]]);
+      }
+    },
+  );
+}
