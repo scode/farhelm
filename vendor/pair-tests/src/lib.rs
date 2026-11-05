@@ -15,9 +15,9 @@ mod tests {
     use alacritty_terminal::term::{Config, Term};
     use alacritty_terminal::vte::{OSC_PAYLOAD_LIMIT, ansi};
 
-    /// Selectors and combining marks leave the printable REP base intact
-    /// through both patched crates. Cell checks alone could miss a register
-    /// that is wrong until the next REP, so each case checks both contracts.
+    /// Selectors and attached continuations keep REP's printable base;
+    /// standalone printable signs replace it. Cell checks alone could miss
+    /// a register that is wrong until REP, so each case checks both contracts.
     #[test]
     fn grapheme_continuations_keep_the_printable_rep_base() {
         use alacritty_terminal::term::cell::Flags;
@@ -30,9 +30,14 @@ mod tests {
             ("a\u{200b}\x1b[2b", Some('a'), 3, "aaa"),
             ("a\u{3164}\x1b[2b", Some('a'), 3, "aaa"),
             ("a\u{ffa0}\x1b[2b", Some('a'), 3, "aaa"),
-            ("❤\u{1161}\u{fe0f}\x1b[2b", Some('❤'), 4, "❤\u{fe0f}❤❤"),
-            ("⌚\u{11a8}\u{fe0e}\x1b[2b", Some('⌚'), 5, "⌚\u{fe0e}⌚⌚"),
-            ("❤\u{16d67}\u{fe0f}\x1b[2b", Some('❤'), 4, "❤\u{fe0f}❤❤"),
+            ("❤\u{1161}\u{fe0f}\x1b[2b", Some('❤'), 3, "❤\u{1161}❤❤"),
+            ("⌚\u{11a8}\u{fe0e}\x1b[2b", Some('⌚'), 6, "⌚\u{11a8}⌚⌚"),
+            (
+                "❤\u{16d67}\u{fe0f}\x1b[2b",
+                Some('\u{16d67}'),
+                2,
+                "❤\u{16d67}\u{16d67}\u{16d67}",
+            ),
             (
                 "\u{1100}\u{16d67}\x1b[2b",
                 Some('\u{1100}'),

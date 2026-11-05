@@ -21421,7 +21421,11 @@
   #2971, while a following selector still finds the emoji base; update the three tests that pin the drop, and the
   vendored patch file. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/terminal-text-drops.md`.
+- Execution: `complete` under the plan's 2026-11-05 Decisions: every unattached vowel or trailing sign uses ordinary
+  printing, selectors stop at retained signs, and the repeat command shares the attachment check. The repair's approved
+  ceiling is 400 physical changed lines. jj change `knpnklktroxktzmxzsprwwmknzvkxomz`, bookmark
+  `plan/terminal-text-drops/02-print-unattached-vowel-signs`;
+  [draft PR #3045](https://github.com/scode/farhelm/pull/3045/changes).
 
 ## gap-recovery-stale-input-modes-submit-pasted-command.md
 

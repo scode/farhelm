@@ -566,16 +566,28 @@ fn a_snapshot_between_base_and_selector_keeps_the_current_width_rule() {
     }
 }
 
-/// Discarded formatting input changes neither saved cells nor REP. A selector
-/// after a restore therefore sees the same base. Legacy blobs still retain
-/// their old suffixes, rather than having saved text silently reinterpreted.
+/// Snapshots preserve which input was discarded and which became a selector
+/// predecessor. Unattached V/T survive as ordinary scalars or combining marks;
+/// legacy blobs retain their suffixes without reinterpreting saved text.
 #[test]
 fn formatting_before_a_selector_is_stable_across_new_and_old_snapshots() {
-    for ignored in ['\u{200b}', '\u{3164}', '\u{ffa0}', '\u{1161}', '\u{16d67}'] {
+    for (incoming, mark, preceding, wide, column) in [
+        ('\u{200b}', None, '❤', true, 2),
+        ('\u{3164}', None, '❤', true, 2),
+        ('\u{ffa0}', None, '❤', true, 2),
+        ('\u{1161}', Some('\u{1161}'), '❤', false, 1),
+        ('\u{16d67}', None, '\u{16d67}', false, 2),
+    ] {
         let mut original = emulator(8, 3);
-        feed(&mut original, format!("❤{ignored}").as_bytes());
-        assert_eq!(original.term().grid()[Line(0)][Column(0)].zerowidth(), None);
-        assert_eq!(original.preceding_char(), Some('❤'));
+        feed(&mut original, format!("❤{incoming}").as_bytes());
+        assert_eq!(
+            original.term().grid()[Line(0)][Column(0)].zerowidth(),
+            mark.map(|c| vec![c]).as_deref()
+        );
+        if incoming == '\u{16d67}' {
+            assert_eq!(original.term().grid()[Line(0)][Column(1)].c, incoming);
+        }
+        assert_eq!(original.preceding_char(), Some(preceding));
         let mut restored = restore(&original.snapshot(MAX).unwrap().blob).emulator;
         for terminal in [&mut original, &mut restored] {
             common::feed_in(
@@ -583,12 +595,13 @@ fn formatting_before_a_selector_is_stable_across_new_and_old_snapshots() {
                 "\u{fe0f}x".as_bytes(),
                 farhelm_terminal_emulator::FeedMode::ReplaySeen,
             );
-            assert!(
+            assert_eq!(
                 terminal.term().grid()[Line(0)][Column(0)]
                     .flags
-                    .contains(Flags::WIDE_CHAR)
+                    .contains(Flags::WIDE_CHAR),
+                wide
             );
-            assert_eq!(terminal.term().grid()[Line(0)][Column(2)].c, 'x');
+            assert_eq!(terminal.term().grid()[Line(0)][Column(column)].c, 'x');
         }
         assert!(diff(&original, &restored).is_empty());
     }

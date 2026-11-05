@@ -2657,6 +2657,9 @@ Ghostty commit `c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed`
 ([target selection, lines 1939–1967](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L1939-L1967),
 [one-column input, lines 2189–2262](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L2189-L2262)).
 
+Unattached vowel or trailing signs use ordinary scalar printing, including zero-width combining storage. Selectors apply
+only to the immediately preceding stored character, so a retained sign blocks a following selector.
+
 New terminals discard the ignored-format character class before storing output, even without an emoji or selector:
 zero-width space, directional marks, embeddings and isolates, line and paragraph separators, word joiner, BOM, two
 Hangul fillers, and the remaining ranges in the vendored `emoji_ignored_format` classifier. Scrollback, snapshots and

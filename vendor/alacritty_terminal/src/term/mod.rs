@@ -1115,15 +1115,15 @@ impl<T> Term<T> {
 
     /// Farhelm patch: whether this input replaces the parser's REP character.
     ///
-    /// Selectors, combining marks and incoming V/T continue or leave the
-    /// existing cell rather than becoming the character REP prints. V/T are
-    /// excluded even when their scalar width is nonzero. Legacy snapshot
-    /// painting retains the parser's old bookkeeping.
+    /// Selectors, combining marks and attached V/T keep the existing REP
+    /// character. An unattached printable V/T becomes the REP character,
+    /// just like other scalar input. This is queried before input changes
+    /// the grid; legacy painting retains the parser's old bookkeeping.
     pub fn input_updates_rep(&self, c: char) -> bool {
         !self.emoji_width
             || (c.width() != Some(0)
                 && !emoji_ignored_format(c)
-                && !matches!(emoji_jamo_property(c), EmojiJamoProperty::V | EmojiJamoProperty::T))
+                && self.emoji_jamo_attachment_point(c).is_none())
     }
 
     /// Farhelm patch: locate the cell a selector or V/T continuation examines.
@@ -1242,25 +1242,24 @@ impl<T> Term<T> {
         self.damage.damage_line(point.line.0 as usize, point.column.0, point.column.0);
     }
 
-    /// Farhelm patch: retain V/T only where the preceding stored codepoint
-    /// permits Hangul attachment. Rejection leaves an emoji base available
-    /// for its selector; acceptance never resizes the cell or moves the cursor.
-    fn input_emoji_jamo(&mut self, incoming: char) {
-        let Some(point) = self.emoji_attachment_point() else {
-            return;
-        };
+    /// Farhelm patch: share the V/T attachment decision with pre-input REP.
+    /// Unattached input takes the ordinary scalar path; an accepted suffix
+    /// never resizes its cell or moves the cursor.
+    fn emoji_jamo_attachment_point(&self, incoming: char) -> Option<Point> {
+        use EmojiJamoProperty::*;
+        let incoming = emoji_jamo_property(incoming);
+        if !matches!(incoming, V | T) {
+            return None;
+        }
+        let point = self.emoji_attachment_point()?;
         let cell = &self.grid[point];
         let preceding = cell.zerowidth().and_then(|marks| marks.last()).copied().unwrap_or(cell.c);
-        use EmojiJamoProperty::*;
-        let attaches = match emoji_jamo_property(incoming) {
+        let attaches = match incoming {
             V => matches!(emoji_jamo_property(preceding), L | Lv | V | Prepend),
             T => matches!(emoji_jamo_property(preceding), Lv | V | Lvt | T | Prepend),
             _ => false,
         };
-        if attaches {
-            self.extra_storage.push_zerowidth(&mut self.grid[point], incoming);
-            self.damage.damage_line(point.line.0 as usize, point.column.0, point.column.0);
-        }
+        attaches.then_some(point)
     }
 
     /// Insert a linebreak at the current cursor position.
@@ -1515,12 +1514,13 @@ impl<T: EventListener> Handler for Term<T> {
         }
         // Farhelm patch: incoming V/T have contextual zero-width behavior,
         // including Kirat V inputs the scalar-width library calls printable.
-        // Decide from the saved predecessor before ordinary width dispatch.
-        if self.emoji_width
-            && matches!(emoji_jamo_property(c), EmojiJamoProperty::V | EmojiJamoProperty::T)
-        {
-            self.input_emoji_jamo(c);
-            return;
+        // Without a legal predecessor, preserve ordinary scalar printing.
+        if self.emoji_width {
+            if let Some(point) = self.emoji_jamo_attachment_point(c) {
+                self.extra_storage.push_zerowidth(&mut self.grid[point], c);
+                self.damage.damage_line(point.line.0 as usize, point.column.0, point.column.0);
+                return;
+            }
         }
 
         // Number of cells the char will occupy.
@@ -3922,27 +3922,32 @@ mod tests {
         }
     }
 
-    /// A Jamo rejected by the pairwise rules must not hide the emoji base
-    /// from its selector. Kirat V catches accidental scalar-width dispatch:
-    /// unicode-width calls it printable, while Ghostty treats it as V here.
+    /// Retained V/T block a following selector. Printable Kirat occupies its
+    /// own cell; zero-width Hangul stays in the base's suffix. Neither lets
+    /// the selector reach past the immediate stored predecessor.
     #[test]
-    fn emoji_selectors_follow_rejected_jamo() {
+    fn emoji_selectors_stop_at_unattached_jamo() {
         assert_eq!('\u{16d67}'.width(), Some(1), "the nonzero-width fixture premise");
         for (base, incoming, selector, wide, width) in [
-            ('\u{2764}', '\u{1161}', '\u{fe0f}', true, 2),
-            ('\u{2764}', '\u{16d67}', '\u{fe0f}', true, 2),
-            ('\u{231a}', '\u{11a8}', '\u{fe0e}', false, 1),
+            ('\u{2764}', '\u{1161}', '\u{fe0f}', false, 1),
+            ('\u{2764}', '\u{16d67}', '\u{fe0f}', false, 2),
+            ('\u{231a}', '\u{11a8}', '\u{fe0e}', true, 2),
         ] {
             let bytes = format!("{base}{incoming}{selector}x");
             let term = fed_term(8, 2, 0, bytes.as_bytes());
             let cell = &term.grid()[Line(0)][Column(0)];
             assert_eq!(cell.c, base, "{bytes:?}");
-            assert_eq!(cell.zerowidth(), Some([selector].as_slice()), "{bytes:?}");
+            if incoming.width() == Some(0) {
+                assert_eq!(cell.zerowidth(), Some([incoming].as_slice()), "{bytes:?}");
+            } else {
+                assert_eq!(term.grid()[Line(0)][Column(1)].c, incoming, "{bytes:?}");
+                assert_eq!(term.grid()[Line(0)][Column(1)].zerowidth(), None, "{bytes:?}");
+            }
             assert_eq!(cell.flags.contains(Flags::WIDE_CHAR), wide, "{bytes:?}");
             assert_eq!(term.grid()[Line(0)][Column(1)].flags.contains(Flags::WIDE_CHAR_SPACER), wide);
             assert_eq!(term.grid()[Line(0)][Column(width)].c, 'x', "{bytes:?}");
             assert_eq!(term.grid().cursor.point, Point::new(Line(0), Column(width + 1)));
-            assert!(!term.input_updates_rep(incoming));
+            assert_eq!(term.input_updates_rep(incoming), incoming.width() != Some(0));
         }
     }
 
@@ -3994,15 +3999,15 @@ mod tests {
         }
     }
 
-    /// Illegal V/T pairs disappear, and a combining mark is the predecessor
-    /// even when a legal Hangul base occurs earlier in the cell's suffix.
-    /// Column-zero attachment is rejected with or without a pending wrap.
+    /// Rejected V/T use ordinary scalar storage, including column zero and
+    /// pending wrap. A combining mark blocks contextual attachment even when
+    /// a legal Hangul base occurs earlier in the cell's suffix.
     #[test]
-    fn emoji_jamo_drops_illegal_and_baseless_suffixes() {
+    fn emoji_jamo_prints_illegal_and_baseless_suffixes() {
         for (bytes, marks) in [
-            ("\u{1100}\u{11a8}", ""),
-            ("\u{ac01}\u{1161}", ""),
-            ("\u{1100}\u{0301}\u{1161}", "\u{0301}"),
+            ("\u{1100}\u{11a8}", "\u{11a8}"),
+            ("\u{ac01}\u{1161}", "\u{1161}"),
+            ("\u{1100}\u{0301}\u{1161}", "\u{0301}\u{1161}"),
         ] {
             let term = fed_term(8, 2, 0, bytes.as_bytes());
             let cell = &term.grid()[Line(0)][Column(0)];
@@ -4012,16 +4017,15 @@ mod tests {
         }
         for columns in [1, 5] {
             for incoming in ['\u{1161}', '\u{11a8}', '\u{16d67}'] {
-                let term = fed_term(columns, 2, 0, incoming.to_string().as_bytes());
-                assert_eq!(term.grid().cursor.point, Point::new(Line(0), Column(0)));
-                assert_eq!(term.grid()[Line(0)][Column(0)].c, ' ');
-                assert!(term.grid()[Line(0)][Column(0)].zerowidth().is_none());
-
-                let term = fed_term(1, 2, 0, format!("x{incoming}").as_bytes());
-                assert_eq!(term.grid()[Line(0)][Column(0)].c, 'x');
-                assert!(term.grid()[Line(0)][Column(0)].zerowidth().is_none());
-                assert_eq!(term.grid().cursor.point, Point::new(Line(0), Column(0)));
-                assert!(term.grid().cursor.input_needs_wrap);
+                for prefix in ["", "a", "x\x1b[1G"] {
+                    let bytes = format!("{prefix}{incoming}");
+                    let term = fed_term(columns, 2, 0, bytes.as_bytes());
+                    let mut scalar = fed_term(columns, 2, 0, b"");
+                    scalar.set_emoji_width(false);
+                    let mut parser: ansi::Processor = ansi::Processor::new();
+                    parser.advance(&mut scalar, bytes.as_bytes());
+                    assert_eq!(term.grid(), scalar.grid(), "{columns}: {bytes:?}");
+                }
             }
         }
     }
@@ -4033,6 +4037,7 @@ mod tests {
     fn emoji_jamo_legacy_replay_keeps_scalar_behavior() {
         for incoming in ['\u{1161}', '\u{11a8}', '\u{16d67}'] {
             let mut term = fed_term(8, 2, 0, "\u{2764}".as_bytes());
+            assert_eq!(term.input_updates_rep(incoming), incoming.width() != Some(0));
             term.set_emoji_width(false);
             assert!(term.input_updates_rep(incoming));
             Handler::input(&mut term, incoming);
