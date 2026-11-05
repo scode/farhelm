@@ -12,9 +12,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
   same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.
 
-- [`stored-wrapper-breaks-new-prompt-literalness.md`](stored-wrapper-breaks-new-prompt-literalness.md) — A previously
-  stored wrapper can make a new initial prompt acquire shell meaning instead of remaining literal data.
-
 - [`selector-policy-drops-ordinary-formatting-input.md`](selector-policy-drops-ordinary-formatting-input.md) — New
   terminals discard formatting codepoints even without selectors, changing stored and copied text. Priority remains
   highest because independent consultation could not settle whether this retained-text loss is outside user-data loss.
