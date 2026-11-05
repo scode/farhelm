@@ -26,3 +26,4 @@ playwright provisioning.spec.ts a first identity learned while following: replac
 playwright provisioning.spec.ts a first identity learned while following: completion  # update-progress-step-name-late
 playwright quick-launch.spec.ts a sequence refused at its prefix leaves later sequences their own bindings  # quick-launch-body-focus-chromium
 playwright quick-launch.spec.ts typed page refusals are atomic and empty Enter leaves later bindings paired  # quick-launch-body-focus-chromium
+playwright provisioning.spec.ts expanded setup failure closes the menu below it  # expanded-setup-failure-menu-absent
