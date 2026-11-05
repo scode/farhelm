@@ -1,6 +1,8 @@
 //! The Tensorlake half of Add host. A recipe is saved before probing; the
 //! billed creation confirmation uses only Tensorlake's acknowledged setting.
 //! The general SSH setup preference never authorizes sandbox creation.
+//! While a recipe is open, its editor supplies the dialog's body and pinned
+//! footer directly; the add attempt and close guard remain owned here.
 
 use crate::hosts::settings_dialog;
 use crate::modal_dialog::{DialogActions, DialogFocus, ModalDialog};
@@ -219,7 +221,15 @@ pub(crate) fn TensorlakeAddDialog(
                     dismiss_label: "Cancel adding host", dismiss_tooltip: "Close without adding a host",
                     on_dismiss: move |_| cancel.call(()),
                 }
-                div { class: "dialog-body host-settings-body",
+                // The editor supplies body/footer siblings of its own. Keeping
+                // it outside our body is what makes its Save stay pinned.
+                if editing() {
+                    RecipeEditor { existing: None, allow_delete: false, in_add_host: true,
+                        on_saved: move |saved: farhelm_proto::tensorlake::recipes::RecipeView| { recipe.set(saved.name); editing.set(false); load.restart(); },
+                        on_cancel: move |_| editing.set(false),
+                    }
+                } else {
+                  div { class: "dialog-body host-settings-body",
                     if let Some(ProbeResponse::TensorlakeProvisionable { sandbox, resources, steps, .. }) = planned {
                         h3 { "Create Tensorlake sandbox?" }
                         p { class: "peer-value", "{crate::peer::display_peer(sandbox.raw())}" }
@@ -233,11 +243,6 @@ pub(crate) fn TensorlakeAddDialog(
                             a { href: "https://www.tensorlake.ai/pricing", target: "_blank", rel: "noopener noreferrer", "Tensorlake pricing" }
                         }
                         p { "On Usage Credits, Tensorlake suspends a sandbox after 24 hours without a connection. Farhelm never resumes it on its own." }
-                    } else if editing() {
-                        RecipeEditor { existing: None, allow_delete: false,
-                            on_saved: move |saved: farhelm_proto::tensorlake::recipes::RecipeView| { recipe.set(saved.name); editing.set(false); load.restart(); },
-                            on_cancel: move |_| editing.set(false),
-                        }
                     } else {
                         div { class: "segmented-control", role: "group", aria_label: "Host kind",
                             button { r#type: "button", aria_pressed: "false", disabled: locked, onclick: move |_| on_ssh.call(()), "SSH" }
@@ -260,7 +265,7 @@ pub(crate) fn TensorlakeAddDialog(
                                     }
                                     label { "Recipe"
                                         select { class: "add-tensorlake-recipe", value: "{recipe}", disabled: locked,
-                                            onchange: move |evt| { if evt.value() == "__new__" { editing.set(true); } else { recipe.set(evt.value()); } },
+                                            onchange: move |evt| { if evt.value() == "__new__" { error.set(None); editing.set(true); } else { recipe.set(evt.value()); } },
                                             option { value: "", disabled: true, "Choose a recipe" }
                                             for item in recipes { option { value: "{item.name}", "{item.name}" } }
                                             option { value: "__new__", "New recipe…" }
@@ -271,8 +276,7 @@ pub(crate) fn TensorlakeAddDialog(
                         }
                     }
                     if let Some(reason) = error() { p { class: "create-session-error add-host-error", role: "alert", "{crate::peer::display_peer(&reason)}" } }
-                }
-                if !editing() {
+                  }
                     crate::modal_dialog::DialogFooter { class: "host-dialog-footer",
                         DialogActions {
                             button { r#type: "button", class: "btn btn-neutral add-host-cancel", onclick: move |_| cancel.call(()), "Cancel" }

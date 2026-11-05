@@ -58,7 +58,8 @@ Under **Software**, choose one of these:
   An image containing an existing Farhelm supervisor installation is refused because it would copy another host's
   identity. You also cannot reuse a snapshot Farhelm manages for a recipe: a later rebuild would delete it.
 
-Saving a recipe does not build a snapshot or create a host.
+**Cancel** and **Save** stay at the bottom of the editor while its fields scroll. Saving a recipe does not build a
+snapshot or create a host.
 
 Saving a change from **Install packages** to **Use an existing image or snapshot** deletes the recipe's prepared
 snapshot; existing hosts keep running. Switching back needs another billed snapshot build.
@@ -109,8 +110,8 @@ recipe.
 ## Add a sandbox host
 
 Open **Add host** and choose **Tensorlake sandbox**. Enter a **Name**, which is how Farhelm shows the host, and choose a
-**Recipe**. **New recipe…** opens the same editor inside this dialog. Choose **Save** in the editor to save the recipe
-and return to the host form.
+**Recipe**. **New recipe…** opens the same editor inside this dialog, with **Cancel** and **Save** in its footer. Choose
+**Save** to save the recipe and return to the host form.
 
 Choose **Continue**, review the size, sandbox name and setup steps, then **Create sandbox**. The confirmation explains
 that the sandbox bills while running. **Create Tensorlake sandboxes without asking** in Settings → **Tensorlake** skips
@@ -161,13 +162,14 @@ needed to delete it. Agents cannot delete Tensorlake hosts.
 
 ### Sandboxes not on this helm
 
-Settings → **Tensorlake** lists **Sandboxes not on this helm** when it finds Farhelm-created sandboxes with no host or
-snapshot build on this helm. These can remain after interrupted setup, lost helm state, or creation by another helm; the
-latter are marked **from another helm**. Sandboxes you created outside Farhelm do not appear.
+Settings → **Tensorlake** lists **Sandboxes not on this helm** below your recipes. These Farhelm-created sandboxes have
+no host or snapshot build on this helm. They can remain after interrupted setup, lost helm state, or creation by another
+helm; the latter are marked **from another helm**. Sandboxes you created outside Farhelm do not appear.
 
 Nothing is deleted automatically. Check the name and state before choosing **Delete**: confirmation deletes that
-sandbox's files, sessions and snapshots too. Failed cleanup stays visible with **Retry cleanup**; **Refresh sandboxes**
-checks the list again.
+sandbox's files, sessions and snapshots too. Failed cleanup stays visible with **Retry cleanup**. **Refresh** beside the
+heading checks the list again, shows **Checking…** while it runs, and says **None found** with the time checked when the
+list is empty. The section stays visible with a saved API key, so an empty result still confirms the check.
 
 Next: [Start a session](/docs/using/start-a-session/), or [Manage hosts](/docs/using/manage-hosts/) for host settings
 and updates.

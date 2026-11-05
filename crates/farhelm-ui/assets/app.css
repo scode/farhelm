@@ -3936,6 +3936,13 @@ a:any-link,
    section's single-column flow and fit phone-width dialogs. */
 .tensorlake-recipes, .recipe-editor { display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-width: 0; }
 .tensorlake-recipes > .btn, .recipe-editor > .btn, .recipe-add-tunnel { align-self: flex-start; }
+/* Settings sections use a grid; the list's flex alignment alone cannot keep
+   this control from stretching across that grid's column. */
+.recipe-new { justify-self: start; }
+.tensorlake-orphans-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.tensorlake-orphans-heading > h4 { flex: 1; margin: 0; }
+.tensorlake-orphans-refresh { flex: 0 0 auto; font-size: 12px; padding: 5px 10px; }
+.tensorlake-orphans-status { margin: 0; }
 .recipe-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .recipe-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--bg-1); border-radius: var(--radius-sm); }
 .recipe-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
@@ -3950,6 +3957,15 @@ a:any-link,
 .recipe-row-status-muted { color: var(--fg-2); }
 .recipe-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
 .recipe-editor .checkout-root-label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* The embedded editor has its own hierarchy in either host. Settings' larger
+   group titles must not make ordinary recipe fields outweigh Size or Software. */
+.recipe-editor label.checkout-root-label > span { font-size: 13px; color: var(--fg-1); }
+.recipe-editor label.checkout-root-label > .recipe-hint { font-size: 12px; }
+.recipe-editor div.checkout-root-label > span { font-size: 14px; font-weight: 600; color: var(--fg-0); }
+.recipe-editor .recipe-editor-title,
+.app-settings-dialog[aria-label="Settings"] .recipe-editor .recipe-editor-title {
+  margin: 0; font-size: 18px; font-weight: 700; color: var(--fg-0);
+}
 .recipe-editor .host-settings-help { margin-left: 0; }
 .recipe-editor textarea { font-family: var(--font-mono); line-height: 1.5; padding: 8px 12px; resize: vertical; }
 .recipe-size { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -3973,6 +3989,15 @@ a:any-link,
 .recipe-endpoint { display: flex; flex-direction: column; gap: 6px; }
 .recipe-editor-actions { flex-wrap: wrap; }
 .recipe-editor-actions .recipe-delete { margin-right: auto; }
+/* Settings keeps Close in its own footer and mounts hidden sections. These
+   answers stay in the recipe's section so navigation hides them with it.
+   The opaque sticky surface covers fields passing behind every answer branch. */
+.recipe-editor-sticky-actions {
+  position: sticky; bottom: 0; z-index: 1;
+  padding: 12px 0; background: var(--bg-1); border-top: 1px solid var(--border-dim);
+}
+.recipe-editor-sticky-actions .templates-departure,
+.recipe-editor-footer .templates-departure { margin: 0; }
 @media (max-width: 620px) {
   .recipe-size, .recipe-source-cards { grid-template-columns: minmax(0, 1fr); }
   .recipe-tunnel { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
