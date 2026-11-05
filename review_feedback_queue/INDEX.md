@@ -20,10 +20,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   a separate Enter. The conditional Bash 5.2 route is established; whether the accepted wrong-mode recovery limit also
   accepts this consequence is ambiguous.
 
-- [`attachment-debug-trace-emits-remote-controls.md`](attachment-debug-trace-emits-remote-controls.md) — With attachment
-  debug tracing enabled, a remote tab identifier can put terminal control bytes into the operator's log display. This is
-  a conditional trust-boundary issue; no payload or runtime exploitation was attempted.
-
 - [`selector-policy-drops-ordinary-formatting-input.md`](selector-policy-drops-ordinary-formatting-input.md) — New
   terminals discard formatting codepoints even without selectors, changing stored and copied text. Priority remains
   highest because independent consultation could not settle whether this retained-text loss is outside user-data loss.
