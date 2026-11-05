@@ -44,6 +44,8 @@
 mod bell;
 mod create_form;
 mod host_picker;
+/// Page-local marks and their metadata menu, independent of the open session.
+mod marking;
 mod quick_switcher;
 mod row;
 /// Save a snapshot of the launcher without changing the draft being launched.

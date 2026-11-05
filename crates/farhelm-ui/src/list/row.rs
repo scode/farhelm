@@ -21,6 +21,7 @@ use crate::status::{StatusBadgeView, confirm_consequence, replace_consequence, s
 use crate::{LaunchHarness, Session, SessionStatus};
 
 use super::bell::{BellSlot, NotificationBell};
+use super::marking::{Gesture, clears_on_escape};
 use super::shared::{
     DeleteTarget, HostLocality, RowQuestion, RowState, SessionHostIcon, SessionHostName,
 };
@@ -863,6 +864,16 @@ std::thread_local! {
 /// point of disabling it is to keep the selection still until every
 /// in-flight create/stop/delete has delivered its result.
 ///
+/// ## Marking without navigation
+///
+/// The open control forwards its modifiers to the list, whose live guards
+/// decide whether to open or mark. `marked` and `data-session-marked` are
+/// independent from the open session's selected state and `aria-current`.
+/// Shift presses prevent native text-range extension; ordinary presses retain
+/// text dragging. The sibling menu, status and bell keep their own actions.
+/// Escape clears marks only from ordinary row focus, yielding to this row's
+/// menu, question, rename or notification panel without claiming the default.
+///
 /// ## Inline delete confirmation
 ///
 /// `RowState::question` (the opening of this row's question that `ListView`
@@ -1002,7 +1013,13 @@ pub(super) fn SessionRow(
     /// Untracked live listing success excludes retained root slots while row
     /// DOM is absent, including before teardown and before recovery mount.
     listing_ready: Callback<(), bool>,
-    on_open: EventHandler<Session>,
+    /// The list decides whether this gesture opens or changes its page-local marks.
+    on_open: EventHandler<(Session, Gesture)>,
+    /// Independent of the selected signal: a row may be both open and marked.
+    #[props(default)]
+    marked: bool,
+    /// Only ordinary list focus can clear marks; dialogs and menus keep Escape.
+    on_clear_marks: Option<EventHandler<()>>,
     /// The "clone" menu item's click: hands the row's own `Session` up so
     /// `ListView` can seed a fresh create form from it
     /// (`create_form::CreatePrefill`). Nothing is mutated or restarted
@@ -1682,11 +1699,20 @@ pub(super) fn SessionRow(
     rsx! {
         div {
             class: row_class,
+            onkeydown: move |event| {
+                if !menu_open && !confirming && !confirming_replace && !renaming
+                    && bell_open.is_none() && clears_on_escape(&event)
+                    && let Some(on_clear) = on_clear_marks
+                {
+                    on_clear.call(());
+                }
+            },
             // Browser selectors and menu focus use the raw routing identity.
             "data-session-id": "{session.id.raw()}",
             "data-session-stale": "{session.stale}",
             "data-session-pinned": "{session.pinned}",
             "data-session-selected": "{selected}",
+            "data-session-marked": "{marked}",
             "data-pin-drag-eligible": "{pin_drag_eligible}",
             // The browser suite's hook for the locality glyph, the same
             // role `data-host-kind` plays on a host panel row: a stable
@@ -1740,7 +1766,14 @@ pub(super) fn SessionRow(
                     // meaning as an implicit cancel.
                     disabled: nav_disabled || confirming || confirming_replace
                         || renaming,
-                    onclick: move |_| on_open.call(open_session.clone()),
+                    // Only Shift suppresses native range text selection. Plain
+                    // presses retain the browser's ordinary pointer defaults.
+                    onmousedown: move |event| {
+                        if event.modifiers().contains(Modifiers::SHIFT) {
+                            event.prevent_default();
+                        }
+                    },
+                    onclick: move |event| on_open.call((open_session.clone(), Gesture::from_modifiers(event.modifiers()))),
                     // STACKED lines rather than one squeezed flex row: the
                     // sidebar column (BUGS_BURNDOWN.md issue 5, interviewed
                     // row contents) is far too narrow for the old
@@ -3248,7 +3281,7 @@ mod tests {
         /// Render an open row menu or confirmation with the supplied peer text.
         /// Inspecting mutation payloads keeps Rust debug escaping out of the proof.
         fn app() -> Element {
-            let on_open = use_callback(|_: Session| {});
+            let on_open = use_callback(|_: (Session, Gesture)| {});
             let (menu_registration, bell_registration, listing_ready) = use_test_anchors();
             let on_clone = use_callback(|_: Session| {});
             let on_replace_with = use_callback(|_: Session| {});
@@ -3542,7 +3575,7 @@ mod tests {
         /// can reopen the question behind the render's back.
         fn app() -> Element {
             let (menu_registration, bell_registration, listing_ready) = use_test_anchors();
-            let on_open = use_callback(|_: Session| {});
+            let on_open = use_callback(|_: (Session, Gesture)| {});
             let on_clone = use_callback(|_: Session| {});
             let on_replace_with = use_callback(|_: Session| {});
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
@@ -3760,7 +3793,8 @@ mod tests {
     fn repeated_parent_refreshes_do_not_rerender_an_unchanged_row() {
         fn app() -> Element {
             let (menu_registration, bell_registration, listing_ready) = use_test_anchors();
-            let on_open = use_callback(|_: Session| {});
+            let on_open = use_callback(|_: (Session, Gesture)| {});
+            let on_clear_marks = use_callback(|()| {});
             let on_clone = use_callback(|_: Session| {});
             let on_replace_with = use_callback(|_: Session| {});
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
@@ -3806,6 +3840,7 @@ mod tests {
                         bell_open: None,
                     },
                     on_open,
+                    on_clear_marks,
                     on_clone,
                     on_replace_with,
                     on_mark_seen,
@@ -3864,7 +3899,7 @@ mod tests {
         }
 
         fn app() -> Element {
-            let on_open = use_callback(|_: Session| {});
+            let on_open = use_callback(|_: (Session, Gesture)| {});
             let on_clone = use_callback(|_: Session| {});
             let on_replace_with = use_callback(|_: Session| {});
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
@@ -3985,14 +4020,53 @@ mod tests {
         compact: bool,
         open: bool,
     ) -> Vec<dioxus::core::Mutation> {
+        marked_identity_row_edits(session, deleting, compact, open, false, false)
+    }
+
+    /// Keep mark and open-session state independent in the real row fixture.
+    /// No browser font or pointer behavior is inferred from these DOM edits.
+    fn marked_identity_row_edits(
+        session: Session,
+        deleting: bool,
+        compact: bool,
+        open: bool,
+        marked: bool,
+        selected: bool,
+    ) -> Vec<dioxus::core::Mutation> {
+        /// Name independent fixture states so marking cannot stand in for selection.
+        #[derive(Clone)]
+        struct Case {
+            session: Session,
+            deleting: bool,
+            compact: bool,
+            open: bool,
+            marked: bool,
+            selected: bool,
+        }
         std::thread_local! {
-            static CASE: std::cell::RefCell<Option<(Session, bool, bool, bool)>> =
+            static CASE: std::cell::RefCell<Option<Case>> =
                 const { std::cell::RefCell::new(None) };
         }
-        CASE.with(|case| *case.borrow_mut() = Some((session, deleting, compact, open)));
+        CASE.with(|case| {
+            *case.borrow_mut() = Some(Case {
+                session,
+                deleting,
+                compact,
+                open,
+                marked,
+                selected,
+            })
+        });
+        /// Rebuild the actual row with explicit state and closed root anchors.
         fn app() -> Element {
-            let (session, deleting, compact, open) =
-                CASE.with(|case| case.borrow().clone()).expect("case set");
+            let Case {
+                session,
+                deleting,
+                compact,
+                open,
+                marked,
+                selected,
+            } = CASE.with(|case| case.borrow().clone()).expect("case set");
             let (menu_registration, bell_registration, listing_ready) = use_test_anchors();
             let read_through = session.notifications_read_through;
             rsx! {
@@ -4002,6 +4076,7 @@ mod tests {
                     listing_ready,
                     session,
                     compact,
+                    marked,
                     state: RowState {
                         error: None,
                         busy: false,
@@ -4010,7 +4085,7 @@ mod tests {
                         nav_disabled: false,
                         menu_open: false,
                         composer_transfer_open: false,
-                        selected: false,
+                        selected,
                         locality: HostLocality::Unknown,
                         host_icon: Default::default(),
                         host_color: Default::default(),
@@ -4020,7 +4095,7 @@ mod tests {
                         deleting,
                         bell_open: open.then_some(read_through),
                     },
-                    on_open: |_: Session| {},
+                    on_open: |_: (Session, Gesture)| {},
                     on_clone: |_: Session| {},
                     on_replace_with: |_: Session| {},
                     on_mark_seen: |_: (String, Option<i64>)| {},
@@ -4042,6 +4117,40 @@ mod tests {
             }
         }
         VirtualDom::new(app).rebuild_to_vec().edits
+    }
+
+    /// A mark must not become the navigation selection: both states can coexist,
+    /// and marking a closed row must not tell assistive technology it is current.
+    #[farhelm_testtrace::test]
+    fn marked_rows_keep_open_session_hooks_and_accessibility_independent() {
+        for selected in [false, true] {
+            for marked in [false, true] {
+                let edits = marked_identity_row_edits(
+                    row_specimen("marked"),
+                    false,
+                    false,
+                    false,
+                    marked,
+                    selected,
+                );
+                assert_eq!(
+                    attribute_values(&edits, "data-session-marked"),
+                    [marked.to_string()]
+                );
+                assert_eq!(
+                    attribute_values(&edits, "data-session-selected"),
+                    [selected.to_string()]
+                );
+                assert_eq!(
+                    attribute_values(&edits, "aria-current"),
+                    if selected {
+                        vec!["true".to_string()]
+                    } else {
+                        Vec::new()
+                    }
+                );
+            }
+        }
     }
 
     /// The movement resolver must describe the actual row, including the raw

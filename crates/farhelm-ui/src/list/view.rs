@@ -1,7 +1,9 @@
 //! The session listing and the reads that keep it current.
 //!
 //! `ListView` owns the fleet-wide state; row rendering and creation stay in
-//! child modules so their narrower contracts remain visible.
+//! child modules so their narrower contracts remain visible. Page-local marks
+//! share the accepted listing and held display; the open session remains a
+//! separate navigation choice.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -41,6 +43,7 @@ use super::create_form::{
     COMPOSER_DIALOG, CreatePrefill, CreateSessionForm, CreateTarget, CreatedSession,
     mark_replace_with, mark_restart_with, prefill_from,
 };
+use super::marking::{self, Gesture, MetadataAction};
 use super::row::{IdentityFlow, SessionRow, session_identity_flow};
 use super::shared::{
     DeleteClick, DeleteTarget, HostOption, OpenDestination, RowQuestion, RowState,
@@ -951,6 +954,10 @@ pub(crate) fn ListView(
     // one reconciliation is in `commit_listing`, which closes a question
     // once its session is no longer in the listing at all.
     let mut row_questions = use_confirm_slots::<String, RowQuestion, ()>();
+    // Filtering conceals identities without proving they vanished. Only the
+    // authoritative-listing boundary below prunes stored marks; every target
+    // projection intersects them with the existing held display instead.
+    let mut marked = use_signal(HashSet::<String>::new);
     // `row_pending`'s entry and exit, with the cross-pane bookkeeping attached:
     // every row operation must (a) refuse to start while the SHARED token
     // is held — the session view or a page operation is mid-write, and a
@@ -1722,6 +1729,7 @@ pub(crate) fn ListView(
             // never against the escaped spelling a user sees in a label.
             let live_ids: HashSet<&str> = listing.sessions.iter().map(|s| s.id.raw()).collect();
             row_questions.retain(|id| live_ids.contains(id.as_str()));
+            marked.write().retain(|id| live_ids.contains(id.as_str()));
             // A complete committed fleet read is the only absence proof
             // strong enough to change an editor. It does not close one: a
             // user may still need its draft. If the exact source returns on
@@ -3086,8 +3094,43 @@ pub(crate) fn ListView(
     let guarded_open = use_callback(guarded_open);
     // Sidebar rows do not consume the acceptance result; the switcher does
     // so a busy refusal preserves both the filter and the opener's focus.
-    let row_open = use_callback(move |session| {
-        guarded_open.call(session);
+    let row_open = use_callback(move |(session, gesture): (Session, Gesture)| {
+        if ops.busy_now() || !row_pending.peek().is_empty() || hosts_panel_open() {
+            return;
+        }
+        // Disabled markup is only a reflection. A queued gesture must also
+        // respect a question or rename that opened after that row was drawn.
+        if row_questions.peek_key(session.id.raw()).is_some()
+            || rename_editor
+                .peek()
+                .as_ref()
+                .is_some_and(|editor| editor.id == session.id.raw())
+        {
+            return;
+        }
+        if gesture == Gesture::Open {
+            if guarded_open.call(session) {
+                marked.write().clear();
+            }
+            return;
+        }
+        let current = listing.peek();
+        let Some(Ok(current)) = current.as_ref() else {
+            return;
+        };
+        let displayed = rows::held_display_order(order_hold.peek().as_ref(), &current.sessions);
+        marking::mark(
+            &mut marked.write(),
+            &displayed,
+            selected.peek().as_deref(),
+            session.id.raw(),
+            gesture,
+        );
+    });
+    let clear_marks = use_callback(move |()| {
+        if !ops.busy_now() && row_pending.peek().is_empty() && !hosts_panel_open() {
+            marked.write().clear();
+        }
     });
     // An empty pane uses one rule on startup and after a noticed removal:
     // first listed visit, else newest-created among the same eligible rows.
@@ -3515,6 +3558,50 @@ pub(crate) fn ListView(
         );
     };
     let on_mark_seen = use_callback(on_mark_seen);
+    // Metadata accepts a drawn subset, then only removes keys that stopped
+    // being visible or marked. The existing row callbacks remain responsible
+    // for requests and failures; this caller owns no second write lifecycle.
+    let bulk_metadata = use_callback(move |(action, drawn): (MetadataAction, Vec<Session>)| {
+        if ops.busy_now() || !row_pending.peek().is_empty() || hosts_panel_open() {
+            return;
+        }
+        let targets = {
+            let current = listing.peek();
+            let Some(Ok(current)) = current.as_ref() else {
+                return;
+            };
+            let displayed = rows::held_display_order(order_hold.peek().as_ref(), &current.sessions);
+            marking::admitted_targets(drawn, &displayed, &marked.peek())
+        };
+        for row in targets {
+            let id = row.id.raw().to_owned();
+            if row_questions.peek_key(&id).is_some()
+                || rename_editor
+                    .peek()
+                    .as_ref()
+                    .is_some_and(|editor| editor.id == id)
+            {
+                errors.write().insert(
+                    id,
+                    format!(
+                        "{}: not started, another operation is in progress; try again",
+                        action.label()
+                    ),
+                );
+                continue;
+            }
+            match action {
+                MetadataAction::Pin => on_pin.call((id, true)),
+                MetadataAction::Unpin => on_pin.call((id, false)),
+                MetadataAction::Read => on_mark_seen.call((id, Some(row.effective_activity()))),
+                MetadataAction::Unread => on_mark_seen.call((id, None)),
+            }
+        }
+        // These callbacks finish acceptance at dispatch: Pin spawns its own
+        // request and seen writes enter the existing shared writer. Neither
+        // claims row_pending or returns completion to await here.
+        marked.write().clear();
+    });
     let on_stop = use_callback(on_stop);
     let on_delete = use_callback(on_delete);
     let confirm_delete = use_callback(confirm_delete);
@@ -3607,6 +3694,17 @@ pub(crate) fn ListView(
         .as_deref()
         .and_then(rows::pin_separator_after)
         .map(str::to_string);
+    let effective_marks = if hosts_panel_open() {
+        Vec::new()
+    } else {
+        marking::effective(displayed.as_deref().unwrap_or_default(), &marked.read())
+    };
+    // The ordinary title can wrap at narrow sidebar widths. Replacing it
+    // moves the rows even if their identities and order are unchanged, so
+    // existing measured popovers must retire before that DOM change lands.
+    use_rendered_movement_between(&!effective_marks.is_empty(), |_, _| {
+        MovementCapture::Merge(popovers.capture_region(AnchorRegion::Sessions))
+    });
     let pin_neighbors = rows::pin_move_neighbors(
         held_order.as_ref(),
         displayed.as_deref().unwrap_or_default(),
@@ -4342,6 +4440,24 @@ pub(crate) fn ListView(
         // band. At minimum width the action group wraps as a whole.
         div { class: "list-header",
             div { class: "session-heading", hidden: hosts_panel_open(),
+                if !effective_marks.is_empty() {
+                    marking::MarkedBar {
+                        targets: effective_marks.clone(), disabled: nav_locked,
+                        layout_epoch, on_action: bulk_metadata, on_clear: clear_marks,
+                    }
+                    if let Some(Ok(listing)) = &*listing.read() {
+                        // Marking replaces the ordinary count, never its
+                        // warning that this listing cannot speak for the fleet.
+                        if count_banner(listing).warning {
+                            { let banner = count_banner(listing); rsx! {
+                                div { class: "{banner.class}", "data-warning": true,
+                                    aria_label: format!("Sessions: {}", banner.text),
+                                    "data-tooltip": format!("Sessions: {}", banner.text), "{banner.text}"
+                                }
+                            } }
+                        }
+                    }
+                } else {
                 super::sort_menu::SortMenu {
                     sort: sort(), compact, layout_epoch,
                     on_sort: apply_sort,
@@ -4363,16 +4479,21 @@ pub(crate) fn ListView(
                         }
                     }
                 }
-                div { class: "session-heading-actions",
+                }
+                // Only triggers disappear. Trash owns cleanup tasks and an
+                // active dialog that a listing-driven marking must not hide.
+                div { class: if effective_marks.is_empty() { "session-heading-actions" } else { "session-heading-actions marking" },
                     super::trash::TrashControl {
                         hosts, revision: trash_revision,
                         gate: crate::ops::PaneGate::new(ops, row_ops),
+                        trigger_hidden: !effective_marks.is_empty(),
                     }
                     // Beside New, the action it feeds (SPEC.md: "The Templates
                     // control sits beside New in the session list header").
                     button {
                         r#type: "button",
                         class: "btn btn-neutral templates-button",
+                        hidden: !effective_marks.is_empty(),
                         aria_label: "Templates",
                         "data-tooltip": preferences.0.read().quick_launch_template.as_ref().map_or_else(|| format!("Templates: mark one with ⚡ for quick launch ({})", crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop)), |name| format!("Templates: quick launch {} ({})", name.escaped(), crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop))),
                         aria_haspopup: "dialog",
@@ -4385,6 +4506,7 @@ pub(crate) fn ListView(
                     // Focus restoration and the Mac Cmd+N shortcut select this
                     // live control by class, so both retain its ordinary guards.
                     class: "btn btn-primary new-session-button",
+                    hidden: !effective_marks.is_empty(),
                     "data-tooltip": NEW_SESSION_TOOLTIP,
                     aria_label: "New session",
                     // This control UNMOUNTS the create form, so it must not act
@@ -4518,7 +4640,11 @@ pub(crate) fn ListView(
                         // Release above must precede this immediate handback;
                         // the removed field would otherwise leave focus on body.
                         restart_bridge.set(None);
-                        FocusTarget::new(if was_restart { ".restart-menu-toggle" } else { ".new-session-button" }, None, false).focus();
+                        if was_restart {
+                            FocusTarget::new(".restart-menu-toggle", None, false).focus();
+                        } else {
+                            FocusTarget::new(".marked-menu-toggle", Some(".new-session-button"), false).focus();
+                        }
                     },
                     on_template_saved: move |template| {
                         // Templates owns the next focus; release the launcher
@@ -4590,7 +4716,7 @@ pub(crate) fn ListView(
                             // it can take focus or keystrokes.
                             on_rename_start.call((id, title, false, true));
                         } else {
-                            FocusTarget::new(".new-session-button", None, false).focus();
+                            FocusTarget::new(".marked-menu-toggle", Some(".new-session-button"), false).focus();
                         }
                         // The fence needs a fresh authoritative successor even
                         // when a healthy feed has no further notice to deliver.
@@ -4602,6 +4728,9 @@ pub(crate) fn ListView(
         // Status remains available while a listing is loading or failed;
         // the rail independently keeps the current host choice reachable.
             div { class: "session-status-filter", hidden: hosts_panel_open(),
+                onkeydown: move |event| {
+                    if marking::clears_on_escape(&event) { clear_marks.call(()); }
+                },
                 div { class: "segmented-control", role: "radiogroup", aria_label: "Session status",
                     for (value, label, help) in [
                         ("", "All", "Show every session, including ended sessions"),
@@ -4774,6 +4903,8 @@ pub(crate) fn ListView(
                                 bell_registration: bell_registration.clone(),
                                 listing_ready,
                                 compact,
+                                marked: marked.read().contains(session.id.raw()),
+                                on_clear_marks: clear_marks,
                                 pin_separator: pin_separator.as_deref() == Some(session.id.raw()),
                                 pin_neighbors: pin_neighbors.get(session.id.raw()).cloned(),
                                 state: RowState {

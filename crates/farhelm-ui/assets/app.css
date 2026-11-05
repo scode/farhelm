@@ -1406,6 +1406,33 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   flex-shrink: 0;
 }
 
+/* Retain dialog/task owners without reserving an empty flex item or hiding
+   their active dialogs when a retained mark becomes visible after a refresh. */
+.session-heading-actions.marking { display: contents; }
+
+/* The marking toolbar occupies the title band without borrowing the blue
+   current-session selection. Its menu uses the ordinary anchored menu shell. */
+.marked-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.marked-count {
+  margin-right: auto;
+  font: 600 13px var(--font-ui);
+  white-space: nowrap;
+}
+
+.marked-bar .marked-menu-toggle,
+.marked-bar .marked-clear {
+  min-width: 24px;
+  height: 24px;
+  padding: 3px;
+}
+
 .session-heading .checkout-trash-button {
   display: inline-flex;
   align-items: center;
@@ -2463,7 +2490,8 @@ a:any-link,
    panel off mid-button). The session flyout wrapper is `position: fixed`,
    positioned from the toggle's own measured viewport rect instead of this
    row's box, so it escapes that clip by construction and this row no longer
-   needs to BE an anchor for anything. */
+   needs to BE an anchor for anything. Marked rows establish a containing
+   block only for their decorative stripe, never for a menu. */
 }
 
 /* The row whose actions menu is open, for as long as it is open (the
@@ -2498,6 +2526,33 @@ a:any-link,
 .session-row.selected {
   background: var(--accent-fill);
   --status-pulse-min: var(--selected-status-pulse-min);
+}
+
+/* Marks are independent bulk targets. A painted stripe adds no width and
+   therefore does not move pin grips or menu anchors. It sits above the open
+   button's hover fill, which would cover an inset shadow on the parent.
+   The open row keeps its blue fill and uses its inverse foreground. */
+.session-row[data-session-marked="true"] {
+  position: relative;
+}
+
+.session-row[data-session-marked="true"]::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 3px;
+  background: var(--accent-fill);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.session-row[data-session-marked="true"]:not(.selected) {
+  background: color-mix(in srgb, var(--accent-fill) 14%, var(--bg-1));
+}
+
+.session-row.selected[data-session-marked="true"]::before {
+  background: var(--on-fill);
 }
 
 /* Without these, the open button's own hover/focus rule (below) paints
@@ -2620,8 +2675,9 @@ a:any-link,
   opacity: 0;
 }
 
-/* No transform, filter, containment, or positioned ancestor: a fixed menu
-   awaiting its ordinary outside-pointer dismissal must keep viewport bounds.
+/* No transform, filter or containment: a fixed menu awaiting its ordinary
+   outside-pointer dismissal must keep viewport bounds. A mark's relative
+   positioning contains only its stripe and does not change fixed coordinates.
    Gesture data survives Rust class refreshes and never stores row order. */
 .session-row[data-pin-dragging] {
   background: var(--bg-2);

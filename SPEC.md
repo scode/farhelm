@@ -1789,6 +1789,29 @@ The chosen order is the list's title: **Recently active**, **Newest created** or
 those orders and **Compact**. Trash with its count, Templates and New are compact icon buttons beside the title; their
 hover text and accessible names explain the actions, and New remains the sidebar's one filled control.
 
+The open session is separate from the **marked** sessions. Shift+click on a row marks the inclusive range from the open
+session to that row in displayed order, without opening it; each range click replaces the previous marking. When the
+open session is not displayed, it marks only the clicked row. Cmd+click or Ctrl+click toggles one row on every platform,
+including the open row. Shift takes precedence when both kinds of modifier are held. A plain accepted row click opens
+that session and clears all marks. Shift marking does not extend the page's text selection, and ordinary dragging still
+selects text. Row controls keep their own actions. The open row keeps its blue fill; a distinct side marker and tint
+identify marked rows.
+
+Marks belong to the current client page and are not saved. Counts, offered actions and targets include only marked rows
+displayed now. Filtering or opening Hosts retains hidden marks but never counts or acts on them; failed listings expose
+no targets. A complete authoritative listing prunes vanished session keys, while a partial, filtered, failed or
+non-authoritative reply does not establish disappearance.
+
+With any effective marks, **N marked**, a metadata menu and Clear replace the ordinary title, count and icon buttons;
+the filters and any truncation or unsupported-filter warning remain available. **Pin** applies only to unpinned marked
+rows and **Unpin** only to pinned ones. **Mark read** and **Mark unread** apply only to marked rows whose own menus
+offer that action. They reuse the ordinary metadata writes and row-local errors; marks clear once the eligible choices
+have been dispatched. A row engaged by its own question or rename shows the ordinary not-started refusal rather than
+being silently omitted. Open buttons, marking, Clear and bulk actions obey the existing live operation lock. Escape
+clears marks only from the session list, without preventing default handling, and yields to a menu, dialog or terminal
+that owns the key. Quick switching and shortcuts keep their existing meaning, and each row's menu still acts only on
+itself.
+
 Below the list title, a single-status segmented choice offers **All**, **Running**, **Waiting** and **Idle**, without
 counts. It combines with the host choice in the helm's query and is not persisted. Ended sessions appear only under All.
 A narrowed list keeps its visible "N of M" count, including when every session matches. Hiding the selected session
@@ -1985,9 +2008,9 @@ accessible text. A heavier separator with a small gap below follows the displaye
 only when an unpinned row follows; there is no Pinned heading. A newly pinned row held below that run does not move the
 separator there, and unpinning a row inside the run shortens it immediately.
 
-The list always carries a count beside its title: **N**, or **N of M** when narrowed, where N matched and M is the whole
-fleet. A truncated reply or an unsupported filter retains its explicit warning rather than claiming a complete matching
-count.
+Without effective marks, the list carries a count beside its title: **N**, or **N of M** when narrowed, where N matched
+and M is the whole fleet. A truncated reply or an unsupported filter retains its explicit warning rather than claiming a
+complete matching count.
 
 The list is served and rendered WHOLE. The fleet this product is for is tens of sessions across a few hosts, not
 thousands, and the design assumes that scale outright: every supervisor answers a listing with its entire list in one

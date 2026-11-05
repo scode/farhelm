@@ -673,7 +673,8 @@ that its required systemd or SSH substrate ran.
   `watchHostPremise`; every spec's contexts are one of these), got a byte-stream notice for a session of the local host;
   an old terminal is allowed only for a session whose host the helm lists as not local (the stack's "remote" supervisor,
   which keeps tmux), and a lookup that cannot establish that fails the test. The readiness waits run the same check
-  early. On Tensorlake, `sandbox-tests.ts run --suite-terminals host` (`.agents/tensorlake.md`). Needs what the browser
+  early. `bulk-session-actions.spec.ts` includes terminal Escape ownership while sessions are marked, on both terminal
+  kinds. On Tensorlake, `sandbox-tests.ts run --suite-terminals host` (`.agents/tensorlake.md`). Needs what the browser
   suite needs. Not in CI and not part of the full browser suite. Run a changed spec's projects of it when that spec
   changes, the helpers' when they change, and wider when the grid client, the helm's grid relay or the supervisor's grid
   streams change in a way the host-terminal config's few specs and the static grid specs do not reach.
