@@ -556,14 +556,30 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   stopped-session premise in Chromium sweep run `ceac5813-b025-478a-9019-a370b5fc97e5`: expected `exited`, observed
   `error` for five seconds. All three isolated classification reruns passed (`46ef9fa7-7605-4b68-9a5f-77a4e60d1e6c`,
   `7a1c431b-99c8-4581-b46b-b126c58b3407`, `63f93b25-ad0e-4db1-99a5-6b9367db2d30`). Cause unknown (FLAKES.md,
-  2026-11-04).
+  2026-11-04). On 2026-11-05 it passed five attempts per engine across ordinary and host terminals; no fresh
+  error-status detail was captured, and the exclusion remains.
+
+- **Shallow pause resets under load.** `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` in
+  `crates/farhelm/tests/e2e/terminal_backpressure.rs` failed one of three exact nextest attempts on 2026-11-05 (batch
+  `ef5851af-9d04-48d0-a378-9c256e2c10a7`, failure `dfecb8be-7208-44be-b9bf-047950e05e5c`). It rejects a reset anywhere
+  in its ten-second post-resume drain, including a later legitimate tmux pause under load. The retained trace still
+  evicts the needed attribution events; add a bounded per-channel cause observable before changing the assertion. The
+  existing sweep exclusion remains. See FLAKES.md, 2026-10-17 and 2026-11-05.
+
+- **Reconnect recovery misses its window under load.** `view-changes-do-not-postpone-a-recovery` in
+  `e2e/tests/terminal-reconnect.spec.ts` passed five exact attempts per engine on 2026-11-05: three with ordinary
+  terminals, two with host terminals. The historical 4185ms failure against 4000ms remains unresolved: driver and
+  deferred terminal-mount latency are included in that observation. Keep the existing exclusion and timing assertion
+  until a retry-deadline observable distinguishes rearming from late observation. See FLAKES.md, 2026-10-17 and
+  2026-11-05.
 
 - **Native tunnel preview exceeds WebKit's case budget.**
   `native tunnel preview keeps ports and actions inside a 650px pane` in `e2e/tests/header.spec.ts` timed out during
   cleanup at its unchanged 60-second deadline in recorder `1fc8687c-1044-4c63-83f9-dfddf8da2604`, then passed unchanged
   in 58 seconds in `9ebdc54c-8229-4787-a96b-19c2836e083e`. The new-terminal-button report records the same case timing
   out twice and passing unchanged in 58.7 seconds. Cause unknown; the narrow timing margin is a hypothesis, not a
-  diagnosed fix.
+  diagnosed fix. On 2026-11-05 it passed five attempts per engine; WebKit took 45.9–56.6 seconds across those runs. The
+  deadline and exclusion remain unchanged; see the bounded-attempt follow-up in FLAKES.md.
 
 - **Interrupted-card Replace clicks lost under load.** The WebKit test
   `don't ask again on a refused YOLO replace marks the host, then replaces with the override` in
@@ -572,7 +588,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   once in six runs under added load (`61cbd3cf-a2ab-4ebc-9b91-cc801ba932dd`) and passed four of four on a quiet machine.
   A Cancel click in the same card was lost the same way once in run `13808999-b14a-44ef-a7df-b547a8419a62`. Hypothesis:
   the spec's injected sessions use ids without the host-entry prefix #2368 made mandatory, so the UI's background
-  session reads get 400s, and one completing at the click re-renders the card (FLAKES.md, 2026-10-20).
+  session reads get 400s, and one completing at the click re-renders the card (FLAKES.md, 2026-10-20). On 2026-11-05 it
+  passed five attempts per engine across ordinary and host terminals. The raw-ID hypothesis was not established by a
+  fresh failure; the fixture and exclusion remain unchanged.
 
 - **Same-source Replace menu fails to open after YOLO cancellation.**
   `plain Replace keeps a newer same-source key after old header YOLO cancellation` in `e2e/tests/replace.spec.ts` failed
@@ -582,7 +600,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   five of ten attempts (`0c25b7f9-40a5-47d2-af94-0c93edf7a331`). Trace and code review identify a product pointer race:
   dismissing the other row's open menu moves its error into that row, shifting the source toggle between pointer press
   and release. Leave the exclusion in place. An explicit test-side close would hide the bug; choosing between stable
-  error space and changed dismissal/input ordering needs a product decision (FLAKES.md, 2026-10-17).
+  error space and changed dismissal/input ordering needs a product decision (FLAKES.md, 2026-10-17). On 2026-11-05 it
+  passed five attempts per engine across ordinary and host terminals. The layout decision is still open; no test-side
+  menu dismissal was added to hide the earlier product race.
 
 - **Browser stack parent-SIGTERM cleanup.** `scripts/test-start-stack-cleanup.sh` left the stack serving, with state and
   processes intact, after killing its spawner with SIGTERM in run `f2355071-3c67-4a7b-ba05-37f853c4a6b3`. The isolated
@@ -598,7 +618,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   its signal and its marker. A PATH `curl` shim delaying startup `POST /api/sessions` by 25 seconds confirmed trap
   deferral of about 24–26 seconds in run `b9d6942f-1800-40f4-b65d-45f4bd078afa`, but all cleanup phases passed. The
   check's 20 iterations also include command latency. This did not reproduce the historical leak; retain the markers and
-  investigate a retained failure before treating interruptible startup commands as its fix.
+  investigate a retained failure before treating interruptible startup commands as its fix. The complete cleanup script
+  passed unchanged on 2026-11-05 in run `6f2eff90-c59c-4602-8283-489747b8a36d`, including spawner SIGKILL, spawner
+  SIGTERM, script SIGTERM and both replacement-supervisor phases. This did not reproduce the leak.
 
 - **Trash dialog's PageDown check on Chromium.** `trash header and global confirmation remain reachable` (both widths)
   in `e2e/tests/trash-dialog.spec.ts` sometimes leaves the Delete all confirmation's scroll area at the top after
@@ -606,38 +628,42 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `89a737f6-3967-42aa-a519-a90238061970`, `e6e3b26c-8418-4e4a-9cfc-c3c976c4c8bf`; twenty runs each on main passed all
   (`7ce0fa35-3abc-400d-ab8d-5fc457bb0731`), with launch-progress failed two (`d30273b9-fc29-4e19-b4c0-036465123b34`) and
   three (`03eda759-efdb-41ff-956b-564f134ad83d`), and it also failed on a stack without launch-progress. Cause unknown;
-  whether launch-progress's waiting status raises its rate is open (FLAKES.md, 2026-11-04).
+  whether launch-progress's waiting status raises its rate is open (FLAKES.md, 2026-11-04). Both widths passed five
+  attempts per engine on 2026-11-05 across ordinary and host terminals. Focus/scroll assertions and exclusions remain
+  unchanged; no fresh trace establishes why the earlier PageDown had no effect.
 
 - **The launcher's YOLO question does not take its answer on WebKit.** `answerYolo` in `e2e/tests/helpers/term.ts`
   (through `fillCreateForm`) failed with "Clicking the checkbox did not change its state" in three tests in three
   rounds: two in `e2e/tests/terminal-multihost.spec.ts` and one in `e2e/tests/terminal-create-idempotency.spec.ts` (runs
   `a865423e-2157-473d-bd78-5bafcce7811e`, `7033e514-e01f-435e-993c-57b6e4ba5126`,
   `55c4bee4-892d-4118-968c-d37cca4c920f`); each passed three re-runs. The step is shared, so other tests can fail the
-  same way. Hypothesis: the click lands while the launcher re-renders the question (FLAKES.md, 2026-11-04).
+  same way. Hypothesis: the click lands while the launcher re-renders the question (FLAKES.md, 2026-11-04). Each of the
+  three excluded callers passed five attempts per engine on 2026-11-05 across ordinary and host terminals. No click
+  retry or answer-helper change was made without evidence of the missed transition.
 
 - **An update's progress label shows no step name while following.** In `e2e/tests/provisioning.spec.ts`, three "while
   following" tests failed waiting for `Updating: N/M <step> m:ss`, the label holding only the count and timer for five
   seconds (runs `8add8072-2ed9-4899-a9ac-d1f5bf3c95d3`, `4d9291ef-904c-4048-ae81-b527a60f6449`,
   `541a7a0e-0619-4e57-b9ba-2d345c1279f8`); each passed three re-runs. Hypothesis: the step name arrives late under load
-  (FLAKES.md, 2026-11-05).
+  (FLAKES.md, 2026-11-05). Each of the three cases passed eight attempts per engine on 2026-11-05: the three-attempt
+  baseline plus five more exact repetitions. The controlled feed can retain an initial all-pending snapshot, but no
+  fresh failure established that as the cause. Step-name assertions, time budgets and exclusions remain unchanged.
 
 - **Quick launch's focus does not return to the page body on Chromium.** Two tests in `e2e/tests/quick-launch.spec.ts`
   poll for the body to hold focus after a blur and sometimes never see it (runs `2d338903-2d70-4c8c-99c4-3d4044d78670`,
   `ffe0693e-0a67-4039-a8e4-4621365c4561`, `4b6e1aad-91ab-4aee-b721-f760fb42b0cf`,
   `443ebd09-f5c5-4cd3-8ad1-d27e96a75532`). Hypothesis: a focus handoff in the page takes focus back (FLAKES.md,
-  2026-11-05).
+  2026-11-05). Both cases passed five attempts per engine on 2026-11-05 across ordinary and host terminals. A delayed
+  focus return remains a hypothesis; neither the body-focus premise nor the exclusion was removed.
 
 ### Difficult deflake
 
-- Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes
-  above are fixed. #382 restored the helm-death test. Binary output was un-ignored on 2026-09-19; it and the stalled
-  viewer RSS, degenerate-size READY, and malformed-sentinel cases still block restoring the entire `farhelm` integration
-  target in `.github/dist-build-setup.yml`. The replacement-claim case is fixed by the 2026-09-17 deflake stack (#711),
-  and the forced-pause helper mismatch was closed as not reproducible on the verified pin (#710) — their status here
-  updates when that stack lands, not before. Browser flakes are separate coverage and do not themselves gate that Rust
-  target. The integration suite remains available for explicit local or worker validation; ordinary CI and the release
-  gate do not run it while this exclusion stands. A single clean combined run cannot establish that these latent
-  failures are fixed; retain the release exclusion until the evidence supports reversing it.
+- Restore the release integration gate after the remaining Rust flake reports are resolved. The binary-output loss and
+  degenerate-size READY matcher have fixes recorded in FLAKES.md (2026-09-30 and 2026-09-07). The older stalled-viewer
+  RSS and malformed-sentinel reports each passed three focused nextest attempts on 2026-11-05 in batch
+  `51c6a652-7437-4d1a-a579-920a936cc00b`; those non-reproductions do not close them. The shallow-pause reset still
+  recurs, as its Deflake entry records. Keep the integration target's exclusion in `.github/dist-build-setup.yml` until
+  evidence supports reversing it. Browser flakes are separate coverage and do not themselves gate that Rust target.
 
 ## Broken tests
 
