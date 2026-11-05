@@ -104,6 +104,7 @@ fn session_list_body() -> SessionListBody {
             stale: true,
             seen_activity_at: Some(1_700_000_090),
             pinned: true,
+            pin_position: Some(7),
             notifications_read_through: 3,
         }],
         total: 5,

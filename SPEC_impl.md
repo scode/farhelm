@@ -5654,16 +5654,33 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   public writes require full-reference syntax but permit stale references; null and sparse updates keep their existing
   meanings. A version-only synthetic rewind may clear an already-qualified selection rather than guess.
 
-- Shared pins live in the presence-only `session_pins` table, keyed by `(host_id, session_id)` since helm schema 63.
-  Like `session_seen`, it cascades on host removal, survives retarget/adoption, is cleared explicitly on deletion, and
-  accepts bounded stray rows from other deletion paths without a reaper. `PUT /api/sessions/{id}/pin` requires a
-  `{pinned: bool}` body, verifies helm-local ownership even for an unreachable host, and bumps the event revision only
-  when membership changes. Listing and detail rows carry `pinned: bool`; the list reads membership in one batch for both
-  cached and identity-less live rows. The helm sort stays unchanged for the quick switcher. The sidebar stably
+- Shared pins live in `session_pins`, keyed by `(host_id, session_id)` since helm schema 63, with a NOT NULL signed
+  `position` since schema 74. The 73→74 step rebuilds the presence-only table using the same DDL as fresh creation,
+  seeding positions from oldest positive creation time recorded in the cache, then unknown times, with
+  `(host_id, session_id)` breaking ties. Missing cache rows and nonpositive times are unknown; the separately recorded
+  time does not depend on decoding the cached JSON. A version-only rewind with the position column already present
+  preserves it. Like `session_seen`, it cascades on host removal, survives retarget/adoption, is cleared explicitly on
+  deletion, and accepts bounded stray rows from other deletion paths without a reaper. `PUT /api/sessions/{id}/pin`
+  requires a `{pinned: bool}` body, verifies helm-local ownership even for an unreachable host, and bumps the event
+  revision only when membership changes. A new pin appends after the stored maximum; retries retain its position, and
+  unpin/re-pin appends again. Only an overflowing maximum requires compaction before appending, in the same transaction.
+  Listing and detail rows carry `pinned: bool` and `pin_position: integer | null`; the list reads positions in one batch
+  for both cached and identity-less live rows. The helm sort stays unchanged for the quick switcher. The sidebar stably
   partitions accepted replies before applying its reorder hold, and computes the separator from the resulting display.
-  Replace copies a source pin to the new id before requesting the source's deletion, so a pin write failure leaves the
-  source intact; if deletion fails both surviving sessions can be pinned. Confirmed deletion clears the old pin best
-  effort, like the other viewer metadata.
+  Replace copies a source pin and its position to the new id before requesting the source's deletion, so a pin write
+  failure leaves the source intact; if deletion fails both surviving sessions can be pinned at the same position. An
+  already-pinned replacement keeps its position. Positions deliberately are not unique, and their total order is
+  `(position, host_id, session_id)`. Confirmed deletion clears the old pin best effort, like the other viewer metadata.
+
+  `PUT /api/sessions/{id}/pin-order` requires `{neighbor: full_session_reference, placement: "before" | "after"}`. Both
+  sessions must be known to the helm, including cached sessions on unreachable hosts, and both must still be pinned; a
+  missing pin is a 409 refusal. A neighbor rather than an index makes the request meaningful when filters or a display
+  hold hide or rearrange rows. One store call under the existing connection mutex reads the full stored set, including
+  invisible pins, moves the requested pin beside its neighbor and renumbers the set from zero in a transaction. Ties and
+  gaps normalize even when the requested adjacency already holds; a present self-move does nothing. Later concurrent
+  moves act on the earlier result, with no revision check or additional locking. The fleet revision advances only when
+  stored positions change. Router ownership keeps that event attached to the write after a client disconnects, and a
+  failed write rolls the transaction back.
 
 ## Ntfy waiting alerts
 

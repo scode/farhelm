@@ -854,7 +854,8 @@ async fn schema_72_leaves_every_existing_host_ordinary() {
     assert_eq!(
         conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        73
+        crate::store::SCHEMA_VERSION,
+        "the schema 72 step runs as part of the whole ladder to the current version"
     );
     let nulls: i64 = conn
         .query_row(

@@ -2601,12 +2601,8 @@ pub(crate) async fn get_session(
         Ok(map) => map.get(&key).copied(),
         Err(e) => return http_error(e),
     };
-    let pinned = match state
-        .store
-        .pinned_sessions(std::slice::from_ref(&key))
-        .await
-    {
-        Ok(pins) => pins.contains(&key),
+    let pin_position = match state.store.pin_positions(std::slice::from_ref(&key)).await {
+        Ok(pins) => pins.get(&key).copied(),
         Err(e) => return http_error(e),
     };
     // And the notification marks, for the same reason.
@@ -2641,7 +2637,8 @@ pub(crate) async fn get_session(
                     host_identity,
                     host_name,
                     seen_activity_at,
-                    pinned,
+                    pinned: pin_position.is_some(),
+                    pin_position,
                     notifications_read_through,
                     stale: true,
                 })
@@ -2675,7 +2672,8 @@ pub(crate) async fn get_session(
                         host_identity,
                         host_name,
                         seen_activity_at,
-                        pinned,
+                        pinned: pin_position.is_some(),
+                        pin_position,
                         notifications_read_through,
                         stale: false,
                     })
@@ -3266,6 +3264,70 @@ pub(crate) async fn set_pin(
             axum::Json(serde_json::json!({})).into_response()
         }
         Err(e) => http_error(e),
+    }
+}
+
+/// Relative placement avoids interpreting a filtered or held display index
+/// as an index into the full stored order, which can include invisible pins.
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PinPlacement {
+    Before,
+    After,
+}
+
+/// Both fields are required: a partial move must not silently choose an end
+/// or a direction. The neighbor is a full session reference like the path ID.
+#[derive(Deserialize)]
+pub(crate) struct MovePinReq {
+    neighbor: String,
+    placement: PinPlacement,
+}
+
+/// Reorder helm-owned pins without contacting either session's supervisor.
+/// The store serializes and commits the whole move; router ownership keeps
+/// its fleet notification attached even if the requesting client disconnects.
+pub(crate) async fn move_pin(
+    State(state): State<Arc<AppState>>,
+    AxPath(id): AxPath<String>,
+    axum::Json(req): axum::Json<MovePinReq>,
+) -> impl IntoResponse {
+    let moved = match resolve_session_ref(&state, &id).await {
+        Ok(key) => key,
+        Err(error) => return http_error(error),
+    };
+    let neighbor = match resolve_session_ref(&state, &req.neighbor).await {
+        Ok(key) => key,
+        Err(error) => return http_error(error),
+    };
+    for key in [&moved, &neighbor] {
+        if let Err(error) = resolve_owner(&state, key).await {
+            return http_error(error);
+        }
+    }
+    match state
+        .store
+        .move_pin(
+            &moved,
+            &neighbor,
+            matches!(req.placement, PinPlacement::Before),
+        )
+        .await
+    {
+        Ok(changed) => {
+            if changed {
+                state.manager.events().bump();
+            }
+            axum::Json(serde_json::json!({})).into_response()
+        }
+        Err(error) if error.downcast_ref::<store::PinMoveError>().is_some() => http_error(
+            SupervisorError::helm(
+                ErrorKind::Conflict,
+                "session or neighbor is no longer pinned".into(),
+            )
+            .into(),
+        ),
+        Err(error) => http_error(error),
     }
 }
 

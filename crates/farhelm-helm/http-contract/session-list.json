@@ -88,7 +88,8 @@
           "owner": "octo"
         }
       },
-      "pinned": true
+      "pinned": true,
+      "pin_position": 7
     }
   ],
   "total": 5,

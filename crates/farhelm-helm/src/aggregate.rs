@@ -235,6 +235,10 @@ pub(crate) struct SessionRow {
     /// Shared helm pin membership. The sidebar partitions on this flag;
     /// the served sort stays intact for clients such as the quick switcher.
     pub(crate) pinned: bool,
+    /// Shared manual position, absent for an unpinned row. Positions can tie
+    /// while Replace keeps both source and replacement; clients break ties
+    /// by host number, then bare session ID. The served sort ignores it.
+    pub(crate) pin_position: Option<i64>,
     /// How far through this session's notifications every client of this
     /// helm has read (`store::HelmStore::notification_marks`): a
     /// notification whose sequence number is above it is unread, which
@@ -327,7 +331,7 @@ fn row_of(
     identity: Option<&str>,
     mut info: SessionInfo,
     seen_activity_at: Option<i64>,
-    pinned: bool,
+    pin_position: Option<i64>,
     marks: NotificationMarks,
 ) -> SessionRow {
     let notifications_read_through = apply_notification_marks(&mut info, marks);
@@ -343,7 +347,8 @@ fn row_of(
             host.alias.as_deref(),
         ),
         seen_activity_at,
-        pinned,
+        pinned: pin_position.is_some(),
+        pin_position,
         stale: !host.state.is_connected(),
     }
 }
@@ -591,7 +596,7 @@ async fn session_list_staged(
         }
     }
     let seen_activity = store.seen_activity(&seen_ids).await?;
-    let pins = store.pinned_sessions(&seen_ids).await?;
+    let pins = store.pin_positions(&seen_ids).await?;
     // The notification marks, joined the same way and for the same reason.
     let notification_marks = store.notification_marks(&seen_ids).await?;
     for cached in slice.rows {
@@ -602,14 +607,14 @@ async fn session_list_staged(
         };
         let key = store::SessionKey::new(cached.host, &cached.info().id);
         let seen = seen_activity.get(&key).copied();
-        let pinned = pins.contains(&key);
+        let pin_position = pins.get(&key).copied();
         let marks = notification_marks.get(&key).copied().unwrap_or_default();
         view.push(row_of(
             host,
             identities.get(&cached.host).and_then(Option::as_deref),
             cached.into_info(),
             seen,
-            pinned,
+            pin_position,
             marks,
         ));
     }
@@ -653,7 +658,7 @@ async fn session_list_staged(
                 identity,
                 info.clone(),
                 seen,
-                pins.contains(&key),
+                pins.get(&key).copied(),
                 marks,
             ));
         }
@@ -702,6 +707,7 @@ mod tests {
             host_name: "this machine".to_string(),
             seen_activity_at: None,
             pinned: false,
+            pin_position: None,
             notifications_read_through: 0,
             stale: false,
         }
@@ -1587,6 +1593,7 @@ mod tests {
         assert_eq!(ids(&untouched.sessions), ["cached-pin", "live-pin"]);
         assert!(
             untouched.sessions.iter().all(|row| !row.pinned
+                && row.pin_position.is_none()
                 && row.seen_activity_at.is_none()
                 && row.notifications_read_through == 0),
             "viewer facts on the other entry must not join by bare ID"
@@ -1606,7 +1613,9 @@ mod tests {
         .unwrap();
         assert_eq!(ids(&list.sessions), ["cached-pin", "live-pin"]);
         assert!(!list.sessions[0].pinned);
+        assert_eq!(list.sessions[0].pin_position, None);
         assert!(list.sessions[1].pinned);
+        assert_eq!(list.sessions[1].pin_position, Some(2));
         harness
             .store
             .set_pinned(&store::SessionKey::new(cached, "cached-pin"), true)
@@ -1622,6 +1631,7 @@ mod tests {
         .unwrap();
         assert_eq!(ids(&filtered.sessions), ["cached-pin"]);
         assert!(filtered.sessions[0].pinned);
+        assert_eq!(filtered.sessions[0].pin_position, Some(3));
     }
 
     /// `SessionRow::seen_activity_at`'s listing join (SPEC.md, Status): a

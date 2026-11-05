@@ -333,8 +333,10 @@ pub struct FolderHistoryEntry {
 }
 
 /// The schema's current shape. See [`apply_schema`] for the version
-/// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 73;
+/// history and the ladder future migrations extend. Crate-visible so tests
+/// that migrate an older database can assert it lands on the current version
+/// without pinning a number every later schema change would break.
+pub(crate) const SCHEMA_VERSION: i64 = 74;
 
 /// Schema 72's columns on `hosts`, in the order the migration appends them,
 /// each with the exact definition text the fresh-create DDL in
@@ -504,11 +506,23 @@ const SESSION_SEEN_PAIRED_SCHEMA: &str = "CREATE TABLE session_seen (
                  PRIMARY KEY (host_id, session_id)
              ) STRICT;";
 
-/// Presence alone records a shared pin. Keep the same entry lifetime as seen
-/// state, including when no cache row currently describes the session.
+/// Historical schema 63 pin DDL. Keep this presence-only shape unchanged:
+/// the bare-key migration must still produce the input schema 74 upgrades.
 const SESSION_PINS_PAIRED_SCHEMA: &str = "CREATE TABLE session_pins (
                  host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
                  session_id TEXT NOT NULL,
+                 PRIMARY KEY (host_id, session_id)
+             ) STRICT;";
+
+/// Shared manual order has the same entry lifetime as the pin itself, even
+/// when no cache row describes it. Positions deliberately permit ties:
+/// Replace copies its source's position before deletion is confirmed, and a
+/// failed deletion leaves both pins. Reads break ties by the paired key;
+/// moves compact the whole stored set, including hidden and lingering pins.
+const SESSION_PINS_ORDERED_SCHEMA: &str = "CREATE TABLE session_pins (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 session_id TEXT NOT NULL,
+                 position INTEGER NOT NULL,
                  PRIMARY KEY (host_id, session_id)
              ) STRICT;";
 
@@ -610,6 +624,17 @@ impl SessionKey {
             session_id: session_id.into(),
         }
     }
+}
+
+/// A relative move cannot use a pin that disappeared after the client read
+/// its list. Callers can downcast this from `anyhow::Error` to refuse the
+/// stale request without reporting a storage failure. The moved key is
+/// checked before the neighbor when both have disappeared.
+#[derive(Debug, thiserror::Error)]
+pub enum PinMoveError {
+    /// The requested session or its neighbor no longer has a stored pin.
+    #[error("session is no longer pinned")]
+    NotPinned(SessionKey),
 }
 
 /// The on-disk spelling of each [`HostKind`], the one place it is written:
@@ -2451,6 +2476,9 @@ pub struct HelmStore {
 ///   only that column carries a CHECK, which keeps it off the local row.
 /// - 73: persist the time of an unresolved Tensorlake host create, so a
 ///   transient missing lookup cannot forget a still-starting sandbox.
+/// - 74: shared manual pin positions, seeded oldest known session first.
+///   Rebuild the table so fresh and upgraded databases share one DDL;
+///   preserve existing positions on version-only fixture rewinds.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2760,7 +2788,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
                  PRIMARY KEY (host_id, host_identity)
              ) STRICT;
               {SESSION_SEEN_PAIRED_SCHEMA}
-              {SESSION_PINS_PAIRED_SCHEMA}
+              {SESSION_PINS_ORDERED_SCHEMA}
               {CHECKOUT_CONFIG_SCHEMA}
               {LAUNCH_TEMPLATES_SCHEMA}
               {SESSION_NOTIFICATION_MARKS_PAIRED_SCHEMA}
@@ -2772,7 +2800,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 73;",
+              PRAGMA user_version = 74;",
             announcement_schema = crate::announcements::SCHEMA,
         ))
         .context("creating schema")?;
@@ -4400,6 +4428,39 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
             .context("migrating helm.db to schema version 73")?;
         version = 73;
     }
+    if version == 73 {
+        let ordered: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM pragma_table_info('session_pins') WHERE name = 'position'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !ordered {
+            // The cache records creation seconds separately from its JSON.
+            // No payload decode is needed: an unrelated malformed payload
+            // must not lose a pin's recorded time. Zero means an old sender
+            // omitted the field; nonpositive and absent times sort last.
+            // Pair keys break every tie, including unknown times.
+            tx.execute_batch(&format!(
+                "ALTER TABLE session_pins RENAME TO session_pins_unordered;
+                 {SESSION_PINS_ORDERED_SCHEMA}
+                 INSERT INTO session_pins (host_id, session_id, position)
+                 SELECT pin.host_id, pin.session_id,
+                        ROW_NUMBER() OVER (
+                            ORDER BY CASE WHEN cache.created_at > 0 THEN 0 ELSE 1 END,
+                                     CASE WHEN cache.created_at > 0 THEN cache.created_at END,
+                                     pin.host_id, pin.session_id
+                        ) - 1
+                 FROM session_pins_unordered AS pin
+                 LEFT JOIN session_cache AS cache
+                   ON cache.host_id = pin.host_id AND cache.session_id = pin.session_id;
+                 DROP TABLE session_pins_unordered;"
+            ))
+            .context("seeding shared session pin order")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 74;")
+            .context("migrating helm.db to schema version 74")?;
+        version = 74;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -4411,6 +4472,46 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         "helm.db has schema version {version}, but this build only understands version \
          {SCHEMA_VERSION}; refusing to open it rather than risk misreading it"
     )
+}
+
+/// Read the complete stored order without joining the cache: an invisible
+/// pin still owns a place. A Replace tie is resolved by the paired key, not
+/// SQLite's incidental row order. Call while holding the store connection.
+fn ordered_pins(conn: &Connection) -> anyhow::Result<Vec<(SessionKey, i64)>> {
+    let mut statement = conn
+        .prepare(
+            "SELECT host_id, session_id, position FROM session_pins
+         ORDER BY position, host_id, session_id",
+        )
+        .context("preparing full pin order")?;
+    statement
+        .query_map([], |row| {
+            Ok((
+                SessionKey::new(row.get(0)?, row.get::<_, String>(1)?),
+                row.get(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .context("reading full pin order")
+}
+
+/// Compact a caller's complete pin order, reporting changed stored values.
+/// The caller owns the transaction so an error cannot leave a partial order.
+/// Comparing positions avoids treating a retry of an already-normalized move
+/// as a change, while normalization of gaps or ties remains observable.
+fn renumber_pins(conn: &Connection, pins: &[(SessionKey, i64)]) -> anyhow::Result<bool> {
+    let mut changed = false;
+    let mut statement = conn
+        .prepare("UPDATE session_pins SET position = ?3 WHERE host_id = ?1 AND session_id = ?2")
+        .context("preparing pin renumber")?;
+    for (index, (key, previous)) in pins.iter().enumerate() {
+        let position = i64::try_from(index).context("too many pins to renumber")?;
+        if position != *previous {
+            changed |=
+                statement.execute(rusqlite::params![key.host, key.session_id, position])? > 0;
+        }
+    }
+    Ok(changed)
 }
 
 /// Schema 37's rewrite of cached `SessionInfo` rows for launch kinds: each
@@ -5869,26 +5970,37 @@ impl HelmStore {
             .await
     }
 
-    /// Read pin membership for exactly the listing's paired keys, in bounded
-    /// SQL batches. Missing keys are unpinned, even if another entry has that ID.
+    /// Read pin membership with the same paired-key scope as position reads.
+    /// Existing callers can retain their presence-only view of shared pins.
     pub async fn pinned_sessions(
         &self,
         ids: &[SessionKey],
     ) -> anyhow::Result<std::collections::HashSet<SessionKey>> {
+        Ok(self.pin_positions(ids).await?.into_keys().collect())
+    }
+
+    /// Read positions for exactly the requested paired keys in bounded SQL
+    /// batches. Missing keys are unpinned; neither cache membership nor a
+    /// reachable host is required. Consumers order by position, then host
+    /// and session ID, because Replace can leave two pins at one position.
+    pub async fn pin_positions(
+        &self,
+        ids: &[SessionKey],
+    ) -> anyhow::Result<std::collections::HashMap<SessionKey, i64>> {
         if ids.is_empty() {
-            return Ok(std::collections::HashSet::new());
+            return Ok(std::collections::HashMap::new());
         }
         let ids = ids.to_vec();
         self.conn
             .call("pin read task panicked", move |conn: &mut Connection| {
-                let mut result = std::collections::HashSet::new();
+                let mut result = std::collections::HashMap::new();
                 for batch in ids.chunks(SESSION_KEY_BATCH) {
                     let placeholders = (0..batch.len())
                         .map(|_| "(?, ?)")
                         .collect::<Vec<_>>()
                         .join(",");
                     let mut stmt = conn.prepare(&format!(
-                        "SELECT host_id, session_id FROM session_pins \
+                        "SELECT host_id, session_id, position FROM session_pins \
                      WHERE (host_id, session_id) IN (VALUES {placeholders})"
                     ))?;
                     let values = batch.iter().flat_map(|key| {
@@ -5899,7 +6011,10 @@ impl HelmStore {
                     });
                     let rows = stmt
                         .query_map(rusqlite::params_from_iter(values), |row| {
-                            Ok(SessionKey::new(row.get(0)?, row.get::<_, String>(1)?))
+                            Ok((
+                                SessionKey::new(row.get(0)?, row.get::<_, String>(1)?),
+                                row.get(2)?,
+                            ))
                         })?
                         .collect::<Result<Vec<_>, _>>()?;
                     result.extend(rows);
@@ -5909,29 +6024,59 @@ impl HelmStore {
             .await
     }
 
-    /// Set shared pin membership, reporting only a real change so retrying
-    /// a PUT does not wake every client for a pin that already matched.
+    /// Append a new pin after every stored pin, or remove its row on unpin.
+    /// An already-pinned session keeps its position, so retries do not move
+    /// it or wake clients. A later re-pin starts at the bottom. Compact only
+    /// when the maximum position cannot be incremented without overflow.
     pub async fn set_pinned(&self, key: &SessionKey, pinned: bool) -> anyhow::Result<bool> {
         let key = key.clone();
         self.conn
             .call("pin write task panicked", move |conn: &mut Connection| {
-                let sql = if pinned {
-                    "INSERT OR IGNORE INTO session_pins (host_id, session_id) VALUES (?1, ?2)"
-                } else {
-                    "DELETE FROM session_pins WHERE host_id = ?1 AND session_id = ?2"
+                if !pinned {
+                    return Ok(conn
+                        .execute(
+                            "DELETE FROM session_pins WHERE host_id = ?1 AND session_id = ?2",
+                            rusqlite::params![key.host, key.session_id],
+                        )
+                        .context("removing session pin")?
+                        > 0);
+                }
+                let tx = conn.transaction().context("beginning pin append")?;
+                let present: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM session_pins WHERE host_id = ?1 AND session_id = ?2)",
+                    rusqlite::params![key.host, key.session_id],
+                    |row| row.get(0),
+                )?;
+                if present {
+                    return Ok(false);
+                }
+                let maximum: Option<i64> = tx.query_row(
+                    "SELECT MAX(position) FROM session_pins", [], |row| row.get(0)
+                )?;
+                let position = match maximum {
+                    None => 0,
+                    Some(i64::MAX) => {
+                        let pins = ordered_pins(&tx)?;
+                        renumber_pins(&tx, &pins)?;
+                        i64::try_from(pins.len()).context("too many pins to append")?
+                    }
+                    Some(maximum) => maximum + 1,
                 };
-                Ok(conn
-                    .execute(sql, rusqlite::params![key.host, key.session_id])
-                    .context("writing session pin")?
-                    > 0)
+                tx.execute(
+                    "INSERT INTO session_pins (host_id, session_id, position) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![key.host, key.session_id, position],
+                ).context("appending session pin")?;
+                tx.commit().context("committing pin append")?;
+                Ok(true)
             })
             .await
     }
 
     /// Give a replacement its source's pin before destroying the source.
-    /// A failed delete can leave both sessions, so this copies membership;
-    /// the caller clears the old id only after the supervisor confirms it.
-    /// Returns whether the replacement gained a pin, for event publication.
+    /// A failed delete can leave both sessions, so this copies membership
+    /// and position; ties are legal until the source is confirmed deleted.
+    /// An already-pinned replacement keeps its own position. Returns whether
+    /// the replacement gained a pin, for event publication.
     pub async fn inherit_pin(
         &self,
         source: &SessionKey,
@@ -5945,8 +6090,8 @@ impl HelmStore {
                 move |conn: &mut Connection| {
                     let changed = conn
                         .execute(
-                            "INSERT OR IGNORE INTO session_pins (host_id, session_id) \
-                 SELECT ?3, ?4 FROM session_pins WHERE host_id = ?1 AND session_id = ?2",
+                            "INSERT OR IGNORE INTO session_pins (host_id, session_id, position) \
+                 SELECT ?3, ?4, position FROM session_pins WHERE host_id = ?1 AND session_id = ?2",
                             rusqlite::params![
                                 source.host,
                                 source.session_id,
@@ -5958,6 +6103,49 @@ impl HelmStore {
                     Ok(changed > 0)
                 },
             )
+            .await
+    }
+
+    /// Place one stored pin immediately before or after another stored pin.
+    /// The named neighbor makes filtered lists safe: hidden and lingering
+    /// pins retain their place in the full order. Each distinct-key move
+    /// renumbers that whole order; the boolean reports changed positions,
+    /// even when the permutation stayed the same. A present self-move is a
+    /// no-op. Missing keys return [`PinMoveError`] without changing anything.
+    ///
+    /// One connection call serializes concurrent moves, so the later move
+    /// acts on the earlier one's result. The transaction also rolls back a
+    /// partially written renumber if storage fails; no revision is needed.
+    pub async fn move_pin(
+        &self,
+        moved: &SessionKey,
+        neighbor: &SessionKey,
+        before: bool,
+    ) -> anyhow::Result<bool> {
+        let moved = moved.clone();
+        let neighbor = neighbor.clone();
+        self.conn
+            .call("pin move task panicked", move |conn: &mut Connection| {
+                let tx = conn.transaction().context("beginning pin move")?;
+                let mut pins = ordered_pins(&tx)?;
+                let moved_index = pins
+                    .iter()
+                    .position(|(key, _)| key == &moved)
+                    .ok_or_else(|| anyhow::Error::new(PinMoveError::NotPinned(moved.clone())))?;
+                let neighbor_index = pins
+                    .iter()
+                    .position(|(key, _)| key == &neighbor)
+                    .ok_or_else(|| anyhow::Error::new(PinMoveError::NotPinned(neighbor)))?;
+                if moved_index == neighbor_index {
+                    return Ok(false);
+                }
+                let pin = pins.remove(moved_index);
+                let neighbor_index = neighbor_index - usize::from(moved_index < neighbor_index);
+                pins.insert(neighbor_index + usize::from(!before), pin);
+                let changed = renumber_pins(&tx, &pins)?;
+                tx.commit().context("committing pin move")?;
+                Ok(changed)
+            })
             .await
     }
 
@@ -12527,6 +12715,12 @@ mod tests {
                 .await
                 .unwrap()
         );
+        assert!(
+            store
+                .set_pinned(&viewer_key(&store, "tail"), true)
+                .await
+                .unwrap()
+        );
         // Replace notifies other clients only when this reports a copy.
         assert!(
             store
@@ -12535,6 +12729,22 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(store.pinned_sessions(&ids).await.unwrap().len(), 2);
+        assert_eq!(
+            store.pin_positions(&ids).await.unwrap(),
+            std::collections::HashMap::from([(ids[0].clone(), 0), (ids[1].clone(), 0),]),
+            "Replace copies the source position instead of appending"
+        );
+        assert!(
+            !store
+                .inherit_pin(&viewer_key(&store, "tail"), &ids[1])
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store.pin_positions(&ids).await.unwrap().get(&ids[1]),
+            Some(&0),
+            "an already-pinned replacement keeps its own position"
+        );
         assert!(
             store
                 .set_pinned(&viewer_key(&store, "source"), false)
@@ -12570,6 +12780,328 @@ mod tests {
             store.pinned_sessions(&ids).await.unwrap(),
             std::collections::HashSet::from([viewer_key(&store, "new")])
         );
+    }
+
+    /// New pins follow the whole stored set, including sessions absent from
+    /// cache. Retrying pin does not move it, while unpin/re-pin goes last;
+    /// positions and that order must survive a database reopen.
+    #[farhelm_testtrace::test]
+    async fn session_pin_positions_append_and_repin_at_the_bottom() {
+        let (dir, store) = fresh_store().await;
+        let a = viewer_key(&store, "a");
+        let b = viewer_key(&store, "b");
+        let c = viewer_key(&store, "c");
+        let keys = [a.clone(), b.clone(), c.clone()];
+        for key in &keys {
+            assert!(store.set_pinned(key, true).await.unwrap());
+        }
+        assert_eq!(
+            store.pin_positions(&keys).await.unwrap(),
+            std::collections::HashMap::from([(a.clone(), 0), (b.clone(), 1), (c.clone(), 2),])
+        );
+        assert!(!store.set_pinned(&a, true).await.unwrap());
+        assert!(store.set_pinned(&b, false).await.unwrap());
+        assert!(!store.pin_positions(&keys).await.unwrap().contains_key(&b));
+        assert!(store.set_pinned(&b, true).await.unwrap());
+        let expected =
+            std::collections::HashMap::from([(a.clone(), 0), (b.clone(), 3), (c.clone(), 2)]);
+        assert_eq!(store.pin_positions(&keys).await.unwrap(), expected);
+        assert!(store.pin_positions(&[]).await.unwrap().is_empty());
+        assert_eq!(store.pin_positions(&[a.clone(), a]).await.unwrap().len(), 1);
+        drop(store);
+        let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        assert_eq!(store.pin_positions(&keys).await.unwrap(), expected);
+    }
+
+    /// Visible neighbors are paired keys, not filtered-list indices. Moves
+    /// before and after a neighbor must retain hidden pins in the full order
+    /// and distinguish equal bare IDs on different hosts.
+    #[farhelm_testtrace::test]
+    async fn session_pin_moves_use_paired_neighbors_and_keep_hidden_pins() {
+        let (_dir, store) = fresh_store().await;
+        let remote = store
+            .add_ssh_host("pin-move.example", None, None)
+            .await
+            .unwrap();
+        let a = viewer_key(&store, "same");
+        let hidden = viewer_key(&store, "hidden");
+        let b = SessionKey::new(remote, "same");
+        let tail = viewer_key(&store, "tail");
+        let keys = [a.clone(), hidden.clone(), b.clone(), tail.clone()];
+        for key in &keys {
+            assert!(store.set_pinned(key, true).await.unwrap());
+        }
+        assert!(store.move_pin(&tail, &b, true).await.unwrap());
+        assert_eq!(
+            store.pin_positions(&keys).await.unwrap(),
+            std::collections::HashMap::from([
+                (a.clone(), 0),
+                (hidden.clone(), 1),
+                (tail.clone(), 2),
+                (b.clone(), 3),
+            ])
+        );
+        assert!(store.move_pin(&a, &b, false).await.unwrap());
+        let expected = std::collections::HashMap::from([
+            (hidden, 0),
+            (tail.clone(), 1),
+            (b.clone(), 2),
+            (a.clone(), 3),
+        ]);
+        assert_eq!(store.pin_positions(&keys).await.unwrap(), expected);
+        assert!(!store.move_pin(&tail, &b, true).await.unwrap());
+        assert!(!store.move_pin(&a, &a, false).await.unwrap());
+        assert_eq!(store.pin_positions(&keys).await.unwrap(), expected);
+    }
+
+    /// Replace ties have a deterministic paired-key order. A move normalizes
+    /// tied/gapped positions even if the requested adjacency already holds,
+    /// and reports the normalization because clients receive those positions.
+    #[farhelm_testtrace::test]
+    async fn session_pin_moves_normalize_ties_and_report_position_changes() {
+        let (_dir, store) = fresh_store().await;
+        let remote = store
+            .add_ssh_host("pin-ties.example", None, None)
+            .await
+            .unwrap();
+        let a = viewer_key(&store, "a");
+        let b = viewer_key(&store, "b");
+        let c = SessionKey::new(remote, "a");
+        let keys = [a.clone(), b.clone(), c.clone()];
+        for key in keys.iter().rev() {
+            store.set_pinned(key, true).await.unwrap();
+        }
+        store
+            .conn
+            .lock()
+            .execute("UPDATE session_pins SET position = 7", [])
+            .unwrap();
+        assert_eq!(
+            ordered_pins(&store.conn.lock())
+                .unwrap()
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect::<Vec<_>>(),
+            keys
+        );
+        assert!(!store.move_pin(&a, &a, true).await.unwrap());
+        assert!(
+            store
+                .pin_positions(&keys)
+                .await
+                .unwrap()
+                .values()
+                .all(|position| *position == 7)
+        );
+        assert!(store.move_pin(&a, &b, true).await.unwrap());
+        assert_eq!(
+            store.pin_positions(&keys).await.unwrap(),
+            std::collections::HashMap::from([(a, 0), (b, 1), (c, 2),])
+        );
+    }
+
+    /// A stale move must refuse without changing order, and a database error
+    /// midway through renumbering must roll back earlier writes. Otherwise a
+    /// failed request could publish a partial order on the next listing.
+    #[farhelm_testtrace::test]
+    async fn session_pin_moves_refuse_stale_keys_and_roll_back_failed_writes() {
+        let (_dir, store) = fresh_store().await;
+        let keys = [
+            viewer_key(&store, "a"),
+            viewer_key(&store, "b"),
+            viewer_key(&store, "c"),
+        ];
+        for key in &keys {
+            store.set_pinned(key, true).await.unwrap();
+        }
+        let expected = store.pin_positions(&keys).await.unwrap();
+        let absent = viewer_key(&store, "absent");
+        let also_absent = viewer_key(&store, "also-absent");
+        for (moved, neighbor, missing) in [
+            (&absent, &keys[0], &absent),
+            (&keys[0], &absent, &absent),
+            (&absent, &absent, &absent),
+            (&absent, &also_absent, &absent),
+        ] {
+            let error = store.move_pin(moved, neighbor, true).await.unwrap_err();
+            assert!(
+                matches!(error.downcast_ref::<PinMoveError>(), Some(PinMoveError::NotPinned(key)) if key == missing)
+            );
+            assert_eq!(store.pin_positions(&keys).await.unwrap(), expected);
+        }
+        store
+            .conn
+            .lock()
+            .execute_batch(
+                "CREATE TEMP TRIGGER reject_pin_renumber BEFORE UPDATE OF position ON session_pins
+             WHEN NEW.session_id = 'b' BEGIN SELECT RAISE(ABORT, 'test pin write failure'); END;",
+            )
+            .unwrap();
+        let error = store.move_pin(&keys[2], &keys[0], true).await.unwrap_err();
+        assert!(format!("{error:#}").contains("test pin write failure"));
+        assert_eq!(store.pin_positions(&keys).await.unwrap(), expected);
+    }
+
+    /// Position overflow is recovered by deterministic compaction, while a
+    /// retry of an existing pin must not compact or move anything. If the
+    /// appended row is refused, the compaction must roll back with it.
+    #[farhelm_testtrace::test]
+    async fn session_pin_append_compacts_only_when_needed_and_rolls_back_on_failure() {
+        let (_dir, store) = fresh_store().await;
+        let a = viewer_key(&store, "a");
+        let b = viewer_key(&store, "b");
+        let c = viewer_key(&store, "c");
+        store.set_pinned(&b, true).await.unwrap();
+        store.set_pinned(&a, true).await.unwrap();
+        store
+            .conn
+            .lock()
+            .execute("UPDATE session_pins SET position = ?1", [i64::MAX])
+            .unwrap();
+        assert!(!store.set_pinned(&a, true).await.unwrap());
+        let original =
+            std::collections::HashMap::from([(a.clone(), i64::MAX), (b.clone(), i64::MAX)]);
+        assert_eq!(
+            store.pin_positions(&[a.clone(), b.clone()]).await.unwrap(),
+            original
+        );
+        assert!(
+            store
+                .set_pinned(&SessionKey::new(i64::MAX, "missing-host"), true)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            store.pin_positions(&[a.clone(), b.clone()]).await.unwrap(),
+            original
+        );
+        assert!(store.set_pinned(&c, true).await.unwrap());
+        assert_eq!(
+            store
+                .pin_positions(&[a.clone(), b.clone(), c.clone()])
+                .await
+                .unwrap(),
+            std::collections::HashMap::from([(a, 0), (b, 1), (c, 2)])
+        );
+    }
+
+    /// A genuine presence-only table needs a stable initial order, using
+    /// recorded creation seconds even when unrelated cached JSON is damaged.
+    /// Unknown legacy/absent times come last; version-only rewinds must then
+    /// preserve manual positions without consulting a cache that may be gone.
+    #[farhelm_testtrace::test]
+    async fn schema_74_seeds_pin_order_and_preserves_it_on_rewinds() {
+        let (dir, store) = fresh_store().await;
+        let first = viewer_key(&store, "unused").host;
+        let second = store
+            .add_ssh_host("pin-upgrade.example", None, None)
+            .await
+            .unwrap();
+        // This is the expected order, deliberately different from insertion
+        // order. Equal known times cross hosts; unknown times use only keys.
+        let keys = [
+            SessionKey::new(first, "same"),
+            SessionKey::new(second, "same"),
+            SessionKey::new(first, "newer"),
+            SessionKey::new(first, "negative"),
+            SessionKey::new(first, "zero"),
+            SessionKey::new(second, "absent"),
+        ];
+        let path = dir.path().join("helm.db");
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(&format!(
+            "DROP TABLE session_pins; {SESSION_PINS_PAIRED_SCHEMA} PRAGMA user_version = 73;"
+        ))
+        .unwrap();
+        for key in keys.iter().rev() {
+            conn.execute(
+                "INSERT INTO session_pins (host_id, session_id) VALUES (?1, ?2)",
+                rusqlite::params![key.host, key.session_id],
+            )
+            .unwrap();
+        }
+        for (key, created_at) in [
+            (&keys[0], 10),
+            (&keys[1], 10),
+            (&keys[2], 30),
+            (&keys[3], -1),
+            (&keys[4], 0),
+        ] {
+            conn.execute(
+                "INSERT INTO session_cache (host_id, session_id, created_at, info_json) VALUES (?1, ?2, ?3, 'malformed')",
+                rusqlite::params![key.host, key.session_id, created_at],
+            ).unwrap();
+        }
+        assert_eq!(
+            conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            73
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM pragma_table_info('session_pins') WHERE name = 'position'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0,
+            "premise: this really is the old presence-only shape"
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM session_pins", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            6
+        );
+        drop(conn);
+        let store = HelmStore::open(&path).await.unwrap();
+        let seeded: std::collections::HashMap<_, _> = keys
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(position, key)| (key, position as i64))
+            .collect();
+        assert_eq!(store.pin_positions(&keys).await.unwrap(), seeded);
+        {
+            let conn = store.conn.lock();
+            assert_eq!(
+                conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                SCHEMA_VERSION
+            );
+            // The current shape permits ties and signed positions. These
+            // values make reseeding observable even if the old cache survived.
+            conn.execute("UPDATE session_pins SET position = 15", [])
+                .unwrap();
+            conn.execute(
+                "UPDATE session_pins SET position = -4 WHERE session_id = 'same'",
+                [],
+            )
+            .unwrap();
+            conn.execute("DELETE FROM session_cache", []).unwrap();
+        }
+        let preserved = store.pin_positions(&keys).await.unwrap();
+        drop(store);
+        for rewind in [73, 62] {
+            let conn = Connection::open(&path).unwrap();
+            conn.pragma_update(None, "user_version", rewind).unwrap();
+            assert_eq!(
+                conn.query_row("SELECT count(*) FROM session_cache", [], |row| row
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0,
+                "premise: a reattribution or reseed has no cache to consult"
+            );
+            drop(conn);
+            let store = HelmStore::open(&path).await.unwrap();
+            assert_eq!(
+                store.pin_positions(&keys).await.unwrap(),
+                preserved,
+                "rewound to {rewind}"
+            );
+            drop(store);
+        }
     }
 
     /// A real pre-pin schema has no table. Upgrading must introduce empty
@@ -13336,7 +13868,7 @@ mod tests {
                 )
                 .unwrap();
                 tx.execute(
-                    "INSERT INTO session_pins VALUES (?1, ?2)",
+                    "INSERT INTO session_pins VALUES (?1, ?2, 42)",
                     rusqlite::params![key.host, key.session_id],
                 )
                 .unwrap();
@@ -13351,17 +13883,21 @@ mod tests {
         let requested = &keys[..keys.len() - 1];
         let seen = store.seen_activity(requested).await.unwrap();
         let pins = store.pinned_sessions(requested).await.unwrap();
+        let positions = store.pin_positions(requested).await.unwrap();
         let marks = store.notification_marks(requested).await.unwrap();
         assert_eq!(seen.len(), requested.len());
         assert_eq!(pins.len(), requested.len());
+        assert_eq!(positions.len(), requested.len());
         assert_eq!(marks.len(), requested.len());
         for key in requested {
             assert_eq!(seen.get(key), Some(&42));
             assert!(pins.contains(key));
+            assert_eq!(positions.get(key), Some(&42));
             assert_eq!(marks.get(key), Some(&(3, 2)));
         }
         assert!(!seen.contains_key(keys.last().unwrap()));
         assert!(!pins.contains(keys.last().unwrap()));
+        assert!(!positions.contains_key(keys.last().unwrap()));
         assert!(!marks.contains_key(keys.last().unwrap()));
     }
 
