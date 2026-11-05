@@ -1,16 +1,16 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-11-04T01:13:46Z",
-  "captured_from": "fadc3be725c00657383494c7045443c5a6e7acba",
-  "commit": "9a8caa94aef1dd60465bbf6e9e42819e187a9a24",
+  "captured_at": "2026-11-05T01:00:52Z",
+  "captured_from": "2cbfdc77aba776967f3a5494e89af5bafe74862b",
+  "commit": "49ecc0b32297ec6912808a970e9127df0ec5ad03",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 576,
       "width": 746
     },
     "add-a-remote-host/add-dialog": {
-      "height": 1268,
+      "height": 1380,
       "width": 1754
     },
     "add-a-remote-host/connected-host": {
@@ -58,7 +58,7 @@
       "width": 604
     },
     "manage-hosts/app-settings": {
-      "height": 1290,
+      "height": 1350,
       "width": 1802
     },
     "manage-hosts/details": {
@@ -296,6 +296,22 @@
     "release-notes/v0-33-0-template-names": {
       "height": 684,
       "width": 1070
+    },
+    "release-notes/v0-35-0-agent-colors": {
+      "height": 750,
+      "width": 1260
+    },
+    "release-notes/v0-35-0-discord": {
+      "height": 972,
+      "width": 1248
+    },
+    "release-notes/v0-35-0-launcher-warning": {
+      "height": 1062,
+      "width": 1744
+    },
+    "release-notes/v0-35-0-permissions-first": {
+      "height": 1062,
+      "width": 1744
     },
     "session-list/controls": {
       "height": 1160,

@@ -23,6 +23,75 @@ import { shot } from "./shot";
 
 const PAGE = "release-notes";
 
+// v0.35.0's static controls and styling can be shown without submitting a
+// launch, changing preferences or sending feedback. Launch progress and file
+// drops are behavior rather than a useful still. The relocated session summary
+// remains unphotographed for the staging timestamp constraint documented below
+// with v0.30.0: its real creation time would follow its invented last activity.
+
+/** Search offers permissions before an agent is chosen; accepting nothing starts nothing. */
+test("v0.35.0 permissions before an agent", async ({ page, request }) => {
+  const name = `${PAGE}/v0-35-0-permissions-first`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 930, height: 1100 });
+  const { director } = await open(page, request);
+  const form = await openLauncher(page);
+  await expect(form.locator('.launch-composer-harness-choice button[aria-pressed="true"]')).toHaveCount(0);
+  const search = form.locator('.launch-composer-search input[role="combobox"]');
+  await search.fill("guarded");
+  const choice = form.getByRole("option", { name: "Permissions: Guarded", exact: true });
+  await expect(choice).toBeVisible();
+  await director.callout(choice, "Choose Guarded or YOLO in search before choosing an agent.", { side: "bottom", dy: 90 });
+  await shot(page, name, [search, choice, form.locator(".launch-composer-harness-choice")], { maxWidth: 930 });
+});
+
+/** The real Help menu exposes the Discord link without opening an external page. */
+test("v0.35.0 Discord help link", async ({ page, request }) => {
+  const name = `${PAGE}/v0-35-0-discord`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1100, height: 1000 });
+  const { director } = await open(page, request);
+  const button = page.getByRole("button", { name: "Help", exact: true });
+  await button.click();
+  const menu = page.getByRole("menu", { name: "Help", exact: true });
+  const link = menu.locator('[data-bar-menu-item="Chat on Discord"]');
+  await expect(link).toBeVisible();
+  await director.callout(link, "Chat on Discord opens Farhelm's Discord to talk with the maintainer and other users.", { side: "right", dy: -70 });
+  await shot(page, name, [button, menu], { maxWidth: 930 });
+});
+
+/** Staged Claude and Codex rows show the palette without rewriting agent marks. */
+test("v0.35.0 colored agent marks", async ({ page, request }) => {
+  const name = `${PAGE}/v0-35-0-agent-colors`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 900 });
+  const { scenario, director } = await open(page, request);
+  const claude = rowOf(page, scenario, session => session.wrapper === "claude" && !session.open);
+  const codex = rowOf(page, scenario, session => session.wrapper === "codex");
+  const mark = claude.locator('svg.harness-glyph[data-glyph="claude"]');
+  await expect(mark).toBeVisible();
+  await expect(codex.locator(".session-agent")).toBeVisible();
+  // Approach the glyph from below: its right-hand neighbor is the permission shield.
+  await director.callout(mark, "Agent marks now have distinct colors. Codex and Goose stay grey; the selected row uses white.", { side: "bottom", dx: 220, dy: 70 });
+  await shot(page, name, [page.locator(".session-list")], { maxWidth: 930 });
+});
+
+/** An effort without an agent is a local refusal, so this warning sends no launch. */
+test("v0.35.0 yellow launcher warnings", async ({ page, request }) => {
+  const name = `${PAGE}/v0-35-0-launcher-warning`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 930, height: 1100 });
+  const { director } = await open(page, request);
+  const form = await openLauncher(page);
+  const search = form.locator('.launch-composer-search input[role="combobox"]');
+  await search.fill("effort:high");
+  const warning = form.locator(".launch-composer-search-message");
+  await expect(warning).toHaveText("Choose a harness first");
+  await expect(warning).toHaveClass(/launch-composer-search-warning/);
+  await director.callout(warning, "Refusals and errors stand out in yellow. Red still marks riskier permission changes and YOLO.", { side: "bottom", dy: 90 });
+  await shot(page, name, [search, warning, form.locator(".launch-composer-harness-choice")], { maxWidth: 930 });
+});
+
 /** The image choice is a draft: photographing it neither pulls nor starts an image. */
 test("v0.33.0 container image", async ({ page, request }) => {
   const name = `${PAGE}/v0-33-0-container-image`;
