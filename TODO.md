@@ -671,7 +671,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `ffe0693e-0a67-4039-a8e4-4621365c4561`, `4b6e1aad-91ab-4aee-b721-f760fb42b0cf`,
   `443ebd09-f5c5-4cd3-8ad1-d27e96a75532`). Hypothesis: a focus handoff in the page takes focus back (FLAKES.md,
   2026-11-05). Both cases passed five attempts per engine on 2026-11-05 across ordinary and host terminals. A delayed
-  focus return remains a hypothesis; neither the body-focus premise nor the exclusion was removed.
+  focus return remains a hypothesis; neither the body-focus premise nor the exclusion was removed. The
+  typed-page-refusals case recurred on Chromium in the host-terminal run `b8e18c76-972f-4e97-bf66-828778581c59` at
+  `0563c44f`; WebKit passed, and the failure snapshot still had terminal input focused after the blur. No additional
+  reproduction or fix was attempted (FLAKES.md, 2026-11-05).
 
 ### Difficult deflake
 
