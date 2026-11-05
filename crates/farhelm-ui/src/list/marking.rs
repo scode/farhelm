@@ -2,13 +2,14 @@
 //!
 //! Stored identities survive filters. Every count and action is projected from
 //! the rows actually displayed, in the list's existing held order; this module
-//! owns neither a second ordering nor a metadata request queue.
+//! owns neither a second ordering nor a lifecycle or metadata request queue.
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use dioxus::prelude::*;
 
+use super::lifecycle::LifecycleAction;
 use crate::Session;
 use crate::anchored_popovers::{
     AnchorRegion, Interest, MovementOwner, use_anchor_binding, use_registration,
@@ -162,7 +163,7 @@ pub(super) fn clears_on_escape(event: &KeyboardEvent) -> bool {
 /// Clearing from a row or filter keeps that surviving control focused. A menu
 /// action removes its own item, so its handback waits for the ordinary title to
 /// mount and yields if another control has already received focus meanwhile.
-fn return_header_focus() {
+pub(super) fn return_header_focus() {
     let destination = crate::modal_dialog::FocusTarget::new(".sort-title", None, false).script();
     document::eval(&format!(
         r#"(() => {{
@@ -176,16 +177,18 @@ fn return_header_focus() {
     ));
 }
 
-/// The header's marked count and metadata menu share the existing menu facilities.
+/// The header's marked count, lifecycle controls and ordinary metadata menu.
 ///
 /// Targets are drawn snapshots. Dispatch belongs to the list, which checks live
-/// locks and visibility before reusing row callbacks and clearing marks.
+/// locks and visibility before reusing row callbacks. Lifecycle completions and
+/// their modal live with that persistent owner, never this conditional toolbar.
 #[component]
 pub(super) fn MarkedBar(
     targets: Vec<Session>,
     disabled: bool,
     layout_epoch: ReadSignal<u64>,
     on_action: EventHandler<(MetadataAction, Vec<Session>)>,
+    on_lifecycle: EventHandler<(LifecycleAction, Vec<Session>)>,
     on_clear: EventHandler<()>,
 ) -> Element {
     let mut open = use_signal(|| false);
@@ -304,7 +307,26 @@ pub(super) fn MarkedBar(
                     on_clear.call(());
                 }
             },
-            span { class: "marked-count", "{targets.len()} marked" }
+            // Accepted lifecycle work disables the buttons. This surviving,
+            // nonsequential target receives the modal's confirming handback.
+            span { class: "marked-count", tabindex: "-1", "{targets.len()} marked" }
+            button {
+                r#type: "button", class: "btn btn-neutral marked-stop", disabled,
+                "data-tooltip": "Stop the agents in the marked sessions currently shown",
+                onclick: { let drawn = targets.clone(); move |_| {
+                    on_lifecycle.call((LifecycleAction::Stop, drawn.clone()));
+                } },
+                "Stop"
+            }
+            button {
+                r#type: "button", class: "btn btn-danger marked-delete", disabled,
+                "data-tooltip": "Delete the marked sessions currently shown",
+                aria_haspopup: "dialog",
+                onclick: { let drawn = targets.clone(); move |_| {
+                    on_lifecycle.call((LifecycleAction::Delete, drawn.clone()));
+                } },
+                "Delete"
+            }
             span { "data-row-menu-key": "list:marked",
                 button {
                     r#type: "button", class: "btn btn-ghost bar-menu-toggle marked-menu-toggle",
@@ -592,7 +614,7 @@ mod tests {
                 MarkedBar {
                     targets: vec![row_specimen("one"), row_specimen("two")],
                     disabled: false, layout_epoch: epoch,
-                    on_action: |_| {}, on_clear: |_| {},
+                    on_action: |_| {}, on_lifecycle: |_| {}, on_clear: |_| {},
                 }
             }
         }
@@ -607,6 +629,75 @@ mod tests {
         assert!(
             texts.contains(&"2 marked"),
             "the toolbar renders the projected target count: {texts:?}"
+        );
+    }
+
+    /// Confirming Delete locks every action before the dialog's focus handback.
+    /// Its count must remain a visible programmatic target outside sequential Tab
+    /// order; focusing one of the newly disabled buttons would lose that handback.
+    #[farhelm_testtrace::test]
+    fn locked_toolbar_keeps_a_programmatic_count_target() {
+        use dioxus::core::{AttributeValue, DynamicNode, ScopeId, TemplateAttribute, TemplateNode};
+
+        /// Mount the toolbar in the same locked state as an accepted batch.
+        fn app() -> Element {
+            use_context_provider(MovementOwner::default);
+            let epoch = use_signal(|| 0);
+            rsx! { MarkedBar {
+                targets: vec![row_specimen("pending")], disabled: true,
+                layout_epoch: epoch, on_action: |_| {}, on_lifecycle: |_| {}, on_clear: |_| {},
+            } }
+        }
+
+        /// Find the rendered count in the component's static template tree.
+        fn count_target(node: &TemplateNode) -> bool {
+            let TemplateNode::Element {
+                tag,
+                attrs,
+                children,
+                ..
+            } = node
+            else {
+                return false;
+            };
+            let has = |name, value| {
+                attrs.iter().any(|attr| matches!(attr,
+                TemplateAttribute::Static { name: key, value: text, .. } if *key == name && *text == value
+            ))
+            };
+            if has("class", "marked-count") {
+                assert_eq!(*tag, "span");
+                assert!(has("tabindex", "-1"));
+                assert!(!attrs.iter().any(|attr| matches!(
+                    attr,
+                    TemplateAttribute::Static {
+                        name: "hidden" | "disabled",
+                        ..
+                    }
+                )));
+                return true;
+            }
+            children.iter().any(count_target)
+        }
+
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        let root = dom.get_scope(ScopeId::APP).unwrap().root_node();
+        let DynamicNode::Component(bar) = &root.dynamic_nodes[0] else {
+            panic!("toolbar mounted");
+        };
+        let rendered = bar.mounted_scope(0, root, &dom).unwrap().root_node();
+        assert!(rendered.template.roots.iter().any(count_target));
+        assert_eq!(
+            rendered
+                .dynamic_attrs
+                .iter()
+                .flat_map(|attrs| attrs.iter())
+                .filter(|attr| attr.name == "disabled"
+                    && matches!(attr.value, AttributeValue::Bool(true)))
+                .count(),
+            4,
+            "Stop, Delete, metadata menu and Clear all obey the same lock"
         );
     }
 }
