@@ -71,6 +71,11 @@ Emoji presentation selectors, as in ❤️, now give eligible characters two col
 presentation selectors can make a wide character narrow. This follows Ghostty's defaults; tmux also widens characters
 that are not eligible and does not narrow them.
 
+New terminals drop some invisible formatting characters from program output, including zero-width spaces, text-direction
+marks, line and paragraph separators, word joiners, byte order marks and Hangul fillers. Those characters are also
+absent from scrollback, saved terminal contents and text you copy. What you type, your programs and their files are
+unchanged.
+
 Two edge cases still differ from Ghostty: with wrapping disabled, a printed space in the final column is treated as
 empty when choosing which character a selector affects; and a terminal only one column wide drops a wide character
 before wrapping. The

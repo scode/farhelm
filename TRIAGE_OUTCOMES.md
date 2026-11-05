@@ -21404,7 +21404,10 @@
 - Completion criteria: SPEC_impl.md (the emulator selector rules) and the user docs page on new terminals state that new
   terminals drop these invisible formatting characters, so copied text and history lack them. No code change. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/terminal-text-drops.md`.
+- Execution: `complete`; SPEC_impl.md and the new-terminals guide state the accepted formatting-character drop and its
+  consequences for copied text, scrollback and saved terminal contents. No code change. jj change
+  `wuvrnstwptzmyypunkyptpqmxvxsqxuu`, bookmark `plan/terminal-text-drops/01-state-formatting-drop`;
+  [draft PR #3029](https://github.com/scode/farhelm/pull/3029/changes).
 
 ## emoji-continuation-drops-standalone-kirat-characters.md
 
