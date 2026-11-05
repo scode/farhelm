@@ -187,3 +187,18 @@ It does not match when the consequence includes any of the following:
 
 - content that cannot be reached at all, or that a keyboard-only or screen-reader user cannot reach;
 - an action that happens without the user's own click.
+
+### An interrupted start collides with another terminal's random socket name
+
+Added 2026-11-04; accepted by the maintainer.
+
+A finding matches when all of these hold:
+
+- Two overlapping terminal starts independently choose the same random 40-bit socket name before either binds it.
+- One start wins, and the other's first stage is interrupted or reaches its deadline before its refusal is observed.
+- Cleanup of that unfinished start sends Shutdown to the winning host at the shared socket, ending that terminal and
+  hanging up its program.
+
+This covers that specific collision-and-interruption route, including loss of the winning terminal's work. It does not
+cover cleanup choosing another terminal without that random-name collision, deliberate replacement of private
+socket-directory contents, or a shutdown applied to the wrong target by another route.
