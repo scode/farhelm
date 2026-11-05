@@ -234,3 +234,19 @@ A finding matches when all of these hold:
 
 This covers that specific loss of Farhelm's retained terminal history. It does not cover ordinary resize counts, file or
 process loss, database corruption, or recovery losing output that remains in a usable snapshot and journal.
+
+### A terminal host's process number is reused during the signal handoff
+
+Added 2026-11-04; accepted by the maintainer.
+
+A finding matches when all of these hold:
+
+- Forced termination verifies a terminal host's process identity on a blocking worker.
+- The host exits and the kernel reuses its process number between that verification and the awaiting task's numeric
+  signal.
+- The signal reaches the unrelated replacement process because the verification result is stale across that internal
+  asynchronous handoff.
+
+This covers that specific handoff, including loss of the unrelated process's work. It does not cover selecting the wrong
+host initially, omitting identity verification, storing a process number for later use, or carrying a bare number across
+other asynchronous work or waits outside this verification-to-signal handoff.
