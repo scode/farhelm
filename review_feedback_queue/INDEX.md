@@ -36,10 +36,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   moves to a terminal host and its host is lost, independent old terminal tabs can disappear from the live-work count.
   Delete can then end those tabs without the required warning, although they may still hold work.
 
-- [`retained-delete-approval-can-kill-new-tab.md`](retained-delete-approval-can-kill-new-tab.md) — A Delete approved
-  when nothing was alive can later end a newly opened tab without asking about that work if its host becomes unreadable
-  between two status reads. The conditional approval and status sequence is established.
-
 - [`selector-policy-drops-ordinary-formatting-input.md`](selector-policy-drops-ordinary-formatting-input.md) — New
   terminals discard formatting codepoints even without selectors, changing stored and copied text. Priority remains
   highest because independent consultation could not settle whether this retained-text loss is outside user-data loss.

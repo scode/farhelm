@@ -282,6 +282,66 @@ async fn an_unreadable_host_records_nothing_and_its_verbs_refuse() {
     assert_eq!(test_host.received(), b"");
 }
 
+/// A nothing-alive approval must not end a tab that becomes unreadable
+/// during the guard. Force the running-to-unavailable transition after
+/// the initial uncertainty check, where a tmux query can yield, and require
+/// a refusal rather than treating the now-uncountable tab as absent.
+#[farhelm_testtrace::test]
+async fn delete_refuses_a_tab_that_becomes_unreadable_between_its_checks() {
+    let state = StateDir::new();
+    let (host, peer) = adopt_test_host(None).await;
+    let peer = Arc::new(peer);
+    let mut seams = SupervisorSeams::default();
+    let changing_host = host.clone();
+    seams.faults.delete_tab_count_gate = Some(Arc::new(move || {
+        let peer = Arc::clone(&peer);
+        let host = changing_host.clone();
+        Box::pin(async move {
+            assert!(matches!(host.liveness(), Liveness::Running { .. }));
+            peer.become_unreadable();
+            wait_for(&host, "tab becoming unreadable", |host| {
+                matches!(host.liveness(), Liveness::Unavailable { .. })
+            })
+            .await;
+        })
+    }));
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        dummy_exe(),
+        SupervisorTimeouts::default(),
+        seams,
+    )
+    .await
+    .expect("supervisor");
+    let entry = entry_with(
+        None,
+        LastOutcome::Exited {
+            exit_code: Some(0),
+            annotation: None,
+        },
+    );
+    entry
+        .session
+        .host_tabs
+        .lock()
+        .unwrap()
+        .push(super::super::host_tabs::HostTab {
+            tab_id: "t1".into(),
+            created_ns: 1,
+            scoped: false,
+            host,
+            end_failed: false,
+            failed_ends: 0,
+            retry_at: None,
+        });
+    let (refusal, settled) = sup
+        .still_alive_for_delete(&entry, farhelm_proto::DeleteGuard::NothingAlive)
+        .await
+        .expect("guard");
+    assert!(refusal.is_some_and(|why| why.contains("cannot be read")));
+    assert!(settled.is_none(), "a refusal must not authorize teardown");
+}
+
 /// A host agent's exit is recorded as soon as its runtime announces it,
 /// without waiting for a tick.
 ///
