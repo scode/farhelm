@@ -1313,6 +1313,10 @@ for (const phone of [false, true]) {
     expect(planned.result, "real discovery must produce the plan this test measures").toBe("provisionable");
     if (planned.result !== "provisionable") throw new Error("fixture did not offer setup");
     await expect(dialog.getByRole("heading")).toHaveText(`Set up host · ${remote}`);
+    // Tensorlake supplies a size subtitle and Back; ordinary SSH setup keeps
+    // its default explanation and offers only the existing setup answers.
+    await expect(dialog.locator(".host-settings-summary")).toHaveText("Farhelm is not running there yet");
+    await expect(dialog.getByRole("button", { name: "Back", exact: true })).toHaveCount(0);
     await expect(dialog.getByRole("button", { name: "Set up", exact: true })).toBeFocused();
     await expectQuietInitialFocus(page, dialog.getByRole("button", { name: "Set up", exact: true }));
     expect((await dialog.boundingBox())!.width).toBe(before.width);

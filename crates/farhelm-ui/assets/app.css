@@ -5840,6 +5840,21 @@ a:any-link,
   padding: 4px 8px;
 }
 
+/* The native recipe picker belongs to the same field column as Name. Keep
+   its platform arrow while matching the surrounding input's size and paint. */
+.add-host-form .add-tensorlake-recipe {
+  box-sizing: border-box; width: 100%; min-width: 0; min-height: 36px;
+  background: var(--well); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--fg-0); font: inherit; font-size: 13px; padding: 4px 8px;
+}
+.add-host-form .add-tensorlake-name-help,
+.add-host-form .add-tensorlake-recipe-help { margin: 0; }
+.add-tensorlake-recipe-summary {
+  margin: 0; padding: 10px 12px; background: var(--bg-1);
+  border: 1px solid var(--border-dim); border-radius: var(--radius-sm);
+  color: var(--fg-1); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere;
+}
+
 /* ===== Host provisioning ========================================== */
 
 /* Provisioning stays inside its host row because confirmation, diagnostics,
@@ -5987,6 +6002,13 @@ a:any-link,
   color: var(--fg-0);
   margin-top: 14px;
   padding: 7px 9px;
+}
+/* Billed creation and its idle limit are one decision in both initial Add
+   and rerun. Keep their shared callout distinct from the plan's kept files. */
+.tensorlake-billing {
+  margin: 0; padding: 12px 14px; background: var(--warn-bg-dim);
+  border-left: 3px solid var(--warn); border-radius: var(--radius-sm);
+  color: var(--fg-0); font-size: 13px; line-height: 1.6;
 }
 
 .provisioning-title {

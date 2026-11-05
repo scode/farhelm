@@ -5758,18 +5758,18 @@ key and answers the count, a 400 without a key, or a 502 with the classified fai
 The REST client is a `TensorlakeApi` trait with one implementation per caller: reqwest against
 `https://api.tensorlake.ai` in production, the same client pointed at a loopback stub in unit tests, an offline
 implementation for test-built helms, and the browser suite's fake. Every call takes the key explicitly; `ApiKey` has no
-`Debug` or `Display`. The trait carries the calls the follow-up host PRs use (list, get, create with an image or
-snapshot source, suspend, resume, terminate, snapshot, get, list and delete snapshots); everything but suspend and
-resume has a caller. Requests follow no redirects and are not retried; a call has a 30-second bound and a create ten
-minutes. A create that times out may still be waiting for capacity on Tensorlake's side and start later, so a timeout
-does not mean "not created": callers reconcile by the sandbox name they chose. The create request always states
-`auto_resume`, because Tensorlake's default lets proxied traffic, a gateway ssh connection included, wake a suspended
-sandbox; with it off such traffic gets a prompt 409 instead, which keeps resuming the user's decision. Path arguments
-are single percent-encoded segments. Replies decode leniently: unknown fields are ignored, most fields are optional, and
-an unknown status decodes as `Unknown` (so an unknown snapshot status cannot tell "still working" from a new kind of
-failure, and pollers bound their wait). Failures are classified as auth (401, 403), not found (404), conflict (409),
-refused (400, 422), other status, transport and undecodable reply. Server messages are kept for display, bounded,
-whitespace-collapsed, stripped of presentation-unsafe characters, and have the key replaced should a server echo it.
+`Debug` or `Display`. The trait carries sandbox listing, lookup, creation from an image or snapshot, suspend, resume and
+termination, plus taking, looking up, listing and deleting snapshots. Requests follow no redirects and are not retried;
+a call has a 30-second bound and a create ten minutes. A create that times out may still be waiting for capacity on
+Tensorlake's side and start later, so a timeout does not mean "not created": callers reconcile by the sandbox name they
+chose. The create request always states `auto_resume`, because Tensorlake's default lets proxied traffic, a gateway ssh
+connection included, wake a suspended sandbox; with it off such traffic gets a prompt 409 instead, which keeps resuming
+the user's decision. Path arguments are single percent-encoded segments. Replies decode leniently: unknown fields are
+ignored, most fields are optional, and an unknown status decodes as `Unknown` (so an unknown snapshot status cannot tell
+"still working" from a new kind of failure, and pollers bound their wait). Failures are classified as auth (401, 403),
+not found (404), conflict (409), refused (400, 422), other status, transport and undecodable reply. Server messages are
+kept for display, bounded, whitespace-collapsed, stripped of presentation-unsafe characters, and have the key replaced
+should a server echo it.
 
 The helm tag is the first eight bytes of SHA-256 over a fixed domain prefix and the registry namespace, written as four
 base-36 digits; a unit test pins its value for a fixed namespace, because changing the derivation would rename every
@@ -5794,7 +5794,8 @@ recording only whether the key matched, plus one per shell command naming its sa
 sandboxes and snapshots the helm created in `state.json` (`FakeModel`, the same model the helm's unit tests drive in
 memory: unique live names, 404 for unknown IDs, a snapshot that completes after its polls), so a spec can assert what is
 left billing. The same fake stands in for the snapshot build's ssh shell and refuses a sandbox its model does not have
-running. Suspend and resume answer 501.
+running. Suspend and resume are logged operations that change the model's state; a repeated request for the current
+state succeeds, and a request against a terminated sandbox is refused.
 
 ## Adding Tensorlake hosts
 
@@ -5863,6 +5864,15 @@ acknowledged setting, and offers no answer that writes the general SSH setup pre
 confirmation to a `ConfirmSlot` opening; accepted close retires it synchronously through the recipe close guard, before
 notifying its parent. Automatic submission consumes only the opening it just created, so a cancelled or replaced opening
 cannot authorize a later billed POST.
+
+The add form reuses the recipe list's summary helper and associates separate Name and Recipe help with their controls,
+keeping both accessible names exact. A displayed creation offer renders `SetupPlanConfirmation` directly as the existing
+frame's header, body and footer. Its optional summary override carries the confirmed size; its optional Back callback
+retires only the captured current `ConfirmToken`, keeps the fields and returns focus to Name. Continue must probe again.
+The existing dialog focus facility hands off to Create when an offer appears inside the mounted modal; ordinary field
+and busy renders do not repeat that handoff. Creation authority remains in `ConfirmSlot` and the existing operation
+claim. The shared Tensorlake mode combines billing, pricing and the idle limit in one callout for initial add and rerun;
+SSH callers retain their default subtitle and omit Back. Copy plan remains in the body with the helm's exact raw text.
 
 ## Tensorlake recipes
 

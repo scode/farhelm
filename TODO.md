@@ -383,9 +383,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **GH_TOKEN in Tensorlake sandboxes.** Inject `GH_TOKEN` into Tensorlake sandboxes like containerized sessions, from a
   named file on the host.
 
-- **TensorLake add-host sandbox dialog lacks structure.** The dialog for adding a TensorLake sandbox host is just a
-  block of text with no visual structure. Fix TBD. Plan: `plans/queue/tensorlake-ui-fixes.md`.
-
 - **Tunnels outliving a killed desktop helm on macOS.** Each recipe tunnel is an `ssh -N -R` child of the helm. An
   orderly quit stops them, and on Linux the kernel kills them when the helm dies (`PR_SET_PDEATHSIG`), but macOS has no
   parent-death signal: after a force quit, SIGKILL or crash of the desktop app, the tunnel ssh keeps running until its

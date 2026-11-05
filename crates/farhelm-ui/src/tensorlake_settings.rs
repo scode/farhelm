@@ -72,12 +72,11 @@ fn test_message(result: TestResult) -> String {
     }
 }
 
-/// The warning at the top of the Tensorlake section, in the maintainer's exact
-/// words (2026-11-04), doubled "your" included. Browser tests compare it
-/// verbatim.
+/// The warning at the top of the Tensorlake section, with the maintainer's
+/// approved wording and spelling correction. Browser tests compare it verbatim.
 pub(crate) const EXPERIMENTAL_WARNING: &str = "EXPERIMENTAL: Tensorlake support is currently early and \
     experimental. User experience is not yet reasonable. Expect rough edges. Things will change randomly between \
-    releases. Try at your your own risk. You are responsible for making sure sandboxes are not running and billing \
+    releases. Try at your own risk. You are responsible for making sure sandboxes are not running and billing \
     you when you don't want them to.";
 
 /// The Tensorlake panel's content below its heading.

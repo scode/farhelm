@@ -308,12 +308,16 @@ sandbox running indefinitely. Ordinary SSH hosts and connections from older helm
 **Add host** offers **SSH** and **Tensorlake sandbox**. A sandbox needs a Name and a saved recipe; **New recipe…** opens
 the full recipe editor inside the dialog and saves it under its name. Without an API key, the form points to Settings →
 Tensorlake. The inline editor opens at **New recipe**, focuses Name and keeps Cancel / Save in the dialog's pinned
-footer; it has no Recipes back button. Continue shows the sandbox name, size and setup steps, says it bills while
-running, links to Tensorlake pricing, and explains the 24-hour idle-suspend limit on Usage Credits. Only **Create
-Tensorlake sandboxes without asking** skips this confirmation, including for setup reruns; the ordinary host-setup
-preference does not, and sandbox confirmation never changes that ordinary preference. Cancelling retires the displayed
-creation offer immediately. The host appears as soon as its setup run is accepted, before a snapshot is built or a
-sandbox is created, and shows progress in the usual setup view. Its details show the sandbox name, recipe, CPU and
+footer; it has no Recipes back button. Help under Name distinguishes the displayed host name from the generated
+`farhelm-host-…` sandbox name. Recipe uses the same control styling as Name and shows the selected recipe's size,
+software source and tunnel count beneath it. Continue opens the standard setup confirmation, titled **Create Tensorlake
+sandbox · &lt;Name&gt;**, with the size beneath the title, numbered setup steps and Copy plan in the body. One callout
+says the sandbox bills while running, links to Tensorlake pricing and explains the 24-hour idle-suspend limit on Usage
+Credits. **Back** returns to Name and Recipe without creating anything; the next Continue obtains a fresh plan. Only
+**Create Tensorlake sandboxes without asking** skips this confirmation, including for setup reruns; the ordinary
+host-setup preference does not, and sandbox confirmation never changes that ordinary preference. Cancelling retires the
+displayed creation offer immediately. The host appears as soon as its setup run is accepted, before a snapshot is built
+or a sandbox is created, and shows progress in the usual setup view. Its details show the sandbox name, recipe, CPU and
 memory. New Tensorlake hosts start with **Start YOLO sessions without asking** on; the other three host permissions
 remain off.
 

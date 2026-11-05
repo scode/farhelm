@@ -697,7 +697,7 @@ test("Tensorlake's create-without-asking switch shows only the stored choice", a
 test("Tensorlake settings open with the experimental warning", async ({ page }) => {
   const warning =
     "EXPERIMENTAL: Tensorlake support is currently early and experimental. User experience is not yet " +
-    "reasonable. Expect rough edges. Things will change randomly between releases. Try at your your own risk. You " +
+    "reasonable. Expect rough edges. Things will change randomly between releases. Try at your own risk. You " +
     "are responsible for making sure sandboxes are not running and billing you when you don't want them to.";
   await page.route("**/api/tensorlake", async (route) => {
     if (route.request().method() === "GET") {
