@@ -15,11 +15,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`stored-wrapper-breaks-new-prompt-literalness.md`](stored-wrapper-breaks-new-prompt-literalness.md) — A previously
   stored wrapper can make a new initial prompt acquire shell meaning instead of remaining literal data.
 
-- [`gap-recovery-stale-input-modes-submit-pasted-command.md`](gap-recovery-stale-input-modes-submit-pasted-command.md) —
-  If recovery loses the output that enabled bracketed paste in Bash, a later pasted newline can submit a command without
-  a separate Enter. The conditional Bash 5.2 route is established; whether the accepted wrong-mode recovery limit also
-  accepts this consequence is ambiguous.
-
 - [`selector-policy-drops-ordinary-formatting-input.md`](selector-policy-drops-ordinary-formatting-input.md) — New
   terminals discard formatting codepoints even without selectors, changing stored and copied text. Priority remains
   highest because independent consultation could not settle whether this retained-text loss is outside user-data loss.

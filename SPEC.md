@@ -2319,15 +2319,16 @@ whatever the agent renders is what you see. There is no composer, no message abs
   the same for the other terminal settings it made, such as the title, redefined colors, line-drawing characters, the
   scroll region and the cursor's style. A program sets these again only when it chooses to, and many set their modes
   only when they start, so such a setting can stay wrong until the program is restarted; meanwhile keys, pastes and
-  mouse input can reach the program encoded for the wrong mode. A query in the lost output that no supervisor had
-  answered before the bytes were lost is never answered (the program waits out its own timeout), and a clipboard write
-  there is not carried out during the recovery; either may already have happened, if a supervisor saw that output before
-  it crashed. A gap never restarts a program or throws away a working terminal. Separately, a checkpoint too large for
-  the terminal host (16 MiB, far more than a full scrollback of ordinary output takes) can leave out old title-stack
-  entries, the oldest scrollback lines and, if that is not enough, the screen's contents. The running terminal is not
-  affected, but a recovery from that checkpoint rebuilds the terminal without them: it shows the same notice when
-  scrollback was left out, which then stays until the program clears its scrollback or the scrollback has turned over,
-  and asks the program to redraw when the screen was left out.
+  mouse input can reach the program encoded for the wrong mode. A multi-line paste into a shell may then run line by
+  line instead of arriving as one block. A query in the lost output that no supervisor had answered before the bytes
+  were lost is never answered (the program waits out its own timeout), and a clipboard write there is not carried out
+  during the recovery; either may already have happened, if a supervisor saw that output before it crashed. A gap never
+  restarts a program or throws away a working terminal. Separately, a checkpoint too large for the terminal host (16
+  MiB, far more than a full scrollback of ordinary output takes) can leave out old title-stack entries, the oldest
+  scrollback lines and, if that is not enough, the screen's contents. The running terminal is not affected, but a
+  recovery from that checkpoint rebuilds the terminal without them: it shows the same notice when scrollback was left
+  out, which then stays until the program clears its scrollback or the scrollback has turned over, and asks the program
+  to redraw when the screen was left out.
 - Opening a session attaches to it — and opening a CLIENT counts as opening a session. A freshly loaded client and a
   client whose open session disappears use the same choice: the first currently listed session in the helm's shared
   visit history, excluding the session just removed, else the newest-created listed session. While history is empty, the

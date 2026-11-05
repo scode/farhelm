@@ -21431,7 +21431,9 @@
 - Decision: on the 2026-11-04 page (Q7) the user picked "Accepted; name it".
 - Completion criteria: the gap bullet in SPEC.md "Terminal experience" adds that a multi-line paste into a shell may
   then run line by line instead of arriving as one block. No code change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-misc-nov4.md`.
+- Execution: implemented in jj change `mpowpyqnpusxltnozkprzpxnmmkwolzy`, bookmark
+  `plan/triage-misc-nov4/03-paste-after-gap-spec`; the recovery-gap caveat explicitly names line-by-line shell paste
+  execution. No code change. Draft PR [#3037](https://github.com/scode/farhelm/pull/3037/changes).
 
 ## attachment-debug-trace-emits-remote-controls.md
 
