@@ -66,3 +66,110 @@ Each PR passed the required single fresh-context gpt-6.1-sol review at high reas
 stale explanation that limited hover dependency rows to program-supplied hyperlinks; it was corrected and the reviewer
 confirmed it resolved. No functional findings remain. Independent commit-message cold reads completed, and the delivery
 report was also cold-read before delivery.
+
+### Landing
+
+Landed with no fixes at landing. Clicking a printed web address now opens what the terminal shows even after a program
+extends the address onto a neighboring wrapped line under a resting pointer, and the specification now says when the
+hyperlink mismatch warning is judged.
+
+- #3018: printed-link hovers remember the neighboring rows used to find the address, with a browser regression.
+- #3019: retires the review finding about clicking newly written text before its next paint, which stays accepted.
+- #3021: the specification's wording that the mismatch warning is judged when the hover starts.
+
+#### What landed since the stack was based, and whether it interacted
+
+Five changes landed on main after the plan's base and before this round started:
+
+- #3012 and #3013 corrected the tests behind three failures that earlier landings reported on main;
+- #3014 recorded a browser flake;
+- #3016, an approved planning PR, queued five plans and added their pointers to TODO.md;
+- #3017 moved eight containerized-session review findings from the review queue into TODO.md.
+
+None touches the terminal grid or its specification, and after #3017's removals the review queue's index still lists
+exactly the files present. A fresh-context review read the plan against these and against the earlier grid plans on main
+(the repeated-link warning and the drag-copy notice) and found no interaction: the program-hyperlink path is unchanged.
+
+While the round ran, #3027 also landed on main: it replaces a literal corner radius in the "Tensorlake support is
+experimental" warning's stylesheet rule with the shared design token. It changes only that rule, which the plan does not
+touch, and it fixes the one JavaScript test failure described under Checks; the JavaScript tests were run again on main
+after the merge. Between this plan's merges, #3038 also landed, adding illustrations to the v0.35.0 release notes (docs
+screenshots and their data); it touches nothing the plan changed. Main now differs from the tested stack only by those
+two changes.
+
+#### Things you should know
+
+- A click on a printed address now does nothing if a row its hover depends on (the rows the address was found on, and
+  the row just beyond each end) is redrawn between press and release, because the click opens only a hover that is still
+  current at release. A program that keeps redrawing a neighboring line (a spinner or status line) can therefore swallow
+  such clicks with no explanation, and the tunnel hint flickers on each redraw. Program-supplied hyperlinks already
+  behave this way, so this matches the existing design; re-checking the link at release instead would be a separate
+  change.
+- Printed file paths record no neighboring rows either, so they may have the same gap as the one fixed here. The review
+  did not verify this, and its impact is smaller because a file hover shows the full resolved path.
+- The specification's new sentence says the warning "need not" follow redraws of "other rows". The code still re-judges
+  it when the link's own rows, or the row beyond either end, change, which that wording allows; tighter wording would
+  help a later reader.
+
+#### Checks
+
+This round landed only this plan, stacked on main `cf43a0ed`. On the stack:
+
+- `cargo fmt --all -- --check`, the check that every test delay states its reason
+  (`python -B scripts/check-test-sleeps.py`, 412 delays, none without a reason), `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (no errors; three warnings about
+  older text), the workspace debug build and the UI's release web build: all passed. Clippy was not run: no Rust source
+  changed.
+- The grid terminal component's browser suite, which holds the plan's regression and is not part of the main browser
+  suite (`npx playwright test --config grid-client/playwright.config.ts --retries=0` in `e2e/`, Chromium and WebKit),
+  run `e32a3935-090c-498a-a862-d330ed2ab595`: all 158 passed.
+- The UI's Rust tests, which build the changed scripts into the UI, `cargo nextest run -p farhelm-ui`, run
+  `7fe5fd22-3911-472c-83c8-ee2137adc7c6`: all 857 passed. The UI's JavaScript tests (`node --test` in
+  `crates/farhelm-ui/js-tests`), run `cecd2ff3-25f6-441a-a62a-c189450edab9`: 515 passed, 1 failed. The failure is the
+  check that the shipped stylesheet uses only design tokens: the "Tensorlake support is experimental" warning (#3010,
+  landed on main before the plan's base, outside the plan queue) added a literal `8px` corner radius. The executor's
+  report saw the same failure. It is not this plan's, and #3027 fixed it on main during the landing; the JavaScript
+  tests run again on main after the merge, run `62299e15-29e4-489e-8e84-8a97b1a21f4e`, all 516 passed.
+- The whole browser suite on Chromium and WebKit, on ten Tensorlake sandboxes at the maintainer's request (cloud virtual
+  machines; each booted the usual three test stacks and ran its share of the suite's projects through the recorder's
+  generic mode, `python3 scripts/record-test-run.py --kind development ...` running
+  `npx playwright test --project=<engine>-<spec> ... --retries=0`, with the binaries and web bundle built locally from
+  this stack), runs `f6817104-0ea4-4e1a-b48b-6c4ebabf2fd9`, `bccbb884-a162-4023-8682-6367fc564910`,
+  `2d338903-2d70-4c8c-99c4-3d4044d78670`, `9a648ba2-ce5a-49a1-9329-028beae0d99e`,
+  `4a0618c3-d05d-437b-92c0-1918b3fbfbc7`, `1313815c-a8c6-4e16-8d02-7710ab6831b5`,
+  `09beff9d-547f-4412-9f2d-00353268d3ea`, `c9de159f-30f6-4161-abbb-7f19887499dc`,
+  `8fe592d8-fd5f-4c19-a387-9a186f7498af`, `035273be-325b-4175-a29a-dba4d25254bd`: 2996 passed, 18 skipped by the specs'
+  own design, 6 failed. Then the same suite with every stack's terminals in terminal hosts, since host terminals render
+  through the same grid code (`FARHELM_E2E_SUITE_TERMINALS=host`), runs `ea697f50-0177-48e5-882b-37e12fe98e09`,
+  `e8d4e772-208c-4908-a84f-ca9edb32fd99`, `c1a33098-ffa0-4c7d-962a-f5e8b7560914`,
+  `67bdd00e-2973-4f31-afb3-eb2d4aa7293d`, `6d92d6a1-6361-466c-9e84-038d218d4cf5`,
+  `03071c4c-3b35-4862-b2be-509eb3ddee06`, `0aafd136-95e9-4b9b-a2a8-1b9552809115`,
+  `fb435a0d-f6c9-4da4-b317-ca85d0a1f061`, `e0456921-ff32-4fc5-b6c6-706f0898f158`,
+  `58a9cac7-f35c-4623-8fd1-e7a60d6324c1`: 2081 passed, 75 skipped by the specs' own design, 4 failed. This run covers
+  only the specs listed for host terminals (`e2e/host-terminal-specs.ts`), which is why it holds fewer tests. Of the ten
+  failures:
+  - "Sidebar surfaces give every control hover text" failed four times, in both engines in both suites (runs `f6817104`,
+    `9a648ba2`, `67bdd00e`, `fb435a0d`), because the Add host form's "SSH" and "Tensorlake sandbox" choices have no
+    hover text. Those choices came with the Tensorlake sandbox hosts (#2973), on main before the plan's base; the plan
+    does not touch the form. It is a break on main and a follow-up there.
+  - Recorded flakes: the launcher's "Runs in YOLO mode" step on WebKit, in "create-intent-key-rebinds-on-host-change: a
+    new target is a new intent" (once in each suite: runs `4a0618c3` and `67bdd00e`), and "post-clone commands with
+    carriage returns refuse edits but can be cleared" (WebKit, once, in the host-terminal suite: run `e0456921`;
+    recorded by open draft PR #2549).
+  - Three single failures in the ordinary suite, none in code the plan touches, each of which then passed three re-runs
+    on the same build, also on sandboxes (the run ids below are the re-runs): "a sequence refused at its prefix leaves
+    later sequences their own bindings" (Chromium; the page's focus did not return to the page body; failed in
+    `2d338903`, re-run `75b17c09-0b63-4b41-b68d-504f176cf3c0`), "suspending an agent with unknown status asks before
+    sending the request" (WebKit; its session was missing from an activity read; failed in `4a0618c3`, re-run
+    `f7329da0-6ec8-45ba-8985-5f040fd9401b`), and "an unconfirmed delete sends the precondition and shows the
+    supervisor's refusal" (WebKit; a stopped session reported an error instead of exited, as in the flake #3014 recorded
+    for another test; failed in `c9de159f`, re-run `8a06acae-23a6-4ad7-b5b2-0ab320192785`). Each is a single failure,
+    not recorded as a flake.
+- Reused: the executor's run of the plan's regression before the fix, which failed in both engines by opening the old
+  address. Not run: the workspace's Rust tests and the desktop-build tests (no Rust source changed), the doctests, the
+  desktop smoke tests, the installer tests, the development screenshot review (no shot changed) and the native Mac app
+  (not runnable on Linux).
+
+The executor's report calls the PRs drafts and names the older main its runs tested; what landed is its commits rebased
+onto current main, with their content unchanged. The stylesheet test failure it calls a separate follow-up was fixed on
+main by #3027 during the landing. Nothing else in it became untrue at landing.
