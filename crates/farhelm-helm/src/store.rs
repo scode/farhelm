@@ -5591,8 +5591,9 @@ impl HelmStore {
     /// Runtime tunnel-consent changes also need the tunnel mutation gate and
     /// a close-all after a successful disabling write. The preferences handler
     /// owns that cancellation-safe transaction; storage alone owns no listeners.
+    /// Tunnel-consent patches use full sync so a power loss cannot restore revoked consent.
     pub async fn update_preferences(&self, patch: PreferencePatch) -> anyhow::Result<()> {
-        self.conn.call("preference write task panicked", move |conn: &mut Connection| -> anyhow::Result<()> {
+        self.conn.call_full_sync_if(patch.tunnel_consent.is_some(), "preference write task panicked", move |conn: &mut Connection| -> anyhow::Result<()> {
             // Each field travels as (present, value): `CASE WHEN present`
             // is what lets a NULL value mean "clear" rather than "keep",
             // which a COALESCE could not express.
@@ -6978,13 +6979,15 @@ impl HelmStore {
     /// asking. Accepts any row, the local one included: the confirmation setting belongs to
     /// the machine, not of how it is registered. Returns whether anything changed; an
     /// unknown id is [`HostStoreError::HostNotFound`].
+    /// Full sync keeps an acknowledged revocation from returning after power loss.
     pub async fn set_yolo_without_asking(
         &self,
         host: HostId,
         yolo_without_asking: bool,
     ) -> anyhow::Result<bool> {
         self.conn
-            .call(
+            .call_full_sync_if(
+                true,
                 "set yolo-without-asking task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<bool> {
                     let tx = conn
@@ -7023,13 +7026,15 @@ impl HelmStore {
     /// same contract: any row, the local one included, since the trust belongs to the
     /// machine; returns whether anything changed; an unknown id is
     /// [`HostStoreError::HostNotFound`].
+    /// Full sync keeps an acknowledged revocation from returning after power loss.
     pub async fn set_commands_without_asking(
         &self,
         host: HostId,
         commands_without_asking: bool,
     ) -> anyhow::Result<bool> {
         self.conn
-            .call(
+            .call_full_sync_if(
+                true,
                 "set commands-without-asking task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<bool> {
                     let tx = conn
@@ -7153,6 +7158,7 @@ impl HelmStore {
     ///
     /// Returns whether the value changed; an unknown host is an error. This is the user's
     /// settings write. An approval's identity-bound grant uses [`Self::allow_browser_for_identity`].
+    /// Full sync keeps an acknowledged revocation from returning after power loss.
     pub async fn set_browser_permission(
         &self,
         host: HostId,
@@ -7160,7 +7166,8 @@ impl HelmStore {
         allowed: bool,
     ) -> anyhow::Result<bool> {
         self.conn
-            .call(
+            .call_full_sync_if(
+                true,
                 "set browser permission task panicked",
                 move |conn: &mut Connection| {
                     let tx = conn
@@ -15794,6 +15801,65 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(created_at, 100, "a losing mint must not rewrite history");
+    }
+
+    /// Revocations must reach FULL before acknowledgement, while unrelated preferences keep NORMAL.
+    /// Triggers witness all four host permissions and tunnel consent inside their real writes;
+    /// SQLite cannot change synchronous within a transaction, so the commit keeps that barrier.
+    #[farhelm_testtrace::test]
+    async fn trust_revocations_commit_with_full_sync() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "durability@fixture", "identity").await;
+        store.update_preferences(Default::default()).await.unwrap();
+        {
+            let conn = store.conn.lock();
+            let mode: String = conn.query_row(
+                "SELECT journal_mode || '-' || synchronous FROM pragma_journal_mode, pragma_synchronous",
+                [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(mode, "wal-1", "premise: ordinary writes use WAL/NORMAL");
+            conn.execute_batch(
+                "CREATE TEMP TRIGGER observe_host_trust BEFORE UPDATE OF yolo_without_asking,
+                   commands_without_asking, links_without_asking, local_links_without_asking ON main.hosts
+                 WHEN (SELECT synchronous FROM pragma_synchronous) != 2
+                 BEGIN SELECT RAISE(ABORT, 'host trust write needs FULL'); END;
+                 CREATE TEMP TRIGGER observe_tunnel_trust BEFORE UPDATE ON main.preferences
+                 WHEN (SELECT synchronous FROM pragma_synchronous) !=
+                   CASE WHEN NEW.tunnel_consent IS OLD.tunnel_consent THEN 1 ELSE 2 END
+                 BEGIN SELECT RAISE(ABORT, 'wrong tunnel-consent sync'); END;",
+            ).unwrap();
+        }
+        for allowed in [true, false] {
+            assert!(store.set_yolo_without_asking(host, allowed).await.unwrap());
+            let changed = store
+                .set_commands_without_asking(host, allowed)
+                .await
+                .unwrap();
+            assert!(changed);
+            for permission in [BrowserPermission::Public, BrowserPermission::LocalNetwork] {
+                let changed = store
+                    .set_browser_permission(host, permission, allowed)
+                    .await
+                    .unwrap();
+                assert!(changed);
+            }
+            let patch = PreferencePatch {
+                tunnel_consent: Some(Some(allowed)),
+                ..Default::default()
+            };
+            store.update_preferences(patch).await.unwrap();
+        }
+        let clear = PreferencePatch {
+            tunnel_consent: Some(None),
+            ..Default::default()
+        };
+        store.update_preferences(clear).await.unwrap();
+        store.update_preferences(Default::default()).await.unwrap();
+        let conn = store.conn.lock();
+        let sync: i64 = conn
+            .query_row("PRAGMA synchronous", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(sync, 1, "the next ordinary write must use NORMAL again");
     }
 
     /// Rotation's user-visible meaning is one database commit: the new token

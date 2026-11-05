@@ -244,6 +244,28 @@ impl Db {
         .context(panic_context)?
     }
 
+    /// Select the existing full-sync barrier for a trust-changing write under the connection lock.
+    /// False keeps ordinary durability; true restores it after the work, including on error.
+    pub async fn call_full_sync_if<T, F>(
+        &self,
+        full_sync: bool,
+        panic_context: &'static str,
+        work: F,
+    ) -> anyhow::Result<T>
+    where
+        F: FnOnce(&mut Connection) -> anyhow::Result<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        self.call(panic_context, move |conn| {
+            if full_sync {
+                with_full_sync(conn, work)
+            } else {
+                work(conn)
+            }
+        })
+        .await
+    }
+
     /// Lock the connection directly, for synchronous callers that already run
     /// off the async executor (tests, and code inside another blocking task).
     pub fn lock(&self) -> MutexGuard<'_, Connection> {

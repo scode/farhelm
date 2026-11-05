@@ -21223,7 +21223,8 @@
   wrapping those writes in the existing helper (a redesign, a separate database, or over about 100 lines of diff not
   counting this ledger, the queue removal or a changelog fragment), block and bring it back. Remove the feedback file
   and its index entry.
-- Execution: planned in `plans/queue/durability-revocations.md`.
+- Execution: implemented in jj change `umltwmzurvqvwxswysouupzymutsmsmw`, bookmark
+  `plan/durability-revocations/01-durable-revocations`; draft PR https://github.com/scode/farhelm/pull/3023/changes.
 
 ## power-loss-removes-valid-resume-binding.md
 
