@@ -82,11 +82,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   when nothing was alive can later end a newly opened tab without asking about that work if its host becomes unreadable
   between two status reads. The conditional approval and status sequence is established.
 
-- [`plain-url-click-can-bind-before-text-paints.md`](plain-url-click-can-bind-before-text-paints.md) — A click can
-  discover a URL in the new terminal model before that text has painted, opening a target the user has not yet seen.
-  Chromium event batching supplies the conditional source route; the displayed-target guarantee and general redraw
-  allowance leave coverage ambiguous.
-
 - [`stationary-hover-omits-canonical-ancestor-dependencies.md`](stationary-hover-omits-canonical-ancestor-dependencies.md)
   — A terminal redraw can leave a required hyperlink mismatch warning absent through a click. The actual target stays
   correctly disclosed; priority remains highest because independent consultation could not settle the security boundary.
