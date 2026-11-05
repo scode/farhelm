@@ -1452,10 +1452,10 @@ test("a pending post-clone save orders reopened settings before the next save", 
     submittedRequest = route.request();
     signalSubmitted();
     await held;
-    await route.continue();
+    await route.fulfill({ response: await route.fetch() });
   };
   const chosen = "printf 'save survives close'";
-  await page.route("**/api/checkout-post-clone", intercept);
+  const stopSaves = await drainedRoute(page, "**/api/checkout-post-clone", intercept);
   try {
     await page.goto("/");
     await openSettings(page, "checkouts");
@@ -1506,11 +1506,10 @@ test("a pending post-clone save orders reopened settings before the next save", 
     expect(await readPostClone(request)).toEqual({ command: newer });
   } finally {
     release();
-    // Settle the owned PUT before restoration even when an assertion fails,
-    // or a late forwarded request could overwrite the previous command.
-    const reply = await submittedRequest?.response();
-    if (reply) await reply.finished();
-    await page.unroute("**/api/checkout-post-clone", intercept);
+    // The callback's backend reply proves the write finished before restore.
+    // WebKit can omit request-finished for an already answered interception;
+    // waiting on that browser event would stall after all save assertions pass.
+    await stopSaves();
     const restored = await request.put("/api/checkout-post-clone", { data: previous });
     expect(restored.ok(), await restored.text()).toBe(true);
     expect(await readPostClone(request)).toEqual(previous);
@@ -1674,6 +1673,12 @@ test("an untouched checkout folder save writes nothing and edited paths are trim
   page.on("request", outgoing => {
     if (outgoing.url().endsWith("/api/checkout-root") && outgoing.method() === "PUT") submitted.push(outgoing);
   });
+  // Own each backend write through its reply, independently of the browser's
+  // request-finished notification, so restoration cannot race a late save.
+  const stopSaves = await drainedRoute(page, "**/api/checkout-root", async (route) => {
+    if (route.request().method() !== "PUT") return route.continue();
+    await route.fulfill({ response: await route.fetch() });
+  });
   try {
     const literal = "~/literal-checkouts ";
     const seeded = await request.put("/api/checkout-root", { data: { root: literal } });
@@ -1714,12 +1719,7 @@ test("an untouched checkout folder save writes nothing and edited paths are trim
     throw error;
   } finally {
     await cleanupOwnedSteps(bodyFailed, [
-      ["submitted checkout saves", async () => {
-        for (const outgoing of submitted) {
-          const reply = await outgoing.response();
-          if (reply) await reply.finished();
-        }
-      }],
+      ["submitted checkout saves", stopSaves],
       ["checkout folder", async () => {
         const restored = await request.put("/api/checkout-root", { data: previous });
         expect(restored.ok()).toBe(true);

@@ -558,13 +558,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `7a1c431b-99c8-4581-b46b-b126c58b3407`, `63f93b25-ad0e-4db1-99a5-6b9367db2d30`). Cause unknown (FLAKES.md,
   2026-11-04).
 
-- **Checkout folder save cleanup times out on WebKit.**
-  `an untouched checkout folder save writes nothing and edited paths are trimmed` in `e2e/tests/settings.spec.ts` passed
-  its body assertions but timed out draining submitted saves in host-terminal run
-  `81a954d9-bbe9-4556-a8bd-dd718350514c`. The exact WebKit case passed in 7.7 seconds in
-  `d53c5dbf-8491-4eba-bf3d-3f3714cc0674`. Hypothesis: the request-finished observation stalls, as in the pending
-  post-clone save flake; investigate without weakening the save assertions (FLAKES.md, 2026-11-04).
-
 - **Folder reset stays outside the dropdown viewport in WebKit.**
   `composer folder dropdown preserves keyboard launch and grouped history` in `e2e/tests/sidebar.spec.ts` selected the
   reset option but failed its viewport assertion in sweep run `e0526613-832f-4fba-b023-b38cc064e5c2`. All three isolated
@@ -628,13 +621,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `a865423e-2157-473d-bd78-5bafcce7811e`, `7033e514-e01f-435e-993c-57b6e4ba5126`,
   `55c4bee4-892d-4118-968c-d37cca4c920f`); each passed three re-runs. The step is shared, so other tests can fail the
   same way. Hypothesis: the click lands while the launcher re-renders the question (FLAKES.md, 2026-11-04).
-
-- **A pending post-clone save's ordering times out on WebKit.**
-  `a pending post-clone save orders reopened settings before the next save` in `e2e/tests/settings.spec.ts` waited 60
-  seconds for an already-answered intercepted save to finish (runs `d70c7024-ae4f-4172-87da-c21680228f62`,
-  `ecb2845b-15c7-4d2d-bef1-2db8b4b42936`, `f4743ad3-5245-4951-bd1f-d78e374312dc`), like the carriage-return test that
-  draft PR #2549 records. Hypothesis: WebKit sometimes never reports an intercepted request as finished (FLAKES.md,
-  2026-11-04).
 
 - **An update's progress label shows no step name while following.** In `e2e/tests/provisioning.spec.ts`, three "while
   following" tests failed waiting for `Updating: N/M <step> m:ss`, the label holding only the count and timer for five

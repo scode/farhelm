@@ -3851,3 +3851,30 @@ attribute every older screenshot without its original timing evidence.
 Class: readiness
 
 Cause: established
+
+## 2026-11-05 — settings save cleanup uses backend completion (e2e/tests/settings.spec.ts)
+
+The two open cleanup stalls, `an untouched checkout folder save writes nothing and edited paths are trimmed` and
+`a pending post-clone save orders reopened settings before the next save`, did not recur in the ordinary baseline: each
+passed three of three per engine in `d22a6787-f6bc-4d36-b7aa-38e2de618d27`. Their historical waits on `reply.finished()`
+are now removed. Each owned PUT is forwarded through the route callback's real backend request, and cleanup drains those
+callbacks before restoring configuration. Backend completion establishes the needed ordering without depending on WebKit
+reporting request-finished after an intercepted reply. Reopened-field locking, both save orders, exact submitted bodies
+and independent persisted-state readback remain asserted. After the change, each case passed three of three per engine
+in ordinary run `0877bae7-861b-40a7-b9a3-be836ac6b306` and two of two per engine in host-terminal run
+`6c3945cf-9c27-4f04-b5a1-be4b3ea9d5b6`. This removes the recorded blocking dependency; the internal reason WebKit left
+the earlier completion observations pending remains unproved. Both TODO entries and exclusions are removed by this
+change.
+
+Evidence: shared x86_64 Linux, Node 26.13.0, Playwright 1.64.0, three browser workers with one stack each, zero retries;
+verified tmux 3.7c executable SHA256 `ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`, locale C.UTF-8.
+Ordinary validation used base `ce630ce7a18a69f8a58fec5786778fdbafd9b3a5` with the four reviewed browser-test fixes
+dirty; the host run used `e7fb5df7f4f26c315a6845e28c1261de40e91b6a` with the remaining fixture fixes dirty. Ambient
+Farhelm variables were scrubbed; the recorder supplied `FARHELM_TEST_TRACE_DIR`, and the host run retained
+`FARHELM_E2E_SUITE_TERMINALS`. Other workloads were present, but load at these individual checks and memory pressure
+were not measured. No new failure occurred to quote; the 2026-11-04 entries retain the old failure excerpts. Reports
+remain private by run UUID and expire with temporary-file cleanup.
+
+Class: peer-lifecycle
+
+Cause: established
