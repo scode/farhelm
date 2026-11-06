@@ -10,7 +10,7 @@
 // - `crates/farhelm-supervisor/tests/fixtures/grid-keys.jsonl`: the bytes
 //   each keydown sends, for every key code below 256, modifier set,
 //   platform and cursor-key mode. The supervisor's encoder is held to it by
-//   its own Rust test, and the page's half (`xtermKeyboardResult`) by
+//   its own Rust test, and the page's half (`keyboardResult`) by
 //   `grid-input-tables.test.js`, so the two cannot drift apart.
 // - `fixtures/input/keydown-actions.jsonl`: what the page does with each
 //   keydown (send it as a `key` message, leave it to text input, scroll,
@@ -184,7 +184,7 @@ function keydown(kc, key, code, mods, altGraph = false) {
  * page's `TextEncoder` sends it (a lone surrogate becomes U+FFFD).
  */
 function sentBytes(ev, appCursor, isMac) {
-  const result = input.xtermKeyboardResult(ev, appCursor, isMac, false);
+  const result = input.keyboardResult(ev, appCursor, isMac, false);
   if (!result.key) return "";
   let data = result.key;
   if (shiftEnterKeyAction(ev) === "arm") data = mergeArmedPrefix(true, data).send;

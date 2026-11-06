@@ -277,7 +277,7 @@ pub fn input_frames(bytes: &[u8]) -> std::slice::Chunks<'_, u8> {
 const ESC: &str = "\x1b";
 
 /// The bytes a keydown with a sequence sends: the key table's row for it
-/// (`xterm_key`'s sequence with Option not acting as Meta), and ESC before
+/// (`key_sequence`'s answer with Option not acting as Meta), and ESC before
 /// the CR of a Shift+Enter, as `shift-enter-key.js` merges it. Empty where
 /// the key has no sequence.
 ///
@@ -305,7 +305,7 @@ pub fn encode_key(
     application_cursor: bool,
     platform: KeyPlatform,
 ) -> Vec<u8> {
-    let Some(mut sent) = xterm_key(key, code, kc, mods, application_cursor, platform) else {
+    let Some(mut sent) = key_sequence(key, code, kc, mods, application_cursor, platform) else {
         return Vec::new();
     };
     if key == "Enter" && mods == modifiers::SHIFT && sent.starts_with('\r') {
@@ -323,7 +323,7 @@ pub fn encode_key(
 /// Ported from xterm.js 6.0.0's `evaluateKeyboardEvent`
 /// (src/common/input/Keyboard.ts), MIT; THIRD_PARTY_NOTICES.md, "Code ported
 /// from xterm.js".
-fn xterm_key(
+fn key_sequence(
     key: &str,
     code: &str,
     kc: u32,
