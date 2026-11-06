@@ -586,22 +586,22 @@ that its required systemd or SSH substrate ran.
   reader as the captured screen is. No tmux: the captured text is the expected value. Seconds, in-process. Part of the
   workspace nextest run; run it when a status reader, the emulator crate, `vendor/` or the fixtures change.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'grid input encoder' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^grid_input::/)'`
-  — the supervisor's encoder of grid viewer input (`crates/farhelm-supervisor/src/grid_input.rs`): keys against the
-  golden table `crates/farhelm-supervisor/tests/fixtures/xterm-keys.jsonl` (the sequence the vendored xterm.js's
-  `evaluateKeyboardEvent` computes for every key code below 256, modifier set, platform and cursor-key mode), mouse
-  reports against `crates/farhelm-supervisor/tests/fixtures/xterm-mouse.jsonl` (what the vendored mouse service reports
-  for every grid mouse event, modifier set, reporting mode and encoding, at the screen's edge and the default encoding's
-  limit), pastes (bracketed-paste markers once around a paste of several parts, line endings and sanitizing carried
-  across parts, the closing marker of an interrupted paste), UTF-8 mouse coordinates, focus reports, the wheel on the
-  alternate screen, and `Input` framing. Seconds, in-process. Part of the workspace nextest run. Which keydowns become
-  key messages at all (the filters xterm.js's `_keyDown` applies around `evaluateKeyboardEvent`: third-level shift, lone
-  capitals, the key after a dead key) and mouse motion de-duplication are the grid client's, pinned by its own tests,
-  not this selection. Both tables are generated from the vendored xterm.js bundle, from the repository root:
-  `node crates/farhelm-ui/js-tests/xterm-key-table.js --write` and
-  `node crates/farhelm-ui/js-tests/xterm-mouse-table.js --write`. Regenerate them whenever
-  `crates/farhelm-ui/assets/vendor/xterm.js` (or, for keys, `crates/farhelm-ui/assets/shift-enter-key.js`) changes,
-  review the diff (a changed row is a key or click a program will read differently), and run this selection; the JS
-  harness's `xterm-key-table.test.js` and `xterm-mouse-table.test.js` fail while a checked-in table is stale.
+  — the supervisor's encoder of grid viewer input (`crates/farhelm-supervisor/src/grid_input.rs`): keys against
+  Farhelm's key table `crates/farhelm-supervisor/tests/fixtures/grid-keys.jsonl` (the sequence for every key code below
+  256, modifier set, platform and cursor-key mode), mouse reports against its mouse table
+  `crates/farhelm-supervisor/tests/fixtures/grid-mouse.jsonl` (every grid mouse event, modifier set, reporting mode and
+  encoding, at the screen's edge and the default encoding's limit), pastes (bracketed-paste markers once around a paste
+  of several parts, line endings and sanitizing carried across parts, the closing marker of an interrupted paste), UTF-8
+  mouse coordinates, focus reports, the wheel on the alternate screen, and `Input` framing. Seconds, in-process. Part of
+  the workspace nextest run. Which keydowns become key messages at all (third-level shift, lone capitals, the key after
+  a dead key) and mouse motion de-duplication are the grid client's, pinned by its own tests, not this selection. Both
+  tables are checked-in contract data, first computed by the vendored xterm.js and read by no test from it now. The key
+  table is rendered from the grid client's keyboard rules: after a deliberate change to them (`grid-input.js`, or
+  `shift-enter-key.js`), run `node crates/farhelm-ui/js-tests/grid-input-tables.js --write` from the repository root,
+  review the diff (a changed row is a key a program will read differently), and run this selection; the JS harness's
+  `grid-input-tables.test.js` fails while a checked-in table differs from what the client computes, and it also holds
+  the client's keydown and Alt-click tables (`crates/farhelm-ui/js-tests/fixtures/input/`). The mouse table is edited by
+  hand, together with the encoder.
 - `python3 scripts/record-test-run.py --kind development --selection 'vendored vte' --concurrency 'libtest default threads' --tmux none -- cargo test --manifest-path vendor/vte/Cargo.toml --features ansi`,
   `python3 scripts/record-test-run.py --kind development --selection 'vendored alacritty_terminal' --concurrency 'libtest default threads' --tmux none -- cargo test --locked --lib --manifest-path vendor/alacritty_terminal/Cargo.toml`
   and

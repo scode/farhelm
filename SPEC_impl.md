@@ -1833,10 +1833,15 @@ spans reused in place, painted at most once per animation frame however many mes
 every non-ASCII cell and letting characters the font draws at the cell width flow inline came from a renderer benchmark
 against xterm.js, recorded in the file's header. Input goes up as small JSON messages (keys, text, pastes, mouse and
 focus events), never as encoded bytes: the supervisor encodes them from the terminal's modes
-(`crates/farhelm-supervisor/src/grid_input.rs`) and is held to the sequences the vendored xterm.js produces by golden
-tables generated from it, so a program reads the same keys and clicks in both kinds. The client sends no flow-control
-pause or resume: it applies every message as it arrives, applying a large history in slices between frames so that the
-screen stays usable, and the helm pauses a grid stream on its own queue instead.
+(`crates/farhelm-supervisor/src/grid_input.rs`). Which keydowns reach the program, and the bytes each key and click
+becomes, are Farhelm's own contract, written down as checked-in tables (`grid-keys.jsonl` and `grid-mouse.jsonl` under
+`crates/farhelm-supervisor/tests/fixtures/`, and the page's keydown and Alt-click tables under
+`crates/farhelm-ui/js-tests/fixtures/input/`) that the page's code and the supervisor's encoder are held to, the key
+table by both. They are the xterm family's encodings, which shells and agents expect, and were first computed by the
+vendored xterm.js, so a program reads the same keys and clicks in both kinds of terminal; no test reads xterm.js for
+them any more. The client sends no flow-control pause or resume: it applies every message as it arrives, applying a
+large history in slices between frames so that the screen stays usable, and the helm pauses a grid stream on its own
+queue instead.
 
 Not built for grid terminals, a near-term entry in `TODO.md`: showing an input method's composition at the cursor
 (committed text is sent).

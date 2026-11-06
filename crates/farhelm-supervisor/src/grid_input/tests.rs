@@ -1,8 +1,7 @@
-//! Tests of the grid input encoder: keys and mouse reports against golden
-//! tables the vendored xterm.js computes, and pastes, the cases the mouse
-//! table leaves out, focus reports and `Input` framing against the bytes
-//! today's terminal sends, worked out from the vendored bundle's code (the
-//! module docs name the functions).
+//! Tests of the grid input encoder: keys and mouse reports against
+//! Farhelm's checked-in key and mouse tables, and pastes, the cases the
+//! mouse table leaves out, focus reports and `Input` framing against the
+//! bytes the module docs specify (the same bytes old terminals send).
 
 use super::*;
 use farhelm_proto::grid::{GRID_MAX_PASTE_PART_BYTES, GRID_MAX_TEXT_INPUT_BYTES};
@@ -89,18 +88,20 @@ fn hex(text: &str) -> Vec<u8> {
 
 // ---- Keys -------------------------------------------------------------------
 
-/// Keyboard parity with today's terminal, for every key at once: the golden
-/// table is the sequence the vendored xterm.js's own `evaluateKeyboardEvent`
-/// computes, with Farhelm's Shift+Enter merge, for every key code below 256
-/// (and the keys and codes its branches read), every modifier set, both
-/// platforms and both cursor-key modes. Every row must match: a difference
-/// is a key that types something else in a terminal host than in a tmux
-/// terminal. The JS harness keeps the table in step with the bundle. Which
-/// keydowns xterm.js's `_keyDown` sends at all is the grid client's to
-/// decide and test, so the table covers keydowns it would drop too.
+/// Every key at once against Farhelm's key table
+/// (`tests/fixtures/grid-keys.jsonl`): the sequence each keydown sends, with
+/// the Shift+Enter merge, for every key code below 256 (and the keys and
+/// codes the rules read), every modifier set, both platforms and both
+/// cursor-key modes. Every row must match: a difference is a key that types
+/// something other than what shells and agents expect, and other than what
+/// an old terminal types. The table was first computed by the vendored
+/// xterm.js's own `evaluateKeyboardEvent`, and the JS harness holds the
+/// page's half of the rules to the same table. Which keydowns are sent at
+/// all is the grid client's to decide and test, so the table covers
+/// keydowns it would drop too.
 #[test]
-fn every_key_encodes_as_the_vendored_xterm_js_computes_it() {
-    let table = include_str!("../../tests/fixtures/xterm-keys.jsonl");
+fn every_key_encodes_as_the_key_table_says() {
+    let table = include_str!("../../tests/fixtures/grid-keys.jsonl");
     let variants = [
         (KeyPlatform::Other, false),
         (KeyPlatform::Other, true),
@@ -509,23 +510,34 @@ fn an_empty_paste_writes_nothing() {
 
 // ---- Mouse ------------------------------------------------------------------
 
-/// Mouse parity with today's terminal: the golden table is what the
-/// vendored xterm.js's own mouse service (its protocols' filters, event
-/// codes, encodings and `triggerMouseEvent`'s checks) sends for every kind
-/// of grid mouse event, every Shift, Alt and Ctrl combination, each
-/// reporting mode the emulator tracks, both of xterm.js's encodings, and
-/// coordinates at the screen's edge and the default encoding's limit. A
-/// difference is a click or scroll a program reads differently in a
-/// terminal host. The JS harness keeps the table in step with the bundle;
-/// UTF-8 coordinates and the alternate screen's arrow keys, which are not in
-/// the mouse service, are tested below.
+/// Every mouse event against Farhelm's mouse table
+/// (`tests/fixtures/grid-mouse.jsonl`): the report each kind of grid mouse
+/// event sends under every Shift, Alt and Ctrl combination, each reporting
+/// mode the emulator tracks, the default and SGR encodings, and coordinates
+/// at the screen's edge and the default encoding's limit. A difference is a
+/// click or scroll a program reads differently, and differently from an old
+/// terminal: the table was first computed by the vendored xterm.js's own
+/// mouse service (its protocols' filters, event codes, encodings and
+/// `triggerMouseEvent`'s checks). UTF-8 coordinates and the alternate
+/// screen's arrow keys, which are not in the table, are tested below.
 #[test]
-fn every_mouse_event_encodes_as_the_vendored_xterm_js_reports_it() {
-    let table = include_str!("../../tests/fixtures/xterm-mouse.jsonl");
+fn every_mouse_event_encodes_as_the_mouse_table_says() {
+    let table = include_str!("../../tests/fixtures/grid-mouse.jsonl");
     let mut compared = 0;
+    // What the rows cover, for the checks after the loop: the table is
+    // edited by hand, and a row dropped by mistake would otherwise just
+    // mean fewer comparisons.
+    let mut kinds = std::collections::BTreeSet::new();
+    let mut protocols = std::collections::BTreeSet::new();
+    let mut encodings = std::collections::BTreeSet::new();
+    let mut columns_seen = std::collections::BTreeSet::new();
+    let mut past_the_screen = false;
     for line in table.lines().filter(|line| !line.starts_with('#')) {
         let row: serde_json::Value = serde_json::from_str(line).expect("a JSON row");
         let field = |index: usize| row[index].as_u64().expect("a number");
+        kinds.insert(row[0].as_str().expect("kind").to_owned());
+        protocols.insert(row[6].as_str().expect("protocol").to_owned());
+        encodings.insert(row[7].as_str().expect("encoding").to_owned());
         let kind = match row[0].as_str().expect("kind") {
             "down" => MouseEventKind::Down,
             "up" => MouseEventKind::Up,
@@ -548,6 +560,8 @@ fn every_mouse_event_encodes_as_the_vendored_xterm_js_reports_it() {
             "SGR" => MouseEncoding::Sgr,
             other => panic!("unknown encoding {other} in {line}"),
         };
+        columns_seen.insert(x);
+        past_the_screen |= x == columns;
         let modes = reporting(mode, encoding);
         let size = Size { columns, lines };
         for mods in 0..8u8 {
@@ -564,6 +578,21 @@ fn every_mouse_event_encodes_as_the_vendored_xterm_js_reports_it() {
         }
     }
     assert!(compared > 6_000, "only {compared} comparisons");
+    // The table must keep covering every event kind, every reporting mode the
+    // emulator tracks, both encodings, both sides of the default encoding's
+    // limit (column 223 is the last it can say, as 0-based 222), and an event
+    // past the screen's last column.
+    fn names(set: &std::collections::BTreeSet<String>) -> Vec<&str> {
+        set.iter().map(String::as_str).collect()
+    }
+    assert_eq!(names(&kinds), ["down", "move", "up", "wheel"]);
+    assert_eq!(names(&protocols), ["ANY", "DRAG", "NONE", "VT200"]);
+    assert_eq!(names(&encodings), ["DEFAULT", "SGR"]);
+    assert!(
+        columns_seen.contains(&222) && columns_seen.contains(&223),
+        "both sides of the default encoding's limit"
+    );
+    assert!(past_the_screen, "an event past the screen's last column");
 }
 
 /// Each reporting mode reports what xterm.js's protocol reports and drops

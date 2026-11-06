@@ -353,7 +353,7 @@ test.describe("Shift+Enter's ESC CR reaches the pane as one write", () => {
       if ((await terminalKind(page)) === "grid") {
         // A grid terminal sends the key itself, one input message, and the
         // supervisor encodes it as ESC CR in one write (grid-input.js and
-        // the supervisor's grid input encoder, whose golden table pins the
+        // the supervisor's grid input encoder, whose key table pins the
         // bytes). One message, Enter with Shift held, is still the
         // single-producer contract here.
         expect(chordFrames, "the chord must leave the browser as exactly one input message").toHaveLength(1);
