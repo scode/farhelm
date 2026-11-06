@@ -3347,6 +3347,13 @@ test("a wrong-host UPDATE acceptance warns on its source row and claims nothing"
   await expect(row.locator(".host-settings")).toBeEnabled();
   expect(updates.plans).toBe(1);
   expect(updates.confirms).toBe(1);
+  // The hosts panel keeps polling the host list, and this test's handler for
+  // it awaits the real response before rewriting it. A poll still inside the
+  // handler when the page closes at the end of the test reads a response
+  // Playwright has already disposed, which fails the test after every
+  // assertion above has passed. Dropping the routes first, ignoring a
+  // handler cut short, ends the test where its claims end.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
 test("a malformed accepted UPDATE warns, survives old success, and never replays", async ({
