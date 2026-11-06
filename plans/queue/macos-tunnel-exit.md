@@ -345,3 +345,40 @@ recorded, and the last PR removes the TODO.md entry. Open, not merged. If a `## 
 entry must also be satisfied. Then close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and
 12): deliver its report through the queue script, write a closing entry in its log, and stop the watchdog. Never edit
 `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-11-06 (claim 90feb8).
+
+### The heartbeat pipe does not fully close a tunnel through the gateway
+
+A force quit or crash on macOS can leave a recipe tunnel's SSH process and sandbox listeners running. The chosen fix was
+a helm-owned stdin pipe, a heartbeat every 30 seconds and a remote 120-second silence limit. You required the whole SSH
+connection to end even with a forwarded connection open, and explicitly required a block if the pipe could not do that;
+no watcher was authorized.
+
+The pipe works against local OpenSSH, but the real Tensorlake gateway failed the held-forward EOF check twice. A fresh
+roundtrip established the forwarded connection before stdin closed. In the diagnostic repeat, independent inspection
+before cleanup confirmed that the remote command and its SSH session process were gone and the sandbox listener refused
+connections. The remote forwarded peer saw EOF/reset. However, after ten seconds the local SSH command's result was
+still pending and the service-side endpoint had seen neither EOF nor reset. The probe did not separately inspect the
+local SSH process table. The gateway appears to retain the forwarded channel after the sandbox-side SSH session ends;
+that explanation is an inference, while the failed teardown is observed.
+
+The failed recorder runs are `dca6ab7d-e116-4341-994a-9a66e1cba923` and `119dfa4b-cdb8-4571-a28a-31739e456a55`. Eight
+focused local tunnel tests passed, including real OpenSSH EOF and silence with a held forward, in
+`f4ce3d72-fd05-48ff-81fd-cca772a05b81`. The macOS unprivileged server prerequisite passed in
+[CI run 42153996017](https://github.com/scode/farhelm/actions/runs/42153996017), using portable OpenSSH with the system
+macOS client. These passes do not resolve the gateway failure. Full gateway silence and lease-kill checks and the final
+macOS regression dispatch were not run because the required EOF guarantee already failed.
+
+[Draft #3072](https://github.com/scode/farhelm/pull/3072/changes) contains only the successful test-server prerequisite.
+The proposed product change remains unpublished and is not ready: its review also found a failure-diagnostic issue. Both
+owned sandboxes and their snapshots were removed, and the test SSH key was deregistered. The working log retains the
+unshipped proposal and evidence.
+
+Should the full teardown requirement remain, with a revised design allowed to investigate a local watcher or another
+gateway-compatible mechanism, or should the requirement be narrowed to ending the sandbox session and listeners while
+allowing the local SSH process and service-side connection to linger? I recommend keeping the full requirement and
+revising the design before implementation resumes; the narrower guarantee leaves local connections behind, and the
+watcher alternative still needs its details settled.
