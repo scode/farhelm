@@ -4153,3 +4153,64 @@ failure occurred to quote; earlier entries retain the historical failures.
 Class: unknown
 
 Cause: unknown
+
+## 2026-11-06 — settings save cleanup waits for a request-finished event WebKit never sends (e2e/tests/settings.spec.ts)
+
+Two checkout-save tests in `e2e/tests/settings.spec.ts` end by waiting for each intercepted save's browser response to
+report `finished()` before restoring the configuration, and on WebKit that wait sometimes never returns, so the test
+times out at 60 seconds in its cleanup after its own assertions passed. In the plans landing monitor's sandbox runs on
+2026-11-06, tested commit `0958dbcd` (one-press-suspended-checkout, which does not touch Settings),
+`post-clone commands with carriage returns refuse edits but can be cleared` and
+`a pending checkout folder save survives closing settings` both failed that way in one host-terminal run
+(`40e6f124-6214-4bd7-865c-64740aecd10e`), passed three host-terminal re-runs each
+(`cb57caa4-7c10-4a8b-9a8f-157331af8daa`) and failed once each in three ordinary re-runs
+(`b9bc59c5-c98f-4e0d-92fc-6735b2c9fc50`), each time at the same `reply.finished()` line. No other test failed in those
+runs. #3061 found that WebKit can leave request-finished pending for an intercepted save that was already answered, and
+replaced the same wait in two sibling tests with a drained route that owns each backend reply; these two still wait on
+the browser event. Hypothesis: the same WebKit behavior, so the same change would fix them. Open; both tests are
+excluded from deflake sweeps; no fix attempted.
+
+```text
+Test timeout of 60000ms exceeded.
+> 1377 |       if (reply) await reply.finished();
+> 1777 |     if (reply) await reply.finished();
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in host-terminal runs) after the recorder scrubbed ambient `FARHELM_*`; the tracked tree
+was clean. Run UUIDs address retained temporary evidence, which expires with cleanup.
+
+Class: ambiguous-observable
+
+Cause: hypothesis
+
+## 2026-11-06 — an update's progress label shows no step name in a fourth provisioning test (e2e/tests/provisioning.spec.ts)
+
+`incarnation churn keeps a followed run while a target change detaches it` failed on WebKit in the plans landing
+monitor's sandbox run `269f1dd3-f429-4b1d-9171-523f76ef94d9` on 2026-11-06 (tested commit `0958dbcd`, which does not
+touch provisioning) with the signature recorded on 2026-11-05 for three sibling tests: right after the update starts,
+the row's label held "Updating: 0/9 0:04", the count and timer with no step name, for the whole five-second wait. It was
+the only failure in that shard and passed three re-runs on the same build (`2bbe5a10-4b0f-4673-a93b-c14151d5598b`).
+Hypothesis: as for the siblings, the first step's name reaches the label later than five seconds under a loaded
+full-suite shard. Open; excluded from deflake sweeps with its siblings; no fix attempted.
+
+```text
+Expected pattern: /Updating: \d+\/\d+ .+ \d+:\d{2}/
+Received string:  "Updating: 0/9 0:04"
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in host-terminal runs) after the recorder scrubbed ambient `FARHELM_*`; the tracked tree
+was clean. Run UUIDs address retained temporary evidence, which expires with cleanup.
+
+Class: readiness
+
+Cause: hypothesis
