@@ -4928,7 +4928,7 @@ async fn foreign_origin_is_refused_on_the_stop_route() {
 /// (`create_in_missing_directory_errors`). This test's job is narrower
 /// and complementary: prove the *client-and-HTTP* half of the chain
 /// (scripted `Error` reply in, status code out) without needing a real
-/// supervisor, tmux, or filesystem precondition to produce one.
+/// supervisor, terminal, or filesystem precondition to produce one.
 #[farhelm_testtrace::test]
 async fn create_session_error_reply_maps_to_bad_request_status() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -8421,7 +8421,7 @@ async fn an_identity_less_entry_can_list_the_same_suffix_as_a_cached_entry() {
 /// The restart itself really happened — the supervisor relaunched, and
 /// the helm received and recorded the reply — but that reply carries
 /// `SessionStatus::Unknown` BY CONTRACT: at the instant it is built the
-/// pane exists and the agent's own `exec` inside it has not been
+/// terminal exists and the agent's own `exec` inside it has not been
 /// observed, and `SessionStatus::Unknown`'s own docs are explicit that
 /// `ListSessions` is the only reply computing a real answer. Recording
 /// it verbatim answered a successful restart with "the helm has no
@@ -8520,7 +8520,7 @@ async fn a_reply_carrying_unknown_never_erases_a_known_status() {
 /// This is the other half of the no-degrade rule, and without it that
 /// rule pays for its own correctness with a visible lag. Restarting an
 /// EXITED session is the case that shows it: the reply says `Unknown`
-/// (deliberately — the pane exists, the agent's exec has not been
+/// (deliberately — the terminal exists, the agent's exec has not been
 /// observed), the merge declines to record it over the cached `exited`,
 /// and the list therefore goes on saying `exited` after a restart that
 /// succeeded. A user watching that sees their own successful action

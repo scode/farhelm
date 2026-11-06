@@ -746,8 +746,7 @@ const PEER_TEXT_CAP: usize = 1024;
 /// ends up: an operator's terminal, via a log line, and a UI, via a state —
 /// and a peer that embeds control bytes can otherwise repaint a console or
 /// hide the very line describing what it did. `Debug`'s escaping is the
-/// same defense the supervisor applies to tmux's exit reasons, chosen there
-/// for the same reason and reused here rather than re-invented.
+/// defense: it renders control bytes as inert, legible escapes.
 ///
 /// Truncation is marked rather than silent: "the host said this" and "the
 /// host said this and kept going" are different diagnostics.

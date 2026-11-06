@@ -105,8 +105,10 @@ pub struct HelmUnitInputs<'a> {
 /// one) contributes no `PATH` entry rather than an empty one, which POSIX
 /// would read as the current directory.
 ///
-/// `KillMode=process` in the template is equally deliberate: tmux owns the
-/// durable sessions, so restarting their manager must stop only the
+/// `KillMode=process` in the template is equally deliberate: the terminals
+/// own the durable sessions (each new terminal's terminal host, and the
+/// private tmux server that holds old ones), and they live in the unit's
+/// control group, so restarting their manager must stop only the
 /// supervisor process rather than systemd's default whole control group.
 ///
 /// So is `UnsetEnvironment=` for the three session markers
@@ -117,9 +119,9 @@ pub struct HelmUnitInputs<'a> {
 /// environment --systemd --all`) copies that tab's markers into the user
 /// manager, and the next supervisor it starts would inherit them: deleting
 /// that session, or closing that tab, would then make the supervisor signal
-/// itself, and a tmux server it started would take every session's panes
-/// with it. A supervisor systemd manages never legitimately belongs to a
-/// session, so stripping them costs nothing. This covers only supervisors
+/// itself, and a tmux server it started would take every old session's
+/// panes with it. A supervisor systemd manages never legitimately belongs to
+/// a session, so stripping them costs nothing. This covers only supervisors
 /// started through this unit; SPEC_impl.md records the limit.
 ///
 /// Fails when any path cannot cross a text boundary faithfully (see
@@ -722,7 +724,7 @@ mod tests {
     /// The complete text of both units, pinned.
     ///
     /// These templates ARE the lifecycle policy — `KillMode=process` is
-    /// what keeps a supervisor restart from killing the tmux sessions it
+    /// what keeps a supervisor restart from killing the terminals it
     /// manages, `WantedBy=default.target` is what makes either unit start
     /// at all — and a substring test would stay green while any of those
     /// directives silently disappeared. The expectations are written out

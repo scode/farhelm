@@ -39,14 +39,14 @@
 //!
 //! Binary frames are the attachment's data in both directions: terminal
 //! bytes, or for a grid stream (`farhelm_proto::grid`) one grid message per
-//! frame, relayed without being read either way. Text frames are the
-//! control channel (`WsClientMsg`): resize, and the browser's own watermark
-//! pause/resume, which is forwarded to the supervisor rather than
-//! interpreted here. Three text frames are made on this side —
-//! `PONG_TEXT_MESSAGE` for the heartbeat, `REPLAY_COMPLETE_TEXT_MESSAGE` for
-//! the marker that separates replayed scrollback from live output, and the
-//! stream notice (`stream_notice`), which opens every attached socket and
-//! says which kind of data follows.
+//! frame, relayed without being read either way. Text frames are the control
+//! channel (`WsClientMsg`): resize, and an old terminal's watermark
+//! pause/resume (the grid client sends none), which is forwarded to the
+//! supervisor rather than interpreted here. Three text frames are made on
+//! this side — `PONG_TEXT_MESSAGE` for the heartbeat,
+//! `REPLAY_COMPLETE_TEXT_MESSAGE` for the marker that separates replayed
+//! scrollback from live output, and the stream notice (`stream_notice`),
+//! which opens every attached socket and says which kind of data follows.
 //!
 //! ## Grid streams
 //!
@@ -162,22 +162,24 @@ impl Drop for TracedAttachment {
 }
 
 /// Initial terminal size, carried as query parameters because a WebSocket
-/// handshake is a GET with no body. Sizing the pane at attach time rather
-/// than waiting for the first `resize` message is what gets live output
-/// to the right width immediately instead of reflowing a moment later.
+/// handshake is a GET with no body. Sizing the terminal at attach time
+/// rather than waiting for the first `resize` message is what gets live
+/// output to the right width immediately instead of reflowing a moment
+/// later.
 ///
-/// It does not shape the replay directly: the supervisor resizes the
-/// window after takeover and just before its replacement client captures
-/// (in that order deliberately — resizing during prep would leave an
-/// incumbent's terminal reflowed by an attach that may still fail; see
-/// the attach handler), so the replay is content tmux reflowed to the
-/// NEW geometry, possibly while the application is still repainting for
-/// it. Full-screen apps finish repainting on the SIGWINCH they already
-/// received; normal-screen sessions wear tmux's reflow until the next
-/// output. For a freshly opened tab that resize is NORMALLY a no-op —
-/// the open path pre-sizes the tab window to the agent window's geometry,
-/// best-effort — which is what keeps a new tab's first replay from racing
-/// its shell's resize repaint in the common case (a failed pre-size, or a
+/// What the size does to the catch-up depends on the terminal, and is the
+/// supervisor's business, not this route's. A new terminal's attach waits
+/// briefly for the size to take effect in its terminal host before it
+/// reads the screen and history it sends, so the grid catch-up is drawn at
+/// the new width rather than sent twice. An old terminal is resized after
+/// takeover and just before its replacement client captures (in that order
+/// deliberately — resizing during prep would leave an incumbent's terminal
+/// reflowed by an attach that may still fail; see the attach handler), so
+/// its replay is content tmux reflowed to the NEW geometry, possibly while
+/// the application is still repainting for it. Either way a full-screen
+/// app finishes repainting on the SIGWINCH it already received. A freshly
+/// opened tab normally already has the agent terminal's size, so its
+/// attach-time resize is a no-op (a failed pre-size of an old tab, or a
 /// client that resized between open and attach, degrades to the ordinary
 /// resize-at-attach).
 ///
@@ -383,10 +385,11 @@ async fn attach_from_query(
 /// session (see `serve_term`'s single attach-failure arm).
 ///
 /// The client → server text messages, all `{"type": ...}`:
-/// - `{"type":"resize","cols":N,"rows":N}` — the pane's new geometry.
-/// - `{"type":"pause"}` — this terminal's unflushed `term.write()`
-///   backlog crossed its high-water mark; stop sending output.
-/// - `{"type":"resume"}` — the backlog drained below the low-water mark;
+/// - `{"type":"resize","cols":N,"rows":N}` — the terminal's new size.
+/// - `{"type":"pause"}` — an old terminal's unflushed `term.write()`
+///   backlog crossed its high-water mark; stop sending output. The grid
+///   client never sends it (the helm pauses grid streams itself).
+/// - `{"type":"resume"}` — that backlog drained below the low-water mark;
 ///   output may flow again.
 /// - `{"type":"ping"}` — the browser's idle-gated liveness probe
 ///   (PLAN_M6.md item 7), answered with `{"type":"pong"}` and forwarded to
@@ -405,12 +408,12 @@ async fn attach_from_query(
 /// path for no added signal.
 ///
 /// Pause and resume carry no payload because the channel is implicit:
-/// one socket is one attachment. They are the browser end of
+/// one socket is one attachment. They are an old terminal's end of
 /// PLAN_M2_5.md's watermark flow control and travel straight through to
 /// the supervisor as `ControlMsg::PauseOutput`/`ResumeOutput` — the helm
-/// keeps no pause state of its own (see `SupervisorClient::pause_output`).
-/// The browser side that SENDS them lands with the UI work in
-/// PLAN_M2_5.md step 4; the server accepts them now.
+/// keeps no state for them (see `SupervisorClient::pause_output`). A grid
+/// stream's pause and resume come from the helm's own queue instead
+/// (this module's "Grid streams").
 ///
 /// `?grid=1` says the browser can render grid streams (see
 /// `TermQuery::asks_for_grid` and this module's "Grid streams"), and every
@@ -456,10 +459,11 @@ fn refused_as_taken_over(error: &anyhow::Error) -> bool {
 /// the browser must hear as `tab_closed` rather than as a failed attempt.
 ///
 /// Every `NotFound` a tab attach can meet describes current state, not a
-/// passing condition: the supervisor looks the tab up in tmux's live pane
-/// list at attach time (an exited but unreaped tab already counts as
-/// gone), a session with no tmux terminal has no tab windows left either,
-/// and a session or host the helm cannot route has taken its tabs with it.
+/// passing condition: the supervisor looks the tab up among the session's
+/// live tabs at attach time (its tab hosts, and its old tabs' tmux windows;
+/// an exited but unreaped tab already counts as gone); a tmux tab of a
+/// session whose agent terminal is gone is not found either; and a session
+/// or host the helm cannot route has taken its tabs with it.
 /// Transport trouble (a lost supervisor, an unreachable host) arrives as
 /// other kinds and keeps recovering. Reported as `other`, this refusal
 /// sent the browser's reconnect ladder through six attempts per tab, each
@@ -470,7 +474,7 @@ fn refused_as_taken_over(error: &anyhow::Error) -> bool {
 /// Tab attaches only. The agent terminal's `NotFound` carries the
 /// supervisor's account of what happened to the session (a reboot, a
 /// restart gap, what restart would do), and the browser keeps showing it
-/// rather than hiding the pane.
+/// rather than hiding the terminal.
 fn refused_as_missing_tab(error: &anyhow::Error, q: &TermQuery) -> bool {
     q.tab.is_some()
         && error
@@ -647,10 +651,11 @@ const PONG_TEXT_MESSAGE: &str = r#"{"type":"pong"}"#;
 /// Pump one attached terminal between the browser and the supervisor.
 ///
 /// The body of the terminal path, and deliberately the dumbest part of it:
-/// bytes are never inspected, buffered, or transformed in either
-/// direction. Every escape sequence a client sees comes from the pane, and
-/// every keystroke reaches it unedited — that is what "full fidelity" in
-/// SPEC.md costs here, and any parsing added at this layer would break it.
+/// frames are never inspected, buffered, or transformed in either
+/// direction. Everything a client draws comes from the supervisor (an old
+/// terminal's bytes, a new terminal's grid messages), and every input
+/// message reaches it unedited — that is what "full fidelity" in SPEC.md
+/// costs here, and any parsing added at this layer would break it.
 ///
 /// The socket always outlives its attachment by exactly one message: when
 /// the supervisor ends the attachment (takeover, dead terminal), the
@@ -691,13 +696,14 @@ async fn serve_term(
 
     // One arm covers both failure sources `attach_from_query` can produce
     // — a locally-refused query shape (an explicit empty `?lease=`) and a
-    // supervisor-side attach refusal (unknown session, unknown tab, tmux
-    // trouble) — because both must reach the user identically: a
-    // `{"type":"detached",...}` notice, then a closed socket, never a bare
-    // disconnect the browser would blame on the network instead of the
-    // request it just made. See `attach_from_query`'s own docs for why
-    // folding them into one `Result` is what keeps this a single arm
-    // instead of two copies of the same three lines.
+    // supervisor-side attach refusal (unknown session, unknown tab, a
+    // terminal that cannot be read) — because both must reach the user
+    // identically: a `{"type":"detached",...}` notice, then a closed
+    // socket, never a bare disconnect the browser would blame on the
+    // network instead of the request it just made. See
+    // `attach_from_query`'s own docs for why folding them into one
+    // `Result` is what keeps this a single arm instead of two copies of
+    // the same three lines.
     let attached = attach_from_query(&state, &session_id, &q, if_unowned);
     tokio::pin!(attached);
     let (client, bare_session_id, channel, mut events) = tokio::select! {

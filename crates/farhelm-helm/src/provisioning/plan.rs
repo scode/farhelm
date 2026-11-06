@@ -800,11 +800,12 @@ impl PlanLayout {
     /// goes through the ordinary checks, and after it the service lets a
     /// retry proceed without a connection. Reloading first makes systemd
     /// forget the removed unit's `KillMode=process`, so stopping ends its
-    /// whole control group, including the private tmux server and retained
-    /// panes. This default control-group behavior was verified against a
-    /// real user manager when uninstall was built. The stop then ends any
+    /// whole control group, including its terminal hosts, the private tmux
+    /// server and its retained panes. This default control-group behavior
+    /// was verified against a real user manager when uninstall was built.
+    /// The stop then ends the state directory's terminal hosts and any tmux
     /// server still reachable at the host's private socket: an inactive unit
-    /// can leave tmux behind even after systemd has forgotten the unit.
+    /// can leave either behind even after systemd has forgotten the unit.
     ///
     /// Three refusals guard the `rm -rf` of the lib directory, all on the
     /// host's symlink-resolved paths with verified alternate home prefixes
