@@ -13,8 +13,9 @@ that it bills while running; deleting it also deletes its snapshots.
 Hovering or focusing the SSH and Tensorlake choices in Add host explains how each adds a host.
 
 Tensorlake hosts can be suspended and resumed without restarting their sessions, with progress until Tensorlake confirms
-the change. The session launcher shows progress while resuming and connecting to a suspended host; a fresh GitHub
-checkout asks you to review its refreshed preview and launch again.
+the change. The session launcher shows progress while resuming and connecting to a suspended host, and starts the
+session in the same press. For a fresh GitHub checkout the directory is picked once the host is ready; a name you
+typed that is already taken still needs changing.
 
 New Tensorlake hosts start YOLO sessions without asking. Reused images need systemd running as their init system and
 must not contain an existing Farhelm supervisor installation.

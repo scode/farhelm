@@ -148,9 +148,9 @@ example while the helm's machine is asleep. An idle agent while Farhelm stays co
 Farhelm does not suspend idle hosts itself or resume them without a user action. A tunnel by itself does not keep a
 sandbox from reaching Tensorlake's idle limit.
 
-Launching on a suspended host shows progress while it resumes and reconnects. Starting in an existing directory then
-continues automatically. For a fresh GitHub checkout, resume refreshes the checkout preview: review it and click
-**Launch** again.
+Launching on a suspended host shows progress while it resumes and reconnects, then starts the session automatically. For
+a fresh GitHub checkout, the directory is picked when the host is ready; a supplied session name determines its
+directory name. If that name is taken, the launch is refused so you can choose another.
 
 ## Delete a sandbox
 

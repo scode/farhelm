@@ -6072,18 +6072,25 @@ the snapshot's attribution wins over the row's. The stored value remains the fal
 states succeed; conflicts are reconciled by reading status. An actual resume withdraws any pre-suspension connection and
 releases both masters before retrying, even if the actor has not yet detected an external suspension. Only an
 already-running sandbox with an already-connected actor skips recovery, preserving its viewers on repeated Resume. Every
-failure releases the hold. The launcher's existing-folder path binds the fresh connection token after resume; fresh
-checkouts require a second click to accept the newly fetched preview.
+failure releases the hold. The launcher's existing-folder path binds the fresh connection token after resume. Fresh
+checkouts arm the form's one-shot pending submission, bound to the returned connection. The old connection is only a
+waiting state while the form's independent host read catches up; its preview never authorizes creation. The form's own
+Ready preview on the returned connection submits once, spending the pending submission before dispatch. Draft or opening
+changes cancel it. Automatic template/Clone name candidates may advance under the unchanged naming policy, while typed
+and fixed names remain exact. Resumed auto-allocation does not pin the old checkout configuration epoch, which the
+host's history may not have revealed when a shortcut pressed; the current Ready preview still matches the full live
+authority and the server validates its configuration. Ordinary guarded answers keep their exact epoch comparison. A lost
+create race refreshes the preview but never submits again automatically.
 
 The launcher's preparation signal belongs to its own submit and names the host being resumed. It surrounds
 `resume_host_connected`, including that helper's bounded reconnection wait; only that form treats its own pending host
-as available and replaces the unavailable note with preparation progress. The existing-directory copy promises the
-subsequent create, while fresh-checkout copy preserves the review-again boundary. Quick launch renders the same
-preparation in its existing progress surface. Preparation failure sends no create and has its own refusal wording;
-session-create progress and uncertain-outcome recovery begin only at their existing dispatch boundary. The attention
-classifier treats a routine lifecycle transition as neither a Problem nor an Update, while independent provisioning
-progress and unseen setup warnings keep their existing precedence. Tunnel failures retain their connected-host
-eligibility; stopped forwards during a lifecycle hold do not report a live tunnel failure.
+as available and replaces the unavailable note with preparation progress. Both destination paths say the session starts
+when the host is ready. Quick launch renders the same preparation in its existing progress surface. Preparation failure
+sends no create and has its own refusal wording; session-create progress and uncertain-outcome recovery begin only at
+their existing dispatch boundary. The attention classifier treats a routine lifecycle transition as neither a Problem
+nor an Update, while independent provisioning progress and unseen setup warnings keep their existing precedence. Tunnel
+failures retain their connected-host eligibility; stopped forwards during a lifecycle hold do not report a live tunnel
+failure.
 
 A successful helper read can precede the form's independent host read. A display-only receipt suppresses the obsolete
 unavailable note for that exact pending target and connection token until the displayed snapshot changes. It grants no

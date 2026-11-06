@@ -42,8 +42,8 @@ it keeps the host, directory, and name.
 With no session open, the host menu starts on the machine you are using, listed as **Local (this machine)**. A host that
 is not connected right now shows its state next to its name, such as "Unreachable, retrying", and you cannot launch on
 it until it is back. A **Suspended** [Tensorlake host](/docs/using/tensorlake-sandboxes/) is the exception: launching
-resumes it first. For a fresh GitHub checkout, review the refreshed checkout preview and click **Launch** again after
-resume. [Add a remote host](/docs/get-started/add-a-remote-host/) covers adding hosts.
+resumes it first and starts the session when it is ready. For a fresh GitHub checkout, the directory is picked after
+the host wakes. [Add a remote host](/docs/get-started/add-a-remote-host/) covers adding hosts.
 
 The directory field starts at the directory of your last agent launch on that host, or at the host's home directory if
 you have not launched an agent there yet; a launch into a new managed checkout does not count. With a session open on
@@ -229,6 +229,8 @@ suggestion. You can also type `gh:owner/repo` in the search box and choose **Man
 suggests repositories you have launched or cloned before, but it does not search GitHub, so type a new one in full.
 
 Before you launch, the launcher shows the directory the clone will go into, and the launch button waits until it does.
+On a suspended Tensorlake host there is no directory to show yet: one press resumes the host, picks the directory
+once it is ready and launches.
 [Quick launch](/docs/using/launch-templates/#quick-launch) creates that directory directly: marking the template means
 you have chosen to start it without seeing the path first. Giving it a number key makes the same choice.
 Each checkout gets a new directory of its own, named after the repository and numbered (`farhelm-1`, `farhelm-2`, and so

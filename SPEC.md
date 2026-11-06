@@ -280,8 +280,8 @@ Suspend requires a connected host after the activity read and a complete listing
 An offline or unknown host asks even when its cached listing is empty. Suspension preserves running processes and
 sessions. A session on a suspended host says **&lt;host&gt; is suspended; this session continues when it resumes** and
 offers **Resume host**. Launching on a suspended host resumes it first and waits for a fresh connection. For a fresh
-GitHub checkout, Resume refreshes the checkout preview; the user reviews it and launches again, since the preview from
-the old connection cannot authorize work on the new one. Farhelm does not suspend automatically.
+GitHub checkout, the folder is allocated once the host is ready and the session starts without a second press. Only a
+fresh preview on the new connection can authorize that create. Farhelm does not suspend automatically.
 
 An explicit Suspend shows **Suspending…**, with a spinner and how long ago Tensorlake was asked, until Tensorlake
 confirms suspension. Only then does the host show **Suspended**, with Farhelm's own completion time. A failed or
@@ -295,10 +295,9 @@ The Suspend confirmation is titled **Suspend &lt;host&gt;?**, with its explanati
 resources use the normal subdued details styling in Hosts.
 
 The session launcher shows its own **Resuming** preparation through both the Tensorlake call and reconnection, including
-quick launch. On the existing-directory path it says the session starts when the host is ready; on the fresh-checkout
-path it says to review the checkout and launch again. A failed preparation says the session was not launched, without
-the uncertain-outcome promise reserved for a create that may have been sent. A host another surface is suspending or
-resuming remains unavailable to this launcher.
+quick launch. Both existing-directory and fresh-checkout launches say the session starts when the host is ready. A
+failed preparation says the session was not launched, without the uncertain-outcome promise reserved for a create that
+may have been sent. A host another surface is suspending or resuming remains unavailable to this launcher.
 
 Tensorlake supervisor connections opt into a two-minute input-silence limit when the remote helper supports it. The helm
 sends a lightweight heartbeat every 30 seconds independently of session refreshes or storage work. If the helm vanishes
@@ -1314,26 +1313,28 @@ a sticky, `/tmp`-style directory. Keeping the root, and so its checkouts and the
 only the user can write is the user's responsibility. Farhelm does not check the root's owner or mode, and the ownership
 and archive promises in this section assume no other account can create, replace, or take over entries in it.
 
-Before Launch becomes available, the composer shows the exact host and path. Direct template launching is the exception:
-marking a template with ⚡ or giving it a number key is consent to its managed-checkout destination, including when
-combined in a quick-launch sequence, so it obtains the same exact preview and launches without showing the path first. A
-lost race still reveals New with the conflict and new preview rather than submitting again. Preview creates no directory
-and reserves nothing. An unnamed checkout uses the lowest available positive `repo-N` and that basename as its session
-title. Naming the session after quick launch changes only its title: the checkout keeps its original `repo-N` directory
-name. An explicit title at creation keeps its printable display spelling while the path uses `repo-` followed by its
-lowercase ASCII slug; runs outside letters and digits become hyphens. A title already starting with `repo-` does not
-repeat that prefix. An empty slug or a component over 200 bytes is refused, and so is a checkout path too long to
-archive later (the archive location adds up to 65 bytes to it, and the whole must stay within the system's path limit:
-4096 bytes on Linux, 1024 on macOS). Existing files, directories and symlinks all occupy a name. If another create wins
-the displayed path, Launch reports the conflict and obtains a new preview; it never submits automatically or silently
-chooses another directory. A typed name or a template's fixed name remains a conflict rather than gaining a suffix. A
-template base name uses its first free candidate, from the base itself through `-2` to `-50`; the cap leaves the
-conflict visible. A lost-race base-name launch obtains a new preview and may advance, but requires another Launch click.
-For Clone into the source's repository, an untouched nonempty copied title defaults to `<source title>-clone`, then the
-lowest free `<source title>-clone-N` for N ≥ 2. The name field shows the effective name, and preview and launch use it
-alike. Changing hosts or repositories restarts the suffix search; editing the name makes it explicit and disables
-automatic suffixes. A lost-race launch re-previews and may advance the default name, but still needs another click on
-Launch for the newly shown path.
+Before Launch becomes available, the composer shows the exact host and path. Fresh GitHub checkouts on a suspended host
+are an exception: the composer shows no path and says the folder is picked automatically when the host is ready (or
+named after the session when a name is supplied). One press resumes, obtains a fresh preview and creates the session.
+Direct template launching is the other exception: marking a template with ⚡ or giving it a number key is consent to its
+managed-checkout destination, including when combined in a quick-launch sequence, so it obtains the same exact preview
+and launches without showing the path first. A lost race still reveals New with the conflict and new preview rather than
+submitting again. Preview creates no directory and reserves nothing. An unnamed checkout uses the lowest available
+positive `repo-N` and that basename as its session title. Naming the session after quick launch changes only its title:
+the checkout keeps its original `repo-N` directory name. An explicit title at creation keeps its printable display
+spelling while the path uses `repo-` followed by its lowercase ASCII slug; runs outside letters and digits become
+hyphens. A title already starting with `repo-` does not repeat that prefix. An empty slug or a component over 200 bytes
+is refused, and so is a checkout path too long to archive later (the archive location adds up to 65 bytes to it, and the
+whole must stay within the system's path limit: 4096 bytes on Linux, 1024 on macOS). Existing files, directories and
+symlinks all occupy a name. If another create wins the displayed path, Launch reports the conflict and obtains a new
+preview; it never submits automatically or silently chooses another directory. A typed name or a template's fixed name
+remains a conflict rather than gaining a suffix. A template base name uses its first free candidate, from the base
+itself through `-2` to `-50`; the cap leaves the conflict visible. A lost-race base-name launch obtains a new preview
+and may advance, but requires another Launch click. For Clone into the source's repository, an untouched nonempty copied
+title defaults to `<source title>-clone`, then the lowest free `<source title>-clone-N` for N ≥ 2. The name field shows
+the effective name, and preview and launch use it alike. Changing hosts or repositories restarts the suffix search;
+editing the name makes it explicit and disables automatic suffixes. A lost-race launch re-previews and may advance the
+default name, but still needs another click on Launch for the newly shown path.
 
 Replace with into a managed checkout, Clone into a different repository, and Clone of a source with no repository ignore
 an untouched copied title: the session is unnamed and gets the lowest available `repo-N`. An empty source title also
