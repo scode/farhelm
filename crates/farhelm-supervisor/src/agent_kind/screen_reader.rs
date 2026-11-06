@@ -505,7 +505,7 @@ fn is_muse_working_line(line: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------
-// Claude Code (observed on 2.1.285 and 2.1.296)
+// Claude Code (observed on 2.1.285, 2.1.296 and 2.1.319)
 // ---------------------------------------------------------------------
 
 /// Claude Code's reader.
@@ -537,8 +537,11 @@ const CLAUDE_FOOTER_LINES: usize = 2;
 
 /// How far above the input box's top rule Claude's working line (spinner or
 /// background-wait announcement) may sit.
-/// Claude puts notices (a connector warning, a tmux hint, a tip) between
-/// the two; six covers every observed arrangement. Blank lines are omitted,
+/// Claude puts notices (a connector warning, a tip, and, where Claude is
+/// told it runs in tmux, a hint about scrolling in tmux) between the two;
+/// six covers every observed arrangement. Claude is told so in an old
+/// terminal, and in a new one started by an earlier release until it is
+/// restarted. Blank lines are omitted,
 /// so an idle screen can also put the end of its transcript in this window.
 const CLAUDE_SPINNER_LINES_ABOVE_BOX: usize = 6;
 
@@ -668,7 +671,7 @@ fn is_claude_working_line(line: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------
-// Codex (observed on 0.159.0)
+// Codex (observed on 0.159.0 and 0.166.0)
 // ---------------------------------------------------------------------
 
 /// Codex's reader.
