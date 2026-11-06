@@ -320,6 +320,10 @@ pub fn encode_key(
 /// scroll locally, and Cmd+A on a Mac, which selects locally). Kept in the
 /// original's shape rather than simplified, since its whole value is being
 /// the same function; the golden table holds it to the original.
+///
+/// Ported from xterm.js 6.0.0's `evaluateKeyboardEvent`
+/// (src/common/input/Keyboard.ts), MIT; THIRD_PARTY_NOTICES.md, "Code ported
+/// from xterm.js".
 fn xterm_key(
     key: &str,
     code: &str,
@@ -454,6 +458,9 @@ fn xterm_key(
 
 /// `evaluateKeyboardEvent`'s default case: every key code the switch does
 /// not name.
+///
+/// Ported from the default case of xterm.js 6.0.0's `evaluateKeyboardEvent`,
+/// MIT; THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
 #[allow(clippy::too_many_arguments)]
 fn other_key(
     key: &str,
@@ -528,6 +535,9 @@ fn other_key(
 
 /// xterm.js's `KEYCODE_KEY_MAPPINGS`: the unshifted and shifted character of
 /// each US-layout key that Alt (as Meta) sends after ESC.
+///
+/// Ported from xterm.js 6.0.0's src/common/input/Keyboard.ts, MIT;
+/// THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
 fn alt_key_mapping(kc: u32) -> Option<(&'static str, &'static str)> {
     Some(match kc {
         48 => ("0", ")"),
@@ -582,6 +592,10 @@ fn utf16_len(text: &str) -> usize {
 /// The grid client never splits a CRLF, and the format does not forbid
 /// splitting a marker after its ESC; carrying both across parts is simpler
 /// than refusing either split.
+///
+/// Ported from xterm.js 6.0.0's `prepareTextForTerminal`
+/// (src/browser/Clipboard.ts), for the line-ending conversion, MIT;
+/// THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
 #[derive(Debug, Default)]
 struct PasteText {
     /// The start of a possible end-of-paste marker at the end of what has
@@ -669,6 +683,10 @@ enum Action {
 /// modifiers and the event's position, and regardless of mode 1007, which
 /// xterm.js does not implement); on the normal screen it is the viewer's own
 /// scrolling and sends nothing.
+///
+/// Ported from xterm.js 6.0.0's `CoreMouseService.triggerMouseEvent` and its
+/// encodings, and its wheel handling in `CoreBrowserTerminal`, MIT;
+/// THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
 fn encode_mouse(
     kind: MouseEventKind,
     button: i8,
@@ -771,6 +789,9 @@ fn encode_mouse(
 /// and 64 for the wheel. A release is button 3 in the encodings that cannot
 /// say which button was released; SGR keeps the button and marks the
 /// release with its final `m` instead.
+///
+/// Ported from xterm.js 6.0.0's `CoreMouseService`, MIT;
+/// THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
 fn event_code(button: u8, action: Action, mods: u8, sgr: bool) -> u32 {
     let mut code = 0;
     if mods & modifiers::CTRL != 0 {

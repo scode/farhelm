@@ -1562,6 +1562,19 @@ declare_assets! {
     const GRID_INPUT_JS: Asset = asset!("/assets/grid-input.js");
     const GRID_BUFFER_JS: Asset = asset!("/assets/grid-buffer.js");
     const GRID_TERMINAL_JS: Asset = asset!("/assets/grid-terminal.js");
+    // The MIT notices for the code grid-input.js, grid-terminal.js,
+    // grid-buffer.js and the supervisor's grid input encoder port from
+    // xterm.js, two of its add-ons and Visual Studio Code. Shipped as a file
+    // for the reason WEB_LINKS_LICENSES gives, and kept apart from
+    // XTERM_LICENSES: that file goes with the vendored xterm.js bundle once
+    // old terminals are dropped, while the ported code stays. The release
+    // `farhelm` binary embeds this bundle, so the notice also travels with
+    // the supervisor's ported Rust code.
+    #[used]
+    static GRID_PORTED_CODE_LICENSES: Asset = asset!(
+        "/assets/grid-ported-code-LICENSES.txt",
+        AssetOptions::builder().with_hash_suffix(false)
+    );
     const TERMINAL_JS: Asset = asset!("/assets/terminal.js");
     // The invalidation feed's socket (PLAN_M6_75.md item 6) — its own asset
     // rather than a corner of terminal.js, because it has nothing to do with a

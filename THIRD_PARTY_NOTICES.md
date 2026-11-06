@@ -24,6 +24,35 @@ Visual Studio Code's `vs/base`) and its fit, clipboard, web-links and unicode-gr
 BSD-3-Clause license. Each bundle's complete notices are in the matching `*-LICENSES.txt` file beside it
 (`xterm-LICENSES.txt` covers `xterm.js` and `xterm.css`) and ship in the app under `/assets/`.
 
+## Code ported from xterm.js
+
+Parts of new terminals' input, selection, sizing and link handling are Farhelm ports of code from `@xterm/xterm` 6.0.0,
+its `@xterm/addon-fit` 0.11.0 and `@xterm/addon-web-links` 0.12.0 add-ons, and the part of Visual Studio Code's
+`vs/base` that xterm.js compiles in. The ports keep behavior that programs and users already rely on, such as the bytes
+each key sends and the cell a click lands on, so they were carried over rather than rewritten. They live in:
+
+- `crates/farhelm-ui/assets/grid-input.js`: the keydown decision (`evaluateKeyboardEvent`, and the filters of
+  `CoreBrowserTerminal._keyDown` and `_isThirdLevelShift`), the platform list (`isMac`, `isWindows`), mouse cell
+  rounding (`getCoords`), mouse move de-duplication and wheel step accumulation (`CoreMouseService`), and the Alt-click
+  cursor move (`moveToCellSequence`).
+- `crates/farhelm-ui/assets/grid-terminal.js`: character measurement (`CharSizeService`), the cell size
+  (`DomRenderer._updateDimensions`), the fit (the fit add-on's `proposeDimensions`), selection coordinates, drag
+  scrolling and column selection (`SelectionService`), placing the input field under the pointer
+  (`moveTextAreaUnderMouseCursor`), and the wheel's scroll distance (Visual Studio Code's `StandardWheelEvent` and
+  scrollable element).
+- `crates/farhelm-ui/assets/grid-buffer.js`: selection text and word selection (`SelectionService`), the default word
+  separators, and the web-links add-on's URL pattern, line window and URL check.
+- `crates/farhelm-supervisor/src/grid_input.rs`: key encoding (`evaluateKeyboardEvent`), mouse report encoding
+  (`CoreMouseService`, and the wheel on the alternate screen), and paste line endings (`prepareTextForTerminal`).
+
+Each ported function names its origin in a source comment. The code is MIT-licensed: copyright the xterm.js authors,
+SourceLair Private Company and Christopher Jeffrey for xterm.js, the xterm.js authors for the add-ons, and Microsoft
+Corporation for Visual Studio Code. The complete notices are in
+`crates/farhelm-ui/assets/grid-ported-code-LICENSES.txt`, which ships in the app as
+`/assets/grid-ported-code-LICENSES.txt` independently of the vendored xterm.js bundle, so it stays when that bundle is
+removed. Release builds of `farhelm`, which run the supervisor, embed the same web bundle and so carry the notice beside
+the ported Rust code.
+
 ## Harness marks
 
 The session sidebar's harness marks in `crates/farhelm-ui/src/icons.rs` vendor geometry from the sources below. Each is
