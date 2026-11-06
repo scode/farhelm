@@ -22,7 +22,7 @@
 
 use proptest::prelude::*;
 
-/// Output where the emulator follows tmux rather than alacritty.
+/// Output where the emulator departs from alacritty on purpose.
 const DEPARTURES: &[&[u8]] = &[
     b"\x1b[?47h",
     b"\x1b[?47l",

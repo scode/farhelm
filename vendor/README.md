@@ -1060,9 +1060,9 @@ behavior, which upstream gets as an issue, not a patch.
   `Term::unset_private_mode`; `vte/src/ansi.rs`, `PrivateMode::new` (no names for 47 and 1047).
 - Patch hunks: none. It depends on the `inactive_grid_mut()` accessor (`term/mod.rs` `@@ -953,6 +1033,235 @@`).
 - Tests (`farhelm-terminal-emulator`): `modes_47_and_1047_show_the_alternate_screen` (`tests/modes.rs`);
-  `modes_47_and_1047_capture_like_tmux` (`tests/screen.rs`: the alternate screen captured, the cursor kept where the
-  program left it, the saved cursor case above, a second entry clearing the screen, and the two mixes with 1049 pinned
-  as known differences); and the 47 and 1047 rows of `mode_reports_on_a_fresh_terminal` and
+  `modes_47_and_1047_read_the_alternate_screen` (`tests/screen.rs`: the alternate screen captured, the cursor kept where
+  the program left it, the saved cursor case above, a second entry clearing the screen, and the two mixes with 1049
+  pinned as what the emulator does); and the 47 and 1047 rows of `mode_reports_on_a_fresh_terminal` and
   `mode_reports_follow_mode_changes` (`tests/queries.rs`). `tests/delegation.rs`, which compares the handler with a bare
   `Term` on generated output, leaves these modes out on purpose, since a bare `Term` ignores them.
 - Upstream status: not yet reported. An issue for alacritty, since the code is Farhelm's and uses only `Term`'s public

@@ -2652,7 +2652,7 @@ fn the_wrap_flag_round_trips_whatever_autowrap_was() {
 /// screen alike; and resetting either one afterwards leaves the restored
 /// terminal in the same encoding as the live one.
 ///
-/// Why: the two are independent modes (the vendored patch, as in tmux), so
+/// Why: the two are independent modes (the vendored patch), so
 /// a terminal can hold both, and the stream sets each on its own; a restore
 /// that kept only one would encode the program's mouse reports differently
 /// once it turned SGR off after a supervisor restart. Spec: `paint`'s

@@ -27,8 +27,9 @@ use super::compare::{Diff, diff};
 use super::synthetic::Rng;
 use super::t0;
 
-/// The scrollback the round trips run with: Farhelm's own (tmux's history
-/// limit today), so that history-heavy snapshots are what production sees.
+/// The scrollback the round trips run with: the supervisor's default
+/// (`DEFAULT_SCROLLBACK_LINES`), so that history-heavy snapshots are what
+/// production sees.
 pub const SCROLLBACK: usize = 12_000;
 
 /// The size limit snapshots are taken with: the host's `MAX_SNAPSHOT`.

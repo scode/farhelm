@@ -1,28 +1,25 @@
 //! The query-answer table, pinned through the public API.
 //!
-//! Each row names what tmux 3.7c answered when probed under Farhelm's server
-//! configuration (every row's `tmux` value comes from a probe, the same
-//! bytes written in one write), beside what this emulator answers, so that a
-//! row where the two differ is visibly deliberate (`src/queries.rs` gives
-//! each reason).
-//! The replay against a live tmux, of these queries and of those recorded
-//! agents sent, is the supervisor's `emulator_parity`; these tests are the
-//! table itself.
+//! Each row is a query and the answer this emulator gives to it on a fresh
+//! 80x24 terminal; `src/queries.rs` gives each answer's reason. The rows are
+//! Farhelm's contract with the programs it runs: a changed row is a changed
+//! promise about what the terminal is, so a row changes only together with
+//! that module's table.
 
 mod common;
 
 use common::{answer, answer_from, emulator, feed, resize};
 use farhelm_terminal_emulator::VERSION_REPORT;
 
-/// One row: a query, this emulator's answer, and tmux 3.7c's.
+/// One row: a query and the answer the table promises for it (empty for
+/// none).
 struct Row {
     query: &'static str,
-    ours: &'static str,
-    tmux: &'static str,
+    answer: &'static str,
 }
 
-const fn row(query: &'static str, ours: &'static str, tmux: &'static str) -> Row {
-    Row { query, ours, tmux }
+const fn row(query: &'static str, answer: &'static str) -> Row {
+    Row { query, answer }
 }
 
 /// Check every row on a fresh 80x24 emulator, and report all mismatches at
@@ -32,10 +29,10 @@ fn check(rows: &[Row]) {
         .iter()
         .filter_map(|row| {
             let got = answer(row.query);
-            (got != row.ours).then(|| {
+            (got != row.answer).then(|| {
                 format!(
-                    "{:?}: answered {:?}, table says {:?} (tmux said {:?})",
-                    row.query, got, row.ours, row.tmux
+                    "{:?}: answered {:?}, table says {:?}",
+                    row.query, got, row.answer
                 )
             })
         })
@@ -47,131 +44,97 @@ fn check(rows: &[Row]) {
 /// the table says.
 ///
 /// Why: programs decide what the terminal can do from these answers, and
-/// they have been tested against tmux's. DA1 in particular must not be
-/// alacritty's VT102 answer (`CSI ? 6 c`), but what tmux and the browser
-/// terminal both say. Spec: `src/queries.rs`, the table.
+/// the agents Farhelm runs were tested against these ones. DA1 in particular
+/// must not be alacritty's VT102 answer (`CSI ? 6 c`), but the VT100 with
+/// advanced video that Farhelm's terminals have always reported; DA2 and
+/// XTVERSION must not claim another terminal. Spec: `src/queries.rs`, the
+/// table.
 #[test]
 fn identification_status_and_window_queries() {
     check(&[
-        row("\x1b[c", "\x1b[?1;2c", "\x1b[?1;2c"),
-        row("\x1b[0c", "\x1b[?1;2c", "\x1b[?1;2c"),
-        // vte reports DECID as DA1; tmux ignores it.
-        row("\x1bZ", "\x1b[?1;2c", ""),
-        // alacritty's own DA2 rather than tmux's claim to be tmux.
-        row("\x1b[>c", "\x1b[>0;2600;1c", "\x1b[>84;0;0c"),
-        row("\x1b[=c", "", ""),
-        // Farhelm rather than tmux, through the vendored vte patch.
-        row("\x1b[>q", VERSION_REPORT, "\x1bP>|tmux 3.7c\x1b\\"),
-        row("\x1b[>0q", VERSION_REPORT, "\x1bP>|tmux 3.7c\x1b\\"),
-        row("\x1b[>1q", "", ""),
-        row("\x1b[5n", "\x1b[0n", "\x1b[0n"),
-        row("\x1b[3;5H\x1b[6n", "\x1b[3;5R", "\x1b[3;5R"),
-        // A pending wrap reports the column after the last, as tmux does.
-        row("\x1b[2;80Hx\x1b[6n", "\x1b[2;81R", "\x1b[2;81R"),
-        row("\x1b[2;79Hx\x1b[6n", "\x1b[2;80R", "\x1b[2;80R"),
+        row("\x1b[c", "\x1b[?1;2c"),
+        row("\x1b[0c", "\x1b[?1;2c"),
+        // vte reports DECID as DA1.
+        row("\x1bZ", "\x1b[?1;2c"),
+        // alacritty's own DA2, which claims no other terminal.
+        row("\x1b[>c", "\x1b[>0;2600;1c"),
+        row("\x1b[=c", ""),
+        // Farhelm, through the vendored vte patch.
+        row("\x1b[>q", VERSION_REPORT),
+        row("\x1b[>0q", VERSION_REPORT),
+        row("\x1b[>1q", ""),
+        row("\x1b[5n", "\x1b[0n"),
+        row("\x1b[3;5H\x1b[6n", "\x1b[3;5R"),
+        // A pending wrap reports the column after the last.
+        row("\x1b[2;80Hx\x1b[6n", "\x1b[2;81R"),
+        row("\x1b[2;79Hx\x1b[6n", "\x1b[2;80R"),
         // With autowrap off nothing is pending: the last column itself.
-        row(
-            "\x1b[?7l\x1b[2;80Hx\x1b[6n\x1b[?7h",
-            "\x1b[2;80R",
-            "\x1b[2;80R",
-        ),
+        row("\x1b[?7l\x1b[2;80Hx\x1b[6n\x1b[?7h", "\x1b[2;80R"),
         // What counts is autowrap when the column was written, not now.
-        row(
-            "\x1b[?7l\x1b[2;80Hx\x1b[?7h\x1b[6n",
-            "\x1b[2;80R",
-            "\x1b[2;80R",
-        ),
-        row(
-            "\x1b[2;80Hx\x1b[?7l\x1b[6n\x1b[?7h",
-            "\x1b[2;81R",
-            "\x1b[2;81R",
-        ),
+        row("\x1b[?7l\x1b[2;80Hx\x1b[?7h\x1b[6n", "\x1b[2;80R"),
+        row("\x1b[2;80Hx\x1b[?7l\x1b[6n\x1b[?7h", "\x1b[2;81R"),
         // A wide character dropped with autowrap off moves nothing.
-        row(
-            "\x1b[2;80Hx\x1b[?7l\u{4e00}\x1b[?7h\x1b[6n",
-            "\x1b[2;81R",
-            "\x1b[2;81R",
-        ),
-        row("\x1b[?6n", "", ""),
-        // vte does not parse the color scheme query.
-        row("\x1b[?996n", "", "\x1b[?997;1n"),
-        row("\x1b[11t", "", ""),
-        row("\x1b[13t", "", ""),
-        // tmux's default cell size of 16x32 pixels, at 80x24.
-        row("\x1b[14t", "\x1b[4;768;1280t", "\x1b[4;768;1280t"),
-        row("\x1b[14;2t", "\x1b[4;768;1280t", "\x1b[4;768;1280t"),
+        row("\x1b[2;80Hx\x1b[?7l\u{4e00}\x1b[?7h\x1b[6n", "\x1b[2;81R"),
+        row("\x1b[?6n", ""),
+        // vte parses neither the color scheme query nor 11 and 13 t.
+        row("\x1b[?996n", ""),
+        row("\x1b[11t", ""),
+        row("\x1b[13t", ""),
+        // The assumed cell size of 16x32 pixels, at 80x24.
+        row("\x1b[14t", "\x1b[4;768;1280t"),
+        row("\x1b[14;2t", "\x1b[4;768;1280t"),
         // vte parses only 14, 18, 22 and 23 of the window operations.
-        row("\x1b[15t", "", "\x1b[5;768;1280t"),
-        row("\x1b[16t", "", "\x1b[6;32;16t"),
-        row("\x1b[18t", "\x1b[8;24;80t", "\x1b[8;24;80t"),
-        row("\x1b[19t", "", "\x1b[9;24;80t"),
-        row("\x1b[21t", "", ""),
+        row("\x1b[15t", ""),
+        row("\x1b[16t", ""),
+        row("\x1b[18t", "\x1b[8;24;80t"),
+        row("\x1b[19t", ""),
+        row("\x1b[21t", ""),
         // Kitty keyboard mode is off, so its query goes unanswered.
-        row("\x1b[?u", "", ""),
-        row("\x1b[?4m", "", ""),
-        row("\x05", "", ""),
+        row("\x1b[?u", ""),
+        row("\x1b[?4m", ""),
+        row("\x05", ""),
         // vte ignores every DCS: DECRQSS and XTGETTCAP.
-        row("\x1bP$qm\x1b\\", "", "\x1bP0$r\x1b\\"),
-        row("\x1bP$q q\x1b\\", "", "\x1bP1$r q0 q\x1b\\"),
-        row("\x1bP+q524742\x1b\\", "", ""),
+        row("\x1bP$qm\x1b\\", ""),
+        row("\x1bP$q q\x1b\\", ""),
+        row("\x1bP+q524742\x1b\\", ""),
     ]);
 }
 
-/// Color queries answer with Farhelm's theme, in tmux's format, with the
-/// query's own terminator; clipboard reads are never answered.
+/// Color queries answer with Farhelm's theme, in xterm's format (16 bits per
+/// channel), with the query's own terminator; clipboard reads are never
+/// answered.
 ///
 /// Why: agents pick light or dark output from the background color, so the
-/// answer must be what the user sees. OSC 12 and OSC 4 are answered today by
-/// the browser terminal (tmux passes them through), from the same theme.
-/// Spec: `src/queries.rs`, the table; `src/theme.rs`.
+/// answer must be what the user sees, and a program that matches its answer
+/// by the terminator it sent must find it. Spec: `src/queries.rs`, the
+/// table; `src/theme.rs`.
 #[test]
 fn color_and_clipboard_queries() {
     check(&[
-        row(
-            "\x1b]10;?\x07",
-            "\x1b]10;rgb:ffff/ffff/ffff\x07",
-            "\x1b]10;rgb:ffff/ffff/ffff\x07",
-        ),
-        row(
-            "\x1b]10;?\x1b\\",
-            "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
-            "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
-        ),
-        row(
-            "\x1b]11;?\x07",
-            "\x1b]11;rgb:2828/2c2c/3434\x07",
-            "\x1b]11;rgb:2828/2c2c/3434\x07",
-        ),
-        row(
-            "\x1b]11;?\x1b\\",
-            "\x1b]11;rgb:2828/2c2c/3434\x1b\\",
-            "\x1b]11;rgb:2828/2c2c/3434\x1b\\",
-        ),
-        row("\x1b]12;?\x07", "\x1b]12;rgb:ffff/ffff/ffff\x07", ""),
+        row("\x1b]10;?\x07", "\x1b]10;rgb:ffff/ffff/ffff\x07"),
+        row("\x1b]10;?\x1b\\", "\x1b]10;rgb:ffff/ffff/ffff\x1b\\"),
+        row("\x1b]11;?\x07", "\x1b]11;rgb:2828/2c2c/3434\x07"),
+        row("\x1b]11;?\x1b\\", "\x1b]11;rgb:2828/2c2c/3434\x1b\\"),
+        row("\x1b]12;?\x07", "\x1b]12;rgb:ffff/ffff/ffff\x07"),
         // Two dynamic colors in one query, as xterm allows.
         row(
             "\x1b]10;?;?\x07",
             "\x1b]10;rgb:ffff/ffff/ffff\x07\x1b]11;rgb:2828/2c2c/3434\x07",
-            "",
         ),
-        row("\x1b]4;1;?\x07", "\x1b]4;1;rgb:cccc/6666/6666\x07", ""),
+        row("\x1b]4;1;?\x07", "\x1b]4;1;rgb:cccc/6666/6666\x07"),
         // 200 is cube entry 184: red level 5, green 0, blue 4.
-        row(
-            "\x1b]4;200;?\x1b\\",
-            "\x1b]4;200;rgb:ffff/0000/d7d7\x1b\\",
-            "",
-        ),
-        row("\x1b]52;c;?\x07", "", ""),
+        row("\x1b]4;200;?\x1b\\", "\x1b]4;200;rgb:ffff/0000/d7d7\x1b\\"),
+        row("\x1b]52;c;?\x07", ""),
     ]);
 }
 
 /// A color the program set is the one its query reports, and a query sent
 /// before a change in the same write reports the color before the change.
 ///
-/// Why: tmux reports the pane's own colors once a program sets them, and
-/// answers each query when it is parsed. Answering only after the whole
-/// write (as alacritty's `ColorRequest` event would) gets the second case
-/// wrong. Spec: `QueryHandler::dynamic_color_sequence`.
+/// Why: a program that sets a color and asks for it must see its own
+/// color, and an answer is the state when the query was parsed. Answering
+/// only after the whole write (as alacritty's `ColorRequest` event would)
+/// gets the second case wrong. Spec: `QueryHandler::dynamic_color_sequence`.
 #[test]
 fn color_queries_report_program_colors_at_the_time_of_asking() {
     let mut emulator = emulator(80, 24);
@@ -201,50 +164,50 @@ fn color_queries_report_program_colors_at_the_time_of_asking() {
 #[test]
 fn mode_reports_on_a_fresh_terminal() {
     check(&[
-        row("\x1b[4$p", "\x1b[4;2$y", "\x1b[4;2$y"),
-        row("\x1b[2$p", "\x1b[2;0$y", "\x1b[2;0$y"),
-        row("\x1b[12$p", "\x1b[12;0$y", "\x1b[12;0$y"),
-        // alacritty implements newline mode; tmux does not.
-        row("\x1b[20$p", "\x1b[20;2$y", "\x1b[20;0$y"),
-        row("\x1b[34$p", "\x1b[34;0$y", "\x1b[34;0$y"),
-        row("\x1b[$p", "", ""),
-        row("\x1b[?1$p", "\x1b[?1;2$y", "\x1b[?1;2$y"),
-        row("\x1b[?3$p", "\x1b[?3;4$y", "\x1b[?3;4$y"),
-        row("\x1b[?5$p", "\x1b[?5;0$y", "\x1b[?5;0$y"),
-        row("\x1b[?6$p", "\x1b[?6;2$y", "\x1b[?6;2$y"),
-        row("\x1b[?7$p", "\x1b[?7;1$y", "\x1b[?7;1$y"),
-        row("\x1b[?8$p", "\x1b[?8;0$y", "\x1b[?8;0$y"),
-        row("\x1b[?9$p", "\x1b[?9;0$y", "\x1b[?9;0$y"),
-        row("\x1b[?12$p", "\x1b[?12;2$y", "\x1b[?12;2$y"),
-        row("\x1b[?25$p", "\x1b[?25;1$y", "\x1b[?25;1$y"),
-        row("\x1b[?45$p", "\x1b[?45;0$y", "\x1b[?45;0$y"),
-        row("\x1b[?47$p", "\x1b[?47;2$y", "\x1b[?47;2$y"),
-        row("\x1b[?66$p", "\x1b[?66;0$y", "\x1b[?66;0$y"),
-        row("\x1b[?67$p", "\x1b[?67;0$y", "\x1b[?67;0$y"),
-        row("\x1b[?69$p", "\x1b[?69;0$y", "\x1b[?69;0$y"),
-        row("\x1b[?1000$p", "\x1b[?1000;2$y", "\x1b[?1000;2$y"),
-        row("\x1b[?1001$p", "\x1b[?1001;0$y", "\x1b[?1001;0$y"),
-        row("\x1b[?1002$p", "\x1b[?1002;2$y", "\x1b[?1002;2$y"),
-        row("\x1b[?1003$p", "\x1b[?1003;2$y", "\x1b[?1003;2$y"),
-        row("\x1b[?1004$p", "\x1b[?1004;2$y", "\x1b[?1004;2$y"),
-        row("\x1b[?1005$p", "\x1b[?1005;2$y", "\x1b[?1005;2$y"),
-        row("\x1b[?1006$p", "\x1b[?1006;2$y", "\x1b[?1006;2$y"),
+        row("\x1b[4$p", "\x1b[4;2$y"),
+        row("\x1b[2$p", "\x1b[2;0$y"),
+        row("\x1b[12$p", "\x1b[12;0$y"),
+        // alacritty implements newline mode.
+        row("\x1b[20$p", "\x1b[20;2$y"),
+        row("\x1b[34$p", "\x1b[34;0$y"),
+        row("\x1b[$p", ""),
+        row("\x1b[?1$p", "\x1b[?1;2$y"),
+        row("\x1b[?3$p", "\x1b[?3;4$y"),
+        row("\x1b[?5$p", "\x1b[?5;0$y"),
+        row("\x1b[?6$p", "\x1b[?6;2$y"),
+        row("\x1b[?7$p", "\x1b[?7;1$y"),
+        row("\x1b[?8$p", "\x1b[?8;0$y"),
+        row("\x1b[?9$p", "\x1b[?9;0$y"),
+        row("\x1b[?12$p", "\x1b[?12;2$y"),
+        row("\x1b[?25$p", "\x1b[?25;1$y"),
+        row("\x1b[?45$p", "\x1b[?45;0$y"),
+        row("\x1b[?47$p", "\x1b[?47;2$y"),
+        row("\x1b[?66$p", "\x1b[?66;0$y"),
+        row("\x1b[?67$p", "\x1b[?67;0$y"),
+        row("\x1b[?69$p", "\x1b[?69;0$y"),
+        row("\x1b[?1000$p", "\x1b[?1000;2$y"),
+        row("\x1b[?1001$p", "\x1b[?1001;0$y"),
+        row("\x1b[?1002$p", "\x1b[?1002;2$y"),
+        row("\x1b[?1003$p", "\x1b[?1003;2$y"),
+        row("\x1b[?1004$p", "\x1b[?1004;2$y"),
+        row("\x1b[?1005$p", "\x1b[?1005;2$y"),
+        row("\x1b[?1006$p", "\x1b[?1006;2$y"),
         // alacritty records these, but nothing in Farhelm acts on them.
-        row("\x1b[?1007$p", "\x1b[?1007;0$y", "\x1b[?1007;0$y"),
-        row("\x1b[?1015$p", "\x1b[?1015;0$y", "\x1b[?1015;0$y"),
-        row("\x1b[?1016$p", "\x1b[?1016;0$y", "\x1b[?1016;0$y"),
-        row("\x1b[?1036$p", "\x1b[?1036;0$y", "\x1b[?1036;0$y"),
-        row("\x1b[?1042$p", "\x1b[?1042;0$y", "\x1b[?1042;0$y"),
-        row("\x1b[?1047$p", "\x1b[?1047;2$y", "\x1b[?1047;2$y"),
-        row("\x1b[?1048$p", "\x1b[?1048;0$y", "\x1b[?1048;0$y"),
-        row("\x1b[?1049$p", "\x1b[?1049;2$y", "\x1b[?1049;2$y"),
-        row("\x1b[?2004$p", "\x1b[?2004;2$y", "\x1b[?2004;2$y"),
-        row("\x1b[?2026$p", "\x1b[?2026;2$y", "\x1b[?2026;2$y"),
-        row("\x1b[?2027$p", "\x1b[?2027;0$y", "\x1b[?2027;0$y"),
+        row("\x1b[?1007$p", "\x1b[?1007;0$y"),
+        row("\x1b[?1015$p", "\x1b[?1015;0$y"),
+        row("\x1b[?1016$p", "\x1b[?1016;0$y"),
+        row("\x1b[?1036$p", "\x1b[?1036;0$y"),
+        row("\x1b[?1042$p", "\x1b[?1042;0$y"),
+        row("\x1b[?1047$p", "\x1b[?1047;2$y"),
+        row("\x1b[?1048$p", "\x1b[?1048;0$y"),
+        row("\x1b[?1049$p", "\x1b[?1049;2$y"),
+        row("\x1b[?2004$p", "\x1b[?2004;2$y"),
+        row("\x1b[?2026$p", "\x1b[?2026;2$y"),
+        row("\x1b[?2027$p", "\x1b[?2027;0$y"),
         // This emulator sends no color scheme notifications.
-        row("\x1b[?2031$p", "\x1b[?2031;0$y", "\x1b[?2031;2$y"),
-        row("\x1b[?2048$p", "\x1b[?2048;0$y", "\x1b[?2048;0$y"),
-        row("\x1b[?$p", "", ""),
+        row("\x1b[?2031$p", "\x1b[?2031;0$y"),
+        row("\x1b[?2048$p", "\x1b[?2048;0$y"),
+        row("\x1b[?$p", ""),
     ]);
 }
 
@@ -254,48 +217,31 @@ fn mode_reports_on_a_fresh_terminal() {
 ///
 /// Why: a report that never says "set" for a mode the program just set
 /// would tell it the mode does not stick. For 2026, alacritty alone would say
-/// reset even inside an update; tmux says set. Spec: `src/queries.rs`,
-/// "DECRQM".
+/// reset even inside an update. Spec: `src/queries.rs`, "DECRQM".
 #[test]
 fn mode_reports_follow_mode_changes() {
     check(&[
-        row(
-            "\x1b[?2026h\x1b[?2026$p\x1b[?2026l",
-            "\x1b[?2026;1$y",
-            "\x1b[?2026;1$y",
-        ),
-        row(
-            "\x1b[?2004h\x1b[?2004$p\x1b[?2004l",
-            "\x1b[?2004;1$y",
-            "\x1b[?2004;1$y",
-        ),
-        row("\x1b[1 q\x1b[?12$p\x1b[0 q", "\x1b[?12;1$y", "\x1b[?12;1$y"),
+        row("\x1b[?2026h\x1b[?2026$p\x1b[?2026l", "\x1b[?2026;1$y"),
+        row("\x1b[?2004h\x1b[?2004$p\x1b[?2004l", "\x1b[?2004;1$y"),
+        row("\x1b[1 q\x1b[?12$p\x1b[0 q", "\x1b[?12;1$y"),
         row(
             "\x1b[?1003h\x1b[?1003$p\x1b[?1002$p\x1b[?1000$p\x1b[?1003l",
             "\x1b[?1003;1$y\x1b[?1002;2$y\x1b[?1000;2$y",
-            "\x1b[?1003;1$y\x1b[?1002;2$y\x1b[?1000;2$y",
         ),
-        row(
-            "\x1b[?1049h\x1b[?1049$p\x1b[?1049l",
-            "\x1b[?1049;1$y",
-            "\x1b[?1049;1$y",
-        ),
-        row("\x1b[4h\x1b[4$p\x1b[4l", "\x1b[4;1$y", "\x1b[4;1$y"),
-        // Modes 47 and 1047 are the alternate screen, as in tmux.
+        row("\x1b[?1049h\x1b[?1049$p\x1b[?1049l", "\x1b[?1049;1$y"),
+        row("\x1b[4h\x1b[4$p\x1b[4l", "\x1b[4;1$y"),
+        // Modes 47 and 1047 are the alternate screen.
         row(
             "\x1b[?47h\x1b[?47$p\x1b[?1047$p\x1b[?1049$p\x1b[?47l",
-            "\x1b[?47;1$y\x1b[?1047;1$y\x1b[?1049;1$y",
             "\x1b[?47;1$y\x1b[?1047;1$y\x1b[?1049;1$y",
         ),
         row(
             "\x1b[?1047h\x1b[?47$p\x1b[?1047$p\x1b[?1049$p\x1b[?1047l\x1b[?1047$p",
             "\x1b[?47;1$y\x1b[?1047;1$y\x1b[?1049;1$y\x1b[?1047;2$y",
-            "\x1b[?47;1$y\x1b[?1047;1$y\x1b[?1049;1$y\x1b[?1047;2$y",
         ),
         // Resetting any tracking mode ends mouse reporting.
         row(
             "\x1b[?1003h\x1b[?1000l\x1b[?1003$p\x1b[?1000$p",
-            "\x1b[?1003;2$y\x1b[?1000;2$y",
             "\x1b[?1003;2$y\x1b[?1000;2$y",
         ),
     ]);
@@ -344,9 +290,9 @@ fn size_queries_follow_resizes() {
 /// The kitty keyboard protocol stays off even when a program asks for it:
 /// the push is ignored, the query unanswered, and no keyboard mode recorded.
 ///
-/// Why: today's browser terminal has no kitty support, so agents send and
-/// expect legacy key encoding; turning kitty on would change how Shift+Enter
-/// and Escape reach them. Spec: `Emulator::new`, `src/modes.rs`.
+/// Why: the input encoder speaks the legacy key encoding only, which is what
+/// agents get from Farhelm's terminals; turning kitty on would change how
+/// Shift+Enter and Escape reach them. Spec: `Emulator::new`, `src/modes.rs`.
 #[test]
 fn kitty_keyboard_requests_are_ignored() {
     let mut emulator = emulator(80, 24);
@@ -374,19 +320,18 @@ fn the_open_update_flag_survives_between_feeds() {
     );
 }
 
-/// Known difference from tmux: a query inside an open update is answered
-/// when the update ends (or is flushed at its deadline), not at once.
+/// Accepted limitation: a query inside an open update is answered when the
+/// update ends (or is flushed at its deadline), not at once.
 ///
-/// Why: tmux answers at once (probed: a cursor position query after an
-/// update start, in its own write, got its answer immediately). This pins
-/// the emulator's behavior so that a change to it is deliberate; the tmux
-/// comparison on recorded agent sessions checks that agents do not wait on
-/// such a query. Spec: `src/queries.rs`, the paragraph on synchronized
-/// updates.
+/// Why: vte holds an update's bytes unparsed until it ends, so a program
+/// that waited for an answer before ending its update would wait until the
+/// deadline. This pins the behavior so that a change to it is deliberate,
+/// in either direction. Spec: `src/queries.rs`, the paragraph on
+/// synchronized updates.
 #[test]
 fn a_query_inside_an_open_update_is_answered_when_it_ends() {
     let mut emulator = emulator(80, 24);
     let asked = feed(&mut emulator, b"\x1b[?2026h\x1b[3;4H\x1b[6n");
-    assert_eq!(asked.replies, b"", "tmux answers \\x1b[3;4R here");
+    assert_eq!(asked.replies, b"", "held until the update ends");
     assert_eq!(feed(&mut emulator, b"\x1b[?2026l").replies, b"\x1b[3;4R");
 }

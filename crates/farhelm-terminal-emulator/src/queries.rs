@@ -1,46 +1,52 @@
 //! Answers to the program's terminal queries, and the handler that
 //! puts them in front of alacritty's own. The same handler is where the
-//! emulator departs from alacritty for tmux's behavior in a few non-query
-//! places (see "Beyond queries" below).
+//! emulator departs from alacritty in a few non-query places (see "Beyond
+//! queries" below).
 //!
 //! # The principle
 //!
-//! Until now a program's queries were answered by tmux, which sits between
-//! the program and the browser's xterm.js and answers most of them itself
-//! (the rest reach xterm.js). Programs have been tested against those
-//! answers. So for each query this emulator answers what tmux 3.7c answers,
-//! wherever that answer is true of this emulator, and deviates only where
-//! tmux's answer would claim something false about it. The table below was
-//! checked against the pinned tmux 3.7c running Farhelm's server
-//! configuration, with and without a control-mode client attached (the
-//! answers were the same).
+//! Programs decide what a terminal can do from its answers, so every answer
+//! here is a promise about this emulator. An answer says what is true of it,
+//! or, where the emulator cannot know (a cell's size in pixels, `CSI 14 t`),
+//! gives an assumption the table names as one. Where the true answer would
+//! need a feature the emulator lacks, it declines: no answer rather than a
+//! claim it cannot keep.
 //!
-//! | Query | Answer | Versus tmux 3.7c |
+//! The table started as the answers old terminals gave (tmux's, and those of
+//! the browser's xterm.js for the color queries tmux passed through to it)
+//! and keeps them wherever they are true here, because the agents people run
+//! were tested against those. The rows that depart say why: among them DECID,
+//! which old terminals ignored and vte cannot tell from DA1, and color
+//! answers ending the way their query did, where xterm.js always ended them
+//! with ST. The table is the contract; `tests/queries.rs` pins every row
+//! through the public API.
+//!
+//! | Query | Answer | Why |
 //! | --- | --- | --- |
-//! | DA1 `CSI c`, `CSI 0 c` | `CSI ? 1 ; 2 c` | same (alacritty alone says `CSI ? 6 c`) |
-//! | DECID `ESC Z` | `CSI ? 1 ; 2 c` | tmux ignores it; vte reports it as DA1, indistinguishably |
-//! | DA2 `CSI > c` | `CSI > 0 ; 2600 ; 1 c` (alacritty's own) | tmux says `CSI > 84 ; 0 ; 0 c`, which claims to be tmux |
-//! | XTVERSION `CSI > q`, `CSI > 0 q` | `DCS > \| Farhelm <version> ST` | tmux says `tmux 3.7c` |
-//! | DSR 5, DSR 6 (cursor position) | `CSI 0 n`, `CSI row ; col R` | same, including past the last column (below) |
-//! | DECRQM `CSI Ps $ p` | see below | same except where noted below |
-//! | OSC 10, 11, 12 `?` | the theme's color, or the program's own if it set one | 10 and 11 the same; tmux leaves 12 to xterm.js (below) |
-//! | OSC 4 `; n ; ?` | the theme's palette entry, or the program's own | tmux leaves it to xterm.js (below) |
-//! | OSC 10 `; ? ; ?` (two at once) | both colors | tmux answers neither; xterm.js answers both |
-//! | `CSI 14 t` (text area in pixels) | `CSI 4 ; rows*32 ; cols*16 t` | same: tmux's default cell size, since no client reports one |
-//! | `CSI 18 t` (text area in cells) | `CSI 8 ; rows ; cols t` | same |
-//! | `CSI 15 t`, `16 t`, `19 t` | none | tmux answers; vte does not parse them |
-//! | `CSI ? 996 n` (color scheme) | none | tmux says dark (`CSI ? 997 ; 1 n`); vte does not parse it |
-//! | DECRQSS `DCS $ q ... ST` | none | tmux answers; vte ignores every DCS |
-//! | kitty keyboard `CSI ? u` | none | same: kitty keyboard mode stays off |
-//! | OSC 52 read `; c ; ?` | none | same: clipboard reads are never answered |
-//! | `CSI ? 4 m`, `CSI ? 6 n`, DA3, ENQ | none | same |
+//! | DA1 `CSI c`, `CSI 0 c` | `CSI ? 1 ; 2 c` | a VT100 with advanced video; alacritty alone says VT102 (`CSI ? 6 c`) |
+//! | DECID `ESC Z` | `CSI ? 1 ; 2 c` | vte reports it as DA1, indistinguishably |
+//! | DA2 `CSI > c` | `CSI > 0 ; 2600 ; 1 c` | alacritty's own, which claims no other terminal (below) |
+//! | XTVERSION `CSI > q`, `CSI > 0 q` | `DCS > \| Farhelm <version> ST` | the terminal the user sees (below) |
+//! | DSR 5, DSR 6 (cursor position) | `CSI 0 n`, `CSI row ; col R` | including past the last column (below) |
+//! | DECRQM `CSI Ps $ p` | see below | the modes as this emulator tracks them |
+//! | OSC 10, 11, 12 `?` | the theme's color, or the program's own if it set one | what the user sees |
+//! | OSC 4 `; n ; ?` | the theme's palette entry, or the program's own | what the user sees |
+//! | OSC 10 `; ? ; ?` (two at once) | both colors | as xterm allows |
+//! | `CSI 14 t` (text area in pixels) | `CSI 4 ; rows*32 ; cols*16 t` | an assumed cell size, since nobody reports one (below) |
+//! | `CSI 18 t` (text area in cells) | `CSI 8 ; rows ; cols t` | the terminal's size |
+//! | `CSI 15 t`, `16 t`, `19 t` | none | vte does not parse them |
+//! | `CSI ? 996 n` (color scheme) | none | vte does not parse it, and no scheme notifications are sent |
+//! | DECRQSS `DCS $ q ... ST` | none | vte ignores every DCS |
+//! | kitty keyboard `CSI ? u` | none | kitty keyboard mode stays off |
+//! | OSC 52 read `; c ; ?` | none | clipboard reads are never answered |
+//! | `CSI ? 4 m`, `CSI ? 6 n`, DA3, ENQ | none | nothing to report |
 //!
-//! DA2: claiming to be tmux would be false, and it is risky, not just
-//! inaccurate. A program that believes it runs in tmux may wrap sequences in
-//! tmux's passthrough envelope (`DCS tmux ; ... ST`), which this emulator
-//! drops like every DCS: a clipboard write sent that way would be lost.
-//! alacritty's own answer (terminal type 0, version 2600 for 0.26.0) is what
-//! this emulator is.
+//! DA2: alacritty's answer (terminal type 0, version 2600 for 0.26.0) is what
+//! this emulator is. Claiming another terminal would be false, and claiming
+//! tmux in particular is risky, not just inaccurate: a program that believes
+//! it runs in tmux may wrap sequences in tmux's passthrough envelope
+//! (`DCS tmux ; ... ST`), which this emulator drops like every DCS, so a
+//! clipboard write sent that way would be lost.
 //!
 //! XTVERSION raises the same question, and here not answering is not an
 //! option: Claude Code asks it first, and when it gets no answer it asks
@@ -49,101 +55,99 @@
 //! Code 2.1.316's startup probe; vte parses the query only with Farhelm's
 //! patch, `vendor/README.md`). The answer names Farhelm, the terminal the
 //! user actually sees, with the Farhelm version this was built as
-//! ([`crate::VERSION_REPORT`]). It names neither tmux (as above) nor
-//! alacritty, whose own window has features this emulator does not, such as
-//! the kitty keyboard protocol. An unfamiliar name is enough for Claude Code:
-//! with any answer, unless `TERM_PROGRAM` is Apple's Terminal, it goes on to
-//! ask DECRQM 2026, and takes a report of set or reset (which this emulator
-//! gives) as support for synchronized output; it compares the name itself
-//! only with iTerm2, tmux, ghostty, kitty and xterm.js, for other features.
+//! ([`crate::VERSION_REPORT`]). It does not name alacritty, whose own window
+//! has features this emulator does not, such as the kitty keyboard protocol.
+//! An unfamiliar name is enough for Claude Code: with any answer, unless
+//! `TERM_PROGRAM` is Apple's Terminal, it goes on to ask DECRQM 2026, and
+//! takes a report of set or reset (which this emulator gives) as support for
+//! synchronized output; it compares the name itself only with iTerm2, tmux,
+//! ghostty, kitty and xterm.js, for other features.
 //!
 //! A cursor position report while a wrap is pending (the program has just
 //! written the last column with autowrap on, and the next character goes to
-//! the next line) names the column after the last, as tmux does, where
-//! alacritty names the last column. Whether a wrap is pending depends on
-//! autowrap when the column was written, not when the report is asked for,
-//! as in tmux. Programs reading the position were tested against tmux's
-//! answer, which also tells them apart the two states the cursor can be in
-//! at that column.
+//! the next line) names the column after the last, where alacritty names the
+//! last column. That tells apart the two states the cursor can be in at that
+//! column, and it is the answer programs have always had from Farhelm's
+//! terminals. Whether a wrap is pending depends on autowrap when the column
+//! was written, not when the report is asked for.
 //!
-//! The color queries tmux does not answer pass through to xterm.js today,
-//! which answers them from the same theme but always ends its answer with ST.
-//! This emulator ends every color answer the way the query ended (BEL or ST),
-//! as tmux does for the ones it answers.
+//! Every color answer is in xterm's format (16 bits per channel) and ends the
+//! way the query ended, with BEL or ST, so a program that matches its answer
+//! by the terminator it sent finds it. (Old terminals ended the answers to
+//! OSC 4 and OSC 12, which xterm.js gave, with ST whatever the query used.)
+//!
+//! `CSI 14 t` assumes a cell of 16 by 32 pixels ([`ASSUMED_CELL_PIXELS`]).
+//! The emulator does not know the viewer's real cell size (the grid client
+//! does not report one, and it changes with the viewer's text size and
+//! screen), so the answer can only be an assumption, and this one is what
+//! Farhelm's terminals have always assumed.
 //!
 //! A query inside an open synchronized update is answered when the update
-//! ends: at its end marker, at its 150 ms deadline, or when it overflows.
-//! tmux answers at once, because it keeps parsing during an update and holds
-//! back only drawing (probed: a cursor position query after an update start
-//! is answered immediately). vte instead holds the update's bytes unparsed,
-//! as alacritty does, so a program that waits for an answer before ending
-//! its update waits until the deadline. This is accepted rather than worked
-//! around: matching tmux would mean parsing inside the update, a change to
-//! vte's buffering. No recorded agent session depends on it: the supervisor's
-//! replay of recorded sessions (`emulator_parity`'s `recordings`) feeds each
-//! recording to an emulator one byte at a time and fails if an update's end
-//! releases any answer, and for the one Claude Code 2.1.316 and one Codex
-//! 0.166.0 session recorded, none did.
+//! ends: at its end marker, at its 150 ms deadline, or when it overflows. vte
+//! holds the update's bytes unparsed, as alacritty does, so a program that
+//! waits for an answer before ending its update waits until the deadline.
+//! This is accepted rather than worked around, since answering at once would
+//! mean parsing inside the update, a change to vte's buffering. When it was
+//! decided, a byte-at-a-time replay of one recorded Claude Code 2.1.316
+//! session and one Codex 0.166.0 session showed no update's end releasing an
+//! answer, so neither recorded session waited on one.
 //!
 //! The answers vte cannot see (`CSI 15/16/19 t`, `CSI ? 996 n`, DECRQSS)
 //! would each take a vte patch to route the query to a handler. They are left
-//! unanswered, a known difference from tmux, because no agent recorded under
-//! tmux sent them (Claude Code 2.1.316 and Codex 0.166.0, one session each).
+//! unanswered because neither recorded agent session above sent them.
 //!
 //! # DECRQM
 //!
 //! A mode report says set (1), reset (2), permanently reset (4) or not
 //! recognized (0). This emulator reports the modes alacritty implements as
-//! alacritty tracks them, and deviates from alacritty where tmux's answer is
-//! the true one here:
+//! alacritty tracks them, and departs from alacritty's own reports where they
+//! would be false here:
 //!
-//! - 2026 (synchronized output): set while an update is open, as tmux does.
-//!   alacritty always says reset, because its handler never sees an open
-//!   update: vte runs the update itself.
-//! - 3 (132 columns): permanently reset, as tmux does. This emulator never
-//!   changes its width; alacritty says not recognized.
+//! - 2026 (synchronized output): set while an update is open. alacritty
+//!   always says reset, because its handler never sees an open update: vte
+//!   runs the update itself.
+//! - 3 (132 columns): permanently reset. This emulator never changes its
+//!   width; alacritty says not recognized.
 //! - 12 (cursor blink): from the cursor style, as alacritty does, but without
 //!   alacritty's side effect of turning the default style into an explicit one.
-//! - 1007 (alternate scroll) and 1042 (urgency hints): not recognized, as tmux
-//!   says. alacritty records them, but nothing in Farhelm acts on them: they
-//!   are features of alacritty's own window. The input encoder may claim 1007
+//! - 1007 (alternate scroll) and 1042 (urgency hints): not recognized.
+//!   alacritty records them, but nothing in Farhelm acts on them: they are
+//!   features of alacritty's own window. The input encoder may claim 1007
 //!   once it scrolls that way.
-//! - 47 and 1047 (alternate screen variants): the alternate screen's state,
-//!   as tmux reports them. alacritty does not implement them; this handler
-//!   does (below).
-//! - 2031 (color scheme notifications): not recognized. tmux reports it
-//!   supported; this emulator never sends the notifications.
-//! - ANSI mode 20 (newline): alacritty's report. tmux does not implement it and
-//!   says not recognized, which would be false here.
-//! - Mode 0, private or not: no answer, as tmux; alacritty answers it as not
-//!   recognized.
-//!
-//! Every other mode, and every mode tmux and alacritty both implement, is
-//! answered the same way by both.
+//! - 47 and 1047 (alternate screen variants): the alternate screen's state.
+//!   alacritty does not implement them; this handler does (below).
+//! - 2031 (color scheme notifications): not recognized, since this emulator
+//!   never sends the notifications.
+//! - ANSI mode 20 (newline): alacritty's report, since it implements the mode.
+//! - Mode 0, private or not: no answer, since it names no mode (alacritty
+//!   answers it as not recognized).
 //!
 //! # Beyond queries
 //!
-//! Three changes depart from alacritty, each checked against tmux 3.7c:
+//! Three changes depart from alacritty:
 //!
 //! - Resetting any mouse tracking mode (1000, 1001, 1002 or 1003) turns mouse
 //!   reporting off, whichever one is on. alacritty clears only the named
 //!   mode, so a program that turned on 1003 and then reset 1000 would keep
 //!   getting mouse reports, and after it exits its shell would receive them
-//!   as typed garbage. The browser's xterm.js, today, also turns reporting
-//!   off on a reset of any of 1000, 1002 and 1003.
+//!   as typed garbage.
 //! - Modes 47 and 1047 switch to and from the alternate screen, which
-//!   alacritty ignores. Like tmux, entering clears the alternate screen and
-//!   keeps the cursor where it is; leaving keeps the cursor where the program
-//!   left it on the alternate screen and leaves the saved cursor (DECSC)
-//!   alone, unlike 1049, which saves and restores the cursor. Mixing these
-//!   with 1049 (entering with one and leaving with the other) can leave the
-//!   cursor elsewhere than tmux would, since alacritty keeps a cursor per
-//!   screen where tmux keeps one. `vendor/README.md` ("Not a patch: modes
-//!   47 and 1047 built on alacritty's screen switch") records the upstream
-//!   behavior this works around, for an upstream issue.
+//!   alacritty ignores; handling them here keeps a program that uses them
+//!   from drawing over the shell's screen. Entering clears the alternate
+//!   screen and keeps the cursor where it is; leaving keeps the cursor where
+//!   the program left it on the alternate screen and leaves the saved cursor
+//!   (DECSC) alone, unlike 1049, which saves and restores the cursor. Mixed
+//!   with 1049, the exit decides: entering with 47 or 1047 and leaving with
+//!   1049 puts the cursor back where it was on the primary screen, since
+//!   alacritty keeps a cursor per screen and its 1049 exit only swaps them;
+//!   entering with 1049 and leaving with 47 or 1047 keeps the cursor where
+//!   the program left it on the alternate screen, like any 47 or 1047 exit.
+//!   `vendor/README.md` ("Not a patch: modes 47 and 1047 built on alacritty's
+//!   screen switch") records the upstream behavior this works around, for an
+//!   upstream issue.
 //! - A full reset (RIS, `ESC c`) that clears a title reports the change
-//!   (`Notice::Title`), which alacritty does silently. tmux keeps the title
-//!   across RIS; this emulator clears it, as alacritty does.
+//!   (`Notice::Title`), which alacritty does silently, so that whoever shows
+//!   the title does not keep showing the cleared one.
 
 use alacritty_terminal::Term;
 use alacritty_terminal::grid::Dimensions;
@@ -158,14 +162,19 @@ use alacritty_terminal::vte::ansi::{
 use crate::effects::{Effect, Listener};
 use crate::theme;
 
-/// Primary device attributes: a VT100 with advanced video (`1 ; 2`), what
-/// tmux (built without sixel) and xterm.js both answer.
+/// Primary device attributes: a VT100 with advanced video (`1 ; 2`). True
+/// of this emulator, it claims nothing more (sixel graphics, say), and it is
+/// what Farhelm's terminals have always answered.
 pub(crate) const PRIMARY_DEVICE_ATTRIBUTES: &str = "\x1b[?1;2c";
 
-/// The cell size, in pixels, that `CSI 14 t` assumes: tmux's defaults
-/// (`DEFAULT_XPIXEL` and `DEFAULT_YPIXEL`), which is what tmux answers with
-/// because Farhelm's control-mode client never reports a pixel size. The
-/// emulator does not know the viewer's real cell size either.
+/// The cell size, `(width, height)` in pixels, that `CSI 14 t` assumes.
+///
+/// The emulator cannot know the viewer's real cell size: the grid client
+/// does not report one, and it changes with the viewer's text size and
+/// screen. 16 by 32 is the size Farhelm's terminals have always assumed
+/// (old terminals answer the same from tmux's defaults), so a program that
+/// sizes images or layout from the answer sees the same terminal in either
+/// kind.
 pub(crate) const ASSUMED_CELL_PIXELS: (usize, usize) = (16, 32);
 
 /// The parser's view of the terminal for the length of one call into vte:
@@ -215,8 +224,8 @@ impl QueryHandler<'_> {
         self.term.grid_mut().cursor = cursor;
     }
 
-    /// Turn every mouse tracking mode off, as resetting any one of them does
-    /// in tmux and in the browser's xterm.js.
+    /// Turn every mouse tracking mode off, which resetting any one of them
+    /// does here (module docs, "Beyond queries").
     fn end_mouse_tracking(&mut self) {
         for mode in [
             NamedPrivateMode::ReportMouseClicks,
@@ -368,8 +377,8 @@ impl Handler for QueryHandler<'_> {
         fn set_scp(&mut self, char_path: ScpCharPath, update_mode: ScpUpdateMode);
     }
 
-    /// DA1 (and DECID, which vte reports the same way) as tmux answers it;
-    /// DA2 as alacritty does; anything else unanswered, as both do.
+    /// DA1 (and DECID, which vte reports the same way) from the table; DA2
+    /// as alacritty answers it; anything else (DA3) unanswered.
     fn identify_terminal(&mut self, intermediate: Option<char>) {
         match intermediate {
             None => self.reply(PRIMARY_DEVICE_ATTRIBUTES.to_owned()),
@@ -380,10 +389,10 @@ impl Handler for QueryHandler<'_> {
     /// DSR, with the cursor position past the last column while a wrap is
     /// pending (see the module docs).
     fn device_status(&mut self, arg: usize) {
-        // The vendored alacritty's wrap flag stands for tmux's cursor one
-        // past the last column: `Term::input` raises it at the last column
-        // only with autowrap on, where tmux moves past the column
-        // (vendor/README.md).
+        // The vendored alacritty's wrap flag is the pending wrap the report
+        // names: `Term::input` raises it at the last column only with
+        // autowrap on (vendor/README.md), so it already records autowrap as
+        // it was when the column was written.
         let cursor = &self.term.grid().cursor;
         if arg == 6 && cursor.input_needs_wrap {
             let (line, column) = (cursor.point.line.0 + 1, cursor.point.column.0 + 2);
@@ -422,7 +431,7 @@ impl Handler for QueryHandler<'_> {
         <Term<Listener> as Handler>::set_private_mode(self.term, mode);
     }
 
-    /// The counterpart of [`Self::set_private_mode`], plus tmux's rule that
+    /// The counterpart of [`Self::set_private_mode`], plus the rule that
     /// resetting any mouse tracking mode ends mouse reporting. vte calls this
     /// for 2026 both on the program's own end marker and when it ends an
     /// update itself (timeout, overflow).
@@ -438,8 +447,9 @@ impl Handler for QueryHandler<'_> {
             PrivateMode::Named(named) if TRACKING.contains(&named) => {
                 return self.end_mouse_tracking();
             }
-            // Highlight tracking, which neither alacritty nor tmux
-            // implements; tmux still ends tracking when it is reset.
+            // Highlight tracking, which alacritty does not implement. It is
+            // still a tracking mode, so its reset ends tracking like the
+            // others'.
             PrivateMode::Unknown(1001) => return self.end_mouse_tracking(),
             _ => {}
         }
@@ -457,8 +467,8 @@ impl Handler for QueryHandler<'_> {
     }
 
     /// Answer a color query from the program's own color if it set one, else
-    /// from Farhelm's theme, in the same format tmux and alacritty use
-    /// (16 bits per channel, the terminator the query used).
+    /// from Farhelm's theme, in xterm's format (16 bits per channel, the
+    /// terminator the query used).
     ///
     /// Answered here rather than through alacritty's `ColorRequest` event
     /// because the event is handled after the whole feed: a program that asks
@@ -473,7 +483,7 @@ impl Handler for QueryHandler<'_> {
         ));
     }
 
-    /// `CSI 14 t`, with tmux's assumed cell size ([`ASSUMED_CELL_PIXELS`]).
+    /// `CSI 14 t`, with the assumed cell size ([`ASSUMED_CELL_PIXELS`]).
     fn text_area_size_pixels(&mut self) {
         let (cell_width, cell_height) = ASSUMED_CELL_PIXELS;
         let height = self.term.screen_lines() * cell_height;

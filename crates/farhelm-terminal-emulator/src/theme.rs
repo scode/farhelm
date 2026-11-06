@@ -10,7 +10,8 @@
 //!
 //! The theme names only the 16 ANSI colors. Entries 16 to 255 are the
 //! standard xterm 256-color extension (a 6x6x6 color cube, then a 24-step gray
-//! ramp), which is what xterm.js, the browser terminal, derives for them too.
+//! ramp), which the browser's grid terminal derives for them too
+//! (`crates/farhelm-ui/assets/grid-style.js`).
 
 use alacritty_terminal::vte::ansi::{NamedColor, Rgb};
 
@@ -138,9 +139,9 @@ mod tests {
     /// The extended palette follows the xterm formula at its corners and
     /// steps.
     ///
-    /// Why: it is computed rather than listed, and xterm.js computes the
-    /// same values for the browser; a slip in the arithmetic would go
-    /// unnoticed until a program asked.
+    /// Why: it is computed rather than listed, and the browser's grid
+    /// terminal computes the same values to draw them; a slip in the
+    /// arithmetic would go unnoticed until a program asked.
     #[test]
     fn extended_palette_follows_the_xterm_formula() {
         assert_eq!(color(16), Some(rgb(0, 0, 0)));

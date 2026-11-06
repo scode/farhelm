@@ -359,7 +359,7 @@ const SCRIPTS: &[Script] = &[
         columns: 10,
         lines: 3,
         // The wrap flag raised with autowrap on, which is then turned off:
-        // still a wrap pending, as tmux has it.
+        // still a wrap pending, since autowrap was on when it was raised.
         steps: &[Feed("first\x1b[2;1H0123456789\x1b[?7l")],
         take: Take::Full,
     },

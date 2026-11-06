@@ -2662,38 +2662,44 @@ For a terminal in a terminal host, the supervisor's emulator is the one place it
 `crates/farhelm-terminal-emulator/` is `alacritty_terminal` 0.26.0 and `vte` 0.15.0, vendored with Farhelm's patches
 (`vendor/README.md`: the caps on hostile output, the history counters a grid stream numbers lines by, the parser's
 ground-state check a snapshot needs, and fixes), plus Farhelm's policy around them. It answers the program's terminal
-queries, tracks the modes that input encoding needs, gives status detection the screen text and title it would read from
-tmux (shaped like tmux's capture, so the status readers run unchanged on both kinds), serves the grid stream, and is
-snapshotted ("Terminal snapshots", below).
+queries, tracks the modes that input encoding needs, gives status detection its screen text and title, serves the grid
+stream, and is snapshotted ("Terminal snapshots", below). The screen text is Farhelm's own format, defined in the
+crate's `screen` module (the visible or alternate screen, one line per row, trailing blanks trimmed, tabs over blank
+cells kept as tabs). It has the shape of tmux's `capture-pane -p` on purpose, so that one set of status reader rules
+reads both kinds of terminal.
 
-Its query answers follow one rule, recorded with the table in the crate's `queries` module: answer what tmux 3.7c
-answers wherever that is true of this emulator, since programs were tested against those answers, and depart only where
-tmux's answer would claim something false. So device attributes say `CSI ? 1 ; 2 c` as tmux does (alacritty alone says a
-VT102); the secondary attributes are alacritty's own, never tmux's, since a program that believes it runs in tmux may
-wrap its output in tmux's passthrough envelope, which this emulator drops; XTVERSION names Farhelm and its version,
-because Claude Code asks nothing further, synchronized output included, without an answer; and color queries are
-answered from Farhelm's terminal theme (Ghostty's palette, as the browser's) or the colors the program set. Known
-differences, accepted: a few queries `vte` does not parse go unanswered, and a query inside an open synchronized update
-is answered when the update ends rather than at once. Keyboard input keeps today's legacy xterm encoding: the kitty
-keyboard protocol stays off (turning it on would change the Shift+Enter and Escape handling SPEC.md promises) and its
-query unanswered, and OSC 52 writes are honored while reads are never answered. The encoding itself is the supervisor's
-(`grid_input.rs`, "The grid client"). `vte` holds a synchronized update's bytes until the update ends, and its 150 ms
-safety deadline is not self-driving: the runtime wakes at the deadline on its own clock and draws the update, and also
-draws one left open when the child exits, when a replay ends and before a resize; `vte` itself ends one whose bytes
-reach its 2 MiB buffer. Each of those can draw a frame the program had not finished. The safety deadline, the buffer
-limit, a resize, the child's exit and the end of a replay are examples of the deliberate exceptions to frames never
-being drawn half done; a recovering replay also draws an open update where it crosses from output an earlier supervisor
-was sent to output none was, and where it crosses a gap, though it carries on to the same final state. The emulator's
-parity with tmux 3.7c (screen text, cursor, title and answers over generated and recorded output, `emulator_parity` in
-the supervisor) is tested against the pinned tmux, with the known differences pinned on both sides.
+Its query answers are Farhelm's own table, recorded in the crate's `queries` module and pinned by its tests: an answer
+says what is true of this emulator or names the assumption it makes, and the emulator declines (answers nothing) rather
+than claim a feature it lacks. The table started as the answers old terminals gave (tmux's, and xterm.js's for the color
+queries tmux passed through), which the agents it runs were tested against, and keeps them wherever they are true here;
+the rows that depart say why (DECID is answered as DA1, which vte cannot tell it from, and color answers end the way
+their query did). So device attributes say `CSI ? 1 ; 2 c` (alacritty alone says a VT102); the secondary attributes are
+alacritty's own and claim no other terminal, since a program that believes it runs in tmux may wrap its output in tmux's
+passthrough envelope, which this emulator drops; `CSI 14 t` assumes a 16 by 32 pixel cell, since nobody reports the
+viewer's; XTVERSION names Farhelm and its version, because Claude Code asks nothing further, synchronized output
+included, without an answer; and color queries are answered from Farhelm's terminal theme (Ghostty's palette, as the
+browser's) or the colors the program set. Known limitations, accepted: a few queries `vte` does not parse go unanswered,
+and a query inside an open synchronized update is answered when the update ends rather than at once. Keyboard input
+keeps today's legacy xterm encoding: the kitty keyboard protocol stays off (turning it on would change the Shift+Enter
+and Escape handling SPEC.md promises) and its query unanswered, and OSC 52 writes are honored while reads are never
+answered. The encoding itself is the supervisor's (`grid_input.rs`, "The grid client"). `vte` holds a synchronized
+update's bytes until the update ends, and its 150 ms safety deadline is not self-driving: the runtime wakes at the
+deadline on its own clock and draws the update, and also draws one left open when the child exits, when a replay ends
+and before a resize; `vte` itself ends one whose bytes reach its 2 MiB buffer. Each of those can draw a frame the
+program had not finished. The safety deadline, the buffer limit, a resize, the child's exit and the end of a replay are
+examples of the deliberate exceptions to frames never being drawn half done; a recovering replay also draws an open
+update where it crosses from output an earlier supervisor was sent to output none was, and where it crosses a gap,
+though it carries on to the same final state. The emulator's parity with tmux 3.7c (screen text, cursor, title and
+answers over generated and recorded output, `emulator_parity` in the supervisor) is tested against the pinned tmux, with
+the known differences pinned on both sides.
 
 Emoji and text variation selectors follow Ghostty's default Unicode width rules: only eligible bases change width,
-selectors after a combining mark are ignored, and text presentation can narrow a wide character. This deliberately
-differs from tmux's widening of any character followed by U+FE0F and its lack of narrowing. Two exceptions keep the
-existing saved state sufficient: with autowrap off at the right edge, a plain space counts as empty when choosing the
-selector's target, where Ghostty distinguishes a printed space from an erased cell; and a one-column terminal keeps the
-existing drop of too-wide input before processing a pending wrap. Both are pinned against the source-derived behavior of
-Ghostty commit `c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed`
+selectors after a combining mark are ignored, and text presentation can narrow a wide character. (Old terminals differ
+here: tmux widens any character followed by U+FE0F and never narrows.) Two exceptions keep the existing saved state
+sufficient: with autowrap off at the right edge, a plain space counts as empty when choosing the selector's target,
+where Ghostty distinguishes a printed space from an erased cell; and a one-column terminal keeps the existing drop of
+too-wide input before processing a pending wrap. Both are pinned against the source-derived behavior of Ghostty commit
+`c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed`
 ([target selection, lines 1939–1967](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L1939-L1967),
 [one-column input, lines 2189–2262](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L2189-L2262)).
 
@@ -4191,23 +4197,24 @@ refusal. No global geometry cache or new asset file is introduced.
   existing dead-before-open refusal with its last output. This keeps tab startup inside containment and preserves a tab
   shell's own startup-file cd, while agent startup restores the session folder after those files have run.
 - Status heuristics: periodic sampling of each live agent pane's visible grid (for an agent in a terminal host, its
-  emulator's screen, shaped like tmux's capture so that the same readers apply), read by one screen reader per agent
-  kind (`agent_kind::screen_reader`). Sampling must never sit on the attach/input path — SPEC.md forbids status from
-  gating interaction. The supervisor's own ticker takes the samples and stores one reading per successful capture;
-  replies only map the stored reading, and classification sits BELOW the recorded-error and dead-pane rules in the
-  existing precedence, so a reading only chooses among the live statuses of a terminal its tmux pane or terminal host
-  reports alive. The generic reader is observed output alone, counted in a session's OWN samples rather than in elapsed
-  time: three consecutive samples showing an unchanged screen reads idle, anything else live reads running, and it never
-  reads waiting (a blocked agent and a finished one are equally quiet). Counting samples rather than seconds is
-  load-bearing — the sampler works through live panes on a budgeted round robin, so a session's real sampling period
-  grows with the fleet, and any wall-clock window would eventually report a continuously-working agent as idle because
-  the HOST was busy. A new launch reads running before its first comparison. A reloaded live pane instead reports
-  provisional `unknown` until a changed screen, a reading from recognized content, or three quiet comparisons provide
-  fresh status evidence (a recognized idle prompt therefore ends the gap on its first sample); a recognized waiting
-  prompt is reported at once. Dead-pane and recorded-error outcomes bypass that provisional state. The helm retains the
-  prior status from its per-host cache for an `unknown` reply, if it has one, and replaces the rest of the row as usual.
-  Its identity-less in-memory list follows the same rule within a connection. Disconnect clears those rows by the
-  existing identity-less host rule, so there is no previous status to retain after its supervisor restarts.
+  emulator's screen text, in Farhelm's screen-text format, which an old terminal's tmux capture shares, so one set of
+  readers serves both), read by one screen reader per agent kind (`agent_kind::screen_reader`). Sampling must never sit
+  on the attach/input path — SPEC.md forbids status from gating interaction. The supervisor's own ticker takes the
+  samples and stores one reading per successful capture; replies only map the stored reading, and classification sits
+  BELOW the recorded-error and dead-pane rules in the existing precedence, so a reading only chooses among the live
+  statuses of a terminal its tmux pane or terminal host reports alive. The generic reader is observed output alone,
+  counted in a session's OWN samples rather than in elapsed time: three consecutive samples showing an unchanged screen
+  reads idle, anything else live reads running, and it never reads waiting (a blocked agent and a finished one are
+  equally quiet). Counting samples rather than seconds is load-bearing — the sampler works through live panes on a
+  budgeted round robin, so a session's real sampling period grows with the fleet, and any wall-clock window would
+  eventually report a continuously-working agent as idle because the HOST was busy. A new launch reads running before
+  its first comparison. A reloaded live pane instead reports provisional `unknown` until a changed screen, a reading
+  from recognized content, or three quiet comparisons provide fresh status evidence (a recognized idle prompt therefore
+  ends the gap on its first sample); a recognized waiting prompt is reported at once. Dead-pane and recorded-error
+  outcomes bypass that provisional state. The helm retains the prior status from its per-host cache for an `unknown`
+  reply, if it has one, and replaces the rest of the row as usual. Its identity-less in-memory list follows the same
+  rule within a connection. Disconnect clears those rows by the existing identity-less host rule, so there is no
+  previous status to retain after its supervisor restarts.
 
   Claude Code and Codex have dedicated readers that answer from recognized content ("anchored" readings) rather than
   change counting, because both redraw parts of their screen while idle (Claude's `/clear` hint, Codex's recap block and
