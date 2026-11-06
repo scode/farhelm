@@ -1455,21 +1455,6 @@ fn size_of(emulator: &Emulator) -> Size {
     }
 }
 
-/// The last `max_bytes` of `screen_text` with trailing whitespace trimmed,
-/// as `Emulator::screen_tail` cuts it (and must keep cutting it: a view
-/// and the emulator give the same tail).
-fn screen_tail_of(screen_text: &str, max_bytes: usize) -> String {
-    let trimmed = screen_text.trim_end();
-    if trimmed.len() <= max_bytes {
-        return trimmed.to_owned();
-    }
-    let mut start = trimmed.len() - max_bytes;
-    while !trimmed.is_char_boundary(start) {
-        start += 1;
-    }
-    trimmed[start..].to_owned()
-}
-
 impl PartialEq for HostTerminal {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.inner, &other.inner)
@@ -2216,12 +2201,15 @@ impl HostTerminal {
         self.inner.scrollback_lines
     }
 
-    /// The last `max_bytes` of the visible screen as plain text, shaped
-    /// like tmux's capture (`Emulator::screen_tail`): what status detection
-    /// reads.
+    /// The last `max_bytes` of the visible screen in Farhelm's screen-text
+    /// format (`Emulator::screen_tail`): what status detection reads. A
+    /// published view and the emulator itself give the same tail, since both
+    /// are cut by `trim_screen_tail`.
     pub fn screen_tail(&self, max_bytes: usize) -> String {
         self.view(
-            |view| screen_tail_of(&view.screen_text, max_bytes),
+            |view| {
+                farhelm_terminal_emulator::trim_screen_tail(&view.screen_text, max_bytes).to_owned()
+            },
             |emulator| emulator.screen_tail(max_bytes),
         )
     }

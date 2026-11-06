@@ -35,10 +35,12 @@ fn captured_permission_footers_match_and_ignore_transcript_mode_words() {
                 };
                 let grid = std::fs::read_to_string(&path).expect("captured grid");
                 // The sampler reads the trimmed 4096-byte tail, not the raw grid.
-                let screen =
-                    crate::tmux::retain_pane_tail(&grid, super::screen_reader::SAMPLE_TAIL_BYTES);
+                let screen = farhelm_terminal_emulator::trim_screen_tail(
+                    &grid,
+                    super::screen_reader::SAMPLE_TAIL_BYTES,
+                );
                 assert!(
-                    !super::screen_fixtures::contains_email(&screen),
+                    !super::screen_fixtures::contains_email(screen),
                     "{}",
                     path.display()
                 );
@@ -46,7 +48,7 @@ fn captured_permission_footers_match_and_ignore_transcript_mode_words() {
                     assert!(!screen.contains(prefix), "{}: {prefix}", path.display());
                 }
                 assert_eq!(
-                    status_line_yolo(harness, &screen),
+                    status_line_yolo(harness, screen),
                     expected,
                     "{}",
                     path.display()

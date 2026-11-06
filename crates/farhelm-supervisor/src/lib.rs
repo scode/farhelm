@@ -49,8 +49,6 @@ mod checkout_trash;
 pub mod container;
 /// The SQLite plumbing the supervisor's and the helm's stores share.
 pub mod db;
-#[cfg(test)]
-mod emulator_parity;
 pub mod files;
 /// Turning a grid viewer's input messages into the bytes a program in a
 /// terminal host reads, from the program's modes.

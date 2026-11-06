@@ -1198,10 +1198,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   maintained follow-up asks for three disconnects, but a healthy test host reconnects after all three. A test following
   that recipe can fail before reaching the intended unavailable state.
 
-- [`explicit-hostname-title-normalized-as-unset.md`](explicit-hostname-title-normalized-as-unset.md) — Emulator parity
-  validation can fail on machines named codex or workspace even when tmux and the emulator show the same explicitly set
-  title.
-
 - [`malformed-pane-fixtures-mask-intended-validators.md`](malformed-pane-fixtures-mask-intended-validators.md) — The
   malformed-pane regression can pass even if earlier validation regresses, reducing confidence in the pane-fact parser.
 

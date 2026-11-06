@@ -154,8 +154,9 @@ source file, in the `xtermjs/xterm.js` source at tag 6.0.0 (commit `f447274f430f
 alacritty application (outside the crate) was read at the master commit below. "Observed" means the bytes were run
 through the crates: the published, unpatched ones unless the record names another configuration (the patched trees, or
 Farhelm's emulator). A result read from the code, an estimate, or a figure measured on another build says so. The fixes
-that keep the emulator's screen where tmux keeps it were found, and are pinned, by the supervisor's comparison with a
-live tmux 3.7c (`crates/farhelm-supervisor/src/emulator_parity/`).
+that keep the emulator's screen where tmux keeps it were found by the supervisor's comparison with a live tmux 3.7c (its
+`emulator_parity` tests, removed in 2026-11 once new terminals stopped using tmux as their reference); the tests each
+record names now are the vendored crates' and the emulator's own.
 
 Each status says whether the behavior was checked against upstream's current source on 2026-11-03: `alacritty/alacritty`
 master at `aecf0f600fa840a415b55da5cf34fbeaec39ac32` (`alacritty_terminal` 0.26.1-dev; crates.io's newest is still
@@ -656,7 +657,7 @@ records" after the records).
 - Patch hunks (vte, `ansi.rs`): `@@ -526,6 +569,12 @@` (`Handler::report_version`), `@@ -1708,6 +1773,8 @@` (the
   `csi_dispatch` arm); the test in `@@ -2437,6 +2504,105 @@`.
 - Tests: `ansi::tests::xtversion_reaches_the_handler` (vte); `identification_status_and_window_queries`
-  (`farhelm-terminal-emulator`, `tests/queries.rs`); `emulator_parity::queries::recorded_agent_probes_get_tmux_answers`.
+  (`farhelm-terminal-emulator`, `tests/queries.rs`); `recorded_agent_startup_probes_get_their_answers` (the same file).
 - Upstream status: not yet reported. Upstreamable as an additive API; the method name is Farhelm's choice. Checked
   against vte `89c9c22` on 2026-11-03: still missing.
 
@@ -672,8 +673,8 @@ records" after the records).
   grid and stale text would stay there.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::clear_screen`.
 - Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1757,8 +2240,10 @@`; the test in `@@ -3299,4 +3832,1060 @@`.
-- Tests: `term::tests::erase_above_from_the_second_line_clears_the_first` (vendored);
-  `emulator_parity::generated::hand_picked_screens_match_tmux`, scenario "erase operations".
+- Tests: `term::tests::erase_above_from_the_second_line_clears_the_first` (vendored). Until 2026-11 also the
+  supervisor's comparison with a live tmux, scenario "erase operations" (since removed).
 - Upstream status: not yet reported. Upstreamable as is. Checked against alacritty `aecf0f6` on 2026-11-03: still
   present (`if cursor.line > 1`).
 
@@ -726,20 +727,18 @@ records" after the records).
   raising it when it drops a wide character with autowrap off (a flag already raised stays raised, since nothing moves).
   Every other reader of the flag (except `CSI J`, under its own record below) keeps upstream's code; with the flag
   meaning what its documentation says, they behave as tmux does in the cases above. Farhelm's cursor report
-  (`farhelm-terminal-emulator`, `src/queries.rs`) and its parity harness read the flag as tmux's cursor one past the
-  last column.
+  (`farhelm-terminal-emulator`, `src/queries.rs`) reads the flag as a cursor one past the last column.
 - Why Farhelm needs it: the status readers were written against tmux's captures, and a kept last-column character or an
   extra scroll changes the screen they read and viewers see. The recorded Claude Code and Codex sessions never turn
   autowrap off, so this matters for other programs in a session's terminal.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::input`.
-- Tests: `term::tests::writing_the_last_column_with_autowrap_off_raises_no_wrap` (vendored);
-  `emulator_parity::generated::hand_picked_screens_match_tmux`, scenarios "autowrap off at the last column: reports and
+- Tests: `term::tests::writing_the_last_column_with_autowrap_off_raises_no_wrap` (vendored); the cursor-report rows of
+  `identification_status_and_window_queries` (`farhelm-terminal-emulator`, `tests/queries.rs`). Until 2026-11 the
+  supervisor's comparison with a live tmux 3.7c also covered scenarios "autowrap off at the last column: reports and
   erases", "autowrap off at the last column, then a resize" and "autowrap off at the last column of the alternate
-  screen, then a wider screen", against a live tmux 3.7c; the cursor-report rows of
-  `identification_status_and_window_queries` (`farhelm-terminal-emulator`, `tests/queries.rs`) and of
-  `emulator_parity::queries::the_answer_table_matches_tmux`. What still differs from tmux at a pending wrap (a tab, a
-  wider alternate screen, a wide character after the corner-cell idiom, writing after autowrap is turned off) is pinned
-  in `emulator_parity::generated::known_differences_stay_as_documented`.
+  screen, then a wider screen", and pinned what still differs from tmux at a pending wrap (a tab, a wider alternate
+  screen, a wide character after the corner-cell idiom, writing after autowrap is turned off); it has since been
+  removed.
 - Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1112,8 +1585,12 @@` (no flag for a wide character dropped with
   autowrap off) and `@@ -1130,9 +1607,13 @@` (no flag for a last-column write with autowrap off); the test in
   `@@ -3299,4 +3832,1060 @@`.
@@ -770,9 +769,9 @@ records" after the records).
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::clear_screen`.
 - Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1774,7 +2259,15 @@`; the test in `@@ -3299,4 +3832,1060 @@`.
 - Tests: `term::tests::erase_below_with_a_wrap_pending_keeps_the_last_column` (vendored: written with autowrap on, off,
-  off then on, on then off, and on then a wide character dropped with autowrap off);
-  `emulator_parity::generated::hand_picked_screens_match_tmux`, scenarios "erase operations" and "autowrap off at the
-  last column: reports and erases", against a live tmux 3.7c.
+  off then on, on then off, and on then a wide character dropped with autowrap off). Until 2026-11 also the supervisor's
+  comparison with a live tmux 3.7c, scenarios "erase operations" and "autowrap off at the last column: reports and
+  erases" (since removed).
 - Upstream status: not yet reported. Arguable upstream: it makes `CSI J` agree with alacritty's own `CSI K`, but xterm
   does the opposite for both, so upstream may prefer xterm's behavior. On its own, without the wrap-flag fix, it would
   also keep a character written with autowrap off, which tmux erases (and xterm.js keeps). Checked against alacritty
@@ -799,9 +798,8 @@ records" after the records).
 - Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1017,6 +1328,36 @@` (`vertical_move`, which the CHA record
   uses too), `@@ -1215,18 +1698,18 @@` (`move_up`, `move_down`), `@@ -1349,16 +1832,16 @@` (`move_down_and_cr`,
   `move_up_and_cr`); the test in `@@ -3299,4 +3832,1060 @@`.
-- Tests: `term::tests::relative_vertical_moves_stop_at_the_scroll_margins` (vendored);
-  `emulator_parity::generated::hand_picked_screens_match_tmux`, scenario "scroll regions";
-  `emulator_parity::generated::generated_streams_match_tmux`.
+- Tests: `term::tests::relative_vertical_moves_stop_at_the_scroll_margins` (vendored). Until 2026-11 also the
+  supervisor's comparison with a live tmux, scenario "scroll regions" and generated streams (since removed).
 - Upstream status: not yet reported. Upstreamable as is. Checked against alacritty `aecf0f6` on 2026-11-03: still
   present.
 
@@ -816,12 +814,12 @@ records" after the records).
 - Fix: `goto_col` moves through `vertical_move` with no lines to move.
 - Why Farhelm needs it: a program that sets a scroll region and origin mode and then positions with CHA would draw each
   such line the region's offset further down than tmux does, on the screen status detection reads and viewers see. No
-  recorded agent session was checked for origin mode; the parity comparison with tmux pins this case.
+  recorded agent session was checked for origin mode; the comparison with a live tmux, since removed, covered this case.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::goto_col`.
 - Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1180,7 +1661,9 @@`, which needs `vertical_move` from
   `@@ -1017,6 +1328,36 @@` (the relative moves record); the test in `@@ -3299,4 +3832,1060 @@`.
-- Tests: `term::tests::cha_in_origin_mode_keeps_the_line` (vendored);
-  `emulator_parity::generated::hand_picked_screens_match_tmux`, scenario "scroll regions".
+- Tests: `term::tests::cha_in_origin_mode_keeps_the_line` (vendored). Until 2026-11 also the supervisor's comparison
+  with a live tmux, scenario "scroll regions" (since removed).
 - Upstream status: not yet reported. Upstreamable as is together with the relative moves fix; filed alone, it would
   instead pass `goto` the line relative to the region, as xterm's `CASE_HPA` does. Checked against alacritty `aecf0f6`
   on 2026-11-03: still present.
@@ -836,11 +834,12 @@ records" after the records).
 - Fix: the reset calls `goto(0, 0)` as the set does.
 - Why Farhelm needs it: a program that leaves origin mode and draws without moving the cursor first would draw where its
   cursor was rather than at the top left, as tmux has it, on the screen status detection reads and viewers see. As for
-  CHA, no recorded agent session was checked for origin mode; the parity comparison with tmux pins it.
+  CHA, no recorded agent session was checked for origin mode; the comparison with a live tmux, since removed, covered
+  it.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::unset_private_mode`.
 - Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -2031,7 +2545,12 @@`; the test in `@@ -3299,4 +3832,1060 @@`.
-- Tests: `term::tests::resetting_origin_mode_homes_the_cursor` (vendored);
-  `emulator_parity::generated::generated_streams_match_tmux`.
+- Tests: `term::tests::resetting_origin_mode_homes_the_cursor` (vendored). Until 2026-11 also the supervisor's
+  comparison with a live tmux on generated streams (since removed).
 - Upstream status: not yet reported. Upstreamable as is. Checked against alacritty `aecf0f6` on 2026-11-03: still
   present.
 
@@ -877,8 +876,8 @@ records" after the records).
 - Tests: `term::tests::utf8_and_sgr_mouse_encodings_are_independent` (vendored: both orders, one sequence with both, and
   resetting either); `mouse_modes_replace_one_another_but_encodings_combine` (`farhelm-terminal-emulator`,
   `tests/modes.rs`); `both_mouse_encodings_set_round_trip` (`tests/snapshot.rs`); and the encoder's
-  `sgr_wins_over_utf8_whichever_was_set_first` (`farhelm-supervisor`, `grid_input`); and two rows of
-  `emulator_parity::queries::the_answer_table_matches_tmux` (both orders, against a live tmux 3.7c).
+  `sgr_wins_over_utf8_whichever_was_set_first` (`farhelm-supervisor`, `grid_input`). Until 2026-11 also two rows of the
+  supervisor's comparison with a live tmux 3.7c (both orders; since removed).
 - Upstream status: not yet reported. Not a bug fix: the exclusion follows xterm on purpose, so this is a question of
   which reference to follow, and is better raised upstream as a question. The alacritty application already reads the
   two bits the way this patch needs: its `mouse_report` checks `SGR_MOUSE` first and sends SGR whenever it is set, and

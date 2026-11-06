@@ -311,10 +311,11 @@ impl Terminal {
     /// The last `max_bytes` of this terminal's visible screen as plain
     /// text, which the status sampler hands to the agent's screen reader.
     ///
-    /// A host terminal reads its emulator, whose screen text is shaped like
-    /// tmux's capture (`farhelm_terminal_emulator::Emulator::screen_tail`),
-    /// which is what the screen readers were written against. The read is
-    /// in memory and cannot fail.
+    /// A host terminal reads its emulator's screen text, in the format the
+    /// screen readers are written against
+    /// (`farhelm_terminal_emulator::Emulator::screen_tail`); a tmux terminal
+    /// reads tmux's capture, which has the same shape. The host's read is in
+    /// memory and cannot fail.
     pub(crate) async fn screen_tail(
         &self,
         sup: &Supervisor,

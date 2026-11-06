@@ -603,9 +603,7 @@ test("a wrapped URL still activates after a resize reflows it", async ({
   // narrowing a terminal in a terminal host reflows its screen as alacritty
   // does, keeping the cursor's row and pushing the lines above it into
   // history, where tmux keeps them on screen (seen here: the URL's head left
-  // the screen with twenty blank rows below the cursor). Resize reflow is
-  // among the emulator's pinned differences from tmux
-  // (crates/farhelm-supervisor/src/emulator_parity/generated.rs).
+  // the screen with twenty blank rows below the cursor).
   test.skip(onHostTerminals(), "the emulator's resize reflow pushes the URL's head into history where tmux keeps it on screen");
   const openedLinks = await recordWindowOpen(page);
   const dialogs = recordDialogs(page);
