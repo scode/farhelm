@@ -2927,8 +2927,8 @@ mod tests {
             // Every table a later schema added goes, including schema 38's
             // `launch_templates`, schema 41's `session_notification_marks`,
             // schema 47's `ntfy_alerts`, schema 52's `session_pins`, schema
-            // 54's `registry_namespace`, schema 70's `tensorlake_account` and
-            // schema 71's `tensorlake_recipes`.
+            // 54's `registry_namespace`, schema 70's `tensorlake_account`,
+            // schema 71's `tensorlake_recipes` and schema 75's `credentials`.
             // A new table that is missing here fails the DDL comparison
             // below, not a migration.
             // Every later preference column also goes, including nullable
@@ -2946,6 +2946,7 @@ mod tests {
                  DROP TABLE registry_namespace;
                  DROP TABLE tensorlake_account;
                  DROP TABLE tensorlake_recipes;
+                 DROP TABLE credentials;
                  ALTER TABLE create_history_sessions DROP COLUMN github_repo;
                  ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;

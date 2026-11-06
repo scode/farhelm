@@ -5880,6 +5880,28 @@ most 4096 visible ASCII bytes. The form saves explicitly and shows its outcome; 
 send under the same timeout. Modal dismissal does not retract a save or test; component state is updated only while
 mounted.
 
+## Named credential catalog
+
+Schema 75 adds the strict `credentials` table, keyed by the immutable user-chosen name. It stores the immutable kind,
+the plaintext secret, creation/replacement timestamps and a positive signed-integer revision. Replacements increment the
+revision even within one timestamp second; blank saves keep the existing row. Overflow refuses the replacement without
+changing the value. Each creation also receives a hidden immutable UUID, distinct even when a deleted name is reused;
+replacement keeps it. Delivery can use that identity alongside the revision without putting it in public metadata. These
+values are separate from shared preferences and the Tensorlake account singleton.
+
+Protected `GET/POST /api/credentials` and `PUT/DELETE /api/credentials/{name}` distinguish creation (409 on a collision)
+from replacement (404 after deletion). Read queries select metadata alone. Save acknowledgements read that metadata
+inside the same immediate transaction as the write, so another window's replacement cannot change the acknowledged
+revision. JSON decoder and database diagnostics never enter responses or logs. Secret-bearing request types have no
+Debug implementation. Tokens reuse the visible-ASCII 4096-byte bound; Codex accepts only a JSON object of at most 64
+KiB, preserving vendor fields. The 512 KiB request cap permits JSON escaping of the bounded pasted file.
+
+The Settings dialog owns one Tensorlake account context above both mounted panels. Key editors share only acknowledged
+metadata, key/test discovery revisions and serialization of key requests. Their secret drafts and outcomes stay local.
+Accepted API saves survive editor dismissal, with mounted fences preventing late responses from touching retired
+signals. A native file selection fills the Codex draft and never submits it; a generation check discards reads
+superseded by paste, agent selection or submission.
+
 ## Tensorlake account
 
 `crates/farhelm-helm/src/tensorlake/` holds the account side of Tensorlake sandbox hosts. Protected GET/PUT

@@ -27,8 +27,9 @@
 //! decides what opens, while this dialog warns about listed types it does not
 //! recognize as safe.
 //! The Tensorlake section is helm configuration with the ntfy contract (an
-//! explicitly saved, write-only API key) plus an acknowledged switch; its
-//! component owns both (`tensorlake_settings.rs`).
+//! explicitly saved, write-only API key) plus an acknowledged switch. Its
+//! account owner sits above both panels because Credentials edits that same key.
+//! Named credentials have their own explicit saves and local secret drafts.
 //!
 //! Section changes hide mounted panels rather than replacing their component
 //! trees. Explicit-save fields keep their drafts and pending work, and device
@@ -58,11 +59,12 @@ pub(crate) const RETURN_FOCUS: &str =
 
 /// Stable panel keys preserve draft and focus ownership; labels are presentation.
 /// The App entry still follows updater availability rather than platform alone.
-const SETTINGS_SECTIONS: [(&str, &str); 9] = [
+const SETTINGS_SECTIONS: [(&str, &str); 10] = [
     ("sessions", "Sessions"),
     ("appearance", "Appearance"),
     ("hosts", "Hosts"),
     ("tensorlake", "Tensorlake"),
+    ("credentials", "Credentials"),
     ("terminal", "Terminal"),
     ("checkouts", "Checkouts"),
     ("agent-trust", "Agent trust"),
@@ -80,6 +82,7 @@ fn settings_section_icon(section: &str) -> Element {
         "appearance" => rsx! { ActionIcon { glyph: ActionGlyph::Appearance } },
         "hosts" => rsx! { ActionIcon { glyph: ActionGlyph::Hosts } },
         "tensorlake" => rsx! { ActionIcon { glyph: ActionGlyph::Key } },
+        "credentials" => rsx! { ActionIcon { glyph: ActionGlyph::Lock } },
         "terminal" => rsx! { ActionIcon { glyph: ActionGlyph::Terminal } },
         "checkouts" => rsx! { FolderIcon {} },
         "agent-trust" => rsx! { ActionIcon { glyph: ActionGlyph::AgentTrust } },
@@ -226,6 +229,7 @@ pub(crate) fn SettingsDialog(
     #[props(default)] focus_workspace_trust: Option<crate::workspace_trust::TrustAgent>,
     #[props(default)] focus_tensorlake: bool,
 ) -> Element {
+    crate::tensorlake_settings::provide_account();
     let base = use_context::<ApiBase>().0;
     let setup_base = base.clone();
     let session_base = base.clone();
@@ -628,6 +632,14 @@ pub(crate) fn SettingsDialog(
                             crate::tensorlake_settings::TensorlakeSettings {}
                         }
                         section {
+                            id: "settings-credentials",
+                            class: "host-settings-section app-settings-panel",
+                            aria_label: "Credentials",
+                            hidden: selected() != "credentials",
+                            h3 { class: "host-settings-section-title", tabindex: "-1", "Credentials" }
+                            crate::credentials_settings::CredentialsSettings {}
+                        }
+                        section {
                             id: "settings-terminal",
                             class: "host-settings-section app-settings-panel",
                             aria_label: "Terminal",
@@ -782,9 +794,9 @@ pub(crate) fn SettingsDialog(
                     // its footer names it.
                     span { class: "dialog-footer-hint",
                         if cfg!(native_desktop) {
-                            "Most choices save immediately; the Tensorlake API key, ntfy alerts, checkout fields and file types use Save."
+                            "Most choices save immediately; credentials, the Tensorlake API key, ntfy alerts, checkout fields and file types use Save."
                         } else {
-                            "Most choices save immediately; the Tensorlake API key, ntfy alerts and checkout fields use Save."
+                            "Most choices save immediately; credentials, the Tensorlake API key, ntfy alerts and checkout fields use Save."
                         }
                     }
                     crate::modal_dialog::DialogActions {

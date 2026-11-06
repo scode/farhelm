@@ -107,6 +107,8 @@ pub(crate) enum ActionGlyph {
     /// the remote hosts' default mark and the section is about the account,
     /// not about hosts. Farhelm's own drawing, not Tensorlake's logo.
     Key,
+    /// Named secrets in Settings; Farhelm's own ordinary padlock drawing.
+    Lock,
     Launch,
     Copy,
     Document,
@@ -294,6 +296,13 @@ pub(crate) fn ActionIcon(
             rsx! {
                 circle { cx: "4.5", cy: "7", r: "2.5" }
                 path { d: "M7 7h5.5M10.5 7v2.2M12.5 7v1.6" }
+            },
+        ),
+        ActionGlyph::Lock => (
+            "lock",
+            rsx! {
+                rect { x: "3", y: "6", width: "8", height: "6", rx: "1" }
+                path { d: "M4.5 6V4a2.5 2.5 0 0 1 5 0v2M7 8.5v1.5" }
             },
         ),
         ActionGlyph::Launch => (

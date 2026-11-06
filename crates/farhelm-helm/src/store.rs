@@ -336,7 +336,20 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 74;
+pub(crate) const SCHEMA_VERSION: i64 = 75;
+
+/// Named secrets have their own table so list responses never need to decode a
+/// secret-bearing configuration object. The monotonically increasing revision
+/// also distinguishes replacements made during the same wall-clock second.
+const CREDENTIALS_SCHEMA: &str = "CREATE TABLE credentials (
+    name TEXT PRIMARY KEY NOT NULL,
+    incarnation TEXT NOT NULL UNIQUE,
+    kind TEXT NOT NULL,
+    secret TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision > 0)
+) STRICT;";
 
 /// Schema 72's columns on `hosts`, in the order the migration appends them,
 /// each with the exact definition text the fresh-create DDL in
@@ -2479,6 +2492,7 @@ pub struct HelmStore {
 /// - 74: shared manual pin positions, seeded oldest known session first.
 ///   Rebuild the table so fresh and upgraded databases share one DDL;
 ///   preserve existing positions on version-only fixture rewinds.
+/// - 75: an empty named, write-only credential catalog, kept outside preferences.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2797,10 +2811,11 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               {announcement_schema}
               {TENSORLAKE_ACCOUNT_SCHEMA}
               {TENSORLAKE_RECIPES_SCHEMA}
+              {CREDENTIALS_SCHEMA}
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 74;",
+              PRAGMA user_version = 75;",
             announcement_schema = crate::announcements::SCHEMA,
         ))
         .context("creating schema")?;
@@ -4460,6 +4475,22 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         tx.execute_batch("PRAGMA user_version = 74;")
             .context("migrating helm.db to schema version 74")?;
         version = 74;
+    }
+    if version == 74 {
+        // Historical migration fixtures may rewind only the version pragma.
+        // A real schema-74 database acquires an empty credential catalog.
+        let present: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM sqlite_master WHERE name = 'credentials'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !present {
+            tx.execute_batch(CREDENTIALS_SCHEMA)
+                .context("creating the credential catalog")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 75;")
+            .context("migrating helm.db to schema version 75")?;
+        version = 75;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to

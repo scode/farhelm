@@ -146,6 +146,9 @@ mod events;
 mod feedback;
 mod ntfy;
 
+/// `/api/credentials` — the named credential catalog: saved secrets can be
+/// replaced but are never returned.
+mod credentials;
 /// `/api/tensorlake` and the Tensorlake API client: the account side of
 /// Tensorlake sandbox hosts (the API key, Farhelm's own ssh key for
 /// sandboxes, and the helm tag their names carry), plus the recipes under
@@ -873,6 +876,20 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/tensorlake/test",
             axum::routing::post(tensorlake::test),
+        )
+        .route(
+            "/api/credentials",
+            get(credentials::list).post(credentials::create).layer(
+                axum::extract::DefaultBodyLimit::max(credentials::BODY_LIMIT),
+            ),
+        )
+        .route(
+            "/api/credentials/{name}",
+            axum::routing::put(credentials::save)
+                .delete(credentials::delete)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    credentials::BODY_LIMIT,
+                )),
         )
         .route("/api/tensorlake/orphans", get(tensorlake::orphans::list))
         .route(

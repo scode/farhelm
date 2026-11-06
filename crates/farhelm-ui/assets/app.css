@@ -4120,6 +4120,33 @@ a:any-link,
 }
 .recipe-editor-sticky-actions .templates-departure,
 .recipe-editor-footer .templates-departure { margin: 0; }
+/* Credential values stay write-only, but their storage risk must remain
+   visible beside every entry point, including the shared account key. */
+.credential-storage-warning {
+  background: var(--danger-bg-dim); border-left: 4px solid var(--danger);
+  padding: 12px 14px; margin: 12px 0; border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+.credential-storage-warning strong { color: var(--danger); }
+.credential-storage-warning p { margin: 6px 0 0; font-size: 13px; color: var(--fg-0); }
+.credential-group-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.credential-editor { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.credential-editor > .btn { align-self: flex-start; }
+.credential-editor .checkout-root-label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.credential-editor input:not([type="file"]), .credential-editor textarea {
+  box-sizing: border-box; width: 100%; min-width: 0; padding: 8px 12px;
+  background: var(--well); color: var(--fg-0); border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+}
+.credential-editor textarea { resize: vertical; line-height: 1.5; }
+.credential-file-label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.credential-file-label input { min-width: 0; max-width: 100%; }
+/* Keep explicit answers inside their own hidden Settings panel, just as for
+   recipes; the modal's global Close footer remains a separate surface. */
+.credential-editor-actions {
+  position: sticky; bottom: 0; z-index: 1; padding: 12px 0;
+  background: var(--bg-1); border-top: 1px solid var(--border-dim);
+}
+.credential-editor-actions .dialog-actions { flex-wrap: wrap; }
 @media (max-width: 620px) {
   .recipe-size, .recipe-source-cards { grid-template-columns: minmax(0, 1fr); }
   .recipe-tunnel { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }

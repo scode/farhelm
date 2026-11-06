@@ -7,6 +7,7 @@ export type SettingsSection =
   | "Appearance"
   | "hosts"
   | "tensorlake"
+  | "credentials"
   | "terminal"
   | "checkouts"
   | "agent trust"
@@ -22,6 +23,7 @@ export const settingsSectionLabels: Record<SettingsSection, string> = {
   Appearance: "Appearance",
   hosts: "Hosts",
   tensorlake: "Tensorlake",
+  credentials: "Credentials",
   terminal: "Terminal",
   checkouts: "Checkouts",
   "agent trust": "Agent trust",
