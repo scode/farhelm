@@ -497,6 +497,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     to come from an in-memory buffer as well, or wait for file logging.
   - Browser and desktop both need it; unlike the client-log route, this is not desktop-only.
 
+- **Deep dive on SQLite compaction settings.** Review how Farhelm's databases handle compaction: WAL checkpointing
+  (nothing sets `wal_autocheckpoint`, so SQLite's default of 1000 pages applies, and the supervisor's database module
+  says there is no checkpoint policy), auto-vacuum, and page size. Decide whether the long-lived stores need explicit
+  settings or a periodic maintenance step as they grow.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
