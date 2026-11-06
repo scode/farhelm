@@ -40,13 +40,13 @@
 //! protocol 68) attaching to a host terminal is refused with a clear error;
 //! that refusal is permanent behavior, not a placeholder. `ReplayComplete`,
 //! `Detached`, `Resize`, `PauseOutput`/`ResumeOutput` and the stall detach
-//! keep their meaning for both stream kinds; for grid streams, pause means
-//! "send nothing until the resume", history included, and the supervisor
-//! coalesces (see "Flow control"). The grid client itself sends no pause or
-//! resume: it applies
-//! messages as they arrive and draws at most once per animation frame, so no
-//! backlog builds up in the page. Its backlog builds up in the helm instead,
-//! which pauses and resumes the supervisor from its own queue.
+//! serve both stream kinds, as their declarations in the crate root define
+//! them; for grid streams, pause means "send nothing until the resume",
+//! history included, and the supervisor coalesces (see "Flow control"). The
+//! grid client itself sends no pause or resume: it applies messages as they
+//! arrive and draws at most once per animation frame, so no backlog builds up
+//! in the page. Its backlog builds up in the helm instead, which pauses and
+//! resumes the supervisor from its own queue.
 //!
 //! The helm passes the browser's request through as `grid`, and relays a
 //! grid channel with what it needs that a byte channel does not: frames up
@@ -1043,8 +1043,8 @@ pub enum MouseMode {
     Motion,
 }
 
-/// How the program ended, as the client shows it in place of tmux's "Pane is
-/// dead" banner: `{"code":n}` or `{"signal":n}` on the wire.
+/// How the program ended, which the client shows in an exit line below the
+/// program's final screen: `{"code":n}` or `{"signal":n}` on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExitState {
