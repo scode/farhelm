@@ -1,0 +1,75 @@
+This file carries the license notices for xterm.js and xterm.css, the
+vendored @xterm/xterm 6.0.0 bundle and stylesheet (see the provenance
+comment on VENDOR_XTERM_JS in ../../src/lib.rs). The minified bundle has no
+room for a header, and until this file existed nothing shipped its notice;
+only xterm.css kept a copyright comment of its own.
+
+The package is MIT-licensed. Its bundle also compiles in part of Visual
+Studio Code's `vs/base` (43 modules under `out/vs/` in the bundle's source
+map, each headed "Copyright (c) Microsoft Corporation ... Licensed under the
+MIT License. See License.txt in the project root"), and the npm package does
+not include that License.txt, so VS Code's MIT notice is reproduced here as
+well. The xterm.js text is copied verbatim from the package's LICENSE file
+as published to npm; the VS Code text is copied verbatim from LICENSE.txt at
+the root of https://github.com/microsoft/vscode.
+
+Certification digests:
+- registry tarball @xterm/xterm 6.0.0:
+  sha256:908e66e04af6c8dc6b00dd3b54de088e2e81e5ed866284fd6c2fb3c2d1c7a3f6
+- retained xterm.js, byte-identical to the tarball's lib/xterm.js:
+  sha256:14903579ff54664cd72f8e8699e6961a6272c21863ec1c3b118cdc8af5d4a972
+
+This notice ships inside the distributed bundles, not just beside the
+source: XTERM_LICENSES in ../../src/lib.rs declares this file as an asset.
+
+================================================================================
+@xterm/xterm — MIT
+================================================================================
+
+Copyright (c) 2017-2019, The xterm.js authors (https://github.com/xtermjs/xterm.js)
+Copyright (c) 2014-2016, SourceLair Private Company (https://www.sourcelair.com)
+Copyright (c) 2012-2013, Christopher Jeffrey (https://github.com/chjj/)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+================================================================================
+Visual Studio Code (vs/base, bundled into @xterm/xterm) — MIT
+================================================================================
+
+MIT License
+
+Copyright (c) 2015 - present Microsoft Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
