@@ -5,6 +5,7 @@ import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { resolveToken as tokenColor } from "./helpers/color";
 import { requireHelmBuild } from "./helpers/helm-build";
 import { fillLauncherFolder } from "./helpers/launcher";
+import { recordPage } from "./helpers/timeline";
 /**
  * The two-pane shell itself (BUGS_BURNDOWN.md issue 5): the properties the
  * sidebar redesign claims but no interaction test proves on its own —
@@ -4310,9 +4311,17 @@ for (const mode of ["row", "header with failed preference read", "external with 
       const b = await createSession(request, { title: `visit-b-${stamp}`, invocation: "sleep 300" });
       owned.push(b.id);
       await stopSession(request, a.id);
-      await expect.poll(async () =>
-        (await listSessions(request)).sessions.find((session) => session.id === a.id)?.status?.state
-      ).toBe("exited");
+      await expect.poll(async () => {
+        const session = (await listSessions(request)).sessions.find((entry) => entry.id === a.id);
+        // Preserve Error's detail before cleanup deletes the row. Sampling the
+        // same listing adds no request or reconciliation to the stop premise.
+        recordPage(page, "visit-history-stopped-session", [
+          ["session", a.id], ["present", session !== undefined],
+          ["status", session?.status?.state ?? "missing"],
+          ["detail", session?.status?.detail ?? ""],
+        ]);
+        return session?.status?.state;
+      }).toBe("exited");
       // sleep-ok: separate second-resolution creation stamps so newest-created provably prefers C.
       await new Promise((resolve) => setTimeout(resolve, 1_100));
       const c = await createSession(request, { title: `visit-c-${stamp}`, invocation: "sleep 300" });

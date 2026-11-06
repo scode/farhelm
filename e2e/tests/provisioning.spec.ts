@@ -35,6 +35,7 @@ import { expectKeyboardTooltip, expectQuietInitialFocus, expectCancelTooltipRetu
 import { expectKeyboardScroll, expectKeyboardScrollFromControl } from "./helpers/keyboard-scroll";
 import { currentStackSlot } from "../stack-slots";
 import { openSettings } from "./helpers/settings";
+import { recordPage } from "./helpers/timeline";
 
 /** Live helm identity copied onto every route response this suite fabricates. */
 let HELM_BUILD = "";
@@ -2667,6 +2668,37 @@ async function holdLockWithAdd(
 const RUNNING_PROGRESS = /Updating: \d+\/\d+ .+ \d+:\d{2}/;
 
 /**
+ * Retain backend step state before a failed label check releases its held run.
+ * The extra read happens only after the original assertion fails, while the
+ * test still holds the update running. It is bounded and cannot replace that
+ * failure, even when the fixture or transport has already disappeared.
+ */
+async function expectNamedUpdateStep(row: Locator, request: APIRequestContext, host: number): Promise<void> {
+  try {
+    await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
+  } catch (error) {
+    try {
+      const response = await request.get(`/api/hosts/${host}/provisioning`, { timeout: 1_000 });
+      recordPage(row.page(), "missing-update-step-response", [["host", host], ["http_status", response.status()]]);
+      if (response.ok()) {
+        const snapshot = await response.json() as Progress;
+        recordPage(row.page(), "missing-update-step-backend", [
+          ["run", snapshot.run_id ?? ""], ["status", snapshot.status], ["step_count", snapshot.steps.length],
+        ]);
+        for (const [index, step] of snapshot.steps.slice(0, 12).entries()) {
+          recordPage(row.page(), "missing-update-step-state", [
+            ["index", index], ["step", step.step], ["status", step.status],
+          ]);
+        }
+      }
+    } catch {
+      recordPage(row.page(), "missing-update-step-diagnostic-unavailable");
+    }
+    throw error;
+  }
+}
+
+/**
  * The row's pending `updating…` status at one exact lifecycle stage.
  *
  * Updates keep their row folded, so the planning, waiting-for-claim, and
@@ -4562,7 +4594,7 @@ for (const boundary of ["following", "submitting"] as const) {
         expect(running.run_id).toBe(accepted?.run_id);
         expect(running.run_id).not.toBeNull();
         if (boundary === "following") {
-          await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
+          await expectNamedUpdateStep(row, request, added.host_id);
         } else {
           await expect(pendingUpdate(row, "submitting")).toBeVisible();
         }
@@ -4603,7 +4635,8 @@ for (const boundary of ["following", "submitting"] as const) {
         // In the submitting case the full-binding watcher drops the intent,
         // but the POST still owns suppression until its checked reply lands.
         acceptance.release();
-        await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
+        if (boundary === "following") await expectNamedUpdateStep(row, request, added.host_id);
+        else await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
         await expect(row.locator(".host-detail")).toHaveCount(0);
         await expect(row.locator(".provisioning-warning")).toHaveCount(0);
 
@@ -4732,7 +4765,8 @@ for (const boundary of ["following", "submitting", "submitting-current"] as cons
         expect(accepted?.host_id).toBe(added.host_id);
         expect(running.run_id).toBe(accepted?.run_id);
         if (boundary === "following") {
-          await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
+          if (change === "identity") await expectNamedUpdateStep(row, request, added.host_id);
+          else await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
         } else {
           await expect(pendingUpdate(row, "submitting")).toBeVisible();
         }

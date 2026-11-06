@@ -423,13 +423,37 @@ export async function attachSession(page: Page, id: string): Promise<void> {
 /**
  * Answer a command launch's required YOLO question in the launcher (`yolo`,
  * default no). The question has no default, so a command-mode create cannot
- * be submitted without it.
+ * be submitted without it. A failed native check retains the surviving radio
+ * state before caller cleanup; diagnostics never retry the click or replace
+ * its original failure.
  */
 export async function answerYolo(form: Locator, yolo = false) {
-  await form
-    .getByRole("group", { name: "Runs in YOLO mode" })
-    .getByLabel(yolo ? "Yes (YOLO)" : "No", { exact: true })
-    .check();
+  const group = form.getByRole("group", { name: "Runs in YOLO mode" });
+  try {
+    await group.getByLabel(yolo ? "Yes (YOLO)" : "No", { exact: true }).check();
+  } catch (error) {
+    try {
+      const radios = await group.locator('input[type="radio"]').evaluateAll(nodes =>
+        nodes.slice(0, 4).map(node => {
+          const radio = node as HTMLInputElement;
+          const box = radio.getBoundingClientRect();
+          return {
+            label: radio.labels?.item(0)?.textContent?.slice(0, 128) ?? "",
+            checked: radio.checked, disabled: radio.disabled,
+            focused: radio === document.activeElement,
+            x: box.x, y: box.y, width: box.width, height: box.height,
+          };
+        })
+      );
+      recordPage(form.page(), "yolo-check-failed", [["requested_yolo", yolo], ["radio_count", radios.length]]);
+      for (const [index, state] of radios.entries()) {
+        recordPage(form.page(), "yolo-radio-state", [["index", index], ...Object.entries(state)]);
+      }
+    } catch {
+      recordPage(form.page(), "yolo-check-diagnostic-unavailable");
+    }
+    throw error;
+  }
 }
 
 /**

@@ -4117,3 +4117,39 @@ is observed; which focus handoff caused it remains a hypothesis.
 Class: pointer-focus
 
 Cause: hypothesis
+
+## 2026-11-05 — failure-state diagnostics for the open browser flakes (e2e/tests)
+
+The existing `browser-timeline.jsonl` failure attachment now records the active control and document focus at the two
+known quick-launch body-focus checks (`quick-launch.spec.ts`), scroll dimensions and focus at both trash PageDown checks
+(`trash-dialog.spec.ts`), and the stopped session's status and error detail before visit-history cleanup
+(`sidebar.spec.ts`). The three missing-step cases (`provisioning.spec.ts`) make one bounded backend read after the label
+assertion fails, retaining the run and step states before releasing their held update. A failed command YOLO check
+retains the surviving radio labels, checked/disabled/focused states and bounds (`helpers/term.ts`). These use the
+existing bounded timeline; assertions, deadlines, sweep exclusions and production code are unchanged. All these flakes
+remain open. A backend snapshot taken after failure is later evidence, not proof of what the browser received.
+
+Controlled run `365fb1dd-676a-4c62-a487-f26d1eee353f` deliberately failed one focus, scroll and progress-label case per
+engine; all six attachments retained the intended state. The two radio cases in that run passed, as did the two
+checked-property experiments in `7a7eb1e9-a9db-4e97-9d2c-14c9d2d3a843`; those did not exercise failure capture. A forced
+error after the native check in `14fabf6f-8e85-4b86-88d3-59ae85fee1ed` exercised that capture on both engines and
+preserved the original error. These synthetic failures do not reproduce or diagnose the historical flakes. All temporary
+triggers were removed. Final-source run `03682c9d-a013-494a-b3e9-45ed0fa7fc89` passed all 22 cases (the 11 known cases
+once per engine); host-terminal run `957684cf-3b0b-4076-bac0-f7424d3bc523` passed all 16 applicable cases. Neither run
+skipped a selected case. The host-terminal selection omits provisioning, which that configuration does not include. The
+older memory test already records individual RSS samples, and the stack cleanup check already records signal/startup
+markers; neither was changed here.
+
+Evidence: base `8a8c9579`, dirty only with these test diagnostics and the temporary triggers in controlled runs. Shared
+x86_64 Linux, Node 26.13.0, Playwright 1.64.0, three browser workers with one stack each, both engines, zero retries.
+Verified tmux 3.7c executable SHA256 `ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`, locale C.UTF-8.
+The recorder scrubbed ambient Farhelm variables and supplied `FARHELM_TEST_TRACE_DIR` and
+`FARHELM_PLAYWRIGHT_POLICY_FILE`; the host run also retained `FARHELM_E2E_SUITE_TERMINALS`. The web build was refreshed
+for this base; native artifacts were reused because intervening product edits affected only the UI. Case-level load,
+memory pressure and browser executable identities were not measured. Reports were complete with no interrupted cases or
+truncated retained output. Private UUID reports, timelines and traces expire with temporary-file cleanup. No new natural
+failure occurred to quote; earlier entries retain the historical failures.
+
+Class: unknown
+
+Cause: unknown
