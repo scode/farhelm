@@ -174,16 +174,18 @@ async fn a_rename_is_visible_in_the_next_list_reply_without_a_restart() {
     );
 }
 
-/// The reply's tabs are rediscovered from tmux, not echoed from the entry.
+/// The reply's tabs are read when the reply is built, not echoed from what
+/// the session's create reported.
 ///
-/// Tabs are never stored anywhere — they exist only as tmux window markers
-/// — so a tab opened after the session was created can appear in a rename
-/// reply only if that reply really was rebuilt from a live probe. This is
+/// A tab is not part of the session's row: a host tab lives in the session's
+/// tab cells (an old terminal's in a tmux window marker), so a tab opened
+/// after the session was created can appear in a rename reply only if that
+/// reply really was rebuilt from the session's current terminals. This is
 /// the cheapest of the three built-not-echoed pins; the other two cover
 /// status and the restart offer, which need a session in a more particular
 /// state to say anything.
 #[farhelm_testtrace::test]
-async fn the_rename_reply_rediscovers_tabs_from_tmux() {
+async fn the_rename_reply_reads_tabs_at_reply_time() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
     assert!(
@@ -197,7 +199,7 @@ async fn the_rename_reply_rediscovers_tabs_from_tmux() {
     assert_eq!(
         reply.tabs.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
         vec![tab.id],
-        "the reply's tabs must be rediscovered from tmux, not echoed from the stored row"
+        "the reply's tabs must be read at reply time, not echoed from the create"
     );
 }
 
@@ -222,7 +224,7 @@ async fn a_rename_reply_reports_the_launch_sentinel_error_a_list_would() {
         .expect("attach");
     let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
-    h.client.send_input(chan, b"quit\r".to_vec()).await;
+    h.client.send_keys(chan, b"quit\r".to_vec()).await;
     // The sentinel path is only consulted for a pane that is dead or gone,
     // so the agent has to be genuinely finished before it means anything.
     wait_for_non_live_status(&h.client, &session.id, 30).await;
@@ -334,11 +336,8 @@ async fn a_rename_reply_reflects_a_reported_identity_without_a_list_first() {
 async fn a_renamed_title_survives_a_supervisor_restart() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let sup1 = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
-        .await
-        .expect("supervisor");
+    let sup1 = supervisor_on(state.path()).await.expect("supervisor");
     let client1 = connect_client(&sup1).await;
     let session = client1
         .create_session(
@@ -595,9 +594,7 @@ async fn a_rename_leaves_an_active_attachment_alone() {
         None,
         "a rename detached a live attachment"
     );
-    h.client
-        .send_input(chan, b"still-attached\r".to_vec())
-        .await;
+    h.client.send_keys(chan, b"still-attached\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "still-attached", 20).await;
 }
 
@@ -866,7 +863,7 @@ async fn a_rename_reply_ignores_corrupt_launch_evidence() {
         .expect("attach");
     let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
-    h.client.send_input(chan, b"quit\r".to_vec()).await;
+    h.client.send_keys(chan, b"quit\r".to_vec()).await;
     wait_for_non_live_status(&h.client, &session.id, 30).await;
     let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
     std::fs::write(&status_path, "").expect("plant empty corrupt sentinel");

@@ -527,7 +527,7 @@ async fn seed_deep_scrollback(sup: &Arc<Supervisor>, session_id: &str, lines: us
 /// half-painted catch-up or a terminal that never appears.
 #[farhelm_testtrace::test]
 async fn an_agent_reattach_marks_the_boundary_before_output_made_during_the_catch_up() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
     seed_deep_scrollback(&h.sup, &session.id, 4000).await;
 
@@ -574,7 +574,7 @@ async fn an_agent_reattach_marks_the_boundary_before_output_made_during_the_catc
 /// half-painted reattach M5 exists to remove.
 #[farhelm_testtrace::test]
 async fn a_deep_scrollback_reattach_marks_only_after_the_last_replay_chunk() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
     seed_deep_scrollback(&h.sup, &session.id, 4000).await;
 
@@ -617,7 +617,7 @@ async fn a_deep_scrollback_reattach_marks_only_after_the_last_replay_chunk() {
 /// [`assert_marker_splits`] checks the marker names it.
 #[farhelm_testtrace::test]
 async fn a_tab_attach_is_marked_on_the_channel_it_attached() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
     let tab = h.client.open_tab(&session.id).await.expect("open tab");
 
@@ -654,7 +654,7 @@ async fn a_tab_attach_is_marked_on_the_channel_it_attached() {
 /// whole of that assembled replay rather than, say, the prefill alone.
 #[farhelm_testtrace::test]
 async fn an_alternate_screen_attach_marks_after_its_visible_snapshot() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
@@ -710,7 +710,7 @@ async fn an_alternate_screen_attach_marks_after_its_visible_snapshot() {
 /// rather than tidy.
 #[farhelm_testtrace::test]
 async fn a_dead_pane_attach_is_marked_after_its_replay_with_no_output_after_it() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
 
     let mut seeder = MarkerPeer::connect(&h.sup, 1).await;
@@ -788,7 +788,7 @@ async fn a_dead_pane_attach_is_marked_after_its_replay_with_no_output_after_it()
 /// rather than as a subtly late marker.
 #[farhelm_testtrace::test]
 async fn an_attach_is_marked_even_when_no_live_output_ever_follows() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
@@ -841,7 +841,7 @@ async fn an_attach_is_marked_even_when_no_live_output_ever_follows() {
 /// every other test here and hangs a freshly created session's terminal.
 #[farhelm_testtrace::test]
 async fn a_fresh_terminal_attach_is_marked_once() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     // Keep the attach racing startup: waiting for agent readiness would
     // remove the empty-history boundary this test is meant to exercise.
     let (session, _work) = basic_session_mid_launch(&h).await;
@@ -875,7 +875,7 @@ async fn a_fresh_terminal_attach_is_marked_once() {
 /// treated as already caught up.
 #[farhelm_testtrace::test]
 async fn a_takeover_marks_the_replacement_and_never_the_incumbent() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
 
     let mut incumbent = MarkerPeer::connect(&h.sup, 1).await;
@@ -942,7 +942,7 @@ async fn a_takeover_marks_the_replacement_and_never_the_incumbent() {
 /// either outcome is exactly what the contract says.
 #[farhelm_testtrace::test]
 async fn a_takeover_during_the_catch_up_ends_it_with_or_without_a_marker() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
     seed_deep_scrollback(&h.sup, &session.id, 4000).await;
 
@@ -1004,7 +1004,7 @@ async fn a_takeover_during_the_catch_up_ends_it_with_or_without_a_marker() {
 /// exactly as the attach path emits one) undetected.
 #[farhelm_testtrace::test]
 async fn a_tmux_pause_catch_up_replays_without_a_marker() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     // `counter` runs until its session is killed, so live output is still
     // arriving when the pause is forced — the shape a real `%pause` takes.

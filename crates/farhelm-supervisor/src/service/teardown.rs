@@ -4278,7 +4278,7 @@ mod tests {
                     create_directory_waiting: Some(Arc::new(move || signal.notify_one())),
                     ..crate::service::FaultHooks::default()
                 },
-                ..SupervisorSeams::default()
+                ..SupervisorSeams::tmux_terminals()
             },
         )
         .await

@@ -426,7 +426,7 @@ async fn an_old_session_restarts_into_a_host_with_its_history_and_tabs() {
     }
     let (tab_channel, tab_stream) = &mut held[1].1;
     holder
-        .send_input(*tab_channel, b"echo TMUX-TAB-$((40+3))\r".to_vec())
+        .send_keys(*tab_channel, b"echo TMUX-TAB-$((40+3))\r".to_vec())
         .await;
     let mut seen = Vec::new();
     wait_for(tab_stream, &mut seen, "TMUX-TAB-43", WAIT_SECS).await;

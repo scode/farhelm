@@ -1,10 +1,10 @@
 //! Custom command text crosses Bash once; filled placeholders remain data.
 //!
-//! These cases use a private login-shell environment and the real shim/tmux
-//! path. Literal argv unit tests cannot distinguish preserved shell source
-//! from a reconstructed command, or prove that a filled value stays inert.
+//! These cases use a private login-shell environment and the real shim, in a
+//! terminal host, as every new terminal is. Literal argv unit tests cannot
+//! distinguish preserved shell source from a reconstructed command, or prove
+//! that a filled value stays inert.
 
-use crate::boot_id_durable_outcome::wait_for_dead_pane;
 use crate::harness::*;
 use farhelm_proto::text::shell_quote;
 
@@ -171,11 +171,7 @@ async fn a_missing_command_program_exits_127_without_an_exec_failure_sentinel() 
         )
         .await
         .expect("Bash starts even though its inner program is absent");
-    wait_for_dead_pane(
-        &h.state.path().join("tmux.sock"),
-        &format!("fh-{}", session.id),
-    )
-    .await;
+    wait_for_dead_agent(&h.sup, h.state.path(), &session.id).await;
     h.sup.reconcile_for_test().await;
     let ended = wait_for_exit_code(&h.client, &session.id, 127, 30).await;
     assert!(matches!(ended.status, SessionStatus::Exited { .. }));
@@ -237,7 +233,7 @@ async fn restart_and_restart_with_use_their_command_resume_source() {
         )
         .await
         .expect("create a resumable command");
-    wait_for_agent_ready(&h.state.path().join("tmux.sock"), &session.id).await;
+    wait_for_agent_ready(&h, &session.id).await;
     let conversation = "conv;$HOME*$(touch${IFS}conversation-injected)";
     h.sup
         .record_conversation_for_test(&session.id, conversation)

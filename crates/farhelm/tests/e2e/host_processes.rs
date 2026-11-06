@@ -551,7 +551,7 @@ async fn the_tmux_process_fixture_still_creates_tmux_terminals() {
         TerminalKind::Tmux,
         "the tmux fixture's supervisor creates tmux terminals: {row:?}"
     );
-    wait_for_agent_ready(&state.join("tmux.sock"), &session.id).await;
+    wait_for_tmux_agent_ready(&state.join("tmux.sock"), &session.id).await;
     let (channel, stream) = client
         .attach_terminal(
             &session.id,
@@ -604,7 +604,7 @@ async fn an_old_session_after_the_switch_to_hosts_is_reported_as_one_to_move() {
         "premise: the first supervisor creates tmux terminals"
     );
     let tmux_socket = stack.state.join("tmux.sock");
-    wait_for_agent_ready(&tmux_socket, &old.id).await;
+    wait_for_tmux_agent_ready(&tmux_socket, &old.id).await;
     drop(client);
     let status = stack.stop(libc::SIGTERM).await;
     assert!(
@@ -633,7 +633,7 @@ async fn an_old_session_after_the_switch_to_hosts_is_reported_as_one_to_move() {
         old_row.supervisor_creates_host_terminals,
         "a bare supervisor reports that it creates new terminals: {old_row:?}"
     );
-    wait_for_agent_ready(&tmux_socket, &old.id).await;
+    wait_for_tmux_agent_ready(&tmux_socket, &old.id).await;
     let (channel, stream) = client
         .attach_terminal(
             &old.id,
@@ -823,7 +823,7 @@ async fn the_private_tmux_server_ends_with_the_last_old_terminal() {
     let client = stack.start().await;
     let old = stack.create(&client).await;
     let tmux_socket = stack.state.join("tmux.sock");
-    wait_for_agent_ready(&tmux_socket, &old.id).await;
+    wait_for_tmux_agent_ready(&tmux_socket, &old.id).await;
     drop(client);
     let status = stack.stop(libc::SIGTERM).await;
     assert!(
@@ -833,7 +833,7 @@ async fn the_private_tmux_server_ends_with_the_last_old_terminal() {
 
     stack.kind_args = &[];
     let client = stack.start().await;
-    wait_for_agent_ready(&tmux_socket, &old.id).await;
+    wait_for_tmux_agent_ready(&tmux_socket, &old.id).await;
     let (channel, stream) = client
         .attach_terminal(
             &old.id,
@@ -893,7 +893,7 @@ async fn old_terminals_without_a_usable_tmux_are_reported_not_alive() {
     let client = stack.start().await;
     let old = stack.create(&client).await;
     let tmux_socket = stack.state.join("tmux.sock");
-    wait_for_agent_ready(&tmux_socket, &old.id).await;
+    wait_for_tmux_agent_ready(&tmux_socket, &old.id).await;
     drop(client);
     let status = stack.stop(libc::SIGTERM).await;
     assert!(
@@ -943,7 +943,7 @@ async fn old_terminals_without_a_usable_tmux_are_reported_not_alive() {
         tmux_server_runs(&tmux_socket).await,
         "the server holding the old session is left running"
     );
-    wait_for_agent_ready(&tmux_socket, &old.id).await;
+    wait_for_tmux_agent_ready(&tmux_socket, &old.id).await;
     drop(client);
     stack.finish().await;
 }

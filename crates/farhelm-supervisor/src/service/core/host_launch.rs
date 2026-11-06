@@ -346,15 +346,38 @@ pub(super) enum HostLeft {
 
 impl Supervisor {
     /// The program this supervisor starts hosts from: its own executable
-    /// ([`crate::hosts::own_host_program`]), or the test seam's
-    /// replacement for an in-process supervisor.
+    /// ([`crate::hosts::own_host_program`]), as a shipped supervisor does,
+    /// unless, in builds with test seams, the seam names another program or
+    /// the supervisor runs inside another program.
+    ///
+    /// The second case is an in-process supervisor in a test binary: its own
+    /// executable is the test binary, which has no `internal terminal-host`,
+    /// while the launch shim program the test gave it (`farhelm_exe`) is the
+    /// built `farhelm` in the Rust e2e suite. It is told apart by that shim
+    /// program not being the running executable; a real `farhelm supervisor
+    /// run`, even one built with test seams for the e2e suite's process
+    /// tests, runs its shim from itself and so starts hosts the shipped way,
+    /// from `/proc/self/exe` on Linux. In this crate's own unit tests the
+    /// fallback is a path that does not exist, even when a test passes the
+    /// libtest runner as its launch shim: run as `internal terminal-host
+    /// --socket …`, the runner would read those arguments as test filters.
+    #[cfg(any(test, feature = "test-seams"))]
     pub(super) fn host_program(&self) -> PathBuf {
-        #[cfg(any(test, feature = "test-seams"))]
-        {
-            if let Some(program) = &self.seams.host_program {
-                return program.clone();
-            }
+        if let Some(program) = &self.seams.host_program {
+            return program.clone();
         }
+        if cfg!(test) {
+            return PathBuf::from("/nonexistent/farhelm-unit-tests-have-no-host-program");
+        }
+        let in_another_program = std::env::current_exe().is_ok_and(|own| own != self.farhelm_exe);
+        if in_another_program {
+            return self.farhelm_exe.clone();
+        }
+        crate::hosts::own_host_program(&self.farhelm_exe)
+    }
+
+    #[cfg(not(any(test, feature = "test-seams")))]
+    pub(super) fn host_program(&self) -> PathBuf {
         crate::hosts::own_host_program(&self.farhelm_exe)
     }
 

@@ -1,5 +1,11 @@
 //! Server-enforced create idempotency: dropped-reply retries and
 //! genuine crash-partway-through cases.
+//!
+//! These run on new terminals: a duplicate agent shows as a second running
+//! terminal host (`agent_terminal_names` counts hosts and tmux sessions both),
+//! and a reboot is simulated by ending every host. How a retry finds and
+//! settles a host an interrupted attempt started is tested in more depth in
+//! `host_creates.rs`.
 
 use crate::harness::*;
 
@@ -43,21 +49,59 @@ async fn create_keyed(
         .await
 }
 
-/// How many tmux sessions this state directory's private server holds —
-/// the check that actually proves "no second process", since a duplicate
-/// create leaves a duplicate agent behind whether or not anything lists it.
-async fn tmux_session_count(sock: &std::path::Path) -> usize {
-    tmux_session_names(sock).await.len()
+/// How many agent terminals run in the state directory `state` — the check that
+/// actually proves "no second process", since
+/// a duplicate create leaves a duplicate agent behind whether or not
+/// anything lists it.
+async fn agent_terminal_count(state: &std::path::Path) -> usize {
+    agent_terminal_names(state).await.len()
 }
 
-/// The `fh-*` tmux session names this server holds.
-async fn tmux_session_names(sock: &std::path::Path) -> Vec<String> {
-    let out = tmux_query(sock, &["list-sessions", "-F", "#{session_name}"]).await;
-    String::from_utf8_lossy(&out.stdout)
+/// The agent terminals running in the state directory `state`, each as
+/// `fh-<session id>`, sorted: the `fh-*` sessions its private tmux server
+/// holds, and every terminal host running there, named by
+/// the session whose launch record names its socket (`unrecorded:<socket>`
+/// for a host no record names, which a duplicate create could leave).
+///
+/// Read from the processes and records themselves, never through a
+/// supervisor, and without connecting to a host (which would take it over).
+async fn agent_terminal_names(state: &std::path::Path) -> Vec<String> {
+    let sock = state.join("tmux.sock");
+    let out = tmux_query(&sock, &["list-sessions", "-F", "#{session_name}"]).await;
+    let mut names: Vec<String> = String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter(|line| line.starts_with("fh-"))
         .map(str::to_string)
-        .collect()
+        .collect();
+    let mut recorded = std::collections::BTreeMap::new();
+    if let Ok(entries) = std::fs::read_dir(state.join("launch")) {
+        for entry in entries.flatten() {
+            let file = entry.file_name().to_string_lossy().into_owned();
+            let Some(stem) = file.strip_suffix(".host") else {
+                continue;
+            };
+            let session = stem.split('.').next().unwrap_or(stem).to_string();
+            let text = std::fs::read_to_string(entry.path()).unwrap_or_default();
+            if let Some(socket) = text.lines().find_map(|line| line.strip_prefix("socket ")) {
+                recorded.insert(socket.to_string(), session);
+            }
+        }
+    }
+    let hosts = farhelm_supervisor::hosts::hosts_dir(state);
+    if let Ok(entries) = std::fs::read_dir(&hosts) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if crate::host_terminals::host_process(&entry.path()).is_none() {
+                continue;
+            }
+            names.push(match recorded.get(&name) {
+                Some(session) => format!("fh-{session}"),
+                None => format!("unrecorded:{name}"),
+            });
+        }
+    }
+    names.sort();
+    names
 }
 
 /// The supervisor's own view of a session's durable row, read through a
@@ -148,12 +192,20 @@ pub(crate) async fn wait_for_state_dir_claim_release(
 /// draining that first, the replacement is constructed alongside a live
 /// predecessor and silently starts read-only — which would make every
 /// assertion below about reload's reconciliation vacuous.
+///
+/// The replacement creates the same kind of terminal `sup` did, so a test
+/// of old terminals keeps them across the restart and one of new terminals
+/// keeps those.
 pub(crate) async fn handoff_to_new_supervisor(
     state: &std::path::Path,
     sup: Arc<Supervisor>,
     client: Arc<SupervisorClient>,
 ) -> Arc<Supervisor> {
-    handoff_to_new_supervisor_with_seams(state, sup, client, SupervisorSeams::default()).await
+    let seams = SupervisorSeams {
+        new_terminals: sup.new_terminals(),
+        ..SupervisorSeams::default()
+    };
+    handoff_to_new_supervisor_with_seams(state, sup, client, seams).await
 }
 
 /// [`handoff_to_new_supervisor`] with the replacement's seams chosen by
@@ -208,11 +260,8 @@ pub(crate) async fn handoff_to_new_supervisor_with_seams(
 async fn a_retried_create_returns_the_same_session_across_a_supervisor_restart() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let sup1 = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
-        .await
-        .expect("supervisor");
+    let sup1 = supervisor_on(state.path()).await.expect("supervisor");
     let client1 = connect_client(&sup1).await;
 
     let first = create_keyed(&client1, work.path(), "intent-1")
@@ -226,13 +275,13 @@ async fn a_retried_create_returns_the_same_session_across_a_supervisor_restart()
         "the retry must replay the session the first attempt created"
     );
     // A replay is the same answer, terminal kinds included: both replies
-    // name the live agent's tmux terminal and report the switch off.
+    // name the live agent's terminal host and report the switch on.
     for reply in [&first, &replay] {
         assert_eq!(
             reply.agent_terminal,
-            Some(farhelm_proto::TerminalKind::Tmux)
+            Some(farhelm_proto::TerminalKind::Host)
         );
-        assert!(!reply.supervisor_creates_host_terminals);
+        assert!(reply.supervisor_creates_host_terminals);
     }
 
     let sup2 = handoff_to_new_supervisor(state.path(), sup1, client1).await;
@@ -246,7 +295,7 @@ async fn a_retried_create_returns_the_same_session_across_a_supervisor_restart()
     );
     assert_eq!(
         after_restart.agent_terminal,
-        Some(farhelm_proto::TerminalKind::Tmux),
+        Some(farhelm_proto::TerminalKind::Host),
         "a replay after a restart names the terminal the reloaded entry holds"
     );
     // Dimensions are deliberately NOT part of the fingerprint — they shape
@@ -273,7 +322,7 @@ async fn a_retried_create_returns_the_same_session_across_a_supervisor_restart()
         listing.sessions
     );
     assert_eq!(
-        tmux_session_count(&state.path().join("tmux.sock")).await,
+        agent_terminal_count(state.path()).await,
         1,
         "and exactly one agent process behind it"
     );
@@ -296,7 +345,6 @@ async fn a_retried_create_returns_the_same_session_across_a_supervisor_restart()
 async fn a_replay_after_a_reboot_reports_no_terminal_kind() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let work = farhelm_teststate::tempdir().expect("workdir");
     let sup1 = supervisor_believing_boot(state.path(), Some("boot-a")).await;
     let client1 = connect_client(&sup1).await;
@@ -305,11 +353,11 @@ async fn a_replay_after_a_reboot_reports_no_terminal_kind() {
         .expect("create");
     assert_eq!(
         first.agent_terminal,
-        Some(farhelm_proto::TerminalKind::Tmux),
-        "premise: the first reply names the live tmux terminal"
+        Some(farhelm_proto::TerminalKind::Host),
+        "premise: the first reply names the live terminal host"
     );
 
-    kill_tmux_server_and_wait(&state.path().join("tmux.sock")).await;
+    end_all_terminals(state.path()).await;
     let sup2 = handoff_to_new_supervisor_with_seams(
         state.path(),
         sup1,
@@ -335,7 +383,7 @@ async fn a_replay_after_a_reboot_reports_no_terminal_kind() {
         .expect("the session's row");
     assert_eq!(
         row.terminal_kind,
-        farhelm_supervisor::store::TerminalKind::Tmux,
+        farhelm_supervisor::store::TerminalKind::Host,
         "premise: the row still names the kind its last terminal was"
     );
 
@@ -344,7 +392,7 @@ async fn a_replay_after_a_reboot_reports_no_terminal_kind() {
         .expect("the keyed retry replays");
     assert_eq!(replay.id, first.id, "premise: the same session is replayed");
     assert_eq!(replay.agent_terminal, None);
-    assert!(!replay.supervisor_creates_host_terminals);
+    assert!(replay.supervisor_creates_host_terminals);
     drop(slot);
 }
 
@@ -409,7 +457,6 @@ async fn a_key_reused_for_a_different_request_is_refused() {
 async fn concurrent_creates_under_one_intent_key_yield_one_session() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let work = farhelm_teststate::tempdir().expect("workdir");
     // Released only after the contender is observed. Expiry must fail the
     // fixture, not let the first create finish and erase the overlap premise.
@@ -506,7 +553,7 @@ async fn concurrent_creates_under_one_intent_key_yield_one_session() {
         listing.sessions
     );
     assert_eq!(
-        tmux_session_count(&state.path().join("tmux.sock")).await,
+        agent_terminal_count(state.path()).await,
         1,
         "and one agent process — a second launch is the failure this collapses"
     );
@@ -525,8 +572,8 @@ async fn a_retry_after_delete_creates_a_fresh_session() {
     let session = create_keyed(&h.client, work.path(), "intent-4")
         .await
         .expect("create");
-    let sock = h.state.path().join("tmux.sock");
-    wait_for_agent_ready(&sock, &session.id).await;
+    let state_dir = h.state.path().to_path_buf();
+    wait_for_agent_ready(&h, &session.id).await;
     assert_eq!(
         stored_reservation(h.state.path(), "intent-4")
             .await
@@ -556,12 +603,12 @@ async fn a_retry_after_delete_creates_a_fresh_session() {
         replacement.id, session.id,
         "the retry must mint a fresh identity"
     );
-    wait_for_agent_ready(&sock, &replacement.id).await;
+    wait_for_agent_ready(&h, &replacement.id).await;
     let rows = stored_sessions(h.state.path()).await;
     assert_eq!(rows.len(), 1, "only the replacement may remain stored");
     assert_eq!(rows[0].id, replacement.id);
     assert_eq!(
-        tmux_session_names(&sock).await,
+        agent_terminal_names(&state_dir).await,
         vec![format!("fh-{}", replacement.id)],
         "the new identity must own the only remaining agent"
     );
@@ -578,8 +625,7 @@ async fn a_retry_after_delete_creates_a_fresh_session() {
 async fn deleting_a_pending_create_frees_its_key_without_relaunching_its_identity() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let sock = state.path().join("tmux.sock");
-    let _tmux = TmuxServerGuard::new(sock.clone());
+    let state_dir = state.path().to_path_buf();
     let work = farhelm_teststate::tempdir().expect("workdir");
     let sup1 = Supervisor::new_with_seams(
         state.path(),
@@ -608,7 +654,7 @@ async fn deleting_a_pending_create_frees_its_key_without_relaunching_its_identit
     assert_eq!(rows[0].id, pending.session_id);
     assert_eq!(rows[0].outcome, LastOutcome::Launching);
     assert!(
-        tmux_session_names(&sock).await.is_empty(),
+        agent_terminal_names(&state_dir).await.is_empty(),
         "premise: no launch occurred"
     );
 
@@ -625,7 +671,7 @@ async fn deleting_a_pending_create_frees_its_key_without_relaunching_its_identit
         Some(pending.clone()),
         "premise: reload preserves the pending key until Delete"
     );
-    assert!(tmux_session_names(&sock).await.is_empty());
+    assert!(agent_terminal_names(&state_dir).await.is_empty());
 
     client2
         .delete_session(&pending.session_id)
@@ -643,9 +689,9 @@ async fn deleting_a_pending_create_frees_its_key_without_relaunching_its_identit
         .await
         .expect("the released key must create normally after the crash seam is gone");
     assert_ne!(replacement.id, pending.session_id);
-    wait_for_agent_ready(&sock, &replacement.id).await;
+    wait_for_agent_ready_on(&sup2, state.path(), &replacement.id).await;
     assert_eq!(
-        tmux_session_names(&sock).await,
+        agent_terminal_names(&state_dir).await,
         vec![format!("fh-{}", replacement.id)],
         "the deleted placeholder must never be relaunched"
     );
@@ -660,7 +706,8 @@ async fn deleting_a_pending_create_frees_its_key_without_relaunching_its_identit
 struct CrashScene {
     /// The session row the interrupted attempt left, if any.
     row: Option<StoredSession>,
-    /// tmux session names alive at the moment of inspection.
+    /// Agent terminals running at the moment of inspection
+    /// ([`agent_terminal_names`]).
     tmux: Vec<String>,
     /// The reservation, after the replacement supervisor's reload has run
     /// but BEFORE any retry — so reload's own settlement pass is visible
@@ -679,8 +726,7 @@ struct CrashScene {
 /// not injecting where it claims to.
 async fn retry_after_a_crash_at(stage: CreateStage) -> CrashScene {
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
-    let sock = state.path().join("tmux.sock");
+    let state_dir = state.path().to_path_buf();
     let work = farhelm_teststate::tempdir().expect("workdir");
     let sup1 = Supervisor::new_with_seams(
         state.path(),
@@ -705,7 +751,7 @@ async fn retry_after_a_crash_at(stage: CreateStage) -> CrashScene {
     let rows = stored_sessions(state.path()).await;
     assert!(rows.len() <= 1, "one create can leave at most one row");
     let scene_row = rows.into_iter().next();
-    let scene_tmux = tmux_session_names(&sock).await;
+    let scene_tmux = agent_terminal_names(&state_dir).await;
 
     // The retry arrives at a supervisor that never saw the first attempt
     // in memory — the only honest way to model a crash, and what makes
@@ -743,13 +789,13 @@ async fn retry_after_a_crash_at(stage: CreateStage) -> CrashScene {
     );
     assert_eq!(listing.sessions[0].id, session.id);
     assert_eq!(
-        tmux_session_names(&sock).await,
+        agent_terminal_names(&state_dir).await,
         vec![format!("fh-{}", session.id)],
-        "tmux must hold exactly the session the retry handed back"
+        "exactly the session the retry handed back must have a running terminal"
     );
     // The retry must own a live pane. This reloaded in-process supervisor
     // has no serve-loop sampler, so cached status cannot prove that premise.
-    wait_for_live_pane(&sock, &format!("fh-{}", session.id), 30).await;
+    wait_for_live_agent(&sup2, state.path(), &session.id, 30).await;
     // The retried session is a normal session: deleting it tears down
     // everything the retry built (the other half of item 6's
     // retry-versus-delete ordering — when the retry wins, the delete that
@@ -759,7 +805,7 @@ async fn retry_after_a_crash_at(stage: CreateStage) -> CrashScene {
         .await
         .expect("delete the retried session");
     assert!(
-        tmux_session_names(&sock).await.is_empty(),
+        agent_terminal_names(&state_dir).await.is_empty(),
         "the delete must have torn down the relaunched agent too"
     );
 
@@ -793,7 +839,7 @@ async fn a_crash_after_the_reservation_lets_the_retry_perform_the_create() {
     );
     assert!(
         scene.tmux.is_empty(),
-        "the crash landed before any side effect, so tmux must hold nothing: {:?}",
+        "the crash landed before any side effect, so no terminal may run: {:?}",
         scene.tmux
     );
     assert_eq!(
@@ -881,7 +927,6 @@ async fn a_crash_before_the_outcome_commit_still_replays_the_same_session() {
 async fn a_reboot_does_not_turn_a_never_launched_intent_into_a_created_one() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let guard = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let work = farhelm_teststate::tempdir().expect("workdir");
     let sup1 = Supervisor::new_with_seams(
         state.path(),
@@ -912,12 +957,10 @@ async fn a_reboot_does_not_turn_a_never_launched_intent_into_a_created_one() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     drop(sup1);
-    // Dropping the guard kills the private tmux server, which is the other
-    // half of a reboot: a boot-id change alone would leave live panes for
-    // the reload to find, which is not a reboot at all. The replacement
-    // guard covers the server the next supervisor starts.
-    drop(guard);
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
+    // Ending every terminal is the other half of a reboot: a boot-id change
+    // alone would leave live terminals for the reload to find, which is not
+    // a reboot at all.
+    end_all_terminals(state.path()).await;
 
     let sup2 = supervisor_believing_boot(state.path(), Some("boot-b")).await;
     assert!(
@@ -947,12 +990,7 @@ async fn a_reboot_does_not_turn_a_never_launched_intent_into_a_created_one() {
     // The session it hands back must be a real, running one — not the
     // interrupted placeholder the reboot left. Inspect the pane directly:
     // this in-process supervisor has no serve-loop status sampler.
-    wait_for_live_pane(
-        &state.path().join("tmux.sock"),
-        &format!("fh-{}", session.id),
-        30,
-    )
-    .await;
+    wait_for_live_agent(&sup2, state.path(), &session.id, 30).await;
     assert_eq!(
         stored_sessions(state.path()).await.len(),
         1,
@@ -976,7 +1014,6 @@ async fn a_reboot_does_not_turn_a_never_launched_intent_into_a_created_one() {
 async fn a_settled_tilde_create_replays_after_home_becomes_unusable() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let home = farhelm_teststate::tempdir().expect("home");
     std::fs::create_dir(home.path().join("ws")).expect("workdir");
     let accepted = home.path().join("ws").to_string_lossy().into_owned();
@@ -1077,7 +1114,6 @@ async fn a_settled_tilde_create_replays_after_home_becomes_unusable() {
 async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let sup1 = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
@@ -1189,7 +1225,6 @@ async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
 async fn a_pending_tilde_create_retries_from_the_stored_expansion() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let home = farhelm_teststate::tempdir().expect("home");
     let workdir = home.path().join("ws");
     std::fs::create_dir(&workdir).expect("workdir");

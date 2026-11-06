@@ -74,8 +74,11 @@ that its required systemd or SSH substrate ran.
   — executes applicable unit and integration targets, including the support crates omitted from default-members. Nextest
   starts a process per test and bounds concurrency across binaries; the e2e group has four slots, supervisor tmux
   modules share two, the two-host fixture reserves two, and RSS reserves all four. The release gate retains its narrower
-  package/target selections; ordinary CI does not run this suite. Do not also run the old full libtest battery. On Linux
-  it needs Python 3 at `/usr/bin/python3`: besides the e2e stand-ins named below, the supervisor's
+  package/target selections; ordinary CI does not run this suite. Do not also run the old full libtest battery. The e2e
+  suite's in-process harness and its real supervisor process fixture create new terminals unless a test asks for old
+  ones by name (`harness_tmux`, `supervisor_process_tmux`, `SupervisorSeams::tmux_terminals()`), as the supervisor's own
+  unit tests that need a real terminal do; those, and the tests of tmux itself, are what the pinned tmux is for. On
+  Linux it needs Python 3 at `/usr/bin/python3`: besides the e2e stand-ins named below, the supervisor's
   `managed_supervisor::` stop test runs a Python stand-in whose main thread exits before its other thread.
 - `python3 scripts/record-test-run.py --kind development --selection 'workspace doctests' --concurrency '4 doctest threads' --tmux required -- cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4`
   — preserves doctest coverage separately because nextest does not execute it.
@@ -235,28 +238,28 @@ that its required systemd or SSH substrate ran.
   overall deadline for settling and ending hosts (a gate holding each end before it starts, not a stuck process read,
   and a one-second budget) returning a retryable refusal and releasing the directory admission and the lifecycle claim.
   Pure unit tests cover the bounded join and the startup sweep keeping every launch host record. The e2e tests
-  (`crates/farhelm/tests/e2e/host_terminals.rs`) move a created session's agent into a real host started from the built
-  `farhelm` (`Supervisor::install_host_agent_for_test`) and check the exit stored with its code, Stop and Delete killing
-  an unmarked process tree from the host's child (Stop leaving the host's process running with its final screen),
-  Restart stopping that tree before its new host starts, the delete guard, a bytes-only attach refused and a grid attach
-  showing the host child's output; and Delete ending hosts, every test's grandchild ignoring SIGHUP (it publishes its
-  pid only after its trap; disposition and ancestry checked first) so that only a sweep rooted at the host's child
-  reaches it: a host agent guarded and then ended (gone at Delete's return) beside a record naming the host its runtime
-  holds, a recorded host of another generation refused by the agent guard beside an ended tmux agent and then ended
-  while another session's recorded host is never touched, a terminal-less session's recorded agent host, a SIGSTOPped
-  host agent ended by the verified signal, a SIGSTOPped recorded host refused by the guard and then signalled, and a
-  host renamed over the agent's socket neither shut down nor signalled while Delete ends the host the runtime adopted
-  and deletes the session. In `host_creates.rs` (the selection below): the unbound recorded start an interrupted create
-  leaves fenced by an unconditional Delete, and Delete of a session whose runtime is held in a snapshot encode ending
-  the adopted host by its process after another host was renamed over its socket, which is left running. Linux only (the
-  e2e suite), a few minutes (several tests wait out a stopped host's connect deadline); part of the workspace nextest
-  run. Run it when a switch point, the host runtime's adapters, the status evidence, the grid attach path or Delete's
-  handling of hosts change.
+  (`crates/farhelm/tests/e2e/host_terminals.rs`) give a created session's agent a real host the test started from the
+  built `farhelm`, in place of the host its create started (`Supervisor::install_host_agent_for_test`), and check the
+  exit stored with its code, Stop and Delete killing an unmarked process tree from the host's child (Stop leaving the
+  host's process running with its final screen), Restart stopping that tree before its new host starts, the delete
+  guard, a bytes-only attach refused and a grid attach showing the host child's output; and Delete ending hosts, every
+  test's grandchild ignoring SIGHUP (it publishes its pid only after its trap; disposition and ancestry checked first)
+  so that only a sweep rooted at the host's child reaches it: a host agent guarded and then ended (gone at Delete's
+  return) beside a record naming the host its runtime holds, a recorded host of another generation refused by the agent
+  guard beside an ended agent and then ended while another session's recorded host is never touched, a terminal-less
+  session's recorded agent host, a SIGSTOPped host agent ended by the verified signal, a SIGSTOPped recorded host
+  refused by the guard and then signalled, and a host renamed over the agent's socket neither shut down nor signalled
+  while Delete ends the host the runtime adopted and deletes the session. In `host_creates.rs` (the selection below):
+  the unbound recorded start an interrupted create leaves fenced by an unconditional Delete, and Delete of a session
+  whose runtime is held in a snapshot encode ending the adopted host by its process after another host was renamed over
+  its socket, which is left running. Linux only (the e2e suite), a few minutes (several tests wait out a stopped host's
+  connect deadline); part of the workspace nextest run. Run it when a switch point, the host runtime's adapters, the
+  status evidence, the grid attach path or Delete's handling of hosts change.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'creating agents in terminal hosts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::host_launch::/) | test(/a_retry_finds_the_sessions_own_published_host/) | test(/^hosts::spawn::/) | test(/^host_creates::/)'`
   — a create starting its agent in a terminal host under the supervisor's switch (`SupervisorSeams::new_terminals`,
   `crates/farhelm-supervisor/src/service/core/host_launch.rs`; on in every shipped launch through
-  `farhelm supervisor run`'s default, off in the in-process harnesses unless a test turns it on). The unit tests pin the
-  host child's environment as a function of its inputs (the supervisor's environment passed through,
+  `farhelm supervisor run`'s default, and in the in-process harnesses unless a test asks for old terminals). The unit
+  tests pin the host child's environment as a function of its inputs (the supervisor's environment passed through,
   `TERM_PROGRAM=farhelm` with the version the emulator's XTVERSION answer names, no `TMUX`, `TMUX_PANE` or `LISTEN_*`,
   where the launch environment applies, the default `PATH`), the launch record's encoding and its refusals, a first
   stage started apart from its spec (pinned, given nothing until finished, killed having read nothing when dropped, a

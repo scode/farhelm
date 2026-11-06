@@ -193,7 +193,7 @@ async fn stop_attached_supervisor(stop: Stop) {
         )
         .await
         .expect("create");
-    wait_for_agent_ready(&sock, &session.id).await;
+    wait_for_tmux_agent_ready(&sock, &session.id).await;
     // A live attachment is what gives the supervisor output-bearing clients
     // (the terminal's forwarder and the session sink) to shut down.
     let (channel, replay, mut rx) = client
@@ -203,7 +203,7 @@ async fn stop_attached_supervisor(stop: Stop) {
     let mut seen = replay;
     // Fresh output through this attachment after its replay, so the stop
     // below meets clients that are really streaming, not merely opened.
-    client.send_input(channel, b"before-stop\r".to_vec()).await;
+    client.send_keys(channel, b"before-stop\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "before-stop", 20).await;
     // Everything the wrapper records from here on is the stop's doing.
     std::fs::OpenOptions::new()

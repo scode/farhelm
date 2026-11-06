@@ -2155,7 +2155,7 @@ fn apply_pause_transition(pause: &watch::Sender<Option<tokio::time::Instant>>, p
 #[cfg(test)]
 mod tests {
     use super::super::core::CreateInputs;
-    use super::super::core::tests::{StateDir, dummy_exe};
+    use super::super::core::tests::{StateDir, dummy_exe, tmux_supervisor};
     use super::*;
     use farhelm_proto::SessionLaunch;
     use farhelm_proto::{RestartOffer, SessionInfo, SessionStatus};
@@ -2629,7 +2629,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn an_authenticated_spawn_hello_with_the_wrong_token_is_unauthorized() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = tmux_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor construction touches only tmux, not the launch shim");
         let cwd = state.path().to_string_lossy().into_owned();
@@ -2820,7 +2820,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn a_valid_session_credential_is_admitted_with_restricted_authority() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = tmux_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let cwd = state.path().to_string_lossy().into_owned();

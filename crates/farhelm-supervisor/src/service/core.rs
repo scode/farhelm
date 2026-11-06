@@ -1147,24 +1147,30 @@ pub struct SupervisorSeams {
     /// in-process harnesses set it here, never through their own process
     /// environment.
     ///
-    /// The two defaults differ on purpose. `Self::default()` keeps
-    /// [`NewTerminals::Tmux`], so an in-process test creates the old kind
-    /// unless it opts in to hosts: the old path keeps its tests for as long
-    /// as old terminals exist, and they were written against tmux. Opting
-    /// in also takes `host_program` (below), because a supervisor inside a
-    /// test binary has no `internal terminal-host` of its own to start
-    /// hosts from.
+    /// `Self::default()` is [`NewTerminals::Host`], the same as the
+    /// command line's default, so an in-process test creates new terminals
+    /// unless it asks for old ones by name ([`Self::tmux_terminals`]). The
+    /// old path keeps an explicitly named set of tests for as long as old
+    /// terminals exist; everything else runs on what the release runs. A
+    /// supervisor inside a test binary has no `internal terminal-host` of
+    /// its own, so creating a host terminal there also takes `host_program`
+    /// (below): the Rust e2e harness points it at the built `farhelm`, and
+    /// the supervisor's own unit tests, which have no such binary, create
+    /// old terminals by name when their subject needs a real terminal.
     pub new_terminals: NewTerminals,
     /// The program terminal hosts are started from, in place of the
     /// supervisor's own executable
     /// ([`crate::hosts::spawn::own_host_program`]).
     ///
-    /// For the in-process harnesses only: a supervisor running inside a
-    /// test binary has that binary as its own executable, which has no
-    /// `internal terminal-host`, so a test that turns on
-    /// [`Self::new_terminals`] points this at the built `farhelm`. `None`
-    /// is the production rule. Absent from builds without `test-seams`, so
-    /// nothing in production can start hosts from another program.
+    /// For tests that start hosts from a program of their choosing (a
+    /// wrapper around `farhelm`, a stand-in). With `None`, a supervisor that
+    /// runs inside another program (an in-process supervisor in a test
+    /// binary, whose own executable has no `internal terminal-host`) starts
+    /// hosts from the `farhelm` it runs its launch shim from, the built
+    /// `farhelm` in the e2e harnesses, and any other starts them the shipped
+    /// way ([`Supervisor::host_program`]). Absent from builds without
+    /// `test-seams`, so nothing in production can start hosts from another
+    /// program.
     #[cfg(any(test, feature = "test-seams"))]
     pub host_program: Option<PathBuf>,
     /// Counts completed background re-adoption passes for tests that must
@@ -1183,9 +1189,10 @@ pub struct SupervisorSeams {
 /// Named for the two kinds rather than on and off, because with terminal
 /// hosts the default the old kind stays selectable for the tests and media
 /// harnesses that keep using tmux, and "new terminals: tmux" reads as what
-/// it does. The derived `Default` is [`NewTerminals::Tmux`]: it is the
-/// in-process harnesses' default ([`SupervisorSeams::default`]), not the
-/// release's, which the command line's default sets.
+/// it does. The derived `Default` is [`NewTerminals::Host`], the release's
+/// kind, and the in-process harnesses' default too
+/// ([`SupervisorSeams::default`]): old terminals are what a test asks for
+/// by name.
 ///
 /// A new create, a new tab and a Restart consult it; a retried create
 /// launches in the kind its launching row already records, whatever this
@@ -1201,10 +1208,11 @@ pub struct SupervisorSeams {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NewTerminals {
     /// A pane in the supervisor's private tmux server, as every terminal was
-    /// before terminal hosts.
-    #[default]
+    /// before terminal hosts: an old terminal, for the tests and harnesses
+    /// whose subject is one.
     Tmux,
     /// A terminal host per agent terminal (SPEC_impl.md, "Terminal host").
+    #[default]
     Host,
 }
 
@@ -1285,11 +1293,31 @@ impl Default for SupervisorSeams {
             launch_shell: None,
             upload_fs: Arc::new(crate::files::RealFs),
             state_dir_claim_wait: Duration::ZERO,
-            new_terminals: NewTerminals::Tmux,
+            new_terminals: NewTerminals::Host,
             #[cfg(any(test, feature = "test-seams"))]
             host_program: None,
             #[cfg(test)]
             readoption_passes: None,
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-seams"))]
+impl SupervisorSeams {
+    /// The default seams with [`NewTerminals::Tmux`]: a supervisor that
+    /// creates old terminals, in its private tmux server.
+    ///
+    /// The one named way an in-process test asks for old terminals, so that
+    /// a reader can tell from the construction alone that a test runs on
+    /// them: the default is the release's kind, terminal hosts. For tests
+    /// whose subject exists only for old terminals (the tmux driver, tmux
+    /// tabs, moving old sessions into hosts), and for this crate's unit
+    /// tests that need a real terminal, which a unit test binary cannot
+    /// start a host for.
+    pub fn tmux_terminals() -> Self {
+        SupervisorSeams {
+            new_terminals: NewTerminals::Tmux,
+            ..SupervisorSeams::default()
         }
     }
 }
@@ -6155,13 +6183,11 @@ impl Supervisor {
     /// launch shim is this very process's binary.
     ///
     /// Not what `farhelm supervisor run` uses: that builds its supervisor
-    /// through [`Self::new_for_startup`] with the options it resolved,
-    /// terminal hosts among them. What calls this today are lib tests that
-    /// need no launch (their `current_exe` is the libtest runner, so a
-    /// harness that launches agents uses `new_with_exe` instead), and new
-    /// terminals here are tmux ones, the in-process default
-    /// ([`SupervisorSeams::new_terminals`]), since that program cannot start
-    /// a host.
+    /// through [`Self::new_for_startup`] with the options it resolved. What
+    /// calls this today are lib tests that need no launch (their
+    /// `current_exe` is the libtest runner, so a harness that launches
+    /// agents uses `new_with_exe` instead). New terminals here are host
+    /// ones, the release's kind, which such a test never starts.
     pub async fn new(state_dir: &Path) -> anyhow::Result<Arc<Supervisor>> {
         Self::new_for_startup(
             state_dir,
@@ -6170,7 +6196,7 @@ impl Supervisor {
                 agent_hooks: crate::agent_kind::AgentHooks::default(),
                 agent_instructions: crate::agent_kind::AgentInstructions::default(),
                 boot_id_file: None,
-                new_terminals: NewTerminals::Tmux,
+                new_terminals: NewTerminals::Host,
             },
         )
         .await
@@ -18122,25 +18148,25 @@ impl Supervisor {
     }
 
     /// Make the host at `socket` session `id`'s agent terminal, in place of
-    /// the tmux terminal its create made, and return the runtime it now
-    /// runs through.
+    /// the terminal its create made, and return the runtime it now runs
+    /// through.
     ///
-    /// A create starts its agent in a host only under the switch
-    /// ([`SupervisorSeams::new_terminals`], which every shipped supervisor
-    /// has on and which an in-process harness turns on only by choice);
-    /// this is how tests reach the switch points' host arms with a
-    /// host whose child they choose (started by the test from the real
-    /// `farhelm` binary, never inside the test process, since a host forks)
-    /// rather than an agent's launch chain.
+    /// This is how tests reach the switch points' host arms with a host
+    /// whose child they choose (started by the test from the real `farhelm`
+    /// binary, never inside the test process, since a host forks) rather
+    /// than an agent's launch chain: one whose processes carry no session
+    /// markers, say.
     /// It adopts the host as freshly spawned, with this supervisor's
     /// liveness notifier, publishes an entry that keeps the created one's
     /// run and session cells, generation and scope and differs only in its
     /// terminal, records the row as a host row whose `pane` holds the
-    /// socket's name (the plan's D-14), and then kills the created tmux
-    /// session, so the session looks like one created in a host: no tmux
-    /// session of its own. The entry is swapped before the kill, so nothing
-    /// ever observes the session without a terminal. Compiled only for
-    /// tests and the `test-seams` feature.
+    /// socket's name (the plan's D-14), and then ends the terminal the
+    /// create made: a host the create started (the default, new terminals)
+    /// is shut down, and the tmux session of a supervisor of old terminals
+    /// is killed, so the session looks like one created in the test's host.
+    /// The entry is swapped before the old terminal ends, so nothing ever
+    /// observes the session without a terminal. Compiled only for tests and
+    /// the `test-seams` feature.
     #[cfg(any(test, feature = "test-seams"))]
     pub async fn install_host_agent_for_test(
         &self,
@@ -18180,8 +18206,9 @@ impl Supervisor {
     }
 
     /// The two helpers above: adopt the host at `socket` as session `id`'s
-    /// agent terminal, and end the created tmux agent: its whole tmux
-    /// session, or with `keep_tabs` only its window.
+    /// agent terminal, and end the terminal the create made: a host it
+    /// started is shut down; a tmux agent loses its whole tmux session, or
+    /// with `keep_tabs` only its window.
     #[cfg(any(test, feature = "test-seams"))]
     async fn move_agent_into_host_for_test(
         &self,
@@ -18228,7 +18255,16 @@ impl Supervisor {
                 self.tmux.kill_window(&tmux.tmux_name, &tmux.pane).await?;
             }
             Some(Terminal::Tmux(tmux)) => self.tmux.kill_session(&tmux.tmux_name).await?,
-            Some(Terminal::Host(_)) | None => {}
+            // The created host's runtime is no longer on the entry; ending
+            // it through that runtime hangs its agent up and removes its
+            // socket, as a confirmed shutdown does.
+            Some(Terminal::Host(created)) => {
+                let report = created.shutdown().await.map_err(|liveness| {
+                    anyhow::anyhow!("the created host could not be shut down: {liveness:?}")
+                })?;
+                anyhow::ensure!(report.ended, "the created host did not end: {report:?}");
+            }
+            None => {}
         }
         Ok(host)
     }
@@ -20256,6 +20292,31 @@ pub(crate) mod tests {
         PathBuf::from("/nonexistent/farhelm")
     }
 
+    /// A supervisor with default timeouts that creates old terminals, in
+    /// its private tmux server: [`Supervisor::new_with_exe`] with
+    /// [`SupervisorSeams::tmux_terminals`].
+    ///
+    /// For the unit tests that create real terminals. The default kind is
+    /// the release's, terminal hosts, but a unit test binary has no
+    /// `farhelm` to start a host from (`Supervisor::host_program`), so these
+    /// tests run their launches in tmux, and what they check is checked on
+    /// old terminals only. Some of the same behavior is pinned on new
+    /// terminals by the Rust e2e suite, whose harness has the built binary,
+    /// and by this crate's stand-in host tests (`tests::host_terminals`);
+    /// that coverage is not complete for every test that uses this.
+    pub(crate) async fn tmux_supervisor(
+        state_dir: &Path,
+        farhelm_exe: PathBuf,
+    ) -> anyhow::Result<Arc<Supervisor>> {
+        Supervisor::new_with_seams(
+            state_dir,
+            farhelm_exe,
+            SupervisorTimeouts::default(),
+            SupervisorSeams::tmux_terminals(),
+        )
+        .await
+    }
+
     /// Keep agent launches failing while allowing real terminal tabs in core tests.
     /// These fixtures need dead or replaceable agent panes alongside live tabs; a
     /// nonexistent program can no longer provide both because tabs now use a helper.
@@ -20678,7 +20739,7 @@ pub(crate) mod tests {
             .expect("canonical cwd")
             .to_string_lossy()
             .into_owned();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = tmux_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let id = "0b4f3c1e-5a52-4d1c-9d0e-2f6a1c7b8e90";
@@ -21103,7 +21164,7 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn an_opened_tab_records_whether_it_was_scoped() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), tab_capable_dummy_exe(&state))
+        let sup = tmux_supervisor(state.path(), tab_capable_dummy_exe(&state))
             .await
             .expect("supervisor");
         let created = sup
@@ -21181,7 +21242,7 @@ pub(crate) mod tests {
                     false,
                     Arc::new(|_| {}),
                 )),
-                ..SupervisorSeams::default()
+                ..SupervisorSeams::tmux_terminals()
             },
         )
         .await
@@ -22917,7 +22978,7 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), tab_capable_dummy_exe(&state))
+        let sup = tmux_supervisor(state.path(), tab_capable_dummy_exe(&state))
             .await
             .expect("supervisor");
         let created = sup
@@ -23385,7 +23446,7 @@ pub(crate) mod tests {
                 SupervisorTimeouts::default(),
                 SupervisorSeams {
                     launch_shell: Some("/bin/sh".into()),
-                    ..SupervisorSeams::default()
+                    ..SupervisorSeams::tmux_terminals()
                 },
             )
             .await
@@ -23488,7 +23549,7 @@ pub(crate) mod tests {
                 }
             })
         });
-        let mut seams = SupervisorSeams::default();
+        let mut seams = SupervisorSeams::tmux_terminals();
         seams.faults.restart_window_gate = Some(gate);
         let state = StateDir::new();
         let sup = Supervisor::new_with_seams(
@@ -23572,7 +23633,7 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn restart_replaces_only_the_dead_agent_window() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), tab_capable_dummy_exe(&state))
+        let sup = tmux_supervisor(state.path(), tab_capable_dummy_exe(&state))
             .await
             .expect("supervisor");
         let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
@@ -23655,7 +23716,7 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn a_forged_tab_on_the_agent_window_cannot_be_listed_or_closed() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), tab_capable_dummy_exe(&state))
+        let sup = tmux_supervisor(state.path(), tab_capable_dummy_exe(&state))
             .await
             .expect("supervisor");
         let created = sup
@@ -23748,7 +23809,7 @@ pub(crate) mod tests {
             SupervisorTimeouts::default(),
             SupervisorSeams {
                 launch_shell: Some("/bin/sh".into()),
-                ..SupervisorSeams::default()
+                ..SupervisorSeams::tmux_terminals()
             },
         )
         .await
@@ -24124,7 +24185,7 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn forged_agent_marker_cannot_authorize_old_tab_cleanup() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), tab_capable_dummy_exe(&state))
+        let sup = tmux_supervisor(state.path(), tab_capable_dummy_exe(&state))
             .await
             .expect("supervisor");
         let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
@@ -24250,7 +24311,7 @@ pub(crate) mod tests {
                         replacement_fault: Some(fault),
                         ..FaultHooks::default()
                     },
-                    ..SupervisorSeams::default()
+                    ..SupervisorSeams::tmux_terminals()
                 },
             )
             .await
@@ -31406,7 +31467,7 @@ exit 0
     #[farhelm_testtrace::test]
     async fn a_pre_launch_kinds_reservation_refuses_its_retry() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = tmux_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let old_claim = |key: &str| IntentClaim {
@@ -31520,7 +31581,7 @@ exit 0
     #[farhelm_testtrace::test]
     async fn a_created_session_dates_its_activity_to_creation_everywhere() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = tmux_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let created = sup
@@ -31578,7 +31639,7 @@ exit 0
         let state = StateDir::new();
         let work = tempfile::tempdir().expect("workdir");
         let cwd = work.path().to_string_lossy().to_string();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = tmux_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
 
@@ -31850,7 +31911,7 @@ exit 0
                 !absent_shim.exists(),
                 "the fixture must not launch a vendor"
             );
-            let sup = Supervisor::new_with_exe(state.path(), absent_shim)
+            let sup = tmux_supervisor(state.path(), absent_shim)
                 .await
                 .expect("supervisor");
             let created = sup
@@ -32586,7 +32647,7 @@ exit 0
                         })),
                         ..FaultHooks::default()
                     },
-                    ..SupervisorSeams::default()
+                    ..SupervisorSeams::tmux_terminals()
                 },
             )
             .await
@@ -33009,7 +33070,7 @@ exit 0
     #[farhelm_testtrace::test]
     async fn a_title_with_control_characters_is_rejected_before_anything_is_stored() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = tmux_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
@@ -33129,7 +33190,7 @@ exit 0
     #[farhelm_testtrace::test]
     async fn a_title_derived_from_a_control_character_cwd_is_sanitized_not_refused() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = tmux_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
@@ -33344,7 +33405,7 @@ exit 0
     #[farhelm_testtrace::test]
     async fn an_ambiguous_tmux_failure_keeps_the_launching_record() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = tmux_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let work = tempfile::tempdir().expect("workdir");
@@ -34072,7 +34133,7 @@ exit 0
     #[farhelm_testtrace::test]
     async fn a_late_activity_write_from_a_pre_restart_entry_reaches_the_live_reply() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = tmux_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let cwd = state.path().to_string_lossy().to_string();
@@ -36811,7 +36872,7 @@ exit 0
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn a_claude_create_carries_the_hook_flags_into_its_launch_spec() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = tmux_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         // A command launch declaring Claude: an undeclared command gets no
@@ -36890,7 +36951,10 @@ exit 0
     // -------------------------------------------------------------------------
 
     /// Default seams with the scope manager disabled, for create and
-    /// lifecycle tests whose contract is independent of cgroup scopes.
+    /// lifecycle tests whose contract is independent of cgroup scopes. Old
+    /// terminals ([`SupervisorSeams::tmux_terminals`]): these tests launch
+    /// real terminals, which a unit test can only start in tmux
+    /// ([`tmux_supervisor`]).
     ///
     /// Even a create that fails before spawning probes availability while
     /// choosing its durable scope policy. A test's reply deadline must not
@@ -36914,7 +36978,7 @@ exit 0
     fn scopeless_seams() -> SupervisorSeams {
         SupervisorSeams {
             scopes: Arc::new(crate::scope::ScopeManager::disabled()),
-            ..SupervisorSeams::default()
+            ..SupervisorSeams::tmux_terminals()
         }
     }
 
@@ -37940,7 +38004,7 @@ exit 0
                         create_intent_waiting: Some(Arc::new(move |_| signal.notify_one())),
                         ..FaultHooks::default()
                     },
-                    ..SupervisorSeams::default()
+                    ..SupervisorSeams::tmux_terminals()
                 },
             )
             .await
@@ -38537,7 +38601,9 @@ exit 0
             test -z \"${{FARHELM_SESSION_TOKEN-}}${{FARHELM_SESSION_ID-}}${{FARHELM_AGENT_ID-}}${{FARHELM_TAB_ID-}}${{FARHELM_SUPERVISOR_SOCK-}}\" || exit 97\n\
             printf '%s\\n' \"$$\" >> {}\nread lifetime\n", quote(starts.to_str().unwrap()))).unwrap();
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let sup = Supervisor::new(state.path()).await.unwrap();
+        let sup = tmux_supervisor(state.path(), std::env::current_exe().unwrap())
+            .await
+            .unwrap();
         let mut first_checkout = checkout_fixture(&first_root);
         first_checkout.keep_spare = true;
         let first = fresh_create(&sup, &first_checkout, None).await.unwrap();
@@ -38662,7 +38728,9 @@ exit 0
             fingerprint: checkout_fingerprint(&checkout),
             dedup_scope: DedupScope::Permanent,
         };
-        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+        let sup = tmux_supervisor(state.path(), std::env::current_exe().unwrap())
+            .await
+            .expect("supervisor");
 
         let info = fresh_create(&sup, &checkout, Some(claim.clone()))
             .await
@@ -38738,9 +38806,7 @@ exit 0
             fingerprint: checkout_fingerprint(&checkout),
             dedup_scope: DedupScope::Permanent,
         };
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .unwrap();
+        let sup = tmux_supervisor(state.path(), dummy_exe()).await.unwrap();
         let origin = fresh_create(&sup, &checkout, Some(claim.clone()))
             .await
             .unwrap();
@@ -38771,9 +38837,7 @@ exit 0
         assert!(ordinary.github_repo.is_none() && ordinary.working_copy.is_none());
         for supervisor in [
             Arc::clone(&sup),
-            Supervisor::new_with_exe(state.path(), dummy_exe())
-                .await
-                .unwrap(),
+            tmux_supervisor(state.path(), dummy_exe()).await.unwrap(),
         ] {
             let listed = super::super::listing::list_all(&supervisor).await.unwrap();
             let fresh = listed
@@ -38970,11 +39034,12 @@ exit 0
 
     /// Pin startup identity and exclude cgroup evidence so these tests prove
     /// sentinel preservation rather than succeeding through another witness.
+    /// Old terminals, for [`tmux_supervisor`]'s reason.
     fn sentinel_recovery_seams() -> SupervisorSeams {
         SupervisorSeams {
             boot_id: Arc::new(|| Ok(Some("sentinel-test-boot".into()))),
             scopes: Arc::new(crate::scope::ScopeManager::disabled()),
-            ..SupervisorSeams::default()
+            ..SupervisorSeams::tmux_terminals()
         }
     }
 
@@ -40537,9 +40602,7 @@ exit 0
             let state = StateDir::new();
             let root = state.path().join("checkouts");
             std::fs::create_dir(&root).unwrap();
-            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-                .await
-                .unwrap();
+            let sup = tmux_supervisor(state.path(), dummy_exe()).await.unwrap();
             let origin = fresh_create(&sup, &checkout_fixture(&root), None)
                 .await
                 .unwrap();
@@ -40664,9 +40727,7 @@ exit 0
         let state = StateDir::new();
         let root = state.path().join("checkouts");
         std::fs::create_dir(&root).unwrap();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .unwrap();
+        let sup = tmux_supervisor(state.path(), dummy_exe()).await.unwrap();
         let info = fresh_create(&sup, &checkout_fixture(&root), None)
             .await
             .unwrap();
@@ -40754,9 +40815,7 @@ exit 0
         let state = StateDir::new();
         let root = state.path().join("checkouts");
         std::fs::create_dir(&root).unwrap();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .unwrap();
+        let sup = tmux_supervisor(state.path(), dummy_exe()).await.unwrap();
         let info = fresh_create(&sup, &checkout_fixture(&root), None)
             .await
             .unwrap();
@@ -40813,7 +40872,7 @@ exit 0
         assert!(sup.tmux.pane_states().await.unwrap().is_empty());
         let seams = SupervisorSeams {
             boot_id: Arc::new(|| Ok(Some("preparation-next-boot".into()))),
-            ..SupervisorSeams::default()
+            ..SupervisorSeams::tmux_terminals()
         };
         let (reloaded, _) =
             Supervisor::reload_sessions(state.path(), &sup.store, &sup.tmux, &seams, true)

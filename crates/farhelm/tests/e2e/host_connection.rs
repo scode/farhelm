@@ -131,10 +131,9 @@ struct RemoteSupervisor {
     control: std::sync::Arc<SupervisorClient>,
     identity: String,
     /// Declared FIRST so it is dropped first: the accept loop must stop
-    /// before the tmux server it may talk to and the state directory it
-    /// serves from disappear underneath it.
+    /// before the state directory it serves from (and the terminal hosts
+    /// in it) disappear underneath it.
     _serving: ServeGuard,
-    _tmux: TmuxServerGuard,
     state: farhelm_teststate::TestDir,
     _work: farhelm_teststate::TestDir,
     session: SessionInfo,
@@ -181,11 +180,14 @@ type ServeFailure = std::sync::Arc<std::sync::Mutex<Option<String>>>;
 async fn remote_supervisor() -> RemoteSupervisor {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("state dir");
-    let sup =
-        Supervisor::new_with_exe_and_timeouts(state.path(), farhelm_bin().into(), suite_timeouts())
-            .await
-            .expect("supervisor");
-    let tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        farhelm_bin().into(),
+        suite_timeouts(),
+        SupervisorSeams::default(),
+    )
+    .await
+    .expect("supervisor");
     // `serve` never returns on its own; it owns the accept loop until the
     // guard below aborts it at teardown. Its error — if it ends early — is
     // parked where the socket wait can report it instead of timing out
@@ -230,7 +232,6 @@ async fn remote_supervisor() -> RemoteSupervisor {
         control,
         identity,
         _serving: serve_task,
-        _tmux: tmux,
         state,
         _work: work,
         session,

@@ -1,5 +1,10 @@
 //! Error status reported through the launch shim's sentinel, and its
 //! durability across restarts and simulated reboots.
+//!
+//! The tests run on new terminals. The one that stays on old terminals,
+//! `create_records_error_when_the_session_directory_cannot_be_entered`, does
+//! because on a new terminal the host's own start is refused on a directory
+//! it cannot enter; its docs record that as a found difference.
 
 use crate::harness::*;
 
@@ -31,6 +36,11 @@ fn unexecutable_agent(program: &std::path::Path) -> farhelm_proto::SessionLaunch
 /// An existing directory without search permission must fail at the final launch
 /// boundary. Metadata still passes admission, and tmux can fall back to HOME, so
 /// only an in-process chdir prevents the executable from touching unrelated work.
+///
+/// Old terminals: on new terminals the create is refused instead of recorded as
+/// an error: the host's start fails on the unenterable directory itself
+/// (terminal-host: starting /bin/bash: Permission denied), a found difference
+/// to decide on.
 #[farhelm_testtrace::test]
 async fn create_records_error_when_the_session_directory_cannot_be_entered() {
     // SAFETY: geteuid has no arguments and cannot fail. Root bypasses this fixture.
@@ -38,7 +48,7 @@ async fn create_records_error_when_the_session_directory_cannot_be_entered() {
         eprintln!("SKIPPED: root bypasses directory search permissions");
         return;
     }
-    let h = harness_believing_boot("directory-test").await;
+    let h = harness_believing_boot_tmux("directory-test").await;
     let work = farhelm_teststate::tempdir().unwrap();
     let witness = farhelm_teststate::tempdir().unwrap();
     let marker = witness.path().join("agent-ran");
@@ -56,11 +66,7 @@ async fn create_records_error_when_the_session_directory_cannot_be_entered() {
         .await
         .expect("admission may publish a session before the helper fails");
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
-    wait_for_dead_pane(
-        &h.state.path().join("tmux.sock"),
-        &format!("fh-{}", session.id),
-    )
-    .await;
+    wait_for_dead_agent(&h.sup, h.state.path(), &session.id).await;
     h.sup.reconcile_for_test().await;
     let row = wait_for_non_live_status(&h.client, &session.id, 30).await;
     drop(denied);
@@ -76,8 +82,8 @@ async fn create_records_error_when_the_session_directory_cannot_be_entered() {
 }
 
 use crate::boot_id_durable_outcome::{
-    harness_believing_boot, listed, supervisor_believing_boot, supervisor_reading_boot,
-    wait_for_dead_pane,
+    harness_believing_boot, harness_believing_boot_tmux, listed, supervisor_believing_boot,
+    supervisor_reading_boot,
 };
 
 // ---------------------------------------------------------------------
@@ -101,7 +107,6 @@ use crate::boot_id_durable_outcome::{
 #[farhelm_testtrace::test]
 async fn unexecutable_invocation_lists_as_error_and_outranks_a_reboot() {
     let h = harness_believing_boot("boot-a").await;
-    let sock = h.state.path().join("tmux.sock");
     let work = farhelm_teststate::tempdir().expect("workdir");
     let missing_binary = work.path().join("no-such-farhelm-agent");
 
@@ -122,7 +127,7 @@ async fn unexecutable_invocation_lists_as_error_and_outranks_a_reboot() {
     // shell by the time it attempts the REAL agent's exec — dies the
     // moment that second exec fails, so the pane goes dead almost
     // immediately, well before any list has a chance to observe it.
-    wait_for_dead_pane(&sock, &format!("fh-{}", session.id)).await;
+    wait_for_dead_agent(&h.sup, h.state.path(), &session.id).await;
 
     h.sup.reconcile_for_test().await;
     let before = wait_for_non_live_status(&h.client, &session.id, 30).await;
@@ -140,10 +145,13 @@ async fn unexecutable_invocation_lists_as_error_and_outranks_a_reboot() {
     // see `service.rs`'s reload/list sentinel-lifecycle comments), so this
     // proves the classification is durable store state, not a live
     // re-read of a file that no longer exists.
-    let sup2 = supervisor_believing_boot(h.state.path(), Some("boot-a")).await;
-    let client2 = connect_client(&sup2).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_believing_boot(&state, Some("boot-a")).await
+        })
+        .await;
     assert_eq!(
-        listed(&client2, &session.id).await.status,
+        listed(&h.client, &session.id).await.status,
         SessionStatus::Error {
             detail: detail.clone()
         },
@@ -157,11 +165,14 @@ async fn unexecutable_invocation_lists_as_error_and_outranks_a_reboot() {
     // even considers it — the ordinary terminal-state stickiness already
     // proven by `a_reboot_interrupts_live_sessions_and_preserves_ended_ones`
     // is what protects it here.
-    kill_tmux_server_and_wait(&sock).await;
-    let sup3 = supervisor_believing_boot(h.state.path(), Some("boot-b")).await;
-    let client3 = connect_client(&sup3).await;
+    end_all_terminals(h.state.path()).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_believing_boot(&state, Some("boot-b")).await
+        })
+        .await;
     assert_eq!(
-        listed(&client3, &session.id).await.status,
+        listed(&h.client, &session.id).await.status,
         SessionStatus::Error { detail },
         "an exec failure must classify error across a reboot, never interrupted"
     );
@@ -181,7 +192,6 @@ async fn unexecutable_invocation_lists_as_error_and_outranks_a_reboot() {
 #[farhelm_testtrace::test]
 async fn a_reboot_never_interrupts_a_row_a_sentinel_already_claims_as_error() {
     let h = harness_believing_boot("boot-a").await;
-    let sock = h.state.path().join("tmux.sock");
     let work = farhelm_teststate::tempdir().expect("workdir");
     let missing_binary = work.path().join("no-such-farhelm-agent");
 
@@ -202,12 +212,15 @@ async fn a_reboot_never_interrupts_a_row_a_sentinel_already_claims_as_error() {
     // still be `Running` in the store (`ConfirmRunning` committed at
     // create time, nothing has observed the exec failure since) when the
     // reboot below lands.
-    wait_for_dead_pane(&sock, &format!("fh-{}", session.id)).await;
+    wait_for_dead_agent(&h.sup, h.state.path(), &session.id).await;
 
-    kill_tmux_server_and_wait(&sock).await;
-    let sup2 = supervisor_believing_boot(h.state.path(), Some("boot-b")).await;
-    let client2 = connect_client(&sup2).await;
-    let status = listed(&client2, &session.id).await.status;
+    end_all_terminals(h.state.path()).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_believing_boot(&state, Some("boot-b")).await
+        })
+        .await;
+    let status = listed(&h.client, &session.id).await.status;
     assert!(
         matches!(status, SessionStatus::Error { .. }),
         "a sentinel-bearing launch must classify error even though its row was still \
@@ -290,12 +303,15 @@ async fn a_planted_malformed_spec_sentinel_classifies_error_with_its_detail() {
     let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
     std::fs::write(&status_path, &detail).expect("plant the sentinel");
 
-    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
-        .await
-        .expect("restart to trigger reload's unconditional sentinel check");
-    let client2 = connect_client(&sup2).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_on(&state)
+                .await
+                .expect("restart to trigger reload's unconditional sentinel check")
+        })
+        .await;
     assert_eq!(
-        listed(&client2, &session.id).await.status,
+        listed(&h.client, &session.id).await.status,
         SessionStatus::Error {
             detail: detail.clone()
         },
@@ -311,16 +327,16 @@ async fn a_planted_malformed_spec_sentinel_classifies_error_with_its_detail() {
 /// Review-swarm fix batch item 5/19: a session `reload_sessions` classifies
 /// `Error` via its sentinel must NOT lose its terminal in the process — the
 /// bug this pins is that the sentinel branch used to `continue` before
-/// ever recording the pane it had already found, leaving `Attach` refusing
-/// a session whose dead pane genuinely still exists in tmux, and
+/// ever recording the terminal it had already found, leaving `Attach`
+/// refusing a session whose terminal (a host keeping its exited child's
+/// screen, or a dead tmux pane) genuinely still exists, and
 /// `DeleteSession`'s kill sweep with nothing to act on at all (a leaked
-/// tmux session). Attach must succeed (the dead pane is viewable, exactly
-/// like any other exited session), and delete must actually tear the real
-/// tmux session down, not merely drop the row.
+/// terminal). Attach must succeed (the exited terminal is viewable, exactly
+/// like any other exited session), and delete must actually end the real
+/// terminal, not merely drop the row.
 #[farhelm_testtrace::test]
 async fn a_reload_classified_error_session_keeps_its_terminal_for_attach_and_delete() {
     let h = harness().await;
-    let sock = h.state.path().join("tmux.sock");
     let work = farhelm_teststate::tempdir().expect("workdir");
     let missing_binary = work.path().join("no-such-farhelm-agent");
 
@@ -336,48 +352,50 @@ async fn a_reload_classified_error_session_keeps_its_terminal_for_attach_and_del
         )
         .await
         .expect("create a session whose invocation cannot exec");
-    wait_for_dead_pane(&sock, &format!("fh-{}", session.id)).await;
+    wait_for_dead_agent(&h.sup, h.state.path(), &session.id).await;
 
     // Reload — not list — is what this test targets: a fresh supervisor's
     // `reload_sessions` reconciliation is where item 5's bug lived,
     // separately from `ListSessions`'s own (already-correct) sentinel
-    // branch. This supervisor goes on to attach below, so it needs the
-    // suite's loaded-CI tmux floors.
-    let sup2 = Supervisor::new_with_exe_and_timeouts(
-        h.state.path(),
-        farhelm_bin().into(),
-        suite_timeouts(),
-    )
-    .await
-    .expect("reload onto the sentinel-classified row");
-    let client2 = connect_client(&sup2).await;
+    // branch. This supervisor goes on to attach below, so it gets the
+    // suite's loaded-CI timeout floors.
+    let h = h
+        .restart_supervisor(|state| async move {
+            Supervisor::new_with_seams(
+                &state,
+                farhelm_bin().into(),
+                suite_timeouts(),
+                SupervisorSeams::default(),
+            )
+            .await
+            .expect("reload onto the sentinel-classified row")
+        })
+        .await;
     assert!(
         matches!(
-            listed(&client2, &session.id).await.status,
+            listed(&h.client, &session.id).await.status,
             SessionStatus::Error { .. }
         ),
         "sanity: the reload really did classify this session as error"
     );
 
-    let tmux_name = format!("fh-{}", session.id);
-    let before = tmux_query(&sock, &["has-session", "-t", &format!("={tmux_name}")]).await;
+    let terminal = RecordedTerminal::of(h.state.path(), &session.id).await;
     assert!(
-        before.status.success(),
-        "the real tmux session must still exist going into this test's real assertions"
+        terminal.exists().await,
+        "the real terminal must still exist going into this test's real assertions"
     );
 
-    // Attach succeeds: the dead pane genuinely exists, so this is exactly
-    // like attaching to any other exited session, not a `NotFound`.
-    client2
+    // Attach succeeds: the exited terminal genuinely exists, so this is
+    // exactly like attaching to any other exited session, not a `NotFound`.
+    h.client
         .attach_live(&session.id, 80, 24)
         .await
         .expect("an error-classified session with a real dead pane must still be attachable");
 
-    client2.delete_session(&session.id).await.expect("delete");
-    let after = tmux_query(&sock, &["has-session", "-t", &format!("={tmux_name}")]).await;
+    h.client.delete_session(&session.id).await.expect("delete");
     assert!(
-        !after.status.success(),
-        "delete must tear down the REAL tmux session, not merely drop the row — a session \
+        !terminal.exists().await,
+        "delete must tear down the REAL terminal, not merely drop the row — a session \
          reload never recorded a terminal for has nothing for the kill sweep to find"
     );
 }
@@ -392,7 +410,6 @@ async fn a_reload_classified_error_session_keeps_its_terminal_for_attach_and_del
 #[farhelm_testtrace::test]
 async fn a_sentinel_survives_an_unreadable_boot_id_undurably_then_commits_once_readable() {
     let h = harness_believing_boot("boot-a").await;
-    let sock = h.state.path().join("tmux.sock");
     let work = farhelm_teststate::tempdir().expect("workdir");
     let missing_binary = work.path().join("no-such-farhelm-agent");
 
@@ -408,7 +425,7 @@ async fn a_sentinel_survives_an_unreadable_boot_id_undurably_then_commits_once_r
         )
         .await
         .expect("create a session whose invocation cannot exec");
-    wait_for_dead_pane(&sock, &format!("fh-{}", session.id)).await;
+    wait_for_dead_agent(&h.sup, h.state.path(), &session.id).await;
 
     let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
     assert!(
@@ -420,9 +437,12 @@ async fn a_sentinel_survives_an_unreadable_boot_id_undurably_then_commits_once_r
     // false for its whole lifetime (no reboot-vs-same-boot decision could
     // even be made), yet this is exactly the "degraded boot-id" case item
     // 2 requires the list path to still READ the sentinel for.
-    let degraded = supervisor_reading_boot(h.state.path(), Err("/proc is unavailable")).await;
-    let degraded_client = connect_client(&degraded).await;
-    let undurable = listed(&degraded_client, &session.id).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_reading_boot(&state, Err("/proc is unavailable")).await
+        })
+        .await;
+    let undurable = listed(&h.client, &session.id).await;
     assert!(
         matches!(undurable.status, SessionStatus::Error { .. }),
         "a degraded supervisor must still SURFACE a sentinel it read, even though it cannot \
@@ -437,11 +457,14 @@ async fn a_sentinel_survives_an_unreadable_boot_id_undurably_then_commits_once_r
 
     // A later supervisor whose boot-id read succeeds: the same
     // classification now lands durably, and the file is consumed.
-    let recovered = supervisor_believing_boot(h.state.path(), Some("boot-a")).await;
-    let recovered_client = connect_client(&recovered).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_believing_boot(&state, Some("boot-a")).await
+        })
+        .await;
     assert!(
         matches!(
-            listed(&recovered_client, &session.id).await.status,
+            listed(&h.client, &session.id).await.status,
             SessionStatus::Error { .. }
         ),
         "the classification must also land once recording becomes possible"
@@ -464,7 +487,6 @@ async fn a_sentinel_survives_an_unreadable_boot_id_undurably_then_commits_once_r
 #[farhelm_testtrace::test]
 async fn stop_before_any_list_on_an_exec_failed_session_still_ends_error() {
     let h = harness().await;
-    let sock = h.state.path().join("tmux.sock");
     let work = farhelm_teststate::tempdir().expect("workdir");
     let missing_binary = work.path().join("no-such-farhelm-agent");
 
@@ -480,7 +502,7 @@ async fn stop_before_any_list_on_an_exec_failed_session_still_ends_error() {
         )
         .await
         .expect("create a session whose invocation cannot exec");
-    wait_for_dead_pane(&sock, &format!("fh-{}", session.id)).await;
+    wait_for_dead_agent(&h.sup, h.state.path(), &session.id).await;
 
     // No `list_sessions` call anywhere above: `stop_session` is the FIRST
     // and only observer this row ever gets before its own exit-recording
@@ -506,13 +528,7 @@ async fn a_corrupt_sentinel_defers_reconciliation_but_lists_succeed() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
     wait_for_live_status(&h.client, &session.id, 30).await;
-    let sock = h.state.path().join("tmux.sock");
-    let out = tmux_query(
-        &sock,
-        &["kill-session", "-t", &format!("=fh-{}", session.id)],
-    )
-    .await;
-    assert!(out.status.success(), "test setup: killing the tmux session");
+    end_agent_terminal(Some(&h.sup), h.state.path(), &session.id).await;
     let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
     std::fs::create_dir_all(status_path.parent().unwrap()).unwrap();
     std::fs::write(&status_path, [0xff, 0xfe, 0xfd]).expect("plant corrupt sentinel");
@@ -578,13 +594,7 @@ async fn the_dead_or_absent_gate_ignores_a_sentinel_behind_a_live_pane_until_the
     );
 
     // Remove the terminal; the next reconciliation reads the same file.
-    let sock = h.state.path().join("tmux.sock");
-    let out = tmux_query(
-        &sock,
-        &["kill-session", "-t", &format!("=fh-{}", session.id)],
-    )
-    .await;
-    assert!(out.status.success(), "test setup: killing the tmux session");
+    end_agent_terminal(Some(&h.sup), h.state.path(), &session.id).await;
 
     h.sup.reconcile_for_test().await;
     let status = listed(&h.client, &session.id).await.status;

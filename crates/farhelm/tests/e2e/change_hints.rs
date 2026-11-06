@@ -115,7 +115,7 @@ async fn until_helm_lists(
 #[farhelm_testtrace::test]
 async fn supervisor_side_changes_reach_the_helm_without_its_poll() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let supervisor = supervisor_process_tmux().await;
+    let supervisor = supervisor_process().await;
     let helm = helm_process_with_args(
         supervisor.state.path(),
         None,
@@ -205,7 +205,7 @@ async fn supervisor_side_changes_reach_the_helm_without_its_poll() {
         .expect("attach the tab");
     let mut seen = replay;
     wait_for_shell(&direct, channel, &mut rx, &mut seen, "READY").await;
-    direct.send_input(channel, b"exit\r".to_vec()).await;
+    direct.send_keys(channel, b"exit\r".to_vec()).await;
     until_helm_lists(
         &client,
         &helm.base,

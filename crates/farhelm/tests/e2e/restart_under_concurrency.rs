@@ -3,21 +3,21 @@
 
 use crate::harness::*;
 
-use crate::boot_id_durable_outcome::{listed, wait_for_dead_pane};
+use crate::boot_id_durable_outcome::listed;
 use crate::create_idempotency::handoff_to_new_supervisor;
 use crate::restart_with_resume::pane_capture;
 
-/// Observe the first restart's dying pane while its original generation is stopping.
+/// Observe the first restart's dying agent while its original generation is stopping.
 ///
 /// Stop intent alone precedes signaling, so a competing restart could still
-/// see a live pane and refuse even with broken serialization. Require pane
-/// death too. Direct store and tmux observations do not acquire the lifecycle
-/// claim or ask a listing to classify the pane. The stubborn child keeps this
-/// phase observable; an advanced generation is a missed fixture premise.
-async fn wait_for_restart_sweep(store: &SessionStore, sock: &std::path::Path, session_id: &str) {
+/// see a live agent and refuse even with broken serialization. Require the
+/// agent's process (`agent_pid`, the terminal's own process, read before the
+/// restart) to be gone too. Direct store and process observations do not
+/// acquire the lifecycle claim or ask a listing to classify the terminal. The
+/// stubborn child keeps this phase observable; an advanced generation is a
+/// missed fixture premise.
+async fn wait_for_restart_sweep(store: &SessionStore, agent_pid: u32, session_id: &str) {
     let mut last = None;
-    let mut last_pane = String::new();
-    let target = format!("fh-{session_id}");
     let result = tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             let row = store
@@ -27,27 +27,11 @@ async fn wait_for_restart_sweep(store: &SessionStore, sock: &std::path::Path, se
                 .expect("the restarting session still exists");
             assert_eq!(
                 row.generation, 0,
-                "restart advanced before its dying original pane was observed"
+                "restart advanced before its dying original agent was observed"
             );
             last = Some(row.outcome.clone());
-            if row.outcome == LastOutcome::StopRequested {
-                let output = tokio::process::Command::new("tmux")
-                    .arg("-S")
-                    .arg(sock)
-                    .args(["display-message", "-p", "-t", &target, "#{pane_dead}"])
-                    .kill_on_drop(true)
-                    .output()
-                    .await
-                    .expect("observe the stopping pane");
-                assert!(
-                    output.status.success(),
-                    "restart pane query failed: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                last_pane = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-                if last_pane == "1" {
-                    return;
-                }
+            if row.outcome == LastOutcome::StopRequested && process_is_gone(agent_pid) {
+                return;
             }
             // sleep-ok: observe the first restart's durable lifecycle phase; scheduling its client task alone does not establish dispatch.
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -56,7 +40,9 @@ async fn wait_for_restart_sweep(store: &SessionStore, sock: &std::path::Path, se
     .await;
     assert!(
         result.is_ok(),
-        "restart never exposed a dying generation-zero pane; last outcome={last:?}, pane_dead={last_pane:?}"
+        "restart never exposed a dying generation-zero agent; last outcome={last:?}, agent \
+         {agent_pid} gone={}",
+        process_is_gone(agent_pid)
     );
 }
 
@@ -133,8 +119,9 @@ async fn a_second_restart_cannot_reap_the_agent_the_first_one_just_launched() {
     // The first restart, with consent: it will spend seconds in the sweep.
     let first_client = Arc::clone(&h.client);
     let first_id = session.id.clone();
+    let agent = agent_pid(&h, &session.id).await;
     let first = tokio::spawn(async move { first_client.restart_session(&first_id, true).await });
-    wait_for_restart_sweep(&store, &h.state.path().join("tmux.sock"), &session.id).await;
+    wait_for_restart_sweep(&store, agent, &session.id).await;
     let second = h.client.restart_session(&session.id, false).await;
 
     first
@@ -190,11 +177,12 @@ async fn a_delete_racing_a_restart_leaves_no_session_and_no_survivors() {
     let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
         .await
         .expect("open the durable restart observer");
+    let agent = agent_pid(&h, &session.id).await;
     let restart_client = Arc::clone(&h.client);
     let restart_id = session.id.clone();
     let restart =
         tokio::spawn(async move { restart_client.restart_session(&restart_id, true).await });
-    wait_for_restart_sweep(&store, &h.state.path().join("tmux.sock"), &session.id).await;
+    wait_for_restart_sweep(&store, agent, &session.id).await;
     h.client
         .delete_session(&session.id)
         .await
@@ -338,7 +326,7 @@ async fn a_repointed_working_directory_refuses_the_restart() {
 /// and the other's agent must be entirely undisturbed.
 #[farhelm_testtrace::test]
 async fn a_restart_respawns_only_its_own_pane() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let sock = h.state.path().join("tmux.sock");
     let (restarted, _work_a) = resumable_basic_session(&h).await;
     let (bystander, _work_b) = resumable_basic_session(&h).await;
@@ -351,7 +339,7 @@ async fn a_restart_respawns_only_its_own_pane() {
     let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     h.client
-        .send_input(chan, b"BYSTANDER-MARKER\r".to_vec())
+        .send_keys(chan, b"BYSTANDER-MARKER\r".to_vec())
         .await;
     wait_for(&mut rx, &mut seen, "BYSTANDER-MARKER", 10).await;
     let bystander_pane = pane_id_of(&sock, &format!("fh-{}", bystander.id)).await;
@@ -457,38 +445,24 @@ async fn a_stale_generation_zero_sentinel_cannot_taint_generation_one() {
         .expect("attach generation one");
     let marker = "GENERATION-ONE-HANDOFF";
     h.client
-        .send_input(chan, format!("{marker}\r").into_bytes())
+        .send_keys(chan, format!("{marker}\r").into_bytes())
         .await;
-    wait_for(
-        &mut output,
-        &mut Vec::new(),
-        &format!("echo:\x1b[36m{marker}"),
-        20,
-    )
-    .await;
+    let echoed = agent_echo(&output, marker);
+    wait_for(&mut output, &mut Vec::new(), &echoed, 20).await;
 
-    // Kill generation 1's pane's OWN process directly, bypassing
-    // `stop_session`, so the pane goes dead (tmux keeps a dead pane around
-    // rather than tearing down the session) with no annotation — the only
-    // shape that would ever even attempt a sentinel read. `kill-session`
-    // would destroy the tmux session outright instead of leaving a dead
-    // pane behind, which is not the state under test here.
-    let sock = h.state.path().join("tmux.sock");
-    let tmux_name = format!("fh-{}", session.id);
-    let pid_out = tmux_query(
-        &sock,
-        &["display-message", "-p", "-t", &tmux_name, "#{pane_pid}"],
-    )
-    .await;
-    let pane_pid: u32 = String::from_utf8_lossy(&pid_out.stdout)
-        .trim()
-        .parse()
-        .expect("a live pane must report a pid");
-    // SAFETY: a real, currently-live pid this test just read from tmux.
+    // Kill generation 1's own process directly, bypassing `stop_session`,
+    // so its terminal holds an exited agent (a host keeps running with the
+    // final screen, as tmux keeps a dead pane) with no annotation: the only
+    // shape that would ever even attempt a sentinel read. Ending the
+    // terminal itself would leave no terminal at all instead, which is not
+    // the state under test here.
+    let pane_pid = agent_pid(&h, &session.id).await;
+    // SAFETY: a real, currently-live pid this test just read from the
+    // agent's terminal.
     unsafe {
         libc::kill(pane_pid as libc::pid_t, libc::SIGKILL);
     }
-    wait_for_dead_pane(&sock, &tmux_name).await;
+    wait_for_dead_agent(&h.sup, h.state.path(), &session.id).await;
 
     let live_read = listed(&h.client, &session.id).await;
     assert!(
