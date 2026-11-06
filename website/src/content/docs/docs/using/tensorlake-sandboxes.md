@@ -52,7 +52,7 @@ read its state directory can read them. Farhelm never shows a saved value again.
 
 For Claude Code, save the token printed by `claude setup-token`. For Codex, run `codex login` on a machine with a
 browser, sign in with ChatGPT, then paste or choose `~/.codex/auth.json`. Recipes can select named API endpoint tokens
-as described below. GitHub tokens and subscription logins are stored here; their recipe controls are not available yet.
+and GitHub tokens as described below. Subscription logins are stored here; their recipe controls are not available yet.
 
 ## Make a recipe
 
@@ -157,10 +157,18 @@ in the launcher. Turn the host setting off if you want that question. The other 
 
 ### Managed checkouts
 
-[Managed checkouts](/docs/using/start-a-session/#start-from-a-managed-checkout) use Git credentials on the sandbox, just
-as on any host. Public repositories need no credentials. For private repositories, set up Git credentials on that host
-once; if it has GitHub's `gh` command installed, you can run `gh auth login` in a Farhelm terminal there. Farhelm does
-not yet supply `GH_TOKEN` to Tensorlake sandboxes.
+[Managed checkouts](/docs/using/start-a-session/#start-from-a-managed-checkout) of private GitHub repositories can use a
+named token from Settings → **Credentials**. Select it under **GitHub** in the host's recipe. New agents, terminal tabs
+and restarted agents receive it as `GH_TOKEN`, including the Git clone that prepares a fresh checkout.
+
+Farhelm-built snapshots include GitHub's `gh` command and Farhelm sets up its Git helper on the host. Reused images and
+snapshots built before this change need `gh` installed for private GitHub checkouts over HTTPS. If it is missing, the
+host stays usable and its details say private clones need gh. Older hosts also need **Update** so their Farhelm can
+deliver the token to new terminals; terminals still using the old tmux backend do not receive it.
+
+Replacing the token in Credentials sends it to connected hosts; other hosts receive it when they next connect. Recipe
+selection changes wait for the next connection or setup. Existing programs keep their environment. Selecting **None**
+removes Farhelm's token file, leaving any Git authentication you configured yourself. Public repositories need no token.
 
 ## Suspend and resume
 

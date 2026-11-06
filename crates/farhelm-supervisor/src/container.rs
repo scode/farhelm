@@ -114,15 +114,9 @@ pub(crate) fn read_token(config: &ContainerConfig) -> anyhow::Result<Option<Stri
         .github_token_file
         .as_ref()
         .map(|path| {
-            let text = std::fs::read_to_string(path)
-                .context("could not read the container's GitHub token file")?;
-            let token = text.trim();
-            anyhow::ensure!(!token.is_empty(), "container GitHub token file is empty");
-            anyhow::ensure!(
-                !token.contains('\0'),
-                "container GitHub token file contains NUL"
-            );
-            Ok(token.to_string())
+            crate::github_token::read_file(std::path::Path::new(path))
+                .context("could not read the container's GitHub token file")?
+                .context("could not read the container's GitHub token file")
         })
         .transpose()
 }

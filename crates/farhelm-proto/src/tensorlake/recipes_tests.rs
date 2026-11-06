@@ -16,6 +16,7 @@ fn recipe() -> RecipeSave {
         },
         claude: None,
         codex: None,
+        github_token_credential: None,
         tunnels: vec![],
     }
 }

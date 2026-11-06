@@ -420,6 +420,7 @@ mod tests {
             source,
             claude: None,
             codex: None,
+            github_token_credential: None,
             tunnels: (0..tunnels)
                 .map(|n| Tunnel {
                     sandbox_port: 8000 + n as u16,

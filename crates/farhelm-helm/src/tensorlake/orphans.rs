@@ -413,6 +413,7 @@ mod tests {
                     source: RecipeSource::Packages { packages: vec![] },
                     claude: None,
                     codex: None,
+                    github_token_credential: None,
                     tunnels: vec![],
                 },
             )

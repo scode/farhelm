@@ -136,6 +136,9 @@ pub struct RecipeSave {
     pub source: RecipeSource,
     pub claude: Option<EndpointSave>,
     pub codex: Option<EndpointSave>,
+    /// A catalog identity, never the token. None removes Farhelm's managed
+    /// token file at the next setup/connection without clearing user gh auth.
+    pub github_token_credential: Option<String>,
     pub tunnels: Vec<Tunnel>,
 }
 
@@ -155,6 +158,7 @@ mod strict {
         source: RecipeSource,
         claude: Option<super::EndpointSave>,
         codex: Option<super::EndpointSave>,
+        github_token_credential: Option<String>,
         tunnels: Vec<Tunnel>,
     }
 
@@ -209,6 +213,7 @@ mod strict {
                 },
                 claude: save.claude,
                 codex: save.codex,
+                github_token_credential: save.github_token_credential,
                 tunnels: save
                     .tunnels
                     .into_iter()
@@ -254,6 +259,7 @@ pub struct RecipeView {
     pub source: RecipeSource,
     pub claude: Option<EndpointView>,
     pub codex: Option<EndpointView>,
+    pub github_token_credential: Option<String>,
     pub tunnels: Vec<Tunnel>,
     /// The snapshot Farhelm built for a managed recipe, which new hosts start
     /// from. Always `None` for a recipe that reuses an image or snapshot.
@@ -637,6 +643,9 @@ pub fn check_recipe(recipe: &RecipeSave) -> Result<(), String> {
             check_recipe_name(name)
                 .map_err(|_| format!("{agent}: select a valid endpoint credential name"))?;
         }
+    }
+    if let Some(name) = recipe.github_token_credential.as_deref() {
+        check_recipe_name(name).map_err(|_| "select a valid GitHub credential name".to_string())?;
     }
     if recipe.tunnels.len() > TUNNELS_CAP {
         return Err(format!("a recipe can have at most {TUNNELS_CAP} tunnels"));

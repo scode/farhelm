@@ -77,6 +77,7 @@ struct Draft {
     snapshot_id: String,
     claude: EndpointDraft,
     codex: EndpointDraft,
+    github_token_credential: String,
     tunnels: Vec<TunnelDraft>,
 }
 
@@ -95,6 +96,7 @@ impl Draft {
             snapshot_id: String::new(),
             claude: EndpointDraft::default(),
             codex: EndpointDraft::default(),
+            github_token_credential: String::new(),
             tunnels: Vec::new(),
         }
     }
@@ -133,6 +135,7 @@ impl Draft {
         };
         draft.claude = endpoint(&view.claude);
         draft.codex = endpoint(&view.codex);
+        draft.github_token_credential = view.github_token_credential.clone().unwrap_or_default();
         draft.tunnels = view
             .tunnels
             .iter()
@@ -191,6 +194,8 @@ impl Draft {
             source,
             claude: endpoint_save(&self.claude),
             codex: endpoint_save(&self.codex),
+            github_token_credential: (!self.github_token_credential.is_empty())
+                .then(|| self.github_token_credential.clone()),
             tunnels,
         };
         check_recipe(&save)?;
@@ -645,19 +650,31 @@ pub(crate) fn RecipeEditor(
                 "Programs in the sandbox reach 127.0.0.1 at the sandbox port, and Farhelm carries the connection to the host and port as seen from this helm's machine. Anything in the sandbox, agents included, can use a tunnel."
             }
 
+            if let Some(reason) = (catalog.error)() {
+                p { class: "checkout-root-error", role: "alert", "{reason}" }
+                button { r#type: "button", class: "btn btn-neutral", disabled: locked,
+                    "data-tooltip": "Load the named credentials again", onclick: move |_| catalog.reload.call(()), "Retry loading credentials" }
+            } else if (catalog.rows)().is_none() {
+                p { role: "status", "Loading credentials…" }
+            }
+            div { class: "checkout-root-label", span { "GitHub" }
+                CredentialPicker {
+                    label: "GitHub token", value: draft.read().github_token_credential.clone(),
+                    kind: farhelm_proto::credentials::CredentialKind::GithubToken,
+                    locked, credentials: (catalog.rows)(),
+                    missing_notice: "The selected GitHub credential is unavailable. Choose another or None.",
+                    on_change: move |value| { draft.write().github_token_credential = value; error.set(None); },
+                }
+                p { class: "host-settings-help",
+                    "Sessions get this token as GH_TOKEN, and git uses it for github.com over HTTPS, including fresh checkouts of private repositories. Add or replace tokens in Settings → Credentials."
+                }
+            }
             div { class: "checkout-root-label", span { "Agents" }
                 if software == Software::Packages {
                     p { class: "host-settings-help", "Claude Code and Codex are installed with their official installers when the snapshot is built." }
                 }
                 p { class: "host-settings-help",
                     "Optionally point either agent at an API endpoint. The base URL usually points at a tunnel's sandbox port, such as http://127.0.0.1:8080. Farhelm writes these into each host's agent settings when it sets the host up."
-                }
-                if let Some(reason) = (catalog.error)() {
-                    p { class: "checkout-root-error", role: "alert", "{reason}" }
-                    button { r#type: "button", class: "btn btn-neutral", disabled: locked,
-                        "data-tooltip": "Load the named credentials again", onclick: move |_| catalog.reload.call(()), "Retry loading credentials" }
-                } else if (catalog.rows)().is_none() {
-                    p { role: "status", "Loading endpoint credentials…" }
                 }
                 EndpointFields { agent: Agent::Claude, draft, locked, credentials: (catalog.rows)(), error }
                 EndpointFields { agent: Agent::Codex, draft, locked, credentials: (catalog.rows)(), error }
@@ -668,7 +685,7 @@ pub(crate) fn RecipeEditor(
 
             if !is_new {
                 p { class: "host-settings-help recipe-edit-note",
-                    "Size and packages apply only to hosts created after you save (packages after the next snapshot build). Tunnels and endpoints are read when a host connects or is set up, so those changes reach existing hosts at their next connection."
+                    "Size and packages apply only to hosts created after you save (packages after the next snapshot build). Tunnels, endpoints and credential selections are read when a host connects or is set up, so those changes reach existing hosts at their next connection."
                 }
             }
 
@@ -812,9 +829,49 @@ impl Agent {
     }
 }
 
-/// A URL and an endpoint-token identity. Keep a disappeared draft selection
-/// visible as unavailable: silently displaying None would conceal the value
-/// the next save actually submits. The store remains admission authority.
+/// Catalog selections share one unavailable-choice policy across consumers.
+/// A disappeared selection remains visible until explicitly replaced; showing
+/// None while submitting its old name would misrepresent the user's draft.
+#[component]
+fn CredentialPicker(
+    label: String,
+    value: String,
+    kind: farhelm_proto::credentials::CredentialKind,
+    locked: bool,
+    credentials: Option<Vec<farhelm_proto::credentials::Credential>>,
+    missing_notice: String,
+    on_change: EventHandler<String>,
+) -> Element {
+    let loaded = credentials.is_some();
+    let entries = credentials
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|row| row.kind == kind)
+        .collect::<Vec<_>>();
+    let missing = !value.is_empty() && !entries.iter().any(|row| row.name == value);
+    rsx! {
+        label { class: "checkout-root-label", span { "{label}" }
+            // Option text changes independently of the control's identity.
+            select { class: "recipe-credential font-mono", aria_label: "{label}",
+                value: "{value}", disabled: locked || !loaded,
+                onchange: move |event| on_change.call(event.value()),
+                // Explicit selection survives replacement of a disappeared
+                // option without the browser silently falling back to None.
+                option { value: "", selected: value.is_empty(), "None" }
+                if missing {
+                    option { value: "{value}", selected: true, disabled: true,
+                        if loaded { "{value} (unavailable)" } else { "{value}" } }
+                }
+                for row in &entries { option { key: "{row.name}", value: "{row.name}",
+                    selected: row.name == value, "{row.name}" } }
+            }
+        }
+        if loaded && missing { p { class: "checkout-root-error", role: "alert", "{missing_notice}" } }
+    }
+}
+
+/// An endpoint keeps its own URL draft while reusing the metadata-only picker.
+/// The store remains authoritative for admitting the chosen name and kind.
 #[component]
 fn EndpointFields(
     agent: Agent,
@@ -827,16 +884,6 @@ fn EndpointFields(
     let mut error = error;
     let current = agent.endpoint_ref(&draft.read()).clone();
     let label = agent.label();
-    let loaded = credentials.is_some();
-    let entries = credentials
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|row| row.kind == farhelm_proto::credentials::CredentialKind::EndpointToken)
-        .collect::<Vec<_>>();
-    let missing = !current.token_credential.is_empty()
-        && !entries
-            .iter()
-            .any(|row| row.name == current.token_credential);
     rsx! {
         div { class: "recipe-endpoint", role: "group", aria_label: "{label} endpoint",
             label { class: "checkout-root-label", span { "{label} base URL" }
@@ -845,26 +892,13 @@ fn EndpointFields(
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                     oninput: move |event| { agent.endpoint(&mut draft.write()).base_url = event.value(); error.set(None); } }
             }
-            label { class: "checkout-root-label", span { "{label} endpoint token" }
-                // Keep the control's label independent of the changing option
-                // text inside its wrapping label, including unavailable names.
-                select { class: "recipe-credential font-mono", aria_label: "{label} endpoint token",
-                    value: "{current.token_credential}", disabled: locked || !loaded,
-                    onchange: move |event| { agent.endpoint(&mut draft.write()).token_credential = event.value(); error.set(None); },
-                    // Replacing the selected option does not change the draft
-                    // value. Mark its replacement selected explicitly so the
-                    // browser cannot fall back to None while the draft keeps
-                    // submitting the disappeared credential's name.
-                    option { value: "", selected: current.token_credential.is_empty(), "None" }
-                    if missing {
-                        option { value: "{current.token_credential}", selected: true, disabled: true,
-                            if loaded { "{current.token_credential} (unavailable)" } else { "{current.token_credential}" } }
-                    }
-                    for row in &entries { option { key: "{row.name}", value: "{row.name}",
-                        selected: row.name == current.token_credential, "{row.name}" } }
-                }
+            CredentialPicker {
+                label: format!("{label} endpoint token"), value: current.token_credential,
+                kind: farhelm_proto::credentials::CredentialKind::EndpointToken,
+                locked, credentials,
+                missing_notice: "The selected endpoint credential is unavailable. Choose another or None.",
+                on_change: move |value| { agent.endpoint(&mut draft.write()).token_credential = value; error.set(None); },
             }
-            if loaded && missing { p { class: "checkout-root-error", role: "alert", "The selected endpoint credential is unavailable. Choose another or None." } }
         }
     }
 }

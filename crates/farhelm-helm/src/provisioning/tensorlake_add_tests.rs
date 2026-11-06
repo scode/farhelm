@@ -221,6 +221,86 @@ async fn credential_delivery_warning_does_not_abort_tensorlake_setup() {
     );
 }
 
+/// GitHub-only recipes must enter setup's credential step without an agent
+/// endpoint to trigger it. Reused images without gh still finish installing
+/// Farhelm after the token upload, keeping the unsuccessful slot retryable.
+#[farhelm_testtrace::test]
+async fn github_only_setup_delivers_before_starting_the_supervisor() {
+    use farhelm_proto::credentials::{CreateCredential, CredentialKind};
+    for github_cli in [true, false] {
+        let f = fixture(false).await;
+        f.harness
+            .store
+            .create_credential(CreateCredential {
+                name: "github".into(),
+                kind: CredentialKind::GithubToken,
+                secret: "fictional-setup-github-token".into(),
+            })
+            .await
+            .unwrap();
+        let mut recipe = crate::tensorlake::recipes::tests_support::save();
+        recipe.source = RecipeSource::Image {
+            image: "example/systemd".into(),
+        };
+        recipe.github_token_credential = Some("github".into());
+        f.harness
+            .store
+            .update_tensorlake_recipe("test-recipe".into(), recipe)
+            .await
+            .unwrap()
+            .unwrap();
+        std::fs::write(
+            f.root.path().join("backend/config.json"),
+            serde_json::to_vec(&serde_json::json!({"default": {"github_cli": github_cli}}))
+                .unwrap(),
+        )
+        .unwrap();
+        let accepted = f.add().await;
+        let view = f.finish(accepted.host_id).await;
+        assert_eq!(view.status, RunStatus::Completed);
+        let step = view
+            .steps
+            .iter()
+            .find(|step| step.step == "configure-agents")
+            .expect("GitHub alone creates the credential step");
+        assert_eq!(step.status, StepStatus::Completed);
+        let warning = f.service.credential_delivery().warning(accepted.host_id);
+        assert_eq!(warning.is_none(), github_cli);
+        if !github_cli {
+            assert!(warning.unwrap().contains("private clones need gh"));
+        }
+        let events = std::fs::read_to_string(f.root.path().join("backend/events.jsonl")).unwrap();
+        assert!(
+            events.find("write-unit").unwrap() < events.find("configure-github-helper").unwrap()
+        );
+        assert!(
+            events.find("configure-github-helper").unwrap()
+                < events.find("enable-supervisor").unwrap()
+        );
+        let host = accepted.host_id;
+        let record: String = f
+            .harness
+            .store
+            .conn()
+            .call("inspect GitHub setup stamp", move |conn| {
+                Ok(conn.query_row(
+                    "SELECT tensorlake_credential_delivery FROM hosts WHERE id = ?1",
+                    [host],
+                    |row| row.get(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert!(!record.contains("fictional-setup-github-token"));
+        let record: serde_json::Value = serde_json::from_str(&record).unwrap();
+        assert_eq!(!record["github"].is_null(), github_cli);
+        if github_cli {
+            assert_eq!(record["github"]["Token"]["name"], "github");
+            assert_eq!(record["github"]["Token"]["revision"], 1);
+        }
+    }
+}
+
 /// A missing key and malformed outer request fail before API work or host
 /// registration. This is the boundary that keeps Continue free of billing.
 #[farhelm_testtrace::test]

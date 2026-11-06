@@ -50,6 +50,7 @@ pub mod container;
 /// The SQLite plumbing the supervisor's and the helm's stores share.
 pub mod db;
 pub mod files;
+pub mod github_token;
 /// Turning a grid viewer's input messages into the bytes a program in a
 /// terminal host reads, from the program's modes.
 pub mod grid_input;

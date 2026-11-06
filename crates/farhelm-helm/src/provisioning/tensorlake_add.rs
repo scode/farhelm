@@ -75,10 +75,11 @@ fn steps(sandbox: &str, name: &str, recipe: &StoredRecipe, ready: bool) -> PlanS
         "prepare-sandbox",
         "Start the sandbox's login manager and keep the user manager running".into(),
     ));
-    if recipe.claude.is_some() || recipe.codex.is_some() {
+    if recipe.claude.is_some() || recipe.codex.is_some() || recipe.github_token_credential.is_some()
+    {
         descriptions.push((
             "configure-agents",
-            "Configure the agents' API endpoints, preserving other settings".into(),
+            "Configure host credentials and agent endpoints, preserving other settings".into(),
         ));
     }
     descriptions.push((
@@ -455,7 +456,10 @@ impl ProvisioningService {
         self.set_step(host, *index, StepStatus::Completed, home_notice)
             .await;
         *index += 1;
-        let configure_index = if plan.recipe.claude.is_some() || plan.recipe.codex.is_some() {
+        let configure_index = if plan.recipe.claude.is_some()
+            || plan.recipe.codex.is_some()
+            || plan.recipe.github_token_credential.is_some()
+        {
             let configured = Some(*index);
             *index += 1;
             configured

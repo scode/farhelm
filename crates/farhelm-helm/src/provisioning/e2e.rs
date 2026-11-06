@@ -67,6 +67,8 @@ struct E2eBehavior {
     hold_actions: bool,
     fail_action: Option<String>,
     action_delay_ms: u64,
+    /// Reused-image degradation without turning file delivery into a refusal.
+    github_cli: bool,
 }
 
 impl Default for E2eBehavior {
@@ -85,6 +87,7 @@ impl Default for E2eBehavior {
             hold_actions: false,
             fail_action: None,
             action_delay_ms: 0,
+            github_cli: true,
         }
     }
 }
@@ -229,6 +232,19 @@ impl E2eProvisioningBackend {
 
 #[async_trait]
 impl ProvisioningBackend for E2eProvisioningBackend {
+    async fn remove_github_token(
+        &self,
+        target: &ProvisioningTarget,
+        _path: &Path,
+    ) -> Result<(), BackendFailure> {
+        self.action(target, "remove-github-token").await?;
+        Ok(())
+    }
+
+    async fn setup_github_git(&self, target: &ProvisioningTarget) -> Result<bool, BackendFailure> {
+        self.action(target, "configure-github-helper").await?;
+        Ok(self.behavior(target).await?.github_cli)
+    }
     async fn prepare_tensorlake_sandbox(
         &self,
         target: &ProvisioningTarget,

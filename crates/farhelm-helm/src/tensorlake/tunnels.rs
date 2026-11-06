@@ -630,6 +630,7 @@ mod tests {
             },
             claude: None,
             codex: None,
+            github_token_credential: None,
             tunnels: vec![Tunnel {
                 sandbox_port: 8080,
                 host: "127.0.0.1".into(),

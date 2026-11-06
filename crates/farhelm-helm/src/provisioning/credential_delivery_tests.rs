@@ -31,7 +31,9 @@ impl Fixture {
     async fn new(codex: bool) -> Self {
         let root = tempfile::tempdir().unwrap();
         let store = HelmStore::open(&root.path().join("helm.db")).await.unwrap();
-        Self::with_store(root, store, codex).await
+        let mut fixture = Self::with_store(root, store, codex).await;
+        fixture.admit().await;
+        fixture
     }
 
     /// Actor cases share the manager's store rather than planting a parallel
@@ -82,6 +84,26 @@ impl Fixture {
             delivery,
             events: FleetEvents::new(),
         }
+    }
+
+    /// Model real setup's copied-state admission before delivery can use the
+    /// supervisor directory. Both file destinations stay under this fixture.
+    async fn admit(&mut self) {
+        let state = self._root.path().join("supervisor-state");
+        assert!(
+            self.store
+                .admit_tensorlake_install(self.row.id, "/fixture/farhelm", state.to_str().unwrap())
+                .await
+                .unwrap()
+        );
+        self.row = self
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == self.row.id)
+            .unwrap();
     }
 
     /// A connection lease is a fixture premise, not a consequence of connect:
@@ -136,6 +158,39 @@ impl Fixture {
             })
             .await
             .unwrap()
+    }
+
+    /// Keep the endpoint constant while changing the GitHub selection, so a
+    /// later failure cannot make already successful endpoint work run again.
+    async fn select_github(&self, name: Option<&str>) {
+        let mut recipe = crate::tensorlake::recipes::tests_support::save();
+        recipe.claude = Some(endpoint("https://first.example/v1", "work"));
+        recipe.github_token_credential = name.map(str::to_owned);
+        self.store
+            .update_tensorlake_recipe("recipe".into(), recipe)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    /// Create one write-only GitHub identity with a marker distinct from the
+    /// endpoint, allowing file and durable-record privacy assertions.
+    async fn github_credential(&self) {
+        self.store
+            .create_credential(CreateCredential {
+                name: "git-work".into(),
+                kind: CredentialKind::GithubToken,
+                secret: "fictional-github-first".into(),
+            })
+            .await
+            .unwrap();
+    }
+
+    /// The same supervisor-owned destination used by real host spawning.
+    fn github_path(&self) -> PathBuf {
+        farhelm_supervisor::github_token::host_file(Path::new(
+            self.row.remote_state_dir.as_deref().unwrap(),
+        ))
     }
 }
 
@@ -196,6 +251,226 @@ async fn recreated_endpoint_names_do_not_match_a_previous_delivery() {
     let before = f.operations();
     f.delivery.connect(&f.row, &f.events).await;
     assert_eq!(f.operations(), before);
+}
+
+/// First delivery configures Git's token-free helper; a connected replacement
+/// rewrites only the private file. A reconstructed delivery object does no SSH
+/// for unchanged state, and None deletes only that file on the next connection.
+#[farhelm_testtrace::test]
+async fn github_delivery_replaces_on_push_and_removes_on_reconnect() {
+    let f = Fixture::new(false).await;
+    f.github_credential().await;
+    f.select_github(Some("git-work")).await;
+    let lease = f.connected().await;
+    let path = f.github_path();
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "fictional-github-first"
+    );
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        f.operations()
+            .iter()
+            .filter(|op| *op == "configure-github-helper")
+            .count(),
+        1
+    );
+    f.replace("git-work", "fictional-github-second").await;
+    assert!(f.delivery.push("git-work", &f.events).await.is_empty());
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "fictional-github-second"
+    );
+    assert_eq!(
+        f.operations()
+            .iter()
+            .filter(|op| *op == "configure-github-helper")
+            .count(),
+        1
+    );
+    let record = f.delivery.read_record(&f.row).await.unwrap();
+    assert_eq!(
+        record.github,
+        Some(GithubStamp::Token {
+            name: "git-work".into(),
+            revision: 2,
+            incarnation: f.stamp("git-work", 2).await.2,
+        })
+    );
+    let json = serde_json::to_string(&record).unwrap();
+    assert!(!json.contains("fictional-github") && !json.contains(FIRST));
+    drop(lease);
+    let delivery = CredentialDelivery::new(f.store.clone(), f.backend.clone());
+    let lease = delivery.enter(&f.row);
+    let before = f.operations();
+    delivery.connect(&f.row, &f.events).await;
+    assert_eq!(
+        f.operations(),
+        before,
+        "unchanged persisted state makes no remote call"
+    );
+    f.select_github(None).await;
+    f.replace("git-work", "fictional-github-third").await;
+    assert!(delivery.push("git-work", &f.events).await.is_empty());
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "fictional-github-third",
+        "recipe edits wait for a connection"
+    );
+    let manual = path.parent().unwrap().join("manual-credential");
+    std::fs::write(&manual, "owned-manual-marker").unwrap();
+    drop(lease);
+    let _lease = delivery.enter(&f.row);
+    delivery.connect(&f.row, &f.events).await;
+    assert!(!path.exists());
+    assert_eq!(
+        std::fs::read_to_string(manual).unwrap(),
+        "owned-manual-marker"
+    );
+    assert_eq!(
+        delivery.read_record(&f.row).await.unwrap().github,
+        Some(GithubStamp::Absent)
+    );
+    assert_eq!(delivery.warning(f.row.id), None);
+}
+
+/// Recreating a deselected name before reconnect keeps the same public
+/// revision. Its new creation identity must still replace the host's old
+/// token; helper setup remains valid because it belongs to the host, not token.
+#[farhelm_testtrace::test]
+async fn recreated_github_names_do_not_match_a_previous_delivery() {
+    let f = Fixture::new(false).await;
+    f.github_credential().await;
+    f.select_github(Some("git-work")).await;
+    let _lease = f.connected().await;
+    let first = f.stamp("git-work", 1).await;
+    f.select_github(None).await;
+    f.store.delete_credential("git-work".into()).await.unwrap();
+    let saved = f
+        .store
+        .create_credential(CreateCredential {
+            name: "git-work".into(),
+            kind: CredentialKind::GithubToken,
+            secret: "fictional-recreated-github".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(saved.revision, 1);
+    let next = f.stamp("git-work", 1).await;
+    assert_ne!(first.2, next.2);
+    f.select_github(Some("git-work")).await;
+    assert_eq!(
+        std::fs::read_to_string(f.github_path()).unwrap(),
+        "fictional-github-first"
+    );
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(f.delivery.warning(f.row.id), None);
+    assert_eq!(
+        std::fs::read_to_string(f.github_path()).unwrap(),
+        "fictional-recreated-github"
+    );
+    assert_eq!(
+        f.delivery.read_record(&f.row).await.unwrap().github,
+        Some(GithubStamp::Token {
+            name: next.0,
+            revision: next.1,
+            incarnation: next.2
+        })
+    );
+    assert_eq!(
+        f.operations()
+            .iter()
+            .filter(|operation| *operation == "configure-github-helper")
+            .count(),
+        1
+    );
+    let before = f.operations();
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(f.operations(), before);
+}
+
+/// Reused images can lack gh. The token still reaches new children, the host
+/// stays usable with a fixed warning, and only the unsuccessful GitHub slot
+/// retries after gh is installed; successful endpoint writes remain durable.
+#[farhelm_testtrace::test]
+async fn github_without_gh_keeps_the_file_and_retries_only_the_unfinished_slot() {
+    let f = Fixture::new(false).await;
+    f.github_credential().await;
+    f.select_github(Some("git-work")).await;
+    f.backend.github_cli.store(false, Ordering::SeqCst);
+    let lease = f.delivery.enter(&f.row);
+    f.delivery.connect(&f.row, &f.events).await;
+    assert!(
+        f.delivery
+            .warning(f.row.id)
+            .unwrap()
+            .contains("private clones need gh")
+    );
+    assert_eq!(
+        std::fs::read_to_string(f.github_path()).unwrap(),
+        "fictional-github-first"
+    );
+    assert!(f.claude().await.contains(FIRST));
+    let record = f.delivery.read_record(&f.row).await.unwrap();
+    assert!(record.claude.is_some() && record.github.is_none());
+    let endpoint = std::fs::read(f.home.join(".claude/settings.json")).unwrap();
+    f.backend.github_cli.store(true, Ordering::SeqCst);
+    drop(lease);
+    let before = f.operations().len();
+    let _lease = f.delivery.enter(&f.row);
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(f.delivery.warning(f.row.id), None);
+    assert_eq!(
+        std::fs::read(f.home.join(".claude/settings.json")).unwrap(),
+        endpoint
+    );
+    let retried = &f.operations()[before..];
+    assert!(
+        !retried.iter().any(|op| op == "read-agent-settings"),
+        "no endpoint merge repeats: {retried:?}"
+    );
+    assert_eq!(
+        retried
+            .iter()
+            .filter(|op| *op == "configure-github-helper")
+            .count(),
+        1
+    );
+}
+
+/// Recipe edits may legally release a catalog name before the old connection
+/// retires its binding. A missing later GitHub value must not withhold a valid
+/// endpoint replacement, and its warning must not roll back that success stamp.
+#[farhelm_testtrace::test]
+async fn a_deleted_github_selection_does_not_block_endpoint_replacement() {
+    let f = Fixture::new(false).await;
+    f.github_credential().await;
+    f.select_github(Some("git-work")).await;
+    let _lease = f.connected().await;
+    f.select_github(None).await;
+    f.store.delete_credential("git-work".into()).await.unwrap();
+    f.replace("work", SECOND).await;
+    let failures = f.delivery.push("work", &f.events).await;
+    assert_eq!(failures.len(), 1);
+    assert_eq!(
+        failures[0].reason,
+        "could not resolve the recipe's GitHub credential"
+    );
+    assert!(f.claude().await.contains(SECOND));
+    assert_eq!(
+        f.delivery.read_record(&f.row).await.unwrap().claude,
+        Some(EndpointStamp::Endpoint {
+            base_url: "https://first.example/v1".into(),
+            credential: Some(f.stamp("work", 2).await),
+        })
+    );
+    assert_eq!(
+        std::fs::read_to_string(f.github_path()).unwrap(),
+        "fictional-github-first"
+    );
 }
 
 /// Distinct URLs and names let the edit-timing test distinguish a binding
@@ -408,7 +683,12 @@ async fn a_later_slot_failure_preserves_the_completed_slot_stamp() {
     f.delivery.connect(&f.row, &f.events).await;
     assert_eq!(
         &f.operations()[before..],
-        ["read-agent-settings", "create-directories", "write-unit"]
+        [
+            "read-agent-settings",
+            "create-directories",
+            "write-unit",
+            "remove-github-token"
+        ]
     );
     assert_eq!(f.delivery.warning(f.row.id), None);
     assert!(
@@ -578,11 +858,7 @@ async fn actor_fixture(hold_hook: bool, hold_backend: bool) -> (Harness, Fixture
         crate::ServingMode::Standalone,
     ));
     *gate.service.lock().unwrap() = Some(harness.state.tensorlake.clone());
-    harness
-        .store
-        .admit_tensorlake_install(f.row.id, "/fixture/farhelm", "/fixture/state")
-        .await
-        .unwrap();
+    f.admit().await;
     harness.fleet.edit(f.row.id, |_| {});
     harness.manager.sync_registry().await.unwrap();
     (harness, f, gate)
