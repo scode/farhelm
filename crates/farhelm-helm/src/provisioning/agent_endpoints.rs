@@ -1,4 +1,4 @@
-//! Merge the recipe's agent endpoints without replacing the user's settings.
+//! Merge or clear the recipe's agent endpoints without replacing user settings.
 //!
 //! These functions return bytes only. The backend writes them through stdin,
 //! never argv, and parse errors deliberately omit the input and parser detail:
@@ -35,11 +35,7 @@ pub(super) fn claude(bytes: Option<&[u8]>, endpoint: &ResolvedEndpoint) -> Resul
 /// Select a dedicated Codex provider, retaining the rest of the TOML document,
 /// including comments. Existing provider tables may contain unrelated keys.
 pub(super) fn codex(bytes: Option<&[u8]>, endpoint: &ResolvedEndpoint) -> Result<Vec<u8>, String> {
-    let text = std::str::from_utf8(bytes.unwrap_or_default())
-        .map_err(|_| "~/.codex/config.toml is not UTF-8".to_string())?;
-    let mut doc = text
-        .parse::<toml_edit::DocumentMut>()
-        .map_err(|_| "~/.codex/config.toml is not valid TOML".to_string())?;
+    let mut doc = codex_document(bytes)?;
     doc["model_provider"] = toml_edit::value("farhelm");
     if !doc.contains_key("model_providers") {
         doc["model_providers"] = toml_edit::Item::Table(toml_edit::Table::new());
@@ -69,9 +65,107 @@ pub(super) fn codex(bytes: Option<&[u8]>, endpoint: &ResolvedEndpoint) -> Result
     Ok(doc.to_string().into_bytes())
 }
 
+/// None and Subscription stop selecting Farhelm's API provider while keeping
+/// user-owned provider configuration intact. The table remains available for
+/// later endpoint use; only its bearer token and our active selection go away.
+/// Already clean or absent files require no write, preserving their exact bytes.
+pub(super) fn clear_codex(bytes: Option<&[u8]>) -> Result<Option<Vec<u8>>, String> {
+    let mut doc = codex_document(bytes)?;
+    let mut changed = false;
+    let mut comments = String::new();
+    if doc.get("model_provider").and_then(toml_edit::Item::as_str) == Some("farhelm") {
+        changed |= remove_codex_key(doc.as_table_mut(), "model_provider", &mut comments);
+    }
+    if let Some(providers) = doc.get_mut("model_providers") {
+        let providers = providers
+            .as_table_like_mut()
+            .ok_or("model_providers in ~/.codex/config.toml must be a table")?;
+        if let Some(provider) = providers.get_mut("farhelm") {
+            let provider = provider
+                .as_table_like_mut()
+                .ok_or("the farhelm provider in ~/.codex/config.toml must be a table")?;
+            changed |= remove_codex_key(provider, "experimental_bearer_token", &mut comments);
+        }
+    }
+    if !comments.is_empty() {
+        // Removed entries own their comments in toml_edit. Retain them at the
+        // document's end, including when no neighbouring key survives cleanup.
+        comments.push_str(doc.trailing().as_str().unwrap_or_default());
+        doc.set_trailing(comments);
+    }
+    Ok(changed.then(|| doc.to_string().into_bytes()))
+}
+
+/// Extract comment decoration before removing an owned setting. Its value is
+/// never rendered or copied; inline and leading comments survive independently.
+fn remove_codex_key(
+    table: &mut dyn toml_edit::TableLike,
+    key: &str,
+    comments: &mut String,
+) -> bool {
+    if let Some(prefix) = table
+        .key(key)
+        .and_then(|key| key.leaf_decor().prefix())
+        .and_then(|raw| raw.as_str())
+    {
+        comments.push_str(prefix);
+        if !prefix.is_empty() && !prefix.ends_with('\n') {
+            comments.push('\n');
+        }
+    }
+    if let Some(suffix) = table
+        .get(key)
+        .and_then(toml_edit::Item::as_value)
+        .and_then(|value| value.decor().suffix())
+        .and_then(|raw| raw.as_str())
+        && suffix.trim_start().starts_with('#')
+    {
+        comments.push_str(suffix);
+        comments.push('\n');
+    }
+    table.remove(key).is_some()
+}
+
+/// Endpoint writes and cleanup share parsing and fixed diagnostics. Returning
+/// a parser's detailed error could disclose an existing token from this file.
+fn codex_document(bytes: Option<&[u8]>) -> Result<toml_edit::DocumentMut, String> {
+    let text = std::str::from_utf8(bytes.unwrap_or_default())
+        .map_err(|_| "~/.codex/config.toml is not UTF-8".to_string())?;
+    text.parse()
+        .map_err(|_| "~/.codex/config.toml is not valid TOML".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Cleanup removes only the owned selection and bearer token. It must not
+    /// delete a provider table a user has extended or rewrite clean files.
+    #[test]
+    fn codex_cleanup_keeps_provider_tables_and_unrelated_settings() {
+        let text = b"# keep\nmodel_provider = 'farhelm'\nmodel = 'personal'\n[model_providers.farhelm]\nexperimental_bearer_token = 'fictional-private'\nbase_url = 'https://endpoint.test'\ncustom = true\n";
+        let cleared = clear_codex(Some(text)).unwrap().unwrap();
+        let text = String::from_utf8(cleared).unwrap();
+        assert!(text.contains("# keep") && !text.contains("fictional-private"));
+        let doc: toml_edit::DocumentMut = text.parse().unwrap();
+        assert!(!doc.contains_key("model_provider"));
+        assert_eq!(doc["model"].as_str(), Some("personal"));
+        assert_eq!(
+            doc["model_providers"]["farhelm"]["custom"].as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            doc["model_providers"]["farhelm"]["base_url"].as_str(),
+            Some("https://endpoint.test")
+        );
+        assert!(clear_codex(Some(text.as_bytes())).unwrap().is_none());
+        assert!(clear_codex(None).unwrap().is_none());
+        assert!(
+            clear_codex(Some(b"model_provider = 'personal'\n# untouched\n"))
+                .unwrap()
+                .is_none()
+        );
+    }
 
     /// Recipe setup must preserve personal settings, including other
     /// providers, rather than making an endpoint save a config replacement.
@@ -137,7 +231,13 @@ mod tests {
                     .unwrap_err()
                     .contains("secret")
             );
+            assert!(!clear_codex(Some(bytes)).unwrap_err().contains("secret"));
         }
+        assert!(
+            clear_codex(Some(b"[model_providers]\nfarhelm = 'secret'\n"))
+                .unwrap_err()
+                .contains("must be a table")
+        );
         assert!(claude(None, &endpoint).is_ok());
         assert!(codex(None, &endpoint).is_ok());
     }

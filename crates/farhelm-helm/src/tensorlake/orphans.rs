@@ -414,6 +414,7 @@ mod tests {
                     claude: None,
                     codex: None,
                     github_token_credential: None,
+                    codex_login_credential: None,
                     tunnels: vec![],
                 },
             )

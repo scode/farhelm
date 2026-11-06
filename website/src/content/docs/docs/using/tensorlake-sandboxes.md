@@ -51,8 +51,14 @@ saved value; closing Settings discards text you have not saved.
 read its state directory can read them. Farhelm never shows a saved value again.
 
 For Claude Code, save the token printed by `claude setup-token`. For Codex, run `codex login` on a machine with a
-browser, sign in with ChatGPT, then paste or choose `~/.codex/auth.json`. Recipes can select named API endpoint tokens
-and GitHub tokens as described below. Subscription logins are stored here; their recipe controls are not available yet.
+browser, sign in with ChatGPT, then paste or choose `~/.codex/auth.json`. Recipes can select Codex logins, named API
+endpoint tokens and GitHub tokens as described below. Claude subscription logins are stored here; their recipe controls
+are not available yet.
+
+Use one ChatGPT login per host. Copies share a rotating refresh token: when one copy renews, other copies cannot renew
+and need a fresh sign-in. [Codex's authentication guidance](https://learn.chatgpt.com/docs/auth/ci-cd-auth) explains
+this ownership. To share inference access, prefer a proxy or load balancer through an API endpoint. You are responsible
+for keeping that use within your provider's terms of service.
 
 ## Make a recipe
 
@@ -82,11 +88,11 @@ snapshot; existing hosts keep running. Switching back needs another billed snaps
 
 ### Agent API endpoints
 
-Under **Agents**, you can set a base URL and choose a named endpoint token for Claude Code, Codex, or both. Create the
-token in Settings → **Credentials** first; **None** uses the endpoint without a token. A base URL can point at a
-[tunnel](#tunnels-to-your-side), such as `http://127.0.0.1:8080`. Farhelm writes these settings when it sets up each
-host, for both software choices, and before it connects. Recipe changes reach existing hosts at their next connection or
-setup. Updating Farhelm on a host does not independently reapply them.
+Under **Agents**, you can set a base URL and choose a named endpoint token for Claude Code, Codex, or both. For Codex,
+select **API endpoint** first. Create the token in Settings → **Credentials** first; **None** uses the endpoint without
+a token. A base URL can point at a [tunnel](#tunnels-to-your-side), such as `http://127.0.0.1:8080`. Farhelm writes
+these settings when it sets up each host, for both software choices, and before it connects. Recipe changes reach
+existing hosts at their next connection or setup. Updating Farhelm on a host does not independently reapply them.
 
 Replacing a token in Credentials keeps its name, so you do not need to edit the recipes that use it. Changing a base URL
 keeps the selected token name. A credential cannot be deleted while a recipe uses it; choose **None** or another name in
@@ -103,6 +109,15 @@ Tokens previously saved inside recipes are removed. Re-enter them in Settings �
 in the recipes. Reload Farhelm before editing a recipe form that was open during the upgrade.
 
 :::
+
+For a ChatGPT login, choose Codex **Subscription** and select the login you saved in Credentials. Farhelm writes it to
+the host's usual `~/.codex/auth.json` and leaves Codex's refreshed file alone until you replace that saved login. Recipe
+selection changes take effect at the next connection or setup; replacing the saved login sends it to hosts already using
+it, with the same delivery warnings as endpoint tokens.
+
+Codex **None** and **Subscription** clear Farhelm's API-provider selection and bearer token, keeping your other
+settings. Switching away from Subscription leaves `auth.json` on the host. Sign out in Codex on that host to remove it;
+choosing None in the recipe does not sign you out.
 
 ### Tunnels to your side
 

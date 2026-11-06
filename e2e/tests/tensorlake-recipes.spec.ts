@@ -368,6 +368,13 @@ for (const palette of ["dark", "light"] as const) {
           });
         }
 
+        // None hides mode-specific fields. Open the endpoint mode before
+        // exercising the last editable control's handoff to sticky actions.
+        await editor.getByRole("radiogroup", { name: "Codex authentication mode", exact: true })
+          .getByRole("radio", { name: "API endpoint", exact: true }).click();
+        // The later modal-close action saves this draft. Opening API mode for
+        // the Tab handoff must leave a valid endpoint for that save to accept.
+        await editor.getByLabel("Codex base URL", { exact: true }).fill("https://codex.example/v1");
         const finalField = editor.getByLabel("Codex endpoint token", {
           exact: true,
         });
@@ -472,6 +479,82 @@ for (const palette of ["dark", "light"] as const) {
   );
 }
 
+/** Mode switches retain drafts but save only their active selection. The
+ * subscription picker admits Codex logins alone, survives reopening, and
+ * protects a referenced login from deletion without ever exposing its value.
+ */
+test("Codex modes retain drafts and select only named Codex logins", async ({ page, request }, info) => {
+  const name = "e2e-codex-mode";
+  const login = "e2e-codex-login";
+  const other = "e2e-claude-login";
+  const secret = "fictional-codex-browser-private";
+  const owned: string[] = [];
+  expect((await recipes(request)).map((row) => row.name)).not.toContain(name);
+  try {
+    for (const [credential, kind, value] of [
+      [login, "codex_login", JSON.stringify({ opaque: secret })],
+      [other, "claude_login", "fictional-claude-browser-private"],
+    ]) {
+      const response = await request.post("/api/credentials", { data: { name: credential, kind, secret: value } });
+      expect(response.status(), await response.text()).toBe(201);
+      owned.push(credential);
+    }
+    await page.goto("/");
+    const list = await openRecipes(page);
+    await list.getByRole("button", { name: "New recipe", exact: true }).click();
+    let editor = page.getByRole("region", { name: "New recipe", exact: true });
+    await editor.getByLabel("Name", { exact: true }).fill(name);
+    const modes = editor.getByRole("radiogroup", { name: "Codex authentication mode", exact: true });
+    await expect(modes.getByRole("radio", { name: "None", exact: true })).toHaveAttribute("aria-checked", "true");
+    await modes.getByRole("radio", { name: "API endpoint", exact: true }).click();
+    await editor.getByLabel("Codex base URL", { exact: true }).fill("https://endpoint.example/v1");
+    await modes.getByRole("radio", { name: "Subscription", exact: true }).click();
+    const picker = editor.getByLabel("Codex login", { exact: true });
+    await expect(picker).toBeEnabled();
+    await expect(picker.locator("option")).toHaveText(["None", login]);
+    await editor.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(editor.getByRole("alert")).toContainText("Choose a Codex login");
+    await picker.selectOption(login);
+    await modes.getByRole("radio", { name: "API endpoint", exact: true }).click();
+    await expect(editor.getByLabel("Codex base URL", { exact: true })).toHaveValue("https://endpoint.example/v1");
+    await modes.getByRole("radio", { name: "Subscription", exact: true }).click();
+    await expect(picker).toHaveValue(login);
+    await picker.scrollIntoViewIfNeeded();
+    await expect(picker).toBeInViewport();
+    await info.attach("codex-subscription-selection", { body: await page.getByRole("dialog", { name: "Settings", exact: true }).screenshot(), contentType: "image/png" });
+    await editor.getByRole("button", { name: "Save", exact: true }).click();
+    const row = list.getByRole("listitem").filter({ hasText: name });
+    await expect(row).toBeVisible();
+    const selected = (await recipes(request)).find((row) => row.name === name);
+    expect(selected.codex).toBeNull();
+    expect(selected.codex_login_credential).toBe(login);
+    expect(JSON.stringify(selected)).not.toContain(secret);
+    expect(await page.content()).not.toContain(secret);
+    expect((await request.delete(`/api/credentials/${login}`)).status()).toBe(409);
+    await row.getByRole("button", { name: `Edit ${name}`, exact: true }).click();
+    editor = page.getByRole("region", { name: `Recipe: ${name}`, exact: true });
+    await expect(editor.getByLabel("Codex login", { exact: true })).toHaveValue(login);
+    await editor.getByRole("radiogroup", { name: "Codex authentication mode", exact: true })
+      .getByRole("radio", { name: "None", exact: true }).click();
+    // A mode selection participates in the existing leave guard.
+    await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(editor.getByText("Save these changes before leaving?", { exact: true })).toBeVisible();
+    await editor.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(row).toBeVisible();
+    expect((await recipes(request)).find((row) => row.name === name).codex_login_credential).toBeNull();
+    const removed = await request.delete(`/api/credentials/${login}`);
+    expect(removed.status()).toBe(200);
+    owned.splice(owned.indexOf(login), 1);
+  } finally {
+    await page.goto("about:blank");
+    await removeRecipes(request, [name]);
+    for (const credential of owned) {
+      const response = await request.delete(`/api/credentials/${credential}`);
+      expect(response.status(), await response.text()).toBe(200);
+    }
+  }
+});
+
 /** Spec: a managed recipe created in the editor is stored with its size,
  * packages (split on spaces and new lines), tunnel, Claude Code endpoint and
  * GitHub selection. Pickers filter credential kinds; only names are returned. Reopening keeps
@@ -575,6 +658,7 @@ test("a managed recipe is created, edited and deleted without exposing its token
       source: { kind: "packages", packages: ["git", "ripgrep", "jq"] },
       claude: { base_url: "http://127.0.0.1:8080", token_credential: credentialName },
       codex: null,
+      codex_login_credential: null,
       github_token_credential: githubName,
       tunnels: [{ sandbox_port: 8080, host: "127.0.0.1", port: 8080 }],
       snapshot: null,

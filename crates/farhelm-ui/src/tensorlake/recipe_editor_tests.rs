@@ -23,6 +23,7 @@ fn saved_view() -> RecipeView {
         }),
         codex: None,
         github_token_credential: None,
+        codex_login_credential: None,
         tunnels: vec![Tunnel {
             sandbox_port: 8080,
             host: "127.0.0.1".into(),
@@ -124,4 +125,42 @@ fn named_endpoint_selection_survives_origin_changes_and_can_be_removed() {
     draft.claude.token_credential = "work-endpoint".into();
     draft.claude.base_url.clear();
     assert!(draft.to_save().unwrap().claude.is_none());
+}
+
+/// Switching modes retains text but submits only the selected authentication.
+/// Empty mode-specific input must fail locally rather than silently save None.
+#[test]
+fn codex_modes_keep_drafts_and_submit_exclusive_selections() {
+    let mut draft = Draft::new_recipe();
+    draft.codex_mode = CodexMode::Endpoint;
+    assert!(draft.to_save().err().unwrap().contains("base URL"));
+    draft.codex.base_url = "https://codex.example/v1".into();
+    draft.codex.token_credential = "endpoint-work".into();
+    let save = draft.to_save().unwrap();
+    assert!(save.codex.is_some() && save.codex_login_credential.is_none());
+    draft.codex_mode = CodexMode::Subscription;
+    assert!(
+        draft
+            .to_save()
+            .err()
+            .unwrap()
+            .contains("choose a Codex login")
+    );
+    draft.codex_login_credential = "codex-work".into();
+    let save = draft.to_save().unwrap();
+    assert!(save.codex.is_none());
+    assert_eq!(save.codex_login_credential.as_deref(), Some("codex-work"));
+    draft.codex_mode = CodexMode::None;
+    let save = draft.to_save().unwrap();
+    assert!(save.codex.is_none() && save.codex_login_credential.is_none());
+    assert_eq!(draft.codex.base_url, "https://codex.example/v1");
+    assert_eq!(draft.codex_login_credential, "codex-work");
+    let mut view = saved_view();
+    view.codex_login_credential = Some("codex-work".into());
+    let reopened = Draft::from_view(&view);
+    assert_eq!(reopened.codex_mode, CodexMode::Subscription);
+    assert_eq!(
+        reopened.to_save().unwrap().codex_login_credential,
+        view.codex_login_credential
+    );
 }

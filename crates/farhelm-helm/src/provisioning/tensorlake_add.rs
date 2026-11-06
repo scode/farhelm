@@ -75,13 +75,12 @@ fn steps(sandbox: &str, name: &str, recipe: &StoredRecipe, ready: bool) -> PlanS
         "prepare-sandbox",
         "Start the sandbox's login manager and keep the user manager running".into(),
     ));
-    if recipe.claude.is_some() || recipe.codex.is_some() || recipe.github_token_credential.is_some()
-    {
-        descriptions.push((
-            "configure-agents",
-            "Configure host credentials and agent endpoints, preserving other settings".into(),
-        ));
-    }
+    // None is a real Codex selection: removing old Farhelm provider settings
+    // can do work or fail even when no credential is selected in this recipe.
+    descriptions.push((
+        "configure-agents",
+        "Configure host credentials and agent endpoints, preserving other settings".into(),
+    ));
     descriptions.push((
         "set-up-farhelm",
         if recipe.tunnels.is_empty() {
@@ -456,16 +455,8 @@ impl ProvisioningService {
         self.set_step(host, *index, StepStatus::Completed, home_notice)
             .await;
         *index += 1;
-        let configure_index = if plan.recipe.claude.is_some()
-            || plan.recipe.codex.is_some()
-            || plan.recipe.github_token_credential.is_some()
-        {
-            let configured = Some(*index);
-            *index += 1;
-            configured
-        } else {
-            None
-        };
+        let configure_index = *index;
+        *index += 1;
         self.set_step(host, *index, StepStatus::Running, None).await;
         let probe = ProbeTarget {
             transport: target.clone(),
@@ -505,10 +496,8 @@ impl ProvisioningService {
         // Reconcile only after the copied-state check admits this installation.
         // Keep the actor held until delivery finishes; a warning must still let
         // the supervisor installation continue to make this host usable.
-        if let Some(configured) = configure_index {
-            self.set_step(host, configured, StepStatus::Running, None)
-                .await;
-        }
+        self.set_step(host, configure_index, StepStatus::Running, None)
+            .await;
         let delivery_notice = self
             .delivery
             .setup(
@@ -519,10 +508,13 @@ impl ProvisioningService {
             )
             .await
             .err();
-        if let Some(configured) = configure_index {
-            self.set_step(host, configured, StepStatus::Completed, delivery_notice)
-                .await;
-        }
+        self.set_step(
+            host,
+            configure_index,
+            StepStatus::Completed,
+            delivery_notice,
+        )
+        .await;
         let described = ProvisioningView::for_plan(host, nonce, &inner);
         if let Some(run) = self.memory.lock().await.runs.get_mut(&host) {
             run.steps.splice(*index.., described.steps);

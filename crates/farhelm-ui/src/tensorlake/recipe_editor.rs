@@ -13,8 +13,8 @@
 //! Requests follow the explicit-save pattern of the ntfy form: they are
 //! declared in the click handler and spawned with `spawn_forever`, so closing
 //! Settings does not retract an accepted save, and they touch component state
-//! only while it is still mounted. Endpoints select credential names from
-//! the metadata catalog; token values never enter the recipe draft or save.
+//! only while it is still mounted. Endpoint tokens and Codex logins select
+//! names from the metadata catalog; values never enter the recipe draft or save.
 //!
 //! Wording follows the goal's UI decisions: the built artifact is a
 //! "snapshot", never a "template" (that word means launch templates), and the
@@ -53,6 +53,15 @@ struct EndpointDraft {
     token_credential: String,
 }
 
+/// Codex keeps each mode's draft while only the selected mode reaches the
+/// recipe. None and Subscription both stop selecting Farhelm's API provider.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CodexMode {
+    None,
+    Endpoint,
+    Subscription,
+}
+
 /// One tunnel row as typed. Ports stay text until save so a half-typed row
 /// does not fight the input.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -77,6 +86,8 @@ struct Draft {
     snapshot_id: String,
     claude: EndpointDraft,
     codex: EndpointDraft,
+    codex_mode: CodexMode,
+    codex_login_credential: String,
     github_token_credential: String,
     tunnels: Vec<TunnelDraft>,
 }
@@ -96,6 +107,8 @@ impl Draft {
             snapshot_id: String::new(),
             claude: EndpointDraft::default(),
             codex: EndpointDraft::default(),
+            codex_mode: CodexMode::None,
+            codex_login_credential: String::new(),
             github_token_credential: String::new(),
             tunnels: Vec::new(),
         }
@@ -135,6 +148,14 @@ impl Draft {
         };
         draft.claude = endpoint(&view.claude);
         draft.codex = endpoint(&view.codex);
+        draft.codex_mode = if view.codex.is_some() {
+            CodexMode::Endpoint
+        } else if view.codex_login_credential.is_some() {
+            CodexMode::Subscription
+        } else {
+            CodexMode::None
+        };
+        draft.codex_login_credential = view.codex_login_credential.clone().unwrap_or_default();
         draft.github_token_credential = view.github_token_credential.clone().unwrap_or_default();
         draft.tunnels = view
             .tunnels
@@ -189,11 +210,25 @@ impl Draft {
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
+        let codex = if self.codex_mode == CodexMode::Endpoint {
+            Some(endpoint_save(&self.codex).ok_or("Codex API endpoint needs a base URL")?)
+        } else {
+            None
+        };
+        let codex_login_credential = if self.codex_mode == CodexMode::Subscription {
+            if self.codex_login_credential.is_empty() {
+                return Err("choose a Codex login in Subscription mode".into());
+            }
+            Some(self.codex_login_credential.clone())
+        } else {
+            None
+        };
         let save = RecipeSave {
             size,
             source,
             claude: endpoint_save(&self.claude),
-            codex: endpoint_save(&self.codex),
+            codex,
+            codex_login_credential,
             github_token_credential: (!self.github_token_credential.is_empty())
                 .then(|| self.github_token_credential.clone()),
             tunnels,
@@ -677,7 +712,28 @@ pub(crate) fn RecipeEditor(
                     "Optionally point either agent at an API endpoint. The base URL usually points at a tunnel's sandbox port, such as http://127.0.0.1:8080. Farhelm writes these into each host's agent settings when it sets the host up."
                 }
                 EndpointFields { agent: Agent::Claude, draft, locked, credentials: (catalog.rows)(), error }
-                EndpointFields { agent: Agent::Codex, draft, locked, credentials: (catalog.rows)(), error }
+                div { class: "recipe-endpoint", role: "group", aria_label: "Codex authentication",
+                    span { "Codex" }
+                    div { class: "segmented-control", role: "radiogroup", aria_label: "Codex authentication mode",
+                        for (mode, label) in [(CodexMode::None, "None"), (CodexMode::Endpoint, "API endpoint"), (CodexMode::Subscription, "Subscription")] {
+                            button { r#type: "button", role: "radio", disabled: locked,
+                                aria_checked: draft.read().codex_mode == mode,
+                                onclick: move |_| { draft.write().codex_mode = mode; error.set(None); }, "{label}" }
+                        }
+                    }
+                    if draft.read().codex_mode == CodexMode::Endpoint {
+                        EndpointFields { agent: Agent::Codex, draft, locked, credentials: (catalog.rows)(), error }
+                    } else if draft.read().codex_mode == CodexMode::Subscription {
+                        CredentialPicker {
+                            label: "Codex login", value: draft.read().codex_login_credential.clone(),
+                            kind: farhelm_proto::credentials::CredentialKind::CodexLogin,
+                            locked, credentials: (catalog.rows)(),
+                            missing_notice: "The selected Codex login is unavailable. Choose another login.",
+                            on_change: move |value| { draft.write().codex_login_credential = value; error.set(None); },
+                        }
+                    }
+                    p { class: "host-settings-help", "Subscription uses a Codex login from Settings → Credentials. Farhelm writes auth.json when that saved login changes and leaves Codex's refreshed file alone. Switching away leaves auth.json on the host; sign out in Codex to remove it." }
+                }
                 p { class: "host-settings-help",
                     "Add or replace endpoint tokens in Settings → Credentials. This recipe saves their names, not their values."
                 }

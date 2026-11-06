@@ -385,6 +385,7 @@ fn CredentialEditor(
                         } }
                 }
                 p { class: "host-settings-help", "On a machine with a browser, run codex login and sign in with ChatGPT, then paste or choose ~/.codex/auth.json." }
+                p { class: "host-settings-help", "Use one ChatGPT login per host. Copies share a rotating refresh token: when one copy renews it, other copies cannot renew and need a fresh sign-in. To share inference access, prefer a proxy or load balancer through an API endpoint. You are responsible for keeping that use within your provider's terms of service." }
             } else if kind() == CredentialKind::ClaudeLogin {
                 p { class: "host-settings-help", "Run claude setup-token on a machine where you can sign in to Claude, then paste the token it prints. It starts with sk-ant-oat01- and lasts a year. You need a Pro, Max, Team or Enterprise plan." }
             }

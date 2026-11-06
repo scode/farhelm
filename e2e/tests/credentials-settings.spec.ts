@@ -51,6 +51,9 @@ test("credentials keep fixed names, replace write-only values and discard login 
     await panel.getByRole("button", { name: "Add agent login", exact: true }).click();
     await expect(editor.getByRole("heading", { name: "New agent login", exact: true })).toBeFocused();
     await editor.getByRole("radio", { name: "Codex", exact: true }).click();
+    await expect(editor).toContainText("when one copy renews it, other copies cannot renew and need a fresh sign-in");
+    await expect(editor).toContainText("prefer a proxy or load balancer through an API endpoint");
+    await expect(editor).toContainText("provider's terms of service");
     await editor.getByLabel("Name", { exact: true }).fill(`${name}-login`);
     await editor.getByLabel("Choose auth.json file", { exact: true }).setInputFiles({
       name: "auth.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify({ future: { token: codex } })),
