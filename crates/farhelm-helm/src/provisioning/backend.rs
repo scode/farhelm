@@ -491,7 +491,10 @@ pub(super) struct SystemBackend {
 }
 
 /// Process-creation seam that tests use to exercise production classifiers
-/// without invoking a real SSH endpoint.
+/// without invoking a real SSH endpoint. Test launchers that stand in for
+/// `ssh` go through `super::ssh_stand_in`, which gives the helm's pipes the
+/// lifetimes a real shared connection gives them; the one exception is a
+/// test that builds a deliberately unmeasured shape and says so.
 pub(crate) trait CommandLauncher: Send + Sync {
     fn spawn(
         &self,
@@ -652,7 +655,7 @@ impl SystemBackend {
     /// `access` is the target's: a Tensorlake sandbox is provisioned with
     /// Farhelm's own key, like every other connection to it, and the payload
     /// uploads and probes inherit that by coming through here too.
-    fn ssh_command(
+    pub(super) fn ssh_command(
         &self,
         destination: &str,
         access: crate::ssh::SshAccessKind,
@@ -1330,11 +1333,14 @@ impl SystemBackend {
             Some(feeder.abort_handle()),
         )
         .await;
-        // Unless the copy succeeded, the feeder may be blocked writing input
-        // nobody will read: the remote side stopped, but a process still holding
-        // the pipe (a shared connection's master, say) keeps the write from
-        // failing. Cancel it so joining it below cannot wait forever; the
-        // capture's own error, or the exit status, is what gets reported.
+        // Unless the copy succeeded, nothing will read the rest of the input,
+        // and the feeder's write fails only once every holder of the pipe's
+        // read end is gone. With OpenSSH that happens as soon as the ssh
+        // process exits or is killed, shared connection or not (see
+        // `ssh_stand_in`), so this cancel is defensive: a process that keeps
+        // the pipe without reading it must not make the join below wait
+        // forever. The capture's own error, or the exit status, is what gets
+        // reported.
         if !matches!(&output, Ok(result) if result.code == Some(0)) {
             feeder.abort();
         }
@@ -1870,12 +1876,16 @@ where
 /// stop the deadline: ssh may still be draining buffered input or waiting for the
 /// remote command after the helm has written its final byte.
 ///
-/// `input` is the task feeding the child's stdin, if one does. Every failure
-/// cancels it before killing the child, releasing the stdin it owns: over a
-/// shared ssh connection the master keeps the session's pipes open until the
-/// remote command ends, and a remote `cat` ends only at EOF on its input. The
-/// stream readers are then joined within [`CAPTURE_PIPE_GRACE`], like a normal
-/// exit's, so a pipe some other process still holds cannot hang the failure.
+/// Every failure kills the child and then joins its stream readers within
+/// [`CAPTURE_PIPE_GRACE`], like a normal exit's. That bound is what keeps a
+/// stalled transfer from hanging (#3006): over a shared ssh connection the
+/// master holds the session's stderr after the ssh process is killed, until
+/// the remote command ends, and a stalled remote command may never end.
+///
+/// `input` is the task feeding the child's stdin, if one does, and every
+/// failure cancels it first. This is defensive rather than load-bearing: as
+/// measured (see `ssh_stand_in`), killing the ssh process already closes the
+/// remote command's stdin and makes the feeder's next write fail.
 pub(super) async fn capture_transfer_child(
     mut child: tokio::process::Child,
     source_bytes: u64,
@@ -1956,10 +1966,9 @@ pub(super) async fn capture_transfer_child(
     finish_child_output(status, stdout_task, stderr_task, &mut signal_rx, context).await
 }
 
-/// End a failed transfer: release its stdin first by cancelling the feeder,
-/// then kill the child's group and join its readers within the shared grace.
-/// The order matters over a shared ssh connection; see
-/// [`capture_transfer_child`].
+/// End a failed transfer: cancel the feeder, kill the child's group, and join
+/// its readers within the shared grace, so a pipe that stays open cannot hang
+/// the failure. See [`capture_transfer_child`] for which part matters.
 async fn stop_transfer(
     child: &mut tokio::process::Child,
     stdout_task: tokio::task::JoinHandle<Vec<u8>>,
@@ -2049,9 +2058,10 @@ pub(super) async fn terminate_child(child: &mut tokio::process::Child) {
 /// stopped: a shared ssh connection's master holds the session's stderr until
 /// the remote command ends, and an escaped helper can hold it indefinitely.
 /// Waiting for EOF is therefore bounded, and an expired bound must not throw
-/// away records that were read long before it. Losing them made every remote
-/// probe over a shared connection report "answered without reporting its
-/// resolved binary", which refused remote uninstall outright.
+/// away records that were read long before it. Losing them made a remote
+/// probe whose remote command outlived the bound report "answered without
+/// reporting its resolved binary", which refused remote uninstall outright
+/// (#3005).
 struct ProbeStderrReader {
     task: tokio::task::JoinHandle<ProbeStderr>,
     progress: Arc<std::sync::Mutex<ProbeStderr>>,
@@ -2089,11 +2099,13 @@ impl ProbeStderrReader {
 /// Terminate a protocol probe and retain its bounded stderr prefix.
 ///
 /// Probe stdout belongs to the framed handshake, so this is the common cleanup
-/// half for the independently drained diagnostic stream. The caller closes
-/// the probe's stdin first (by dropping the handshake writer): over a shared
-/// ssh connection, that is what ends the remote command and so lets the
-/// master release stderr. A two-second bound still keeps an escaped helper
-/// from retaining a host planning slot forever; see [`ProbeStderrReader`].
+/// half for the independently drained diagnostic stream. Over a shared ssh
+/// connection, stderr reaches EOF only once the remote command is done.
+/// Killing the ssh process closes the remote command's stdin and stdout, so a
+/// remote stdio proxy then ends on the EOF or on its next write, but how soon
+/// that happens is up to the remote side. The two-second bound keeps a slow
+/// remote command, or an escaped helper, from retaining a host planning slot;
+/// see [`ProbeStderrReader`] for why expiry keeps what was read.
 async fn stop_probe(child: &mut tokio::process::Child, stderr: ProbeStderrReader) -> ProbeStderr {
     terminate_child(child).await;
     stderr.finish(Duration::from_secs(2)).await
@@ -2166,9 +2178,11 @@ impl ProvisioningBackend for SystemBackend {
                 ));
             }
         };
-        // Nothing is written after the hello. Closing stdin now ends the
-        // remote command, which is what lets a shared ssh connection's
-        // master release the probe's stderr (see `stop_probe`).
+        // Nothing is written after the hello, so stdin closes here. The
+        // remote stdio proxy ends once it reads that EOF, but stopping the
+        // probe delivers the same EOF to it, so this close does not decide
+        // when a shared connection's master releases stderr (see
+        // `stop_probe`).
         drop(writer);
         match handshake_result {
             Ok(Ok(ControlMsg::Hello {
@@ -3545,12 +3559,15 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
 mod tests {
     use super::*;
 
-    /// Stands in for an upload whose remote side has stopped while something
-    /// else still holds its pipes, as a shared ssh connection's master does:
-    /// the upload exits with status 7 at once, and a detached holder (its own
-    /// session, so outside the upload's process group) keeps stdin, stdout and
-    /// stderr open without reading. The holder publishes its pid atomically so
-    /// the test can end it.
+    /// Stands in for an upload process that exits with status 7 at once while
+    /// a detached holder (its own session, so outside the upload's process
+    /// group) keeps stdin, stdout and stderr open without reading. The holder
+    /// publishes its pid atomically so the test can end it.
+    ///
+    /// NOTE: This is a defensive shape, not one measured from OpenSSH. A live
+    /// shared-connection client exits only once the session's output has
+    /// closed (see `super::super::ssh_stand_in`), so over real ssh the exit
+    /// and the held pipes do not coexist like this.
     #[cfg(target_os = "linux")]
     struct HeldUploadLauncher {
         holder_pid: PathBuf,
@@ -3582,10 +3599,12 @@ mod tests {
         }
     }
 
-    /// Why: when an upload's ssh process exits unsuccessfully while another
-    /// process (a shared connection's master) still holds its pipes, the feeder
-    /// stays blocked writing input nobody reads. Joining it unconditionally made
-    /// the upload, and so the whole install or update, hang instead of failing.
+    /// Why: when an upload's process exits unsuccessfully while another
+    /// process still holds its pipes, the feeder stays blocked writing input
+    /// nobody reads. Joining it unconditionally would hang the upload, and so
+    /// the whole install or update, instead of failing it. (The stall over
+    /// the shared-connection stand-in, which follows measured OpenSSH, is
+    /// `a_stalled_transfer_fails_while_a_shared_session_holds_stderr`.)
     ///
     /// Spec: with a payload larger than a pipe buffer, an upload that exits with
     /// status 7 while a holder keeps its pipes open returns an error within the
@@ -3725,11 +3744,11 @@ mod tests {
     }
 
     /// Why: a shared ssh connection's master holds the probe session's stderr
-    /// open after the probe's own ssh process is killed, so the bounded wait
-    /// for EOF always expires there. Discarding what was read by then made
-    /// every remote probe over a shared connection report "answered without
-    /// reporting its resolved binary", refusing remote uninstall on every
-    /// ordinary ssh host.
+    /// open after the probe's own ssh process is killed, until the remote
+    /// command ends, so the bounded wait for EOF expires whenever the remote
+    /// side takes longer than the bound. Discarding what was read by then
+    /// made such a probe report "answered without reporting its resolved
+    /// binary", refusing remote uninstall (#3005).
     ///
     /// Spec: when stderr stays open past the bound, `stop_probe` still returns
     /// the wrapper records and the diagnostic prefix that arrived before it.

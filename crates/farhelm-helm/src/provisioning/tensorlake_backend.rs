@@ -166,9 +166,14 @@ mod tests {
 
     /// Replace only child execution, leaving ssh construction, bounded
     /// capture and preparation's status classification in production code.
+    /// The scripts run behind the ssh stand-in, so a sandbox command gets the
+    /// pipe behavior of whatever connection its argv asks for.
     struct Scripts(Mutex<VecDeque<&'static str>>);
     impl CommandLauncher for Scripts {
-        fn spawn(&self, _: &mut tokio::process::Command) -> std::io::Result<tokio::process::Child> {
+        fn spawn(
+            &self,
+            command: &mut tokio::process::Command,
+        ) -> std::io::Result<tokio::process::Child> {
             let script = self
                 .0
                 .lock()
@@ -176,14 +181,8 @@ mod tests {
                 .pop_front()
                 .expect("expected command");
             let mut child = tokio::process::Command::new("sh");
-            child
-                .args(["-c", script])
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true);
-            isolate_process_group(&mut child);
-            child.spawn()
+            child.args(["-c", script]);
+            crate::provisioning::ssh_stand_in::spawn_remote(command, child)
         }
     }
 

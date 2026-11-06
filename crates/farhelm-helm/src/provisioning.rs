@@ -29,6 +29,10 @@ mod payloads;
 mod plan;
 mod release_payloads;
 mod service;
+// What a test's stand-in for `ssh` must do with the helm's pipes; every ssh
+// launcher in these tests goes through it.
+#[cfg(test)]
+mod ssh_stand_in;
 mod uninstall_refusal;
 
 pub use backend::{LocalSupervisorDiscovery, discover_local_supervisor};
@@ -129,9 +133,16 @@ mod tests {
         }
     }
 
+    /// Answer each launch with the next scripted remote command, recording
+    /// the program the backend asked for. The script stands in for what sshd
+    /// would run, behind [`super::ssh_stand_in`], so an ssh launch gets a
+    /// shared connection's pipe behavior and a local one runs as itself.
+    /// `shared` records, per launch, whether the stand-in gave it a shared
+    /// connection, so a test that depends on sharing can assert it.
     struct ScriptLauncher {
         scripts: Mutex<VecDeque<String>>,
         programs: Mutex<Vec<String>>,
+        shared: Mutex<Vec<bool>>,
     }
 
     impl ScriptLauncher {
@@ -139,6 +150,7 @@ mod tests {
             Arc::new(Self {
                 scripts: Mutex::new(scripts.into_iter().collect()),
                 programs: Mutex::new(Vec::new()),
+                shared: Mutex::new(Vec::new()),
             })
         }
     }
@@ -161,15 +173,13 @@ mod tests {
                 .unwrap()
                 .pop_front()
                 .expect("one scripted child per launch");
+            self.shared
+                .lock()
+                .unwrap()
+                .push(super::ssh_stand_in::shares_connection(command));
             let mut scripted = tokio::process::Command::new("sh");
-            scripted
-                .args(["-c", &script])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true);
-            isolate_process_group(&mut scripted);
-            scripted.spawn()
+            scripted.args(["-c", &script]);
+            super::ssh_stand_in::spawn_remote(command, scripted)
         }
     }
 
@@ -177,7 +187,8 @@ mod tests {
     /// (the backend's own upload script over ssh) discards the real payload and publishes
     /// exact fixture bytes instead. This isolates digest and cleanup checks
     /// from SSH setup without replacing the backend's own shell command
-    /// construction.
+    /// construction. Like every ssh launcher here, it runs the remote side
+    /// behind [`super::ssh_stand_in`].
     struct ScriptedTransferLauncher {
         temporary: PathBuf,
         bytes: &'static str,
@@ -220,13 +231,7 @@ mod tests {
             } else {
                 child.arg("-c").arg(remote);
             }
-            child
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true);
-            isolate_process_group(&mut child);
-            child.spawn()
+            super::ssh_stand_in::spawn_remote(command, child)
         }
     }
 
@@ -270,13 +275,7 @@ mod tests {
             };
             let mut child = tokio::process::Command::new("sh");
             child.args(["-c", &script]);
-            child
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true);
-            isolate_process_group(&mut child);
-            child.spawn()
+            super::ssh_stand_in::spawn_remote(command, child)
         }
     }
 
@@ -304,13 +303,8 @@ mod tests {
                 .env("HOME", &self.home)
                 .env("PATH", format!("{}:/usr/bin:/bin", self.bin.display()))
                 .env_remove("XDG_CONFIG_HOME")
-                .env_remove("XDG_STATE_HOME")
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true);
-            isolate_process_group(&mut child);
-            child.spawn()
+                .env_remove("XDG_STATE_HOME");
+            super::ssh_stand_in::spawn_remote(command, child)
         }
     }
 
@@ -6683,6 +6677,98 @@ mod tests {
         }
     }
 
+    /// Why: remote uninstall and Update planning dial the binary the probe's
+    /// remote side reports on stderr before the hello. Over the shared ssh
+    /// connection that every provisioning command uses, stopping the probe's
+    /// ssh process does not close that stderr: the connection's master holds
+    /// it until the remote side is done, and a remote side can take longer
+    /// than the helm's two-second wait (a slow host or link). The helm used to
+    /// throw away everything it had read when that wait expired, so remote
+    /// uninstall was refused with "answered without reporting its resolved
+    /// binary" (#3005).
+    ///
+    /// Spec: a probe over a shared connection whose remote side, after the
+    /// hello and the end of its input, still holds stderr when the helm's wait
+    /// expires reports a present supervisor that dials the resolved binary.
+    /// The remote marks reaching its wait before the probe returns and
+    /// leaving it only after the test releases it, so it was alive, holding
+    /// stderr, throughout: a pass cannot come from an early EOF instead.
+    #[farhelm_testtrace::test]
+    async fn a_shared_connection_probe_keeps_records_its_remote_still_holds() {
+        let root = super::ssh_stand_in::control_root();
+        let lingering = root.path().join("lingering");
+        let release = root.path().join("release");
+        let done = root.path().join("done");
+        let hello = farhelm_proto::Frame::control(&ControlMsg::Hello {
+            database_schema: None,
+            protocol_version: farhelm_proto::PROTOCOL_VERSION,
+            build_version: "0.9.9-fixture".to_string(),
+            role: "supervisor".to_string(),
+            host_identity: Some("fixture-identity".to_string()),
+            auth: None,
+        });
+        // `cat` consumes the helm's hello and returns at the end of input;
+        // the loop then keeps the remote, and so its stderr, alive until the
+        // test releases it after the probe has returned. `done` is created
+        // only on the way out of that loop.
+        let script = format!(
+            "printf '%s\\n' '{REMOTE_PROBE_MARKER}' >&2; \
+             printf '%s%s\\n' '{REMOTE_RESOLVED_PREFIX}' '/resolved/lib/farhelm' >&2; \
+             {}; cat >/dev/null; : > {lingering}; \
+             while [ ! -e {release} ]; do sleep 0.05; done; : > {done}",
+            frame_script(hello),
+            lingering = shell_words::quote(lingering.to_str().unwrap()),
+            release = shell_words::quote(release.to_str().unwrap()),
+            done = shell_words::quote(done.to_str().unwrap()),
+        );
+        let launcher = ScriptLauncher::new([script]);
+        let backend = SystemBackend {
+            control_dir: root.path().to_path_buf(),
+            linger: LingerBehavior::Simulated(Ok(())),
+            launcher: launcher.clone(),
+            runtime_units: false,
+            fail_before_rename: false,
+        };
+        let target = ProbeTarget {
+            transport: ProvisioningTarget::ssh("scripted.example"),
+            probe_farhelm: PathBuf::from("farhelm"),
+            probe_state_dir: None,
+        };
+        let started = tokio::time::Instant::now();
+        let observation = backend.probe(&target).await;
+        let elapsed = started.elapsed();
+        let waiting = lingering.exists();
+        std::fs::write(&release, b"").unwrap();
+        assert_eq!(
+            *launcher.shared.lock().unwrap(),
+            [true],
+            "premise: the probe rode a shared connection"
+        );
+        assert!(
+            waiting,
+            "premise: the remote side was in its wait when the probe returned"
+        );
+        assert!(
+            wait_for_fixture_file(&done, Duration::from_secs(10)).await,
+            "premise: the remote side stayed alive until the test released it"
+        );
+        assert!(
+            elapsed >= Duration::from_secs(2),
+            "premise: the helm's stderr wait expired rather than seeing EOF: {elapsed:?}"
+        );
+        match observation {
+            Ok(ProbeObservation::Supervisor {
+                build_version,
+                dial_farhelm,
+                ..
+            }) => {
+                assert_eq!(build_version, "0.9.9-fixture");
+                assert_eq!(dial_farhelm, PathBuf::from("/resolved/lib/farhelm"));
+            }
+            other => panic!("expected a present supervisor, got {other:?}"),
+        }
+    }
+
     /// The desktop-startup classifier must treat a skewed local supervisor
     /// as ANSWERING: it owns the socket and the state directory, so
     /// starting a rival because we cannot talk to it would be strictly
@@ -7133,66 +7219,53 @@ mod tests {
         );
     }
 
-    /// Why: over a shared ssh connection the master keeps a transfer session's
-    /// pipes open after the local ssh is killed, until the remote command
-    /// ends, and the remote `cat` ends only when its input closes. A stall
-    /// failure that joined its stream readers without a bound while the input
-    /// feeder still held stdin never returned, leaving an install or update
-    /// hung and its host blocked for other setup actions.
+    /// Why: a stalled upload over a shared ssh connection must still fail.
+    /// When the helm kills the transfer's ssh process, the connection's master
+    /// closes the transfer's stdin and stdout but holds its stderr until the
+    /// remote side ends, and a stalled remote side (a hung link or host) does
+    /// not end. A stall failure that waited for both output pipes without a
+    /// bound never returned, leaving the install or update hung and its host
+    /// blocked for other setup actions (#3006).
     ///
-    /// Spec: a holder outside the transfer's process group (standing in for
-    /// the master) keeps stdout and stderr open until EOF on the transfer's
-    /// stdin, which a feeder task holds, and then writes a release marker. When
-    /// the transfer stalls, the failure returns well within the reader grace,
-    /// the feeder is cancelled, and the holder sees its input end. The marker,
-    /// not the holder's process state, is the oracle: the holder is reparented
-    /// when the transfer's group dies, and a zombie still answers `kill(pid, 0)`.
-    #[cfg(target_os = "linux")]
+    /// Spec: over the shared-connection stand-in, a transfer whose remote
+    /// side reports one size, then neither reads its input nor ends, fails as
+    /// stalled within the reader grace plus a margin, and the failure cancels
+    /// the feeder that holds the transfer's stdin. The remote leaves its wait
+    /// only once the test releases it, marking that with `done`, so it was
+    /// alive, holding stderr, when the failure returned; and the failure took
+    /// at least the reader grace, so that bound, not an EOF, ended the wait.
     #[farhelm_testtrace::test]
-    async fn transfer_stall_releases_the_input_a_shared_session_waits_on() {
-        let root = tempfile::tempdir().unwrap();
-        let holder_pid = root.path().join("holder.pid");
-        let released = root.path().join("released");
-        // `setsid` takes the holder out of the transfer's process group, so the
-        // group kill cannot end it. A non-interactive shell gives a background
-        // job /dev/null as stdin unless it is redirected, and dash does not
-        // count `<&0` as a redirection, so the transfer's stdin reaches the
-        // holder through fd 3. The pid file is renamed into place, so it is
-        // never seen half written.
-        let script = format!(
-            "exec 3<&0; setsid sh -c 'echo $$ > \"$1.tmp\" && mv \"$1.tmp\" \"$1\"; cat >/dev/null; : > \"$2\"' \
-             holder {pid} {released} <&3 & exec 3<&-; printf '0\\n'; exec sleep 60",
-            pid = shell_words::quote(holder_pid.to_str().unwrap()),
-            released = shell_words::quote(released.to_str().unwrap())
+    async fn a_stalled_transfer_fails_while_a_shared_session_holds_stderr() {
+        let root = super::ssh_stand_in::control_root();
+        let release = root.path().join("release");
+        let done = root.path().join("done");
+        let ssh = SystemBackend::new(root.path().to_path_buf())
+            .ssh_command(
+                "stalled.example",
+                crate::ssh::SshAccessKind::UserConfig,
+                "true".to_string(),
+            )
+            .unwrap();
+        assert!(
+            super::ssh_stand_in::shares_connection(&ssh),
+            "premise: the transfer rides a shared connection"
         );
-        let mut command = tokio::process::Command::new("sh");
-        command.args(["-c", &script]);
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        isolate_process_group(&mut command);
-        let mut child = command.spawn().unwrap();
+        let mut remote = tokio::process::Command::new("sh");
+        remote.args([
+            "-c",
+            &format!(
+                "printf '0\\n'; while [ ! -e {release} ]; do sleep 0.05; done; : > {done}",
+                release = shell_words::quote(release.to_str().unwrap()),
+                done = shell_words::quote(done.to_str().unwrap()),
+            ),
+        ]);
+        let mut child = super::ssh_stand_in::spawn_remote(&ssh, remote).unwrap();
         let stdin = child.stdin.take().unwrap();
         // The feeder of a stalled upload: it owns stdin and never finishes.
         let feeder = tokio::spawn(async move {
             let _stdin = stdin;
             std::future::pending::<()>().await
         });
-        if !wait_for_fixture_file(&holder_pid, Duration::from_secs(5)).await {
-            terminate_child(&mut child).await;
-            panic!("the stand-in for the shared connection never started");
-        }
-        let holder: i32 = std::fs::read_to_string(&holder_pid)
-            .unwrap()
-            .trim()
-            .parse()
-            .expect("the renamed pid file is complete");
-        assert!(
-            !released.exists(),
-            "premise: the holder still waits on its input"
-        );
         let started = tokio::time::Instant::now();
         let failure = tokio::time::timeout(
             CAPTURE_PIPE_GRACE + Duration::from_secs(10),
@@ -7203,10 +7276,21 @@ mod tests {
                 Some(feeder.abort_handle()),
             ),
         )
-        .await
-        .expect("a stalled transfer must fail even while another process holds its pipes")
-        .expect_err("no growth after the first report is a stall");
+        .await;
+        let elapsed = started.elapsed();
+        std::fs::write(&release, b"").unwrap();
+        assert!(
+            wait_for_fixture_file(&done, Duration::from_secs(10)).await,
+            "premise: the remote side stayed alive until the test released it"
+        );
+        let failure = failure
+            .expect("a stalled transfer must fail even while its session holds stderr")
+            .expect_err("no growth after the first report is a stall");
         assert!(failure.context.contains("stalled"), "{failure:?}");
+        assert!(
+            elapsed >= CAPTURE_PIPE_GRACE,
+            "the reader grace, not an EOF, ended the wait: {elapsed:?}"
+        );
         assert!(
             tokio::time::timeout(Duration::from_secs(5), feeder)
                 .await
@@ -7214,19 +7298,6 @@ mod tests {
                 .unwrap_err()
                 .is_cancelled()
         );
-        // Releasing stdin is what lets the holder go; it must not need the
-        // reader grace to expire first.
-        assert!(
-            started.elapsed() < CAPTURE_PIPE_GRACE,
-            "the failure waited out the reader grace instead of releasing input"
-        );
-        if !wait_for_fixture_file(&released, Duration::from_secs(5)).await {
-            // SAFETY: the holder is this test's own fixture process.
-            unsafe {
-                libc::kill(holder, libc::SIGKILL);
-            }
-            panic!("the holder never saw the transfer's input end");
-        }
     }
 
     /// An unbounded stdout line must neither accumulate forever nor prevent
@@ -7269,7 +7340,7 @@ mod tests {
     /// Wait for a child-created file without assuming that spawn implies
     /// readiness. This keeps process-cleanup assertions tied to a descendant
     /// known to have started, and returns false within the fixture bound.
-    async fn wait_for_fixture_file(path: &Path, within: Duration) -> bool {
+    pub(super) async fn wait_for_fixture_file(path: &Path, within: Duration) -> bool {
         let deadline = tokio::time::Instant::now() + within;
         loop {
             if path.exists() {
@@ -11016,13 +11087,7 @@ mod tests {
                     .arg("-c")
                     .arg(command.as_std().get_args().last().unwrap());
             }
-            child
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true);
-            isolate_process_group(&mut child);
-            child.spawn()
+            super::ssh_stand_in::spawn_remote(command, child)
         }
     }
 
