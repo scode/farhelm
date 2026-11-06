@@ -950,15 +950,6 @@ are not.
 - Extend containerized sessions to the macOS desktop, help users prepare or obtain images, and consider stronger
   isolation beyond the experimental Linux rootless Podman support. Plan: `plans/queue/podman-sandbox.md`.
 
-- Replace xterm.js with libghostty via WebAssembly, assessed 2026-09-12 in `lore/2026-09-12-libghostty-assessment.md`.
-  Native libghostty on macOS is ruled out there: it owns its own PTY and renders into an NSView, neither of which fits a
-  WebSocket-fed terminal inside a webview. The WASM route through `coder/ghostty-web` (xterm.js-compatible API over the
-  upstream wasm) is plausible but not a drop-in: `onBinary`, `parser.registerOscHandler`, `buffer.active`, and `refresh`
-  are missing, its `write` parses synchronously so the backpressure model in SPEC_impl.md has to be re-derived, and the
-  upstream wasm ships only on the rolling `tip` release with nothing stable to pin. Medium to high effort; the payoff is
-  dropping the scroll-freeze workaround and getting Ghostty's own grapheme and SGR handling. First step is a one- or
-  two-day spike mounting ghostty-web in the island under WebKit.
-
 - **"Learn more" links from the GUI to the docs.** Once the official documentation lives at a stable URL, add direct
   "Learn more…" style links in various places in the GUI that point at the relevant documentation page. Which places get
   one is to be decided when this is picked up.
@@ -991,13 +982,13 @@ are not.
   navigation handler blocks every in-window navigation after the first load and hands http(s) links to the system
   browser, so no outside page or iframe runs there. Everything untrusted is rendered as text: terminal output, session
   titles and host-reported metadata, which SPEC.md's "Local authority and trust between hosts" says the GUI must treat
-  as untrusted, go through xterm.js cells, Dioxus's escaped text or `textContent`, never `innerHTML` or
-  `dangerous_inner_html`, and Rust-built page script interpolates only JSON-serialized values. Exploiting the fallback
-  would need a new script-injection bug in Farhelm's rendering or xterm.js, or a navigation escape in Dioxus or WebKit.
-  Such script would already hold the device secret and could drive the whole helm API, typing into terminals included,
-  so the file read adds a quieter route to files rather than new power. It is wanted at all because SPEC.md's "Client
-  hardening" holds the native app to a higher bar: proportionate hardening that narrows what a hypothetical flaw could
-  reach.
+  as untrusted, go through the grid's `textContent` spans (xterm.js cells for old terminals), Dioxus's escaped text or
+  `textContent`, never `innerHTML` or `dangerous_inner_html`, and Rust-built page script interpolates only
+  JSON-serialized values. Exploiting the fallback would need a new script-injection bug in Farhelm's rendering or
+  xterm.js, or a navigation escape in Dioxus or WebKit. Such script would already hold the device secret and could drive
+  the whole helm API, typing into terminals included, so the file read adds a quieter route to files rather than new
+  power. It is wanted at all because SPEC.md's "Client hardening" holds the native app to a higher bar: proportionate
+  hardening that narrows what a hypothetical flaw could reach.
 
   Why it is not done yet: as of 2026-10-02 every complete fix seems to need patching Dioxus, either through a
   `[patch.crates-io]` fork of dioxus-desktop or dioxus-asset-resolver (the repo's first patched Rust dependency, to be
@@ -1075,10 +1066,11 @@ are not.
   channel with its `preferredNotifChannel` setting (in `/config`; values such as `iterm2`, `ghostty`, `kitty` or
   `terminal_bell`) and fires when it needs the user: a permission prompt, or sitting idle waiting for input. Codex does
   it with `notifications = true` under `[tui]` in `~/.codex/config.toml`, and fires when a turn finishes and on approval
-  requests. Inside Farhelm those codes reach tmux, which drops them unless `allow-passthrough` is on (Farhelm does not
-  set it), and past that they would land in Farhelm's terminal rather than a native terminal app. Investigate what
-  Farhelm could do with them: surface them as client notifications, use them as a status signal, or nothing. Related to
-  the ntfy.sh entry under Near term.
+  requests. Inside Farhelm those codes reach the supervisor's own terminal emulator in a new terminal, which does
+  nothing with them, and tmux in an old one, which drops them unless `allow-passthrough` is on (Farhelm does not set
+  it), and past tmux they would land in xterm.js. Either way they end in Farhelm's terminal rather than a native
+  terminal app. Investigate what Farhelm could do with them: surface them as client notifications, use them as a status
+  signal, or nothing. Related to the ntfy.sh entry under Near term.
 
 - **"Phone home" supervisors.** Allow supervisors to come up and register themselves with the helm, instead of being set
   up or pushed from the helm, so hosts show up dynamically as they come and go.

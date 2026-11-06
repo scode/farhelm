@@ -171,10 +171,11 @@
                       panel in both palettes; its outline still marks the
                       boundary when light mode reverses the surface ladder.
                       Not a rung: other content never sits on this fill. */
-  --terminal-bg: #282c34; /* the terminal's surface: the xterm.js theme's
-                             background (assets/terminal-theme.js), mirrored
-                             here so the pane's gutter and viewport match; a
-                             js-test pins the two to the same value */
+  --terminal-bg: #282c34; /* the terminal's surface: the terminal theme's
+                             background (assets/terminal-theme.js), which the
+                             grid and xterm.js both paint, mirrored here so
+                             the pane's gutter and viewport match; a js-test
+                             pins the two to the same value */
   --bg-1: #1d222c; /* RAISED CHROME: the sidebar column and everything in it,
                       the main pane's titlebar, the tab strip, and the quiet
                       bands (stale notice, stale metadata) */
@@ -8566,10 +8567,12 @@ a:any-link,
 }
 
 /* The current web render has no separately painted dark margin: the pane,
-   terminal and xterm viewport all use --terminal-bg. An inset shadow uses
-   the terminal's existing 4px padding as the optional frame, without a
-   layout change or a colored fill in the extra space below xterm. Select
-   only the pane's direct child: xterm also calls its inner element .terminal.
+   the terminal element and the terminal's own surface (the grid, or
+   xterm.js's viewport for an old terminal) all paint the terminal theme's
+   background (--terminal-bg) by default. An inset shadow uses the
+   terminal's existing 4px padding as the optional frame, without a layout
+   change or a colored fill in the extra space below the rows. Select only
+   the pane's direct child: xterm.js also calls its inner element .terminal.
    With the switch off this rule does not paint, preserving the original surface. */
 .terminal-panes[data-colored-frame="true"] .terminal-pane > .terminal {
   box-shadow: inset 0 0 0 4px var(--host-frame-color);
