@@ -125,6 +125,8 @@ mod uploads;
 
 pub use capture::{CaptureStoreFault, CaptureWrite};
 pub use connection::handle_connection;
+/// The environment a terminal host's child gets, for `crate::agent_screen`.
+pub(crate) use core::host_child_env;
 pub use core::{
     BootIdSource, CreateCrashSeam, CreateIntentWaiting, CreateStage, FaultHooks,
     ForwarderCleanupGate, HostRestartFault, HostRestartStage, NaturalDetachGate, NewTerminals,

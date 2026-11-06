@@ -11,11 +11,16 @@ job: `scripts/capture-agent-screens.py`, described in `docs/agent-screen-fixture
 
 ## The tool
 
-`scripts/agent-tui.py` runs one program in its own private tmux server, on a socket in a fresh random directory under
-`/tmp`, and lets you read and type at it. It never touches the live install (see "The live install is off-limits" in
-AGENTS.md): no helm, no supervisor, no session of the maintainer's is involved, only the agent binaries themselves. It
-also starts the program without `TMUX`, `TMUX_PANE`, or any `FARHELM_*` variable, which matters because an agent session
-usually runs inside Farhelm itself, and an agent under test that inherited those would talk to the live helm.
+`scripts/agent-tui.py` runs one program in a real Farhelm terminal host, as a supervisor runs an agent in a new terminal
+(the supervisor's emulator answering the program's startup queries, the environment a supervisor gives an agent), from a
+fresh random directory under `/tmp`, and lets you read and type at it. It needs the built `farhelm`
+(`cargo build -p farhelm`; `--farhelm` on `start` names another). It never touches the live install (see "The live
+install is off-limits" in AGENTS.md): no helm, no supervisor, no session of the maintainer's is involved, only the agent
+binaries and the built `farhelm` itself. It also starts the program without `TMUX`, `TMUX_PANE`, any `FARHELM_*`
+variable, or the markers an enclosing agent session sets for its children (`CLAUDECODE` and the rest of
+`OUTER_SESSION_MARKERS` in `scripts/agent_screen_host.py`), which matters because an agent session usually runs inside
+Farhelm itself: an agent under test that inherited those would talk to the live helm, or believe it runs below the agent
+that started the tool.
 
 ```sh
 run=$(scripts/agent-tui.py start --cwd "$scratch" -- cursor-agent) || exit 1
@@ -24,7 +29,7 @@ scripts/agent-tui.py wait "$run" 'Trust' --timeout 30   # or wait for specific t
 scripts/agent-tui.py type "$run" 'hello'           # literal text, not submitted
 scripts/agent-tui.py keys "$run" Enter             # named keys: Enter, Escape, Down, C-c
 scripts/agent-tui.py screen "$run"                 # the visible grid, as Farhelm's sampler sees it
-scripts/agent-tui.py stop "$run"                   # always: kills the server, removes the run directory
+scripts/agent-tui.py stop "$run"                   # always: ends the program, removes the run directory
 ```
 
 `scripts/agent-tui.py self-test` checks the tool itself against a small shell program, the environment scrub included.
@@ -48,8 +53,8 @@ Run it after changing the script.
   Enter in one burst can read as a paste (Codex inserts the newline instead of submitting).
 - An agent that stops at a sign-in or update screen is not testable as it stands. Do not sign in or update on the
   maintainer's behalf; report which agent and what it showed.
-- Run several agents at once if you like: each `start` is its own server. `stop` every run when done, including after a
-  failure, and check that no `/tmp/fh-tui-*` directory of yours is left behind.
+- Run several agents at once if you like: each `start` is its own terminal host. `stop` every run when done, including
+  after a failure, and check that no `/tmp/fh-tui-*` directory of yours is left behind.
 
 ## Reporting what you saw
 

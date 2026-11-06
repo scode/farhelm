@@ -25,7 +25,7 @@ mod vendor;
 /// Starting a create's agent in a terminal host, behind
 /// [`SupervisorSeams::new_terminals`] (see its own docs).
 mod host_launch;
-pub(crate) use host_launch::{AtRecordedSocket, read_launch_record};
+pub(crate) use host_launch::{AtRecordedSocket, host_child_env, read_launch_record};
 use host_launch::{HostLeft, HostSpawnFailure, SpawnedInHost};
 
 /// Keeping host terminals across a supervisor restart: the stopping
