@@ -662,7 +662,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `541a7a0e-0619-4e57-b9ba-2d345c1279f8`); each passed three re-runs. Hypothesis: the step name arrives late under load
   (FLAKES.md, 2026-11-05). Each of the three cases passed eight attempts per engine on 2026-11-05: the three-attempt
   baseline plus five more exact repetitions. The controlled feed can retain an initial all-pending snapshot, but no
-  fresh failure established that as the cause. Step-name assertions, time budgets and exclusions remain unchanged.
+  fresh failure established that as the cause. Step-name assertions, time budgets and exclusions remain unchanged. A
+  fourth test, "incarnation churn keeps a followed run while a target change detaches it", failed the same way on WebKit
+  in run `269f1dd3-f429-4b1d-9171-523f76ef94d9` and passed three re-runs (FLAKES.md, 2026-11-06).
 
 - **Quick launch's focus does not return to the page body on Chromium.** Two tests in `e2e/tests/quick-launch.spec.ts`
   poll for the body to hold focus after a blur and sometimes never see it (runs `2d338903-2d70-4c8c-99c4-3d4044d78670`,
@@ -673,6 +675,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   typed-page-refusals case recurred on Chromium in the host-terminal run `b8e18c76-972f-4e97-bf66-828778581c59` at
   `0563c44f`; WebKit passed, and the failure snapshot still had terminal input focused after the blur. No additional
   reproduction or fix was attempted (FLAKES.md, 2026-11-05).
+
+- **Settings save cleanup waits for a request-finished event WebKit never sends.** Two checkout-save tests in
+  `e2e/tests/settings.spec.ts` (post-clone commands with carriage returns, and a pending checkout folder save surviving
+  close) time out in cleanup on `reply.finished()` (runs `40e6f124-6214-4bd7-865c-64740aecd10e`,
+  `b9bc59c5-c98f-4e0d-92fc-6735b2c9fc50`); host-terminal re-runs `cb57caa4-7c10-4a8b-9a8f-157331af8daa` passed.
+  Hypothesis: the WebKit behavior #3061 fixed in two sibling tests with a drained route (FLAKES.md, 2026-11-06).
 
 ### Difficult deflake
 
