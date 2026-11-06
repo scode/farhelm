@@ -169,8 +169,8 @@
 //!   is `{"x":col,"y":row,"visible":bool,"shape":"block"|"underline"|"bar",
 //!   "blink":bool}` and lies on the screen (`x < cols`, `y < rows`). The
 //!   default cursor (one no program has styled) is sent with `blink: true`,
-//!   because today's terminal blinks unless the program says otherwise
-//!   (alacritty's own default is steady).
+//!   so that a cursor blinks unless the program says otherwise, as it does in
+//!   old terminals (alacritty's own default is steady).
 //!
 //! A frame that changes `cols` or `rows` comes with `rows` for every non-blank
 //! row, since the client blanks every row a resizing frame does not update.
@@ -218,15 +218,15 @@
 //! all naming the same target, the last with `last: true`. The whole write is
 //! at most [`GRID_MAX_CLIPBOARD_BYTES`]; the sender drops a larger one. The
 //! client writes the text to the clipboard when the last part arrives, as
-//! today's terminal honors OSC 52 writes. Reads are never answered: there is
-//! no clipboard-read message.
+//! old terminals honor OSC 52 writes. Reads are never answered: there is no
+//! clipboard-read message, so a program cannot read what the user copied.
 //!
-//! The client honors only `target: "clipboard"`, as today's terminal honors
-//! only OSC 52 writes to the clipboard selector: `primary` writes are not
+//! The client honors only `target: "clipboard"`: `primary` writes are not
 //! copied to the system clipboard, because a program setting its selection
-//! must not overwrite what the user copied. One accepted difference from
-//! today: the emulator maps an empty selector (and a list starting with `c`)
-//! to the clipboard, where today's terminal ignored them.
+//! must not overwrite what the user copied. Old terminals honor only OSC 52
+//! writes to the clipboard selector too, with one accepted difference: the
+//! emulator maps an empty selector (and a list starting with `c`) to the
+//! clipboard, where old terminals ignore them.
 //!
 //! ## `state`: on attach after `hello`, then whenever it changes
 //!
@@ -266,9 +266,9 @@
 //! it would cost a history reset and a full resend on every attach.
 //!
 //! Each `key` message says whether the viewer runs on a Mac (`mac`, absent
-//! meaning false), since today's xterm.js encodes some keys differently
-//! there; the supervisor encodes each key from the message alone, with no
-//! per-attachment platform to keep across reconnects.
+//! meaning false), since some keys encode differently there (see
+//! [`GridInput::Key`]); the supervisor encodes each key from the message alone,
+//! with no per-attachment platform to keep across reconnects.
 //!
 //! A paste is split into parts of at most [`GRID_MAX_PASTE_PART_BYTES`] of
 //! text that also stay within [`GRID_MAX_INPUT_MESSAGE`] once encoded (a part
@@ -1027,7 +1027,8 @@ pub enum CursorShape {
 /// on a Mac) selects locally. One exception to "sends only what the program
 /// asked for": while [`TerminalState::alt_screen`] is true and this is `Off`,
 /// the client still sends `wheel` messages, which the supervisor turns into
-/// arrow keys as today's terminal does.
+/// arrow keys, so a full-screen program without mouse support still scrolls
+/// (as in old terminals).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MouseMode {
@@ -1471,8 +1472,8 @@ pub enum MouseEventKind {
     Up,
     Move,
     /// The wheel moved; `button` 0 is up, 1 is down. One message per
-    /// browser wheel event that scrolls at least one line, which is what
-    /// today's xterm.js sends (one report, or one arrow key, per such event).
+    /// browser wheel event that scrolls at least one line, and so one report
+    /// (or one arrow key) per such event, as old terminals send.
     Wheel,
 }
 
@@ -1487,38 +1488,40 @@ pub enum MouseEventKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum GridInput {
-    /// A keydown that today's xterm.js would send a sequence for at keydown.
-    /// `key`, `code` and `kc` (`keyCode`) are the browser's values; the
-    /// supervisor encodes them the way the vendored xterm.js
-    /// `evaluateKeyboardEvent` does with Farhelm's options, including
-    /// Shift+Enter as ESC CR in one write.
+    /// A keydown that has a sequence of its own at keydown. `key`, `code`
+    /// and `kc` (`keyCode`) are the browser's values; the supervisor encodes
+    /// them as the xterm terminal family encodes keys, which shells and
+    /// agents expect, including Shift+Enter as ESC CR in one write. The
+    /// bytes for every keydown are Farhelm's key table
+    /// (`crates/farhelm-supervisor/tests/fixtures/grid-keys.jsonl`), the
+    /// same bytes old terminals send.
     ///
-    /// Which keydowns become `key` messages is the client's decision, made as
-    /// xterm.js's `_keyDown` makes it before and after calling that function;
-    /// the supervisor never second-guesses it. The client sends no `key` for
-    /// its own shortcuts (Cmd+K/J, Ctrl+Shift+K/J, the text-size keys), for a
-    /// keydown `evaluateKeyboardEvent` gives no sequence for, nor for one
-    /// `_keyDown` leaves to the browser's text input or drops: a third-level
+    /// Which keydowns become `key` messages is the client's decision; the
+    /// supervisor never second-guesses it. The client sends no `key` for its
+    /// own shortcuts (Cmd+K/J, Ctrl+Shift+K/J, the text-size keys), for a
+    /// keydown the key table gives no sequence for, nor for one it leaves
+    /// to the browser's text input or drops: a third-level
     /// shift (Option without Ctrl or Meta on a Mac, Ctrl+Alt or AltGraph on
     /// Windows, as AltGr) on a key code above 47 or of 0, a single capital
     /// A to Z without Ctrl, Alt or Meta, and the first sending keydown after
     /// a dead key or AltGraph. The characters those type arrive as `text`,
     /// as do space, other composed characters and composition results; a
     /// third-level shift on a key code 0 (the iOS arrow names) or 112 to 123
-    /// (F1 to F12) sends nothing at all, as today. Printable keys that
-    /// xterm.js sends at keydown (key code 48 and up) are `key` messages, and
-    /// the supervisor produces their bytes exactly as that function does.
+    /// (F1 to F12) sends nothing at all, as in old terminals. Printable keys
+    /// with a sequence at keydown (key code 48 and up) are `key` messages,
+    /// and the supervisor produces their bytes as the key table says.
     Key {
         key: String,
         code: String,
         kc: u32,
         /// The [`modifiers`] bit set.
         mods: u8,
-        /// The viewer runs on a Mac, by xterm.js's exact platform list
+        /// The viewer runs on a Mac, by an exact platform list
         /// (`navigator.platform` is `Macintosh`, `MacIntel`, `MacPPC` or
-        /// `Mac68K`). Some keys encode differently there in today's xterm.js,
-        /// which treats Option as a key of its own on a Mac and Alt as Meta
-        /// elsewhere (Ctrl+Option with `_` or `@`, among others). Carried on
+        /// `Mac68K`, the list old terminals' xterm.js uses). Some keys encode
+        /// differently there, because Option is a key of its own on a Mac
+        /// (it composes characters) while Alt acts as Meta elsewhere
+        /// (Ctrl+Option with `_` or `@`, among others). Carried on
         /// every key rather than once per attachment so that a message is
         /// enough to encode it. Absent means false, and false is left out
         /// when encoding.
@@ -1529,25 +1532,26 @@ pub enum GridInput {
     /// `key` (see there), and composition results.
     Text { data: String },
     /// One part of a paste. The supervisor wraps the whole paste, from the
-    /// first part through the one with `last` set, in bracketed-paste
-    /// markers when the program asked for them, and converts line endings as
-    /// xterm.js does. Parts split only at character boundaries and never
-    /// between a CR and its LF, and arrive with no other input between them.
-    /// A paste is written only once its last part has arrived; one cut short
-    /// is dropped whole (module docs, "Client to supervisor"). The client's classification of
-    /// pasted content stays on the client and is unchanged.
+    /// first part through the one with `last` set, in bracketed-paste markers
+    /// when the program asked for them, and converts every CRLF and LF to CR,
+    /// so a pasted line ends the way a typed Enter does. Parts split only at
+    /// character boundaries and never between a CR and its LF, and arrive with
+    /// no other input between them. A paste is written only once its last part
+    /// has arrived; one cut short is dropped whole (module docs, "Client to
+    /// supervisor"). The client's classification of pasted content stays on the
+    /// client and is unchanged.
     Paste { data: String, last: bool },
     /// A mouse event in cell coordinates, 0-based, within the screen.
     /// `button` is 0 left, 1 middle, 2 right for `down`, `up` and `move`
     /// (and -1 for motion with no button held); for `wheel` it is 0 up and 1
     /// down.
     ///
-    /// De-duplicating motion is the client's job, as xterm.js's mouse
-    /// service does it with its last reported event: a `move` in the same
-    /// cell, with the same button and the same Shift, Alt and Ctrl as the last
-    /// mouse message sent, is not sent. The supervisor encodes every `move`
-    /// it gets, so a client that forwarded every pixel's `mousemove` would
-    /// repeat the same report to the program.
+    /// De-duplicating motion is the client's job, against its last reported
+    /// event (as old terminals do): a `move` in the same cell, with the same
+    /// button and the same Shift, Alt and Ctrl as the last mouse message sent,
+    /// is not sent. The supervisor encodes every `move` it gets, so a client
+    /// that forwarded every pixel's `mousemove` would repeat the same report to
+    /// the program.
     Mouse {
         kind: MouseEventKind,
         button: i8,

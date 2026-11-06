@@ -48,21 +48,21 @@
 //
 // ## Scrollback: a virtualized view over history and screen
 //
-// The rows on the page are only the visible ones. What they show is a
-// window onto one buffer of lines (grid-buffer.js): the history the model
-// has applied, then the screen, with a notice line on top when recovery
-// lost some history (`state.history_trimmed`). Following the bottom, the
-// rows are the screen; scrolled back, the window is anchored to the
-// absolute number of its top line, so it stays on the same text while
-// output continues and while the oldest history is dropped, as xterm.js's
-// viewport does. Wheel, Shift+PageUp/Down and a scrollbar move it with
-// xterm.js 6.0's amounts; any input sent to the program, a mouse report
-// included, returns it to the bottom (`scrollOnUserInput`). History the
-// client trims after falling behind keeps its line numbers, so a view
-// anchored there holds at the oldest line rather than jumping (only a
-// `history_reset`, a resize or the alternate screen let go of the anchor).
-// On the alternate screen there is no history to scroll, as in xterm.js's
-// alternate buffer.
+// The rows on the page are only the visible ones. What they show is a window
+// onto one buffer of lines (grid-buffer.js): the history the model has
+// applied, then the screen, with a notice line on top when recovery lost some
+// history (`state.history_trimmed`). Following the bottom, the rows are the
+// screen; scrolled back, the window is anchored to the absolute number of its
+// top line, so it stays on the same text while output continues and while the
+// oldest history is dropped (as in old terminals). The wheel moves it by
+// `wheelPixels`' amount (50 pixels a notch), Shift+PageUp/Down by a page less
+// a line, and the scrollbar by where it is dragged, the same as in an old
+// terminal; any input sent to the program, a mouse report included, returns
+// it to the bottom. History the client trims after falling behind keeps its
+// line numbers, so a view anchored there holds at the oldest line rather than
+// jumping (only a `history_reset`, a resize or the alternate screen let go of
+// the anchor). On the alternate screen there is no history to scroll, as in
+// old terminals.
 //
 // History is applied in slices (grid-model.js, "The HISTORY QUEUE"): a
 // message that arrives with nothing queued gets one slice at once (so live
@@ -81,8 +81,8 @@
 // word, a triple click the soft-wrapped line, Shift-click extends, Alt-drag
 // off a Mac selects a column (block), Cmd+A on a Mac selects everything,
 // and a drag past the top or bottom scrolls. A quick Alt-click (Option on a
-// Mac) moves the program's cursor there with arrow keys, as xterm.js's
-// `altClickMovesCursor` does.
+// Mac) moves the program's cursor there with arrow keys, as in old
+// terminals.
 // A selection is anchored to line numbers like the view, so it spans
 // history and screen and stays on its text while output arrives; a
 // resize, the alternate screen switching, a history reset, or input sent to
@@ -93,12 +93,13 @@
 //
 // ## Links
 //
-// Links come from a provider per line, like xterm.js's link providers:
-// terminal.js's gives the program's hyperlinks, printed URLs and file paths
-// with today's hover displays, checks and downloads (without a provider
-// there are none). The pointer over a link underlines it and, when the link
-// says so, shows a hand. A primary press and release on the same link, with
-// no more than xterm.js's 4px of jitter between them, is a click, and the
+// Links come from a provider per line, the shape old terminals' link
+// providers have: terminal.js's gives the program's hyperlinks, printed URLs
+// and file paths with the same hover displays, checks and downloads as an
+// old terminal's (without a provider there are none). The pointer over a
+// link underlines it and, when the link says so, shows a hand. A primary
+// press and release on the same link, with no more than 4px of jitter
+// between them (the old terminal's allowance), is a click, and the
 // link's `activate` gets it (`isLinkClick` names the admitted release).
 // Under mouse reporting `linkPress` decides whether the press is withheld
 // from the program (the link-click setting); a withheld press, its drag and
@@ -163,8 +164,8 @@
   // (see "Scrollback" in this file's header): half a 60 Hz frame, so input
   // and painting keep their turn while a large history is applied.
   const DRAIN_SLICE_MS = 8;
-  // xterm.js's selection color (its theme default, which Farhelm's theme
-  // does not override), drawn over the text.
+  // The selection color, drawn over the text: the old terminal's theme
+  // default (xterm.js's), which Farhelm's theme does not override.
   const SELECTION_COLOR = "rgba(255, 255, 255, 0.3)";
   // A drag that leaves the screen scrolls it by up to this many lines per
   // tick, faster the farther out (xterm.js's DRAG_SCROLL_MAX_SPEED and
@@ -174,9 +175,9 @@
   const DRAG_SCROLL_MAX_LINES = 15;
   const DRAG_SCROLL_MAX_DISTANCE = 50;
   const DRAG_SCROLL_INTERVAL_MS = 50;
-  // VS Code's scrollbar (xterm.js 6.0's): the slider never shrinks below
-  // this, and it fades out this long after the last scroll once the pointer
-  // has left the terminal.
+  // The old terminal's scrollbar (VS Code's, as xterm.js 6.0 ships it): the
+  // slider never shrinks below this, and it fades out this long after the
+  // last scroll once the pointer has left the terminal.
   const SLIDER_MIN_HEIGHT = 20;
   const SCROLLBAR_FADE_MS = 800;
   // A press and release this close together are a click, not a drag
@@ -257,12 +258,13 @@
   }
 
   /**
-   * How many pixels one wheel event scrolls the view, as xterm.js 6.0's
-   * scrollable element computes it (VS Code's `StandardWheelEvent` and
-   * `_onMouseWheel`): the event normalized to notches (`wheelDeltaY` / 120
-   * where the engine has it, else lines or pixels / 40), 50 pixels a notch,
-   * five times that with Alt. Positive scrolls toward older lines. Shift
-   * turns the wheel horizontal off a Mac, which scrolls nothing here.
+   * How many pixels one wheel event scrolls the view, the same as in an old
+   * terminal (xterm.js 6.0's scrollable element, from VS Code's
+   * `StandardWheelEvent` and `_onMouseWheel`): the event normalized to
+   * notches (`wheelDeltaY` / 120 where the engine has it, else lines or
+   * pixels / 40), 50 pixels a notch, five times that with Alt. Positive
+   * scrolls toward older lines. Shift turns the wheel horizontal off a Mac,
+   * which scrolls nothing here.
    *
    * Ported from Visual Studio Code's `StandardWheelEvent` and
    * `ScrollableElement._onMouseWheel` as compiled into xterm.js 6.0.0, MIT;
@@ -283,13 +285,14 @@
   /**
    * Mount a grid terminal into `container`.
    *
-   * `options`: `fontSize` and `fontFamily` (the same as the xterm.js
-   * terminals use), `theme` (terminal-theme.js), `platform`
+   * `options`: `fontSize` and `fontFamily` (the same as old terminals
+   * use), `theme` (terminal-theme.js), `platform`
    * (`navigator.platform`), `send(message)` for input messages,
    * `onResize(cols, rows)` when the fitted size changes, and `size`, the
    * size the program already has (the one the socket URL carried, when a
-   * swap from xterm.js creates this; xterm.js's initial 80 x 24 when
-   * omitted, as for a new terminal, whose first fit then reports its size),
+   * swap from an old terminal creates this; 80 x 24, an old terminal's
+   * initial size, when omitted, as for a new terminal, whose first fit
+   * then reports its size),
    * which a fit reports only if it differs,
    * `onClipboard(text, target)` for a program's completed clipboard write
    * ("clipboard" or "primary"), `onCopy(text)` for a selection the user
@@ -320,7 +323,7 @@
     model.deferHistory = true;
     const styles = gridStyle.createStyleMapper(options.theme);
     const platform = options.platform || "";
-    // Mac-ness as xterm.js reads it (grid-input.js's `platformOf`).
+    // Mac-ness as old terminals read it (grid-input.js's `platformOf`).
     const isMac = gridInput.platformOf(platform).isMac;
     const isLinux = /Linux/.test(platform);
     let send = options.send;
@@ -345,8 +348,8 @@
     element.className = "grid-terminal";
     const screen = document.createElement("div");
     screen.className = "grid-terminal-screen";
-    // Decorative to assistive technology for now, as xterm.js's rows are;
-    // an accessible reading of the grid is not part of today's terminal.
+    // Decorative to assistive technology for now, as an old terminal's rows
+    // are; old terminals offer no accessible reading of their text either.
     screen.setAttribute("aria-hidden", "true");
     // The selection and the hovered link are drawn over the rows, under the
     // cursor; both ignore the pointer.
@@ -364,7 +367,7 @@
     scrollbar.appendChild(slider);
     const exitEl = document.createElement("div");
     exitEl.className = "grid-terminal-exit";
-    // The keyboard's target: a hidden text field, as xterm.js uses, so the
+    // The keyboard's target: a hidden text field (as in old terminals), so the
     // browser's own text input (dead keys, Option characters, input
     // methods) has somewhere to deliver characters.
     const input = document.createElement("textarea");
@@ -553,7 +556,7 @@
     /**
      * The index of the top visible line now. An anchor is kept even while
      * it clamps (history being refilled after a trim, or its line dropped at
-     * the cap shows the oldest line, as xterm.js holds its viewport there);
+     * the cap shows the oldest line, as an old terminal's view holds there);
      * only scrolling to the bottom or something that voids line numbers
      * (`noteDamage`) lets go of it.
      */
@@ -783,7 +786,7 @@
      * Draw the cursor over its cell: a filled block showing the cell's
      * character in the accent color, a bar or an underline while the
      * terminal has focus, and an outline of the cell when it does not
-     * (xterm.js's `cursorInactiveStyle`). Blinks only while focused. It
+     * (as in old terminals). Blinks only while focused. It
      * scrolls with the screen, so a view scrolled back far enough hides it.
      */
     function paintCursor(rowOffset) {
@@ -829,8 +832,8 @@
       const defaults = styles.defaults();
       element.style.color = defaults.fg;
       element.style.backgroundColor = defaults.bg;
-      // xterm.js's `enable-mouse-events`: an arrow pointer while the
-      // program owns the mouse.
+      // An arrow pointer while the program owns the mouse, as in old
+      // terminals.
       element.classList.toggle("grid-terminal-mouse", state.mouse !== "off");
       // The exit line is in the terminal's defaults reversed, so it reads as
       // the client's own line rather than part of the program's output.
@@ -939,21 +942,22 @@
       if (selection && selection.start.abs < source().first) {
         // The selected lines were dropped at the history cap.
         if (selection.end.abs < source().first) clearSelection();
-        // A column selection keeps its column, as xterm.js's trim does.
+        // A column selection keeps its column, as an old terminal's trim does.
         else selection.start = { abs: source().first, col: selection.column ? selection.start.col : 0 };
       }
     }
 
     // ## Scrollbar
     //
-    // VS Code's scrollbar as xterm.js 6.0 shows it: a slider in the 14px the
-    // fit reserves, sized by the share of lines visible, shown while the
-    // pointer is over the terminal and for a moment after a scroll, and
-    // only when there is something to scroll.
+    // The old terminal's scrollbar (VS Code's, as xterm.js 6.0 shows it): a
+    // slider in the 14px the fit reserves, sized by the share of lines
+    // visible, shown while the pointer is over the terminal and for a moment
+    // after a scroll, and only when there is something to scroll.
 
     // The part of a line the wheel has moved past the view's top line, in
     // pixels at `wheelRemainderCell`, so a trackpad's small deltas add up to
-    // lines (xterm.js rounds its scroll position to a line the same way).
+    // lines (an old terminal rounds its scroll position to a line the same
+    // way).
     // Only the remainder is kept: the top itself is read from the anchor at
     // every event, so history dropped at the cap, or new history while
     // scrolled back, cannot make the next wheel step jump.
@@ -1073,7 +1077,7 @@
     /**
      * The line position under a pointer event: the cell (`round: false`)
      * or the nearest cell boundary (`round: true`, how a character
-     * selection's ends move, as xterm.js's selection coordinates do).
+     * selection's ends move, as in old terminals).
      * Rows above or below the screen clamp to its first or last row.
      *
      * Ported from xterm.js 6.0.0's `getCoords` (src/browser/input/Mouse.ts) as
@@ -1091,12 +1095,12 @@
       if (index < shape.notice) index = shape.notice;
       const abs = absAt(Math.min(index, shape.total - 1), shape);
       const raw = x / cellWidth;
-      // xterm.js's boundary is `ceil(raw + 0.5) - 1` (its `getCoords` with
-      // `isSelection`, then one less): nearest, but a press exactly
-      // mid-cell goes to the cell's left boundary, where `Math.round`
-      // would go right. With whole-pixel cells that is no corner case: a
-      // browser spec's drag starting 4px into an 8px cell lost the cell's
-      // character on the grid and kept it on xterm.js.
+      // The boundary is `ceil(raw + 0.5) - 1`, as in old terminals
+      // (xterm.js's `getCoords` with `isSelection`, then one less): nearest,
+      // but a press exactly mid-cell goes to the cell's left boundary, where
+      // `Math.round` would go right. With whole-pixel cells that is no corner
+      // case: a browser spec's drag starting 4px into an 8px cell lost the
+      // cell's character on the grid and kept it on an old terminal.
       const col = Math.min(model.cols, Math.max(0, round ? Math.ceil(raw + 0.5) - 1 : Math.floor(raw)));
       return { abs, col: round ? col : Math.min(col, model.cols - 1) };
     }
@@ -1130,7 +1134,7 @@
      * Start a local selection at a press: a click starts an empty one at
      * the nearest boundary, a double click selects the word, a triple click
      * the soft-wrapped line, and Shift with a selection already there
-     * extends it (xterm.js's `SelectionService` press handling).
+     * extends it, as in old terminals.
      *
      * Ported from xterm.js 6.0.0's `SelectionService` press handling
      * (`handleMouseDown`, `shouldColumnSelect`), MIT; THIRD_PARTY_NOTICES.md,
@@ -1146,8 +1150,8 @@
         gesture.anchorRange = range;
         selection = { start: range.start, end: range.end };
       } else if (ev.altKey && !isMac) {
-        // xterm.js's `shouldColumnSelect`: Alt starts a column selection
-        // off a Mac (where Option forces a selection instead).
+        // Alt starts a column selection off a Mac (where Option forces a
+        // selection instead), as in old terminals.
         gesture.mode = "column";
         gesture.anchor = positionAt(ev, true);
         selection = { start: gesture.anchor, end: gesture.anchor, column: true };
@@ -1227,16 +1231,17 @@
 
     // ## Links
     //
-    // The links on a line come from a provider, as xterm.js's link
+    // The links on a line come from a provider, as old terminals' link
     // providers give them: `options.links.row(abs, done)` (terminal.js's
-    // gives the program's hyperlinks, printed URLs and file paths, with
-    // today's displays and checks; without a provider there are no links).
+    // gives the program's hyperlinks, printed URLs and file paths, with the
+    // same displays and checks as an old terminal's; without a provider
+    // there are no links).
     // A link is `{kind, web, ranges, evidence?, hover(event), leave(),
     // activate(event), decorations}`; `decorations.underline` and
     // `decorations.pointerCursor` may change while it is hovered (a file
     // link shows the hand only once its check succeeds), so they are setters
-    // here, as in xterm.js. A provider may answer later (a container's paths
-    // are checked by its host first); only the answer to the latest
+    // here, as in old terminals. A provider may answer later (a container's
+    // paths are checked by its host first); only the answer to the latest
     // question, about rows still in place and the line still under the
     // pointer, counts (`answerLines`).
     //
@@ -1252,11 +1257,11 @@
     // that is not current is left first (withdrawing a stale target display
     // and a file link's permission) and the link under the pointer asked for
     // afresh, a new link object hovered afresh; the file addon reuses its
-    // check when path, text and range are unchanged. That is xterm.js's
-    // linkifier: a render of the hovered link's rows leaves it and asks
-    // again; with nothing hovered a render does nothing, and a link that
-    // appears under a still pointer is found on the next move. A release
-    // activates only the link its press was on, still current.
+    // check when path, text and range are unchanged. That is how an old
+    // terminal's links behave: a render of the hovered link's rows leaves it
+    // and asks again; with nothing hovered a render does nothing, and a link
+    // that appears under a still pointer is found on the next move. A
+    // release activates only the link its press was on, still current.
 
     let hoverLink = null;
     // The row objects the hovered link's `hover()` read, by line number.
@@ -1353,7 +1358,7 @@
       });
     }
 
-    /** Give a hovered link xterm.js's decoration setters (see "## Links"). */
+    /** Give a hovered link its decoration setters (see "## Links"). */
     function decorate(link) {
       const initial = link.decorations || {};
       let underline = initial.underline !== false;
@@ -1417,8 +1422,8 @@
     }
 
     /**
-     * After a paint (xterm.js's `onRenderedViewportChange` for a hovered
-     * link): a hover whose rows changed, or that is no longer under the
+     * After a paint (as an old terminal rechecks a hovered link after a
+     * render): a hover whose rows changed, or that is no longer under the
      * resting pointer because the view moved, is left and asked for afresh.
      * With nothing hovered nothing happens until the pointer moves.
      */
@@ -1445,10 +1450,10 @@
     }
 
     /**
-     * Send input the user made (a key, typed text, a paste): like
-     * xterm.js's `scrollOnUserInput`, it brings the view back to the bottom,
-     * and like terminal.js's `dismissSelection` for xterm.js, it clears the
-     * selection, which would otherwise sit over text the input changes.
+     * Send input the user made (a key, typed text, a paste): it brings the
+     * view back to the bottom and clears the selection, which would
+     * otherwise sit over text the input changes (both as in old terminals,
+     * where terminal.js's `dismissSelection` does the clearing).
      */
     function sendUserInput(messages) {
       if (frozen || !send) return false;
@@ -1466,8 +1471,9 @@
     /**
      * Paste text as the program's input: `paste` messages split at the
      * format's bounds (the supervisor adds bracketed-paste markers and
-     * converts line endings as xterm.js does). The caller has sanitized it
-     * (terminal.js's attachment interception, or the paste listener here).
+     * converts line endings as an old terminal does). The caller has
+     * sanitized it (terminal.js's attachment interception, or the paste
+     * listener here).
      */
     function paste(text) {
       if (typeof text !== "string" || text === "") return false;
@@ -1481,7 +1487,7 @@
 
     // Page shortcuts (the quick switcher, templates, session actions, text
     // size) are window capture listeners that stop the event before it gets
-    // here, so they never reach the program, exactly as with xterm.js.
+    // here, so they never reach the program, exactly as with an old terminal.
     input.addEventListener("keydown", (ev) => {
       restoreInput();
       const decision = gridInput.keydownAction(ev, platform, deadKeyPending);
@@ -1491,8 +1497,8 @@
         cancel(ev);
         return;
       }
-      // Shift+PageUp/Down scroll the view a page less a line (xterm.js's
-      // `scrollPages`), and Cmd+A on a Mac selects everything; none of them
+      // Shift+PageUp/Down scroll the view a page less a line (as in old
+      // terminals), and Cmd+A on a Mac selects everything; none of them
       // reach the program.
       if (decision.action === "page-up") scrollLines(-(model.rows - 1));
       else if (decision.action === "page-down") scrollLines(model.rows - 1);
@@ -1520,7 +1526,7 @@
     });
     // A paste that terminal.js's attachment interception (a capture
     // listener on the pane) did not take: plain text without that policy.
-    // It goes to the program as a paste, as xterm.js's own handler sends it.
+    // It goes to the program as a paste, as an old terminal sends it.
     input.addEventListener("paste", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
@@ -1534,7 +1540,7 @@
       if (text) paste(sanitizePaste(text));
     });
     // The browser's own Copy (a keyboard shortcut or the context menu) on
-    // the input copies the selection, as xterm.js's copy handler does.
+    // the input copies the selection, as in an old terminal.
     input.addEventListener("copy", (ev) => {
       if (!hasSelection() || !ev.clipboardData) return;
       ev.clipboardData.setData("text/plain", selectionText());
@@ -1562,8 +1568,8 @@
     }
 
     /**
-     * xterm.js's `moveTextAreaUnderMouseCursor`: put the input under the
-     * pointer for a context menu (or a Linux middle-button paste), so the
+     * Put the input under the pointer, as old terminals do, for a context
+     * menu (or a Linux middle-button paste), so the
      * browser's menu offers Paste (and Copy, for the selection put in it)
      * and a paste lands in the terminal. `restoreInput` parks it again at
      * the next key, press, paste or blur.
@@ -1592,7 +1598,7 @@
     // A press decides what the gesture is: a report to the program (mouse
     // reporting on and no forcing modifier), a local selection, and, on a
     // link, a candidate click. The gesture's moves and release are followed
-    // on the document, as xterm.js does, so a release outside the terminal
+    // on the document (as in old terminals), so a release outside the terminal
     // still ends it.
 
     const mouseDedupe = gridInput.createMouseDeduper();
@@ -1609,10 +1615,9 @@
     /**
      * Report a mouse event the program's mode asks for. A report is input
      * from the user, so like a key it brings the view back to the bottom and
-     * clears the selection (xterm.js sends SGR and UTF-8 reports through its
-     * user-input path, which applies `scrollOnUserInput` and fires the
-     * `onUserInput` its selection clears on; the client cannot see the
-     * encoding, and programs use SGR).
+     * clears the selection (an old terminal does both for SGR and UTF-8
+     * reports, which go through its user-input path; the client cannot see
+     * the encoding, and programs use SGR).
      */
     function mouseMessage(kind, button, ev) {
       if (!gridInput.modeReports(model.state.mouse, kind, button)) return;
@@ -1641,8 +1646,8 @@
       const ending = gesture;
       const button = gridInput.pressButton(ev.button);
       if (ending.reporting && button !== null && !(ending.withheld && button === 0)) mouseMessage("up", button, ev);
-      // A report gesture ends when every button is up, as xterm.js's
-      // document listeners do; a selection or link gesture ends with the
+      // A report gesture ends when every button is up, as in old
+      // terminals; a selection or link gesture ends with the
       // button that started it.
       const done = ending.reporting ? !ev.buttons : ev.button === ending.button || !ev.buttons;
       if (!done) return;
@@ -1674,7 +1679,7 @@
     }
 
     /**
-     * xterm.js's `altClickMovesCursor` (on by default): a quick Alt-click
+     * Alt-click moves the cursor, as in old terminals: a quick Alt-click
      * (Option on a Mac) that selected at most one character, with the view
      * at the bottom, moves the program's cursor to the clicked cell by
      * typing arrow keys (grid-input.js's `moveToCellSequence`, sent as `key`
@@ -1734,7 +1739,7 @@
 
     element.addEventListener("mousedown", (ev) => {
       // Keep keyboard focus in the terminal and stop the browser's own
-      // text selection, as xterm.js's press handler does.
+      // text selection, as an old terminal's press handler does.
       ev.preventDefault();
       restoreInput();
       focus();
@@ -1742,9 +1747,9 @@
       const forced = !!copyOnSelect && copyOnSelect.pressForcesSelection(ev, platform);
       const tracking = model.state.mouse !== "off";
       const button = gridInput.pressButton(ev.button);
-      // The press is on a link when it lands on the hovered one (xterm.js's
-      // linkifier keeps the link the pointer is over, not one found at the
-      // press).
+      // The press is on a link when it lands on the hovered one: the link
+      // the pointer is over, not one found at the press (as in old
+      // terminals).
       const pressed = ev.button === 0 ? linkCell(ev) : null;
       const link = pressed && hoverLink && gridBuffer.linkCovers(hoverLink, pressed) ? hoverLink : null;
       // Under mouse reporting the link-click setting decides whether a
@@ -1771,7 +1776,7 @@
         startSelection(ev);
         gesture = null;
       } else if (ev.button === 2 && isMac && !inSelection(ev)) {
-        // xterm.js's `rightClickSelectsWord`, on by default on a Mac: the
+        // A right click on a Mac selects the word, as in old terminals: the
         // context menu's Copy then has the word.
         const range = gridBuffer.wordRange(source(), positionAt(ev, false));
         if (range) {
@@ -1793,13 +1798,13 @@
       if (gridInput.wheelGoesToProgram(model.state)) {
         if (ev.deltaY === 0) return;
         ev.preventDefault();
-        // One message per event that scrolls at least a line, as xterm.js
-        // sends one report (or one arrow key) per such event.
+        // One message per event that scrolls at least a line, as an old
+        // terminal sends one report (or one arrow key) per such event.
         if (wheel.consume(ev, wheelRowHeight, model.rows) === 0) return;
         const button = gridInput.wheelButton(ev);
         if (model.state.mouse === "off") {
           // The alternate screen without mouse reporting: the supervisor
-          // turns the step into an arrow key, as xterm.js does.
+          // turns the step into an arrow key, as an old terminal does.
           sendMessage(pointerMessage("wheel", button, ev));
           return;
         }
@@ -1917,7 +1922,7 @@
     root.addEventListener("visibilitychange", onVisibilityChange);
 
     // A window moved to a display with another pixel ratio changes the
-    // rounded cell height; xterm.js re-measures then, and so does this.
+    // rounded cell height; an old terminal re-measures then, and so does this.
     // The query names one ratio, so it is re-armed for the new one.
     let pixelRatioWatch = null;
     function watchPixelRatio() {
@@ -1952,7 +1957,7 @@
         model.apply(message);
         noteModelChange();
         // A program turning focus reporting on hears the current state at
-        // once, focused or not, as xterm.js answers DECSET 1004.
+        // once, focused or not, as an old terminal answers DECSET 1004.
         if (!reporting && model.state.focus) sendMessage(gridInput.focusReport(focused));
         // A program's completed clipboard write (OSC 52).
         for (const write of model.takeClipboard()) if (onClipboard) onClipboard(write.text, write.target);
@@ -2010,7 +2015,7 @@
       /**
        * Whether `event` is the release a click on a link was admitted with,
        * for a link's `activate` to check (terminal-links.js's link gesture
-       * plays this part for xterm.js).
+       * plays this part for old terminals).
        */
       isLinkClick(event) {
         return !!event && event === admittedClick;

@@ -97,15 +97,17 @@
   // clipboard failures silent).
 
   /**
-   * The platforms on which xterm forces a local selection with Option
-   * rather than Shift: exactly the `navigator.platform` values the vendored
-   * xterm.js treats as Mac (`isMac` in its platform module), whose
-   * `SelectionService.shouldForceSelection` reads Option there (with
-   * `macOptionClickForcesSelection`, which terminal.js sets) and Shift
-   * everywhere else. The notice must name the key that actually works, so
-   * this copies xterm's rule rather than guessing from the user agent.
+   * The platforms on which a local selection is forced with Option rather
+   * than Shift: exactly these `navigator.platform` values. Both kinds of
+   * terminal follow this rule: the grid component reads it from here
+   * (grid-input.js's `platformOf` has the same list), and old terminals'
+   * xterm.js applies the same list itself (`isMac` in its platform module,
+   * read by `SelectionService.shouldForceSelection` with
+   * `macOptionClickForcesSelection`, which terminal.js sets). The notice
+   * must name the key that actually works, so this is an exact list rather
+   * than a guess from the user agent.
    */
-  const XTERM_MAC_PLATFORMS = ["Macintosh", "MacIntel", "MacPPC", "Mac68K"];
+  const MAC_PLATFORMS = ["Macintosh", "MacIntel", "MacPPC", "Mac68K"];
 
   /**
    * The modifier that forces Farhelm's own selection under mouse reporting
@@ -115,7 +117,7 @@
    * @returns {"Option" | "Shift"}
    */
   function forcingModifier(platform) {
-    return XTERM_MAC_PLATFORMS.includes(platform) ? "Option" : "Shift";
+    return MAC_PLATFORMS.includes(platform) ? "Option" : "Shift";
   }
 
   /**
@@ -148,7 +150,7 @@
    * hold the key they are holding would be wrong); and an OSC 52 write since
    * the press means the program copied by itself.
    *
-   * `forced` is read from the press event with xterm's own rule (see
+   * `forced` is read from the press event with the forcing rule (see
    * `pressForcesSelection`), not inferred from the missing selection: under
    * mouse tracking a plain press does not clear an earlier forced
    * selection. That retained text is neither copied nor evidence that this
@@ -174,8 +176,8 @@
 
   /**
    * Whether a press holds the modifier that forces Farhelm's own selection
-   * on this platform: xterm's `shouldForceSelection`, Option (`altKey`)
-   * where it treats the platform as Mac, Shift everywhere else.
+   * on this platform: Option (`altKey`) on a Mac by `MAC_PLATFORMS`, Shift
+   * everywhere else.
    *
    * @param {{altKey: boolean, shiftKey: boolean}} ev the press event
    * @param {string} platform `navigator.platform`

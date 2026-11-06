@@ -8,24 +8,29 @@
 // here is the part only the page can decide: whether a key event is one
 // the terminal sends at all, and in which form.
 //
-// ## Keys: the same split xterm.js makes today
+// ## Keys: a `key` message, or the browser's text input
 //
-// Today's terminal (the vendored xterm.js 6.0.0) decides at keydown whether
-// a key produces a sequence: `evaluateKeyboardEvent` maps the event to one,
-// and `CoreBrowserTerminal._keyDown` sends it and cancels the event, or
-// leaves the event alone so the character arrives through the browser's
-// own text input (`_keyPress`/`_inputEvent`) instead. Option on a Mac,
-// dead keys and AltGr layouts depend on that second path.
+// Each keydown is decided once: either it is sent as a `key` message (and
+// the event cancelled), or it is left to the browser's own text input, whose
+// character the grid sends as `text`. Only keys with a sequence of their own
+// (Enter, arrows, Ctrl+letter, function keys, Alt+key as Meta off a Mac, a
+// plain character) can be sent as `key`, and some of those are still left
+// to text input: a third-level shift (Option on a Mac, AltGr) and the key
+// after a dead key, whose character only the browser knows, and a lone
+// capital (`keydownAction` has the filters). The sequences are the xterm
+// terminal family's encodings, which shells and agents expect; the
+// supervisor computes them from the `key` message with the program's modes.
+// Because the decision does not depend on those modes, the page can make it
+// without knowing them.
 //
-// `keydownAction` reproduces that decision exactly, using a port of
-// `evaluateKeyboardEvent` (`xtermKeyboardResult`) whose output the unit
-// tests compare with the vendored bundle's own function over every key
-// code and modifier combination. Where xterm.js would send a sequence, the
-// grid sends a `key` message and the supervisor computes the same sequence
-// from the same function with the program's modes; where xterm.js would
-// wait for text, the grid waits for the input event and sends `text`.
-// Because the decision whether a sequence exists does not depend on the
-// program's modes, the page can make it without knowing them.
+// `keydownAction` makes the decision. Its rules, and the keyboard rules in
+// `xtermKeyboardResult` that it asks whether a sequence exists, are ported
+// from the vendored xterm.js 6.0.0 (`evaluateKeyboardEvent` and the filters
+// around it in `CoreBrowserTerminal._keyDown`), so a new terminal types
+// exactly like an old one. Farhelm's checked-in tables pin both over the
+// whole key space (js-tests/grid-input-tables.js): the bytes for every
+// keydown, which the supervisor's encoder is held to as well, and which
+// keydowns are sent at all.
 //
 // Shift+Enter needs nothing special here: it is a `key` message like any
 // Enter, and the supervisor sends ESC CR for it in one write (SPEC.md,
@@ -34,10 +39,11 @@
 // ## Mouse and wheel
 //
 // Mouse events become `mouse` messages in cell coordinates, sent only for
-// what the program's mouse mode asks for (`state.mouse`), with the same
-// cell rounding, clamping and move deduplication as xterm.js's mouse
-// service. Wheel steps follow xterm.js's `consumeWheelEvent`, including its
-// pixel accumulation, so a trackpad scrolls a program at today's rate.
+// what the program's mouse mode asks for (`state.mouse`), with the cell
+// rounding, clamping and move de-duplication old terminals use, so a click
+// lands on the same cell in both. Wheel steps accumulate pixel deltas into
+// lines, so a trackpad scrolls a program at the same rate as in an old
+// terminal.
 (function (root) {
   "use strict";
 
@@ -47,7 +53,7 @@
 
   const MODS = Object.freeze({ SHIFT: 1, ALT: 2, CTRL: 4, META: 8 });
 
-  // xterm.js's C0 names, as `evaluateKeyboardEvent` uses them.
+  // The C0 control characters the keyboard rules send, by their names.
   const C0 = Object.freeze({
     NUL: "\x00",
     BS: "\b",
@@ -60,8 +66,8 @@
     DEL: "\x7f",
   });
 
-  // xterm.js's `KEYCODE_KEY_MAPPINGS`: the unshifted and shifted character
-  // of each US-layout key that Alt+key encodes as ESC + character.
+  // The unshifted and shifted character of each US-layout key that Alt+key
+  // encodes as ESC + character.
   // Ported from xterm.js 6.0.0's src/common/input/Keyboard.ts, MIT;
   // THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
   const KEYCODE_KEY_MAPPINGS = Object.freeze({
@@ -88,25 +94,28 @@
     222: ["'", '"'],
   });
 
-  // Result types, as xterm.js numbers them.
+  // Result types, numbered as in the ported original.
   const KEY_RESULT = Object.freeze({ SEND_KEY: 0, SELECT_ALL: 1, PAGE_UP: 2, PAGE_DOWN: 3 });
 
-  /** The modifier bit set the input messages carry (and xterm.js computes). */
+  /** The modifier bit set the input messages carry (1 Shift, 2 Alt, 4 Ctrl, 8 Meta). */
   function modifiers(ev) {
     return (ev.shiftKey ? MODS.SHIFT : 0) | (ev.altKey ? MODS.ALT : 0) | (ev.ctrlKey ? MODS.CTRL : 0) |
       (ev.metaKey ? MODS.META : 0);
   }
 
   /**
-   * A port of the vendored xterm.js 6.0.0's `evaluateKeyboardEvent`:
-   * `{type, cancel, key}`, where `key` is the sequence xterm.js would send
-   * for this keydown (undefined when it sends none at keydown).
+   * The keyboard rules for one keydown: `{type, cancel, key}`, where `key`
+   * is the sequence the key sends (undefined when it sends none at keydown),
+   * `type` whether it is instead a local page scroll or select-all, and
+   * `cancel` whether the event is cancelled anyway.
    *
    * Kept line for line with the original's branches rather than
-   * simplified, because its whole value is being the same function; the
-   * unit tests hold it to the vendored bundle. The supervisor's encoder
-   * makes the same computation with the program's real modes; the page
-   * only needs `type`, `cancel` and whether `key` exists.
+   * simplified, because its value is giving exactly the old terminal's
+   * answer; the key table (js-tests/grid-input-tables.js) pins it. The
+   * supervisor's encoder makes the same computation with the program's real
+   * modes; the page only needs `type`, `cancel` and whether `key` exists.
+   * `macOptionIsMeta` is kept from the original's signature, but Farhelm
+   * only ever passes false, and only false is pinned by the tables.
    *
    * Ported from xterm.js 6.0.0's `evaluateKeyboardEvent`
    * (src/common/input/Keyboard.ts), MIT; THIRD_PARTY_NOTICES.md, "Code ported
@@ -242,17 +251,17 @@
     return result;
   }
 
-  // The `navigator.platform` values the vendored xterm.js treats as a Mac
-  // (its `Browser.isMac`), the same list copy-on-select.js uses for the
-  // forcing modifier.
+  // The `navigator.platform` values that count as a Mac (old terminals'
+  // xterm.js uses the same list), and the list copy-on-select.js uses for
+  // the forcing modifier.
   const MAC_PLATFORMS = ["Macintosh", "MacIntel", "MacPPC", "Mac68K"];
 
   /**
-   * Platform names as xterm.js's `Browser` module reads them: exact
-   * `navigator.platform` values, not a pattern, because the supervisor's
-   * encoder decides Mac-only encodings from the `mac` flag this sets on key
-   * messages, and both sides must agree with xterm.js on which viewers are
-   * Macs (an iPad's "iPad" or a "MacSomething" are not).
+   * Whether a viewer is a Mac or Windows, by exact `navigator.platform`
+   * values, not a pattern: the supervisor's encoder decides Mac-only
+   * encodings from the `mac` flag this sets on key messages, and the page's
+   * own keyboard rules read the same answer, so both must agree on which
+   * viewers are Macs (an iPad's "iPad" or a "MacSomething" are not).
    *
    * Ported from xterm.js 6.0.0's `isMac` and `isWindows`
    * (src/common/Platform.ts), MIT; THIRD_PARTY_NOTICES.md, "Code ported from
@@ -267,10 +276,10 @@
   }
 
   /**
-   * xterm.js's `_isThirdLevelShift` for a keydown: Option on a Mac (with
-   * `macOptionIsMeta` off, as Farhelm leaves it) or AltGr on Windows,
-   * composing a character the text-input path delivers. Not for the arrow
-   * and editing keys below key code 48.
+   * Whether a keydown is a third-level shift: Option on a Mac (Option does
+   * not act as Meta) or AltGr on Windows, composing a character the
+   * text-input path delivers. Not for the arrow and editing keys below key
+   * code 48.
    *
    * Ported from xterm.js 6.0.0's `CoreBrowserTerminal._isThirdLevelShift`, MIT;
    * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
@@ -284,33 +293,32 @@
   }
 
   /**
-   * What the grid does with one keydown, mirroring
-   * `CoreBrowserTerminal._keyDown` (with `macOptionIsMeta` and screen-reader
-   * mode off, as Farhelm configures xterm.js):
+   * What the grid does with one keydown (Option not acting as Meta, and no
+   * screen-reader mode, as old terminals are configured too):
    *
    * - `"send"`: send a `key` message and cancel the event;
    * - `"pass"`: leave the event to the browser, whose text input (if any)
    *   arrives as an input event and becomes a `text` message; `cancel`
-   *   says whether to prevent the default anyway (xterm.js does for some
-   *   keys it does not send, such as a dead key under Alt);
+   *   says whether to prevent the default anyway (for some keys that send
+   *   nothing, such as a dead key under Alt);
    * - `"page-up"`/`"page-down"`: Shift+PageUp/Down, which scroll the
    *   terminal's own view and never reach the program;
    * - `"select-all"`: Cmd+A on a Mac, which selects locally;
    * - `"ignore"`: an input method owns the key.
    *
-   * The supervisor's encoder (built from `evaluateKeyboardEvent`) assumes
-   * it receives only keydowns xterm.js would send, so `_keyDown`'s filters
-   * apply exactly: a third-level shift (Option on a Mac, so Option+F1-F12
-   * and Option with the iOS arrow keys too; Ctrl+Alt or AltGraph on
-   * Windows) is left to text input, as are capital letters and the key
-   * after a dead key; an input method's keys are ignored. The unit tests
-   * hold this to the vendored `_keyDown` over the whole key space.
+   * The supervisor's encoder encodes whatever key it is sent, so these
+   * filters are what keep composed characters out of it: a third-level
+   * shift (Option on a Mac, so Option+F1-F12 and Option with the iOS arrow
+   * keys too; Ctrl+Alt or AltGraph on Windows) is left to text input, as
+   * are capital letters and the key after a dead key; an input method's
+   * keys are ignored. The keydown table (js-tests/grid-input-tables.js)
+   * pins this over the whole key space.
    *
-   * `deadKeyPending` is xterm.js's `_unprocessedDeadKey`: once a dead key
-   * (or AltGraph) has gone down, the next key that would send a sequence is
-   * left to text input instead, so the composed character is what arrives.
-   * Pass the returned value back in on the next keydown, and reset it to
-   * false when text input sends something, as xterm.js's text handlers do.
+   * `deadKeyPending` says a dead key (or AltGraph) has gone down: the next
+   * key that would send a sequence is left to text input instead, so the
+   * composed character is what arrives. Pass the returned value back in on
+   * the next keydown, and reset it to false when text input sends
+   * something.
    *
    * Ported from xterm.js 6.0.0's `CoreBrowserTerminal._keyDown`, MIT;
    * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
@@ -326,9 +334,8 @@
     const quiet = result.type === KEY_RESULT.SELECT_ALL ? "select-all" : "pass";
     if (isThirdLevelShift(ev, platform)) return outcome(quiet, false);
     if (!result.key) return outcome(quiet, result.cancel);
-    // xterm.js leaves capital letters to its keypress handler (an input
-    // method on macOS can otherwise send them lowercase); the character is
-    // the same either way.
+    // Capital letters are left to text input (an input method on macOS can
+    // otherwise send them lowercase); the character is the same either way.
     if (ev.key && !ev.ctrlKey && !ev.altKey && !ev.metaKey && ev.key.length === 1) {
       const code = ev.key.charCodeAt(0);
       if (code >= 65 && code <= 90) return outcome("pass", result.cancel);
@@ -344,9 +351,8 @@
    * The `key` message for a keydown `keydownAction` said to send, or null
    * when a browser value is past the format's 64-byte field bound (no
    * real key name is). `mac: true` says the viewer is a Mac by
-   * `platformOf`'s list: some keys encode differently there in today's
-   * xterm.js (Ctrl+Option with `_` or `@`, among others), so the
-   * supervisor needs it.
+   * `platformOf`'s list: some keys encode differently there (Ctrl+Option
+   * with `_` or `@`, among others), so the supervisor needs it.
    *
    * Any other viewer's message leaves `mac` out, which the format reads as
    * false. That is the canonical form `farhelm-proto` encodes and its golden
@@ -485,10 +491,10 @@
   // ## Mouse
 
   /**
-   * The cell under a pointer offset (pixels from the screen's top left),
-   * rounded and clamped the way xterm.js's `getCoords` does for mouse
-   * reports, so a press on a cell boundary or outside the grid lands on
-   * the same cell it does today.
+   * The cell under a pointer offset (pixels from the screen's top left): a
+   * boundary pixel belongs to the cell before it, and a point outside the
+   * grid clamps to its edge, as in old terminals, so a press lands on the
+   * same cell in both.
    *
    * Ported from xterm.js 6.0.0's `getCoords` (src/browser/input/Mouse.ts), MIT;
    * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
@@ -514,7 +520,7 @@
 
   /**
    * The button a wheel step reports: 0 for up (toward the top of the
-   * history, a negative `deltaY`) and 1 for down, as xterm.js numbers wheel
+   * history, a negative `deltaY`) and 1 for down, the grid format's wheel
    * buttons. Only the sign matters; `createWheelAccumulator` decides whether
    * the event scrolls a line at all.
    */
@@ -556,9 +562,10 @@
 
   /**
    * Tracks the last mouse message sent so a move equal to it is not sent
-   * again: xterm.js's `CoreMouseService` keeps the last REPORTED event of
-   * any kind (`_lastEvent`) and drops a move whose cell, button, action and
-   * Shift, Alt and Ctrl match it (`_equalEvents`; Meta is not compared).
+   * again: it keeps the last REPORTED event of any kind and drops a move
+   * whose cell, button, action and Shift, Alt and Ctrl match it (Meta is not
+   * compared), so a program asking for motion gets one report per cell
+   * crossed, not one per pixel.
    * Because the action is compared, a move is only ever a repeat of a
    * move: the first move after a press, release or wheel step in the same
    * cell is sent. Callers pass only messages they are about to send.
@@ -583,12 +590,13 @@
   }
 
   /**
-   * xterm.js's `consumeWheelEvent`: how many lines one wheel event scrolls,
-   * accumulating partial lines from pixel deltas across events, with its
-   * default sensitivities (1, and 5 under Alt or Ctrl). Shift+wheel is
-   * horizontal and scrolls nothing. Today's terminal sends one report (or
-   * one arrow key) per event whose amount is not zero, so callers only
-   * need the sign of `deltaY` once this says the event counts.
+   * How many lines one wheel event scrolls a program, accumulating partial
+   * lines from pixel deltas across events (damped to 0.3 under 50 px, which
+   * is how a trackpad's events look), at sensitivity 1, and 5 under Alt or
+   * Ctrl. Shift+wheel is horizontal and scrolls nothing. The grid sends one
+   * report (or one arrow key) per event whose amount is not zero, as old
+   * terminals do, so callers only need the sign of `deltaY` once this says
+   * the event counts.
    *
    * Ported from xterm.js 6.0.0's `CoreMouseService.consumeWheelEvent`, MIT;
    * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
@@ -616,25 +624,27 @@
   /**
    * Whether a wheel event goes to the program as a `wheel` message: when
    * it reports the mouse, and on the alternate screen without mouse
-   * reporting, where today's terminal sends arrow keys instead (the
-   * supervisor encodes those from the same message). On the normal screen
+   * reporting, where it becomes arrow keys instead, so a full-screen
+   * program without mouse support still scrolls (the supervisor encodes
+   * those from the same message). On the normal screen
    * without mouse reporting the wheel scrolls the client's own history.
    */
   function wheelGoesToProgram(state) {
     return state.mouse !== "off" || state.altScreen;
   }
 
-  // ## Alt-click moves the cursor (xterm.js's `altClickMovesCursor`)
+  // ## Alt-click moves the cursor
   //
-  // Today's terminal moves a shell's cursor to an Alt-clicked (Option on a
-  // Mac) cell by typing arrow keys: `moveToCellSequence` in the vendored
-  // bundle decides how many, from the cursor, the screen and its soft wraps.
-  // `moveToCellSequence` below is that function, kept branch for branch with
-  // the original (including the argument it passes that looks like a slip:
-  // the parity is the point), and the unit tests hold it to the bundle's own
-  // function. Its sequences are made with normal cursor keys; the client
-  // sends them as `key` messages (`arrowKeyMessages`), so the supervisor
-  // encodes each with the program's cursor-key mode, as xterm.js would have.
+  // An Alt-click (Option on a Mac) moves a shell's cursor to the clicked
+  // cell by typing arrow keys: `moveToCellSequence` decides how many, from
+  // the cursor, the screen and its soft wraps. It is ported from the
+  // vendored xterm.js 6.0.0 and kept branch for branch with the original
+  // (including the argument it passes that looks like a slip: landing the
+  // cursor where an old terminal lands it is the point), and the Alt-click
+  // table (js-tests/grid-input-tables.js) pins its results. Its sequences
+  // are made with normal cursor keys; the client sends them as `key`
+  // messages (`arrowKeyMessages`), so the supervisor encodes each with the
+  // program's cursor-key mode.
 
   /** The arrow sequence for direction letter `dir` ("A" up, "B" down, "C" right, "D" left). */
   function arrowSequence(dir, applicationCursor) {
@@ -647,7 +657,7 @@
     return out;
   }
 
-  /** How many rows above `row` it continues (xterm.js's `wrappedRowsForRow`). */
+  /** How many rows above `row` it continues. */
   function wrappedRowsForRow(row, bufferService) {
     let count = 0;
     let line = bufferService.buffer.lines.get(row);
@@ -683,7 +693,7 @@
     return repeatSequence(rowsToMove, arrowSequence(verticalDirection(startY, targetY), applicationCursor));
   }
 
-  /** The text between two cells, walking rows (xterm.js's `bufferLine`). */
+  /** The text between two cells, walking rows. */
   function bufferLine(startCol, startRow, endCol, endRow, forward, bufferService) {
     let currentCol = startCol;
     let currentRow = startRow;
@@ -736,8 +746,7 @@
 
   /**
    * The arrow keys that move the cursor from where it is to cell
-   * (`targetX`, `targetY`) of the screen (0-based), as the vendored
-   * xterm.js's `moveToCellSequence` makes them. `bufferService` is
+   * (`targetX`, `targetY`) of the screen (0-based). `bufferService` is
    * `{cols, rows, buffer: {x, y, hasScrollback, lines: {length, get(row)},
    * translateBufferLineToString(row, trimRight, startCol, endCol)}}` with
    * screen rows as lines; `hasScrollback` is false on the alternate screen,
