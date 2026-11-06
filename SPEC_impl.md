@@ -2447,17 +2447,23 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   while one of its hosts may still run. The command-line read the verified signal makes runs off the async workers
   through the same gate as the process-table walks: one that is stuck in the kernel fails the check within ten seconds,
   keeps one blocking thread until it returns, and makes every later walk or check fail at once meanwhile rather than
-  strand a thread each. Then the tmux teardown runs and tolerates finding nothing. **The residual**: a host the session
-  no longer records (a record deleted by hand) is not found; a recorded host that answers nothing gets the verified
-  signal but gives no sweep root; a read stuck in the kernel holds one thread until it returns; and these keep a session
-  undeletable until a person deals with them: a record that cannot be read or decoded, a record whose socket serves
-  another terminal's host, a recorded host whose process is not known, whose command line the verified signal rejects
-  (it does not end with `--socket` and that socket's path), or that survives SIGKILL, and a recorded host whose child
-  runs but cannot be read to pin it. A session whose agent terminal is a startup placeholder (a host a restarted
-  supervisor could not adopt, "Across supervisor restarts" below) has no runtime: the launch record naming its socket is
-  settled like any other. A placeholder no record names is ended only when the host at its socket answers with a tag
-  naming the session (then it is counted, rooted and shut down like a recorded host of the session); anything else there
-  keeps the session and is never signalled, since nothing but the socket's name ties that process to the session.
+  strand a thread each. Then the tmux teardown runs and tolerates finding nothing. A host's grid stream ends with its
+  host, before Delete takes the attachment lock to detach the session's viewers, so until a Delete has detached them (or
+  returned) every natural verdict of a stream of that session ("session terminal ended", a failed stream or input) waits
+  (`Supervisor::deletes_in_progress`, one entry per session, added under its lifecycle claim). The viewer then hears the
+  Delete's notice, as an old terminal's viewer does: "session deleted", or, when the Delete failed after detaching it,
+  why it failed; only when the Delete failed before detaching it is the natural verdict sent. A stall detach does not
+  wait. **The residual**: a host the session no longer records (a record deleted by hand) is not found; a recorded host
+  that answers nothing gets the verified signal but gives no sweep root; a read stuck in the kernel holds one thread
+  until it returns; and these keep a session undeletable until a person deals with them: a record that cannot be read or
+  decoded, a record whose socket serves another terminal's host, a recorded host whose process is not known, whose
+  command line the verified signal rejects (it does not end with `--socket` and that socket's path), or that survives
+  SIGKILL, and a recorded host whose child runs but cannot be read to pin it. A session whose agent terminal is a
+  startup placeholder (a host a restarted supervisor could not adopt, "Across supervisor restarts" below) has no
+  runtime: the launch record naming its socket is settled like any other. A placeholder no record names is ended only
+  when the host at its socket answers with a tag naming the session (then it is counted, rooted and shut down like a
+  recorded host of the session); anything else there keeps the session and is never signalled, since nothing but the
+  socket's name ties that process to the session.
 - **Across supervisor restarts** (`service/core/host_handover.rs`) a host terminal keeps running, and its session keeps
   its state. An orderly stop checkpoints hosts with at least 1 MiB of processed output since their latest known snapshot
   under one ten-second deadline that runs beside the output clients' ten seconds. Its own encodes use at most half the

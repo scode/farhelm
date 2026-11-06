@@ -939,6 +939,67 @@ fault_hooks! {
     tmux_seed_fault: Arc<dyn Fn() -> Result<(), host_restart::TmuxSeedFault> + Send + Sync>,
 }
 
+/// A Delete's mark in [`Supervisor::deletes_in_progress`], for as long as
+/// the Delete runs: dropping it removes the mark and wakes every natural
+/// detach that waited for the Delete to be over.
+pub(crate) struct DeleteInProgress<'a> {
+    supervisor: &'a Supervisor,
+    session_id: String,
+    _over: tokio::sync::watch::Sender<()>,
+}
+
+impl Drop for DeleteInProgress<'_> {
+    fn drop(&mut self) {
+        self.supervisor
+            .deletes_in_progress
+            .lock()
+            .expect("the deletes-in-progress map is never poisoned")
+            .remove(&self.session_id);
+    }
+}
+
+impl Supervisor {
+    /// Mark session `session_id` as being deleted until the returned mark
+    /// drops (see [`Self::deletes_in_progress`]).
+    ///
+    /// Called only under the session's lifecycle claim (by the Delete
+    /// teardown), so at most one mark exists per session: a second insert
+    /// would replace the first entry, and the first mark's drop would then
+    /// remove the second Delete's.
+    pub(crate) fn mark_delete_in_progress(&self, session_id: &str) -> DeleteInProgress<'_> {
+        let (over, watch) = tokio::sync::watch::channel(());
+        let earlier = self
+            .deletes_in_progress
+            .lock()
+            .expect("the deletes-in-progress map is never poisoned")
+            .insert(session_id.to_string(), watch);
+        debug_assert!(
+            earlier.is_none(),
+            "two Deletes of session {session_id} at once: the lifecycle claim allows one"
+        );
+        DeleteInProgress {
+            supervisor: self,
+            session_id: session_id.to_string(),
+            _over: over,
+        }
+    }
+
+    /// Wait for the Delete of `session_id` in progress now, if any, to be
+    /// over: at once when none is.
+    pub(crate) async fn delete_over(&self, session_id: &str) {
+        let watch = self
+            .deletes_in_progress
+            .lock()
+            .expect("the deletes-in-progress map is never poisoned")
+            .get(session_id)
+            .cloned();
+        if let Some(mut watch) = watch {
+            // Ends when the Delete drops its mark, the watch's only sender.
+            while watch.changed().await.is_ok() {}
+        }
+    }
+}
+
 /// The injectable seams a `Supervisor` is built with. All default to
 /// production behavior; grouped into one struct so a new injection point
 /// does not grow the constructor's signature again.
@@ -4990,6 +5051,28 @@ pub struct Supervisor {
     /// because a takeover cannot interleave inside any of their
     /// check-then-act pairs.
     pub(crate) attachments: Mutex<HashMap<AttachmentKey, ActiveAttach>>,
+    /// The sessions a Delete is tearing down right now, each with a watch
+    /// whose sender the Delete holds ([`DeleteInProgress`]) and drops when
+    /// it returns, whatever the outcome.
+    ///
+    /// What keeps a viewer from being told by its stream's natural end
+    /// (`session terminal ended`, or a failed stream or input) what a
+    /// Delete caused: the Delete ends a host terminal (and kills a tmux
+    /// agent) before it takes `attachments` to detach the session's
+    /// viewers, and a terminal host's stream ends with its host. Every
+    /// natural verdict for a session in here waits until the Delete is over
+    /// (`connection::detach_naturally`), with one of three outcomes: the
+    /// Delete detached the viewer as deleted, or it failed after detaching
+    /// it and said why ("detached during a failed delete"), and either way
+    /// the waiting verdict finds its attachment gone and sends nothing; or
+    /// the Delete failed before detaching it, and the natural verdict is
+    /// then sent as the true one. A stall detach does not wait: a Delete
+    /// does not cause one.
+    ///
+    /// At most one entry per session: only a Delete holding the session's
+    /// lifecycle claim adds one ([`Supervisor::mark_delete_in_progress`]).
+    pub(crate) deletes_in_progress:
+        std::sync::Mutex<HashMap<String, tokio::sync::watch::Receiver<()>>>,
     /// The upward request channel of every full-authority connection
     /// currently served — see [`super::agent_relay`] for what travels up
     /// one and why anything does.
@@ -6558,6 +6641,7 @@ impl Supervisor {
             restarting_tabs: std::sync::Mutex::new(HashMap::new()),
             last_listed: std::sync::Mutex::new(HashMap::new()),
             attachments: Mutex::new(HashMap::new()),
+            deletes_in_progress: std::sync::Mutex::new(HashMap::new()),
             helm_links: Mutex::new(Vec::new()),
             change_hints: Arc::new(super::hints::ChangeHints::default()),
             output_reaps: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -20315,6 +20399,44 @@ pub(crate) mod tests {
             SupervisorSeams::tmux_terminals(),
         )
         .await
+    }
+
+    /// A natural detach's wait for a Delete in progress ends exactly when
+    /// the Delete drops its mark, and does not wait at all for another
+    /// session or when no Delete runs.
+    ///
+    /// Why: Delete ends a host terminal before it detaches the session's
+    /// viewers with "session deleted", and the host's stream ends with it;
+    /// the stream's natural verdict waits on this so the viewer is told by
+    /// the Delete (`Supervisor::deletes_in_progress`). A wait that never
+    /// ended would leave a failed Delete's viewers without any notice.
+    /// Spec: with session `a` marked, a first poll of `delete_over("a")` is
+    /// pending (polled directly, so no scheduler order is assumed) and
+    /// `delete_over("b")` completes; once the mark drops, the pending wait
+    /// completes and the map is empty.
+    #[farhelm_testtrace::test]
+    async fn a_natural_detach_waits_for_its_sessions_delete_to_be_over() {
+        use std::future::Future as _;
+        let state = StateDir::new();
+        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+        let mark = sup.mark_delete_in_progress("a");
+        let mut waiting = std::pin::pin!(sup.delete_over("a"));
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(
+            waiting.as_mut().poll(&mut cx).is_pending(),
+            "the wait lasts while the Delete runs"
+        );
+        tokio::time::timeout(Duration::from_secs(5), sup.delete_over("b"))
+            .await
+            .expect("another session's delete is no reason to wait");
+        drop(mark);
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("the wait ends with the Delete");
+        assert!(
+            sup.deletes_in_progress.lock().unwrap().is_empty(),
+            "the mark is gone with the Delete"
+        );
     }
 
     /// Keep agent launches failing while allowing real terminal tabs in core tests.

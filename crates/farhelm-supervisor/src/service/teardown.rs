@@ -312,6 +312,13 @@ impl Supervisor {
         directory_admission: tokio::sync::OwnedMutexGuard<()>,
         found: Option<SessionHosts>,
     ) -> Result<farhelm_proto::SessionDeleteOutcome, TeardownError> {
+        // Held until the session's viewers are detached, or to this
+        // function's end on every failure path: a viewer whose stream ends
+        // because this teardown ended its terminal hears this teardown's
+        // notice (deleted, or why the Delete failed), and its stream's own
+        // end only when the Delete failed before detaching it
+        // (`Supervisor::deletes_in_progress`).
+        let deleting = self.mark_delete_in_progress(session_id);
         // The process-tree sweep runs BEFORE any lock is held: it can
         // take seconds (a grace period plus several /proc walks), and
         // holding `attachments` for that long would stall every OTHER
@@ -1053,6 +1060,10 @@ impl Supervisor {
             );
         }
         drop(attachments);
+        // Every viewer has its notice and the row is gone: a waiting natural
+        // verdict can only find its attachment gone, so it need not wait out
+        // the unbounded file removal below.
+        drop(deleting);
 
         // Everything below removes on-disk state that now belongs to nothing,
         // and runs AFTER `attachments` is released. It is unbounded (a

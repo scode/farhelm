@@ -530,10 +530,7 @@ async fn a_second_lease_takes_over_both_terminals_of_one_session_only() {
 /// point of the fixture.
 #[farhelm_testtrace::test]
 async fn deleting_a_session_detaches_every_channel_and_reaps_scrubbed_tab_daemons() {
-    // Old terminals, for now: on new terminals Delete ends the agent's
-    // attachment with "session terminal ended" rather than a deletion
-    // notice, which is the supervisor's to fix, not this test's.
-    let Some((h, _scopes)) = scope_gated_harness_tmux(
+    let Some((h, _scopes)) = scope_gated_harness(
         "deleting_a_session_detaches_every_channel_and_reaps_scrubbed_tab_daemons",
     )
     .await
