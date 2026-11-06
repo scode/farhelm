@@ -7,7 +7,7 @@
 // text sits in exact-width boxes beside text that flows at the font's
 // advance; the cascade must actually produce the colors and decorations the
 // inline styles name; and a real keyboard and mouse must turn into the
-// input messages today's terminal would have sent. Both engines run, WebKit
+// input messages the grid's keyboard and mouse rules call for. Both engines run, WebKit
 // standing in for the desktop app's.
 //
 // No Farhelm stack is involved: the page and the shipped assets are served
@@ -175,7 +175,7 @@ function state(change: Record<string, unknown>): string {
   return JSON.stringify({ ...STATE, ...change });
 }
 
-/** Whether this browser is a Mac by xterm.js's exact platform list. */
+/** Whether this browser is a Mac by the grid's exact platform list (grid-input.js's `platformOf`). */
 async function viewerIsMac(page: Page): Promise<boolean> {
   return page.evaluate(() => ["Macintosh", "MacIntel", "MacPPC", "Mac68K"].includes(navigator.platform));
 }
@@ -222,7 +222,7 @@ test("a recorded attach draws its text, wide boxes, styles and cursor in their c
   expect(byText("中").width).toBeCloseTo(2 * width, 0);
   expect(byText("文").left).toBeCloseTo(8 * width, 0);
   expect(byText("web").left).toBeCloseTo(11 * width, 0);
-  // Bold green draws bright green (#B9CA4A), as xterm.js does.
+  // Bold green draws bright green (#B9CA4A), as in old terminals.
   expect(byText("hello").color).toBe("rgb(185, 202, 74)");
   expect(Number(byText("hello").weight)).toBeGreaterThanOrEqual(700);
   // An underlined run with its own underline color (blue).
@@ -444,9 +444,9 @@ test("markup-looking, bidi-overriding and right-to-left text is drawn as literal
   expect(lefts.map((left) => Math.round(left / width))).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
 });
 
-test("typing sends the same key and text messages today's terminal would", async ({ page }) => {
+test("typing sends key messages for keys with a sequence and text messages for typed characters", async ({ page }) => {
   const mac = await macField(page);
-  // Keys xterm.js encodes at keydown go as `key` messages for the
+  // Keys with a sequence of their own go as `key` messages for the
   // supervisor to encode; keys whose character comes from text input
   // (capitals, space) go as `text`. Shift+Enter is a key with the Shift bit.
   await openGrid(page);
@@ -492,7 +492,7 @@ test("the mouse reports cells only in the modes the program asked for", async ({
 });
 
 test("turning focus reporting on reports the current focus, focused or not", async ({ page }) => {
-  // xterm.js answers DECSET 1004 with the state at that moment, so a
+  // DECSET 1004 is answered with the state at that moment, so a
   // program that dims when unfocused starts out right either way.
   await openGrid(page);
   await feed(page, stream("attach.jsonl"));
@@ -508,8 +508,8 @@ test("turning focus reporting on reports the current focus, focused or not", asy
 });
 
 test("a drag under drag reporting follows the held button and its release outside the terminal", async ({ page }) => {
-  // The drag leaves the terminal and is released outside it; xterm.js
-  // follows both on the document and reports them at the grid's edge.
+  // The drag leaves the terminal and is released outside it; the grid
+  // follows both on the document and reports them at its edge.
   // Once released, a buttonless move is not a drag and reports nothing.
   await openGrid(page);
   await feed(page, [...stream("attach.jsonl"), state({ mouse: "drag" })]);
@@ -531,7 +531,7 @@ test("a drag under drag reporting follows the held button and its release outsid
   await expect.poll(() => sent(page)).toEqual([
     { t: "mouse", kind: "down", button: 0, x: 1, y: 0, mods: 0 },
     { t: "mouse", kind: "move", button: 0, x: 4, y: 2, mods: 0 },
-    // Outside the grid, clamped to its last cell, as xterm.js does.
+    // Outside the grid, clamped to its last cell.
     { t: "mouse", kind: "move", button: 0, x: 19, y: 3, mods: 0 },
     { t: "mouse", kind: "up", button: 0, x: 19, y: 3, mods: 0 },
   ]);
@@ -568,7 +568,7 @@ test("a hello at another size than the pane fits asks once for the fitted size",
   expect(await resizes()).toEqual([fitted, fitted]);
 });
 
-test("a right click under mouse reporting keeps the browser's context menu, as xterm.js does", async ({ page }) => {
+test("a right click under mouse reporting keeps the browser's context menu", async ({ page }) => {
   await openGrid(page);
   await feed(page, [...stream("attach.jsonl"), state({ mouse: "click" })]);
   const prevented = await page.evaluate(() => {
@@ -638,7 +638,7 @@ test("an ended program's exit status is shown by the client, below its last row"
 
 test("the grid fits its container and refits at a new text size", async ({ page }) => {
   // The fitted size is what the resize control message sends; a larger
-  // text size must shrink it, as with xterm.js.
+  // text size must shrink it.
   await openGrid(page);
   const first = await page.evaluate(() => (window as any).harness.resizes.slice());
   expect(first).toHaveLength(1);
@@ -695,8 +695,8 @@ async function settled(page: Page): Promise<void> {
 /**
  * The page position in cell (`x`, visible row `y`), `fx` of the way across
  * it (the middle by default). A selection's ends move to the nearest cell
- * boundary, and exactly mid-cell to the left one, as in xterm.js; a drag
- * ending exactly mid-cell would still leave the rounding to sub-pixel
+ * boundary, and exactly mid-cell to the left one (old terminals' rounding);
+ * a drag ending exactly mid-cell would still leave the rounding to sub-pixel
  * layout, so the drags below end clearly to one side, and the midpoint
  * itself is tested where its position is a whole pixel.
  */
@@ -709,7 +709,7 @@ async function cellAt(page: Page, x: number, y: number, fx = 0.5): Promise<{ x: 
 test("the wheel scrolls back through history, which stays put while output arrives, and typing returns to the bottom", async ({ page }) => {
   const mac = await macField(page);
   // Scrollback is the client's own view over the history it holds. A
-  // scrolled-back view is anchored to its lines, as xterm.js's viewport
+  // scrolled-back view is anchored to its lines, as an old terminal's
   // is, so new output does not drag it along; any input sent to the
   // program brings it back to the bottom (`scrollOnUserInput`).
   await openGrid(page);
@@ -760,7 +760,7 @@ test("Shift+PageUp and PageDown scroll by a page without reaching the program, a
   await settled(page);
   await page.evaluate(() => (window as any).harness.grid.focus());
   await page.keyboard.press("Shift+PageUp");
-  // A page is the rows less one, as xterm.js's `scrollPages`.
+  // A page is the rows less one.
   await expect.poll(async () => (await viewport(page)).top).toBe(40 - 4);
   await page.keyboard.press("Shift+PageUp");
   await expect.poll(async () => (await viewport(page)).top).toBe(40 - 8);
@@ -786,8 +786,8 @@ test("Shift+PageUp and PageDown scroll by a page without reaching the program, a
 });
 
 test("the alternate screen has no history to scroll, and lost history is marked above the oldest line", async ({ page }) => {
-  // A full-screen program's view is its own business (xterm.js's
-  // alternate buffer has no scrollback); `history_trimmed` says recovery
+  // A full-screen program's view is its own business (the alternate
+  // screen has no scrollback); `history_trimmed` says recovery
   // lost some history, which the view says where the gap is.
   await openGrid(page);
   await feed(page, attachWithHistory(30, 3, 5, { history_trimmed: true }));
@@ -810,16 +810,16 @@ test("the alternate screen has no history to scroll, and lost history is marked 
  * left boundary, keeping its character, and a pixel further right starts
  * after it.
  *
- * Why: that is xterm.js's rounding (its `getCoords` with `isSelection`, then
- * one less: `ceil(x / width + 0.5) - 1`), and the grid once rounded the
- * midpoint right instead (`Math.round`), so a live drag starting 4px into an
- * 8px cell lost the first character it was aimed at. Spec: on a row
+ * Why: that is the grid's documented rounding, `ceil(x / width + 0.5) - 1`
+ * (old terminals round the same way), and the grid once rounded the midpoint
+ * right instead (`Math.round`), so a live drag starting 4px into an 8px cell
+ * lost the first character it was aimed at. Spec: on a row
  * `abcdefghij`, a drag from the exact midpoint of a cell `k` to the row's end
  * copies the row from `k`'s character; from one pixel right of it, from the
  * next character. The midpoint is chosen where it falls on a whole pixel, so
  * the browser delivers it exactly.
  */
-test("a selection pressed exactly mid-cell starts at that cell, as in xterm.js", async ({ page }) => {
+test("a selection pressed exactly mid-cell starts at that cell", async ({ page }) => {
   await openGrid(page);
   await feed(page, [
     JSON.stringify({ t: "hello", cols: 10, rows: 3, history_cap: 100 }),
@@ -997,8 +997,8 @@ test("a click on a link reports it; a drag across one never does; a withheld pre
 
 test("a paste goes to the program as paste messages and brings the view back", async ({ page }) => {
   // Without terminal.js's attachment interception (covered with the
-  // island) the component pastes plain text itself, as xterm.js's own
-  // handler does. The supervisor adds bracketed-paste markers and converts
+  // island) the component pastes plain text itself, as an old terminal's
+  // own handler does. The supervisor adds bracketed-paste markers and converts
   // line endings; the client only splits at the format's bounds.
   await openGrid(page);
   await feed(page, attachWithHistory(20, 3, 10));
@@ -1022,7 +1022,7 @@ test("a paste goes to the program as paste messages and brings the view back", a
 });
 
 test("the context menu finds the input under the pointer, holding the selection", async ({ page }) => {
-  // xterm.js's `moveTextAreaUnderMouseCursor`: the browser's own menu then
+  // The input moves under the pointer, so the browser's own menu then
   // offers Paste into the terminal and Copy of the selection.
   await openGrid(page);
   await feed(page, stream("attach.jsonl"));
@@ -1152,7 +1152,7 @@ test("a wheel step after the history cap dropped lines moves by the step alone",
   // Three lines dropped at the cap: the same line is now at index 2.
   expect((await viewport(page)).top).toBe(2);
   expect((await visibleRows(page))[0]).toBe("05");
-  // One wheel step of exactly one row down (50 px a notch, as xterm.js's).
+  // One wheel step of exactly one row down (50 px a notch).
   await page.evaluate(() => {
     const element = document.querySelector(".grid-terminal") as HTMLElement;
     const height = document.querySelector(".grid-terminal-screen")!.getBoundingClientRect().height / 3;
@@ -1165,9 +1165,8 @@ test("a wheel step after the history cap dropped lines moves by the step alone",
 });
 
 test("a mouse report brings a scrolled-back view to the bottom and clears the selection, as input does", async ({ page }) => {
-  // xterm.js sends reports through its user-input path, which scrolls to
-  // the bottom and clears the selection; the program then sees the click
-  // on the screen it shows.
+  // A report is user input, which scrolls to the bottom and clears the
+  // selection; the program then sees the click on the screen it shows.
   await openGrid(page);
   await feed(page, [...attachWithHistory(20, 3, 10), state({ mouse: "click" })]);
   await settled(page);
@@ -1196,7 +1195,7 @@ test("a mouse report brings a scrolled-back view to the bottom and clears the se
 });
 
 test("a quick Alt-click (Option on a Mac) moves the program's cursor with arrow keys", async ({ page }) => {
-  // xterm.js's altClickMovesCursor: the arrows its moveToCellSequence makes
+  // The arrows grid-input.js's moveToCellSequence makes
   // (here five cells right on the cursor's own row), sent as key messages.
   await openGrid(page);
   await feed(page, [
@@ -1215,7 +1214,7 @@ test("a quick Alt-click (Option on a Mac) moves the program's cursor with arrow 
 });
 
 test("Alt-drag off a Mac selects a column, copied one line per row", async ({ page }) => {
-  // xterm.js's column selection; on a Mac Option forces a selection instead.
+  // A column selection; on a Mac Option forces a selection instead.
   test.skip(await viewerIsMac(page), "Option is the forcing modifier on a Mac");
   await openGrid(page);
   await feed(page, [
@@ -1244,7 +1243,7 @@ test("history trimmed after falling behind keeps a scrolled-back view at the old
   // the oldest kept line instead of jumping to the bottom. (A selection is
   // not voided by the trim either, but every line a selection could have
   // been on is older than the cap's worth just received, so it goes with
-  // its lines, as in xterm.js; the unit test pins that the trim is no
+  // its lines; the unit test pins that the trim is no
   // reset.)
   await openGrid(page);
   const row = (n: number) => textRow(`l${n}`);
@@ -1303,8 +1302,8 @@ test("history keeps being applied after the page is hidden", async ({ page }) =>
   expect(await page.evaluate(() => (window as any).harness.grid.model.historyLength)).toBe(1200);
 });
 
-test("redraws ask for links as xterm.js's linkifier does: never with nothing hovered, once per change to a hovered link's rows", async ({ page }) => {
-  // xterm.js re-asks on a render only for a hovered link whose rows were
+test("redraws ask for links never with nothing hovered, and once per change to a hovered link's rows", async ({ page }) => {
+  // The grid re-asks on a render only for a hovered link whose rows were
   // rendered; with nothing hovered it waits for the next move. A spinner
   // redrawn every frame under a resting pointer therefore costs nothing,
   // and a hovered link is asked for again exactly once per change to its
@@ -1380,7 +1379,7 @@ test("redraws ask for links as xterm.js's linkifier does: never with nothing hov
 });
 
 test("a column selection whose first lines drop at the cap keeps its columns", async ({ page }) => {
-  // xterm.js's trim moves only the row of a selection's start; a column
+  // The trim moves only the row of a selection's start; a column
   // selection must not widen to column 0.
   test.skip(await viewerIsMac(page), "Option is the forcing modifier on a Mac");
   await openGrid(page);

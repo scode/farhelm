@@ -107,17 +107,10 @@
 // afresh, which is how a redraw withdraws a stale link (see "## Links" in
 // `create`).
 //
-// ## Size: exactly xterm.js's
+// ## Size
 //
-// A pane must give the program the same rows and columns whichever
-// component it holds. A new terminal's socket URL carries this component's
-// own fit, but a terminal whose kind the page did not know is attached at
-// xterm.js's size before a grid notice swaps this in, and a grid that
-// fitted differently would resize the program again at once, redrawing it
-// and rebuilding its history. So the cell metrics and the fit are
-// xterm.js 6.0's, step for step (the vendored bundle's `CharSizeService`,
-// `DomRenderer._updateDimensions` and the fit addon's
-// `proposeDimensions`):
+// The rows and columns a pane gives its program follow one formula, which
+// is Farhelm's fit contract:
 //
 // - the character is measured with an offscreen canvas's `measureText("W")`
 //   (width, and the font bounding box for height), or a 32-W span where the
@@ -125,16 +118,30 @@
 // - the cell is derived through device pixels, rounding the height up per
 //   device pixel and the whole canvas to CSS pixels at the CURRENT size,
 //   so the cell width can differ from the character width by rounding and
-//   the result depends on the size being fitted from;
-// - the fit subtracts this element's 4px padding (xterm.js's element
-//   carries the same `.terminal` padding) and the 14px the addon reserves
-//   for a scrollbar, which is where this component's scrollbar sits.
+//   the result depends on the size being fitted from (80 x 24 before the
+//   first fit);
+// - the room is the container's size less this element's 4px padding and
+//   a 14px column for the scrollbar, which is where this component's
+//   scrollbar sits;
+// - the size is the room over the cell, rounded down, at least 2 x 1 and at
+//   most the format's 1000 x 1000.
 //
-// A browser spec mounts both components in identical containers and holds
-// them to the same fitted size across text sizes and pixel ratios. The
-// fitted size goes to the program through the existing resize control
-// message; what is drawn is always the size the supervisor last committed
-// in a frame.
+// Why this formula and not a simpler one: it is the old terminal's (the
+// vendored xterm.js 6.0's `CharSizeService`, `DomRenderer._updateDimensions`
+// and fit add-on, ported step for step), and a pane must give the program
+// the same rows and columns whichever component it holds. A new terminal's
+// socket URL carries this component's own fit, but a terminal whose kind
+// the page did not know is attached at the old terminal's size before a
+// grid notice swaps this in, and a grid that fitted differently would
+// resize the program again at once, redrawing it and rebuilding its
+// history.
+//
+// A browser spec (`e2e/grid-client/grid-fit.spec.ts`) holds the fit to this
+// formula, worked out from each run's own measurement, across text sizes
+// and pixel ratios, and holds old terminals' xterm.js to the same formula,
+// which is what the swap relies on. The fitted size goes to the program through the
+// existing resize control message; what is drawn is always the size the
+// supervisor last committed in a frame.
 //
 // ## Not built
 //
@@ -143,12 +150,14 @@
 (function (root) {
   "use strict";
 
-  // The fit addon reserves this for xterm.js's scrollbar whenever there is
-  // scrollback; matching it keeps a pane's column count the same.
+  // The scrollbar's column, which the fit leaves out of the room (see
+  // "Size"; the old terminal's fit add-on reserves the same 14px, which
+  // keeps a pane's column count the same in both).
   const SCROLLBAR_WIDTH = 14;
   const MAX_DIMENSION = 1000;
   const MEASURE_TEXT = "W".repeat(32);
-  // xterm.js's size before its first fit.
+  // The size a terminal has before its first fit (an old terminal starts at
+  // the same 80 x 24).
   const DEFAULT_SIZE = Object.freeze({ cols: 80, rows: 24 });
   // How long one slice of history application may run before it yields
   // (see "Scrollback" in this file's header): half a 60 Hz frame, so input
@@ -178,10 +187,10 @@
   const TRIMMED_TEXT = "Some earlier output could not be recovered";
 
   /**
-   * xterm.js's preferred character measurement: a 2D context whose
+   * The preferred character measurement (see "Size"): a 2D context whose
    * `measureText` reports the font bounding box, or null where it does not
-   * (then the 32-W span is used, as xterm.js falls back to it). One
-   * context serves every grid terminal on the page.
+   * (then the 32-W span is used). One context serves every grid terminal on
+   * the page.
    *
    * Ported from xterm.js 6.0.0's `CharSizeService`, with `measureChar` below,
    * MIT; THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
@@ -203,10 +212,9 @@
   }
 
   /**
-   * The CSS cell size xterm.js's DOM renderer uses for a character of
-   * `charWidth` x `charHeight` at `cols` x `rows` and pixel ratio `dpr`
-   * (`DomRenderer._updateDimensions`, with no letter spacing and a line
-   * height of 1, as Farhelm configures xterm.js).
+   * The CSS cell size for a character of `charWidth` x `charHeight` at
+   * `cols` x `rows` and pixel ratio `dpr` (see "Size"), with no letter
+   * spacing and a line height of 1, as old terminals are configured too.
    *
    * Ported from xterm.js 6.0.0's `DomRenderer._updateDimensions`, MIT;
    * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
@@ -223,10 +231,10 @@
   }
 
   /**
-   * The fit addon's `proposeDimensions`: the size that fits `available`
-   * (the container's computed width and height, minus this element's
-   * padding) at the cell metrics of the current size. Never below 2 x 1,
-   * and never past the format's 1000 x 1000.
+   * The size that fits `available` (the container's computed width and
+   * height, minus this element's padding) at the cell metrics of the
+   * current size (see "Size"). Never below 2 x 1, and never past the
+   * format's 1000 x 1000.
    *
    * Ported from @xterm/addon-fit 0.11.0's `proposeDimensions`, MIT;
    * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
@@ -397,16 +405,16 @@
     let cellHeight = 0;
     let wheelRowHeight = 0;
     // The size the program was last told about: the size the socket URL
-    // carried (`options.size`, xterm.js's fit before a swap; the default
-    // for a new terminal, whose first fit replaces it) until this component
-    // fits differently. Like xterm.js's buffer size, it is also
-    // the size the next fit's cell metrics are computed at.
+    // carried (`options.size`, the old terminal's fit before a swap; the
+    // default for a new terminal, whose first fit replaces it) until this
+    // component fits differently. It is also the size the next fit's cell
+    // metrics are computed at (see "Size").
     let fitted = { ...(options.size || DEFAULT_SIZE) };
 
     /**
-     * Measure the character as xterm.js's `CharSizeService` does. Returns
-     * whether the measurement changed; a font with no metrics yet (no
-     * layout box for the span fallback) leaves the previous one.
+     * Measure the character (see "Size"). Returns whether the measurement
+     * changed; a font with no metrics yet (no layout box for the span
+     * fallback) leaves the previous one.
      *
      * Ported from xterm.js 6.0.0's `CharSizeService`, MIT;
      * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
@@ -437,9 +445,9 @@
 
     /**
      * Bring the drawing metrics up to date for the size on screen (the
-     * model's, or the fitted size before the first frame), as xterm.js's
-     * renderer recomputes them on every resize. Returns whether they
-     * changed, in which case every row must be laid out again.
+     * model's, or the fitted size before the first frame): the cell depends
+     * on the size (see "Size"), so it is recomputed on every resize. Returns
+     * whether they changed, in which case every row must be laid out again.
      */
     function currentCell() {
       if (!charWidth && !measureChar()) return false;
@@ -454,11 +462,10 @@
     }
 
     /**
-     * Fit the grid to its container exactly as xterm.js's fit addon fits
-     * xterm.js (see "Size" in this file's header) and report a size that
-     * differs from the last one reported or carried through `onResize`. A
-     * container with no layout box, or no font metrics yet, proposes
-     * nothing.
+     * Fit the grid to its container by the formula in this file's header
+     * ("Size") and report a size that differs from the last one reported or
+     * carried through `onResize`. A container with no layout box, or no font
+     * metrics yet, proposes nothing.
      *
      * Ported from @xterm/addon-fit 0.11.0's `proposeDimensions` (the room
      * read from the container and this element's padding), MIT;

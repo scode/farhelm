@@ -1825,17 +1825,21 @@ into a new terminal, the agent's spec says `pending` and its reconnect attempts 
 The catch-up and its reveal, the heartbeat, detaches, banners, reconnect, resize, paste interception, the clipboard
 queue, links with their hover checks, file downloads and tunnels are shared with xterm.js terminals.
 
-The grid's fit and cell metrics are xterm.js 6.0's, step for step, so a pane gives the program the same rows and columns
-whichever component holds it (on the compatibility swap, a grid that fitted differently from the xterm.js size the
-socket URL carried would resize the program at once and make the supervisor resend the history); a browser spec holds
-the two to the same size across text sizes and pixel ratios. Rendering is one element per visible row with its runs as
-spans reused in place, painted at most once per animation frame however many messages arrive; the choice between boxing
-every non-ASCII cell and letting characters the font draws at the cell width flow inline came from a renderer benchmark
-against xterm.js, recorded in the file's header. Input goes up as small JSON messages (keys, text, pastes, mouse and
-focus events), never as encoded bytes: the supervisor encodes them from the terminal's modes
-(`crates/farhelm-supervisor/src/grid_input.rs`). Which keydowns reach the program, and the bytes each key and click
-becomes, are Farhelm's own contract, written down as checked-in tables (`grid-keys.jsonl` and `grid-mouse.jsonl` under
-`crates/farhelm-supervisor/tests/fixtures/`, and the page's keydown and Alt-click tables under
+The grid's fit and cell metrics are Farhelm's documented formula (`grid-terminal.js`, "Size"): the character measured by
+an offscreen canvas, the cell rounded through device pixels at the size being fitted from, and the room less the
+element's padding and a 14-pixel scrollbar. The formula is the old terminal's (xterm.js 6.0's measurement, cell rounding
+and fit add-on), so a pane gives the program the same rows and columns whichever component holds it: on the
+compatibility swap, a grid that fitted differently from the size the socket URL carried would resize the program at once
+and make the supervisor resend the history. A browser spec holds the grid to the formula, computed from each run's own
+measurement, across text sizes and pixel ratios, without running xterm.js; an old-terminal test beside it holds the
+vendored xterm.js's fit to the same formula, which is the compatibility swap's premise. Rendering is one element per
+visible row with its runs as spans reused in place, painted at most once per animation frame however many messages
+arrive; the choice between boxing every non-ASCII cell and letting characters the font draws at the cell width flow
+inline came from a renderer benchmark against xterm.js, recorded in the file's header. Input goes up as small JSON
+messages (keys, text, pastes, mouse and focus events), never as encoded bytes: the supervisor encodes them from the
+terminal's modes (`crates/farhelm-supervisor/src/grid_input.rs`). Which keydowns reach the program, and the bytes each
+key and click becomes, are Farhelm's own contract, written down as checked-in tables (`grid-keys.jsonl` and
+`grid-mouse.jsonl` under `crates/farhelm-supervisor/tests/fixtures/`, and the page's keydown and Alt-click tables under
 `crates/farhelm-ui/js-tests/fixtures/input/`) that the page's code and the supervisor's encoder are held to, the key
 table by both. They are the xterm family's encodings, which shells and agents expect, and were first computed by the
 vendored xterm.js, so a program reads the same keys and clicks in both kinds of terminal; no test reads xterm.js for
