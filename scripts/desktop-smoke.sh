@@ -1208,7 +1208,10 @@ if [ "$APPEARANCE_MODE" = 1 ]; then
       done
       [ -n "$observed" ] || fail "native appearance observation timed out"
       sed -n 's/^desktop_appearance_smoke: //p' "$evidence/desktop.log" >"$evidence/observation.json"
-      python3 -c 'import json,sys; result=json.load(open(sys.argv[1])); assert result.get("ok"), result' \
+      # The probe fails a terminal that is not a grid; the kind and the burst
+      # count are asserted here too, so a probe that stopped checking the
+      # terminal cannot pass the case.
+      python3 -c 'import json,sys; result=json.load(open(sys.argv[1])); assert result.get("ok"), result; assert result.get("terminalKind") == "grid", result.get("terminalKind"); assert result.get("terminalRoundtrip", {}).get("burstLines") == 512, result.get("terminalRoundtrip")' \
         "$evidence/observation.json" || fail "native appearance observation failed (see $evidence)"
       kill -0 "$desktop_pid" 2>/dev/null || fail "appearance app died before final frame"
       DISPLAY="$DISP" timeout 10 import -window "$window" "$evidence/final-client.png" || fail "capturing final appearance client"

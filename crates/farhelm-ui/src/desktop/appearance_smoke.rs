@@ -104,6 +104,17 @@ pub(super) const HEAD_OBSERVER: &str = r#"<script id="farhelm-appearance-smoke">
       tag: node.tagName, id: node.id, src: node.getAttribute('src'),
     })),
   };
+  // Whether an xterm.js surface was ever added to the page, by a separate
+  // observer that runs until it sees one: a new terminal built with xterm.js
+  // first and then swapped for the grid leaves no xterm.js element behind,
+  // so only a record of the insertion can show it happened.
+  state.xtermMounted = false;
+  const xtermWatch = new MutationObserver(() => {
+    if (!document.querySelector('.xterm')) return;
+    state.xtermMounted = true;
+    xtermWatch.disconnect();
+  });
+  xtermWatch.observe(document.documentElement, {subtree: true, childList: true});
   const observer = new MutationObserver(() => {
     if (!document.querySelector('#main')?.textContent.trim()) return;
     state.firstContent = snapshot();
@@ -160,8 +171,14 @@ pub(super) fn use_observation() {
 /// Startup is observed before any interaction. The shell creates one ordinary
 /// owned session through the authenticated API; opening its real row gives
 /// terminal evidence without adding a permanent application fixture feature.
-/// Input and a numbered output burst must retain that same live attachment.
-/// Polling names each readiness boundary and has one overall deadline.
+/// The app creates every session in a terminal host, so the terminal is the
+/// grid component, and the probe reads it as the browser suite's terminal
+/// helpers do: its painted background, its input field for focus, its own
+/// `paste` and grid `text` input messages for typing, and its model's
+/// `snapshot()` (history and screen) for the output. A terminal that is not
+/// a grid fails the case rather than being skipped. Input and a numbered
+/// output burst must retain that same live attachment. Polling names each
+/// readiness boundary and has one overall deadline.
 const DRIVER: &str = r#"
 return await (async () => {
   const evidence = {scenario, phases: [], coverageGaps: ['live native system appearance event not supplied by this fixture']};
@@ -208,14 +225,14 @@ return await (async () => {
     const sessionId = row.closest('[data-session-id]')?.dataset.sessionId;
     check(sessionId, 'owned terminal row has no session identity');
     row.click();
-    // The app's sessions run in terminal hosts, drawn by the grid component,
-    // and this probe's terminal checks below read xterm.js (its theme, focus
-    // target, paste and input calls and buffer). Until they read the grid
-    // model instead (TODO.md, "The desktop smoke's appearance leg on grid
-    // terminals"), a grid terminal skips them and the leg checks everything
-    // else; an xterm.js terminal (a session from before terminal hosts) still
-    // gets them.
-    await wait(() => (window.__farhelmTermReady && document.querySelector('.xterm-screen')) || window.__farhelmGrid, 'mounted terminal');
+    // The app's sessions run in terminal hosts, which the page draws with the
+    // grid component and nothing of xterm.js.
+    await wait(() => window.__farhelmGrid, 'mounted grid terminal');
+    // The grid paints its theme's background at its first frame, which the
+    // reveal flushes; every snapshot below measures that paint.
+    await wait(() => window.__farhelmIslands?.terminal?.test?.replay?.revealed, 'revealed grid terminal');
+    check(getComputedStyle(window.__farhelmGrid.element).backgroundColor !== 'rgba(0, 0, 0, 0)', 'grid terminal never painted');
+    check(!early.xtermMounted && !window.__farhelmTerm, 'xterm.js was mounted for a new terminal');
     const open = async () => {
       document.querySelector('.app-settings-toggle').click();
       await wait(() => document.querySelector('.app-settings-dialog'), 'Settings dialog');
@@ -224,19 +241,24 @@ return await (async () => {
       await wait(() => document.querySelector('#settings-appearance:not([hidden])'), 'visible Appearance section');
       await wait(() => document.querySelector('[data-appearance-choice="' + (stored ? override : 'system') + '"]').checked, 'initial native radio property');
     };
+    // The terminal keeps its own dark background whatever the app's
+    // appearance: the token the stylesheet defines, and the color the grid
+    // paints on its element from the terminal theme.
+    const terminalDark = {token: '#282c34', painted: 'rgb(40, 44, 52)'};
     const snapshot = label => {
       const root = getComputedStyle(document.documentElement);
-      const term = window.__farhelmTerm;
+      const grid = window.__farhelmGrid;
       const phase = {label, at: performance.now(), timeOrigin: performance.timeOrigin,
         nativeLight: matchMedia('(prefers-color-scheme: light)').matches,
         root: document.documentElement.dataset.appearance, stored: localStorage.getItem('farhelm.appearance'),
         ground: root.getPropertyValue('--bg-0').trim(), canvas: root.backgroundColor,
         checked: [...document.querySelectorAll('[data-appearance-choice]')].filter(node => node.checked).map(node => node.dataset.appearanceChoice),
-        terminal: term ? {background: term.options.theme.background, token: root.getPropertyValue('--terminal-bg').trim(), screens: document.querySelectorAll('.xterm-screen').length} : null};
+        terminal: grid ? {background: getComputedStyle(grid.element).backgroundColor, token: root.getPropertyValue('--terminal-bg').trim(), screens: document.querySelectorAll('.grid-terminal-screen').length} : null};
       evidence.phases.push(phase);
       check(phase.timeOrigin === early.timeOrigin, 'appearance action reloaded the native document');
       check(phase.canvas === canvases[phase.root], 'canvas does not follow the resolved palette');
-      if (phase.terminal) check(phase.terminal.background.toLowerCase() === '#282c34' && phase.terminal.token.toLowerCase() === '#282c34', 'terminal dark background changed');
+      check(phase.terminal, 'grid terminal gone');
+      check(phase.terminal.background === terminalDark.painted && phase.terminal.token.toLowerCase() === terminalDark.token, 'terminal dark background changed');
       return phase;
     };
     await open();
@@ -273,7 +295,7 @@ return await (async () => {
     // the round trip; reconnecting must not silently rescue a failed burst.
     const island = await wait(() => {
       const current = window.__farhelmIslands?.terminal;
-      if (!(current?.term || current?.grid) || current.ws?.readyState !== WebSocket.OPEN || !current.test?.replay?.revealed) return;
+      if (!current?.grid || current.ws?.readyState !== WebSocket.OPEN || !current.test?.replay?.revealed) return;
       const url = new URL(current.ws.url, location.href);
       const parts = url.pathname.split('/');
       const matches = decodeURIComponent(parts[3] || '') === sessionId && parts[1] === 'api' && parts[2] === 'sessions'
@@ -281,59 +303,66 @@ return await (async () => {
         && !url.searchParams.has('tab');
       return matches ? current : null;
     }, 'live revealed terminal for the owned session');
-    // Which component the owned session's settled attachment holds, decided
-    // only now: the page can show one component before the stream notice
-    // picks the other.
-    evidence.terminalKind = island.grid ? 'grid' : 'xterm';
-    if (island.grid) {
-      evidence.terminalRoundtrip = {skipped: 'grid terminal: the input round trip and terminal theme checks read xterm.js (TODO.md)'};
-      const final = snapshot('terminal-final');
-      check(final.root === override, 'final opposite-system override was lost');
-      evidence.ok = true;
-      return evidence;
-    }
-    const term = island.term, socket = island.ws;
+    // What the helm announced on the attachment, not what the probe expects.
+    evidence.terminalKind = island.test.stream;
+    check(island.test.stream === 'grid', 'the helm did not serve a grid stream');
+    const grid = island.grid, socket = island.ws;
     const sameAttachment = () => {
-      check(window.__farhelmIslands?.terminal === island && island.term === term && island.ws === socket
+      check(window.__farhelmIslands?.terminal === island && island.grid === grid && island.ws === socket
         && socket.readyState === WebSocket.OPEN && island.test.replay.revealed, 'terminal attachment closed or changed during input/burst');
     };
-    term.focus();
-    await wait(() => { sameAttachment(); return document.activeElement === term.textarea; }, 'terminal textarea focus');
-    // Read a bounded tail of the real xterm buffer, not viewport-only DOM.
-    // The 512-line burst fits well within the existing 12,000-line scrollback.
+    grid.focus();
+    const field = grid.element.querySelector('.grid-terminal-input');
+    await wait(() => { sameAttachment(); return document.activeElement === field; }, 'grid terminal input focus');
+    // Read the last 640 lines of the grid's model (history, then the screen),
+    // not viewport-only DOM, and only once its history has been applied: the
+    // grid applies a large history in slices, so a tail read mid-way would
+    // miss lines that did arrive. The 512-line burst fits well within the
+    // 12,000-line scrollback.
     const terminalLines = () => {
       sameAttachment();
-      const buffer = term.buffer.active, lines = [];
-      for (let i = Math.max(0, buffer.length - 640); i < buffer.length; i++) lines.push(buffer.getLine(i)?.translateToString(true) || '');
-      return lines;
+      const shown = grid.snapshot();
+      if (shown.historyPending) return null;
+      return [...shown.history, ...shown.lines].slice(-640);
     };
-    check(!terminalLines().some(line => line === 'FH-NATIVE-INPUT' || line === 'FH-NATIVE-DONE' || line === 'FH-NATIVE-AFTER'), 'terminal markers already present before input');
+    // Enter as the browser suite's `sendTerminalInput` sends it: a grid `text`
+    // input message straight down the attachment's socket, which the
+    // supervisor writes as the same byte (the grid itself would send a
+    // pressed Enter as a `key` message).
+    const pressEnter = () => {
+      sameAttachment();
+      const messages = window.farhelmGridInput.textMessages('\r').map(message => window.farhelmGridInput.encodeInput(message));
+      check(messages.length > 0 && messages.every(Boolean), 'grid text message for Enter not encodable');
+      for (const bytes of messages) socket.send(bytes);
+    };
+    const before = await wait(terminalLines, 'grid history applied before input');
+    check(!before.some(line => line === 'FH-NATIVE-INPUT' || line === 'FH-NATIVE-DONE' || line === 'FH-NATIVE-AFTER'), 'terminal markers already present before input');
     const inputAt = performance.now();
-    // These public APIs use xterm's real onData -> socket -> PTY path. Split
-    // printf markers cannot be satisfied by the shell echoing the pasted line.
-    // This establishes terminal input, not physical native keyboard dispatch.
+    // The grid's own paste sends `paste` input messages down the socket to
+    // the PTY. Split printf markers cannot be satisfied by the shell echoing
+    // the pasted line. This establishes terminal input, not physical native
+    // keyboard dispatch.
     const command = "printf '\\nFH-NATIVE-%s\\n' INPUT; for ((i=1;i<=512;i++)); do printf 'FH-BURST-%04d\\n' \"$i\"; done; printf 'FH-NATIVE-%s\\n' DONE";
-    term.paste(command);
-    term.input('\r', true);
+    check(grid.paste(command), 'grid terminal refused the pasted command');
+    pressEnter();
     const burstLines = await wait(() => {
       const lines = terminalLines();
-      return lines.includes('FH-NATIVE-DONE') ? lines : null;
+      return lines && lines.includes('FH-NATIVE-DONE') ? lines : null;
     }, 'owned terminal input acknowledgement and burst completion');
     const burst = burstLines.filter(line => /^FH-BURST-\d{4}$/.test(line));
     check(burstLines.includes('FH-NATIVE-INPUT'), 'terminal input acknowledgement missing');
     check(burst.length === 512 && burst.every((line, index) => line === 'FH-BURST-' + String(index + 1).padStart(4, '0')), 'terminal burst lost, duplicated or reordered lines');
-    term.paste("printf '\\nFH-NATIVE-%s\\n' AFTER");
-    term.input('\r', true);
+    check(grid.paste("printf '\\nFH-NATIVE-%s\\n' AFTER"), 'grid terminal refused the second pasted command');
+    pressEnter();
     const afterLines = await wait(() => {
       const lines = terminalLines();
-      return lines.includes('FH-NATIVE-AFTER') ? lines : null;
+      return lines && lines.includes('FH-NATIVE-AFTER') ? lines : null;
     }, 'terminal input after burst');
-    evidence.terminalRoundtrip = {input: 'xterm public paste/input', sessionId, sameAttachment: true,
+    evidence.terminalRoundtrip = {input: 'grid paste and text input messages', sessionId, sameAttachment: true,
       revealed: island.test.replay.revealed, socketOpen: socket.readyState === WebSocket.OPEN,
       burstLines: burst.length, first: burst[0], last: burst[burst.length - 1],
       elapsedMs: performance.now() - inputAt, afterAcknowledged: true, tail: afterLines.slice(-8)};
     const final = snapshot('terminal-final');
-    check(final.terminal.background.toLowerCase() === '#282c34' && final.terminal.token.toLowerCase() === '#282c34', 'terminal dark background changed');
     check(final.root === override, 'final opposite-system override was lost');
     evidence.ok = true;
   } catch (error) { evidence.error = String(error); evidence.ok = false; }

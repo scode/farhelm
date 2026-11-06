@@ -27,14 +27,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Generally rethink the session filtering experience.** The list now names its active filters and shows a removable
   host chip; revisit the broader filtering experience.
 
-- **The desktop smoke's appearance leg on grid terminals.** The optional appearance leg of the Linux desktop smoke
-  (`DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh`) checks each light/dark case's terminal too: its background
-  color, that typing reaches the agent, and that a 512-line burst arrives whole and in order on the same attachment.
-  Sessions now run in terminal hosts, drawn by the grid terminal, and that part of its in-page probe
-  (`crates/farhelm-ui/src/desktop/appearance_smoke.rs`) reads xterm.js, so on a grid terminal it is skipped (the leg's
-  other checks still run). Migrating it means reading the grid's model for the burst (as the browser suite's terminal
-  helpers do), typing through the grid's input messages, and finding the grid's own background color and focus target.
-
 - **Overhaul the grid stream's encoding and the grid client's history storage.** Grid terminals (terminals in a terminal
   host) get their screen and history from the supervisor as JSON messages, and the page keeps every history line
   decoded, as one JavaScript object per run of styled text plus a style object per distinct color pair. Measured in
