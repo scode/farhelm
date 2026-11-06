@@ -96,6 +96,9 @@ Generic recorder wrapping is fine but not required for these; record each result
   sweep runs `test-install-sh.sh` only under the host's GNU userland). Both runs include the installer's scenario-scoped
   request counts and diagnostics for unexpected requests in refused `/latest` cases.
 - `dprint check`
+- The recorded unprivileged inetd SSH prerequisite probe from `.agents/validation.md`; its macOS counterpart runs only
+  with the on-demand `tunnel-sshd-probe` CI suite, using Homebrew's server and the system SSH client. It proves the test
+  substrate, not recipe-tunnel lifetime.
 - `python3 scripts/check-agents-md.py` and `python3 scripts/check-agents-md.py --self-test` (includes both Claude
   instruction-file names in the repository inventory and mixed-case specification pointers)
 - `cd website && bun install --frozen-lockfile && bun run build`, and `cd website/feedback-tests && node --test`

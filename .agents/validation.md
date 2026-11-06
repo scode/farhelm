@@ -798,6 +798,12 @@ that its required systemd or SSH substrate ran.
   because the workspace's glibc debug binary cannot exec on CentOS 9. A few minutes, most of it the musl build; the
   container image and the tmux build are both cached after the first run.
 - `dprint check`
+- `python3 scripts/record-test-run.py --kind development --selection 'unprivileged inetd SSH prerequisite' --concurrency 'one owned SSH client and inetd server' --timeout 40 --tmux none -- deno run -A scripts/tunnel-sshd-probe.ts <scratch>`
+  — the prerequisite probe for recipe-tunnel lifetime tests: real unprivileged OpenSSH authentication and exact stdin
+  echo through an inetd-mode server, with private keys/configuration and no listener. Missing sshd fails. Dispatch the
+  macOS version with `gh workflow run ci.yml --ref <branch> -f suite=tunnel-sshd-probe`; it proves the test substrate,
+  not tunnel teardown or gateway behavior. On macOS it uses Homebrew's portable OpenSSH server with the system SSH
+  client: Apple's server requires an audit session that this unprivileged pipe connection cannot create.
 - `python3 scripts/check-agents-md.py` and `python3 scripts/check-agents-md.py --self-test` — keeps the agent
   instructions loadable: the root `AGENTS.md` within the 28 KiB budget (Codex injects only its first 32 KiB and drops
   the rest silently) and ending with its truncation sentinel, every path an instruction file names and every

@@ -33,6 +33,7 @@ on:
         options:
           - baseline
           - uninstall-macos
+          - tunnel-sshd-probe
 
 permissions:
   contents: read
@@ -47,6 +48,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  tunnel-sshd-probe:
+    if: inputs.suite == 'tunnel-sshd-probe'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Install the probe runtime and portable SSH server
+        run: brew install deno openssh
+      - name: Prove unprivileged inetd SSH
+        run: |
+          python3 scripts/record-test-run.py \
+            --kind development --selection 'macOS unprivileged inetd SSH prerequisite' \
+            --concurrency 'one owned SSH client and inetd server' --timeout 40 --tmux none \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- deno run -A scripts/tunnel-sshd-probe.ts "$RUNNER_TEMP"
+
   uninstall-macos:
     if: inputs.suite == 'uninstall-macos'
     runs-on: macos-15
@@ -170,7 +189,7 @@ jobs:
   changes:
     runs-on: ubicloud
     # Draft PRs run nothing (see the trigger comment at the top).
-    if: inputs.suite != 'uninstall-macos' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    if: inputs.suite == 'baseline' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
@@ -383,7 +402,7 @@ jobs:
   website:
     runs-on: ubicloud
     # Draft PRs run nothing (see the trigger comment at the top).
-    if: inputs.suite != 'uninstall-macos' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    if: inputs.suite == 'baseline' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     steps:
       - uses: actions/checkout@v7
       # Bun installs the packages, but `astro build` runs under Node through
@@ -410,7 +429,7 @@ jobs:
   dprint:
     runs-on: ubicloud
     # Draft PRs run nothing (see the trigger comment at the top).
-    if: inputs.suite != 'uninstall-macos' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    if: inputs.suite == 'baseline' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     steps:
       - uses: actions/checkout@v7
       - name: Check formatting with dprint
@@ -438,7 +457,7 @@ jobs:
   dist-check:
     runs-on: ubicloud
     # Draft PRs run nothing (see the trigger comment at the top).
-    if: inputs.suite != 'uninstall-macos' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    if: inputs.suite == 'baseline' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     steps:
       - uses: actions/checkout@v7
       - name: Install the pinned dist
