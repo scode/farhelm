@@ -1516,9 +1516,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   written when a later input succeeds before their acknowledgements are sent. The conditional source route is
   established; production prompts are disabled, and no user-work loss is claimed.
 
-- [`new-terminal-guide-overstates-xterm-removal.md`](new-terminal-guide-overstates-xterm-removal.md) — The migration
-  guide says no xterm.js is involved although it still initializes and sizes the viewer before grid attachment.
-
 - [`emoji-report-names-wrong-vendored-patch.md`](emoji-report-names-wrong-vendored-patch.md) — An emoji landing-report
   follow-up names the parser patch instead of the terminal emulator patch containing its cosmetic edits.
 

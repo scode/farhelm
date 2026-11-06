@@ -1011,13 +1011,15 @@ test("a tab whose mount fails is rolled back and bannered while its siblings sta
 });
 
 // terminal.js keys its pending mounts by element id so one terminal
-// waiting on xterm's globals cannot hold up another — and so a wait for a
+// waiting on its scripts cannot hold up another — and so a wait for a
 // terminal that has since LEFT the desired set is cancelled rather than
 // left to fire into a view that no longer wants it. That second property
 // is what this pins: the M2-era "stale mount retry" bug, in its per-tab
 // form.
 //
-// Count reads of the withheld `window.Terminal`: a surviving retry cannot
+// Count reads of the withheld `window.farhelmGridTerminal` (the grid
+// component, which the mount gate waits for on both kinds of terminal; a
+// new terminal's gate reads nothing of xterm.js): a surviving retry cannot
 // mount once its element is gone, so counting mounted islands alone would
 // miss it. A rising count first proves the retry is genuinely pending.
 test("a pending tab mount is cancelled when the tab leaves the desired set", async ({
@@ -1038,9 +1040,9 @@ test("a pending tab mount is cancelled when the tab leaves the desired set", asy
     // pending — the agent terminal staying up is what lets this test keep
     // observing the page at all.
     await page.evaluate(() => {
-      (window as any).__stashedTerminal = (window as any).Terminal;
+      (window as any).__stashedTerminal = (window as any).farhelmGridTerminal;
       (window as any).__terminalReadCount = 0;
-      Object.defineProperty(window, "Terminal", {
+      Object.defineProperty(window, "farhelmGridTerminal", {
         configurable: true,
         get() {
           (window as any).__terminalReadCount++;
@@ -1069,7 +1071,7 @@ test("a pending tab mount is cancelled when the tab leaves the desired set", asy
     // may: the pending attempt was cancelled when the tab left the set,
     // and a mount now would attach a terminal the supervisor destroyed.
     await page.evaluate(() => {
-      Object.defineProperty(window, "Terminal", {
+      Object.defineProperty(window, "farhelmGridTerminal", {
         configurable: true,
         writable: true,
         value: (window as any).__stashedTerminal,

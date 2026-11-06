@@ -4,8 +4,9 @@
 // grid-style.js, grid-input.js and grid-buffer.js, where `node --test`
 // covers them.
 //
-// terminal.js decides per attachment which component a terminal gets
-// (xterm.js for byte streams, this for grid streams) and owns everything
+// terminal.js decides which component a terminal gets (this for a new
+// terminal, and for a grid stream that replaces xterm.js on a terminal whose
+// kind the page did not know; xterm.js for byte streams) and owns everything
 // about the connection: the socket, catch-up, heartbeat, reconnect,
 // banners, and what a clipboard write or a link click is allowed to do.
 // This file only needs a container element, a way to send input messages,
@@ -109,10 +110,11 @@
 // ## Size: exactly xterm.js's
 //
 // A pane must give the program the same rows and columns whichever
-// component it holds: the socket URL carries xterm.js's size (measured
-// before the stream's kind is known), and a grid that fitted differently
-// would resize the program again at once, redrawing it and, for a grid
-// stream, rebuilding its history. So the cell metrics and the fit are
+// component it holds. A new terminal's socket URL carries this component's
+// own fit, but a terminal whose kind the page did not know is attached at
+// xterm.js's size before a grid notice swaps this in, and a grid that
+// fitted differently would resize the program again at once, redrawing it
+// and rebuilding its history. So the cell metrics and the fit are
 // xterm.js 6.0's, step for step (the vendored bundle's `CharSizeService`,
 // `DomRenderer._updateDimensions` and the fit addon's
 // `proposeDimensions`):
@@ -262,8 +264,10 @@
    * terminals use), `theme` (terminal-theme.js), `platform`
    * (`navigator.platform`), `send(message)` for input messages,
    * `onResize(cols, rows)` when the fitted size changes, and `size`, the
-   * size the program already has (the one the socket URL carried; xterm.js's
-   * initial 80 x 24 when omitted), which a fit reports only if it differs,
+   * size the program already has (the one the socket URL carried, when a
+   * swap from xterm.js creates this; xterm.js's initial 80 x 24 when
+   * omitted, as for a new terminal, whose first fit then reports its size),
+   * which a fit reports only if it differs,
    * `onClipboard(text, target)` for a program's completed clipboard write
    * ("clipboard" or "primary"), `onCopy(text)` for a selection the user
    * completed, `links` (a link provider, see "## Links" inside; no links
@@ -378,8 +382,9 @@
     let cellHeight = 0;
     let wheelRowHeight = 0;
     // The size the program was last told about: the size the socket URL
-    // carried (`options.size`, xterm.js's fit before the swap) until this
-    // component fits differently. Like xterm.js's buffer size, it is also
+    // carried (`options.size`, xterm.js's fit before a swap; the default
+    // for a new terminal, whose first fit replaces it) until this component
+    // fits differently. Like xterm.js's buffer size, it is also
     // the size the next fit's cell metrics are computed at.
     let fitted = { ...(options.size || DEFAULT_SIZE) };
 

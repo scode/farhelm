@@ -1805,25 +1805,33 @@ browser gets the screen and scrollback as rows of styled runs (the grid stream o
 transport: system ssh + stdio protocol") and draws them; it is not a terminal emulator. It lives in
 `crates/farhelm-ui/assets/grid-*.js`: `grid-terminal.js` is the DOM half (rendering, the virtualized scrollback,
 selection, the pointer and keyboard), and `grid-model.js`, `grid-buffer.js`, `grid-style.js` and `grid-input.js` hold
-the decisions it acts on as pure functions, which `node --test` covers. `terminal.js` owns the connection for both
-kinds: every mount builds the xterm.js surface first, because the socket URL carries xterm.js's measured size before the
-stream's kind is known, asks for either kind (`grid=1`), and replaces that surface with the grid component when the
-helm's stream notice says `grid`, before any data has been written to it. The catch-up and its reveal, the heartbeat,
-detaches, banners, reconnect, resize, paste interception, the clipboard queue, links with their hover checks, file
-downloads and tunnels are shared with xterm.js terminals.
+the decisions it acts on as pure functions, which `node --test` covers. `terminal.js` owns the connection for both kinds
+and picks the surface before the socket exists, because the socket URL carries its measured size. The session view hands
+it each terminal's kind from the listing (`SessionInfo::agent_terminal`, `TabInfo::kind`). A new terminal mounts the
+grid component directly: nothing of xterm.js is built, measured, waited for or published as a test hook for it, the
+grid's own fit gives the size, and a byte stream on its attachment is a broken contract that ends the attachment as a
+stream error. An old terminal, or one whose kind the page does not know, builds the xterm.js surface first as it always
+has, asks for either kind (`grid=1`), and replaces that surface with the grid component when the helm's stream notice
+says `grid`, before any data has been written to it. That swap is the compatibility path for a kind the page did not
+know or had stale, such as another client's Restart moving an old agent into a new terminal before this view's listing
+caught up. A view's own Restart does not need it: the Restart's reply names the restarted agent's kind, which the
+remount uses until a listing of the restarted run arrives, and while the Restart is in flight, if it can move the agent
+into a new terminal, the agent's spec says `pending` and its reconnect attempts mount nothing until the kind is known.
+The catch-up and its reveal, the heartbeat, detaches, banners, reconnect, resize, paste interception, the clipboard
+queue, links with their hover checks, file downloads and tunnels are shared with xterm.js terminals.
 
 The grid's fit and cell metrics are xterm.js 6.0's, step for step, so a pane gives the program the same rows and columns
-whichever component holds it (a grid that fitted differently would resize the program at once and, for a grid stream,
-make the supervisor resend the history); a browser spec holds the two to the same size across text sizes and pixel
-ratios. Rendering is one element per visible row with its runs as spans reused in place, painted at most once per
-animation frame however many messages arrive; the choice between boxing every non-ASCII cell and letting characters the
-font draws at the cell width flow inline came from a renderer benchmark against xterm.js, recorded in the file's header.
-Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes: the
-supervisor encodes them from the terminal's modes (`crates/farhelm-supervisor/src/grid_input.rs`) and is held to the
-sequences the vendored xterm.js produces by golden tables generated from it, so a program reads the same keys and clicks
-in both kinds. The client sends no flow-control pause or resume: it applies every message as it arrives, applying a
-large history in slices between frames so that the screen stays usable, and the helm pauses a grid stream on its own
-queue instead.
+whichever component holds it (on the compatibility swap, a grid that fitted differently from the xterm.js size the
+socket URL carried would resize the program at once and make the supervisor resend the history); a browser spec holds
+the two to the same size across text sizes and pixel ratios. Rendering is one element per visible row with its runs as
+spans reused in place, painted at most once per animation frame however many messages arrive; the choice between boxing
+every non-ASCII cell and letting characters the font draws at the cell width flow inline came from a renderer benchmark
+against xterm.js, recorded in the file's header. Input goes up as small JSON messages (keys, text, pastes, mouse and
+focus events), never as encoded bytes: the supervisor encodes them from the terminal's modes
+(`crates/farhelm-supervisor/src/grid_input.rs`) and is held to the sequences the vendored xterm.js produces by golden
+tables generated from it, so a program reads the same keys and clicks in both kinds. The client sends no flow-control
+pause or resume: it applies every message as it arrives, applying a large history in slices between frames so that the
+screen stays usable, and the helm pauses a grid stream on its own queue instead.
 
 Not built for grid terminals, a near-term entry in `TODO.md`: showing an input method's composition at the cursor
 (committed text is sent).

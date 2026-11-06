@@ -58,8 +58,8 @@ export async function waitForReplayReveal(
 
 /**
  * Wait until the island at `elementId` is MOUNTED — a terminal component
- * (xterm.js, or the grid once a grid stream replaced it) and a socket exist
- * for it.
+ * (the grid for a new terminal, else xterm.js until a grid stream replaces
+ * it) and a socket exist for it.
  *
  * The registry's terminal, socket, and test record together are the mount
  * boundary. It does not require OPEN, replay reveal, or focus, which is why
@@ -164,7 +164,8 @@ async function observeSession(
 
     // The component's hidden text field is the actual keyboard-input
     // destination: xterm.js's public textarea, or the grid's input field
-    // once a grid stream replaced xterm.js (terminal.js's `adoptGrid`).
+    // (a new terminal's from its mount, or once a grid stream replaced
+    // xterm.js, terminal.js's `adoptGrid`).
     // Being somewhere inside a terminal container does not prove that keys
     // reach the terminal; another focusable descendant could own them
     // instead.

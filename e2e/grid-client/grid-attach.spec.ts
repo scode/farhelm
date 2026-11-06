@@ -1,16 +1,20 @@
 // terminal.js's attach plumbing for grid streams, driven against a fake
 // socket on a static page.
 //
-// An island cannot know which component its terminal needs until the helm
-// says so on the socket, so every mount builds xterm.js as it always has
-// and a `{"type":"stream","kind":"grid"}` notice swaps the grid component
-// in. These specs pin the parts of that which only the real terminal.js can
-// show: the socket asks for grid streams, a grid notice replaces the
-// surface and keeps the catch-up and its reveal, input leaves as binary
-// frames, the text-size step resizes a grid terminal, a stream with no
-// notice (an older helm) stays on xterm.js, and a grid frame that breaks
-// the format ends the attachment visibly. The fake socket stands in for
-// the helm, which does not send grid streams yet.
+// The session view tells terminal.js which kind each terminal is. A new
+// terminal (`kind: "host"`, what these specs mount by default) gets the grid
+// component directly, with nothing of xterm.js built, waited for or
+// published. A terminal whose kind is old (`tmux`) or unknown builds
+// xterm.js as it always has, and a `{"type":"stream","kind":"grid"}` notice
+// swaps the grid component in: the compatibility path for a kind the page
+// did not know or had stale. These specs pin the parts of that which only
+// the real terminal.js can show: the socket asks for grid streams at the
+// grid's own size, the catch-up and its reveal, input leaves as binary
+// frames, the text-size step resizes a grid terminal, a byte stream on a new
+// terminal's attachment is refused, the swap on the compatibility path, a
+// stream with no notice (an older helm) on an unknown kind stays on
+// xterm.js, and a grid frame that breaks the format ends the attachment
+// visibly. The fake socket stands in for the helm.
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
@@ -184,15 +188,10 @@ function stream(name: string): string[] {
 }
 
 /**
- * Open the page and mount the agent terminal the way a session view does,
- * returning once its socket exists. No reconnect policy is passed, so a
- * failed attachment shows its banner instead of retrying.
+ * Open the static page, serving it and the shipped assets through request
+ * routing, with no terminal mounted yet.
  */
-async function mountTerminal(
-  page: Page,
-  replay?: Record<string, unknown>,
-  { attach, reconnect, spec: extra }: { attach?: unknown; reconnect?: unknown; spec?: Record<string, unknown> } = {},
-): Promise<void> {
+async function openPage(page: Page): Promise<void> {
   // A mount that throws reports it on a timer's stack, not to the test;
   // surface it so a failure says why.
   page.on("pageerror", (error) => console.log(`page error: ${error.stack ?? error}`));
@@ -205,12 +204,48 @@ async function mountTerminal(
     return route.fulfill({ path: file });
   });
   await page.goto(`${ORIGIN}/`);
+}
+
+/**
+ * Open the page and mount the agent terminal the way a session view does,
+ * returning once its socket exists. No reconnect policy is passed, so a
+ * failed attachment shows its banner instead of retrying. The spec is a new
+ * terminal's (`kind: "host"`) unless `spec` says otherwise; `kind: null` is
+ * a terminal whose kind the page does not know.
+ *
+ * Every xterm.js `Terminal` the page constructs is counted in
+ * `window.xtermTerminalsBuilt`, so a spec can show that none was built. With
+ * `withoutXterm`, xterm.js's globals and the Shift+Enter merge (which only
+ * its input uses) are removed before the mount, as if their scripts had
+ * never arrived.
+ */
+async function mountTerminal(
+  page: Page,
+  replay?: Record<string, unknown>,
+  { attach, reconnect, spec: extra, withoutXterm }: { attach?: unknown; reconnect?: unknown; spec?: Record<string, unknown>; withoutXterm?: boolean } = {},
+): Promise<void> {
+  await openPage(page);
   // Test controls for the catch-up (terminal.js's `replayControls`).
   if (replay) await page.evaluate((controls) => ((window as any).__farhelmTestReplay = controls), replay);
+  await page.evaluate((remove) => {
+    const w = window as any;
+    w.xtermTerminalsBuilt = 0;
+    if (remove) {
+      for (const name of ["Terminal", "FitAddon", "ClipboardAddon", "WebLinksAddon", "UnicodeGraphemesAddon", "farhelmShiftEnterKey"]) delete w[name];
+      return;
+    }
+    const Xterm = w.Terminal;
+    w.Terminal = class extends Xterm {
+      constructor(...args: unknown[]) {
+        super(...args);
+        w.xtermTerminalsBuilt += 1;
+      }
+    };
+  }, !!withoutXterm);
   await page.evaluate(({ attach, reconnect, extra }) => {
     // The page's own document listeners, before any terminal exists.
     (window as any).listenersBeforeMount = (window as any).documentListeners();
-    const spec = { el: "term", banner: "banner", status: "status", connecting: "connecting", notice: null, copyHint: null, path: "/api/sessions/s1/term", gen: 1, primary: true, focus: true, unavailable: false, sessionId: "s1", ...extra };
+    const spec = { el: "term", banner: "banner", status: "status", connecting: "connecting", notice: null, copyHint: null, path: "/api/sessions/s1/term", gen: 1, primary: true, focus: true, unavailable: false, sessionId: "s1", kind: "host", ...extra };
     // With a reconnect policy the island is mounted the way a session view
     // mounts it, through `sync`, which is what hands the policy over.
     if (reconnect) (window as any).farhelmTerm.sync("https://grid.test", [spec], attach, reconnect);
@@ -246,18 +281,58 @@ async function macField(page: Page): Promise<{ mac?: true }> {
   return (await viewerIsMac(page)) ? { mac: true } : {};
 }
 
-test("a grid notice swaps in the grid component and keeps the catch-up, input and resize", async ({ page }) => {
+/**
+ * What the page publishes about the agent terminal's island: its test
+ * registry entry's kind and field names (`__farhelmIslands`), the stream it
+ * settled, and which singleton test hooks exist.
+ */
+async function islandShape(page: Page) {
+  return page.evaluate(() => {
+    const w = window as any;
+    const island = w.__farhelmIslands.term;
+    return {
+      kind: island.kind,
+      fields: Object.keys(island).sort(),
+      stream: island.test.stream,
+      term: "__farhelmTerm" in w,
+      termReady: "__farhelmTermReady" in w,
+      grid: !!w.__farhelmGrid,
+    };
+  });
+}
+
+/**
+ * A new terminal is drawn by the grid component from its first frame, and
+ * nothing of xterm.js is built for it.
+ *
+ * Why: the migration's point is that a new terminal does not use xterm.js
+ * at all. Building xterm.js first only to measure the socket's size and
+ * dispose it on the stream notice was the old design, and a regression to
+ * it would leave every new terminal measured by, and briefly published as,
+ * the old component.
+ * Spec: a spec of kind `host` mounts the grid before any frame, constructs
+ * no xterm.js `Terminal`, publishes a grid-shaped record (no `term`, `fit`
+ * or link gesture) and `__farhelmGrid` but neither `__farhelmTerm` nor
+ * `__farhelmTermReady`, and asks for a grid stream at the grid's own fitted
+ * size. The grid notice changes nothing but the settled stream; the
+ * catch-up still hides the terminal until the marker, typing leaves as a
+ * binary input frame, and the program is asked only for the fitted size.
+ */
+test("a new terminal mounts the grid directly, with nothing of xterm.js, and keeps the catch-up, input and resize", async ({ page }) => {
   const mac = await macField(page);
   await mountTerminal(page);
+  // Before any frame: the grid is already the surface.
+  await expect(page.locator("#term .grid-terminal")).toHaveCount(1);
+  await expect(page.locator("#term .xterm")).toHaveCount(0);
+  expect(await islandShape(page)).toEqual({ kind: "grid", fields: ["grid", "kind", "test", "ws"], stream: null, term: false, termReady: false, grid: true });
   const url = await page.evaluate(() => (window as any).FakeSocket.all[0].url as string);
   expect(new URL(url).searchParams.get("grid")).toBe("1");
+  const fitted = await page.evaluate(() => (window as any).__farhelmGrid.size());
+  expect({ cols: Number(new URL(url).searchParams.get("cols")), rows: Number(new URL(url).searchParams.get("rows")) }).toEqual(fitted);
   await socket(page, "open");
   await socket(page, "text", { type: "stream", kind: "grid" });
-  await page.waitForFunction(() => (window as any).__farhelmIslands.term.kind === "grid");
-  // The xterm.js surface is gone; the grid's is in the same element.
-  await expect(page.locator("#term .xterm")).toHaveCount(0);
+  expect((await islandShape(page)).stream).toBe("grid");
   await expect(page.locator("#term .grid-terminal")).toHaveCount(1);
-  expect(await page.evaluate(() => (window as any).__farhelmIslands.term.test.stream)).toBe("grid");
   // The catch-up still hides the terminal until the marker, then reveals
   // the current screen.
   for (const line of stream("attach.jsonl")) await socket(page, "binary", line);
@@ -274,14 +349,155 @@ test("a grid notice swaps in the grid component and keeps the catch-up, input an
   ]);
   // The program was only ever asked for the size the URL carried: once at
   // open, as for every attachment, and once more because the fixture's
-  // hello (20 x 4) is not the size this pane fits. The swap itself sent
-  // nothing.
+  // hello (20 x 4) is not the size this pane fits.
   const carried = { cols: Number(new URL(url).searchParams.get("cols")), rows: Number(new URL(url).searchParams.get("rows")) };
   expect(await resizes(page)).toEqual([carried, carried]);
   // A larger text size refits the grid and tells the program, once.
   await page.evaluate(() => (window as any).farhelmTerm.stepFontSize(4));
   await expect.poll(async () => (await resizes(page)).length).toBe(3);
   expect((await resizes(page))[2].cols).toBeLessThan(carried.cols);
+  // Nothing along the way built xterm.js.
+  expect(await page.evaluate(() => (window as any).xtermTerminalsBuilt)).toBe(0);
+});
+
+/**
+ * A new terminal's mount does not wait for xterm.js's scripts.
+ *
+ * Why: the mount gate used to wait for xterm.js and its add-ons on every
+ * terminal, so a new terminal's readiness hung on scripts it never uses.
+ * Spec: with xterm.js's globals and the Shift+Enter merge removed before
+ * the mount (the premise is checked), a spec of kind `host` still mounts
+ * the grid, opens its socket and draws an attach.
+ */
+test("a new terminal mounts without any of xterm.js's scripts", async ({ page }) => {
+  await mountTerminal(page, undefined, { withoutXterm: true });
+  expect(await page.evaluate(() => ["Terminal", "FitAddon", "farhelmShiftEnterKey"].filter((name) => name in window))).toEqual([]);
+  await attachGrid(page);
+  await expect(page.locator("#term .grid-terminal-row").nth(0)).toHaveText("$ echo");
+});
+
+/**
+ * A byte stream on a new terminal's attachment ends it as a stream error,
+ * whether the helm announced it or sent bytes with no notice.
+ *
+ * Why: a new terminal never becomes an old one, so there is no xterm.js
+ * surface to fall back to; drawing nothing and saying so is the contract
+ * violation's honest ending, the same one a grid frame that breaks the
+ * format gets.
+ * Spec: a `bytes` notice, or a binary frame before any notice, closes the
+ * socket, banners the error, draws no byte of it, and builds no xterm.js.
+ */
+for (const shape of ["notice", "bare bytes"] as const) {
+  test(`a new terminal's attachment that carries a byte stream (${shape}) is refused`, async ({ page }) => {
+    await mountTerminal(page);
+    await socket(page, "open");
+    if (shape === "notice") await socket(page, "text", { type: "stream", kind: "bytes" });
+    await socket(page, "binary", "hello from bytes");
+    expect(await page.evaluate(() => (window as any).FakeSocket.all[0].readyState)).toBe(3);
+    await expect(page.locator("#banner")).toHaveText("Terminal stream error: a new terminal's attachment carried a byte stream");
+    await expect(page.locator("#term")).not.toContainText("hello from bytes");
+    expect(await page.evaluate(() => (window as any).xtermTerminalsBuilt)).toBe(0);
+  });
+}
+
+/**
+ * A mount whose kind is `pending` opens nothing until a sync names the
+ * kind.
+ *
+ * Why: while the view's own Restart may move an old agent into a new
+ * terminal, the kind the restarted agent will have is unknown, and any
+ * mount then (a reconnect after the Restart's teardown) would have to guess
+ * and build xterm.js for what may be a new terminal.
+ * Spec: a `pending` spec synced alone opens no socket within a settle
+ * window; the same spec synced again with kind `host` (same generation)
+ * mounts the grid directly.
+ */
+test("a pending kind mounts nothing until a sync names it", async ({ page }) => {
+  await openPage(page);
+  const sync = (kind: string) => page.evaluate(([kind, reconnect]) => {
+    const spec = { el: "term", banner: "banner", status: "status", connecting: "connecting", notice: null, copyHint: null, path: "/api/sessions/s1/term", gen: 1, primary: true, focus: true, unavailable: false, sessionId: "s1", kind };
+    (window as any).farhelmTerm.sync("https://grid.test", [spec], undefined, reconnect);
+  }, [kind, RECONNECT_POLICY] as const);
+  await sync("pending");
+  // The premise: the mount gate's scripts are all there, so only the kind
+  // holds the mount back.
+  expect(await page.evaluate(() => !!(window as any).farhelmGridTerminal && !!(window as any).Terminal)).toBe(true);
+  // sleep-ok: a bounded window in which a mount that ignored the hold would have opened its socket (the gate polls every 50 ms).
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => (window as any).FakeSocket.all.length)).toBe(0);
+  await sync("host");
+  await page.waitForFunction(() => (window as any).FakeSocket.all.length === 1);
+  await expect(page.locator("#term .grid-terminal")).toHaveCount(1);
+  await expect(page.locator("#term .xterm")).toHaveCount(0);
+});
+
+/**
+ * A Restart's `pending` kind also holds the reconnect its own teardown
+ * starts, for an old terminal that was already mounted.
+ *
+ * Why: this view's Restart syncs `pending` while the old island is still
+ * live, and the Restart then ends that island's socket. The recovery that
+ * follows is built from the dying mount's spec unless it takes the newer
+ * one, and a first attempt of kind `tmux` would build xterm.js against a
+ * session that may already be in a new terminal.
+ * Spec: an agent of kind `tmux` is mounted (one xterm.js terminal); the same
+ * attachment is synced as `pending`; its socket closes as a transport loss
+ * and a reconnect attempt is made; no second socket opens and no second
+ * xterm.js terminal is built. The Restart's answer (kind `host`, the next
+ * generation) then mounts the grid directly, still with one xterm.js
+ * terminal ever built.
+ */
+test("a Restart's pending kind holds the reconnect its teardown starts", async ({ page }) => {
+  await mountTerminal(page, undefined, { reconnect: RECONNECT_POLICY, spec: { kind: "tmux" } });
+  expect(await page.evaluate(() => (window as any).xtermTerminalsBuilt)).toBe(1);
+  const sync = (kind: string, gen: number) => page.evaluate(([kind, gen, reconnect]) => {
+    const spec = { el: "term", banner: "banner", status: "status", connecting: "connecting", notice: null, copyHint: null, path: "/api/sessions/s1/term", gen, primary: true, focus: true, unavailable: false, sessionId: "s1", kind };
+    (window as any).farhelmTerm.sync("https://grid.test", [spec], undefined, reconnect);
+  }, [kind, gen, RECONNECT_POLICY] as const);
+  await socket(page, "open");
+  await sync("pending", 1);
+  // The premise: the live island survived the pending sync untouched.
+  expect(await page.evaluate(() => (window as any).__farhelmIslands.term.kind)).toBe("bytes");
+  await socket(page, "close");
+  await expect(page.locator("#connecting")).toHaveAttribute("data-reconnect-phase", "retrying");
+  await page.evaluate(() => (window as any).farhelmTerm.reconnectNow("term"));
+  // sleep-ok: a bounded window in which an attempt that ignored the hold would have opened its socket (the gate polls every 50 ms).
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => ({ sockets: (window as any).FakeSocket.all.length, built: (window as any).xtermTerminalsBuilt }))).toEqual({ sockets: 1, built: 1 });
+  await sync("host", 2);
+  await page.waitForFunction(() => (window as any).FakeSocket.all.length === 2);
+  await expect(page.locator("#term .grid-terminal")).toHaveCount(1);
+  await expect(page.locator("#term .xterm")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).xtermTerminalsBuilt)).toBe(1);
+});
+
+/**
+ * On the compatibility path, a grid notice swaps the xterm.js surface out
+ * for the grid and leaves a grid-shaped island behind.
+ *
+ * Why: an old terminal's spec can be stale (another client's Restart moved
+ * the agent into a new terminal before this view's listing caught up), and
+ * then the page has built xterm.js for what turns out to be a grid stream.
+ * The swap must leave the same island a direct mount makes, with xterm.js's
+ * test hooks gone, so nothing later reaches a disposed xterm.js.
+ * Spec: a spec of kind `tmux` builds xterm.js; its grid notice replaces it
+ * with the grid in the same element, and the island's record and hooks then
+ * have the direct mount's shape.
+ */
+test("a grid notice on an old terminal's spec swaps in the grid with a new terminal's island", async ({ page }) => {
+  await mountTerminal(page, undefined, { spec: { kind: "tmux" } });
+  expect(await page.evaluate(() => (window as any).xtermTerminalsBuilt)).toBe(1);
+  expect(await islandShape(page)).toEqual({ kind: "bytes", fields: ["kind", "term", "test", "ws"], stream: null, term: true, termReady: true, grid: false });
+  await socket(page, "open");
+  await socket(page, "text", { type: "stream", kind: "grid" });
+  await page.waitForFunction(() => (window as any).__farhelmIslands.term.kind === "grid");
+  await expect(page.locator("#term .xterm")).toHaveCount(0);
+  await expect(page.locator("#term .grid-terminal")).toHaveCount(1);
+  expect(await islandShape(page)).toEqual({ kind: "grid", fields: ["grid", "kind", "test", "ws"], stream: "grid", term: false, termReady: false, grid: true });
+  for (const line of stream("attach.jsonl")) await socket(page, "binary", line);
+  await socket(page, "text", { type: "replay_complete" });
+  await page.waitForFunction(() => (window as any).__farhelmTest.replay.revealed);
+  await expect(page.locator(".grid-terminal-row").nth(0)).toHaveText("$ echo");
 });
 
 /** The resize control messages the page has sent. */
@@ -357,7 +573,7 @@ test("page shortcuts pressed in a grid terminal act and never reach the program"
 test("the swap removes every page-level listener the xterm.js surface installed", async ({ page }) => {
   // Copy-on-select and the link gesture observers listen on the document;
   // left behind, they would act on a disposed terminal on every click.
-  await mountTerminal(page);
+  await mountTerminal(page, undefined, { spec: { kind: null } });
   const beforeMount = await page.evaluate(() => (window as any).listenersBeforeMount);
   await page.waitForFunction(() => !!(window as any).__farhelmIslands?.term);
   const mounted = await page.evaluate(() => (window as any).documentListeners());
@@ -368,12 +584,33 @@ test("the swap removes every page-level listener the xterm.js surface installed"
   expect(await page.evaluate(() => (window as any).documentListeners())).toEqual(beforeMount);
 });
 
+/**
+ * A new terminal's unmount removes every page-level listener its surface
+ * installed.
+ *
+ * Why: a directly mounted grid installs its page-side drivers itself (the
+ * drag-copy notice's document listener among them) rather than inheriting
+ * them from a swap, so their teardown is its own; one left behind would act
+ * on a disposed grid on every release anywhere on the page.
+ * Spec: a spec of kind `host` with a drag-copy notice adds document
+ * listeners; unmounting it leaves exactly those from before the mount.
+ */
+test("a new terminal's unmount removes every page-level listener its surface installed", async ({ page }) => {
+  await mountTerminal(page, undefined, { spec: { notice: "notice" } });
+  const beforeMount = await page.evaluate(() => (window as any).listenersBeforeMount);
+  const mounted = await page.evaluate(() => (window as any).documentListeners());
+  expect(mounted.length).toBeGreaterThan(beforeMount.length);
+  await page.evaluate(() => (window as any).farhelmTerm.unmount("term"));
+  await expect(page.locator("#term .grid-terminal")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).documentListeners())).toEqual(beforeMount);
+});
+
 test("a grid notice after the idle reveal keeps keyboard focus in the terminal", async ({ page }) => {
   // A silent attach is revealed by the catch-up's idle bound and may have
   // been focused before the notice arrives; disposing xterm.js must hand
   // that focus to the grid rather than drop it on the page.
   await page.addInitScript(() => ((window as any).openSocketsAtOnce = true));
-  await mountTerminal(page, { idleMs: 300 });
+  await mountTerminal(page, { idleMs: 300 }, { spec: { kind: null } });
   await page.waitForFunction(() => (window as any).__farhelmTest.replay.revealed);
   expect(await page.evaluate(() => (window as any).__farhelmTest.replay.revealReason)).toBe("idle");
   await page.evaluate(() => (window as any).__farhelmTerm.focus());
@@ -385,7 +622,7 @@ test("a grid notice after the idle reveal keeps keyboard focus in the terminal",
 test("text frames before the notice settle nothing; the notice still decides", async ({ page }) => {
   // The ordering contract: the notice precedes data and `replay_complete`;
   // a heartbeat answer may come first.
-  await mountTerminal(page);
+  await mountTerminal(page, undefined, { spec: { kind: null } });
   await socket(page, "open");
   await socket(page, "text", { type: "pong" });
   expect(await page.evaluate(() => (window as any).__farhelmIslands.term.test.stream)).toBeNull();
@@ -394,7 +631,7 @@ test("text frames before the notice settle nothing; the notice still decides", a
 });
 
 test("an older helm whose first frame is the end of an empty replay stays on xterm.js", async ({ page }) => {
-  await mountTerminal(page);
+  await mountTerminal(page, undefined, { spec: { kind: null } });
   await socket(page, "open");
   await socket(page, "text", { type: "replay_complete" });
   await page.waitForFunction(() => (window as any).__farhelmTest.replay.revealed);
@@ -406,7 +643,7 @@ test("an older helm whose first frame is the end of an empty replay stays on xte
 });
 
 test("a grid notice after byte data is a broken contract and ends the attachment", async ({ page }) => {
-  await mountTerminal(page);
+  await mountTerminal(page, undefined, { spec: { kind: null } });
   await socket(page, "open");
   await socket(page, "binary", "some bytes");
   await socket(page, "text", { type: "stream", kind: "grid" });
@@ -415,7 +652,7 @@ test("a grid notice after byte data is a broken contract and ends the attachment
 });
 
 test("a stream with no notice stays on xterm.js, as from an older helm", async ({ page }) => {
-  await mountTerminal(page);
+  await mountTerminal(page, undefined, { spec: { kind: null } });
   await socket(page, "open");
   await socket(page, "binary", "hello from bytes");
   await socket(page, "text", { type: "replay_complete" });

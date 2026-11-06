@@ -14,8 +14,10 @@ details, this is the map:
   takes the count banner's "filter was ignored" wording).
 - **Auto-select changes every test's page load**: a session attaches at `goto` before any click. Tests that stage route
   holds or stubs around a specific session's first reads must `pinAutoSelect(page, otherId)` BEFORE `goto` (the helper
-  fetches the helm identity and writes the keyed record — a bare id is silently ignored). `__farhelmTermReady` is true
-  from load, so it no longer gates "the session I just acted on is up" — use title-based completion signals.
+  fetches the helm identity and writes the keyed record — a bare id is silently ignored). `__farhelmTermReady` is an old
+  terminal's (xterm.js) hook only, true from load once one is shown, and never set for a grid terminal, so it gates
+  neither "the session I just acted on is up" nor anything on new terminals — use title-based completion signals, and
+  the island registry's readiness helpers (`helpers/terminal-readiness.ts`) where a terminal's state is the question.
 - **Only genuinely on-demand surfaces need open helpers**: `openRowMenu` awaits its floating menu, while the permanent
   host selector is ready when its selected option and the particular request or DOM outcome under test are observed.
   `openHostsPanel` awaits the permanent host list and opens its global details disclosure. A bare-DOM

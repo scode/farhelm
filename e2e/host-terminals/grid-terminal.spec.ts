@@ -20,15 +20,47 @@ function startupRow(page: Page): Locator {
 }
 
 /**
+ * Count every xterm.js `Terminal` the page constructs, in
+ * `window.__xtermTerminalsBuilt`, from before any script runs.
+ *
+ * xterm.js's bundle assigns its exports onto the global object, so an
+ * accessor installed first sees the class arrive and hands terminal.js a
+ * subclass that counts. The scripts still load (old terminals need them);
+ * the count says whether anything used them.
+ */
+async function countXtermTerminals(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__xtermTerminalsBuilt = 0;
+    let counted: unknown;
+    Object.defineProperty(w, "Terminal", {
+      configurable: true,
+      get: () => counted,
+      set(Xterm: any) {
+        counted = class extends Xterm {
+          constructor(...args: unknown[]) {
+            super(...args);
+            w.__xtermTerminalsBuilt += 1;
+          }
+        };
+      },
+    });
+  });
+}
+
+/**
  * Open the app on the startup session and wait until its terminal is the
  * grid component, mounted and focused, showing the fake agent's ready line.
  *
- * The grid component mounts only when the helm's stream notice says `grid`
- * (terminal.js's `adoptGrid`), so `window.__farhelmGrid` replacing
- * `window.__farhelmTerm` is the premise that this session's terminal really
- * is a host terminal, not a tmux one drawn by xterm.js.
+ * The session listing says the startup session's agent is a new terminal,
+ * so terminal.js mounts the grid directly and never builds xterm.js for it:
+ * `window.__farhelmGrid` with no `window.__farhelmTerm`, and no xterm.js
+ * `Terminal` constructed at all while xterm.js's scripts did load, is the
+ * premise that this session's terminal really is a host terminal drawn
+ * without the old component.
  */
 async function openGridTerminal(page: Page): Promise<Locator> {
+  await countXtermTerminals(page);
   await page.goto("/");
   const row = startupRow(page);
   await expect(row).toBeVisible({ timeout: 20_000 });
@@ -48,6 +80,10 @@ async function openGridTerminal(page: Page): Promise<Locator> {
   const grid = page.locator(".grid-terminal");
   await expect(grid).toHaveCount(1);
   await expect(grid).toContainText("FAKE-AGENT READY", { timeout: 30_000 });
+  expect(
+    await page.evaluate(() => ({ loaded: typeof (window as any).Terminal === "function", built: (window as any).__xtermTerminalsBuilt })),
+    "xterm.js's scripts load, and no xterm.js terminal is built for a new terminal",
+  ).toEqual({ loaded: true, built: 0 });
   // Typing goes to the grid's own input element, so the focus handoff is
   // established before any key is pressed, not assumed from the attach.
   await grid.click();
@@ -64,8 +100,9 @@ async function openGridTerminal(page: Page): Promise<Locator> {
  * pass the request on, or the supervisor did not stream the host terminal,
  * the session would show nothing or an attach refusal; if keys did not
  * travel back as grid input, the terminal would draw but never answer.
- * Spec: the startup session's terminal mounts as the grid component (never
- * xterm.js), draws the agent's `FAKE-AGENT READY` line, and after a line is
+ * Spec: the startup session's terminal mounts as the grid component, with
+ * no xterm.js terminal ever constructed for it, draws the agent's
+ * `FAKE-AGENT READY` line, and after a line is
  * typed and Enter pressed, draws the agent's `echo:` of that line. The line
  * carries the project's name, since both engines' projects share one session.
  */
