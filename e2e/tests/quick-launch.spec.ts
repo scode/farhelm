@@ -28,6 +28,32 @@ import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-
 import { routeGate } from "./helpers/route-gate";
 import { requireHelmBuild } from "./helpers/helm-build";
 import { openSessionActionMenu } from "./helpers/session-actions";
+import { recordPage } from "./helpers/timeline";
+
+/**
+ * Keep the body-focus premise unchanged while recording who wins each poll.
+ * A bare false loses the distinction between a terminal taking focus back and
+ * the browser document itself losing focus. The existing failure timeline
+ * retains these samples alongside its passive focus events, before cleanup.
+ */
+async function expectPageBodyFocus(page: Page, boundary: string): Promise<void> {
+  recordPage(page, "body-focus-blur", [["boundary", boundary]]);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect.poll(async () => {
+    const state = await page.evaluate(() => {
+      const active = document.activeElement;
+      return {
+        body: active === document.body,
+        document_focused: document.hasFocus(),
+        tag: active?.tagName ?? "",
+        classes: active?.getAttribute("class")?.slice(0, 128) ?? "",
+        terminal: active?.closest("[data-terminal]")?.getAttribute("data-terminal") ?? "",
+      };
+    });
+    recordPage(page, "body-focus-sample", [["boundary", boundary], ...Object.entries(state)]);
+    return state.body;
+  }).toBe(true);
+}
 
 /** Fabricated replies retain the owned helm's real build identity. The
  * terminal-family helper depends on that family's reset hooks, which these
@@ -446,8 +472,7 @@ test("typed page refusals are atomic and empty Enter leaves later bindings paire
     await expect(indicator).toHaveCount(0);
     await expect(form).toHaveCount(0);
     for (const word of [missing, ambiguous]) {
-      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-      await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
+      await expectPageBodyFocus(page, word === missing ? "missing word" : "ambiguous word");
       await page.keyboard.press("Control+Shift+KeyX");
       await page.keyboard.press("Digit9");
       await page.keyboard.type(`${good} ${word}`);
@@ -465,8 +490,7 @@ test("typed page refusals are atomic and empty Enter leaves later bindings paire
     }
     await patchPreferences(request, { template_shortcuts: { "1": good } });
     expect((await readPreferences(request)).template_shortcuts).toEqual({ "1": good });
-    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-    await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await expectPageBodyFocus(page, "valid sequence after word refusals");
     await expect(begin).toBeEnabled();
     await page.keyboard.press("Control+Shift+KeyX");
     await page.keyboard.press("Digit1");
@@ -978,8 +1002,7 @@ test("a sequence refused at its prefix leaves later sequences their own bindings
     // The prefix yields to a focused text field. If the page did not arm, it
     // would copy nothing at Enter and leave nothing behind, and the test
     // would pass without the refusal it exists for.
-    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-    await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await expectPageBodyFocus(page, "refused prefix");
     // The app's refusal of Begin is otherwise only inferred from the held
     // read. A sequence pill is its observable opposite: the app accepted the
     // prefix. Watch for one until the refused Enter's copy is drained.
@@ -1032,8 +1055,7 @@ test("a sequence refused at its prefix leaves later sequences their own bindings
     await expect(trigger).toBeEnabled();
     // The prefix yields to a focused text field, and cancelling New may hand
     // focus anywhere. Start this sequence from the page, as the first one did.
-    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-    await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await expectPageBodyFocus(page, "valid sequence after prefix refusal");
     await page.keyboard.press("Control+Shift+KeyX");
     await page.keyboard.press("Digit1");
     await expect(indicator).toContainText(fresh);

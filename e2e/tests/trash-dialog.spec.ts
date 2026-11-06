@@ -8,6 +8,7 @@ import { type APIRequestContext, type Locator, type Page } from "@playwright/tes
 import { localHostId, patchPreferences, readPreferences, stubFeed } from "./helpers/fleet";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 import { expectKeyboardScroll, expectKeyboardScrollFromControl } from "./helpers/keyboard-scroll";
+import { recordPage } from "./helpers/timeline";
 
 installTerminalSuiteHooks();
 
@@ -875,7 +876,22 @@ for (const width of [1000, 360]) {
     await page.keyboard.press("Home");
     await expect.poll(() => region.evaluate(node => node.scrollTop)).toBe(0);
     await page.keyboard.press("PageDown");
-    await expect.poll(() => region.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+    // Record the premise with the existing scroll sample: a lost focus handoff
+    // and a confirmation that no longer overflows both otherwise read as zero.
+    await expect.poll(async () => {
+      const state = await region.evaluate(node => ({
+        scroll_top: node.scrollTop,
+        scroll_height: node.scrollHeight,
+        client_height: node.clientHeight,
+        overflow_y: getComputedStyle(node).overflowY,
+        focused_inside: node.contains(document.activeElement),
+        focused_tag: document.activeElement?.tagName ?? "",
+        focused_classes: document.activeElement?.getAttribute("class")?.slice(0, 128) ?? "",
+        document_focused: document.hasFocus(),
+      }));
+      recordPage(page, "trash-pagedown-sample", Object.entries(state));
+      return state.scroll_top;
+    }).toBeGreaterThan(0);
     await submit.focus();
     await expectExposed(submit, region);
     expect(await dialog.evaluate((node) => node.scrollTop)).toBe(0);

@@ -279,7 +279,8 @@ export interface SessionRow {
   title: string;
   /** Second-resolution stamp used to distinguish visit order from creation order. */
   created_at: number;
-  status?: { state: string };
+  /** Error detail is retained by stop-premise diagnostics before row cleanup. */
+  status?: { state: string; detail?: string };
   /** Whether Restart can resume the session ("resume"), or why it cannot
    * ("not_captured", "no_conversation_reporting"). */
   restart_offer?: string;
