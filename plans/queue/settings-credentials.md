@@ -425,3 +425,36 @@ passed its code review gate, and the PRs remove the two TODO.md entries this pla
 `## Decisions` section exists, its latest entry must also be satisfied. Then close the plan per
 `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write
 a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-11-06 (claim 6e398e).
+
+### Claude subscription delivery needs permission for first-run setup
+
+This plan adds named credentials in Settings and delivers them to Tensorlake hosts. The independent work is complete in
+five reviewed draft PRs: [credential storage and Settings](https://github.com/scode/farhelm/pull/3074/changes),
+[named endpoint tokens](https://github.com/scode/farhelm/pull/3077/changes),
+[endpoint replacement delivery](https://github.com/scode/farhelm/pull/3081/changes),
+[GitHub authentication for private checkouts and terminals](https://github.com/scode/farhelm/pull/3082/changes), and
+[Codex subscription logins that preserve refreshed credentials](https://github.com/scode/farhelm/pull/3086/changes).
+Claude subscription selection and delivery are the unfinished part; Claude login values can be saved in the catalog but
+cannot yet be selected by recipes.
+
+The agreed Claude design writes the subscription token into its settings and requires a fresh host to reach an
+interactive agent without onboarding. Installed Claude Code 2.1.318, started in a fresh home and empty directory with
+that configuration, stopped at its theme chooser. The token was explicitly fake: this proves the observed onboarding
+stop, not successful authentication or how a valid token behaves. Inspection of the installed program also found a
+separate onboarding-completion gate. The plan explicitly requires a block before writing additional Claude
+configuration. No onboarding answer or additional metadata write was made.
+
+May Farhelm initialize the smallest non-secret first-run fields in Claude's usual configuration, with the required
+fields established by an isolated probe, or should this plan defer Claude subscription delivery and land the five
+existing drafts? Initialization would preserve other settings and the normal agent home. Deferral avoids managing more
+vendor configuration but leaves the agreed Claude feature unfinished. Valid-token authentication remains a required
+check and will need a privately supplied test credential; no existing agent credentials were read.
+
+I recommend authorizing the narrow first-run initialization and its isolated verification, so a new Tensorlake host can
+use the selected Claude subscription without manual onboarding. This would authorize only the required first-run
+metadata; it would not waive the valid-token acceptance check. The public plan answer should record the scope decision
+without including a credential.
