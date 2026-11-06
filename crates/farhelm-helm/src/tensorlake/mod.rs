@@ -71,6 +71,7 @@ pub(crate) struct Tensorlake(Arc<Inner>);
 
 struct Inner {
     store: HelmStore,
+    delivery: Arc<crate::provisioning::credential_delivery::CredentialDelivery>,
     api: Arc<dyn TensorlakeApi>,
     /// `None` for a helm built without a state directory (the test seam
     /// [`AppState::with_provisioning`]), which has nowhere to keep a key.
@@ -99,6 +100,7 @@ impl Inner {
         shell: Arc<dyn SandboxShell>,
         ssh_keys: Option<Arc<SshKeyStore>>,
         tunnel_fake: Option<Arc<e2e::E2eTensorlake>>,
+        delivery: Arc<crate::provisioning::credential_delivery::CredentialDelivery>,
     ) -> Self {
         let builds = Arc::new(RecipeBuilds::new(
             store.clone(),
@@ -109,6 +111,7 @@ impl Inner {
         ));
         Self {
             store,
+            delivery,
             api,
             ssh_keys,
             #[cfg(test)]
@@ -138,7 +141,11 @@ impl Tensorlake {
     ///
     /// Test builds never read the environment and never reach Tensorlake:
     /// their API is offline unless a test injects one ([`Self::with_api`]).
-    pub(crate) fn production(store: HelmStore, state_dir: &Path) -> anyhow::Result<Self> {
+    pub(crate) fn production_with_delivery(
+        store: HelmStore,
+        state_dir: &Path,
+        delivery: Arc<crate::provisioning::credential_delivery::CredentialDelivery>,
+    ) -> anyhow::Result<Self> {
         let (api, shell, fake): ProductionSeams = if cfg!(test) {
             (Arc::new(Offline::test()), Arc::new(OfflineShell), None)
         } else {
@@ -151,19 +158,33 @@ impl Tensorlake {
             shell,
             Some(Arc::new(SshKeyStore::new(tensorlake_dir))),
             fake,
+            delivery,
         ))))
     }
 
     /// A service that can neither reach Tensorlake nor keep a key: what a
     /// helm assembled without a state directory holds until `AppState::new`
     /// replaces it with the production one.
+    #[cfg(test)]
     pub(crate) fn detached(store: HelmStore) -> Self {
+        let delivery =
+            crate::provisioning::credential_delivery::CredentialDelivery::detached(store.clone());
+        Self::detached_with_delivery(store, delivery)
+    }
+
+    /// An injected provisioning service supplies file operations while API and
+    /// key storage remain offline until their own test seams are selected.
+    pub(crate) fn detached_with_delivery(
+        store: HelmStore,
+        delivery: Arc<crate::provisioning::credential_delivery::CredentialDelivery>,
+    ) -> Self {
         Self(Arc::new(Inner::new(
             store,
             Arc::new(Offline::test()),
             Arc::new(OfflineShell),
             None,
             None,
+            delivery,
         )))
     }
 
@@ -178,6 +199,7 @@ impl Tensorlake {
             Arc::clone(&self.0.shell),
             self.0.ssh_keys.clone(),
             None,
+            Arc::clone(&self.0.delivery),
         )))
     }
 
@@ -191,12 +213,30 @@ impl Tensorlake {
             shell,
             self.0.ssh_keys.clone(),
             None,
+            Arc::clone(&self.0.delivery),
         )))
     }
 
     /// The helm's snapshot builds.
     pub(crate) fn builds(&self) -> &Arc<RecipeBuilds> {
         &self.0.builds
+    }
+
+    /// Settings/key tests need the ordinary key directory, without any file
+    /// delivery backend or second production environment selection.
+    #[cfg(test)]
+    pub(crate) fn production(store: HelmStore, state_dir: &Path) -> anyhow::Result<Self> {
+        let delivery =
+            crate::provisioning::credential_delivery::CredentialDelivery::detached(store.clone());
+        Self::production_with_delivery(store, state_dir, delivery)
+    }
+
+    /// Setup, host presentation and replacement routes share the connect hook's
+    /// lifetime tracking and backend rather than constructing another service.
+    pub(crate) fn credential_delivery(
+        &self,
+    ) -> &Arc<crate::provisioning::credential_delivery::CredentialDelivery> {
+        &self.0.delivery
     }
 
     /// Live forwarding health, absent outside a connected phase.

@@ -85,12 +85,17 @@ snapshot; existing hosts keep running. Switching back needs another billed snaps
 Under **Agents**, you can set a base URL and choose a named endpoint token for Claude Code, Codex, or both. Create the
 token in Settings → **Credentials** first; **None** uses the endpoint without a token. A base URL can point at a
 [tunnel](#tunnels-to-your-side), such as `http://127.0.0.1:8080`. Farhelm writes these settings when it sets up each
-host, for both software choices. Changing the recipe does not reconfigure agents on hosts already set up, and updating
-Farhelm on a host does not reapply them.
+host, for both software choices, and before it connects. Recipe changes reach existing hosts at their next connection or
+setup. Updating Farhelm on a host does not independently reapply them.
 
 Replacing a token in Credentials keeps its name, so you do not need to edit the recipes that use it. Changing a base URL
 keeps the selected token name. A credential cannot be deleted while a recipe uses it; choose **None** or another name in
-those recipes first. Setup uses the token's current saved value.
+those recipes first. Replacing a token sends its new value to hosts already using it; disconnected hosts receive it when
+they next connect. Existing agents may also pick up the replacement.
+
+If a host cannot receive a replacement, the save still succeeds and says **Saved; not delivered to** that host, with a
+reason. The host stays usable, with an amber mark and the reason in its details. Farhelm tries again at its next
+connection or when you replace the credential again.
 
 :::caution[Endpoint tokens after upgrading]
 

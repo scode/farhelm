@@ -3320,21 +3320,27 @@ pub(crate) enum SandboxCheck {
 /// attempt on a Tensorlake host and never while the host is connected, so a
 /// connected host costs no API traffic and a suspended one costs one call
 /// per re-probe.
-/// The same service acquires recipe forwards on entry to the connected
-/// phase; their lease drops before a hold can acknowledge parking.
+/// The same service reconciles credentials and acquires recipe forwards on
+/// entry to the connected phase; their leases drop before a hold acknowledges
+/// parking, including while the hook is still acquiring those resources.
 #[async_trait::async_trait]
 pub(crate) trait SandboxStatusSource: Send + Sync {
     async fn check(&self, sandbox: &str) -> SandboxCheck;
 
     /// Acquire resources that must end with this connected phase. Scripted
-    /// status sources need none; production starts recipe forwards here.
-    async fn connected(
-        &self,
-        _row: &HostRow,
-        _events: Arc<FleetEvents>,
-    ) -> Option<crate::tensorlake::tunnels::TunnelLease> {
-        None
+    /// status sources need none; production delivers credentials and starts
+    /// recipe forwards before the supervisor becomes routable.
+    async fn connected(&self, _row: &HostRow, _events: Arc<FleetEvents>) -> ConnectedResources {
+        ConnectedResources::default()
     }
+}
+
+/// Keep all resources alive across the hook-to-Connected publication gap and
+/// until serving ends. Dropping acquisition on a hold cancels them together.
+#[derive(Default)]
+pub(crate) struct ConnectedResources {
+    pub(crate) _tunnels: Option<crate::tensorlake::tunnels::TunnelLease>,
+    pub(crate) _credentials: Option<crate::provisioning::credential_delivery::ConnectionLease>,
 }
 
 /// The status source of a manager started without one ([`ConnectionManager::start`]):
@@ -3725,7 +3731,7 @@ impl HostActor {
                     // Recipe loading can wait on storage. A hold must cancel
                     // that acquisition too, or a late read could start SSH
                     // after Suspend has already closed the shared masters.
-                    let _tunnels = tokio::select! {
+                    let _connected_resources = tokio::select! {
                         request = next_nudge(&mut nudge) => {
                             active |= request.fresh_window;
                             continue;

@@ -10,6 +10,7 @@ use super::backend::{
     ActionOutcome, BackendFailure, PreparedPayload, ProbeObservation, ProbeTarget,
     ProvisioningBackend, ReachOutcome, SystemBackend, path_text, stage_payload,
 };
+use super::credential_delivery::CredentialDelivery;
 use super::e2e::{E2E_BACKEND_ENV, E2ePayloads, E2eProvisioningBackend};
 use super::http::{
     HostPlanResponse, ProbeDestination, ProbeRequest, ProbeResponse, ProvisionRequest,
@@ -155,6 +156,7 @@ pub(crate) enum RunTask {
 /// Process-local orchestration authority for probes and one run per host.
 pub(crate) struct ProvisioningService {
     backend: Arc<dyn ProvisioningBackend>,
+    delivery: Arc<CredentialDelivery>,
     payloads: Arc<dyn PayloadSource>,
     store: HelmStore,
     manager: Arc<ConnectionManager>,
@@ -328,6 +330,56 @@ fn schema_refusal(host_schema: Option<i64>) -> Option<String> {
     })
 }
 
+/// Select transport and payloads before the manager can run a connection hook.
+/// Both services receive these same validated seams; a late backend attachment
+/// or a second environment selection would leave initial connections different.
+pub(crate) struct ProductionProvisioning {
+    backend: Arc<dyn ProvisioningBackend>,
+    payloads: Arc<dyn PayloadSource>,
+    pub(crate) delivery: Arc<CredentialDelivery>,
+}
+
+impl ProductionProvisioning {
+    /// Validate the marked E2E source or select the ordinary transport once.
+    /// Release payload policy follows the binary build, independently of the
+    /// UI serving mode, just as it did in the former service constructor.
+    pub(crate) fn new(
+        store: HelmStore,
+        state_dir: &Path,
+        selection: PayloadSelection,
+        release_build: bool,
+    ) -> anyhow::Result<Self> {
+        let (backend, payloads): (Arc<dyn ProvisioningBackend>, Arc<dyn PayloadSource>) =
+            if let Some(root) = std::env::var_os(E2E_BACKEND_ENV) {
+                let root = PathBuf::from(root);
+                let backend = E2eProvisioningBackend::new(root.clone(), state_dir)?;
+                eprintln!(
+                    "WARNING: E2E-only injected provisioning backend enabled from {}; host setup actions are simulated",
+                    root.display()
+                );
+                (
+                    Arc::new(backend),
+                    Arc::new(E2ePayloads(root.join("ENABLED"))),
+                )
+            } else {
+                // Resolve a relative payload selection against the same cwd as
+                // the former service constructor, preserving its alias guard.
+                let cwd =
+                    std::env::current_dir().context("reading the current working directory")?;
+                (
+                    Arc::new(SystemBackend::new(state_dir.to_path_buf())),
+                    production_payloads(selection, state_dir, release_build, &cwd)?,
+                )
+            };
+        let delivery = CredentialDelivery::new(store, Arc::clone(&backend));
+        Ok(Self {
+            backend,
+            payloads,
+            delivery,
+        })
+    }
+}
+
 impl ProvisioningService {
     /// Drive one real scan with caller-owned attempt memory, without a timer or
     /// background scheduling, so retry tests can name the exact event boundary.
@@ -346,49 +398,14 @@ impl ProvisioningService {
         store: HelmStore,
         manager: Arc<ConnectionManager>,
         helm_state_dir: PathBuf,
-        selection: PayloadSelection,
-        release_build: bool,
+        sources: ProductionProvisioning,
     ) -> anyhow::Result<Arc<Self>> {
         let local_farhelm =
             std::env::current_exe().context("locating the running farhelm binary")?;
-        if let Some(root) = std::env::var_os(E2E_BACKEND_ENV) {
-            let root = PathBuf::from(root);
-            let backend = E2eProvisioningBackend::new(root.clone(), &helm_state_dir)?;
-            eprintln!(
-                "WARNING: E2E-only injected provisioning backend enabled from {}; host setup actions are simulated",
-                root.display()
-            );
-            return Ok(Arc::new(Self {
-                backend: Arc::new(backend),
-                payloads: Arc::new(E2ePayloads(root.join("ENABLED"))),
-                store,
-                manager,
-                layout: PlanLayout::production(helm_state_dir),
-                local_farhelm,
-                memory: tokio::sync::Mutex::new(ProvisioningMemory::default()),
-                automatic_update_admission: tokio::sync::Mutex::new(()),
-                run_slots: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_RUNS)),
-                add_confirmations: Arc::default(),
-                plan_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_PLANS),
-                progress_read_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_PROGRESS_READS),
-                #[cfg(test)]
-                fail_registry_sync: std::sync::atomic::AtomicBool::new(false),
-                #[cfg(test)]
-                registry_sync_gate: std::sync::Mutex::new(None),
-                #[cfg(test)]
-                automatic_admission_gate: std::sync::Mutex::new(None),
-                #[cfg(test)]
-                helm_build_override: std::sync::Mutex::new(None),
-            }));
-        }
-        // The directory a RELATIVE `--payload-dir` is spelled against
-        // (F1, review round 3) — `production_payloads`'s legacy-cache alias
-        // guard needs it to resolve such a selection the same way the shell
-        // that launched this process would have.
-        let cwd = std::env::current_dir().context("reading the current working directory")?;
         Ok(Arc::new(Self {
-            backend: Arc::new(SystemBackend::new(helm_state_dir.clone())),
-            payloads: production_payloads(selection, &helm_state_dir, release_build, &cwd)?,
+            backend: sources.backend,
+            delivery: sources.delivery,
+            payloads: sources.payloads,
             store,
             manager,
             layout: PlanLayout::production(helm_state_dir),
@@ -420,6 +437,7 @@ impl ProvisioningService {
         local_farhelm: PathBuf,
     ) -> Arc<Self> {
         Arc::new(Self {
+            delivery: CredentialDelivery::new(store.clone(), Arc::clone(&backend)),
             backend,
             payloads,
             store,
@@ -1953,9 +1971,15 @@ impl ProvisioningService {
             let _ = task.await;
         }
         let stopped = self.manager.stop_actor(host).await;
+        self.delivery.forget(host);
         self.manager.forget_cache_lock(host);
         drop(serialized);
         Ok(stopped)
+    }
+
+    /// Test composition and Tensorlake hooks must use this service's backend.
+    pub(crate) fn credential_delivery(&self) -> Arc<CredentialDelivery> {
+        Arc::clone(&self.delivery)
     }
 
     /// Drop process-local progress, pending confirmation ids and the busy

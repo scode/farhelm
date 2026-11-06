@@ -83,8 +83,18 @@ impl SandboxStatusSource for Tensorlake {
         &self,
         row: &HostRow,
         events: std::sync::Arc<crate::feed::FleetEvents>,
-    ) -> Option<super::tunnels::TunnelLease> {
-        self.start_tunnels(row, events).await
+    ) -> crate::manager::ConnectedResources {
+        if row.tensorlake.is_none() {
+            return crate::manager::ConnectedResources::default();
+        }
+        // Registration precedes every credential read, and the returned lease
+        // covers the later Connected publication as well as serving itself.
+        let lease = self.0.delivery.enter(row);
+        self.0.delivery.connect(row, &events).await;
+        crate::manager::ConnectedResources {
+            _tunnels: self.start_tunnels(row, events).await,
+            _credentials: Some(lease),
+        }
     }
 }
 

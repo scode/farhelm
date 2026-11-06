@@ -1,11 +1,10 @@
 //! Tensorlake's outer add plan: authorize creation once, record ownership
 //! before billing, then discover and splice the ordinary Farhelm setup plan.
-//! The recipe copy carries secrets and is never formatted or serialized.
+//! The recipe copy freezes choices; named credential values resolve at delivery.
 
 use super::super::{
-    agent_endpoints,
     http::StepView,
-    plan::{DirectorySpec, PlanStep, PlanSteps},
+    plan::{PlanStep, PlanSteps},
 };
 use super::*;
 use crate::ssh::SshAccessKind;
@@ -448,16 +447,21 @@ impl ProvisioningService {
         };
         self.set_step(host, *index, StepStatus::Running, None).await;
         let home = self.backend.prepare_tensorlake_sandbox(&target).await?;
-        self.set_step(host, *index, StepStatus::Completed, None)
+        let home_notice = self
+            .delivery
+            .remember_home(&self.host_row(host).await?, home.clone())
+            .await
+            .err();
+        self.set_step(host, *index, StepStatus::Completed, home_notice)
             .await;
         *index += 1;
-        if plan.recipe.claude.is_some() || plan.recipe.codex.is_some() {
-            self.set_step(host, *index, StepStatus::Running, None).await;
-            self.configure_agents(&target, &home, &plan.recipe).await?;
-            self.set_step(host, *index, StepStatus::Completed, None)
-                .await;
+        let configure_index = if plan.recipe.claude.is_some() || plan.recipe.codex.is_some() {
+            let configured = Some(*index);
             *index += 1;
-        }
+            configured
+        } else {
+            None
+        };
         self.set_step(host, *index, StepStatus::Running, None).await;
         let probe = ProbeTarget {
             transport: target.clone(),
@@ -494,6 +498,27 @@ impl ProvisioningService {
             "the Tensorlake host disappeared before installation admission"
         );
         self.sync_registry().await?;
+        // Reconcile only after the copied-state check admits this installation.
+        // Keep the actor held until delivery finishes; a warning must still let
+        // the supervisor installation continue to make this host usable.
+        if let Some(configured) = configure_index {
+            self.set_step(host, configured, StepStatus::Running, None)
+                .await;
+        }
+        let delivery_notice = self
+            .delivery
+            .setup(
+                &self.host_row(host).await?,
+                &plan.recipe,
+                &home,
+                self.manager.events(),
+            )
+            .await
+            .err();
+        if let Some(configured) = configure_index {
+            self.set_step(host, configured, StepStatus::Completed, delivery_notice)
+                .await;
+        }
         let described = ProvisioningView::for_plan(host, nonce, &inner);
         if let Some(run) = self.memory.lock().await.runs.get_mut(&host) {
             run.steps.splice(*index.., described.steps);
@@ -592,58 +617,5 @@ impl ProvisioningService {
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         }).await.map_err(|_| refused("Tensorlake did not start the sandbox within 15 minutes; run setup again"))?
-    }
-
-    /// Merge files locally, then stream private writes through the normal
-    /// backend. Unset endpoints never read or touch their agent's file.
-    async fn configure_agents(
-        &self,
-        target: &ProvisioningTarget,
-        home: &Path,
-        recipe: &StoredRecipe,
-    ) -> anyhow::Result<()> {
-        type Merge = fn(
-            Option<&[u8]>,
-            &crate::tensorlake::recipes::ResolvedEndpoint,
-        ) -> Result<Vec<u8>, String>;
-        for (folder, file, endpoint, merge) in [
-            (
-                ".claude",
-                "settings.json",
-                recipe.claude.as_ref(),
-                agent_endpoints::claude as Merge,
-            ),
-            (
-                ".codex",
-                "config.toml",
-                recipe.codex.as_ref(),
-                agent_endpoints::codex as Merge,
-            ),
-        ] {
-            let Some(endpoint) = endpoint else {
-                continue;
-            };
-            let endpoint = self.store.resolve_endpoint(endpoint.clone()).await?;
-            let dir = home.join(folder);
-            let path = dir.join(file);
-            let previous = self.backend.read_small_file(target, &path).await?;
-            let bytes = merge(previous.as_deref(), &endpoint).map_err(refused)?;
-            self.backend
-                .ensure_directories(
-                    target,
-                    &[DirectorySpec {
-                        path: dir,
-                        mode: 0o700,
-                        shared: true,
-                    }],
-                )
-                .await?;
-            let temporary =
-                path.with_file_name(format!(".{file}.farhelm-tmp-{}", uuid::Uuid::new_v4()));
-            self.backend
-                .install_bytes(target, &bytes, &path, &temporary, 0o600)
-                .await?;
-        }
-        Ok(())
     }
 }

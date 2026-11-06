@@ -709,6 +709,14 @@ pub(crate) fn rail_identity(name: &str, destination: Option<&str>, local: bool) 
     }
 }
 
+/// Delivery can fail during setup or while the supervisor is usable. Keep the
+/// same warning predicate for rail color, host status and attention grouping.
+fn credential_delivery_failed(host: &Host) -> bool {
+    host.tensorlake
+        .as_ref()
+        .is_some_and(|sandbox| sandbox.credential_warning.is_some())
+}
+
 /// One native rail button owns its mounted trigger; actions stay in HostRow.
 /// Selection and context activation are separate gestures, so opening host
 /// actions never changes which sessions the list is showing.
@@ -732,6 +740,10 @@ fn HostRailAvatar(
     let id = host.id;
     let mut handle = use_signal(|| None::<Rc<MountedData>>);
     let mut presentation = rail_presentation(&host.state, progress.as_ref(), update_available);
+    if credential_delivery_failed(&host) {
+        presentation.phase = "unreachable";
+        presentation.words.push_str("; credentials not delivered");
+    }
     if crate::tensorlake::tunnels::failed(&host) {
         presentation.phase = "unreachable";
         presentation.words.push_str("; tunnels failed, retrying");
@@ -4793,7 +4805,7 @@ fn HostRow(
                     // name, not the `⋯` toggle, absorbs width pressure.
                     class: if update_is_active {
                         "host-status {phase_class(&host.state)} updating"
-                    } else if crate::tensorlake::tunnels::failed(&host) {
+                    } else if crate::tensorlake::tunnels::failed(&host) || credential_delivery_failed(&host) {
                         "host-status unreachable"
                     } else {
                         "host-status {phase_class(&host.state)}"
@@ -5374,6 +5386,9 @@ fn HostRow(
                 }
                 if let Some(view) = sandbox.tunnels.clone() {
                     crate::tensorlake::tunnels::TunnelDetails { view }
+                }
+                if let Some(reason) = &sandbox.credential_warning {
+                    p { class: "host-detail credential-delivery-warning", role: "status", "Credentials not delivered: {reason.escaped()}" }
                 }
             }
             if let Some(destination) = lines.destination {
@@ -8274,6 +8289,7 @@ mod tests {
             recipe: "gpu-dev".into(),
             size: None,
             tunnels: None,
+            credential_warning: None,
         });
         let copy = settings_dialog::RemoveCopy::for_host(&sandbox);
         assert_eq!(copy.title, "Delete sandbox");

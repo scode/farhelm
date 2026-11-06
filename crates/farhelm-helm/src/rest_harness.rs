@@ -1016,6 +1016,13 @@ impl Harness {
         )
         .await
         .expect("start the restarted manager");
+        let sources = crate::provisioning::ProductionProvisioning::new(
+            store.clone(),
+            _dir.path(),
+            crate::provisioning::PayloadSelection::Default,
+            cfg!(farhelm_release_build),
+        )
+        .expect("select restarted provisioning seams");
         Harness {
             served: Vec::new(),
             store: store.clone(),
@@ -1024,11 +1031,14 @@ impl Harness {
                 ..AppState::new(
                     Arc::clone(&manager),
                     store.clone(),
-                    crate::tensorlake::Tensorlake::production(store, _dir.path())
-                        .expect("build the restarted Tensorlake service"),
+                    crate::tensorlake::Tensorlake::production_with_delivery(
+                        store,
+                        _dir.path(),
+                        Arc::clone(&sources.delivery),
+                    )
+                    .expect("build the restarted Tensorlake service"),
                     _dir.path().to_path_buf(),
-                    crate::provisioning::PayloadSelection::Default,
-                    cfg!(farhelm_release_build),
+                    sources,
                     crate::ServingMode::Standalone,
                 )
                 .expect("build restarted app state")
@@ -1356,6 +1366,13 @@ impl FleetBuilder {
     /// Start the manager and assemble the shared state the router reads.
     pub(crate) async fn start(self) -> Harness {
         let state_dir = self.dir.path().to_path_buf();
+        let sources = crate::provisioning::ProductionProvisioning::new(
+            self.store.clone(),
+            &state_dir,
+            crate::provisioning::PayloadSelection::Default,
+            cfg!(farhelm_release_build),
+        )
+        .expect("select harness provisioning seams");
         let cadence = Cadence {
             refresh: self.refresh.unwrap_or(test_cadence().refresh),
             ..test_cadence()
@@ -1406,11 +1423,14 @@ impl FleetBuilder {
             ..AppState::new(
                 Arc::clone(&manager),
                 self.store.clone(),
-                crate::tensorlake::Tensorlake::production(self.store, &state_dir)
-                    .expect("build the harness Tensorlake service"),
+                crate::tensorlake::Tensorlake::production_with_delivery(
+                    self.store,
+                    &state_dir,
+                    Arc::clone(&sources.delivery),
+                )
+                .expect("build the harness Tensorlake service"),
                 state_dir,
-                crate::provisioning::PayloadSelection::Default,
-                cfg!(farhelm_release_build),
+                sources,
                 crate::ServingMode::Standalone,
             )
             .expect("build harness app state")

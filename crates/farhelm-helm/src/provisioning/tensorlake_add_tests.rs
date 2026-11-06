@@ -137,6 +137,90 @@ impl Fixture {
     }
 }
 
+/// Endpoint delivery shares setup's injected backend. A credential failure
+/// remains a warning while the supervisor installation completes, so an image
+/// with unreadable agent settings can still become a usable Farhelm host.
+#[farhelm_testtrace::test]
+async fn credential_delivery_warning_does_not_abort_tensorlake_setup() {
+    use farhelm_proto::credentials::{CreateCredential, CredentialKind};
+    let f = fixture(false).await;
+    f.harness
+        .store
+        .create_credential(CreateCredential {
+            name: "endpoint".into(),
+            kind: CredentialKind::EndpointToken,
+            secret: "fictional-setup-token".into(),
+        })
+        .await
+        .unwrap();
+    let mut recipe = crate::tensorlake::recipes::tests_support::save();
+    recipe.source = RecipeSource::Image {
+        image: "example/systemd".into(),
+    };
+    recipe.claude = Some(farhelm_proto::tensorlake::recipes::EndpointSave {
+        base_url: "https://endpoint.example/v1".into(),
+        token_credential: Some("endpoint".into()),
+    });
+    f.harness
+        .store
+        .update_tensorlake_recipe("test-recipe".into(), recipe)
+        .await
+        .unwrap()
+        .unwrap();
+    std::fs::write(f.root.path().join("backend/config.json"),
+        r#"{"default":{"fail_action":"read-agent-settings","message":"fictional-private-diagnostic"}}"#).unwrap();
+    let accepted = f.add().await;
+    let view = f.finish(accepted.host_id).await;
+    assert_eq!(view.status, RunStatus::Completed);
+    let configure = view
+        .steps
+        .iter()
+        .find(|step| step.step == "configure-agents")
+        .unwrap();
+    assert_eq!(configure.status, StepStatus::Completed);
+    assert_eq!(
+        configure.message.as_deref(),
+        Some("could not read the agent settings")
+    );
+    assert_eq!(
+        f.service
+            .credential_delivery()
+            .warning(accepted.host_id)
+            .as_deref(),
+        Some("could not read the agent settings")
+    );
+    let events = std::fs::read_to_string(f.root.path().join("backend/events.jsonl")).unwrap();
+    let read = events.find("read-agent-settings").unwrap();
+    let enable = events.find("enable-supervisor").unwrap();
+    assert!(
+        read < enable,
+        "the warning must precede continued installation: {events}"
+    );
+    assert!(
+        !serde_json::to_string(&view)
+            .unwrap()
+            .contains("fictional-private-diagnostic")
+    );
+    let host = accepted.host_id;
+    let record: String = f
+        .harness
+        .store
+        .conn()
+        .call("inspect fixture delivery home", move |conn| {
+            Ok(conn.query_row(
+                "SELECT tensorlake_credential_delivery FROM hosts WHERE id = ?1",
+                [host],
+                |row| row.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&record).unwrap()["home"],
+        "/home/farhelm-e2e"
+    );
+}
+
 /// A missing key and malformed outer request fail before API work or host
 /// registration. This is the boundary that keeps Continue free of billing.
 #[farhelm_testtrace::test]

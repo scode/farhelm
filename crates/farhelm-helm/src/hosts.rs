@@ -127,6 +127,9 @@ pub(crate) struct TensorlakeHostView {
     /// failure never claims the supervisor itself is disconnected.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) tunnels: Option<farhelm_proto::tensorlake::TunnelView>,
+    /// Delivery is independent of connectivity and can fail during setup too.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) credential_warning: Option<String>,
 }
 
 impl From<&crate::store::TensorlakeBinding> for TensorlakeHostView {
@@ -136,6 +139,7 @@ impl From<&crate::store::TensorlakeBinding> for TensorlakeHostView {
             recipe: binding.recipe.clone(),
             size: binding.resources,
             tunnels: None,
+            credential_warning: None,
         }
     }
 }
@@ -503,6 +507,8 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                     .and_then(|row| row.tensorlake.as_ref())
                     .map(|binding| {
                         let mut view = TensorlakeHostView::from(binding);
+                        view.credential_warning =
+                            state.tensorlake.credential_delivery().warning(snapshot.id);
                         if snapshot.state.is_connected() {
                             view.tunnels = state.tensorlake.tunnel_view(snapshot.id);
                         }

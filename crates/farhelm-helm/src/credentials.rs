@@ -230,18 +230,25 @@ pub(crate) fn has_kind(
     )
 }
 
-/// Resolve a value only for host delivery. Callers keep it in a transient
-/// non-Debug, non-Serialize shape and expose only content-free failures.
+/// Resolve a value, revision and creation identity together for host delivery. Callers
+/// keep the result transient and non-Debug/non-Serialize; reading the revision
+/// separately could record a newer value as delivered when only the old one was.
 pub(crate) fn secret(
     conn: &rusqlite::Connection,
     name: &str,
     kind: CredentialKind,
-) -> rusqlite::Result<Option<String>> {
+) -> rusqlite::Result<Option<(String, u64, String)>> {
     let kind = serde_json::to_string(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?;
     conn.query_row(
-        "SELECT secret FROM credentials WHERE name = ?1 AND kind = ?2",
+        "SELECT secret, revision, incarnation FROM credentials WHERE name = ?1 AND kind = ?2",
         params![name, kind],
-        |row| row.get(0),
+        |row| {
+            Ok((
+                row.get(0)?,
+                u64::try_from(row.get::<_, i64>(1)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                row.get(2)?,
+            ))
+        },
     )
     .optional()
 }
@@ -280,13 +287,35 @@ pub(crate) async fn save(
     let Ok(Json(save)) = body else {
         return Refusal::Invalid("could not read the credential request").response();
     };
-    match state.store.save_credential(name, save).await {
-        Ok(row) => {
-            state.manager.events().bump();
-            Json(row).into_response()
+    let replaced = save
+        .secret
+        .as_deref()
+        .is_some_and(|secret| !secret.trim().is_empty());
+    // A disconnected Settings client cannot leave a committed replacement
+    // without its corresponding push. The helm owns both phases together.
+    crate::run_owned(async move {
+        match state.store.save_credential(name, save).await {
+            Ok(row) => {
+                state.manager.events().bump();
+                let delivery_failures = if replaced {
+                    state
+                        .tensorlake
+                        .credential_delivery()
+                        .push(&row.name, state.manager.events())
+                        .await
+                } else {
+                    Vec::new()
+                };
+                Json(farhelm_proto::credentials::SavedCredential {
+                    credential: row,
+                    delivery_failures,
+                })
+                .into_response()
+            }
+            Err(reason) => reason.response(),
         }
-        Err(reason) => reason.response(),
-    }
+    })
+    .await
 }
 
 /// Deletion never needs to select, deserialize or return the saved value.

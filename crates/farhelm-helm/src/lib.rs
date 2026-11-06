@@ -613,16 +613,14 @@ impl AppState {
         store: store::HelmStore,
         tensorlake: tensorlake::Tensorlake,
         state_dir: PathBuf,
-        payload_selection: provisioning::PayloadSelection,
-        release_build: bool,
+        sources: provisioning::ProductionProvisioning,
         mode: ServingMode,
     ) -> anyhow::Result<AppState> {
         let provisioning = provisioning::ProvisioningService::production(
             store.clone(),
             Arc::clone(&manager),
             state_dir,
-            payload_selection,
-            release_build,
+            sources,
         )?;
         Ok(AppState {
             tensorlake,
@@ -645,7 +643,10 @@ impl AppState {
             ntfy: manager.ntfy.clone(),
             // No state directory reaches this seam, so no ssh key and no
             // API; `new` replaces it with the production service.
-            tensorlake: tensorlake::Tensorlake::detached(store.clone()),
+            tensorlake: tensorlake::Tensorlake::detached_with_delivery(
+                store.clone(),
+                provisioning.credential_delivery(),
+            ),
             manager,
             store: store.clone(),
             auth: auth::AuthState::for_mode(store, mode),
@@ -2376,7 +2377,17 @@ async fn serve_with_ready(
     }
     // Before the manager: its actors check a Tensorlake host's sandbox
     // through this service before every dial, from their first attempt on.
-    let tensorlake = tensorlake::Tensorlake::production(store.clone(), &state_dir)?;
+    let sources = provisioning::ProductionProvisioning::new(
+        store.clone(),
+        &state_dir,
+        args.payload_selection(),
+        cfg!(farhelm_release_build),
+    )?;
+    let tensorlake = tensorlake::Tensorlake::production_with_delivery(
+        store.clone(),
+        &state_dir,
+        Arc::clone(&sources.delivery),
+    )?;
     let manager = manager::ConnectionManager::start_with_sandboxes(
         store.clone(),
         Arc::new(manager::SystemTransport::new(&state_dir)),
@@ -2390,17 +2401,7 @@ async fn serve_with_ready(
     )
     .await?;
 
-    let mut app = AppState::new(
-        manager,
-        store,
-        tensorlake,
-        state_dir.clone(),
-        args.payload_selection(),
-        // D13: release payload selection follows this binary's build, not
-        // whether this serving mode exposes its compiled UI over HTTP.
-        cfg!(farhelm_release_build),
-        mode,
-    )?;
+    let mut app = AppState::new(manager, store, tensorlake, state_dir.clone(), sources, mode)?;
     app.clipboard_sink = clipboard_sink;
     app.link_opener = link_opener;
     if let Some(downloads) = downloads {

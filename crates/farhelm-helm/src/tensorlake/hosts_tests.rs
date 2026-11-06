@@ -74,17 +74,19 @@ impl SandboxStatusSource for FakeApi {
         &self,
         row: &HostRow,
         events: Arc<crate::feed::FleetEvents>,
-    ) -> Option<super::super::tunnels::TunnelLease> {
+    ) -> crate::manager::ConnectedResources {
         let (service, gate) = {
             let state = self.0.lock().unwrap();
             (state.tunnels.clone(), state.connected_gate.clone())
         };
-        let service = service?;
+        let Some(service) = service else {
+            return crate::manager::ConnectedResources::default();
+        };
         if let Some(gate) = gate {
             gate.entered.notify_one();
             gate.release.notified().await;
         }
-        service.start_tunnels(row, events).await
+        SandboxStatusSource::connected(&service, row, events).await
     }
 
     async fn check(&self, sandbox: &str) -> SandboxCheck {
@@ -811,11 +813,12 @@ async fn ordinary_ssh_convergence_requires_tensorlake_install_admission() {
 /// Why: an upgraded helm's existing hosts must stay exactly what they were;
 /// only a row Farhelm registers as a sandbox may become one.
 ///
-/// Spec: a database rewound to schema 71 without the five Tensorlake columns
-/// (and with an ssh host in it) reopens at 73 with all six columns present
-/// and null, and the ssh host still decodes as an ordinary ssh host with no
-/// binding. Reopening runs both the schema-72 binding migration and the
-/// schema-73 pending-create migration; the final version must include both.
+/// Spec: a database rewound to schema 71 without its Tensorlake columns (and
+/// with an ssh host in it) reopens at the current version with all seven
+/// present and null, and the ssh host still decodes as an ordinary ssh host
+/// with no binding. Reopening runs the schema-72 binding migration, the
+/// schema-73 pending-create migration and the schema-77 credential-delivery
+/// migration; the final version must include all three.
 #[farhelm_testtrace::test]
 async fn schema_72_leaves_every_existing_host_ordinary() {
     let dir = tempfile::tempdir().unwrap();
@@ -831,6 +834,7 @@ async fn schema_72_leaves_every_existing_host_ordinary() {
         "tensorlake_resources",
         "tensorlake_suspended_at",
         "tensorlake_pending_create_at",
+        "tensorlake_credential_delivery",
     ] {
         conn.execute_batch(&format!("ALTER TABLE hosts DROP COLUMN {column};"))
             .unwrap();
@@ -858,7 +862,7 @@ async fn schema_72_leaves_every_existing_host_ordinary() {
     assert_eq!(ssh_row.tensorlake, None);
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
-    assert_eq!(columns(&conn), 6);
+    assert_eq!(columns(&conn), 7);
     assert_eq!(
         conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
@@ -870,7 +874,8 @@ async fn schema_72_leaves_every_existing_host_ordinary() {
             "SELECT count(*) FROM hosts WHERE tensorlake_sandbox IS NULL \
              AND tensorlake_sandbox_id IS NULL AND tensorlake_recipe IS NULL \
              AND tensorlake_resources IS NULL AND tensorlake_suspended_at IS NULL \
-             AND tensorlake_pending_create_at IS NULL",
+             AND tensorlake_pending_create_at IS NULL \
+             AND tensorlake_credential_delivery IS NULL",
             [],
             |row| row.get(0),
         )
@@ -1751,6 +1756,9 @@ async fn lifecycle_holds_end_tunnels_and_resume_reads_the_recipe_again() {
         fake.clone(),
         None,
         Some(fake),
+        crate::provisioning::credential_delivery::CredentialDelivery::detached(
+            harness.store.clone(),
+        ),
     )));
     let mut recipe = RecipeSave {
         size: RecipeSize {

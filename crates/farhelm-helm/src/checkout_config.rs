@@ -2987,6 +2987,8 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN tensorlake_resources;
                  ALTER TABLE hosts DROP COLUMN tensorlake_suspended_at;
                  ALTER TABLE hosts DROP COLUMN tensorlake_pending_create_at;
+                 -- Schema 77 added the Tensorlake credential-delivery record.
+                 ALTER TABLE hosts DROP COLUMN tensorlake_credential_delivery;
                  -- Schema 62 added host entry UUIDs, which v26 did not have.
                  DROP INDEX hosts_entry_uuid;
                  ALTER TABLE hosts DROP COLUMN entry_uuid;

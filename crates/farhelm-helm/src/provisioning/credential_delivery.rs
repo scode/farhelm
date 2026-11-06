@@ -1,0 +1,535 @@
+//! Per-host endpoint convergence on the ordinary provisioning transport.
+//!
+//! A connection registers before reading credentials and keeps its lease until
+//! it ends. Replacement therefore includes a hook that has read an old value
+//! but has not published Connected yet. Only nonsecret bindings are retained;
+//! pending recipe edits wait for the next setup or connection.
+
+use super::backend::{COMMAND_TIMEOUT, ProvisioningBackend};
+use super::plan::{DirectorySpec, ProvisioningTarget};
+use crate::feed::FleetEvents;
+use crate::store::{HelmStore, HostId, HostRow};
+use crate::tensorlake::recipes::{ResolvedEndpoint, StoredEndpoint, StoredRecipe};
+use farhelm_proto::credentials::DeliveryFailure;
+use futures_util::{StreamExt, stream};
+use rusqlite::{OptionalExtension, params};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::sync::{OwnedMutexGuard, watch};
+use tokio::time::{Instant, timeout_at};
+
+/// Bound concurrent SSH work without restarting the save's shared deadline for
+/// hosts waiting for a slot. Provisioning uses the same four-host work budget.
+const PUSH_CONCURRENCY: usize = 4;
+const STORAGE: &str = "could not read or record the host's credential delivery state";
+const TIMED_OUT: &str = "credential delivery did not finish within the SSH timeout";
+
+/// An active connection's choices, rather than a copy of the whole recipe.
+#[derive(Clone, Deserialize)]
+pub(crate) struct Bindings {
+    claude: Option<StoredEndpoint>,
+    codex: Option<StoredEndpoint>,
+}
+
+#[cfg(test)]
+#[path = "credential_delivery_tests.rs"]
+mod tests;
+
+impl Bindings {
+    /// Setup's confirmed recipe stays frozen, while its named values stay live.
+    pub(super) fn from_recipe(recipe: &StoredRecipe) -> Self {
+        Self {
+            claude: recipe.claude.clone(),
+            codex: recipe.codex.clone(),
+        }
+    }
+
+    /// A replacement must not activate another recipe's pending selection edit.
+    fn uses(&self, name: &str) -> bool {
+        [&self.claude, &self.codex]
+            .into_iter()
+            .flatten()
+            .any(|endpoint| endpoint.token_credential.as_deref() == Some(name))
+    }
+}
+
+/// Known absence means this endpoint-only interface requested no file work.
+/// It is not the later explicit agent-mode None cleanup. That mode must carry
+/// its own fingerprint and clean unknown host configuration once.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+enum EndpointStamp {
+    Absent,
+    Endpoint {
+        base_url: String,
+        credential: Option<(String, u64, String)>,
+    },
+}
+
+/// Only successful slots are durable. Outer None is unknown, so a partial
+/// failure retries unfinished work without forgetting another slot's success.
+#[derive(Default, Deserialize, Serialize)]
+struct Record {
+    home: Option<PathBuf>,
+    claude: Option<EndpointStamp>,
+    codex: Option<EndpointStamp>,
+}
+
+/// Secret-bearing values exist only while a serialized operation uses them.
+struct Slot {
+    endpoint: Option<ResolvedEndpoint>,
+    stamp: EndpointStamp,
+}
+
+/// Runtime selections and warnings belong to one registered host identity.
+/// Secret bytes and delivery successes live elsewhere, so reconnecting cannot
+/// accidentally reuse a cached value or mistake a warning for durable state.
+#[derive(Default)]
+struct Live {
+    binding: Option<(HostRow, Bindings)>,
+    warning: Option<String>,
+    /// A timed-out older operation cannot replace a newer attempt's warning.
+    attempt: u64,
+}
+
+/// One serialization boundary shared by every connection incarnation. Counted
+/// leases allow an older incarnation to retire without cancelling its successor.
+struct Entry {
+    entry_uuid: String,
+    serial: Arc<tokio::sync::Mutex<()>>,
+    active: watch::Sender<usize>,
+    live: Mutex<Live>,
+}
+
+impl Entry {
+    /// Identity changes allocate another entry; an old lease cannot end it.
+    fn new(row: &HostRow) -> Self {
+        Self {
+            entry_uuid: row.entry_uuid.clone(),
+            serial: Arc::default(),
+            active: watch::channel(0).0,
+            live: Mutex::default(),
+        }
+    }
+
+    /// Warning ordering is local to attempts, independent of durable records.
+    fn begin(&self) -> u64 {
+        let mut live = self.live.lock().unwrap();
+        Self::next_attempt(&mut live)
+    }
+
+    /// Check a queued candidate again before superseding any warning. A new
+    /// connection may have cleared its selections while this host waited for a
+    /// push slot; only that connection can report its still-unknown delivery.
+    fn begin_push(&self, name: &str) -> Option<u64> {
+        let mut live = self.live.lock().unwrap();
+        if !live
+            .binding
+            .as_ref()
+            .is_some_and(|(_, binding)| binding.uses(name))
+        {
+            return None;
+        }
+        Some(Self::next_attempt(&mut live))
+    }
+
+    /// Allocate under the same mutex as the selection check. Clearing a
+    /// binding for a new connection must happen before its newer attempt starts.
+    fn next_attempt(live: &mut Live) -> u64 {
+        live.attempt = live
+            .attempt
+            .checked_add(1)
+            .expect("delivery attempt exhausted");
+        live.attempt
+    }
+
+    /// Publish only the newest attempt's result and invalidate the host feed
+    /// when its visible warning actually changes.
+    fn warning(&self, attempt: u64, reason: Option<String>, events: &FleetEvents) {
+        let mut live = self.live.lock().unwrap();
+        if live.attempt == attempt && live.warning != reason {
+            live.warning = reason;
+            events.bump();
+        }
+    }
+}
+
+/// Owned by the actor through acquisition, Connected publication and serving.
+/// Dropping it synchronously cancels pushes before their next backend poll.
+pub(crate) struct ConnectionLease(Arc<Entry>);
+
+impl Drop for ConnectionLease {
+    fn drop(&mut self) {
+        self.0
+            .active
+            .send_modify(|count| *count = count.saturating_sub(1));
+    }
+}
+
+/// Shared by setup and the Tensorlake connect hook, with no manager dependency.
+/// Detached settings-only test services deliberately have no remote backend.
+pub(crate) struct CredentialDelivery {
+    store: HelmStore,
+    backend: Option<Arc<dyn ProvisioningBackend>>,
+    entries: Mutex<HashMap<HostId, Arc<Entry>>>,
+    budget: Duration,
+}
+
+impl CredentialDelivery {
+    /// Bind delivery to the same already-selected backend as host setup. The
+    /// manager must receive this object before its first actor can connect.
+    pub(super) fn new(store: HelmStore, backend: Arc<dyn ProvisioningBackend>) -> Arc<Self> {
+        Arc::new(Self {
+            store,
+            backend: Some(backend),
+            entries: Mutex::default(),
+            budget: COMMAND_TIMEOUT,
+        })
+    }
+
+    /// No environment selection or production fallback belongs in a test seam.
+    #[cfg(test)]
+    pub(crate) fn detached(store: HelmStore) -> Arc<Self> {
+        Arc::new(Self {
+            store,
+            backend: None,
+            entries: Mutex::default(),
+            budget: COMMAND_TIMEOUT,
+        })
+    }
+
+    /// Numeric IDs alone cannot authorize work after a host entry is replaced.
+    /// A new identity gets a separate lease/lock entry; guarded writes still
+    /// check the persisted identity before accepting any success record.
+    fn entry(&self, row: &HostRow) -> Arc<Entry> {
+        let mut entries = self.entries.lock().unwrap();
+        let entry = entries
+            .entry(row.id)
+            .or_insert_with(|| Arc::new(Entry::new(row)));
+        if entry.entry_uuid != row.entry_uuid {
+            *entry = Arc::new(Entry::new(row));
+        }
+        Arc::clone(entry)
+    }
+
+    /// Registration precedes every await in the connect hook. Clearing a prior
+    /// connection's binding here prevents it authorizing a new connection's push.
+    pub(crate) fn enter(&self, row: &HostRow) -> ConnectionLease {
+        let entry = self.entry(row);
+        {
+            let mut live = entry.live.lock().unwrap();
+            entry.active.send_modify(|count| {
+                if *count == 0 {
+                    live.binding = None;
+                }
+                *count += 1;
+            });
+        }
+        ConnectionLease(entry)
+    }
+
+    /// Host presentation is independent of routability: a usable supervisor
+    /// can still have a failed credential delivery that the user needs to see.
+    pub(crate) fn warning(&self, host: HostId) -> Option<String> {
+        self.entries
+            .lock()
+            .unwrap()
+            .get(&host)
+            .and_then(|entry| entry.live.lock().unwrap().warning.clone())
+    }
+
+    /// Host removal bounds retained warning/lock state and cancels any push
+    /// still holding the removed entry. Its later lease Drop is harmless.
+    pub(super) fn forget(&self, host: HostId) {
+        if let Some(entry) = self.entries.lock().unwrap().remove(&host) {
+            entry.active.send_replace(0);
+        }
+    }
+
+    /// Persist preparation's home without rerunning user-manager setup later.
+    pub(super) async fn remember_home(&self, row: &HostRow, home: PathBuf) -> Result<(), String> {
+        let entry = self.entry(row);
+        let guard = Arc::clone(&entry.serial).lock_owned().await;
+        let mut record = self.read_record(row).await?;
+        record.home = Some(home);
+        self.write_record(row, &record, guard).await?;
+        Ok(())
+    }
+
+    /// Delivery failures remain warnings; they never refuse a usable connection.
+    pub(crate) async fn connect(&self, row: &HostRow, events: &FleetEvents) {
+        let entry = self.entry(row);
+        let attempt = entry.begin();
+        let result = timeout_at(Instant::now() + self.budget, async {
+            let guard = Arc::clone(&entry.serial).lock_owned().await;
+            let bindings = self.read_bindings(row).await?;
+            entry.live.lock().unwrap().binding = Some((row.clone(), bindings.clone()));
+            self.apply(row, bindings, None, guard).await
+        })
+        .await
+        .unwrap_or_else(|_| Err(TIMED_OUT.into()));
+        entry.warning(attempt, result.err(), events);
+    }
+
+    /// Use the confirmed setup choices, after install coordinates are admitted.
+    /// The next connection independently refreshes the recipe selection.
+    pub(super) async fn setup(
+        &self,
+        row: &HostRow,
+        recipe: &StoredRecipe,
+        home: &Path,
+        events: &FleetEvents,
+    ) -> Result<(), String> {
+        let entry = self.entry(row);
+        let attempt = entry.begin();
+        let result = timeout_at(Instant::now() + self.budget, async {
+            let guard = Arc::clone(&entry.serial).lock_owned().await;
+            self.apply(
+                row,
+                Bindings::from_recipe(recipe),
+                Some(home.to_path_buf()),
+                guard,
+            )
+            .await
+        })
+        .await
+        .unwrap_or_else(|_| Err(TIMED_OUT.into()));
+        entry.warning(attempt, result.clone().err(), events);
+        result
+    }
+
+    /// One deadline covers all candidates, lock waits and transport operations.
+    /// A hook that has not read any credential yet can safely be skipped: it
+    /// will read the committed replacement or publish its own failure warning.
+    pub(crate) async fn push(&self, name: &str, events: &FleetEvents) -> Vec<DeliveryFailure> {
+        let deadline = Instant::now() + self.budget;
+        let entries = self
+            .entries
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|entry| {
+                let active = *entry.active.borrow() != 0;
+                active
+                    && entry
+                        .live
+                        .lock()
+                        .unwrap()
+                        .binding
+                        .as_ref()
+                        .is_some_and(|(_, bindings)| bindings.uses(name))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        stream::iter(entries).map(|entry| async move {
+            let attempt = entry.begin_push(name)?;
+            let mut active = entry.active.subscribe();
+            let result = tokio::select! {
+                biased;
+                _ = active.wait_for(|count| *count == 0) => return None,
+                result = timeout_at(deadline, async {
+                    let guard = Arc::clone(&entry.serial).lock_owned().await;
+                    let binding = entry.live.lock().unwrap().binding.clone();
+                    let Some((row, bindings)) = binding.filter(|(_, binding)| binding.uses(name)) else { return Ok(()); };
+                    self.apply(&row, bindings, None, guard).await
+                }) => result.unwrap_or_else(|_| Err(TIMED_OUT.into())),
+            };
+            let row = entry.live.lock().unwrap().binding.as_ref()
+                .filter(|(_, binding)| binding.uses(name)).map(|(row, _)| row.clone())?;
+            entry.warning(attempt, result.clone().err(), events);
+            result.err().map(|reason| DeliveryFailure {
+                host: row.alias.or_else(|| row.tensorlake.map(|binding| binding.sandbox)).unwrap_or_else(|| "host".into()),
+                reason,
+            })
+        }).buffer_unordered(PUSH_CONCURRENCY).filter_map(|result| async { result }).collect().await
+    }
+
+    /// Resolve revisions under the host lock and record each successful file
+    /// before attempting the next. Equal fingerprints perform no SSH at all.
+    async fn apply(
+        &self,
+        row: &HostRow,
+        bindings: Bindings,
+        home: Option<PathBuf>,
+        mut guard: OwnedMutexGuard<()>,
+    ) -> Result<(), String> {
+        let mut record = self.read_record(row).await?;
+        if let Some(home) = home
+            && record.home.as_ref() != Some(&home)
+        {
+            record.home = Some(home);
+            guard = self.write_record(row, &record, guard).await?;
+        }
+        let [claude, codex] = self.resolve(bindings).await?;
+        if record.claude.as_ref() == Some(&claude.stamp)
+            && record.codex.as_ref() == Some(&codex.stamp)
+        {
+            return Ok(());
+        }
+        let target = ProvisioningTarget::Ssh {
+            destination: row
+                .destination
+                .clone()
+                .ok_or("the host has no SSH destination")?,
+            access: crate::ssh::SshAccessKind::Tensorlake,
+        };
+        for (is_claude, folder, file, slot) in [
+            (true, ".claude", "settings.json", claude),
+            (false, ".codex", "config.toml", codex),
+        ] {
+            let previous_stamp = if is_claude {
+                &record.claude
+            } else {
+                &record.codex
+            };
+            if previous_stamp.as_ref() == Some(&slot.stamp) {
+                continue;
+            }
+            if let Some(endpoint) = slot.endpoint {
+                let backend = self
+                    .backend
+                    .as_ref()
+                    .ok_or("credential delivery is unavailable")?;
+                if record.home.is_none() {
+                    record.home = Some(
+                        backend
+                            .host_home(&target)
+                            .await
+                            .map_err(|_| "could not read the sandbox's home directory")?,
+                    );
+                    guard = self.write_record(row, &record, guard).await?;
+                }
+                let directory = record.home.as_ref().unwrap().join(folder);
+                let path = directory.join(file);
+                let previous = backend
+                    .read_small_file(&target, &path)
+                    .await
+                    .map_err(|_| "could not read the agent settings")?;
+                let bytes = if is_claude {
+                    super::agent_endpoints::claude(previous.as_deref(), &endpoint)
+                } else {
+                    super::agent_endpoints::codex(previous.as_deref(), &endpoint)
+                }?;
+                backend
+                    .ensure_directories(
+                        &target,
+                        &[DirectorySpec {
+                            path: directory,
+                            mode: 0o700,
+                            shared: true,
+                        }],
+                    )
+                    .await
+                    .map_err(|_| "could not prepare the agent settings directory")?;
+                let temporary =
+                    path.with_file_name(format!(".{file}.farhelm-tmp-{}", uuid::Uuid::new_v4()));
+                backend
+                    .install_bytes(&target, &bytes, &path, &temporary, 0o600)
+                    .await
+                    .map_err(|_| "could not install the agent settings")?;
+            }
+            if is_claude {
+                record.claude = Some(slot.stamp);
+            } else {
+                record.codex = Some(slot.stamp);
+            }
+            guard = self.write_record(row, &record, guard).await?;
+        }
+        Ok(())
+    }
+
+    /// Loading only two named slots does not read build state or vendor auth.
+    async fn read_bindings(&self, row: &HostRow) -> Result<Bindings, String> {
+        let name = row
+            .tensorlake
+            .as_ref()
+            .ok_or("the host is not a Tensorlake sandbox")?
+            .recipe
+            .clone();
+        self.store
+            .conn()
+            .call("credential recipe selection", move |conn| {
+                let json: String = conn.query_row(
+                    "SELECT spec_json FROM tensorlake_recipes WHERE name = ?1",
+                    [name],
+                    |row| row.get(0),
+                )?;
+                Ok(serde_json::from_str(&json)?)
+            })
+            .await
+            .map_err(|_| "could not read the host's recipe credential selections".into())
+    }
+
+    /// Each catalog read binds a value to its revision. The shared resolver
+    /// already keeps secrets transient; warnings discard storage diagnostics.
+    async fn resolve(&self, bindings: Bindings) -> Result<[Slot; 2], String> {
+        let resolve = async |endpoint: Option<StoredEndpoint>| -> Result<Slot, String> {
+            let Some(endpoint) = endpoint else {
+                return Ok(Slot {
+                    endpoint: None,
+                    stamp: EndpointStamp::Absent,
+                });
+            };
+            let name = endpoint.token_credential.clone();
+            let resolved = self
+                .store
+                .resolve_endpoint(endpoint)
+                .await
+                .map_err(|_| "could not resolve the recipe's endpoint credentials")?;
+            let credential = name
+                .zip(resolved.revision)
+                .zip(resolved.incarnation.clone())
+                .map(|((name, revision), incarnation)| (name, revision, incarnation));
+            Ok(Slot {
+                stamp: EndpointStamp::Endpoint {
+                    base_url: resolved.base_url.clone(),
+                    credential,
+                },
+                endpoint: Some(resolved),
+            })
+        };
+        Ok([
+            resolve(bindings.claude).await?,
+            resolve(bindings.codex).await?,
+        ])
+    }
+
+    /// Missing state is unknown, not successful absence. Refuse corrupt state
+    /// and stale host identities with fixed text rather than leaking JSON or
+    /// accepting a relative home for subsequent remote file operations.
+    async fn read_record(&self, row: &HostRow) -> Result<Record, String> {
+        let (id, identity) = (row.id, row.entry_uuid.clone());
+        self.store.conn().call("read credential delivery state", move |conn| {
+            let json: Option<Option<String>> = conn.query_row("SELECT tensorlake_credential_delivery FROM hosts WHERE id = ?1 AND entry_uuid = ?2 AND tensorlake_sandbox IS NOT NULL", params![id, identity], |row| row.get(0)).optional()?;
+            match json {
+                None => anyhow::bail!("host no longer exists"),
+                Some(None) => Ok(Record::default()),
+                Some(Some(json)) => {
+                    let record: Record = serde_json::from_str(&json)?;
+                    anyhow::ensure!(record.home.as_ref().is_none_or(|home| home.is_absolute()), "host home is not absolute");
+                    Ok(record)
+                },
+            }
+        }).await.map_err(|_| STORAGE.into())
+    }
+
+    /// Db::call's blocking closure survives cancellation. Move serialization
+    /// into it, and return it only after the write finishes; a timed-out caller
+    /// cannot let a later operation overtake its still-queued record update.
+    async fn write_record(
+        &self,
+        row: &HostRow,
+        record: &Record,
+        guard: OwnedMutexGuard<()>,
+    ) -> Result<OwnedMutexGuard<()>, String> {
+        let (id, identity) = (row.id, row.entry_uuid.clone());
+        let json = serde_json::to_string(record).map_err(|_| STORAGE.to_string())?;
+        self.store.conn().call("record credential delivery", move |conn| {
+            let guard = guard;
+            anyhow::ensure!(conn.execute("UPDATE hosts SET tensorlake_credential_delivery = ?3 WHERE id = ?1 AND entry_uuid = ?2 AND tensorlake_sandbox IS NOT NULL", params![id, identity, json])? == 1, "host no longer exists");
+            Ok(guard)
+        }).await.map_err(|_| STORAGE.into())
+    }
+}

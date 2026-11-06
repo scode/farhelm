@@ -4113,6 +4113,7 @@ a:any-link,
   width: 100%; min-width: 0; min-height: 36px; padding: 6px 10px;
   background: var(--well); color: var(--fg-0); border: 1.5px solid var(--border); border-radius: var(--radius-sm);
 }
+.credential-delivery-warning { color: var(--warn-bright); }
 .recipe-editor-actions { flex-wrap: wrap; }
 .recipe-editor-actions .recipe-delete { margin-right: auto; }
 /* Settings keeps Close in its own footer and mounts hidden sections. These

@@ -23,6 +23,7 @@ mod agent_endpoints;
 /// it, and how later non-Rust consumers stay aligned with it instead).
 pub mod assets;
 mod backend;
+pub(crate) mod credential_delivery;
 mod e2e;
 mod http;
 mod payloads;
@@ -44,7 +45,7 @@ pub(crate) use http::{
 };
 pub(crate) use payloads::PayloadSelection;
 pub use release_payloads::{RELEASE_KEY_RING, verify_signed_metadata, verify_signed_sums};
-pub(crate) use service::{AutomaticUpdates, ProvisioningService, RunTask};
+pub(crate) use service::{AutomaticUpdates, ProductionProvisioning, ProvisioningService, RunTask};
 
 #[cfg(test)]
 mod tests {
@@ -381,7 +382,7 @@ mod tests {
 
     /// Recorder for orchestration tests, including planted failure, linger,
     /// registration-order, and in-flight barriers.
-    struct FakeBackend {
+    pub(super) struct FakeBackend {
         probe: Mutex<Option<Result<ProbeObservation, BackendFailure>>>,
         /// How many probes reached this backend: what proves a refusal
         /// came before anything dialed the host.
@@ -398,18 +399,18 @@ mod tests {
         /// which have no business reading local state never do.
         unit_reads: Mutex<Vec<String>>,
         inspect_failure: Mutex<Option<String>>,
-        operations: Mutex<Vec<String>>,
-        fail: Mutex<Option<String>>,
+        pub(super) operations: Mutex<Vec<String>>,
+        pub(super) fail: Mutex<Option<String>>,
         skip: Mutex<Option<String>>,
         linger: Mutex<Option<Result<(), String>>>,
         registration: Mutex<Option<(HelmStore, String)>>,
-        entered: tokio::sync::Notify,
-        release: tokio::sync::Notify,
-        block_first: std::sync::atomic::AtomicBool,
+        pub(super) entered: tokio::sync::Notify,
+        pub(super) release: tokio::sync::Notify,
+        pub(super) block_first: std::sync::atomic::AtomicBool,
         /// Pause discovery after the service's initial registry read. Shares
         /// the fixture's notifications with the existing action gate.
         block_probe: std::sync::atomic::AtomicBool,
-        stateful: std::sync::atomic::AtomicBool,
+        pub(super) stateful: std::sync::atomic::AtomicBool,
         /// Run once when the named operation is recorded: what that step
         /// "did" to the far side, for a test that needs the host to change
         /// at a specific point in the run (the new supervisor coming up at
@@ -461,7 +462,7 @@ mod tests {
     type OperationHook = (&'static str, Box<dyn FnOnce() + Send>);
 
     impl FakeBackend {
-        fn absent(home: PathBuf) -> Arc<Self> {
+        pub(super) fn absent(home: PathBuf) -> Arc<Self> {
             Arc::new(Self {
                 probe: Mutex::new(Some(Ok(ProbeObservation::Absent))),
                 probes: std::sync::atomic::AtomicUsize::new(0),
@@ -568,6 +569,34 @@ mod tests {
 
     #[async_trait]
     impl ProvisioningBackend for FakeBackend {
+        async fn host_home(&self, _target: &ProvisioningTarget) -> Result<PathBuf, BackendFailure> {
+            self.record("read-home")?;
+            match &*self.reach.lock().unwrap() {
+                ReachOutcome::Supported(reach) => Ok(reach.home.clone()),
+                _ => Err(BackendFailure::new("fixture has no home", "")),
+            }
+        }
+
+        /// Stateful credential fixtures read only their owned home; ordinary
+        /// provisioning fixtures still model an absent agent configuration.
+        async fn read_small_file(
+            &self,
+            _target: &ProvisioningTarget,
+            path: &Path,
+        ) -> Result<Option<Vec<u8>>, BackendFailure> {
+            self.record("read-agent-settings")?;
+            if !self.stateful.load(std::sync::atomic::Ordering::SeqCst) {
+                return Ok(None);
+            }
+            match tokio::fs::read(path).await {
+                Ok(bytes) => Ok(Some(bytes)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(_) => Err(BackendFailure::new(
+                    "fixture could not read agent settings",
+                    "",
+                )),
+            }
+        }
         async fn probe(&self, _target: &ProbeTarget) -> Result<ProbeObservation, BackendFailure> {
             self.probes
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -687,8 +716,11 @@ mod tests {
             content: &[u8],
             destination: &Path,
             _temporary: &Path,
-            _mode: u32,
+            mode: u32,
         ) -> Result<ActionOutcome, BackendFailure> {
+            // A refused install must leave the fixture's previous bytes intact,
+            // just as an unsuccessful atomic replacement does on the host.
+            let outcome = self.record("write-unit")?;
             if self.stateful.load(std::sync::atomic::Ordering::SeqCst) {
                 tokio::fs::write(destination, content)
                     .await
@@ -698,8 +730,9 @@ mod tests {
                             error.to_string(),
                         )
                     })?;
+                set_mode(destination, mode).await?;
             }
-            self.record("write-unit")
+            Ok(outcome)
         }
 
         async fn daemon_reload(
@@ -1267,7 +1300,7 @@ mod tests {
         assert!(rendered.contains("remote PATH"), "{rendered}");
     }
 
-    fn service(
+    pub(super) fn service(
         harness: &Harness,
         backend: Arc<FakeBackend>,
         root: &Path,

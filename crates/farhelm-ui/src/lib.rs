@@ -853,6 +853,9 @@ pub struct TensorlakeHost {
     /// older helms and hosts with no active recipe forwards omit it.
     #[serde(default)]
     pub tunnels: Option<farhelm_proto::tensorlake::TunnelView>,
+    /// A saved credential can remain undelivered while the supervisor works.
+    #[serde(default)]
+    pub credential_warning: Option<peer::PeerText>,
 }
 
 impl Host {

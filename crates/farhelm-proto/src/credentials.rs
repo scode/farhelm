@@ -48,6 +48,23 @@ pub struct SaveCredential {
     pub secret: Option<String>,
 }
 
+/// A committed save may leave a host's previous value in place. Reasons carry
+/// no submitted bytes or transport captures, and identify the affected host.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct DeliveryFailure {
+    pub host: String,
+    pub reason: String,
+}
+
+/// Delivery failure does not undo the saved credential. Callers acknowledge
+/// storage and display these failures separately instead of offering a retry
+/// that would unnecessarily replace the value again.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SavedCredential {
+    pub credential: Credential,
+    pub delivery_failures: Vec<DeliveryFailure>,
+}
+
 /// Authentication files are intentionally opaque beyond being bounded objects.
 /// Vendor-added fields must survive a paste or upload without a Farhelm update.
 pub const CODEX_LOGIN_CAP: usize = 64 * 1024;

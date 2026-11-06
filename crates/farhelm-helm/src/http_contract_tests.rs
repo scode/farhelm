@@ -268,6 +268,7 @@ fn host_list_body() -> serde_json::Value {
 fn tensorlake_view(id: i64) -> crate::hosts::TensorlakeHostView {
     crate::hosts::TensorlakeHostView {
         tunnels: None,
+        credential_warning: None,
         sandbox: format!("farhelm-host-k7q2-host{id}-m3x9"),
         recipe: "rust-dev".to_string(),
         size: Some(farhelm_proto::tensorlake::recipes::RecipeSize {
