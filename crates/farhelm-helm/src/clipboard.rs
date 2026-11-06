@@ -31,16 +31,16 @@
 //!
 //! One bounded text field per request ([`MAX_TEXT_BYTES`], with
 //! [`MAX_BODY_BYTES`] sized above it for JSON overhead and enforced in
-//! `lib.rs` before the handler allocates anything). Oversized text is the
-//! caller's bug and 413s. An authenticated, parsed, in-bounds request is a
-//! 204 whether the native write succeeded or not: SPEC.md makes clipboard
-//! operations best-effort and silent on failure by contract, so a sink
-//! failure is a `tracing` warn for the operator, never an error for a page
-//! that has nothing useful to do with one. No accept-rate window, unlike
-//! client-log: each write costs one bounded pasteboard update and emits no
-//! per-request log line, so there is no amplification for a budget to take
-//! away — a page spamming this endpoint churns the clipboard exactly as
-//! fast as it could churn any clipboard API it held.
+//! `lib.rs` before the handler allocates anything). Oversized text 413s (see
+//! [`MAX_TEXT_BYTES`] for which copies can hit it). An authenticated, parsed,
+//! in-bounds request is a 204 whether the native write succeeded or not:
+//! SPEC.md makes clipboard operations best-effort and silent on failure by
+//! contract, so a sink failure is a `tracing` warn for the operator, never an
+//! error for a page that has nothing useful to do with one. No accept-rate
+//! window, unlike client-log: each write costs one bounded pasteboard update
+//! and emits no per-request log line, so there is no amplification for a
+//! budget to take away — a page spamming this endpoint churns the clipboard
+//! exactly as fast as it could churn any clipboard API it held.
 //!
 //! At most [`MAX_IN_FLIGHT_WRITES`] native writes run at once
 //! ([`ClipboardAdmission`]). A write that finds them all busy is dropped
@@ -58,10 +58,21 @@ use axum::response::IntoResponse;
 use serde::Deserialize;
 use std::sync::Arc;
 
-/// Most text one request may place on the clipboard. Sized comfortably above
-/// the biggest OSC 52 payload the vendored xterm.js addon will assemble
-/// (base64 in the escape decodes to well under 100 KiB) while still bounding
-/// what an arbitrary page script can make the native side allocate.
+/// Most text one request may place on the clipboard: 256 KiB.
+///
+/// The cap exists to bound what an arbitrary page script can make the
+/// native side allocate. Its size was chosen for programs' OSC 52 writes:
+/// the original sizing assumed an old terminal's OSC 52 payloads stay well
+/// under 100 KiB, a bound the xterm.js clipboard add-on does not itself
+/// enforce.
+///
+/// Larger copies exist. A new terminal's grid stream carries an OSC 52
+/// write of up to `farhelm_proto::grid::GRID_MAX_CLIPBOARD_BYTES` (8 MiB),
+/// and a selection over a long scrollback, in either kind of terminal, can
+/// pass the cap too. In the desktop app such text is refused here with 413
+/// and is lost like any failed clipboard write: silently, as SPEC.md's
+/// best-effort clipboard contract has every failure be. A browser page,
+/// which writes the clipboard itself, has no such limit.
 pub(crate) const MAX_TEXT_BYTES: usize = 256 * 1024;
 
 /// The route's whole-body cap (enforced as the axum body limit in
