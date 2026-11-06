@@ -28,11 +28,10 @@
 //! retires its built snapshot in the same transaction. Everything else in
 //! `state_json` is the build engine's.
 //!
-//! Endpoint tokens are stored unencrypted with the rest of the spec, like the
-//! ntfy token, and never returned: the read shape says only whether one is
-//! saved. Because a request body can carry a token, a body that does not
+//! Endpoints store credential names, never values. Because an outdated client
+//! can still submit an embedded token, a body that does not
 //! decode gets a fixed refusal instead of serde's diagnostic, which can quote
-//! the submitted text, and no stored-type here implements `Debug`.
+//! the submitted text. Only transient resolved endpoints carry secret values.
 //!
 //! Saving never builds: a build bills, so only the explicit build route starts
 //! one. The routes call Tensorlake only for a delete's cleanup and a retired
@@ -66,22 +65,25 @@ pub(crate) const BODY_LIMIT: usize = 64 * 1024;
 // Stored shape
 // ---------------------------------------------------------------------------
 
-/// An agent endpoint as `spec_json` stores it: the token in the clear.
-///
-/// No `Debug`: this carries a secret.
+/// An endpoint's persisted selection; the value belongs to the credential table.
 #[derive(Clone, Deserialize, Serialize)]
 pub(crate) struct StoredEndpoint {
+    pub(crate) base_url: String,
+    pub(crate) token_credential: Option<String>,
+}
+
+/// Secret-bearing input to the pure settings merges, never persisted as a recipe
+/// or returned by a route. Only delivery resolves a named value into this shape.
+pub(crate) struct ResolvedEndpoint {
     pub(crate) base_url: String,
     pub(crate) token: Option<String>,
 }
 
-/// A recipe's `spec_json`: the user's definition, secrets included.
+/// A recipe's `spec_json`: user choices and credential names, without values.
 ///
 /// Never crosses the HTTP boundary; [`Self::view`] is the only way out.
 /// Rows are written only through [`Self::saved`], so a stored recipe has
 /// passed `check_recipe` with this build's or an older build's rules.
-///
-/// No `Debug`: the endpoints carry secrets.
 #[derive(Clone, Deserialize, Serialize)]
 pub(crate) struct StoredRecipe {
     pub(crate) size: RecipeSize,
@@ -92,23 +94,18 @@ pub(crate) struct StoredRecipe {
 }
 
 impl StoredRecipe {
-    /// Validate `save` and resolve its tokens against `previous`, the stored
-    /// definition it replaces (`None` for a new recipe).
-    ///
-    /// Run this inside the write's own transaction for an update: the token
-    /// rule compares against what is stored at that moment, so a stale form
-    /// cannot carry a token saved after it loaded to another origin. Packages
-    /// are stored without duplicates, in their given order.
-    fn saved(previous: Option<&StoredRecipe>, mut save: RecipeSave) -> Result<Self, String> {
+    /// Validate and normalize choices without resolving secret values. The caller
+    /// checks credential references inside its write transaction. Packages keep
+    /// their given order with exact duplicates removed.
+    fn saved(mut save: RecipeSave) -> Result<Self, String> {
         check_recipe(&save)?;
         if let RecipeSource::Packages { packages } = &mut save.source {
             let mut seen = std::collections::HashSet::new();
             packages.retain(|package| seen.insert(package.clone()));
         }
-        let claude = resolve_endpoint(previous.and_then(|p| p.claude.as_ref()), save.claude)
-            .map_err(|reason| format!("Claude Code: {reason}"))?;
-        let codex = resolve_endpoint(previous.and_then(|p| p.codex.as_ref()), save.codex)
-            .map_err(|reason| format!("Codex: {reason}"))?;
+        let claude =
+            resolve_endpoint(save.claude).map_err(|reason| format!("Claude Code: {reason}"))?;
+        let codex = resolve_endpoint(save.codex).map_err(|reason| format!("Codex: {reason}"))?;
         Ok(Self {
             size: save.size,
             source: save.source,
@@ -123,7 +120,7 @@ impl StoredRecipe {
         let endpoint = |endpoint: &Option<StoredEndpoint>| {
             endpoint.as_ref().map(|endpoint| EndpointView {
                 base_url: endpoint.base_url.clone(),
-                token_set: endpoint.token.is_some(),
+                token_credential: endpoint.token_credential.clone(),
             })
         };
         RecipeView {
@@ -140,37 +137,38 @@ impl StoredRecipe {
     }
 }
 
-/// Apply one endpoint save to the stored endpoint it replaces, under the
-/// ntfy token rule (`EndpointSave`'s docs): an omitted token survives only
-/// when the base URL keeps its origin, an empty one clears, any other
-/// replaces. An endpoint saved as `None` is removed, token and all.
-///
-/// The URL has already passed the shared structural check; parsing it here
-/// with a real URL parser is a second gate and gives the origin (scheme,
-/// host, effective port with defaults normalized) the comparison needs.
-fn resolve_endpoint(
-    previous: Option<&StoredEndpoint>,
-    save: Option<EndpointSave>,
-) -> Result<Option<StoredEndpoint>, &'static str> {
+/// Parse the URL with the server's full parser after the shared structural
+/// check. The selected credential name survives a URL change deliberately:
+/// the editor selects an identity, not an unseen token-preservation action.
+fn resolve_endpoint(save: Option<EndpointSave>) -> Result<Option<StoredEndpoint>, &'static str> {
     let Some(save) = save else {
         return Ok(None);
     };
-    let url = reqwest::Url::parse(&save.base_url)
+    reqwest::Url::parse(&save.base_url)
         .map_err(|_| "use an http or https base URL without credentials, query or fragment")?;
-    let same_origin = previous.is_some_and(|previous| {
-        reqwest::Url::parse(&previous.base_url)
-            .is_ok_and(|previous| previous.origin() == url.origin())
-    });
-    let token = match save.token {
-        None if same_origin => previous.and_then(|previous| previous.token.clone()),
-        None => None,
-        Some(token) if token.is_empty() => None,
-        Some(token) => Some(token),
-    };
     Ok(Some(StoredEndpoint {
         base_url: save.base_url,
-        token,
+        token_credential: save.token_credential,
     }))
+}
+
+/// Name/kind admission belongs to the same transaction that saves the recipe;
+/// a separate catalog preflight would race deletion on another connection.
+fn check_credentials(conn: &Connection, spec: &StoredRecipe) -> anyhow::Result<Option<Refusal>> {
+    for endpoint in [&spec.claude, &spec.codex].into_iter().flatten() {
+        if let Some(name) = &endpoint.token_credential
+            && !crate::credentials::has_kind(
+                conn,
+                name,
+                farhelm_proto::credentials::CredentialKind::EndpointToken,
+            )?
+        {
+            return Ok(Some(Refusal::Invalid(
+                "select an existing API endpoint token in Settings → Credentials".into(),
+            )));
+        }
+    }
+    Ok(None)
 }
 
 /// Why a recipe write did not happen. Each maps to one HTTP status and a
@@ -330,7 +328,7 @@ impl HelmStore {
         if let Err(reason) = check_recipe_name(&name) {
             return Ok(Err(Refusal::Invalid(reason.to_string())));
         }
-        let spec = match StoredRecipe::saved(None, save) {
+        let spec = match StoredRecipe::saved(save) {
             Ok(spec) => spec,
             Err(reason) => return Ok(Err(Refusal::Invalid(reason))),
         };
@@ -338,10 +336,15 @@ impl HelmStore {
         let now = now_secs();
         self.conn()
             .call("Tensorlake recipe create task panicked", move |conn| {
-                if let Some(refusal) = refuse_owned_snapshot(conn, &spec.source)? {
+                let tx =
+                    conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                if let Some(refusal) = check_credentials(&tx, &spec)? {
                     return Ok(Err(refusal));
                 }
-                let inserted = conn
+                if let Some(refusal) = refuse_owned_snapshot(&tx, &spec.source)? {
+                    return Ok(Err(refusal));
+                }
+                let inserted = tx
                     .execute(
                         "INSERT INTO tensorlake_recipes (name, spec_json, created_at, updated_at)
                          VALUES (?1, ?2, ?3, ?3)
@@ -349,6 +352,8 @@ impl HelmStore {
                         rusqlite::params![name, json, now],
                     )
                     .context("storing a Tensorlake recipe")?;
+                tx.commit()
+                    .context("committing the Tensorlake recipe create")?;
                 Ok(if inserted == 0 {
                     Err(Refusal::Exists)
                 } else {
@@ -360,9 +365,8 @@ impl HelmStore {
 
     /// Replace the definition of the existing recipe `name` with `save`.
     ///
-    /// The stored spec is read and the tokens resolved against it in the same
-    /// immediate transaction as the write (see [`StoredRecipe::saved`]). Only
-    /// `spec_json` and `updated_at` change; the build state in `state_json`
+    /// Credential references are admitted in the same immediate transaction as
+    /// the write. Only `spec_json` and `updated_at` change; the build state in `state_json`
     /// is never part of this statement, so an edit cannot clobber it.
     pub(crate) async fn update_tensorlake_recipe(
         &self,
@@ -386,11 +390,14 @@ impl HelmStore {
                 let Some(stored) = stored else {
                     return Ok(Err(Refusal::Missing));
                 };
-                let previous = decode_spec(&name, &stored)?;
-                let spec = match StoredRecipe::saved(Some(&previous), save) {
+                decode_spec(&name, &stored)?;
+                let spec = match StoredRecipe::saved(save) {
                     Ok(spec) => spec,
                     Err(reason) => return Ok(Err(Refusal::Invalid(reason))),
                 };
+                if let Some(refusal) = check_credentials(&tx, &spec)? {
+                    return Ok(Err(refusal));
+                }
                 if let Some(refusal) = refuse_owned_snapshot(&tx, &spec.source)? {
                     return Ok(Err(refusal));
                 }
@@ -411,6 +418,35 @@ impl HelmStore {
                 tx.commit()
                     .context("committing the Tensorlake recipe update")?;
                 Ok(Ok(spec))
+            })
+            .await
+    }
+
+    /// Resolve the current value for setup without ever serializing it into a
+    /// recipe. A deleted or wrong-kind identity refuses setup with fixed text.
+    pub(crate) async fn resolve_endpoint(
+        &self,
+        endpoint: StoredEndpoint,
+    ) -> anyhow::Result<ResolvedEndpoint> {
+        self.conn()
+            .call("resolve endpoint credential", move |conn| {
+                let token = match endpoint.token_credential {
+                    Some(name) => Some(
+                        crate::credentials::secret(
+                            conn,
+                            &name,
+                            farhelm_proto::credentials::CredentialKind::EndpointToken,
+                        )?
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("the recipe's API endpoint credential no longer exists")
+                        })?,
+                    ),
+                    None => None,
+                };
+                Ok(ResolvedEndpoint {
+                    base_url: endpoint.base_url,
+                    token,
+                })
             })
             .await
     }

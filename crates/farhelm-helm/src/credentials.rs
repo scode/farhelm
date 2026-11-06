@@ -29,6 +29,7 @@ pub(crate) enum Refusal {
     Invalid(&'static str),
     Exists,
     Missing,
+    InUse,
     Storage,
 }
 
@@ -38,6 +39,10 @@ impl Refusal {
             Self::Invalid(reason) => (StatusCode::BAD_REQUEST, reason),
             Self::Exists => (StatusCode::CONFLICT, "a credential already has that name"),
             Self::Missing => (StatusCode::NOT_FOUND, "the credential no longer exists"),
+            Self::InUse => (
+                StatusCode::CONFLICT,
+                "a recipe uses this credential; change that recipe before deleting it",
+            ),
             Self::Storage => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Farhelm could not access the credential catalog",
@@ -71,9 +76,13 @@ impl HelmStore {
                     "SELECT name, kind, created_at, updated_at, revision
                      FROM credentials ORDER BY name",
                 )?;
-                Ok(statement
+                let mut rows = statement
                     .query_map([], metadata)?
-                    .collect::<Result<Vec<_>, _>>()?)
+                    .collect::<Result<Vec<_>, _>>()?;
+                for row in &mut rows {
+                    row.used_by = users(conn, &row.name)?;
+                }
+                Ok(rows)
             })
             .await
             .map_err(|_| Refusal::Storage)
@@ -159,19 +168,23 @@ impl HelmStore {
             .map_err(|_| Refusal::Storage)?
     }
 
-    /// Delete the named entry without reading its saved value.
+    /// Refuse deletion while any recipe names the credential. The immediate
+    /// transaction also excludes a recipe writer admitting a new reference.
     pub(crate) async fn delete_credential(&self, name: String) -> Result<(), Refusal> {
         let deleted = self
             .conn()
             .call("credential delete", move |conn| {
                 let tx =
                     conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                if !users(&tx, &name)?.is_empty() {
+                    return Ok(Err(Refusal::InUse));
+                }
                 let deleted = tx.execute("DELETE FROM credentials WHERE name = ?1", [name])?;
                 tx.commit()?;
-                Ok(deleted)
+                Ok(Ok(deleted))
             })
             .await
-            .map_err(|_| Refusal::Storage)?;
+            .map_err(|_| Refusal::Storage)??;
         if deleted == 0 {
             Err(Refusal::Missing)
         } else {
@@ -182,11 +195,55 @@ impl HelmStore {
 
 /// Read the acknowledgement while its writer still excludes competing edits.
 fn read_metadata(conn: &rusqlite::Connection, name: &str) -> rusqlite::Result<Credential> {
-    conn.query_row(
+    let mut row = conn.query_row(
         "SELECT name, kind, created_at, updated_at, revision FROM credentials WHERE name = ?1",
         [name],
         metadata,
+    )?;
+    row.used_by = users(conn, name)?;
+    Ok(row)
+}
+
+/// The same reference query feeds metadata and delete admission. Recipe writers
+/// validate references under an immediate transaction too, so independent
+/// connections cannot leave a saved recipe pointing at a deleted credential.
+fn users(conn: &rusqlite::Connection, name: &str) -> rusqlite::Result<Vec<String>> {
+    let mut statement = conn.prepare(
+        "SELECT name FROM tensorlake_recipes
+         WHERE json_extract(spec_json, '$.claude.token_credential') = ?1
+            OR json_extract(spec_json, '$.codex.token_credential') = ?1 ORDER BY name",
+    )?;
+    statement.query_map([name], |row| row.get(0))?.collect()
+}
+
+/// Saving a recipe checks identity and kind without loading secret values.
+pub(crate) fn has_kind(
+    conn: &rusqlite::Connection,
+    name: &str,
+    kind: CredentialKind,
+) -> rusqlite::Result<bool> {
+    let kind = serde_json::to_string(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?;
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM credentials WHERE name = ?1 AND kind = ?2)",
+        params![name, kind],
+        |row| row.get(0),
     )
+}
+
+/// Resolve a value only for host delivery. Callers keep it in a transient
+/// non-Debug, non-Serialize shape and expose only content-free failures.
+pub(crate) fn secret(
+    conn: &rusqlite::Connection,
+    name: &str,
+    kind: CredentialKind,
+) -> rusqlite::Result<Option<String>> {
+    let kind = serde_json::to_string(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?;
+    conn.query_row(
+        "SELECT secret FROM credentials WHERE name = ?1 AND kind = ?2",
+        params![name, kind],
+        |row| row.get(0),
+    )
+    .optional()
 }
 
 /// Catalog reads return metadata only, including after a failed replacement.

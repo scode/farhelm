@@ -15,10 +15,9 @@
 //! scripts and ssh arguments, and a recipe name ends up verbatim inside the
 //! snapshot builder's sandbox name (`farhelm-build-<helm tag>-<recipe>`).
 //!
-//! Endpoint tokens follow the ntfy token's write-only rule: the read shape
-//! carries only whether a token is saved, and a save may leave it out to keep
-//! it. Types that can carry a token deliberately do not implement `Debug`, so
-//! a stray `{:?}` cannot print one.
+//! Endpoints refer to the write-only credential catalog by name. Neither
+//! reads nor saves contain token values; changing the endpoint server does
+//! not silently change which named credential the recipe selects.
 //!
 //! The read shape also reports a managed recipe's snapshot build: the built
 //! snapshot ([`SnapshotView`]) and whether a build runs or how the last one
@@ -97,28 +96,23 @@ pub struct Tunnel {
     pub port: u16,
 }
 
-/// An agent endpoint as the helm reports it: the base URL, and only whether a
-/// token is saved. The token itself never leaves the helm.
+/// An agent endpoint names a credential without exposing its saved value.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct EndpointView {
     pub base_url: String,
-    pub token_set: bool,
+    pub token_credential: Option<String>,
 }
 
 /// An agent endpoint as a save sends it.
 ///
-/// `token` follows the ntfy token's rule: `None` keeps the saved token only
-/// when the base URL's origin (scheme, host and effective port) is unchanged,
-/// so a stale form cannot carry a token to another server; an empty string
-/// clears it; anything else replaces it. On a new recipe there is nothing to
-/// keep, so `None` means no token.
-///
-/// No `Debug`: this carries a secret.
+/// `token_credential` is a complete selection: None uses no token. The helm
+/// validates the referenced entry's existence and endpoint-token kind in the
+/// same transaction as the recipe write, so deletion cannot race admission.
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EndpointSave {
     pub base_url: String,
-    pub token: Option<String>,
+    pub token_credential: Option<String>,
 }
 
 /// Everything a recipe save sets apart from the name.
@@ -126,16 +120,15 @@ pub struct EndpointSave {
 /// `claude` is Claude Code's endpoint (written into the sandbox as
 /// `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`), `codex` is Codex's
 /// (a model provider's `base_url` and `experimental_bearer_token`). `None`
-/// means the recipe configures no endpoint for that agent and drops any saved
-/// token for it.
+/// means the recipe configures no endpoint for that agent. Credential values
+/// belong exclusively to Settings → Credentials.
 ///
 /// Unknown fields are refused at every level, nested size, source, tunnel and
 /// endpoint included: a field a newer client sets and this helm would silently
 /// drop is worse than a clear refusal. `deny_unknown_fields` does not reach
 /// into nested types, and [`RecipeSize`], [`RecipeSource`] and [`Tunnel`] stay
 /// tolerant because reads share them, so decoding goes through the strict
-/// write-only mirror `strict::RecipeSave`. No `Debug`: the endpoints carry
-/// secrets.
+/// save mirror `strict::RecipeSave`.
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(from = "strict::RecipeSave")]
 pub struct RecipeSave {
@@ -577,13 +570,13 @@ pub fn check_token(token: &str) -> Result<(), &'static str> {
 /// 4096 GB of disk), the source (package words per `package_word_is_valid`,
 /// at most [`PACKAGES_CAP`]; an image name of 1 to 200 bytes of
 /// `[A-Za-z0-9._/:-]` not starting with `-`; a snapshot ID of 1 to 64
-/// lowercase letters and digits), each endpoint's base URL and replacement
-/// token, and the tunnels (at most [`TUNNELS_CAP`], unique non-zero sandbox
+/// lowercase letters and digits), each endpoint's base URL and credential
+/// name, and the tunnels (at most [`TUNNELS_CAP`], unique non-zero sandbox
 /// ports other than 22, which the sandbox's own sshd holds, non-zero target
 /// ports, valid hosts).
 ///
 /// Messages are user-facing and name the offending package, image or tunnel
-/// where that helps; none of those values is secret. URL and token messages
+/// where that helps; none of those values is secret. URL and credential-name messages
 /// are fixed. Duplicate packages are not refused here: the helm drops them
 /// when it stores the recipe, as [`parse_packages`] does.
 pub fn check_recipe(recipe: &RecipeSave) -> Result<(), String> {
@@ -640,10 +633,9 @@ pub fn check_recipe(recipe: &RecipeSave) -> Result<(), String> {
     for (agent, endpoint) in [("Claude Code", &recipe.claude), ("Codex", &recipe.codex)] {
         let Some(endpoint) = endpoint else { continue };
         check_base_url(&endpoint.base_url).map_err(|reason| format!("{agent}: {reason}"))?;
-        if let Some(token) = endpoint.token.as_deref()
-            && !token.is_empty()
-        {
-            check_token(token).map_err(|reason| format!("{agent}: {reason}"))?;
+        if let Some(name) = endpoint.token_credential.as_deref() {
+            check_recipe_name(name)
+                .map_err(|_| format!("{agent}: select a valid endpoint credential name"))?;
         }
     }
     if recipe.tunnels.len() > TUNNELS_CAP {

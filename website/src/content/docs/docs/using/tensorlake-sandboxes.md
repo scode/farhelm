@@ -51,8 +51,8 @@ saved value; closing Settings discards text you have not saved.
 read its state directory can read them. Farhelm never shows a saved value again.
 
 For Claude Code, save the token printed by `claude setup-token`. For Codex, run `codex login` on a machine with a
-browser, sign in with ChatGPT, then paste or choose `~/.codex/auth.json`. Saving a named credential does not yet select
-it for a recipe or send it to a host; the recipe controls below still use their existing API endpoint fields.
+browser, sign in with ChatGPT, then paste or choose `~/.codex/auth.json`. Recipes can select named API endpoint tokens
+as described below. GitHub tokens and subscription logins are stored here; their recipe controls are not available yet.
 
 ## Make a recipe
 
@@ -82,15 +82,22 @@ snapshot; existing hosts keep running. Switching back needs another billed snaps
 
 ### Agent API endpoints
 
-Under **Agents**, you can set a base URL and optional token for Claude Code, Codex, or both. A base URL can point at a
+Under **Agents**, you can set a base URL and choose a named endpoint token for Claude Code, Codex, or both. Create the
+token in Settings → **Credentials** first; **None** uses the endpoint without a token. A base URL can point at a
 [tunnel](#tunnels-to-your-side), such as `http://127.0.0.1:8080`. Farhelm writes these settings when it sets up each
 host, for both software choices. Changing the recipe does not reconfigure agents on hosts already set up, and updating
 Farhelm on a host does not reapply them.
 
-Tokens are stored unencrypted in the helm's state and never shown again. A blank token field keeps the saved token while
-the server stays the same; changing the server clears it, as the editor explains. Use the clear switch to remove one
-deliberately. Subscription logins and uploading agent credentials are not supported yet; use API authentication for
-these hosts.
+Replacing a token in Credentials keeps its name, so you do not need to edit the recipes that use it. Changing a base URL
+keeps the selected token name. A credential cannot be deleted while a recipe uses it; choose **None** or another name in
+those recipes first. Setup uses the token's current saved value.
+
+:::caution[Endpoint tokens after upgrading]
+
+Tokens previously saved inside recipes are removed. Re-enter them in Settings → **Credentials**, then select their names
+in the recipes. Reload Farhelm before editing a recipe form that was open during the upgrade.
+
+:::
 
 ### Tunnels to your side
 

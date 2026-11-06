@@ -604,7 +604,7 @@ impl ProvisioningService {
     ) -> anyhow::Result<()> {
         type Merge = fn(
             Option<&[u8]>,
-            &crate::tensorlake::recipes::StoredEndpoint,
+            &crate::tensorlake::recipes::ResolvedEndpoint,
         ) -> Result<Vec<u8>, String>;
         for (folder, file, endpoint, merge) in [
             (
@@ -623,10 +623,11 @@ impl ProvisioningService {
             let Some(endpoint) = endpoint else {
                 continue;
             };
+            let endpoint = self.store.resolve_endpoint(endpoint.clone()).await?;
             let dir = home.join(folder);
             let path = dir.join(file);
             let previous = self.backend.read_small_file(target, &path).await?;
-            let bytes = merge(previous.as_deref(), endpoint).map_err(refused)?;
+            let bytes = merge(previous.as_deref(), &endpoint).map_err(refused)?;
             self.backend
                 .ensure_directories(
                     target,

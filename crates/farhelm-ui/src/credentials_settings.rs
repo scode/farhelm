@@ -73,14 +73,22 @@ fn focus_editor() {
     );
 }
 
-/// Refreshes preserve the last good catalog and never treat a failure as empty.
-#[component]
-pub(crate) fn CredentialsSettings() -> Element {
+/// Metadata consumers share the read lifecycle, never secret drafts. Each
+/// mounted reader retains its last good catalog while a refresh is unavailable.
+#[derive(Clone, Copy)]
+pub(crate) struct CatalogState {
+    pub(crate) rows: Signal<Option<Vec<Credential>>>,
+    pub(crate) error: Signal<Option<String>>,
+    pub(crate) reload: Callback<()>,
+}
+
+/// A feed notice may supersede a slow read. Generation fencing prevents that
+/// response from hiding a newly saved name in either Settings or Add host.
+pub(crate) fn use_catalog() -> CatalogState {
     let base = use_context::<ApiBase>().0;
     let mut rows = use_signal(|| None::<Vec<Credential>>);
     let mut error = use_signal(|| None::<String>);
     let mut generation = use_signal(|| 0_u64);
-    let mut editing = use_signal(|| None::<Editing>);
     let reload = use_callback(move |()| {
         generation += 1;
         let mine = generation();
@@ -101,6 +109,43 @@ pub(crate) fn CredentialsSettings() -> Element {
     });
     use_hook(move || reload.call(()));
     crate::feed::use_feed_reader(move || reload.call(()));
+    CatalogState {
+        rows,
+        error,
+        reload,
+    }
+}
+
+/// Refresh recipe-use metadata without replacing an editor's unsaved secret.
+#[component]
+pub(crate) fn CredentialsSettings() -> Element {
+    let CatalogState {
+        rows,
+        error,
+        reload,
+    } = use_catalog();
+    let mut editing = use_signal(|| None::<Editing>);
+    use_effect(move || {
+        // Subscribe even before an editor opens; peek keeps the draft update
+        // itself from scheduling a second effect or replacing unsaved text.
+        let current_rows = rows.read();
+        let Some(mut current) = editing.peek().clone() else {
+            return;
+        };
+        let Some(previous) = current.existing.as_mut() else {
+            return;
+        };
+        let Some(fresh) = current_rows
+            .as_ref()
+            .and_then(|rows| rows.iter().find(|row| row.name == previous.name))
+        else {
+            return;
+        };
+        if previous.used_by != fresh.used_by {
+            previous.used_by = fresh.used_by.clone();
+            editing.set(Some(current));
+        }
+    });
     let listed = rows();
     rsx! {
         div { class: "credential-overview", hidden: editing().is_some(),

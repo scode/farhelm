@@ -1,6 +1,7 @@
 ---
-kind: added
+kind: breaking
 ---
 
-Settings now has a Credentials section for named tokens and agent logins, with a clear warning that saved values are
-not encrypted on disk. The Tensorlake API key can be changed there or in Tensorlake settings.
+Settings → Credentials now keeps named tokens and agent logins, with a warning that they are not encrypted on disk.
+Tensorlake recipes select named endpoint tokens; existing recipe tokens are removed, so re-enter your endpoint tokens
+in Settings → Credentials and choose their names in the recipes.

@@ -1,11 +1,11 @@
 //! The editor's pure parts: turning a draft into a save request, reopening a
-//! saved recipe, and predicting what a save does to a saved token. The
+//! saved recipe, and retaining an explicit named endpoint selection. The
 //! browser spec covers the rendered form; these pin the rules it relies on.
 
 use super::*;
 
 /// A saved recipe as the list hands it to the editor, with a Claude Code
-/// endpoint whose token is saved.
+/// endpoint that names a saved credential.
 fn saved_view() -> RecipeView {
     RecipeView {
         name: "rust-dev".into(),
@@ -19,7 +19,7 @@ fn saved_view() -> RecipeView {
         },
         claude: Some(EndpointView {
             base_url: "http://127.0.0.1:8080".into(),
-            token_set: true,
+            token_credential: Some("work-endpoint".into()),
         }),
         codex: None,
         tunnels: vec![Tunnel {
@@ -34,11 +34,10 @@ fn saved_view() -> RecipeView {
 }
 
 /// Spec: reopening a saved recipe and saving it unchanged sends the same
-/// definition back, with no token field (keep the saved token).
+/// definition back, including the chosen credential's name.
 ///
 /// Why: Edit followed by Save must be a no-op on the helm. A draft that lost
-/// a field on the way in, or sent an empty token, would silently change the
-/// recipe or clear its token.
+/// a field on the way in would silently stop authenticating the endpoint.
 #[test]
 fn an_unchanged_reopened_recipe_saves_back_unchanged() {
     let view = saved_view();
@@ -49,10 +48,7 @@ fn an_unchanged_reopened_recipe_saves_back_unchanged() {
     assert_eq!(save.tunnels, view.tunnels);
     let claude = save.claude.expect("the endpoint is kept");
     assert_eq!(claude.base_url, "http://127.0.0.1:8080");
-    assert!(
-        claude.token.is_none(),
-        "a blank token field keeps the saved token"
-    );
+    assert_eq!(claude.token_credential.as_deref(), Some("work-endpoint"));
     assert!(save.codex.is_none());
     assert_eq!(Draft::from_view(&view), draft, "reopening is stable");
 }
@@ -104,91 +100,27 @@ fn drafts_become_requests_or_local_refusals() {
     assert!(bad.to_save().is_err(), "the shared package rule applies");
 }
 
-/// Spec: a blank base URL removes the endpoint; a typed token without a base
-/// URL is refused; with a base URL, Clear sends an empty token, a typed token
-/// replaces, and a blank field sends none.
-///
-/// Why: these three token outcomes are the helm's write-only token contract;
-/// the form must never send an empty string by accident (that clears) or
-/// drop a token the user just typed.
+/// A stale draft carries a chosen name rather than an unseen saved secret.
+/// Changing servers must retain that explicit choice; only selecting None or
+/// removing the endpoint removes its reference, without deleting the catalog.
 #[test]
-fn endpoint_drafts_map_to_the_token_contract() {
-    let draft = |base_url: &str, token: &str, clear: bool| EndpointDraft {
-        base_url: base_url.into(),
-        token: token.into(),
-        clear,
-    };
+fn named_endpoint_selection_survives_origin_changes_and_can_be_removed() {
+    let mut draft = Draft::from_view(&saved_view());
+    draft.claude.base_url = "https://another.example/v1".into();
+    let selected = draft.to_save().unwrap().claude.unwrap();
+    assert_eq!(selected.token_credential.as_deref(), Some("work-endpoint"));
+    assert_eq!(selected.base_url, "https://another.example/v1");
+    draft.claude.token_credential.clear();
     assert!(
-        endpoint_save("Codex", &draft("", "", false))
+        draft
+            .to_save()
             .unwrap()
+            .claude
+            .unwrap()
+            .token_credential
             .is_none()
     );
-    assert!(
-        endpoint_save("Codex", &draft(" ", "", true))
-            .unwrap()
-            .is_none()
-    );
-    assert!(
-        endpoint_save("Codex", &draft("", "secret", false))
-            .err()
-            .expect("refused")
-            .starts_with("Codex: ")
-    );
-    let token = |d: EndpointDraft| endpoint_save("Codex", &d).unwrap().unwrap().token;
-    assert_eq!(token(draft("http://h", "", true)).as_deref(), Some(""));
-    assert_eq!(
-        token(draft("http://h", "secret", false)).as_deref(),
-        Some("secret")
-    );
-    assert_eq!(token(draft("http://h", "", false)), None);
-}
-
-/// Spec: the token field predicts the helm's origin rule: kept for the same
-/// origin (a path change included), dropped on an origin change, a clear or a
-/// removed endpoint, replaced when typed, and nothing to say without a saved
-/// token.
-///
-/// Why: the form never sees the token, so this prediction is the only way
-/// the user learns before saving that a server change will drop it.
-#[test]
-fn token_fate_follows_the_origin_rule() {
-    let saved = EndpointView {
-        base_url: "http://127.0.0.1:8080".into(),
-        token_set: true,
-    };
-    let draft = |base_url: &str, token: &str, clear: bool| EndpointDraft {
-        base_url: base_url.into(),
-        token: token.into(),
-        clear,
-    };
-    let fate = |d: EndpointDraft| token_fate(Some(&saved), &d);
-    assert_eq!(
-        fate(draft("http://127.0.0.1:8080/v1", "", false)),
-        TokenFate::Kept
-    );
-    assert_eq!(
-        fate(draft("http://127.0.0.1:9090", "", false)),
-        TokenFate::Dropped
-    );
-    assert_eq!(
-        fate(draft("http://127.0.0.1:8080", "", true)),
-        TokenFate::Dropped
-    );
-    assert_eq!(fate(draft("", "", false)), TokenFate::Dropped);
-    assert_eq!(
-        fate(draft("http://127.0.0.1:8080", "new", false)),
-        TokenFate::Replaced
-    );
-    let unset = EndpointView {
-        token_set: false,
-        ..saved.clone()
-    };
-    assert_eq!(
-        token_fate(Some(&unset), &draft("http://other", "", false)),
-        TokenFate::None
-    );
-    assert_eq!(
-        token_fate(None, &draft("http://h", "", false)),
-        TokenFate::None
-    );
+    draft.claude.token_credential = "work-endpoint".into();
+    draft.claude.base_url.clear();
+    assert!(draft.to_save().unwrap().claude.is_none());
 }

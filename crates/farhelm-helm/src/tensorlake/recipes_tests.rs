@@ -16,6 +16,23 @@ use tower::ServiceExt as _;
 
 const TOKEN: &str = "private-endpoint-token-marker";
 const OTHER_TOKEN: &str = "private-replacement-token-marker";
+const ENDPOINT: &str = "work-endpoint";
+const OTHER_ENDPOINT: &str = "other-endpoint";
+
+/// Saved values live outside recipes. Distinct names and marker values let
+/// route assertions distinguish a valid reference from accidental disclosure.
+async fn seed_credentials(store: &HelmStore) {
+    for (name, secret) in [(ENDPOINT, TOKEN), (OTHER_ENDPOINT, OTHER_TOKEN)] {
+        store
+            .create_credential(farhelm_proto::credentials::CreateCredential {
+                name: name.into(),
+                kind: farhelm_proto::credentials::CredentialKind::EndpointToken,
+                secret: secret.into(),
+            })
+            .await
+            .unwrap();
+    }
+}
 
 /// A fresh store in its own temporary directory. The directory is returned so
 /// it outlives the store.
@@ -24,23 +41,23 @@ async fn store() -> (tempfile::TempDir, HelmStore) {
     let store = HelmStore::open(&dir.path().join("helm.db"))
         .await
         .expect("open a fresh store");
+    seed_credentials(&store).await;
     (dir, store)
 }
 
-/// `save()` with a Claude Code endpoint at `base_url` and the given token
-/// field.
-fn with_claude(base_url: &str, token: Option<&str>) -> RecipeSave {
+/// A Claude endpoint selecting a credential name, with no secret in its request.
+fn with_claude(base_url: &str, credential: Option<&str>) -> RecipeSave {
     let mut recipe = save();
     recipe.claude = Some(EndpointSave {
         base_url: base_url.into(),
-        token: token.map(str::to_string),
+        token_credential: credential.map(str::to_string),
     });
     recipe
 }
 
-/// The stored Claude Code token of recipe `name`, read through the store.
+/// Observe setup's resolved value privately; recipe storage contains only names.
 async fn claude_token(store: &HelmStore, name: &str) -> Option<String> {
-    store
+    let endpoint = store
         .tensorlake_recipes()
         .await
         .unwrap()
@@ -48,8 +65,8 @@ async fn claude_token(store: &HelmStore, name: &str) -> Option<String> {
         .find(|(stored, _)| stored == name)
         .expect("the recipe exists")
         .1
-        .claude
-        .and_then(|endpoint| endpoint.token)
+        .claude?;
+    store.resolve_endpoint(endpoint).await.unwrap().token
 }
 
 /// Read `(spec_json, state_json, created_at)` of a row straight from the table.
@@ -74,14 +91,14 @@ async fn raw_row(store: &HelmStore, name: &str) -> (String, String, i64) {
 ///
 /// Why: "New recipe" must never overwrite a recipe (another client may have
 /// created the same name meanwhile), and an overwrite would also silently
-/// replace the other recipe's tokens.
+/// replace the other recipe's endpoint choices.
 #[farhelm_testtrace::test]
 async fn create_refuses_an_existing_name_and_invalid_input() {
     let (_dir, store) = store().await;
     store
         .create_tensorlake_recipe(
             "rust-dev".into(),
-            with_claude("http://127.0.0.1:8080", Some(TOKEN)),
+            with_claude("http://127.0.0.1:8080", Some(ENDPOINT)),
         )
         .await
         .unwrap()
@@ -209,17 +226,11 @@ async fn updates_write_the_spec_and_never_the_build_state() {
     assert!(store.tensorlake_recipes().await.unwrap().is_empty());
 }
 
-/// Spec: an omitted token survives an update only while the endpoint's
-/// origin (scheme, host, effective port) is unchanged; a path change keeps
-/// it, an origin change drops it, an empty token clears it, a new token
-/// replaces it, and removing the endpoint drops its token.
-///
-/// Why: the form never receives the saved token, so "leave blank to keep" is
-/// the only way to edit a recipe without retyping it. Resolving that against
-/// the stored row inside the save is what stops a stale form from moving a
-/// token to a server the user did not intend to send it to (ntfy's rule).
+/// A named choice survives a server change, and replacing that catalog entry
+/// changes setup's resolved value without editing any recipe. A used entry is
+/// undeletable until the recipe explicitly stops referring to it.
 #[farhelm_testtrace::test]
-async fn endpoint_tokens_follow_the_origin_rule() {
+async fn endpoint_references_survive_url_changes_and_track_replacements() {
     let (_dir, store) = store().await;
     let name = "rust-dev";
     let update = |recipe: RecipeSave| {
@@ -235,49 +246,196 @@ async fn endpoint_tokens_follow_the_origin_rule() {
     store
         .create_tensorlake_recipe(
             name.into(),
-            with_claude("http://127.0.0.1:8080", Some(TOKEN)),
+            with_claude("http://127.0.0.1:8080", Some(ENDPOINT)),
         )
         .await
         .unwrap()
         .unwrap_or_else(|_| panic!("create succeeds"));
     assert_eq!(claude_token(&store, name).await.as_deref(), Some(TOKEN));
 
-    update(with_claude("http://127.0.0.1:8080/v1", None)).await;
+    update(with_claude("https://another.example/v1", Some(ENDPOINT))).await;
+    let before = raw_row(&store, name).await;
+    assert!(!before.0.contains(TOKEN));
+    assert!(before.0.contains(ENDPOINT));
+    let metadata = store
+        .credentials()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.name == ENDPOINT)
+        .unwrap();
+    assert_eq!(metadata.used_by, vec![name]);
+    assert!(matches!(
+        store.delete_credential(ENDPOINT.into()).await,
+        Err(crate::credentials::Refusal::InUse)
+    ));
+    store
+        .save_credential(
+            ENDPOINT.into(),
+            farhelm_proto::credentials::SaveCredential {
+                secret: Some(OTHER_TOKEN.into()),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        raw_row(&store, name).await,
+        before,
+        "replacement does not edit the recipe"
+    );
     assert_eq!(
         claude_token(&store, name).await.as_deref(),
-        Some(TOKEN),
-        "same origin, other path: kept"
+        Some(OTHER_TOKEN)
     );
-    update(with_claude("HTTP://127.0.0.1:8080", None)).await;
-    assert_eq!(
-        claude_token(&store, name).await.as_deref(),
-        Some(TOKEN),
-        "same origin spelled differently: kept"
-    );
-    update(with_claude("http://127.0.0.1:9090", None)).await;
-    assert_eq!(
-        claude_token(&store, name).await,
-        None,
-        "origin change: dropped"
-    );
-
-    update(with_claude("http://127.0.0.1:8080", Some(TOKEN))).await;
-    update(with_claude("http://127.0.0.1:8080", Some(OTHER_TOKEN))).await;
-    assert_eq!(
-        claude_token(&store, name).await.as_deref(),
-        Some(OTHER_TOKEN),
-        "replaced"
-    );
-    update(with_claude("http://127.0.0.1:8080", Some(""))).await;
-    assert_eq!(claude_token(&store, name).await, None, "cleared");
-
-    update(with_claude("http://127.0.0.1:8080", Some(TOKEN))).await;
-    update(save()).await;
     update(with_claude("http://127.0.0.1:8080", None)).await;
+    assert_eq!(claude_token(&store, name).await, None);
+    store.delete_credential(ENDPOINT.into()).await.unwrap();
+}
+
+/// Missing and wrong-kind names cannot enter either a new or an existing
+/// recipe. Checking only the picker would let stale or external clients save
+/// an unusable definition, while resolving secret bytes is unnecessary here.
+#[farhelm_testtrace::test]
+async fn missing_and_wrong_kind_references_are_refused_atomically() {
+    let (_dir, store) = store().await;
+    store
+        .create_credential(farhelm_proto::credentials::CreateCredential {
+            name: "github-only".into(),
+            kind: farhelm_proto::credentials::CredentialKind::GithubToken,
+            secret: TOKEN.into(),
+        })
+        .await
+        .unwrap();
+    super::tests_support::create(&store, "existing").await;
+    let before = raw_row(&store, "existing").await;
+    for name in ["missing", "github-only"] {
+        let recipe = with_claude("https://proxy.example/v1", Some(name));
+        assert!(matches!(
+            store
+                .create_tensorlake_recipe("new".into(), recipe.clone())
+                .await
+                .unwrap(),
+            Err(Refusal::Invalid(_))
+        ));
+        assert!(matches!(
+            store
+                .update_tensorlake_recipe("existing".into(), recipe)
+                .await
+                .unwrap(),
+            Err(Refusal::Invalid(_))
+        ));
+        assert_eq!(raw_row(&store, "existing").await, before);
+    }
+    assert_eq!(store.tensorlake_recipes().await.unwrap().len(), 1);
+}
+
+/// Independent SQLite connections race admission against deletion. Exactly
+/// one operation can succeed: no committed recipe may reference the deleted
+/// identity. Exercise create and update, which historically had different
+/// transaction boundaries, without timing sleeps or process-global state.
+#[farhelm_testtrace::test]
+async fn recipe_reference_admission_and_credential_delete_have_one_winner() {
+    for creating in [true, false] {
+        let (dir, writer) = store().await;
+        if !creating {
+            super::tests_support::create(&writer, "racing").await;
+        }
+        let deleter = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        assert!(
+            writer
+                .credentials()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.name == ENDPOINT)
+        );
+        let write = async {
+            let recipe = with_claude("https://proxy.example/v1", Some(ENDPOINT));
+            if creating {
+                writer
+                    .create_tensorlake_recipe("racing".into(), recipe)
+                    .await
+            } else {
+                writer
+                    .update_tensorlake_recipe("racing".into(), recipe)
+                    .await
+            }
+        };
+        let (written, deleted) = tokio::join!(write, deleter.delete_credential(ENDPOINT.into()));
+        let written = written.unwrap();
+        assert_ne!(
+            written.is_ok(),
+            deleted.is_ok(),
+            "exactly one competing write succeeds"
+        );
+        let catalog = writer.credentials().await.unwrap();
+        if written.is_ok() {
+            assert!(matches!(deleted, Err(crate::credentials::Refusal::InUse)));
+            assert_eq!(
+                catalog
+                    .iter()
+                    .find(|row| row.name == ENDPOINT)
+                    .unwrap()
+                    .used_by,
+                vec!["racing"]
+            );
+        } else {
+            assert!(matches!(written, Err(Refusal::Invalid(_))));
+            assert!(!catalog.iter().any(|row| row.name == ENDPOINT));
+            for (_, recipe) in writer.tensorlake_recipes().await.unwrap() {
+                assert!(
+                    recipe
+                        .claude
+                        .as_ref()
+                        .and_then(|endpoint| endpoint.token_credential.as_deref())
+                        != Some(ENDPOINT)
+                );
+            }
+        }
+    }
+}
+
+/// Upgrade drops embedded tokens instead of inventing catalog identities. All
+/// other definition fields and the build's billed-resource record survive;
+/// a database version change must not silently lose ownership of a sandbox.
+#[farhelm_testtrace::test]
+async fn schema_75_drops_embedded_tokens_and_preserves_recipe_and_build_state() {
+    let (dir, store) = store().await;
+    let catalog_before = store.credentials().await.unwrap();
+    let mut spec = serde_json::to_value(save()).unwrap();
+    spec["claude"] = serde_json::json!({"base_url":"https://claude.example/v1", "token":"legacy-claude-private-value"});
+    spec["codex"] = serde_json::json!({"base_url":"https://codex.example/v1", "token":"legacy-codex-private-value"});
+    spec["future_setting"] = serde_json::json!({"keep":true});
+    let json = serde_json::to_string(&spec).unwrap();
+    let state = "{ \"builder_sandbox_id\": \"sbx456\" }";
+    store.conn().call("plant schema75 recipe", move |conn| {
+        conn.execute("INSERT INTO tensorlake_recipes (name, spec_json, state_json, created_at, updated_at) VALUES ('legacy', ?1, ?2, 7, 8)", rusqlite::params![json, state])?;
+        conn.execute_batch("PRAGMA user_version = 75;")?;
+        Ok(())
+    }).await.unwrap();
+    drop(store);
+    let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+    let (migrated, build_state, created) = raw_row(&store, "legacy").await;
+    assert!(!migrated.contains("legacy-claude-private-value"));
+    assert!(!migrated.contains("legacy-codex-private-value"));
+    spec["claude"].as_object_mut().unwrap().remove("token");
+    spec["codex"].as_object_mut().unwrap().remove("token");
     assert_eq!(
-        claude_token(&store, name).await,
-        None,
-        "removing the endpoint dropped its token; re-adding it does not restore it"
+        serde_json::from_str::<serde_json::Value>(&migrated).unwrap(),
+        spec
+    );
+    assert_eq!(build_state, state);
+    assert_eq!(created, 7);
+    assert_eq!(store.credentials().await.unwrap(), catalog_before);
+    let recipes = store.tensorlake_recipes().await.unwrap();
+    assert!(
+        recipes[0]
+            .1
+            .claude
+            .as_ref()
+            .unwrap()
+            .token_credential
+            .is_none()
     );
 }
 
@@ -317,7 +475,9 @@ async fn an_unreadable_row_fails_the_listing_without_quoting_it() {
 
 /// A helm with offline host actors; recipes need nothing else.
 async fn helm() -> Harness {
-    FleetBuilder::new().await.start().await
+    let harness = FleetBuilder::new().await.start().await;
+    seed_credentials(&harness.store).await;
+    harness
 }
 
 /// One request through the real protected router.
@@ -437,7 +597,7 @@ async fn routes_create_update_and_delete_with_distinct_refusals() {
 }
 
 /// Spec: no reply (create, update, list, a validation refusal, a malformed
-/// body) contains a saved or submitted token; reads report `token_set`.
+/// body) contains a saved or submitted token; reads report only its name.
 ///
 /// Why: tokens are write-only, like the ntfy token and the Tensorlake API
 /// key. Every client of the helm can read these routes, and nothing needs a
@@ -446,7 +606,7 @@ async fn routes_create_update_and_delete_with_distinct_refusals() {
 #[farhelm_testtrace::test]
 async fn tokens_never_appear_in_replies() {
     let harness = helm().await;
-    let recipe = with_claude("http://127.0.0.1:8080", Some(TOKEN));
+    let recipe = with_claude("http://127.0.0.1:8080", Some(ENDPOINT));
     let (status, body) = call(
         &harness,
         "POST",
@@ -461,17 +621,17 @@ async fn tokens_never_appear_in_replies() {
         view.claude,
         Some(EndpointView {
             base_url: "http://127.0.0.1:8080".into(),
-            token_set: true
+            token_credential: Some(ENDPOINT.into())
         })
     );
     assert_eq!(view.codex, None);
 
     let (_, body) = call(&harness, "GET", "/api/tensorlake/recipes", None).await;
     assert!(!body.contains(TOKEN), "{body}");
-    assert!(body.contains(r#""token_set":true"#), "{body}");
+    assert!(body.contains(ENDPOINT), "{body}");
 
-    // Keep the token across an unrelated edit, then read it back only as a flag.
-    let mut edited = with_claude("http://127.0.0.1:8080", None);
+    // An unrelated edit carries the same name and never a secret value.
+    let mut edited = with_claude("http://127.0.0.1:8080", Some(ENDPOINT));
     edited.size.cpus = 4;
     let (status, body) = call(
         &harness,
@@ -482,11 +642,11 @@ async fn tokens_never_appear_in_replies() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert!(!body.contains(TOKEN));
-    assert!(body.contains(r#""token_set":true"#), "{body}");
+    assert!(body.contains(ENDPOINT), "{body}");
     assert_eq!(
         claude_token(&harness.store, "rust-dev").await.as_deref(),
         Some(TOKEN),
-        "premise: the token is stored, so its absence above is the redaction"
+        "premise: setup can resolve the saved value, while API replies cannot"
     );
 
     // A token that fails validation, and bodies that do not decode.
@@ -503,9 +663,16 @@ async fn tokens_never_appear_in_replies() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(!body.contains(OTHER_TOKEN), "{body}");
+    let mut legacy = serde_json::to_value(CreateRecipe {
+        name: "legacy".into(),
+        recipe: with_claude("http://127.0.0.1:8080", None),
+    })
+    .unwrap();
+    legacy["recipe"]["claude"]["token"] = serde_json::json!(OTHER_TOKEN);
     for malformed in [
         format!(r#"{{"name":"x","recipe":{{"size":"{OTHER_TOKEN}"}}}}"#),
         format!(r#"{{"name":"x","recipe":{{}},"{OTHER_TOKEN}":1}}"#),
+        serde_json::to_string(&legacy).unwrap(),
     ] {
         let (status, body) =
             call(&harness, "POST", "/api/tensorlake/recipes", Some(malformed)).await;

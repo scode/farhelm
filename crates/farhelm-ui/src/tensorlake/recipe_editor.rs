@@ -13,9 +13,8 @@
 //! Requests follow the explicit-save pattern of the ntfy form: they are
 //! declared in the click handler and spawned with `spawn_forever`, so closing
 //! Settings does not retract an accepted save, and they touch component state
-//! only while it is still mounted. Saved endpoint tokens never reach the
-//! form; a blank token field keeps the saved one under the helm's origin
-//! rule, which the form explains before saving.
+//! only while it is still mounted. Endpoints select credential names from
+//! the metadata catalog; token values never enter the recipe draft or save.
 //!
 //! Wording follows the goal's UI decisions: the built artifact is a
 //! "snapshot", never a "template" (that word means launch templates), and the
@@ -47,13 +46,11 @@ enum Software {
     Snapshot,
 }
 
-/// One agent endpoint as typed. `token` is a replacement only (the saved one
-/// is never loaded); `clear` asks the helm to drop the saved token.
+/// One endpoint's URL and named credential selection, with no secret draft.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct EndpointDraft {
     base_url: String,
-    token: String,
-    clear: bool,
+    token_credential: String,
 }
 
 /// One tunnel row as typed. Ports stay text until save so a half-typed row
@@ -66,7 +63,7 @@ struct TunnelDraft {
 }
 
 /// The editor's whole form state. Equality with the baseline (the form as
-/// opened) is what "unsaved changes" means, so a typed replacement token
+/// opened) is what "unsaved changes" means, so a different credential selection
 /// counts as a change and an edit typed back to its original does not.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Draft {
@@ -129,7 +126,10 @@ impl Draft {
                 .as_ref()
                 .map(|endpoint| endpoint.base_url.clone())
                 .unwrap_or_default(),
-            ..EndpointDraft::default()
+            token_credential: view
+                .as_ref()
+                .and_then(|endpoint| endpoint.token_credential.clone())
+                .unwrap_or_default(),
         };
         draft.claude = endpoint(&view.claude);
         draft.codex = endpoint(&view.codex);
@@ -189,8 +189,8 @@ impl Draft {
         let save = RecipeSave {
             size,
             source,
-            claude: endpoint_save("Claude Code", &self.claude)?,
-            codex: endpoint_save("Codex", &self.codex)?,
+            claude: endpoint_save(&self.claude),
+            codex: endpoint_save(&self.codex),
             tunnels,
         };
         check_recipe(&save)?;
@@ -200,64 +200,18 @@ impl Draft {
 
 /// The save shape of one endpoint draft.
 ///
-/// A blank base URL means "no endpoint", which also drops a saved token; a
-/// replacement token without a base URL is a mistake worth saying so about.
-/// With a base URL, `clear` sends an empty token (drop it), a typed token
-/// replaces it, and a blank field sends none (the helm keeps the saved one if
-/// the origin is unchanged).
-fn endpoint_save(agent: &str, draft: &EndpointDraft) -> Result<Option<EndpointSave>, String> {
+/// A blank base URL removes the endpoint's reference; the catalog value stays
+/// saved. Unlike an unsaved secret, a name needs no discard warning of its own.
+fn endpoint_save(draft: &EndpointDraft) -> Option<EndpointSave> {
     let base_url = draft.base_url.trim();
     if base_url.is_empty() {
-        if !draft.token.is_empty() && !draft.clear {
-            return Err(format!(
-                "{agent}: enter a base URL, or remove the token you typed"
-            ));
-        }
-        return Ok(None);
+        return None;
     }
-    let token = if draft.clear {
-        Some(String::new())
-    } else if draft.token.is_empty() {
-        None
-    } else {
-        Some(draft.token.clone())
-    };
-    Ok(Some(EndpointSave {
+    Some(EndpointSave {
         base_url: base_url.to_string(),
-        token,
-    }))
-}
-
-/// What happens to a saved token when this draft is saved, for the token
-/// field's placeholder and the hint below it. Mirrors the helm's rule, but
-/// the helm decides: a stale form cannot keep a token by this prediction.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TokenFate {
-    /// No token is saved for this endpoint.
-    None,
-    /// The saved token stays.
-    Kept,
-    /// A typed token replaces the saved one.
-    Replaced,
-    /// The saved token is dropped: cleared, origin changed, or the endpoint
-    /// removed.
-    Dropped,
-}
-
-/// Predict [`TokenFate`] for one endpoint from what is saved and the draft.
-fn token_fate(saved: Option<&EndpointView>, draft: &EndpointDraft) -> TokenFate {
-    let Some(saved) = saved.filter(|saved| saved.token_set) else {
-        return TokenFate::None;
-    };
-    if draft.clear || draft.base_url.trim().is_empty() {
-        TokenFate::Dropped
-    } else if !draft.token.is_empty() {
-        TokenFate::Replaced
-    } else if crate::ntfy_settings::server_origin_changed(&saved.base_url, draft.base_url.trim()) {
-        TokenFate::Dropped
-    } else {
-        TokenFate::Kept
-    }
+        token_credential: (!draft.token_credential.is_empty())
+            .then(|| draft.token_credential.clone()),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -378,6 +332,7 @@ pub(crate) fn RecipeEditor(
     #[props(default)] on_deleted: Option<EventHandler<String>>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    let catalog = crate::credentials_settings::use_catalog();
     let opened = existing.clone();
     let baseline = use_hook(|| {
         opened
@@ -534,8 +489,6 @@ pub(crate) fn RecipeEditor(
 
     let leave_shown = leave_prompt.current();
     let delete_shown = delete_prompt.current();
-    let saved_claude = existing.as_ref().and_then(|view| view.claude.clone());
-    let saved_codex = existing.as_ref().and_then(|view| view.codex.clone());
     let software = draft.read().software;
     let tunnels = draft.read().tunnels.clone();
     let shown_name = existing
@@ -699,10 +652,17 @@ pub(crate) fn RecipeEditor(
                 p { class: "host-settings-help",
                     "Optionally point either agent at an API endpoint. The base URL usually points at a tunnel's sandbox port, such as http://127.0.0.1:8080. Farhelm writes these into each host's agent settings when it sets the host up."
                 }
-                EndpointFields { agent: Agent::Claude, draft, locked, saved: saved_claude.clone(), error }
-                EndpointFields { agent: Agent::Codex, draft, locked, saved: saved_codex.clone(), error }
+                if let Some(reason) = (catalog.error)() {
+                    p { class: "checkout-root-error", role: "alert", "{reason}" }
+                    button { r#type: "button", class: "btn btn-neutral", disabled: locked,
+                        "data-tooltip": "Load the named credentials again", onclick: move |_| catalog.reload.call(()), "Retry loading credentials" }
+                } else if (catalog.rows)().is_none() {
+                    p { role: "status", "Loading endpoint credentials…" }
+                }
+                EndpointFields { agent: Agent::Claude, draft, locked, credentials: (catalog.rows)(), error }
+                EndpointFields { agent: Agent::Codex, draft, locked, credentials: (catalog.rows)(), error }
                 p { class: "host-settings-help",
-                    "Tokens are stored unencrypted in the helm's state on this machine. Farhelm never shows them again."
+                    "Add or replace endpoint tokens in Settings → Credentials. This recipe saves their names, not their values."
                 }
             }
 
@@ -835,15 +795,6 @@ impl Agent {
         }
     }
 
-    /// What the agent's own configuration calls the token: Claude Code's
-    /// `ANTHROPIC_AUTH_TOKEN`, Codex's `experimental_bearer_token`.
-    fn token_label(self) -> &'static str {
-        match self {
-            Agent::Claude => "Auth token",
-            Agent::Codex => "Bearer token",
-        }
-    }
-
     /// The draft's endpoint for this agent, to read.
     fn endpoint_ref(self, draft: &Draft) -> &EndpointDraft {
         match self {
@@ -861,35 +812,31 @@ impl Agent {
     }
 }
 
-/// One agent's endpoint fields: base URL, a write-only token, and a clear
-/// switch when a token is saved.
-///
-/// The token field never shows the saved token; its placeholder says what
-/// saving will do to it ([`token_fate`]), and a hint appears when an origin
-/// change would drop it, the way the ntfy form explains its own token.
-/// `new-password` rather than `off`: browsers ignore `off` for password
-/// fields and could otherwise fill the helm's own saved web token here, which
-/// would then be sent to the endpoint.
+/// A URL and an endpoint-token identity. Keep a disappeared draft selection
+/// visible as unavailable: silently displaying None would conceal the value
+/// the next save actually submits. The store remains admission authority.
 #[component]
 fn EndpointFields(
     agent: Agent,
     draft: Signal<Draft>,
     locked: bool,
-    saved: Option<EndpointView>,
+    credentials: Option<Vec<farhelm_proto::credentials::Credential>>,
     error: Signal<Option<String>>,
 ) -> Element {
     let mut draft = draft;
     let mut error = error;
     let current = agent.endpoint_ref(&draft.read()).clone();
-    let fate = token_fate(saved.as_ref(), &current);
-    let token_set = saved.as_ref().is_some_and(|saved| saved.token_set);
     let label = agent.label();
-    let token_label = agent.token_label();
-    let placeholder = match fate {
-        TokenFate::None => "Optional",
-        TokenFate::Kept | TokenFate::Replaced => "Token saved; leave blank to keep it",
-        TokenFate::Dropped => "Saved token will be cleared",
-    };
+    let loaded = credentials.is_some();
+    let entries = credentials
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|row| row.kind == farhelm_proto::credentials::CredentialKind::EndpointToken)
+        .collect::<Vec<_>>();
+    let missing = !current.token_credential.is_empty()
+        && !entries
+            .iter()
+            .any(|row| row.name == current.token_credential);
     rsx! {
         div { class: "recipe-endpoint", role: "group", aria_label: "{label} endpoint",
             label { class: "checkout-root-label", span { "{label} base URL" }
@@ -898,22 +845,26 @@ fn EndpointFields(
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                     oninput: move |event| { agent.endpoint(&mut draft.write()).base_url = event.value(); error.set(None); } }
             }
-            label { class: "checkout-root-label", span { "{label} {token_label.to_lowercase()}" }
-                input { r#type: "password", class: "recipe-token", value: "{current.token}", readonly: locked || current.clear,
-                    autocomplete: "new-password", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                    placeholder,
-                    oninput: move |event| { agent.endpoint(&mut draft.write()).token = event.value(); error.set(None); } }
-            }
-            if token_set && fate == TokenFate::Dropped && !current.clear && !current.base_url.trim().is_empty() {
-                p { class: "host-settings-help recipe-token-origin-hint", "Changing the server clears the saved token when you save" }
-            }
-            if token_set {
-                label { class: "app-settings-choice setting-row",
-                    span { "Clear saved {token_label.to_lowercase()}" }
-                    input { r#type: "checkbox", class: "control-switch", checked: current.clear, disabled: locked,
-                        onchange: move |event| { agent.endpoint(&mut draft.write()).clear = event.checked(); error.set(None); } }
+            label { class: "checkout-root-label", span { "{label} endpoint token" }
+                // Keep the control's label independent of the changing option
+                // text inside its wrapping label, including unavailable names.
+                select { class: "recipe-credential font-mono", aria_label: "{label} endpoint token",
+                    value: "{current.token_credential}", disabled: locked || !loaded,
+                    onchange: move |event| { agent.endpoint(&mut draft.write()).token_credential = event.value(); error.set(None); },
+                    // Replacing the selected option does not change the draft
+                    // value. Mark its replacement selected explicitly so the
+                    // browser cannot fall back to None while the draft keeps
+                    // submitting the disappeared credential's name.
+                    option { value: "", selected: current.token_credential.is_empty(), "None" }
+                    if missing {
+                        option { value: "{current.token_credential}", selected: true, disabled: true,
+                            if loaded { "{current.token_credential} (unavailable)" } else { "{current.token_credential}" } }
+                    }
+                    for row in &entries { option { key: "{row.name}", value: "{row.name}",
+                        selected: row.name == current.token_credential, "{row.name}" } }
                 }
             }
+            if loaded && missing { p { class: "checkout-root-error", role: "alert", "The selected endpoint credential is unavailable. Choose another or None." } }
         }
     }
 }

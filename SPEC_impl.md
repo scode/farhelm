@@ -5896,11 +5896,19 @@ revision. JSON decoder and database diagnostics never enter responses or logs. S
 Debug implementation. Tokens reuse the visible-ASCII 4096-byte bound; Codex accepts only a JSON object of at most 64
 KiB, preserving vendor fields. The 512 KiB request cap permits JSON escaping of the bounded pasted file.
 
+Credential metadata includes the names of recipes referring to it. The same reference query protects deletion inside its
+immediate transaction. Both recipe create and update check existence and endpoint-token kind inside their own immediate
+write transactions; this excludes a competing delete even across independent SQLite connections. Saving a recipe checks
+metadata alone. Setup resolves values into a transient `ResolvedEndpoint` with neither Debug nor Serialize; persisted
+`StoredEndpoint` contains only `base_url` and optional `token_credential`.
+
 The Settings dialog owns one Tensorlake account context above both mounted panels. Key editors share only acknowledged
 metadata, key/test discovery revisions and serialization of key requests. Their secret drafts and outcomes stay local.
 Accepted API saves survive editor dismissal, with mounted fences preventing late responses from touching retired
 signals. A native file selection fills the Codex draft and never submits it; a generation check discards reads
-superseded by paste, agent selection or submission.
+superseded by paste, agent selection or submission. The metadata-only catalog reader also populates endpoint pickers in
+Settings and Add host, independently of whether Credentials is mounted. Failed refreshes keep the last good list. Feed
+updates refresh an open credential editor's use metadata without replacing its secret draft.
 
 ## Tensorlake account
 
@@ -6053,13 +6061,13 @@ snapshot builder's sandbox name (`farhelm-build-<helm tag>-<recipe>`), so it mus
 Tensorlake name, and mapping it without sanitizing keeps two recipes from sharing a builder. Package words must start
 with a lowercase letter or digit: the build shell-quotes them, but apt-get still reads a quoted `-o...` word as an
 option. Tunnel hosts are DNS names, IPv4 literals or bracketed IPv6 literals, the shape an ssh `-R` forward carries
-without quoting. Endpoint base URLs are http(s) without credentials, query or fragment, and tokens are at most 4096
-visible ASCII bytes. Token preservation is the ntfy rule, resolved against the stored row inside the update's immediate
-transaction: an omitted token survives only for the same origin, an empty one clears, any other replaces, and removing
-an endpoint drops its token. A request body that does not decode is refused with a fixed message, because serde's
-diagnostic can quote submitted text, and stored rows that do not decode fail the listing without quoting their content.
-Successful writes bump the invalidation feed, and the Settings list re-reads on each notice. Write bodies are capped at
-64 KiB.
+without quoting. Endpoint base URLs are http(s) without credentials, query or fragment. Endpoints name an optional
+endpoint-token credential; None is an explicit selection, and a URL change retains the named choice. Schema 76 removes
+the old `claude.token` and `codex.token` JSON fields without importing values or changing `state_json`, so users
+re-enter their endpoint tokens in Credentials. Request decoding rejects the old token fields. A request body that does
+not decode is refused with a fixed message, because serde's diagnostic can quote submitted text, and stored rows that do
+not decode fail the listing without quoting their content. Successful writes bump the invalidation feed, and the
+Settings list re-reads on each notice. Write bodies are capped at 64 KiB.
 
 ## Tensorlake snapshot builds
 

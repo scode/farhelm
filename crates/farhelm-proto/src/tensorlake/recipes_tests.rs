@@ -186,14 +186,13 @@ fn reused_images_and_snapshots_have_narrow_shapes() {
 }
 
 /// Spec: an endpoint's base URL is http(s) with a host, optional port and
-/// path, and no credentials, query or fragment; a replacement token is 1 to
-/// 4096 visible ASCII bytes, and an empty one (clear) is accepted.
+/// path, and no credentials, query or fragment; named endpoint credentials
+/// use the same immutable-name grammar as recipes.
 ///
-/// Why: the URL and token are written into agent configuration in the
-/// sandbox. Credentials in a URL would be a second, unannounced secret, and a
-/// token with whitespace or controls would corrupt the files it is written to.
+/// Why: URLs must not smuggle a second secret, and credential names must be
+/// usable identities. Secret validation belongs to the separate catalog.
 #[test]
-fn endpoint_urls_and_tokens_are_checked() {
+fn endpoint_urls_and_credential_names_are_checked() {
     for good in [
         "http://127.0.0.1:8080",
         "https://lb.internal/v1",
@@ -220,23 +219,26 @@ fn endpoint_urls_and_tokens_are_checked() {
     ] {
         assert!(check_base_url(bad).is_err(), "{bad:?}");
     }
-    let with_token = |token: Option<&str>| {
+    let with_token = |name: Option<&str>| {
         let mut save = recipe();
         save.claude = Some(EndpointSave {
             base_url: "http://127.0.0.1:8080".into(),
-            token: token.map(str::to_string),
+            token_credential: name.map(str::to_string),
         });
         check_recipe(&save)
     };
     assert_eq!(with_token(None), Ok(()));
-    assert_eq!(with_token(Some("")), Ok(()), "empty clears");
-    assert_eq!(with_token(Some("sk-abc_123")), Ok(()));
+    assert!(
+        with_token(Some("")).is_err(),
+        "None is explicit; an empty identity is invalid"
+    );
+    assert_eq!(with_token(Some("work-endpoint")), Ok(()));
     assert!(with_token(Some("has space")).is_err());
-    assert!(with_token(Some(&"t".repeat(TOKEN_CAP + 1))).is_err());
+    assert!(with_token(Some(&"t".repeat(RECIPE_NAME_CAP + 1))).is_err());
     let mut save = recipe();
     save.codex = Some(EndpointSave {
         base_url: "http://user@host".into(),
-        token: None,
+        token_credential: None,
     });
     assert!(check_recipe(&save).unwrap_err().starts_with("Codex: "));
 }
@@ -319,7 +321,8 @@ fn wire_shapes_are_tagged_and_saves_are_strict() {
     );
     let strict = |edit: &dyn Fn(&mut serde_json::Value)| {
         let mut save = serde_json::to_value(recipe()).unwrap();
-        save["claude"] = serde_json::json!({"base_url": "http://127.0.0.1:8080", "token": null});
+        save["claude"] =
+            serde_json::json!({"base_url": "http://127.0.0.1:8080", "token_credential": null});
         save["tunnels"] = serde_json::json!([{"sandbox_port": 8080, "host": "h", "port": 8080}]);
         assert!(
             serde_json::from_value::<RecipeSave>(save.clone()).is_ok(),

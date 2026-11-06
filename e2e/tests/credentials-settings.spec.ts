@@ -115,3 +115,85 @@ test("the two Tensorlake key forms share acknowledged metadata and separate draf
     expect(response.ok()).toBe(true);
   }
 });
+
+/** Reference notices must reach an editor that is already open without
+ * replacing its unsaved secret. Recipe pickers must filter by kind and retain
+ * a disappeared draft choice until the user explicitly selects None.
+ */
+test("recipe references refresh deletion guards and preserve unavailable picker choices", async ({ page, request }) => {
+  const endpoint = "e2e-live-endpoint";
+  const github = "e2e-live-github";
+  const recipeName = "e2e-live-recipe";
+  const owned: string[] = [];
+  let ownsRecipe = false;
+  const definition = {
+    size: { cpus: 2, memory_gb: 4, disk_gb: 20 }, source: { kind: "image", image: "example/systemd" },
+    claude: { base_url: "https://proxy.example/v1", token_credential: endpoint as string | null }, codex: null, tunnels: [],
+  };
+  try {
+    for (const [name, kind] of [[endpoint, "endpoint_token"], [github, "github_token"]]) {
+      const created = await request.post("/api/credentials", { data: { name, kind, secret: "fictional-reference-secret" } });
+      expect(created.status(), await created.text()).toBe(201);
+      owned.push(name);
+    }
+    const created = await request.post("/api/tensorlake/recipes", { data: { name: recipeName, recipe: definition } });
+    expect(created.ok(), await created.text()).toBe(true);
+    ownsRecipe = true;
+    await page.goto("/");
+    const dialog = await openSettings(page, "credentials");
+    const panel = dialog.locator("#settings-credentials");
+    await panel.getByRole("button", { name: `Edit ${endpoint}`, exact: true }).click();
+    const editor = panel.locator(".credential-editor");
+    await expect(editor.getByRole("button", { name: "Delete", exact: true })).toBeDisabled();
+    await expect(editor).toContainText(recipeName);
+    await editor.getByLabel("Token", { exact: true }).fill("unsaved-reference-draft");
+    definition.claude.token_credential = null;
+    const cleared = await request.put(`/api/tensorlake/recipes/${recipeName}`, { data: definition });
+    expect(cleared.ok(), await cleared.text()).toBe(true);
+    await expect(editor.getByRole("button", { name: "Delete", exact: true })).toBeEnabled();
+    await expect(editor.getByLabel("Token", { exact: true })).toHaveValue("unsaved-reference-draft");
+    await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+    const catalog = await (await request.get("/api/credentials")).json() as { name: string; revision: number }[];
+    expect(catalog.find((row) => row.name === endpoint)?.revision).toBe(1);
+
+    await selectSettingsSection(page, "tensorlake");
+    await dialog.getByRole("button", { name: `Edit ${recipeName}`, exact: true }).click();
+    const recipeEditor = dialog.getByRole("region", { name: `Recipe: ${recipeName}`, exact: true });
+    const picker = recipeEditor.getByLabel("Claude Code endpoint token", { exact: true });
+    await expect(picker).toBeEnabled();
+    expect(await picker.locator("option").allTextContents()).toContain(endpoint);
+    expect(await picker.locator("option").allTextContents()).not.toContain(github);
+    await picker.selectOption(endpoint);
+    const removed = await request.delete(`/api/credentials/${endpoint}`);
+    expect(removed.ok(), await removed.text()).toBe(true);
+    await expect(picker).toHaveValue(endpoint);
+    await expect(picker.locator("option:checked")).toHaveText(`${endpoint} (unavailable)`);
+    const refused = page.waitForResponse((response) => response.url().endsWith(`/api/tensorlake/recipes/${recipeName}`) && response.request().method() === "PUT");
+    await recipeEditor.getByRole("button", { name: "Save", exact: true }).click();
+    expect((await refused).status()).toBe(400);
+    await expect(recipeEditor.locator(".recipe-editor-sticky-actions").getByRole("alert")).toContainText("select an existing API endpoint token");
+    await picker.selectOption("");
+    await expect(picker).toHaveValue("");
+    await expect(recipeEditor.getByText("The selected endpoint credential is unavailable. Choose another or None.", { exact: true })).toHaveCount(0);
+    // None restores the saved selection, so change the URL to exercise an
+    // actual successful save rather than clicking the unchanged-form answer.
+    await recipeEditor.getByLabel("Claude Code base URL", { exact: true }).fill("https://another.example/v1");
+    await expect(recipeEditor.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+    await recipeEditor.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(recipeEditor).toHaveCount(0);
+    const response = await request.get("/api/tensorlake/recipes");
+    expect(response.ok(), await response.text()).toBe(true);
+    const listed = await response.json() as { recipes: { name: string; claude: { token_credential: string | null } }[] };
+    expect(listed.recipes.find((recipe) => recipe.name === recipeName)?.claude.token_credential).toBeNull();
+  } finally {
+    if (!page.isClosed()) await page.goto("about:blank");
+    if (ownsRecipe) {
+      const recipe = await request.delete(`/api/tensorlake/recipes/${recipeName}`);
+      expect([200, 404], await recipe.text()).toContain(recipe.status());
+    }
+    for (const name of owned) {
+      const removed = await request.delete(`/api/credentials/${name}`);
+      expect([200, 404], await removed.text()).toContain(removed.status());
+    }
+  }
+});
