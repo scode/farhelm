@@ -18,7 +18,8 @@ import { resolveToken } from "./helpers/color";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import fs from "node:fs";
 import { renameSession, stubFeed } from "./helpers/fleet";
-import { attachSession, cleanupSession, restartIdleAgent, termText, waitForTermText, onHostTerminals } from "./helpers/term";
+import { attachSession, cleanupSession, restartIdleAgent, termText, waitForTermText } from "./helpers/term";
+import { OLD_TERMINAL_TAG } from "../suite-terminals";
 import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { routeGate } from "./helpers/route-gate";
 import {
@@ -667,14 +668,13 @@ test("a displaced view discovers the winner's new tab without attaching it, unti
 // terminal and the sibling tab are proven unaffected by INPUT round trips,
 // not merely by their counters staying zero: a page that had wedged
 // entirely would also report zero pauses everywhere.
-test("stalling one tab's writes pauses only that tab; the agent and a sibling stay live", async ({
+test("stalling one tab's writes pauses only that tab; the agent and a sibling stay live", { tag: OLD_TERMINAL_TAG }, async ({
   page,
   request,
 }) => {
   // xterm.js's write-callback flow control. A grid stream is paced by the
   // helm and the supervisor instead (their own tests pin a paused flood
   // losing nothing), and the grid has no writes to stall.
-  test.skip(onHostTerminals(), "xterm.js's write-callback flow control; grid streams are paced by the helm and supervisor");
   test.setTimeout(180_000);
   const title = `tab-isolation-${Date.now()}`;
   let id: string | undefined;

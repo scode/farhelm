@@ -65,7 +65,8 @@
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
 import { cleanupSession, createSession } from "./helpers/fleet";
-import { attachSession, onHostTerminals, termText, terminalScreen, terminalViewport, waitForTermText } from "./helpers/term";
+import { attachSession, termText, terminalScreen, terminalViewport, waitForTermText } from "./helpers/term";
+import { OLD_TERMINAL_TAG } from "../suite-terminals";
 
 /**
  * The agent terminal's local selection as text, run in the page: xterm.js's
@@ -355,85 +356,101 @@ test("an OSC 52 write from the terminal's own process reaches the system clipboa
   }
 });
 
-test("an OSC 52 read query never receives real clipboard contents (F5)", async ({
-  page,
-  request,
-}) => {
-  const recordedText = await recordOutboundWebSocketText(page);
-  const secret = `secret-e2e-${Date.now()}`;
-  // In a terminal host the query is the supervisor emulator's, which never
-  // answers an OSC 52 read (its query-answer table,
-  // crates/farhelm-terminal-emulator/tests/queries.rs), so there is no
-  // report to wait for; a line printed after the query is what shows it was
-  // parsed. This page-side check sees only what the page sends.
-  const parsedMarker = `osc52-read-parsed-${Date.now()}`;
-  const invocation = gatedShellInvocation(
-    onHostTerminals()
-      ? `printf "\\033]52;c;?\\007"; printf "${parsedMarker}\\n"`
-      : `printf "\\033]52;c;?\\007"`,
+/**
+ * An OSC 52 read query never gets the real clipboard back, on either kind of
+ * terminal: the security property F5 names, which a regression would turn
+ * into any program in a session reading whatever the user last copied.
+ *
+ * The two kinds answer differently, so each has its own case. A new terminal
+ * (the ordinary run) sends no report at all: the supervisor's emulator owns
+ * the query and never answers a read (its query-answer table,
+ * crates/farhelm-terminal-emulator/tests/queries.rs), and the page sends
+ * nothing. An old terminal's xterm.js clipboard add-on answers every query,
+ * and terminal.js's provider makes that answer an empty payload; that case is
+ * in the old-terminal set (OLD_TERMINAL_TAG), since only old sessions have it.
+ */
+for (const terminals of ["new", "old"] as const) {
+  test(
+    terminals === "new"
+      ? "an OSC 52 read query never receives real clipboard contents (F5)"
+      : "an OSC 52 read query on an old terminal is answered with an empty payload (F5)",
+    terminals === "old" ? { tag: OLD_TERMINAL_TAG } : {},
+    async ({ page, request }) => {
+      const recordedText = await recordOutboundWebSocketText(page);
+      const secret = `secret-e2e-${Date.now()}`;
+      // A new terminal sends no report to wait for, so a line printed after the
+      // query is what shows it was parsed. This page-side check sees only what
+      // the page sends.
+      const parsedMarker = `osc52-read-parsed-${Date.now()}`;
+      const invocation = gatedShellInvocation(
+        terminals === "new"
+          ? `printf "\\033]52;c;?\\007"; printf "${parsedMarker}\\n"`
+          : `printf "\\033]52;c;?\\007"`,
+      );
+      const session = await createSession(request, {
+        title: `osc52-read-e2e-${Date.now()}`,
+        cwd: "/tmp",
+        invocation,
+      });
+      try {
+        await page.goto("/");
+        await page.evaluate((value) => navigator.clipboard.writeText(value), secret);
+        // Confirm the seed actually landed before trusting it as a baseline —
+        // see the no-clobber test below for why this matters.
+        await expect
+          .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+          .toBe(secret);
+
+        await attachSession(page, session.id);
+        await page.locator("#terminal").click();
+        await page.keyboard.press("Enter");
+
+        if (terminals === "new") {
+          await waitForTermText(page, parsedMarker, 15_000);
+          expect(
+            await recordedText(),
+            "the page sends no OSC 52 report for a grid terminal, not even an empty one",
+          ).not.toContain("]52;");
+        } else {
+          // The addon answers a query SYNCHRONOUSLY when the provider's
+          // `readText` is not a Promise (`ClipboardAddon.ts`'s own
+          // `_setOrReportClipboard`), which `clipboardProvider` in terminal.js
+          // is by design — so the report is sent as terminal INPUT
+          // (`Terminal.input`, which rides the same `onData` -> WebSocket path
+          // any keystroke does) almost immediately once xterm parses the query.
+          await expect
+            .poll(recordedText, {
+              timeout: 15_000,
+              message: "waiting for the addon's OSC 52 report of the (refused) query",
+            })
+            .toMatch(/\x1b\]52;c;[A-Za-z0-9+/=]*\x07/);
+          const report = (await recordedText()).match(/\x1b\]52;c;([A-Za-z0-9+/=]*)\x07/)!;
+          expect(
+            report[1],
+            "a refused read must report an EMPTY payload, not merely a harmless-looking one",
+          ).toBe("");
+        }
+
+        const text = await recordedText();
+        expect(
+          text,
+          "the secret must never reach the terminal's own input/output in any form",
+        ).not.toContain(secret);
+        expect(
+          text,
+          "the secret's base64 form — the shape a real leak would actually take on the wire — " +
+            "must not appear either",
+        ).not.toContain(Buffer.from(secret, "utf8").toString("base64"));
+        expect(
+          await page.evaluate(() => navigator.clipboard.readText()),
+          "the query must not have disturbed the real clipboard either",
+        ).toBe(secret);
+      } finally {
+        await cleanupSession(request, session.id);
+      }
+    },
   );
-  const session = await createSession(request, {
-    title: `osc52-read-e2e-${Date.now()}`,
-    cwd: "/tmp",
-    invocation,
-  });
-  try {
-    await page.goto("/");
-    await page.evaluate((value) => navigator.clipboard.writeText(value), secret);
-    // Confirm the seed actually landed before trusting it as a baseline —
-    // see the no-clobber test below for why this matters.
-    await expect
-      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-      .toBe(secret);
-
-    await attachSession(page, session.id);
-    await page.locator("#terminal").click();
-    await page.keyboard.press("Enter");
-
-    // The addon answers a query SYNCHRONOUSLY when the provider's
-    // `readText` is not a Promise (`ClipboardAddon.ts`'s own
-    // `_setOrReportClipboard`), which `clipboardProvider` in terminal.js
-    // is by design — so the report is sent as terminal INPUT
-    // (`Terminal.input`, which rides the same `onData` -> WebSocket path
-    // any keystroke does) almost immediately once xterm parses the query.
-    if (onHostTerminals()) {
-      await waitForTermText(page, parsedMarker, 15_000);
-      expect(
-        await recordedText(),
-        "the page sends no OSC 52 report for a grid terminal, not even an empty one",
-      ).not.toContain("]52;");
-    } else {
-      await expect
-        .poll(recordedText, {
-          timeout: 15_000,
-          message: "waiting for the addon's OSC 52 report of the (refused) query",
-        })
-        .toMatch(/\x1b\]52;c;[A-Za-z0-9+/=]*\x07/);
-      const report = (await recordedText()).match(/\x1b\]52;c;([A-Za-z0-9+/=]*)\x07/)!;
-      expect(
-        report[1],
-        "a refused read must report an EMPTY payload, not merely a harmless-looking one",
-      ).toBe("");
-    }
-
-    const text = await recordedText();
-    expect(
-      text,
-      "the secret must never reach the terminal's own input/output in any form",
-    ).not.toContain(secret);
-    expect(
-      text,
-      "the secret's base64 form — the shape a real leak would actually take on the wire — " +
-        "must not appear either",
-    ).not.toContain(Buffer.from(secret, "utf8").toString("base64"));
-    expect(
-      await page.evaluate(() => navigator.clipboard.readText()),
-      "the query must not have disturbed the real clipboard either",
-    ).toBe(secret);
-  } finally {
-    await cleanupSession(request, session.id);
-  }
-});
+}
 
 for (
   const behavior of [

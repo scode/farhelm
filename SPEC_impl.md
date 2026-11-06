@@ -2140,14 +2140,15 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   process's environment, and a systemd unit or an agent's shell could inherit a variable by accident) and never a user
   setting, since which kind new terminals are is the release's decision. The harnesses that run a real supervisor
   process and test old terminals pass `--new-terminals tmux`: the e2e suite's tmux process fixture, the process tests of
-  tmux's own control clients, the browser suite's stacks (`e2e/start-stack.sh`, unless its config sets
-  `FARHELM_E2E_NEW_TERMINALS=host` for the local supervisor, as the host-terminal specs under `e2e/host-terminals/` and
-  the main suite's host-terminal run do; every stack's "remote" supervisor keeps tmux), and the README and docs media
-  stacks, whose captures were designed against tmux terminals. The process-level tests of hosts
-  (`crates/farhelm/tests/e2e/host_processes.rs`) pass `host` explicitly, except the one that checks the bare command's
-  default. The value is fixed for the supervisor's lifetime: it decides only what later creates, tab opens and Restarts
-  start in and never moves a running terminal, and a supervisor restarted with the other value still finds and keeps
-  every terminal it had, of either kind. The flag came with schema 33 (above).
+  tmux's own control clients, the browser suite's old-terminal set (`FARHELM_E2E_SUITE_TERMINALS=tmux`, which starts
+  both of every stack's supervisors with it; `e2e/suite-terminals.ts`), and the README and docs media stacks, whose
+  captures were designed against tmux terminals. The browser suite's ordinary run passes `--new-terminals host` to both
+  supervisors of every stack (`e2e/start-stack.sh`), so it tests new terminals, and checks that every terminal it
+  attaches is one. The process-level tests of hosts (`crates/farhelm/tests/e2e/host_processes.rs`) pass `host`
+  explicitly, except the one that checks the bare command's default. The value is fixed for the supervisor's lifetime:
+  it decides only what later creates, tab opens and Restarts start in and never moves a running terminal, and a
+  supervisor restarted with the other value still finds and keeps every terminal it had, of either kind. The flag came
+  with schema 33 (above).
 - **Creating agents in hosts** (`service/core/host_launch.rs`) is behind that switch, on in every shipped launch. A new
   create, a new tab ("Tabs in hosts" below) and a Restart consult it: with it on, Restart of a tmux session moves the
   session's agent into a host ("Moving an old session into a host" below), and with it off it stays in tmux exactly as
@@ -7447,7 +7448,8 @@ constraint (see the GUI section's motivation), not an afterthought:
 
 - **Playwright (TypeScript) drives the web build in headless Chromium** against a real helm and real supervisor on
   Linux. DOM assertions and screenshots both work because the UI is real DOM. This is the canonical GUI verification
-  path for agents.
+  path for agents. Its stacks create new terminals, as shipped supervisors do; the tests whose subject exists only for
+  old terminals are a separately named old-terminal set that runs against tmux stacks (`e2e/suite-terminals.ts`).
 - **A fake agent** — `farhelm-fixtures fake-agent --script basic|altscreen|binary|mouse-modes|spawn|agent-relay`, from
   the `farhelm-fixtures` package, a test-only binary that is never shipped (the product binary carries no fixtures) —
   stands in for Claude Code/Codex across this suite's integration and e2e tests. Its deterministic scripts cover
@@ -7471,7 +7473,7 @@ constraint (see the GUI section's motivation), not an afterthought:
   the emulator is held to Farhelm's answer table, screen-text format and modes by its own tests (the recorded agents'
   startup probes among them), the status readers by the captured agent screens painted into it, and its snapshot round
   trip by property tests; and the grid client has a static-page browser suite fed recorded grid streams beside the
-  browser specs that run terminals in hosts on a real stack. `.agents/validation.md` names the selections.
+  browser suite, which runs every terminal in a host on a real stack. `.agents/validation.md` names the selections.
 - **`node --test` unit-tests the asset-JS layer's pure functions**, under `crates/farhelm-ui/js-tests/` (outside
   `assets/` for source/test separation — bundling itself is by explicit `asset!` registration, so placement alone
   neither includes nor excludes a file). It currently covers `term-bytes.js`'s byte-domain conversion for

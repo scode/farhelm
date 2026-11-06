@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Boot the real stack for Playwright: TWO supervisors (each with its own
-# private tmux) + helm (loopback, on the port FARHELM_E2E_PORT names) + one
-# fake-agent session, then run the helm in the foreground so Playwright's
+# Boot the real stack for Playwright: TWO supervisors (each creating new
+# terminals in terminal hosts, or old ones in its own private tmux on the
+# suite's old-terminal run) + helm (loopback, on the port FARHELM_E2E_PORT
+# names) + one fake-agent session, then run the helm in the foreground so Playwright's
 # webServer can watch it.
 #
 # The port is an INPUT, never chosen here: Playwright needs baseURL and its
@@ -112,27 +113,24 @@ if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
   exit 1
 fi
 
-# Which kind of terminal the LOCAL supervisor creates new terminals in, passed
-# on as `farhelm supervisor run --new-terminals` (the supervisor's hidden
-# harness seam; SPEC_impl.md, "Terminal host"). Unset or empty means `tmux`,
-# although a bare `farhelm supervisor run` creates terminal hosts: the main
-# browser suite's ordinary runs leave it empty, and their specs were written
-# against tmux terminals and xterm.js, so they keep testing those for as long
-# as old terminals exist. Its host-terminal run (playwright.config.ts with
-# FARHELM_E2E_SUITE_TERMINALS=host) and the host-terminal config
-# (host-terminals/playwright.config.ts) set `host`, which makes the startup
-# session below, and every session their specs create there, a terminal in a
-# terminal host. Only the local supervisor takes it: the "remote" one always
-# gets `tmux` (below), so a session created there stays an old terminal in
-# either run, as does a session on its replacement in
-# terminal-multihost.spec.ts. A value the flag would refuse is refused here,
-# before anything starts.
-new_terminals_args=()
-case "${FARHELM_E2E_NEW_TERMINALS:-}" in
-  '') new_terminals_args=(--new-terminals tmux) ;;
-  tmux | host) new_terminals_args=(--new-terminals "$FARHELM_E2E_NEW_TERMINALS") ;;
+# Which kind of terminal BOTH supervisors create, passed on as `farhelm
+# supervisor run --new-terminals` (the supervisor's hidden harness seam;
+# SPEC_impl.md, "Terminal host"). Unset or empty means `host`, a terminal host
+# drawn by the grid component, which is what every shipped supervisor creates
+# and what the main browser suite tests by default. `tmux` is for its
+# old-terminal set (e2e/suite-terminals.ts), whose tests are about old
+# terminals and need sessions created in tmux. The main config always sets it
+# to the run's kind. Given explicitly rather than left to the flag's default,
+# so this stack does not change kind if that default ever does, and so both
+# supervisors' command lines have the same shape (`replacement_state` below
+# and scripts/test-start-stack-cleanup.sh recognise the remote by its leading
+# arguments). A value the flag would refuse is refused here, before anything
+# starts.
+new_terminals="${FARHELM_E2E_NEW_TERMINALS:-host}"
+case "$new_terminals" in
+  tmux | host) ;;
   *)
-    echo "FARHELM_E2E_NEW_TERMINALS must be tmux or host, got '$FARHELM_E2E_NEW_TERMINALS'" >&2
+    echo "FARHELM_E2E_NEW_TERMINALS must be tmux or host, got '$new_terminals'" >&2
     exit 1
     ;;
 esac
@@ -424,9 +422,11 @@ cleanup() {
     # isolated. Only now that no supervisor can start another one, and
     # before the host stop, which can take a while: Playwright SIGKILLs
     # this whole group 5 s after its TERM, and a cheap step must not wait
-    # behind a slow one.
-    tmux -S "$state/tmux.sock" kill-server 2>/dev/null
-    tmux -S "$remote_state/tmux.sock" kill-server 2>/dev/null
+    # behind a slow one. A supervisor on new terminals starts no tmux
+    # server, so only a socket that exists (the old-terminal run's) gets a
+    # tmux command at all.
+    [ -S "$state/tmux.sock" ] && tmux -S "$state/tmux.sock" kill-server 2>/dev/null
+    [ -S "$remote_state/tmux.sock" ] && tmux -S "$remote_state/tmux.sock" kill-server 2>/dev/null
     stop_terminal_hosts "$state" "$state/stop-terminal-hosts.log" || hosts_stopped=false
     stop_terminal_hosts "$remote_state" "$state/stop-terminal-hosts-remote.log" || hosts_stopped=false
   else
@@ -505,7 +505,7 @@ stack_mark "watcher $watcher_pid watching spawner $spawner_pid; state $state"
 
 HOME="$structured_home" SHELL="$bash_shell" GIT_CONFIG_GLOBAL="$checkout_git_config" \
   GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=0 GIT_ALLOW_PROTOCOL=file GIT_TERMINAL_PROMPT=0 \
-  "$bin" supervisor run --state-dir "$state" "${new_terminals_args[@]}" >"$state/supervisor.log" 2>&1 9>&- &
+  "$bin" supervisor run --state-dir "$state" --new-terminals "$new_terminals" >"$state/supervisor.log" 2>&1 9>&- &
 sup_pid=$!
 
 # A SECOND supervisor, on its own state directory inside this run's
@@ -530,7 +530,7 @@ sup_pid=$!
 #
 # The remote reads its boot id from a file this run owns rather than from
 # the kernel, so the multi-host suite can simulate a REBOOT of that host:
-# kill the supervisor and its tmux server, rewrite the file, respawn the
+# kill the supervisor and end its terminals, rewrite the file, respawn the
 # supervisor with the same option (published below as
 # `remote_boot_id_file`) — and the sessions that were live come back
 # interrupted, exactly as after a real boot. `--boot-id-file` is the
@@ -548,12 +548,12 @@ printf 'boot-1\n' >"$remote_boot_id_file" || exit 1
 remote_supervisor_log="$state/remote-supervisor.log"
 remote_supervisor_rust_log="${RUST_LOG:-},farhelm_supervisor::service::handlers=debug"
 
-# `--new-terminals tmux` last, after the arguments `replacement_state` above and
-# scripts/test-start-stack-cleanup.sh recognise this supervisor by: the specs
-# that use this host (terminal-multihost.spec.ts's reboot among them) were
-# written against tmux terminals, as the local supervisor's are by default here.
+# `--new-terminals` last, after the arguments `replacement_state` above and
+# scripts/test-start-stack-cleanup.sh recognise this supervisor by. The same
+# kind as the local supervisor's, published below as `new_terminals` so that
+# terminal-multihost.spec.ts's replacement remote keeps it too.
 RUST_LOG="$remote_supervisor_rust_log" "$bin" supervisor run --state-dir "$remote_state" --boot-id-file "$remote_boot_id_file" \
-  --new-terminals tmux >"$remote_supervisor_log" 2>&1 9>&- &
+  --new-terminals "$new_terminals" >"$remote_supervisor_log" 2>&1 9>&- &
 remote_sup_pid=$!
 
 # Give both supervisors a moment to bind their sockets before the helm
@@ -613,8 +613,9 @@ print(json.dumps({
     "remote_supervisor_log": sys.argv[11],
     "remote_supervisor_rust_log": sys.argv[12],
     "tensorlake_fake": sys.argv[13],
+    "new_terminals": sys.argv[14],
 }))
-' "$bin" "$remote_state" "$remote_sup_pid" "$state" "$provisioning_backend" "$remote_boot_id_file" "$checkout_git_config" "$structured_home" "$fixtures" "$remote_replacement_pid" "$remote_supervisor_log" "$remote_supervisor_rust_log" "$tensorlake_fake" >"$stack_info" || exit 1
+' "$bin" "$remote_state" "$remote_sup_pid" "$state" "$provisioning_backend" "$remote_boot_id_file" "$checkout_git_config" "$structured_home" "$fixtures" "$remote_replacement_pid" "$remote_supervisor_log" "$remote_supervisor_rust_log" "$tensorlake_fake" "$new_terminals" >"$stack_info" || exit 1
 
 # Mint before the helm starts so its first protected request sees the same
 # durable token the harness CLI printed. It is captured only long enough to

@@ -101,9 +101,6 @@ Generic recorder wrapping is fine but not required for these; record each result
 - `cd website && bun install --frozen-lockfile && bun run build`, and `cd website/feedback-tests && node --test`
 - `cd e2e && npx playwright test --config grid-client/playwright.config.ts` (the grid terminal's static-page specs,
   which boot no stack and which neither the sweep nor CI runs)
-- `cd e2e && npx playwright test --config host-terminals/playwright.config.ts` (the browser specs of terminals in
-  terminal hosts, against one stack of their own whose supervisor runs with `--new-terminals host`; after the browser
-  suite's builds, and neither the sweep nor CI runs them)
 - `node --test e2e/tests/helpers/program-input.test.ts` (the decoding the shortcut specs use to say what a program read
   from a terminal's input frames; seconds)
 - `dist generate --check`
@@ -118,8 +115,9 @@ Generic recorder wrapping is fine but not required for these; record each result
 - `python3 scripts/test-todo-picker.py` (TODO extraction and legacy standalone checklist)
 - `deno test -A scripts/serve-page.ts` (legacy standalone server; agent pages use the `interactive-artifact` skill)
 - `deno test -A scripts/tensorlake/sandbox-tests.ts` and
-  `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-shard.sh` (the Tensorlake harness's own checks;
-  running the harness is only on the maintainer's request, `.agents/tensorlake.md`)
+  `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-shard.sh` (the Tensorlake harness's own checks,
+  among them loading the old-terminal set's account from the checkout; running the harness is only on the maintainer's
+  request, `.agents/tensorlake.md`)
 - `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py`
 - The vendored terminal crates' three recorded test commands from `.agents/validation.md` (`vendor/vte`,
   `vendor/alacritty_terminal`, and both together in `vendor/pair-tests`), which the sweep's workspace batteries never
@@ -191,12 +189,12 @@ its timing-sensitive phases (the nextest and browser phases come first) or after
 sweep's own pre-fix result as evidence for the fix. A fix waiting for that required check is not ready to land; once the
 check passes, land it without waiting for unrelated work.
 
-The browser suite's host-terminal run (`.agents/validation.md`, the `FARHELM_E2E_SUITE_TERMINALS=host` entry) is not
-part of the sweep: the spec files `e2e/host-terminal-specs.ts` lists, on both engines, against stacks whose supervisors
-create terminals in terminal hosts, including marked-session Escape ownership in `bulk-session-actions.spec.ts`. It is
-about the size of the browser suite, so run it like a runtime phase, after the sweep's timing-sensitive phases or once
-the sweep finishes, through the recorder with `--keep-farhelm-env FARHELM_E2E_SUITE_TERMINALS`, or on Tensorlake
-sandboxes (`sandbox-tests.ts run --suite-terminals host`) when the maintainer asked for them.
+The browser suite's old-terminal set (`.agents/validation.md`, the `FARHELM_E2E_SUITE_TERMINALS=tmux` entry) is not part
+of the sweep, whose browser phase is the ordinary run on new terminals: the tests about old terminals alone, on both
+engines, against stacks whose supervisors create tmux terminals. It is small (about a hundred tests), but it boots its
+own stacks, so run it like a runtime phase, after the sweep's timing-sensitive phases or once the sweep finishes,
+through the recorder with `--keep-farhelm-env FARHELM_E2E_SUITE_TERMINALS`, or on Tensorlake sandboxes
+(`sandbox-tests.ts run --suite-terminals tmux`) when the maintainer asked for them.
 
 ## 4. Release gate and CI in GitHub
 

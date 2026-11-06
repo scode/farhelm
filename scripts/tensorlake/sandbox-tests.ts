@@ -10,12 +10,12 @@
  * Subcommands (all take `--scratch <dir>`, where packs, the ledger and results live, outside the checkout):
  *   make-template --name <sandbox>     bootstrap a fresh sandbox, prove it with a probe shard, snapshot it, print the ID
  *   run --template <snapshot> --prefix <name-prefix> --shards <n> --out <dir> [--grep <title>] [--repeat <n>]
- *       [--suite-terminals host] [project ...]
+ *       [--suite-terminals tmux] [project ...]
  *                                      shard the projects (default: all) over clones of the template, collect results;
  *                                      --grep and --repeat narrow a rerun and apply to every shard; --reuse-pack
  *                                      sends the previous run's pack (the same build) instead of packing again;
- *                                      --suite-terminals host runs every shard's stacks with terminal hosts
- *                                      (e2e/host-terminal-specs.ts), so only that run's projects exist
+ *                                      --suite-terminals tmux runs the suite's old-terminal set on tmux stacks
+ *                                      (e2e/suite-terminals.ts), so only that set's projects exist
  *   sweep [--keep <snapshot>]          terminate ledger sandboxes still alive, delete snapshots of ledger sandboxes
  *
  * The sandbox-side work is in `bootstrap.sh` and `run-shard.sh` beside this file. They are Bash because they run on the
@@ -27,7 +27,6 @@
 import $ from "jsr:@david/dax@0.50.1";
 import { parseArgs } from "jsr:@std/cli@1.0.32/parse-args";
 import { assertEquals } from "jsr:@std/assert@1.0.19";
-import { HOST_TERMINAL_SPECS } from "../../e2e/host-terminal-specs.ts";
 
 const HERE = import.meta.dirname!;
 // The checkout this script lives in; `--repo` overrides it for a copy run from elsewhere.
@@ -125,12 +124,24 @@ export function balance(projects: string[], n: number, lines: (spec: string) => 
   return shards.filter((s) => s.length);
 }
 
-/** Every project of the suite, or of its host-terminal run (`hostTerminals`), which has only the listed specs'. */
-function allProjects(hostTerminals: boolean) {
-  const specs = [...Deno.readDirSync(`${REPO}/e2e/tests`)].map((e) => e.name).filter((n) => n.endsWith(".spec.ts"))
-    .filter((n) => !hostTerminals || HOST_TERMINAL_SPECS.has(n))
+/** The old-terminal set's account (e2e/suite-terminals.ts), as much of it as the project list needs. */
+export type OldTerminalSet = { files: ReadonlySet<string>; tagged: ReadonlySet<string> };
+
+/** Loads the old-terminal set's account from the tested checkout (`REPO`, after any `--repo`), not from beside this
+ * script: a copy run from elsewhere must shard the target checkout's suite, and `sweep` must not need a suite at all. */
+async function oldTerminalSet(): Promise<OldTerminalSet> {
+  const m = await import(`file://${Deno.realPathSync(`${REPO}/e2e/suite-terminals.ts`)}`);
+  return { files: new Set(m.OLD_TERMINAL_FILES.keys()), tagged: m.OLD_TERMINAL_TAGGED };
+}
+
+/** Every project of a run, as playwright.config.ts makes them: the ordinary run has every spec file but the whole
+ * old-terminal ones, and the old-terminal run (`tmux`) has only the whole ones and those with tagged tests. `specs`
+ * are the spec file names under e2e/tests. */
+export function allProjects(specs: string[], tmux: boolean, old: OldTerminalSet): string[] {
+  const names = specs.filter((n) => n.endsWith(".spec.ts"))
+    .filter((n) => tmux ? old.files.has(n) || old.tagged.has(n) : !old.files.has(n))
     .map((n) => n.slice(0, -".spec.ts".length)).sort();
-  return ["chromium", "webkit"].flatMap((e) => specs.map((s) => `${e}-${s}`));
+  return ["chromium", "webkit"].flatMap((e) => names.map((s) => `${e}-${s}`));
 }
 
 const specLines = (spec: string) => Deno.readTextFileSync(`${REPO}/e2e/tests/${spec}.spec.ts`).split("\n").length;
@@ -167,8 +178,9 @@ async function shard(
       await $`tl sbx exec ${name} tar -czf ${HOME}/out/${label}/runs.tar.gz -C /tmp/farhelm-tmp test-runs`.noThrow();
       await $`tl sbx cp ${name}:${HOME}/out/${label}/runs.tar.gz ${out}/${label}/runs.tar.gz`.noThrow().quiet();
     }
-    // A host-terminal shard whose script never saw the variable runs the ordinary suite and passes on tmux; its
-    // summary's `suite terminals:` line is the shard script's own word that it kept the variable for the run.
+    // An old-terminal shard whose script never saw the variable runs the ordinary suite's projects of those files on
+    // new terminals and can pass; its summary's `suite terminals:` line is the shard script's own word that it kept
+    // the variable for the run.
     let code = r.code;
     const kind = env.find((e) => e.startsWith("FARHELM_E2E_SUITE_TERMINALS="))?.split("=")[1];
     if (kind && !summaryNamesSuiteTerminals(await Deno.readTextFile(`${out}/${label}/summary.txt`).catch(() => ""), kind)) {
@@ -197,12 +209,15 @@ async function freeNames(prefix: string, n: number) {
 // --- subcommands
 
 async function run(a: Record<string, string>, projects: string[]) {
-  // The main suite's terminal kind (e2e/host-terminal-specs.ts): only `host` is a choice; unset is the default.
-  if (a["suite-terminals"] && a["suite-terminals"] !== "host") throw new Error("--suite-terminals takes only host");
+  // The main suite's terminal kind (e2e/suite-terminals.ts): only `tmux`, the old-terminal set, is a choice; unset is
+  // the ordinary new-terminal run.
+  if (a["suite-terminals"] && a["suite-terminals"] !== "tmux") throw new Error("--suite-terminals takes only tmux");
   // A rerun of failures must test the same build. Rust test builds relink `target/debug/farhelm` with test features, so
   // packing again while or after they run would send a different binary; --reuse-pack keeps the earlier pack.
   const pack_ = a["reuse-pack"] ? `${a.scratch}/pack` : await pack(a.scratch);
-  const shards = balance(projects.length ? projects : allProjects(!!a["suite-terminals"]), Number(a.shards), specLines);
+  const specs = [...Deno.readDirSync(`${REPO}/e2e/tests`)].map((e) => e.name);
+  const chosen = projects.length ? projects : allProjects(specs, !!a["suite-terminals"], await oldTerminalSet());
+  const shards = balance(chosen, Number(a.shards), specLines);
   const names = await freeNames(a.prefix, shards.length);
   const extra = [...(a.grep ? ["-g", a.grep] : []), ...(a.repeat ? [`--repeat-each=${a.repeat}`] : [])];
   const env = a["suite-terminals"] ? [`FARHELM_E2E_SUITE_TERMINALS=${a["suite-terminals"]}`] : [];
@@ -278,8 +293,27 @@ Deno.test("snapshotRows reads snapshot and source sandbox IDs from the CLI's tab
 });
 
 Deno.test("summaryNamesSuiteTerminals accepts only the shard script's exact line for the kind", () => {
-  const summary = "systemd --user: running\nself-ssh: ok\nsuite terminals: host\nexit: 0\n";
-  assertEquals(summaryNamesSuiteTerminals(summary, "host"), true);
-  assertEquals(summaryNamesSuiteTerminals("systemd --user: running\nexit: 0\n", "host"), false);
-  assertEquals(summaryNamesSuiteTerminals("suite terminals: tmux\n", "host"), false);
+  const summary = "systemd --user: running\nself-ssh: ok\nsuite terminals: tmux\nexit: 0\n";
+  assertEquals(summaryNamesSuiteTerminals(summary, "tmux"), true);
+  assertEquals(summaryNamesSuiteTerminals("systemd --user: running\nexit: 0\n", "tmux"), false);
+  assertEquals(summaryNamesSuiteTerminals("suite terminals: host\n", "tmux"), false);
+});
+
+/** Why: a shard handed a project the config does not make fails with "project not found", and one missing a project
+ * silently drops its coverage, so the list must match playwright.config.ts's for both runs. Spec: the ordinary run takes
+ * every spec file but the whole old-terminal ones (a file with tagged tests stays); the tmux run takes only the whole
+ * and the tagged files; non-spec entries never become projects. */
+Deno.test("allProjects leaves the old-terminal set's whole files out of the ordinary run and runs only the set on tmux", () => {
+  const specs = ["a.spec.ts", "old.spec.ts", "mixed.spec.ts", "helpers", "notes.md"];
+  const old: OldTerminalSet = { files: new Set(["old.spec.ts"]), tagged: new Set(["mixed.spec.ts"]) };
+  assertEquals(allProjects(specs, false, old), ["chromium-a", "chromium-mixed", "webkit-a", "webkit-mixed"]);
+  assertEquals(allProjects(specs, true, old), ["chromium-mixed", "chromium-old", "webkit-mixed", "webkit-old"]);
+});
+
+/** Why: the account is loaded at run time from the tested checkout by a dynamic import, which nothing else exercises
+ * before a sandbox is paid for. Spec: this checkout's e2e/suite-terminals.ts loads and every file it names exists. */
+Deno.test("the checkout's old-terminal set loads and names spec files that exist", async () => {
+  const old = await oldTerminalSet();
+  const specs = new Set([...Deno.readDirSync(`${REPO}/e2e/tests`)].map((e) => e.name));
+  for (const name of [...old.files, ...old.tagged]) assertEquals(specs.has(name), true, name);
 });

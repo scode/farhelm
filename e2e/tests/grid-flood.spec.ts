@@ -2,15 +2,15 @@
 // in the real app: the supervisor's emulator takes the program's output at
 // full speed, and the browser gets the emulator's rows and history as a grid
 // stream, paced by the helm and the supervisor rather than by the page's own
-// write callbacks (which is what tests/terminal-flood.spec.ts checks for
-// xterm.js). The Rust tests of the supervisor's grid streams and of the
+// write callbacks (which is what terminal-flood.spec.ts checks for xterm.js,
+// in the old-terminal set). The Rust tests of the supervisor's grid streams and of the
 // helm's relay check the pause itself against stand-ins; this is the same
 // path end to end, judged by what a viewer ends up with.
 import path from "node:path";
 import type { Page } from "@playwright/test";
-import { expect, test } from "../tests/helpers/evidence";
-import { cleanupSession, createSession } from "../tests/helpers/fleet";
-import { attachSession, terminalKind, waitForTermText } from "../tests/helpers/term";
+import { expect, test } from "./helpers/evidence";
+import { cleanupSession, createSession } from "./helpers/fleet";
+import { attachSession, terminalKind, waitForTermText } from "./helpers/term";
 
 /**
  * The `flood_gated` fake agent (crates/farhelm-fixtures/src/fake_agent.rs):
@@ -20,7 +20,7 @@ import { attachSession, terminalKind, waitForTermText } from "../tests/helpers/t
  */
 const FLOOD_GATED = `"${path.resolve(__dirname, "../../target/debug/farhelm-fixtures")}" fake-agent --script flood-gated`;
 
-/** `fake_agent::FLOOD_RECORDS`, duplicated as tests/terminal-flood.spec.ts does. */
+/** `fake_agent::FLOOD_RECORDS`, duplicated as terminal-flood.spec.ts does. */
 const FLOOD_RECORDS = 800_000;
 
 /**

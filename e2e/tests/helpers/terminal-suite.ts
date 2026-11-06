@@ -10,7 +10,7 @@ import path from "node:path";
 import { requireHelmBuild } from "./helm-build";
 import { createResumableSession } from "./fleet";
 import { stackScratchDir } from "./scratch";
-import { attachSession, onHostTerminals, terminalKind, terminalText, waitForTermText, waitForTerminalText } from "./term";
+import { attachSession, suiteTerminals, terminalKind, terminalText, waitForTermText, waitForTerminalText } from "./term";
 import { waitForSessionRevealed } from "./terminal-readiness";
 
 export {
@@ -328,12 +328,14 @@ export async function openTerminal(page: Page) {
   // The fake agent prints this banner once its raw-mode setup is ready; its
   // prompt is deliberately later output.
   await waitForTermText(page, "FAKE-AGENT READY");
-  // A host-terminal run's premise: the shared session really is a terminal
-  // in a terminal host, drawn as a grid. Without this, a stack that kept
-  // tmux would pass every product-level assertion of that run vacuously.
-  if (onHostTerminals()) {
-    expect(await terminalKind(page), "a host-terminal run's shared session must draw as a grid").toBe("grid");
-  }
+  // The run's premise: on the ordinary run the shared session really is a
+  // terminal in a terminal host, drawn as a grid (a stack that kept tmux would
+  // pass every product-level assertion vacuously), and on the old-terminal
+  // set's run it is an old one, drawn by xterm.js, which its tests read.
+  expect(
+    await terminalKind(page),
+    `the shared session must draw as ${suiteTerminals() === "host" ? "a grid" : "xterm.js"} on this run`,
+  ).toBe(suiteTerminals() === "host" ? "grid" : "xterm");
 }
 
 /**
@@ -401,8 +403,8 @@ const tabSessionDirs: string[] = [];
  * the SESSION's working directory" checkable at all: a shared `/tmp` would
  * match whatever the shell happened to inherit.
  *
- * The agent is the ordinary fake agent — a tab needs the session's tmux
- * session to exist (PLAN_M4.md item 2 refuses a tab on a session with no
+ * The agent is the ordinary fake agent — a tab needs the session to have a
+ * live terminal (PLAN_M4.md item 2 refuses a tab on a session with no
  * terminal substrate), so the session has to be genuinely alive.
  */
 export async function createTabSession(

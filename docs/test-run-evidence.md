@@ -202,6 +202,11 @@ PATH="$tmux_dir:$PATH" python3 ../scripts/record-test-run.py \
   -- npx playwright test 'feed\.spec\.ts'
 ```
 
+That is the ordinary run, whose stacks create every terminal in a terminal host. The suite's old-terminal set, the tests
+about old terminals alone, runs with `FARHELM_E2E_SUITE_TERMINALS=tmux` in the environment, which the recorder scrubs
+like every `FARHELM_*` variable unless the command names it with `--keep-farhelm-env FARHELM_E2E_SUITE_TERMINALS`;
+without it, the run is the ordinary one under whatever label it was given (`.agents/validation.md` has the command).
+
 The requested `npx playwright test` prefix is a selection syntax; execution uses resolved Node and the locally installed
 Playwright CLI directly. Both Playwright packages and their lock entries must match 1.64.0. The maintained config runs
 with three workers, each driving its own stack (`e2e/stack-slots.ts`), zero retries, one execution per selected case, no

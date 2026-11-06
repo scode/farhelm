@@ -1,8 +1,8 @@
 // A terminal in a terminal host, in the real app, against a real helm and a
-// supervisor started with `--new-terminals host` (this directory's
-// playwright.config.ts). The stack's startup session (`e2e-session`, the fake
-// agent's `basic` script) is therefore created in a host, and its terminal
-// reaches the browser as a grid stream that the grid terminal component draws.
+// supervisor that creates new terminals (the ordinary run's stacks;
+// e2e/suite-terminals.ts). A session created there runs in a host, and its
+// terminal reaches the browser as a grid stream that the grid terminal
+// component draws, with no xterm.js terminal built for it.
 //
 // The static specs in e2e/grid-client/ pin the component against recorded
 // streams, and the Rust tests pin the supervisor's and the helm's halves; this
@@ -10,14 +10,9 @@
 // socket, the helm relays it, and the supervisor streams the host terminal's
 // emulator.
 import type { Locator, Page } from "@playwright/test";
-import { expect, test } from "../tests/helpers/evidence";
-
-/** The startup session's row, matched on its whole title. */
-function startupRow(page: Page): Locator {
-  return page.locator(".session-row").filter({
-    has: page.locator(".session-title", { hasText: /^e2e-session$/ }),
-  });
-}
+import { expect, test } from "./helpers/evidence";
+import { cleanupSession, createSession } from "./helpers/fleet";
+import { attachSession } from "./helpers/term";
 
 /**
  * Count every xterm.js `Terminal` the page constructs, in
@@ -49,24 +44,21 @@ async function countXtermTerminals(page: Page): Promise<void> {
 }
 
 /**
- * Open the app on the startup session and wait until its terminal is the
- * grid component, mounted and focused, showing the fake agent's ready line.
+ * Open the app on session `id` (the fake agent's `basic` script) and wait
+ * until its terminal is the grid component, mounted and focused, showing the
+ * fake agent's ready line.
  *
- * The session listing says the startup session's agent is a new terminal,
- * so terminal.js mounts the grid directly and never builds xterm.js for it:
+ * The session listing says the session's agent is a new terminal, so
+ * terminal.js mounts the grid directly and never builds xterm.js for it:
  * `window.__farhelmGrid` with no `window.__farhelmTerm`, and no xterm.js
  * `Terminal` constructed at all while xterm.js's scripts did load, is the
  * premise that this session's terminal really is a host terminal drawn
  * without the old component.
  */
-async function openGridTerminal(page: Page): Promise<Locator> {
+async function openGridTerminal(page: Page, id: string): Promise<Locator> {
   await countXtermTerminals(page);
   await page.goto("/");
-  const row = startupRow(page);
-  await expect(row).toBeVisible({ timeout: 20_000 });
-  if ((await row.getAttribute("data-session-selected")) !== "true") {
-    await row.locator(".session-row-open").click();
-  }
+  await attachSession(page, id);
   await expect
     .poll(
       () =>
@@ -77,7 +69,7 @@ async function openGridTerminal(page: Page): Promise<Locator> {
       { timeout: 30_000, message: "waiting for the grid terminal to mount" },
     )
     .toEqual({ grid: true, xterm: false });
-  const grid = page.locator(".grid-terminal");
+  const grid = page.locator("#terminal .grid-terminal");
   await expect(grid).toHaveCount(1);
   await expect(grid).toContainText("FAKE-AGENT READY", { timeout: 30_000 });
   expect(
@@ -100,16 +92,24 @@ async function openGridTerminal(page: Page): Promise<Locator> {
  * pass the request on, or the supervisor did not stream the host terminal,
  * the session would show nothing or an attach refusal; if keys did not
  * travel back as grid input, the terminal would draw but never answer.
- * Spec: the startup session's terminal mounts as the grid component, with
- * no xterm.js terminal ever constructed for it, draws the agent's
- * `FAKE-AGENT READY` line, and after a line is
- * typed and Enter pressed, draws the agent's `echo:` of that line. The line
- * carries the project's name, since both engines' projects share one session.
+ * Spec: a new session's terminal mounts as the grid component, with no
+ * xterm.js terminal ever constructed on the page, draws the agent's
+ * `FAKE-AGENT READY` line, and after a line is typed and Enter pressed, draws
+ * the agent's `echo:` of that line. The session is the test's own and the
+ * line is stamped per invocation, absent from the screen until typed, so an
+ * echo left by an earlier run or repetition cannot pass for this one's.
  */
-test("a host terminal draws as a grid and takes typing", async ({ page }, testInfo) => {
-  const grid = await openGridTerminal(page);
-  const line = `typed-in-${testInfo.project.name}`;
-  await page.keyboard.type(line);
-  await page.keyboard.press("Enter");
-  await expect(grid).toContainText(`echo:${line}`, { timeout: 15_000 });
+test("a host terminal draws as a grid and takes typing", async ({ page, request }) => {
+  const stamp = Date.now();
+  const session = await createSession(request, { title: `grid-terminal-${stamp}` });
+  try {
+    const grid = await openGridTerminal(page, session.id);
+    const line = `typed-in-${stamp}`;
+    await expect(grid, "premise: the line is not on screen before it is typed").not.toContainText(line);
+    await page.keyboard.type(line);
+    await page.keyboard.press("Enter");
+    await expect(grid).toContainText(`echo:${line}`, { timeout: 15_000 });
+  } finally {
+    await cleanupSession(request, session.id);
+  }
 });

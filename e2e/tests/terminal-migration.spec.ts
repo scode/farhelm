@@ -5,13 +5,14 @@
 //
 // Two kinds of evidence, kept apart on purpose:
 //
-// - The real stack's own replies. This suite's ordinary runs start their
-//   supervisors with `--new-terminals tmux` (start-stack.sh does unless its
-//   config asks for hosts), which keeps the switch off, as the media
-//   harnesses' stacks run too, so their sessions must look exactly as they
-//   always have: no band, no terminal kinds. This is also the end-to-end
-//   check that the kinds and the switch report reach the browser through
-//   the helm unchanged.
+// - The real stack's own replies. The ordinary run's supervisors create new
+//   terminals, so a session made there names its terminals as new and shows
+//   no band; that is the end-to-end check that the kinds and the switch
+//   report reach the browser through the helm unchanged. The old-terminal
+//   set's run (OLD_TERMINAL_TAG; e2e/suite-terminals.ts) has supervisors that
+//   keep the switch off, as the media harnesses' stacks do, and checks that
+//   their sessions look exactly as they always have: no band, no terminal
+//   kinds.
 // - Seeded listings. The band needs an old session on a supervisor that
 //   creates new terminals, which only a supervisor restarted from tmux to
 //   hosts has, and no browser stack restarts its local supervisor. So the
@@ -21,18 +22,14 @@
 //   trust question. That a real supervisor reports exactly those fields for
 //   such a session is checked by the process test
 //   `host_processes::an_old_session_after_the_switch_to_hosts_is_reported_as_one_to_move`
-//   (crates/farhelm/tests/e2e/host_processes.rs). On the suite's
-//   host-terminal run (host-terminal-specs.ts) the real terminals underneath
-//   are new ones; the seeded cases hold there too.
-//
-// The real-host leg for sessions already on new terminals is
-// e2e/host-terminals/migration.spec.ts, under the config that starts such a
-// stack.
+//   (crates/farhelm/tests/e2e/host_processes.rs). The real terminals under
+//   the seeds are new ones.
 
 import type { Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
 import { cleanupSession, createSession, renameSession } from "./helpers/fleet";
-import { attachSession, onHostTerminals } from "./helpers/term";
+import { attachSession } from "./helpers/term";
+import { OLD_TERMINAL_TAG } from "../suite-terminals";
 
 /** What a seeded row says about its terminals; `undefined` leaves the real
  * stack's value. */
@@ -97,7 +94,7 @@ async function openTab(request: Parameters<typeof cleanupSession>[0], sessionId:
   return (await opened.json()).tab;
 }
 
-/** The real stack's switch-off reply for one session, read past the UI. */
+/** The real stack's own reply for one session (its terminal kinds and switch report), read past the UI. */
 async function listedRow(request: Parameters<typeof cleanupSession>[0], sessionId: string) {
   const listed = await request.get("/api/sessions");
   expect(listed.ok()).toBe(true);
@@ -113,12 +110,10 @@ const kinds = (page: Page) => page.locator(".session-details .session-details-te
  * old and the switch as off, and its sessions show neither the band nor the
  * terminal kinds. Why: that is what the media harnesses' captures run on,
  * and what every shipped supervisor showed before terminal hosts; any change
- * there would show up in every published screenshot. */
-test("a supervisor still on old terminals shows no band and no terminal kinds", async ({ page, request }) => {
-  // About a stack whose supervisor keeps old terminals; on a host-terminal
-  // run every stack creates new ones, and host-terminals/migration.spec.ts
-  // checks that side (new kinds named, no band).
-  test.skip(onHostTerminals(), "needs a supervisor on old terminals; host-terminals/migration.spec.ts covers new ones");
+ * there would show up in every published screenshot. In the old-terminal
+ * set, since it needs a supervisor on old terminals; the ordinary run's
+ * counterpart is the next test. */
+test("a supervisor still on old terminals shows no band and no terminal kinds", { tag: OLD_TERMINAL_TAG }, async ({ page, request }) => {
   const session = await createSession(request, { title: `migration-off-${Date.now()}` });
   try {
     const tab = await openTab(request, session.id);
@@ -133,6 +128,45 @@ test("a supervisor still on old terminals shows no band and no terminal kinds", 
     await expect(page.locator(".session-details")).toBeVisible();
     await expect(band(page)).toHaveCount(0);
     await expect(kinds(page)).toHaveCount(0);
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * A session created on a host that creates new terminals says so in its
+ * details, for its agent and for a tab opened beside it, and shows no
+ * migration band.
+ *
+ * Why: this is where the terminal kinds and the switch report are checked
+ * end to end from a supervisor that really creates new terminals, through
+ * the helm, into the page; and a session already on new terminals must never
+ * be told to move. Spec: the helm lists a new session with `agent_terminal:
+ * host` and `supervisor_creates_host_terminals: true`; its details read "New
+ * terminal" with the tooltip "Agent: new terminal."; once a tab is opened (in
+ * a host too, as its reply says), they read "New terminals" and name
+ * "Terminal 1: new terminal."; there is no `.migration-band` throughout.
+ * Its own session rather than the stack's startup one, so no earlier spec's
+ * tabs on that session change what the details say.
+ */
+test("a session on new terminals names their kind and shows no band", async ({ page, request }) => {
+  const session = await createSession(request, { title: `migration-new-${Date.now()}` });
+  try {
+    const row = await listedRow(request, session.id);
+    expect(row.agent_terminal).toBe("host");
+    expect(row.supervisor_creates_host_terminals).toBe(true);
+
+    await page.goto("/");
+    await attachSession(page, session.id);
+    await expect(kinds(page)).toHaveText(/^New terminal/, { timeout: 30_000 });
+    await expect(kinds(page)).toHaveAttribute("data-tooltip", "Agent: new terminal.");
+    await expect(band(page)).toHaveCount(0);
+
+    const tab = await openTab(request, session.id);
+    expect(tab.kind, "the tab-open reply names a host tab").toBe("host");
+    await expect(kinds(page)).toHaveText(/^New terminals/, { timeout: 30_000 });
+    await expect(kinds(page)).toHaveAttribute("data-tooltip", "Agent: new terminal. Terminal 1: new terminal.");
+    await expect(band(page)).toHaveCount(0);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -216,12 +250,9 @@ test("an old session's band hides until the next visit and offers only what the 
  * say what does. */
 test("a new agent with an old tab is told to reopen that tab", async ({ page, request }) => {
   // The seeded kinds are also what the page mounts by: an agent seeded as a
-  // new terminal gets the grid alone, and an old terminal's byte stream then
-  // ends its attachment as a broken contract, so the session never becomes
-  // ready. The host-terminal run has real new terminals under these seeds
-  // (the old tab's seed is the compatibility path, xterm.js swapped for the
-  // grid), and covers this case there.
-  test.skip(!onHostTerminals(), "seeds a new agent, which needs a real new terminal; covered on the host-terminal run");
+  // new terminal gets the grid alone, which needs the real new terminal under
+  // it that the ordinary run's supervisors make (the old tab's seed is the
+  // compatibility path, xterm.js swapped for the grid).
   const session = await createSession(request, { title: `migration-tabs-${Date.now()}` });
   try {
     await openTab(request, session.id);

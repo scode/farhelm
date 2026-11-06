@@ -1,6 +1,8 @@
-// Playwright drives the WEB build against a real helm, supervisor,
-// private tmux, and fake agent — no mocks anywhere in the stack
-// (PLAN_M1.md: this is the canonical GUI verification path for agents).
+// Playwright drives the WEB build against a real helm, supervisors, and
+// fake agent — no mocks anywhere in the stack (PLAN_M1.md: this is the
+// canonical GUI verification path for agents). The stacks create new
+// terminals (terminal hosts, drawn by the grid component) unless the run
+// asks for the old-terminal set (suite-terminals.ts).
 //
 // Two engines run: Chromium, and WebKit as a stand-in for the desktop
 // app's actual renderer family (WKWebView on macOS, WebKitGTK on Linux).
@@ -18,7 +20,15 @@ import { STACK_INFO_ENV } from "./global-setup";
 import { STACK_PORT_ENV } from "./stack-port";
 import { currentStackSlot, harnessStackSlots, isWorkerProcess, STACK_COUNT } from "./stack-slots";
 import { AUTH_STATE_ENV, harnessAuthorizationHeaders } from "./tests/helpers/device-auth";
-import { HOST_TERMINAL_LEFT_OUT, HOST_TERMINAL_SPECS, SUITE_TERMINALS_ENV, SUITE_TERMINALS_METADATA } from "./host-terminal-specs";
+import {
+  OLD_TERMINAL_FILES,
+  OLD_TERMINAL_GREP,
+  OLD_TERMINAL_TAG,
+  OLD_TERMINAL_TAGGED,
+  SUITE_TERMINALS_ENV,
+  SUITE_TERMINALS_METADATA,
+  suiteTerminalsFrom,
+} from "./suite-terminals";
 
 // One stack per worker slot (stack-slots.ts). Ports are chosen once per run
 // and pinned through the environment; see stack-port.ts for why a fixed port
@@ -47,44 +57,57 @@ function discoverSpecFiles(directory = testsDir): string[] {
     .sort();
 }
 
-/** An import of a terminal-family helper: what makes a spec a terminal spec for the host run's list. */
-const TERMINAL_HELPER_IMPORT = /from ["']\.\/helpers\/(term|terminal-readiness|terminal-suite|real-agent)["']/;
+/**
+ * A use of the old-terminal tag in a spec's source, through the constant or
+ * as the literal tag in quotes: what puts a file in `OLD_TERMINAL_TAGGED`'s
+ * account. The literal counts too, since a test tagged with it leaves the
+ * ordinary run all the same.
+ */
+const OLD_TERMINAL_TAG_USE = new RegExp(`\\bOLD_TERMINAL_TAG\\b|["'\`]${OLD_TERMINAL_TAG}["'\`]`);
 
-// Which kind of terminal this run's stacks create (host-terminal-specs.ts;
-// tests/helpers/term.ts, "Two kinds of terminal"). Unset is the suite as it
-// always ran: every stack's supervisor keeps its own default. `host` starts
-// every stack's local supervisor with `--new-terminals host` and runs only the
-// spec files that host-terminal-specs.ts lists (it also says why the others
-// stay out); a test there that is about the old terminal alone skips itself.
-// Any other value is refused here rather than run as the default.
-const suiteTerminals = process.env[SUITE_TERMINALS_ENV] ?? "";
-if (suiteTerminals !== "" && suiteTerminals !== "host") {
-  throw new Error(`${SUITE_TERMINALS_ENV} must be unset or "host", got "${suiteTerminals}"`);
-}
-const onHostTerminals = suiteTerminals === "host";
+// Which kind of terminal this run's stacks create (suite-terminals.ts;
+// tests/helpers/term.ts, "Two kinds of terminal"). Unset is the ordinary run:
+// every stack's supervisors create new terminals, and every spec runs except
+// the old-terminal set. `tmux` starts them on old terminals and runs only that
+// set. Any other value is refused here rather than run as either.
+const suiteTerminals = suiteTerminalsFrom(process.env[SUITE_TERMINALS_ENV]);
 
 const discovered = discoverSpecFiles();
-if (onHostTerminals) {
-  // The host run's list must stay a complete account of the terminal specs:
-  // a listed or left-out file that does not exist (renamed, moved), a file
-  // in both, and a spec that uses the terminal helpers but is in neither
-  // would each change what the run covers without a word.
-  const leftOut = [...HOST_TERMINAL_LEFT_OUT.keys()];
-  const missing = [...HOST_TERMINAL_SPECS, ...leftOut].filter((spec) => !discovered.includes(spec));
-  const both = [...HOST_TERMINAL_SPECS].filter((spec) => HOST_TERMINAL_LEFT_OUT.has(spec));
-  const unclassified = discovered.filter((spec) =>
-    !HOST_TERMINAL_SPECS.has(spec) && !HOST_TERMINAL_LEFT_OUT.has(spec) &&
-    TERMINAL_HELPER_IMPORT.test(readFileSync(join(testsDir, spec), "utf8"))
-  );
-  if (missing.length || both.length || unclassified.length) {
+// The old-terminal set's account must stay complete on both runs: a listed
+// file that does not exist (renamed, moved), a file in both lists, a spec
+// that tags tests without being listed as tagged (a whole file that also tags
+// is reported as such), and a listed tagged file that tags nothing would each
+// move tests between the runs without a word.
+{
+  const listed = [...OLD_TERMINAL_FILES.keys(), ...OLD_TERMINAL_TAGGED];
+  const missing = listed.filter((spec) => !discovered.includes(spec));
+  const both = [...OLD_TERMINAL_TAGGED].filter((spec) => OLD_TERMINAL_FILES.has(spec));
+  const tagging = discovered.filter((spec) => OLD_TERMINAL_TAG_USE.test(readFileSync(join(testsDir, spec), "utf8")));
+  const unlisted = tagging.filter((spec) => !OLD_TERMINAL_TAGGED.has(spec) && !OLD_TERMINAL_FILES.has(spec));
+  const taggedWhole = tagging.filter((spec) => OLD_TERMINAL_FILES.has(spec));
+  const untagged = [...OLD_TERMINAL_TAGGED].filter((spec) => discovered.includes(spec) && !tagging.includes(spec));
+  if (missing.length || both.length || unlisted.length || taggedWhole.length || untagged.length) {
     throw new Error(
-      `host-terminal-specs.ts names spec files that do not exist (${missing.join(", ") || "none"}), ` +
-        `lists files in both sets (${both.join(", ") || "none"}), and leaves terminal specs in neither ` +
-        `(${unclassified.join(", ") || "none"})`,
+      `suite-terminals.ts names spec files that do not exist (${missing.join(", ") || "none"}), ` +
+        `lists files as both whole and tagged (${both.join(", ") || "none"}), leaves files that tag ` +
+        `old-terminal tests unlisted (${unlisted.join(", ") || "none"}), has whole files that also use the ` +
+        `tag (${taggedWhole.join(", ") || "none"}), and lists tagged files that tag nothing ` +
+        `(${untagged.join(", ") || "none"})`,
     );
   }
 }
-const specFiles = discovered.filter((spec) => !onHostTerminals || HOST_TERMINAL_SPECS.has(spec));
+
+/**
+ * The run's spec files, each with the test filter its projects carry: the
+ * ordinary run takes every file but the whole old-terminal ones and leaves
+ * the tagged tests out; the old-terminal run takes the whole files as they
+ * are and only the tagged tests of the others. Project-level filters, so a
+ * `-g` on the command line narrows further instead of replacing them.
+ */
+const specFiles: { spec: string; grep?: RegExp; grepInvert?: RegExp }[] = suiteTerminals === "host"
+  ? discovered.filter((spec) => !OLD_TERMINAL_FILES.has(spec)).map((spec) => ({ spec, grepInvert: OLD_TERMINAL_GREP }))
+  : discovered.filter((spec) => OLD_TERMINAL_FILES.has(spec) || OLD_TERMINAL_TAGGED.has(spec))
+    .map((spec) => (OLD_TERMINAL_FILES.has(spec) ? { spec } : { spec, grep: OLD_TERMINAL_GREP }));
 
 const engines = [
   { name: "chromium", use: { ...devices["Desktop Chrome"] } },
@@ -127,7 +150,7 @@ export default defineConfig({
   // Global setup runs in the runner, which has no slot of its own, so it is
   // told about every stack it has to authenticate here.
   metadata: {
-    [SUITE_TERMINALS_METADATA]: onHostTerminals ? "host" : "default",
+    [SUITE_TERMINALS_METADATA]: suiteTerminals,
     stackSlots: stackSlots.map(({ baseURL, stackInfoPath, authStatePath }) => ({
       baseURL,
       stackInfoPath,
@@ -145,9 +168,11 @@ export default defineConfig({
   // specs that only wait for that host (`agent-relay`, `filters`) find it up
   // whatever ran before them.
   projects: engines.flatMap((engine) =>
-    specFiles.map((spec) => ({
+    specFiles.map(({ spec, grep, grepInvert }) => ({
       name: `${engine.name}-${spec.replace(/\.spec\.ts$/, "")}`,
       testMatch: spec,
+      ...(grep ? { grep } : {}),
+      ...(grepInvert ? { grepInvert } : {}),
       use: engine.use,
     })),
   ),
@@ -179,14 +204,11 @@ export default defineConfig({
       [STACK_PORT_ENV]: String(stack.port),
       [STACK_INFO_ENV]: stack.stackInfoPath,
       [AUTH_STATE_ENV]: stack.authStatePath,
-      // Pinned: Playwright merges its own environment into this, and a
-      // FARHELM_E2E_NEW_TERMINALS exported for the host-terminal config
-      // (host-terminals/playwright.config.ts) must not decide this suite's
-      // terminals. Only this suite's own switch (`SUITE_TERMINALS_ENV`,
-      // above) turns terminal hosts on; otherwise it is empty, which
-      // start-stack.sh reads as `tmux`, since this suite's specs were written
-      // against tmux terminals although a bare supervisor now creates hosts.
-      FARHELM_E2E_NEW_TERMINALS: onHostTerminals ? "host" : "",
+      // Pinned to the run's kind: Playwright merges its own environment into
+      // this, and a FARHELM_E2E_NEW_TERMINALS exported in the runner's shell
+      // must not decide this suite's terminals. Only this suite's own switch
+      // (`SUITE_TERMINALS_ENV`, above) chooses them.
+      FARHELM_E2E_NEW_TERMINALS: suiteTerminals,
     },
     // The API correctly answers 401 before global setup has exchanged the
     // token. The public static bundle is therefore the readiness probe.
@@ -200,9 +222,10 @@ export default defineConfig({
     stderr: "pipe",
     timeout: 30_000,
     // Without this Playwright SIGKILLs the process group, which no trap
-    // can catch — and the private tmux server (which daemonizes out of
-    // the group) would survive every run. SIGTERM lets start-stack.sh
-    // reap its own supervisor and tmux server.
+    // can catch — and the terminal hosts (and, on the old-terminal run,
+    // the private tmux servers), which outlive the processes that started
+    // them, would survive every run. SIGTERM lets start-stack.sh reap its own supervisors, hosts
+    // and tmux servers.
     gracefulShutdown: { signal: "SIGTERM", timeout: 5_000 },
   })),
 });

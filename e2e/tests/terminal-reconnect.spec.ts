@@ -33,7 +33,8 @@ import fs from "node:fs";
 import { drainedRoute } from "./helpers/drained-route";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import { localHostId, stubFeed } from "./helpers/fleet";
-import { attachSession, cleanupSession, termText, waitForTermText, terminalInput, onHostTerminals, terminalKind, terminalLinkPointer, terminalSize } from "./helpers/term";
+import { attachSession, cleanupSession, termText, waitForTermText, terminalInput, terminalLinkPointer, terminalSize } from "./helpers/term";
+import { OLD_TERMINAL_TAG } from "../suite-terminals";
 import {
   addTab,
   createTabSession,
@@ -350,17 +351,6 @@ test("socket-killed-reconnects-and-lands-at-tail", async ({ page, request }) => 
       replay.revealReason,
       "a reconnect is an ordinary reattach: it ends on the marker, not on a degradation",
     ).toBe("marker");
-    // How xterm.js's catch-up hands over the replay: one write, revealed
-    // from its callback. A grid replay is frames the component applies as
-    // they arrive, with no writes to count; the rest of this test holds for
-    // both.
-    if ((await terminalKind(page)) !== "grid") {
-      expect(
-        replay.writesWhileHidden,
-        "the whole replay reaches xterm.js as ONE write, exactly as a reopen does",
-      ).toBe(1);
-      expect(replay.revealedInWriteCallback).toBe(true);
-    }
     expect(
       replay.viewportAtTailOnReveal,
       "the first frame the user sees after a reconnect is the tail",
@@ -2050,9 +2040,8 @@ try {
  * xterm's completed write callback across that death to prove it cannot
  * erase the successor retry or replace the outage card with a dead screen.
  */
-test("late-replay-flush-keeps-a-new-recovery-alive", async ({ page, request }) => {
+test("late-replay-flush-keeps-a-new-recovery-alive", { tag: OLD_TERMINAL_TAG }, async ({ page, request }) => {
   // Holds xterm.js's write callback across a recovery; a grid has none.
-  test.skip(onHostTerminals(), "holds xterm.js's write callback; a grid has none");
   await reconnectTimingsFromNextLoad(page, { delaysMs: [50, 5_000], probeIntervalMs: 5_000 });
   let ownId: string | undefined;
   try {

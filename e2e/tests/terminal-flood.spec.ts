@@ -8,7 +8,8 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DEVICE_SECRET_KEY, requireProductPageAuth } from "./helpers/device-auth";
-import { attachSession, cleanupSession, onHostTerminals, termText, terminalKind, waitForTermText } from "./helpers/term";
+import { attachSession, cleanupSession, termText, terminalKind, waitForTermText } from "./helpers/term";
+import { OLD_TERMINAL_TAG } from "../suite-terminals";
 import { stackScratchDir } from "./helpers/scratch";
 import {
   installTerminalSuiteHooks,
@@ -667,17 +668,16 @@ async function waitForFloodStreamComplete(page: Page) {
 // `verifyStream: true` installs the whole-stream verifier FIRST (order is
 // load-bearing — see its own docs), so it keeps observing every byte even
 // after `holdTermWrites` later hands writes straight through.
-test("the whole flood stream arrives exactly once and in order, with at least one pause/resume cycle observed", async ({
+test("the whole flood stream arrives exactly once and in order, with at least one pause/resume cycle observed", { tag: OLD_TERMINAL_TAG }, async ({
   page,
   request,
 }) => {
   // xterm.js's watermark flow control (its write callbacks, `paused`)
   // and a verifier over the byte stream. A grid stream carries the
   // emulator's rows, not the program's bytes, and is paced by the helm and
-  // the supervisor; e2e/host-terminals/grid-flood.spec.ts checks a flood's
+  // the supervisor; e2e/tests/grid-flood.spec.ts checks a flood's
   // scrollback there, and the Rust grid stream and helm relay tests check
   // the pause.
-  test.skip(onHostTerminals(), "xterm.js's watermark flow control over a byte stream; e2e/host-terminals/grid-flood.spec.ts covers grid floods");
   test.setTimeout(150_000);
   const title = `flood-complete-${Date.now()}`;
   let id: string | undefined;
@@ -767,14 +767,15 @@ test("the whole flood stream arrives exactly once and in order, with at least on
 // that only waited for the banner to appear, with no floor on how soon,
 // could pass by catching that mechanism instead of the one this test is
 // actually named for.
-test("a client that stops draining is detached with the stall reason after the full stall interval; reattaching afterward replays", async ({
+test("a client that stops draining is detached with the stall reason after the full stall interval; reattaching afterward replays", { tag: OLD_TERMINAL_TAG }, async ({
   page,
   request,
 }) => {
   // Stalls xterm.js's writes to trip its own watermark; a grid has no
-  // writes to stall (the helm's stall detach for grid streams is pinned by
-  // its relay tests).
-  test.skip(onHostTerminals(), "stalls xterm.js's writes; the grid stall detach is pinned by the helm relay tests");
+  // writes to stall. The helm's stall detach for grid streams is pinned by
+  // its relay tests, and the page's side of it (the banner, no automatic
+  // reconnect) in e2e/grid-client/grid-attach.spec.ts ("a grid attachment
+  // detached as stalled shows why and does not reconnect").
   // The nested waits below sum to a bit over STALL_DETACH_TIMEOUT (60s):
   // confirming the pause, the banner's own margin past 60s, and the
   // reattach/replay at the end. Set comfortably above that sum, plus room
@@ -983,12 +984,11 @@ test("a client that stops draining is detached with the stall reason after the f
 // 0` on a replay-only attachment is a much sharper statement than "either
 // zero, or one that we will excuse", and the sharper one is available for
 // free once the producer is quiesced.
-test("reconnecting within the same page resets flow-control state; the new attachment neither inherits a pause nor sends a bare resume", async ({
+test("reconnecting within the same page resets flow-control state; the new attachment neither inherits a pause nor sends a bare resume", { tag: OLD_TERMINAL_TAG }, async ({
   page,
   request,
 }) => {
   // xterm.js's own flow-control state across a reconnect.
-  test.skip(onHostTerminals(), "xterm.js's client flow-control state; grid streams keep none in the page");
   // The producer's whole ~12 MiB now has to finish before the measurement
   // can even start: attachment one carries it as far as the pause, the
   // drain takes the entire rest, and only then comes the reattach. About
@@ -1146,14 +1146,13 @@ test("a terminal socket for an unknown session reports why", async ({
 // by canonical-mode input handling and was not pinned down; the containment
 // rule, not the mechanism, is the contract.) This file's per-file stack
 // reset contains that damage before another terminal area runs.
-test("an over-one-megabyte message does not drop the terminal socket", async ({
+test("an over-one-megabyte message does not drop the terminal socket", { tag: OLD_TERMINAL_TAG }, async ({
   page,
 }) => {
   // A byte stream's input bound. A grid input message over 64 KiB ends the
   // attachment by design (the grid format; the helm relay tests pin it), and
   // the grid client never builds one; the grid's large paste has its own test
   // below.
-  test.skip(onHostTerminals(), "a byte stream's input size; the grid's large paste is tested on its own below");
   const pasteOverOneMiB = 1024 * 1024 + 1;
   await openTerminal(page);
   // A fresh response proves the receiver is live before the large send;
@@ -1222,7 +1221,8 @@ for line in sys.stdin:
  * A paste of more than 1 MiB into a grid terminal arrives whole, byte for
  * byte, and the attachment that carried it stays.
  *
- * Why: the user's half of the byte-stream test above. A grid terminal never
+ * Why: the new terminal's side of the byte-stream test above, which runs
+ * only in the old-terminal set (OLD_TERMINAL_TAG). A grid terminal never
  * sends one message that large (an input message over 64 KiB ends the
  * attachment by design); its paste splits into messages within the bound,
  * which the supervisor writes in order. A paste that lost, repeated or
@@ -1240,7 +1240,6 @@ test("a paste of more than one megabyte into a grid terminal arrives whole and k
   page,
   request,
 }) => {
-  test.skip(!onHostTerminals(), "grid terminals only; old terminals have the byte-stream test above");
   test.setTimeout(120_000);
   const pasteOverOneMiB = 1024 * 1024 + 1;
   const cycle = "abcdefghijklmnopqrstuvw";

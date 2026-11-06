@@ -686,6 +686,71 @@ test("a stream kind this page cannot draw is refused the same way", async ({ pag
   await expect(page.locator("#banner")).toContainText("Terminal stream error");
 });
 
+/**
+ * Open the island's socket as a grid stream and deliver the attach fixture's
+ * frames with no end-of-replay marker, leaving the catch-up open: the
+ * terminal is still hidden, which the caller can rely on.
+ */
+async function openCatchUp(page: Page): Promise<void> {
+  await socket(page, "open");
+  await socket(page, "text", { type: "stream", kind: "grid" });
+  for (const line of stream("attach.jsonl")) await socket(page, "binary", line);
+  await expect(page.locator("#term")).toHaveCSS("visibility", "hidden");
+  expect(await page.evaluate(() => (window as any).__farhelmTest.replay.revealed)).toBe(false);
+}
+
+/**
+ * A takeover that ends a grid terminal's catch-up before its end-of-replay
+ * marker reveals what arrived, under the banner.
+ *
+ * Why: the supervisor owes no marker to an attachment something else tore
+ * down, so a page that waited for one would hide the terminal forever. The
+ * ending is terminal.js's attach code for both kinds; the old-terminal set's
+ * `replay-degrades-on-detach` pins it for xterm.js's buffered catch-up, and
+ * this pins it for the grid, which applies frames as they arrive.
+ * Spec: after the grid notice and the attach fixture's frames, with no
+ * `replay_complete`, the terminal is hidden; a `detached` notice
+ * (`taken_over`) ends the catch-up with reveal reason `detached`, the
+ * terminal is visible with the fixture's first row drawn, and the banner says
+ * "Detached: another client attached".
+ */
+test("a takeover during a grid terminal's catch-up reveals what arrived, under the banner", async ({ page }) => {
+  await mountTerminal(page);
+  await openCatchUp(page);
+  await socket(page, "text", { type: "detached", code: "taken_over", reason: "another client attached" });
+  await page.waitForFunction(() => (window as any).__farhelmTest.replay.revealed);
+  expect(await page.evaluate(() => (window as any).__farhelmTest.replay.revealReason)).toBe("detached");
+  await expect(page.locator("#banner")).toContainText("Detached: another client attached");
+  await expect(page.locator("#term")).toHaveCSS("visibility", "visible");
+  await expect(page.locator("#term .grid-terminal-row").nth(0)).toHaveText("$ echo");
+});
+
+/**
+ * A socket that closes during a grid terminal's catch-up, before its
+ * end-of-replay marker, reveals what arrived and says the connection closed.
+ *
+ * Why: a client-side detach gets no notice and a failed attach only closes,
+ * so on those paths the close is the only signal that no more frames are
+ * coming; a page that ignored it would leave the terminal hidden under its
+ * "connecting" line forever. The old-terminal set's `replay-degrades-on-close`
+ * pins this for xterm.js; this pins it for the grid.
+ * Spec: with no reconnect policy (so nothing retries), after the grid notice
+ * and the attach fixture's frames with no `replay_complete`, the socket
+ * closes; the catch-up ends with reveal reason `closed`, the terminal is
+ * visible with the fixture's first row drawn, and the banner says
+ * "Connection closed".
+ */
+test("a socket closing during a grid terminal's catch-up reveals what arrived, under the banner", async ({ page }) => {
+  await mountTerminal(page);
+  await openCatchUp(page);
+  await socket(page, "close");
+  await page.waitForFunction(() => (window as any).__farhelmTest.replay.revealed);
+  expect(await page.evaluate(() => (window as any).__farhelmTest.replay.revealReason)).toBe("closed");
+  await expect(page.locator("#banner")).toContainText("Connection closed");
+  await expect(page.locator("#term")).toHaveCSS("visibility", "visible");
+  await expect(page.locator("#term .grid-terminal-row").nth(0)).toHaveText("$ echo");
+});
+
 // ## Tier 2: paste, drop, copy, links and connection behavior
 
 // `attachments::attachment_policy`'s shape, with this spec's own wording.
@@ -1048,6 +1113,36 @@ test("a dropped connection keeps the grid's last screen while it recovers, and a
   await attachGrid(page, 2);
   await expect(page.locator("#term .grid-terminal")).toHaveCount(1);
   await expect(page.locator("#term .grid-terminal-row").nth(0)).toHaveText("$ echo");
+});
+
+/**
+ * A grid attachment the helm detaches as stalled shows why and does not
+ * reconnect on its own.
+ *
+ * Why: the helm ends an attachment whose browser stopped reading (its relay
+ * tests pin that it sends the `stalled` notice for grid streams); the page's
+ * half is to say so and to treat it as a decision, since reconnecting
+ * straight away would hand the same stalled page the same flood. The
+ * old-terminal set's stall test pins this for xterm.js by stalling its
+ * writes; a grid has no writes to stall, so the notice is fed directly.
+ * Spec: with a reconnect policy whose ladder retries after 50 ms, after a
+ * completed grid attach, a `detached` notice with code `stalled` and the
+ * socket's close leave the banner saying "Detached: <the reason>", and no
+ * second socket opens within half a second, ten times the ladder's delay.
+ */
+test("a grid attachment detached as stalled shows why and does not reconnect", async ({ page }) => {
+  await mountTerminal(page, undefined, { reconnect: { ...RECONNECT_POLICY, delaysMs: [50] } });
+  await attachGrid(page);
+  await page.evaluate(() => {
+    const ws = (window as any).FakeSocket.all[0];
+    ws.text({ type: "detached", code: "stalled", reason: "the browser stopped reading" });
+    ws.close();
+  });
+  await expect(page.locator("#banner")).toContainText("Detached: the browser stopped reading");
+  // sleep-ok: an absence over a window: the ladder's 50 ms delay would have opened a second socket well within it.
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => (window as any).FakeSocket.all.length)).toBe(1);
+  await expect(page.locator("#banner")).toContainText("Detached: the browser stopped reading");
 });
 
 test("a recovered grid terminal replays into a new grid and drops the held screen", async ({ page }) => {
