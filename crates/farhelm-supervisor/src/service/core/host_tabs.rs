@@ -15,8 +15,9 @@
 //! `farhelm internal tab-shell`, which enters the session's directory and
 //! execs the user's login shell), inside the tab's own scope when there is a
 //! user manager, exactly as a tmux tab window runs it; its environment is
-//! what a tmux pane's command gets (`host_launch::host_child_env`), with the
-//! tab's markers and credential, which reach the child only. The host itself
+//! a host child's (`host_launch::host_child_env`: the supervisor's
+//! environment with Farhelm's terminal variables), with the tab's markers
+//! and credential, which reach the child only. The host itself
 //! carries none, so no marker sweep ever ends it.
 //!
 //! Its client tag names the session, the tab's id, whether its child runs in
@@ -450,7 +451,7 @@ impl Supervisor {
             TabScopeMarker::Unscoped
         };
         let StartedTab { host, spawning } = match self
-            .start_tab_host(session_id, &record, argv, &env, cwd, size, &tag, &shell)
+            .start_tab_host(&record, argv, &env, cwd, size, &tag, &shell)
             .await
         {
             Ok(started) => started,
@@ -599,12 +600,10 @@ impl Supervisor {
     /// spec, and a start whose first stage cannot be pinned or whose record
     /// cannot be written is ended there, with nothing started.
     ///
-    /// The child's environment is a tmux pane command's
+    /// The child's environment is an agent host child's
     /// (`host_child_env`), with `env` (the tab's markers, credential and the
-    /// launch environment) where tmux applies a new window's `-e`; the `TMUX`
-    /// placeholder that brings is removed by the tab helper before the
-    /// user's shell starts, as it removes a pane's `TMUX`. `shell` is the
-    /// login shell the helper runs, for `SHELL`.
+    /// launch environment) as its launch environment. `shell` is the login
+    /// shell the helper runs, for `SHELL`.
     ///
     /// On failure the guard is released and what the start may have left is
     /// returned, for [`Self::unwind_unstarted_tab`]. The open's fault seam
@@ -616,7 +615,6 @@ impl Supervisor {
     #[allow(clippy::too_many_arguments)]
     async fn start_tab_host(
         &self,
-        session_id: &str,
         record: &Path,
         argv: Vec<String>,
         env: &[(String, String)],
@@ -626,17 +624,10 @@ impl Supervisor {
         shell: &str,
     ) -> Result<StartedTab, TabStartFailure> {
         let shell_variable = self.host_shell_variable(shell).await;
-        let tmux_version = self.pane_term_program_version(session_id).await;
         let child = ChildSpec {
             argv: argv.into_iter().map(OsString::from).collect(),
             cwd: PathBuf::from(cwd),
-            env: host_child_env(
-                std::env::vars_os(),
-                env,
-                tmux_version.as_deref(),
-                &shell_variable,
-                cwd,
-            ),
+            env: host_child_env(std::env::vars_os(), env, &shell_variable, cwd),
             size: Size {
                 cols: size.cols.clamp(1, 10_000),
                 rows: size.rows.clamp(1, 10_000),
@@ -673,7 +664,7 @@ impl Supervisor {
                 && let Err(error) = interrupt()
             {
                 if let Err(delivery) = starting.deliver_and_abandon_for_test().await {
-                    warn!(session = %session_id, error = %delivery,
+                    warn!(session = %tag.session_id, error = %delivery,
                         "the interrupted tab start's spec was not delivered");
                 }
                 return Err(TabStartFailure::Interrupted(

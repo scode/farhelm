@@ -1751,19 +1751,20 @@ belongs to that tab and dies when the tab is closed, reaped, or deleted with its
 limits on hosts without a usable systemd user manager; see above). This is deliberately unlike the agent launch, which
 leaves detached services started by shell initialization before the agent outside its cleanup guarantee (see above),
 though cleanup may still reach one that stays in the agent's process tree. The agent's launch has normally already run
-the same startup files, so a tab usually finds such a service running and only reuses it, with one routine exception:
-the launch runs those files while `TMUX` is still set and removes it only afterwards (see
-[Ownership during cleanup and provisioning](#ownership-during-cleanup-and-provisioning)), so a tmux autostart guarded by
-`TMUX` being unset does not fire there. When the user's tmux server is not already running, the first tab's startup
-files therefore routinely start it, and the tab owns it; when they `exec tmux`, detaching from it ends the tab and the
-server with it. In an old terminal the launch's `TMUX` names Farhelm's private tmux server; in a new one (see
-[Terminal experience](#terminal-experience)) it names a socket that cannot exist, so a startup file that runs a tmux
-command because `TMUX` is set gets an error that it cannot connect instead of reaching the private server. A tab whose
-process exits on its own is reaped automatically and silently: the tab disappears as if closed, its dead pane's
-scrollback is discarded, and no notice or exit code is shown. This is deliberately NOT the agent terminal's contract —
-an exited agent stays viewable with its scrollback — because a tab's shell exiting is the user being done with the tab.
-A shell that dies before the tab's open completes still refuses the open loudly, with the shell's last words as the
-error.
+the same startup files, so a tab usually finds such a service running and only reuses it. A tmux autostart guarded by
+`TMUX` being unset is where the two kinds of terminal differ. In an old terminal the launch runs those files while
+`TMUX` still names Farhelm's private tmux server and removes it only afterwards (see
+[Ownership during cleanup and provisioning](#ownership-during-cleanup-and-provisioning)), so such an autostart does not
+fire there; when the user's tmux server is not already running, the first tab's startup files therefore routinely start
+it, and the tab owns it, and when they `exec tmux`, detaching from it ends the tab and the server with it. A new
+terminal (see [Terminal experience](#terminal-experience)) is not tmux and does not pretend to be: no `TMUX` is set at
+any point, so the autostart runs during the agent's launch as it would in any terminal outside tmux. One that execs tmux
+replaces the launch, so the agent does not start and the session's terminal shows the user's tmux instead; keeping a
+login shell's startup files from doing that is the user's to arrange. A tab whose process exits on its own is reaped
+automatically and silently: the tab disappears as if closed, its dead pane's scrollback is discarded, and no notice or
+exit code is shown. This is deliberately NOT the agent terminal's contract — an exited agent stays viewable with its
+scrollback — because a tab's shell exiting is the user being done with the tab. A shell that dies before the tab's open
+completes still refuses the open loudly, with the shell's last words as the error.
 
 When a session's terminal contents no longer exist on a reachable host after a reboot, opening it shows the session's
 metadata and says why there is no terminal, rather than an empty pane.
@@ -2416,16 +2417,21 @@ whatever the agent renders is what you see. There is no composer, no message abs
   ever taken to be painted into another terminal (see Restart under [Lifecycle operations](#lifecycle-operations)).
 - A new terminal runs in a **terminal host**: a small process of its own on the host, instead of the host's private tmux
   server, that keeps the terminal and its program running across supervisor restarts and updates (the two kinds of
-  terminal are described below). A new terminal keeps its scrollback to the same floor as an old one (below), and keeps
-  it across supervisor restarts and updates as well as client disconnects: its terminal host holds the program's output
-  while no supervisor reads it (up to a bound, next), and the next supervisor rebuilds the terminal from it. That output
-  is held in memory only, never on disk. A viewer that attaches or reconnects is sent the current screen and then the
-  whole scrollback once, oldest first; from then on it is sent only what changes: the screen as it is now, and the lines
-  that entered the scrollback, appended. The scrollback stays while a full-screen program shows and is there when the
-  program exits. When the scrollback changes in a way an append cannot show (a resize rewraps it, the program erases it
-  or redefines one of the terminal's palette colors, or lines the viewer was still owed fell off the scrollback's far
-  end), the viewer is sent the whole scrollback again once the change has settled, so a window dragged to a new size
-  sends it once, or for a long drag once during it and once when it stops, not at every step.
+  terminal are described below). Programs in a new terminal are told it is Farhelm's own: `TERM_PROGRAM=farhelm` with
+  Farhelm's version as `TERM_PROGRAM_VERSION` (the version the terminal also reports when a program asks it), with
+  `TERM=xterm-256color` and `COLORTERM=truecolor`, all four set whatever the supervisor's own environment holds, and
+  nothing that names tmux: no `TMUX` or `TMUX_PANE`. In a containerized session only `TERM` and `COLORTERM` reach the
+  container, so programs there are told no terminal program at all. A new terminal keeps its scrollback to the same
+  floor as an old one (below), and keeps it across supervisor restarts and updates as well as client disconnects: its
+  terminal host holds the program's output while no supervisor reads it (up to a bound, next), and the next supervisor
+  rebuilds the terminal from it. That output is held in memory only, never on disk. A viewer that attaches or reconnects
+  is sent the current screen and then the whole scrollback once, oldest first; from then on it is sent only what
+  changes: the screen as it is now, and the lines that entered the scrollback, appended. The scrollback stays while a
+  full-screen program shows and is there when the program exits. When the scrollback changes in a way an append cannot
+  show (a resize rewraps it, the program erases it or redefines one of the terminal's palette colors, or lines the
+  viewer was still owed fell off the scrollback's far end), the viewer is sent the whole scrollback again once the
+  change has settled, so a window dragged to a new size sends it once, or for a long drag once during it and once when
+  it stops, not at every step.
 - A terminal host keeps a bounded amount of the program's output beyond the supervisor's latest checkpoint of the
   terminal: 32 MiB by default, a few minutes of an agent redrawing as fast as it can, hours of a shell. When more than
   that arrives while no supervisor reads it (a supervisor that crashed and is not started again soon; on the Mac nothing

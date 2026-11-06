@@ -3159,18 +3159,6 @@ impl TmuxDriver {
         Ok(())
     }
 
-    /// The version the tmux server on the private socket reports
-    /// (`#{version}`, the same text tmux gives its panes as
-    /// `TERM_PROGRAM_VERSION`), for a terminal host's child to get what a
-    /// pane's command gets (`service::core::host_launch::host_child_env`).
-    pub(crate) async fn server_version(&self) -> anyhow::Result<String> {
-        let reported = self
-            .run(&["display-message", "-p", "#{version}"])
-            .await
-            .context("asking the tmux server on the private socket for its version")?;
-        Ok(reported.trim_end_matches('\n').to_string())
-    }
-
     /// Apply the floor to the SERVER now on the private socket, which is
     /// not necessarily the version the `-V` probe cleared.
     ///

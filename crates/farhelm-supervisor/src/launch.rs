@@ -136,24 +136,22 @@ pub const AGENT_ID_ENV_VAR: &str = "FARHELM_AGENT_ID";
 /// The variables tmux sets in every pane it runs, naming its own server
 /// and the pane. Farhelm removes both from agents and terminal tabs.
 ///
-/// Every agent and tab runs inside Farhelm's private tmux server, so with
-/// these left in place a plain `tmux new-window` or `tmux split-window`,
-/// typed by the user or run by an agent, lands in that hidden server, where
-/// Stop, Restart, Delete and tab close never clean it up (SPEC.md,
-/// "Ownership during cleanup and provisioning", which declares that use
-/// unsupported). Removing them makes tmux behave as it would in an SSH
-/// login: it reaches the user's own server, or says none is running.
+/// Every agent and tab in an old terminal runs inside Farhelm's private
+/// tmux server, so with these left in place a plain `tmux new-window` or
+/// `tmux split-window`, typed by the user or run by an agent, lands in that
+/// hidden server, where Stop, Restart, Delete and tab close never clean it
+/// up (SPEC.md, "Ownership during cleanup and provisioning", which declares
+/// that use unsupported). Removing them makes tmux behave as it would in an
+/// SSH login: it reaches the user's own server, or says none is running.
 /// Nothing Farhelm runs inside a pane needs them: every Farhelm tmux call
 /// names its socket explicitly, and in-pane helpers find the supervisor
 /// through `FARHELM_SUPERVISOR_SOCK`. Deliberately reaching the private
 /// server by its socket stays possible and stays unsupported.
 ///
-/// An agent in a terminal host has no tmux around it, but its login shell
-/// still runs its startup files with a placeholder `TMUX`
-/// (`service::core::host_launch::STARTUP_TMUX_PLACEHOLDER`), so that a
-/// startup file that starts tmux when `TMUX` is unset stays held back as it
-/// is in a pane. This removal is what takes that placeholder away again
-/// before the agent starts, so it is load-bearing for both kinds.
+/// A terminal host's child never gets either
+/// (`service::core::host_launch::host_child_env`), so for an agent or tab in
+/// a terminal host this removal finds nothing to remove unless a startup
+/// file set them; it stays one code path for both kinds.
 pub const PRIVATE_TMUX_ENV_VARS: [&str; 2] = ["TMUX", "TMUX_PANE"];
 
 /// What the shim needs to launch the agent: written as JSON by the

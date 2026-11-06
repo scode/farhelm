@@ -11,9 +11,10 @@
 //! starts that command as a host's child, and answers the questions the
 //! create's launch identity asks of a host:
 //!
-//! - **What the child gets** ([`host_child_env`]): the environment a tmux
-//!   pane's command gets today (the plan's D-13), with the startup-file
-//!   protection described there (D-12). The host itself starts with an
+//! - **What the child gets** ([`host_child_env`]): the supervisor's own
+//!   environment with the variables of Farhelm's terminal set over it
+//!   (`TERM_PROGRAM=farhelm` among them) and nothing that names a tmux
+//!   server or pane. The host itself starts with an
 //!   empty environment and only the socket on its command line
 //!   (`crate::hosts::spawn`), so the session's markers and credential,
 //!   which reach the child through this environment and the launch spec,
@@ -66,95 +67,79 @@ use terminal_host::protocol::Info;
 
 // ---- The child's environment -------------------------------------------------------
 
-/// `TERM` for a host's child: what tmux sets in a pane from the private
-/// server's `default-terminal` (`crate::tmux`'s server configuration), and
-/// what the emulator interprets.
+/// `TERM` for a host's child: the terminal type the supervisor's emulator
+/// implements (`farhelm_terminal_emulator`).
 pub(crate) const HOST_TERM: &str = "xterm-256color";
 
-/// The value a host's child gets for `TMUX`, standing in for the private
-/// server's own while the agent's login shell runs its startup files (the
-/// plan's D-12).
-///
-/// In a tmux pane the login shell's startup files run with tmux's `TMUX`
-/// set, and the launch shim removes it (`crate::launch::PRIVATE_TMUX_ENV_VARS`)
-/// only afterwards, before the agent starts. A startup file that starts or
-/// attaches tmux when `TMUX` is unset (a common way to get tmux in every
-/// terminal) is therefore held back while an agent starts, and so it must
-/// be in a host, which has no tmux of its own: otherwise it would put the
-/// agent's whole launch chain inside the user's own tmux, and the agent in a
-/// terminal Farhelm does not drive. The same strip removes this placeholder,
-/// so the agent and everything it starts see neither.
-///
-/// It names a socket path that cannot exist (`/dev/null` is not a
-/// directory), so a startup file that runs a tmux command because `TMUX` is
-/// set reaches no server: tmux prints that it cannot connect, on the
-/// terminal before the agent draws. In a tmux pane the same command
-/// reached Farhelm's private server silently.
-pub(crate) const STARTUP_TMUX_PLACEHOLDER: &str = "/dev/null/farhelm-terminal-host,0,0";
+/// `COLORTERM` for a host's child: the emulator draws 24-bit color, which
+/// programs only use when this says so (`TERM` cannot).
+const HOST_COLORTERM: &str = "truecolor";
+
+/// `TERM_PROGRAM` for a host's child: the terminal is Farhelm's own, and
+/// says so. Programs that adapt to the terminal they run in read this
+/// variable, so it names the terminal the child really runs in rather than
+/// one it does not (the old terminals' tmux, or whatever terminal the
+/// supervisor was started from).
+pub(crate) const HOST_TERM_PROGRAM: &str = "farhelm";
+
+/// `TERM_PROGRAM_VERSION` for a host's child: this build's version, the
+/// same one the emulator reports when a program asks for the terminal's
+/// version (XTVERSION, `farhelm_terminal_emulator::VERSION_REPORT`), so that
+/// the two ways a program can learn the terminal's version agree.
+pub(crate) const HOST_TERM_PROGRAM_VERSION: &str = farhelm_proto::BUILD_VERSION;
 
 /// What `PATH` is when neither the supervisor nor the launch environment
-/// has one: tmux's own default for a pane (`_PATH_DEFPATH`).
+/// has one, so that the login shell and the launch shim can still find the
+/// system's programs.
 const DEFAULT_PATH: &str = "/usr/bin:/bin";
 
-/// What tmux sets `TERM_PROGRAM` to in every pane, and so a host's child
-/// gets too (see [`host_child_env`]).
-const PANE_TERM_PROGRAM: &str = "tmux";
-
-/// Variables a host's child never inherits from the supervisor.
+/// Variables a host's child never inherits from the supervisor, because
+/// they describe something the child is not part of.
 ///
-/// - `TMUX_PANE` names a pane, and a host's child is in none. (A supervisor
-///   started from inside the user's own tmux has it; tmux overrides it for
-///   its panes, so a host's child must not see the outer one either.)
-/// - `TERM_PROGRAM_VERSION`, which [`host_child_env`] sets again from the
-///   private server's version when that is known; a supervisor started from
-///   a terminal application carries that application's, which no pane ever
-///   sees.
+/// - `TMUX` and `TMUX_PANE` name a tmux server and a pane, and a host's
+///   child is in neither. A supervisor started from inside the user's own
+///   tmux has them; a child that inherited them would send a plain `tmux`
+///   command to that server and believe it runs in one of its panes.
 /// - `LISTEN_PID`, `LISTEN_FDS`, `LISTEN_FDNAMES`: systemd's socket
-///   activation hand-off, which tmux clears for its panes too.
+///   activation hand-off, which names descriptors given to the supervisor
+///   process, not to the child.
 ///
-/// `TMUX` and `TERM_PROGRAM` are not here because they are always
-/// overwritten, with the startup placeholder and tmux's own name.
+/// The terminal's own variables (`TERM`, `COLORTERM`, `TERM_PROGRAM`,
+/// `TERM_PROGRAM_VERSION`) are not here because [`host_child_env`] always
+/// sets them, which replaces whatever the supervisor's terminal left.
 const NOT_INHERITED: [&str; 5] = [
+    "TMUX",
     "TMUX_PANE",
-    "TERM_PROGRAM_VERSION",
     "LISTEN_PID",
     "LISTEN_FDS",
     "LISTEN_FDNAMES",
 ];
 
-/// The complete environment of a host's child: what tmux 3.7c gives a new
-/// pane's command (`environ_for_session` and `spawn_pane` in its source)
-/// when the supervisor creates a session, with the startup placeholder for
-/// `TMUX` and no `TMUX_PANE` (the plan's D-12 and D-13).
+/// The complete environment of a host's child.
 ///
-/// In tmux's order, which decides who wins a name: the supervisor's own
-/// environment (`base`; a pane gets the server's, which the supervisor
-/// started with its own, and the session's `update-environment` copies of
-/// the supervisor's), then `launch_env` (`-e` on `new-session`), then the
-/// terminal's own variables (which therefore override `launch_env`, as
-/// tmux's do): `TERM`, `TERM_PROGRAM=tmux`, `TERM_PROGRAM_VERSION` (the
-/// private server's version, `tmux_version`; left unset when it could not
-/// be asked) and `COLORTERM=truecolor`; then the `TMUX` placeholder,
-/// `PATH` (the supervisor's, which tmux takes from the client that created
-/// the session; else the launch environment's; else tmux's default),
-/// `SHELL` (`shell`: tmux's `default-shell`) and `PWD` (`cwd`).
+/// The child gets the supervisor's own environment (`base`), which is what
+/// SPEC.md's "as if the user had SSHed in" contract builds on, with
+/// `launch_env` over it, and then the variables that describe the terminal
+/// over both: [`HOST_TERM`], [`HOST_COLORTERM`], [`HOST_TERM_PROGRAM`] and
+/// [`HOST_TERM_PROGRAM_VERSION`]. These are always set, never inherited, so
+/// that a supervisor started from some other terminal (an iTerm, the user's
+/// own tmux) passes none of that terminal's claims to the child. Then
+/// `SHELL` (`shell`, the user's login shell) and `PWD` (`cwd`), and `PATH`
+/// when nothing gave one ([`DEFAULT_PATH`]). The [`NOT_INHERITED`]
+/// variables are removed, also when `launch_env` sets them.
 ///
-/// `TERM_PROGRAM` names tmux although no tmux is involved. That keeps what
-/// agents read exactly what they read in a pane, which the screen readers
-/// and agent fixtures were made under; tmux's passthrough envelope, which a
-/// program that believes it runs in tmux may use, is off in Farhelm's tmux
-/// and dropped by the emulator alike, so it reaches neither terminal.
+/// Nothing here claims tmux: a host's child runs in no tmux, and a login
+/// shell's startup file that starts tmux when `TMUX` is unset runs as it
+/// would in any terminal outside tmux.
 ///
 /// Sorted by name, so the same inputs give the same spec.
 pub(crate) fn host_child_env(
     base: impl IntoIterator<Item = (OsString, OsString)>,
     launch_env: &[(String, String)],
-    tmux_version: Option<&str>,
     shell: &str,
     cwd: &str,
 ) -> Vec<(OsString, OsString)> {
     let mut env: BTreeMap<OsString, OsString> = base.into_iter().collect();
-    let client_path = env.get(std::ffi::OsStr::new("PATH")).cloned();
     for (name, value) in launch_env {
         env.insert(name.into(), value.into());
     }
@@ -162,21 +147,14 @@ pub(crate) fn host_child_env(
         env.remove(std::ffi::OsStr::new(name));
     }
     env.insert("TERM".into(), HOST_TERM.into());
-    env.insert("TERM_PROGRAM".into(), PANE_TERM_PROGRAM.into());
-    if let Some(version) = tmux_version {
-        env.insert("TERM_PROGRAM_VERSION".into(), version.into());
-    }
-    env.insert("COLORTERM".into(), "truecolor".into());
-    env.insert("TMUX".into(), STARTUP_TMUX_PLACEHOLDER.into());
-    match client_path {
-        Some(path) => {
-            env.insert("PATH".into(), path);
-        }
-        None => {
-            env.entry("PATH".into())
-                .or_insert_with(|| DEFAULT_PATH.into());
-        }
-    }
+    env.insert("COLORTERM".into(), HOST_COLORTERM.into());
+    env.insert("TERM_PROGRAM".into(), HOST_TERM_PROGRAM.into());
+    env.insert(
+        "TERM_PROGRAM_VERSION".into(),
+        HOST_TERM_PROGRAM_VERSION.into(),
+    );
+    env.entry("PATH".into())
+        .or_insert_with(|| DEFAULT_PATH.into());
     env.insert("SHELL".into(), shell.into());
     env.insert("PWD".into(), cwd.into());
     env.into_iter().collect()
@@ -380,30 +358,16 @@ impl Supervisor {
         crate::hosts::own_host_program(&self.farhelm_exe)
     }
 
-    /// `SHELL` for a host's child, as tmux's `default-shell` would give it:
-    /// the user's login shell. That is the launch's own shell in
-    /// production; a supervisor whose launch shell is a test seam still
-    /// gives the user's login shell, as tmux does whatever command a pane
-    /// runs, so a test can compare the two kinds' environments.
+    /// `SHELL` for a host's child: the user's login shell. That is the
+    /// launch's own shell in production. A supervisor whose launch shell is
+    /// a test seam (a stand-in that records what it was given, say) still
+    /// gives the user's login shell, so that the stand-in changes only how
+    /// the launch starts, not which shell the child's programs see as the
+    /// user's.
     pub(super) async fn host_shell_variable(&self, launch_shell: &str) -> String {
         match &self.seams.launch_shell {
             Some(_) => crate::launch::resolve_shell().await,
             None => launch_shell.to_string(),
-        }
-    }
-
-    /// The private tmux server's version, which tmux gives every pane as
-    /// `TERM_PROGRAM_VERSION`; `None`, logged, when tmux cannot be asked,
-    /// which costs a host's child only that variable.
-    pub(super) async fn pane_term_program_version(&self, id: &str) -> Option<String> {
-        match self.tmux.server_version().await {
-            Ok(version) => Some(version),
-            Err(error) => {
-                warn!(session = %id, error = %format!("{error:#}"),
-                    "could not ask tmux for its version; the terminal host's child gets no \
-                     TERM_PROGRAM_VERSION");
-                None
-            }
         }
     }
 
@@ -492,11 +456,9 @@ impl Supervisor {
             }
         };
         let shell_variable = self.host_shell_variable(&shell).await;
-        let tmux_version = self.pane_term_program_version(id).await;
         let env = host_child_env(
             std::env::vars_os(),
             &self.seams.launch_env,
-            tmux_version.as_deref(),
             &shell_variable,
             &cwd,
         );
@@ -1060,9 +1022,9 @@ pub(super) async fn remove_ended_socket_file(socket: &Path) {
 #[cfg(test)]
 mod tests {
     //! The child's environment and the launch record, as pure functions of
-    //! their inputs. That the environment matches what a real tmux pane's
-    //! command gets, and that the record fences a start that outlived its
-    //! supervisor, is shown against a real tmux and real hosts in
+    //! their inputs. That a real agent launched in a host gets this
+    //! environment, and that the record fences a start that outlived its
+    //! supervisor, is shown against real hosts in
     //! `crates/farhelm/tests/e2e/host_creates.rs`.
 
     use super::*;
@@ -1080,24 +1042,25 @@ mod tests {
             .map(|(_, v)| v.to_str().unwrap())
     }
 
-    /// The supervisor's environment reaches the child, with the terminal's
-    /// own variables set as a tmux pane's are, and an outer tmux's or
-    /// terminal's claims replaced or removed.
+    /// The supervisor's environment reaches the child, with Farhelm's
+    /// terminal variables set over it and an outer tmux's or terminal's
+    /// claims replaced or removed.
     ///
     /// Why: the child's environment is SPEC.md's "as if the user had
-    /// SSHed in" contract, which a tmux pane delivered by passing the
-    /// supervisor's environment through; a host passes nothing it is not
-    /// given. Spec: from a supervisor environment holding `HOME`, `PATH`,
-    /// a `FARHELM_` variable, an outer tmux's `TMUX`/`TMUX_PANE`, an outer
-    /// terminal's `TERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERSION` and
-    /// `COLORTERM`, and systemd's `LISTEN_*`, with the private server's
-    /// version `3.7c`, the child gets `HOME`, `PATH` and the `FARHELM_`
-    /// variable unchanged, `TERM=xterm-256color`, `TERM_PROGRAM=tmux`,
-    /// `TERM_PROGRAM_VERSION=3.7c`, `COLORTERM=truecolor`, the startup
-    /// placeholder for `TMUX`, `SHELL` and `PWD` from the arguments, and no
-    /// `TMUX_PANE` or `LISTEN_*`; the result is sorted by name.
+    /// SSHed in" contract, so the supervisor's own variables must pass
+    /// through; and a new terminal must not claim to be tmux or the
+    /// terminal the supervisor happened to start from, since programs adapt
+    /// to what these variables say. Spec: from a supervisor environment
+    /// holding `HOME`, `PATH`, a `FARHELM_` variable, an outer tmux's
+    /// `TMUX`/`TMUX_PANE`, an outer terminal's `TERM`, `TERM_PROGRAM`,
+    /// `TERM_PROGRAM_VERSION` and `COLORTERM`, and systemd's `LISTEN_*`, the
+    /// child gets `HOME`, `PATH` and the `FARHELM_` variable unchanged,
+    /// `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=farhelm`,
+    /// `TERM_PROGRAM_VERSION` set to this build's version, `SHELL` and `PWD`
+    /// from the arguments, and no `TMUX`, `TMUX_PANE` or `LISTEN_*`; the
+    /// result is sorted by name.
     #[test]
-    fn the_child_gets_the_supervisors_environment_shaped_like_a_panes() {
+    fn the_child_gets_the_supervisors_environment_in_farhelms_terminal() {
         let child = host_child_env(
             env(&[
                 ("HOME", "/home/someone"),
@@ -1114,7 +1077,6 @@ mod tests {
                 ("LISTEN_FDNAMES", "x"),
             ]),
             &[],
-            Some("3.7c"),
             "/bin/zsh",
             "/work",
         );
@@ -1128,110 +1090,85 @@ mod tests {
                 ("PWD", "/work"),
                 ("SHELL", "/bin/zsh"),
                 ("TERM", "xterm-256color"),
-                ("TERM_PROGRAM", "tmux"),
-                ("TERM_PROGRAM_VERSION", "3.7c"),
-                ("TMUX", STARTUP_TMUX_PLACEHOLDER),
+                ("TERM_PROGRAM", "farhelm"),
+                ("TERM_PROGRAM_VERSION", farhelm_proto::BUILD_VERSION),
             ])
         );
     }
 
-    /// Without the private server's version, the child gets no
-    /// `TERM_PROGRAM_VERSION` at all, never an outer terminal's.
+    /// `TERM_PROGRAM_VERSION` is the version the emulator reports to a
+    /// program that asks the terminal for its version.
     ///
-    /// Why: a version that names another program than `TERM_PROGRAM` is a
-    /// claim no pane ever made. Spec: a supervisor environment with
-    /// `TERM_PROGRAM_VERSION=3.5` and no tmux version gives a child with
-    /// `TERM_PROGRAM=tmux` and no `TERM_PROGRAM_VERSION`.
+    /// Why: a program can learn the terminal's version from the environment
+    /// or by asking the terminal (XTVERSION); two different answers would
+    /// make one of them a lie. Spec: the emulator's XTVERSION answer is
+    /// `DCS > | Farhelm <TERM_PROGRAM_VERSION> ST`.
     #[test]
-    fn without_tmuxs_version_the_child_gets_none() {
-        let child = host_child_env(
-            env(&[("TERM_PROGRAM_VERSION", "3.5")]),
-            &[],
-            None,
-            "/bin/sh",
-            "/",
+    fn the_version_is_the_one_the_emulator_reports() {
+        assert_eq!(
+            farhelm_terminal_emulator::VERSION_REPORT,
+            format!("\x1bP>|Farhelm {HOST_TERM_PROGRAM_VERSION}\x1b\\")
         );
-        assert_eq!(get(&child, "TERM_PROGRAM"), Some("tmux"));
-        assert_eq!(get(&child, "TERM_PROGRAM_VERSION"), None);
     }
 
-    /// The launch environment applies as tmux's `-e` does: over the
-    /// supervisor's own, under the terminal's own variables.
+    /// The launch environment applies over the supervisor's own, under the
+    /// terminal's variables, and cannot bring back what a child never
+    /// inherits.
     ///
-    /// Why: the launch environment seam is how tests give a launch its own
-    /// `HOME`; a host that ordered it differently from tmux would make the
-    /// same test see different environments per kind. Spec: a launch
-    /// environment setting `HOME`, `TERM`, `TERM_PROGRAM`, `PATH`, `SHELL`
-    /// and `TMUX` gives the child its `HOME`, but `TERM` and `TERM_PROGRAM`
-    /// from the terminal, `PATH` from the supervisor, `SHELL` from the
-    /// argument and the `TMUX` placeholder.
+    /// Why: the launch environment carries a tab's markers and credential
+    /// and, in tests, a launch's own `HOME`; it must win over the
+    /// supervisor's values, but the terminal's description is not the
+    /// launch's to change. Spec: a launch environment setting `HOME`,
+    /// `PATH`, `TERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `SHELL` and
+    /// `TMUX` gives the child its `HOME` and `PATH`, the terminal's `TERM`,
+    /// `TERM_PROGRAM` and `TERM_PROGRAM_VERSION`, `SHELL` from the argument
+    /// and no `TMUX`.
     #[test]
-    fn the_launch_environment_applies_where_tmux_applies_it() {
+    fn the_launch_environment_applies_under_the_terminals_variables() {
         let child = host_child_env(
             env(&[("HOME", "/home/someone"), ("PATH", "/usr/bin")]),
             &[
                 ("HOME".into(), "/fixture/home".into()),
+                ("PATH".into(), "/fixture/bin".into()),
                 ("TERM".into(), "dumb".into()),
                 ("TERM_PROGRAM".into(), "fixture".into()),
-                ("PATH".into(), "/fixture/bin".into()),
+                ("TERM_PROGRAM_VERSION".into(), "0.0.1".into()),
                 ("SHELL".into(), "/fixture/sh".into()),
                 ("TMUX".into(), "/fixture/tmux,1,0".into()),
             ],
-            Some("3.7c"),
             "/bin/bash",
             "/",
         );
         assert_eq!(get(&child, "HOME"), Some("/fixture/home"));
+        assert_eq!(get(&child, "PATH"), Some("/fixture/bin"));
         assert_eq!(get(&child, "TERM"), Some(HOST_TERM));
-        assert_eq!(get(&child, "TERM_PROGRAM"), Some("tmux"));
-        assert_eq!(get(&child, "PATH"), Some("/usr/bin"));
+        assert_eq!(get(&child, "TERM_PROGRAM"), Some(HOST_TERM_PROGRAM));
+        assert_eq!(
+            get(&child, "TERM_PROGRAM_VERSION"),
+            Some(HOST_TERM_PROGRAM_VERSION)
+        );
         assert_eq!(get(&child, "SHELL"), Some("/bin/bash"));
-        assert_eq!(get(&child, "TMUX"), Some(STARTUP_TMUX_PLACEHOLDER));
+        assert_eq!(get(&child, "TMUX"), None);
     }
 
-    /// A supervisor without `PATH` gives the child tmux's default one,
+    /// A supervisor without `PATH` gives the child a minimal default one,
     /// unless the launch environment gives one.
     ///
     /// Why: a login shell started with no `PATH` cannot find the programs
-    /// its startup files run; tmux falls back the same way. Spec: no
+    /// its startup files run. Spec: no
     /// `PATH` anywhere gives `/usr/bin:/bin`; a launch environment `PATH`
     /// with none in the supervisor's is kept.
     #[test]
-    fn without_a_path_the_child_gets_tmuxs_default() {
-        let child = host_child_env(env(&[]), &[], None, "/bin/sh", "/");
+    fn without_a_path_the_child_gets_a_default() {
+        let child = host_child_env(env(&[]), &[], "/bin/sh", "/");
         assert_eq!(get(&child, "PATH"), Some(DEFAULT_PATH));
         let child = host_child_env(
             env(&[]),
             &[("PATH".into(), "/fixture/bin".into())],
-            None,
             "/bin/sh",
             "/",
         );
         assert_eq!(get(&child, "PATH"), Some("/fixture/bin"));
-    }
-
-    /// The startup placeholder names a path no socket can ever be bound at,
-    /// and is in the shape tmux reads `TMUX` in.
-    ///
-    /// Why: a startup file that runs a tmux command because `TMUX` is set
-    /// must reach no server; a placeholder at a path someone could bind
-    /// would hand its commands to whoever did. Spec: the placeholder's
-    /// socket part (before the first comma) lies under `/dev/null`, which
-    /// is not a directory, so nothing exists under it; and it carries the
-    /// two comma-separated fields tmux's own value has after the socket.
-    #[test]
-    fn the_startup_placeholder_names_no_possible_socket() {
-        let (socket, rest) = STARTUP_TMUX_PLACEHOLDER
-            .split_once(',')
-            .expect("socket, pid and session index");
-        assert_eq!(rest.split(',').count(), 2);
-        let socket = Path::new(socket);
-        assert_eq!(socket.parent(), Some(Path::new("/dev/null")));
-        assert!(
-            !Path::new("/dev/null").is_dir(),
-            "premise: /dev/null is not a directory"
-        );
-        assert!(std::fs::symlink_metadata(socket).is_err());
     }
 
     /// The launch record reads back what was written, and refuses anything

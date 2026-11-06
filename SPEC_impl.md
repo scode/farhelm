@@ -2146,51 +2146,53 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   command (the spec, the hooks, the login shell, and the shim's command line with its `systemd-run --user --scope`
   wrapper exactly where a pane has it), and the host's child runs that command: the agent keeps its launch scope, and
   the host gets no scope of its own, living in the supervisor's control group as the tmux server does. The child's
-  environment is what tmux 3.7c gives a pane's command when the supervisor creates a session: the supervisor's own
-  environment, then the launch environment, then `TERM=xterm-256color`, `TERM_PROGRAM=tmux`, `TERM_PROGRAM_VERSION` (the
-  private server's version) and `COLORTERM=truecolor`, the supervisor's `PATH` (else the launch environment's, else
-  `/usr/bin:/bin`), `SHELL` (the user's login shell) and `PWD`, without `TMUX_PANE` and systemd's `LISTEN_*`.
-  `TERM_PROGRAM` names tmux although none is involved, so that agents read exactly what they read in a pane; tmux's
-  passthrough envelope, which a program that believes it runs in tmux may use, is off in Farhelm's tmux and dropped by
-  the emulator alike. `TMUX` is a placeholder naming a socket under `/dev/null`, where none can exist: a pane's login
-  shell runs its startup files with tmux's `TMUX` set, which holds back a startup file that starts tmux when `TMUX` is
-  unset, and the placeholder keeps that protection; the launch shim removes it with the private server's variables
-  before the agent starts. A tmux command a startup file runs because `TMUX` is set reaches no server and prints that it
-  cannot connect, where in a pane it reached the private server silently. The host's tag binds it to the session and the
-  launch generation, and confirming the launch writes the socket's name to the row's `pane`. **The launch record**: the
-  socket's name is drawn before the host's first stage starts, and before that first stage is given the spec (it starts
-  nothing until it has read it whole), the launch's artifacts record the socket's name and the first stage's process,
-  pinned to its start identity (`<state>/launch/<id>.<generation>.host`). A supervisor that dies after the record leaves
-  a first stage that can still start the host on its own, and the record is how a retry finds it; one that dies before
-  it leaves a first stage whose stdin ends without a spec, which starts nothing. A failed host start is classified from
-  the first stage's exit status: a refusal, or an unfinished start the spawn confirmed ended, leaves nothing, and the
-  create rolls back as for an absent tmux session; a host that may still run (an unfinished start not confirmed ended,
-  or a host that reported ready but cannot be used) is ended through the protocol or by the verified signal, and only
-  when that cannot be confirmed is the launching row kept (with its record). A create that lost to Delete, or whose
-  confirmation failed, sweeps the agent's process tree and then ends its host the same way: through its runtime's
-  `Shutdown` within 15 seconds (a runtime takes it up only between its other work, which a snapshot encode can hold),
-  and otherwise, with the runtime stopped so that it cannot take the host back, by its socket within
-  `stop-terminal-hosts`'s per-host limits. The socket file a host ended by a signal leaves is then removed, judged gone
-  again first. A retried create whose row shows no launch asks, in order: whether the session's published entry holds a
-  host (a create kept as a launching record publishes the host it could not end), which is the launch; whether a launch
-  record exists, without which no host start ever got its spec; whether the recorded first stage still runs, in which
-  case it is waited for up to five seconds and then ended with the verified signal; and finally what is at the recorded
-  socket. A host whose tag names the session's first launch is the launch, and anything else that answers leaves the
-  retry unresolved. Nothing there is absence only once no live process names the socket on its command line: a second
-  stage the first stage forked before it ended still binds the socket and starts the child before its readiness report
-  finds the first stage gone and it ends both, so the socket is looked at again for up to five seconds while such a
-  process remains, and the retry is left unresolved if one stays. The record stays through an agent's launch error (the
-  error settles the agent, not its host, which may still run with the failed launch's final screen and is named nowhere
-  else while the row's `pane` is empty). A retry that finds the host replays the session as created and starts nothing;
-  the interrupted attempt's host itself stays running, and a restarted supervisor's reload adopts it by its tag, as it
-  finds an interrupted tmux launch's pane by its marker. The supervisor-wide `host_scan` lock keeps host spawns (holding
-  it shared from just before the first stage starts until the host's entry is published, or until the create gives the
-  host up) apart from what must not overlap them (holding it exclusively): the removal of an ended host's socket file
-  (by a create or by Delete), whose re-verifying removal requires that nothing binds sockets in the directory meanwhile,
-  and any scan of the socket directory inside a running supervisor (today `serve`'s reload), since a scan would take a
-  host over from the create that is starting it. Delete's settling of its session's launch records takes no part in it:
-  the session's lifecycle claim keeps that session's own creates out. A session kept as a launching record with its host
-  unconfirmed ended has that host ended by its Delete, which finds it by the launch record.
+  environment (`host_child_env`, the same for agent and tab hosts) is the supervisor's own environment with the launch
+  environment over it, then the terminal's own variables over both: `TERM=xterm-256color` (the terminal type the
+  emulator implements), `COLORTERM=truecolor`, `TERM_PROGRAM=farhelm` and `TERM_PROGRAM_VERSION` set to the build's
+  version, the one the emulator's XTVERSION answer names. These four are always set, so a supervisor started from some
+  other terminal passes none of its claims on. Then `SHELL` (the user's login shell, also when a test seam replaces the
+  launch shell), `PWD`, and `PATH` as `/usr/bin:/bin` when nothing gave one. `TMUX`, `TMUX_PANE` and systemd's
+  `LISTEN_*` are never passed on: a supervisor started inside the user's own tmux has the first two, and the child is in
+  no tmux. Nothing claims tmux, and no tmux is asked anything for the launch. A login shell's startup file that starts
+  tmux when `TMUX` is unset therefore runs during the agent's launch, as in any terminal outside tmux (SPEC.md, "Session
+  view"); until 2026-11 the child got `TERM_PROGRAM=tmux`, the private server's version and a placeholder `TMUX` that
+  held such an autostart back, and a host started then keeps that environment until its agent is restarted. The
+  containerized launch forwards only `TERM` and `COLORTERM` into the container, so a containerized agent sees no
+  `TERM_PROGRAM` either way. The host's tag binds it to the session and the launch generation, and confirming the launch
+  writes the socket's name to the row's `pane`. **The launch record**: the socket's name is drawn before the host's
+  first stage starts, and before that first stage is given the spec (it starts nothing until it has read it whole), the
+  launch's artifacts record the socket's name and the first stage's process, pinned to its start identity
+  (`<state>/launch/<id>.<generation>.host`). A supervisor that dies after the record leaves a first stage that can still
+  start the host on its own, and the record is how a retry finds it; one that dies before it leaves a first stage whose
+  stdin ends without a spec, which starts nothing. A failed host start is classified from the first stage's exit status:
+  a refusal, or an unfinished start the spawn confirmed ended, leaves nothing, and the create rolls back as for an
+  absent tmux session; a host that may still run (an unfinished start not confirmed ended, or a host that reported ready
+  but cannot be used) is ended through the protocol or by the verified signal, and only when that cannot be confirmed is
+  the launching row kept (with its record). A create that lost to Delete, or whose confirmation failed, sweeps the
+  agent's process tree and then ends its host the same way: through its runtime's `Shutdown` within 15 seconds (a
+  runtime takes it up only between its other work, which a snapshot encode can hold), and otherwise, with the runtime
+  stopped so that it cannot take the host back, by its socket within `stop-terminal-hosts`'s per-host limits. The socket
+  file a host ended by a signal leaves is then removed, judged gone again first. A retried create whose row shows no
+  launch asks, in order: whether the session's published entry holds a host (a create kept as a launching record
+  publishes the host it could not end), which is the launch; whether a launch record exists, without which no host start
+  ever got its spec; whether the recorded first stage still runs, in which case it is waited for up to five seconds and
+  then ended with the verified signal; and finally what is at the recorded socket. A host whose tag names the session's
+  first launch is the launch, and anything else that answers leaves the retry unresolved. Nothing there is absence only
+  once no live process names the socket on its command line: a second stage the first stage forked before it ended still
+  binds the socket and starts the child before its readiness report finds the first stage gone and it ends both, so the
+  socket is looked at again for up to five seconds while such a process remains, and the retry is left unresolved if one
+  stays. The record stays through an agent's launch error (the error settles the agent, not its host, which may still
+  run with the failed launch's final screen and is named nowhere else while the row's `pane` is empty). A retry that
+  finds the host replays the session as created and starts nothing; the interrupted attempt's host itself stays running,
+  and a restarted supervisor's reload adopts it by its tag, as it finds an interrupted tmux launch's pane by its marker.
+  The supervisor-wide `host_scan` lock keeps host spawns (holding it shared from just before the first stage starts
+  until the host's entry is published, or until the create gives the host up) apart from what must not overlap them
+  (holding it exclusively): the removal of an ended host's socket file (by a create or by Delete), whose re-verifying
+  removal requires that nothing binds sockets in the directory meanwhile, and any scan of the socket directory inside a
+  running supervisor (today `serve`'s reload), since a scan would take a host over from the create that is starting it.
+  Delete's settling of its session's launch records takes no part in it: the session's lifecycle claim keeps that
+  session's own creates out. A session kept as a launching record with its host unconfirmed ended has that host ended by
+  its Delete, which finds it by the launch record.
 - **Tabs in hosts** (`service/core/host_tabs.rs`): under the same switch every new tab is a terminal host of its own,
   whatever its session's agent runs in, so a tmux agent's session holds its old tmux tabs and new host tabs side by side
   (a mixed session), and a host agent's only host tabs; a tab never changes kind. The tab-open gate asks the agent's
@@ -4881,11 +4883,13 @@ refusal. No global geometry cache or new asset file is introduced.
   below; on a host without a usable user manager, a detached tab-started process whose environment is unreadable escapes
   the sweep). The tab shell is itself what closing the tab promises to kill, and a tab has no shim that could run after
   initialization to apply containment later. The agent launch has normally already run the same startup files outside
-  containment, so guarded startup logic usually reuses that instance, with one routine exception: the launch removes the
-  private server's `TMUX` and `TMUX_PANE` only after those files ran, so a tmux autostart guarded by `TMUX` being unset
-  fires in the first tab instead, and when no tmux server of the user's is running yet, that tab starts and owns it
-  (with `exec tmux`, a detach ends both the tab and the server). A shared service dies with a tab only when the tab's
-  startup files are the first to start it.
+  containment, so guarded startup logic usually reuses that instance, with one routine exception for a tmux autostart
+  guarded by `TMUX` being unset. In an old terminal the launch removes the private server's `TMUX` and `TMUX_PANE` only
+  after those files ran, so such an autostart fires in the first tab instead, and when no tmux server of the user's is
+  running yet, that tab starts and owns it (with `exec tmux`, a detach ends both the tab and the server). In a new
+  terminal no `TMUX` is set at any point, so the autostart runs during the agent's launch, and one that execs tmux keeps
+  the agent from starting (SPEC.md, "Session view"). A shared service dies with a tab only when the tab's startup files
+  are the first to start it.
 
   **What the cgroup does and does not promise.** It targets ACCIDENTAL daemonization — the dev server, MCP server, or
   build watcher that double-forks and execs away its environment marker, which is exactly the shape the sweep provably
