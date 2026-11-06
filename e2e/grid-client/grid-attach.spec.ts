@@ -1070,9 +1070,10 @@ test("a recovered grid terminal replays into a new grid and drops the held scree
 
 // ## Tier 3: the hyperlink mismatch warning, file paths, tunnels
 //
-// Today's link code (terminal-links.js, terminal-files.js) runs on the grid
-// through an adapter of xterm.js's buffer API; these specs hold the grid to
-// what that code shows and allows, with hostile link text and targets.
+// The link code (terminal-links.js, terminal-files.js) runs on the grid's
+// own link lines, the same code an old terminal runs through xterm.js's
+// adapter; these specs hold the grid to what that code shows and allows,
+// with hostile link text and targets.
 
 /**
  * Replace the screen of socket `index` with `rows` (each `[text, link]`,

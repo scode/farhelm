@@ -1749,17 +1749,22 @@ recovery snapshot reinstalls its retained terminal's link-gesture observer besid
 both; input and transport listeners remain detached.
 
 An OSC 8 link's hover compares the link's underlined text with its target (`linkTextMismatch` in
-`assets/terminal-links.js`) to decide whether the display is the quiet one or the loud mismatch warning. The text is
-joined by `linkHoverText`, which reads the undocumented `extended.urlId` on the cell returned by the public
-`term.buffer.active.getLine(y).getCell(x)` API. Only consecutive rows carrying the same tag join, with exactly one
-contiguous tagged run per row, at most 128 rows and 8192 characters. Each run is read without trimming; only the ends of
-the joined string are trimmed. One synthetic empty padding cell before a terminal-wrapped wide character is omitted; an
-actual printed space is preserved. Agent cursor moves do not set `isWrapped`, so that flag is not a join condition.
-Within a complete bounded, unambiguous extent, rows whose addresses each independently match the target compare as
-separate occurrences. Otherwise the whole text is compared normally. An adjacent continuation that exceeds a bound or
-has ambiguous runs yields Fragment: its hovered piece warns whenever it looks like an address, even if that piece
-happens to equal the target. A single row with repeated same-tag links keeps its existing comparison. An unavailable tag
-yields Unknown and restores the previous row-only comparison unchanged, including its false alarms and gaps.
+`assets/terminal-links.js`) to decide whether the display is the quiet one or the loud mismatch warning. The link code
+in `terminal-links.js` and `terminal-files.js` reads a terminal through one small interface, "link lines" (each line's
+length, whether it soft-wraps from the previous one, its cells' characters, widths and hyperlink tags, and its text),
+which the grid offers directly (`grid-buffer.js`'s `linkLines`); old terminals read xterm.js's buffer through an adapter
+to that interface (`xtermLines`), so both kinds share one implementation. The text is joined by `linkHoverText` from the
+cells' hyperlink tags; on an old terminal the tag is the undocumented `extended.urlId` on the cell returned by
+xterm.js's public `term.buffer.active.getLine(y).getCell(x)` API, read from a fresh cell each time. Only consecutive
+rows carrying the same tag join, with exactly one contiguous tagged run per row, at most 128 rows and 8192 characters.
+Each run is read without trimming; only the ends of the joined string are trimmed. One synthetic empty padding cell
+before a terminal-wrapped wide character is omitted; an actual printed space is preserved. Agent cursor moves do not set
+a soft wrap, so that flag is not a join condition. Within a complete bounded, unambiguous extent, rows whose addresses
+each independently match the target compare as separate occurrences. Otherwise the whole text is compared normally. An
+adjacent continuation that exceeds a bound or has ambiguous runs yields Fragment: its hovered piece warns whenever it
+looks like an address, even if that piece happens to equal the target. A single row with repeated same-tag links keeps
+its existing comparison. An unavailable tag yields Unknown and restores the previous row-only comparison unchanged,
+including its false alarms and gaps.
 
 Decided 2026-10-15: accept this read-only private field access, superseding the 2026-09-30 decision to accept
 wrapped-link false alarms. The bundle stays byte-identical to upstream. The field can change at a manual xterm upgrade;
@@ -1787,8 +1792,8 @@ In grid terminals, `grid-buffer.js` resolves directly continuing pieces with gen
 and equal targets to the first piece's id and target. Pieces continue when adjacent on a row, or from a soft-wrapped
 row's last cell into column zero of the next (including the synthetic padding before a wrapped wide character). Explicit
 program ids stay separate from generated ids. Per-question row caching keeps resolution linear in the runs examined,
-with at most 128 rows of backward discovery. The underline and the buffer adapter's tags use the same identity, as do
-the rows captured as hover and late-answer evidence.
+with at most 128 rows of backward discovery. The underline and the link lines' tags use the same identity, as do the
+rows captured as hover and late-answer evidence.
 
 Only the spelling distinguishes generated ids: a program can send `id=7_alacritty` itself. This is acceptable because
 joining requires equal targets, and such a contiguous chain is a subset of what a shared explicit id already joins. The
@@ -3673,12 +3678,13 @@ escapes. Decimal size (1000 bytes per KB) and exact byte thresholds set the left
 override size with red. Native mode alone advertises the platform modifier for `can_open` files. Both plain and OSC
 adapters forward their mouse event to the same transfer path; web modifiers always request a plain browser download.
 
-`terminal-files.js` supplies conservative token recognition and a terminal-owned xterm addon below the existing OSC 8
-and web providers. Public buffer cells map UTF-16 token offsets to wrapped coordinates, preserving wide/combined glyphs.
-Logical lines over 8192 characters or 128 rows are not linkified. Whitespace, quotes and brackets delimit ordinary
-paths; filenames with spaces require an OSC file link. Plain schemes and protocol-relative tokens are excluded. File
-URIs decode once; their path belongs to the session host regardless of URI authority. No shell directory tracking or
-hover cache is introduced.
+`terminal-files.js` supplies conservative token recognition and the terminal-owned file links (`FileLinks`), which a
+grid hosts directly and an old terminal loads as an xterm.js add-on (`XtermFileLinksAddon`) below the existing OSC 8 and
+web providers; only that add-on registers xterm.js link providers or wraps xterm.js's private OSC 8 provider. Link-line
+cells map UTF-16 token offsets to wrapped coordinates, preserving wide/combined glyphs. Logical lines over 8192
+characters or 128 rows are not linkified. Whitespace, quotes and brackets delimit ordinary paths; filenames with spaces
+require an OSC file link. Plain schemes and protocol-relative tokens are excluded. File URIs decode once; their path
+belongs to the session host regardless of URI authority. No shell directory tracking or hover cache is introduced.
 
 The OSC handler enables `allowNonHttpProtocols` and owns the explicit scheme boundary: parsed http/https targets go
 unchanged to the existing opener, valid file targets go to file lookup/download, and every other scheme does nothing.

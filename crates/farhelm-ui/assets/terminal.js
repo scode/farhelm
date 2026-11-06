@@ -1168,12 +1168,11 @@
   // press); what each link DOES is today's code, here: the OSC 8 target
   // display with its mismatch warning (`showLinkTarget` with
   // `linkHoverText`), the tunnel hint and Cmd-click tunnel, the opening
-  // rules (`activateWebLink`), and file paths through a `FileLinksAddon`
+  // rules (`activateWebLink`), and file paths through `FileLinks`
   // (detection, the checking hover, refusals, downloads, the desktop app's
-  // opening). Those helpers read a terminal through xterm.js's buffer API,
-  // so they get an adapter over the grid (grid-buffer.js's `xtermBuffer`)
-  // and run unchanged; the addon is hosted without being activated, since
-  // the grid, not xterm.js, asks for links.
+  // opening). Those helpers read a terminal as link lines (terminal-links.js,
+  // "Link lines"), which the grid offers directly (`linkLines`); the
+  // xterm.js surface is the one that reads them through an adapter.
   //
   // Module-level rather than inside `mount()`, and reading nothing of a
   // mount but what is passed in: a grid kept as a takeover's snapshot
@@ -1194,17 +1193,16 @@
     const links = window.farhelmTerminalLinks;
     const files = window.farhelmTerminalFiles;
     const native = typeof window[WEBVIEW_DEVICE_SECRET] === "string";
-    // The terminal as today's helpers read it.
-    const term = {
+    // The terminal as the link code reads it (terminal-files.js's header).
+    const view = {
       get element() {
         return getGrid().element;
       },
-      get buffer() {
-        return { active: getGrid().xtermBuffer() };
-      },
-      getSelection: () => getGrid().selectionText(),
+      lines: () => getGrid().linkLines(),
+      hasSelection: () => !!getGrid().selectionText(),
     };
-    const fileLinks = new files.FileLinksAddon({
+    const fileLinks = new files.FileLinks({
+      view,
       endpoint: baseUrl + spec.path.split("/term")[0] + "/files",
       secret: deviceSecret,
       native,
@@ -1213,10 +1211,6 @@
       isClick: (event) => getGrid().isLinkClick(event),
       coveringRects: () => files.markedCoverRects(document),
     });
-    // Hosted, not activated: `activate` would register an xterm.js link
-    // provider, and the grid asks for links itself (see `row` below).
-    fileLinks.term = term;
-
     const tunnelState = () => (native ? window.farhelmTunnelSessions?.[spec.sessionId] : null);
     const tunnelHint = (uri) => {
       const state = tunnelState();
@@ -1238,7 +1232,7 @@
       webHoverIdentity = identity;
     };
     const hideWebLinkTarget = () => {
-      links.hideLinkTarget(term.element);
+      links.hideLinkTarget(view.element);
       if (webLeaveTimer !== null) clearTimeout(webLeaveTimer);
       webLeaveTimer = setTimeout(() => {
         webLeaveTimer = null;
@@ -1248,9 +1242,9 @@
     };
     // OSC links always disclose their target; printed URLs only with a
     // tunnel hint. The display must be fully visible and uncovered at the
-    // click (the addon's shared check and refusal).
+    // click (`FileLinks.admitDisclosure`'s shared check and refusal).
     const webDisclosureAdmits = (uri, osc) => !(osc || tunnelHint(uri)) ||
-      fileLinks.admitDisclosure(term.element.querySelector(":scope > .terminal-link-target:not(.terminal-file-target)"), true);
+      fileLinks.admitDisclosure(view.element.querySelector(":scope > .terminal-link-target:not(.terminal-file-target)"), true);
     const activateWeb = (event, uri, osc) => links.activateWebLink({
       validated: osc,
       uri,
@@ -1282,14 +1276,15 @@
 
     /** A program's hyperlink: a web target, a file on the session host, or an inert other scheme. */
     const oscLink = (found) => {
-      const range = window.farhelmGridBuffer.toXtermRange(found.ranges[0]);
+      const range = found.ranges[0];
       const target = files.oscTarget(found.uri);
       const link = { ...found, text: found.uri, range, web: target?.kind === "web", decorations: { underline: true, pointerCursor: true } };
       if (target?.kind === "web") {
         link.hover = (event) => {
-          const hoverText = links.linkHoverText(term, range, found.uri);
-          noteWebHover(found.uri, range, links.linkRangeText(term, range));
-          links.showLinkTarget(event, found.uri, term.element, hoverText.text, hoverText.kind === "fragment", tunnelHint(found.uri));
+          const lines = view.lines();
+          const hoverText = links.linkHoverText(lines, range, found.uri);
+          noteWebHover(found.uri, range, links.linkRangeText(lines, range));
+          links.showLinkTarget(event, found.uri, view.element, hoverText.text, hoverText.kind === "fragment", tunnelHint(found.uri));
         };
         link.leave = hideWebLinkTarget;
         link.activate = (event) => {
@@ -1297,7 +1292,7 @@
         };
       } else if (target?.kind === "file") {
         link.path = target.path;
-        link.hover = (event) => fileLinks.hover(event, target.path, null, range, links.linkRowText(term, range));
+        link.hover = (event) => fileLinks.hover(event, target.path, null, range, links.linkRowText(view.lines(), range));
         link.leave = () => fileLinks.leave();
         link.activate = (event) => {
           if (getGrid().isLinkClick(event) && !getGrid().hasSelection()) fileLinks.download(target.path, event);
@@ -1306,23 +1301,23 @@
         // xterm.js underlines any OSC 8 link; a scheme outside the
         // allowlist does nothing on hover or click.
         link.hover = () => noteWebHover(null, null, null);
-        link.leave = () => links.hideLinkTarget(term.element);
+        link.leave = () => links.hideLinkTarget(view.element);
         link.activate = () => {};
       }
       return link;
     };
 
-    /** A URL printed as text (the web-links addon's links). */
+    /** A URL printed as text (a `text` link of grid-buffer.js's `rowLinks`). */
     const textLink = (found) => {
-      const range = window.farhelmGridBuffer.toXtermRange({ start: found.ranges[0].start, end: found.ranges[found.ranges.length - 1].end });
+      const range = { start: found.ranges[0].start, end: found.ranges[found.ranges.length - 1].end };
       return {
         ...found,
         web: links.isPlainWebUrl(found.uri),
         decorations: { underline: true, pointerCursor: true },
         hover(event) {
-          noteWebHover(found.uri, range, links.linkRangeText(term, range));
+          noteWebHover(found.uri, range, links.linkRangeText(view.lines(), range));
           const hint = tunnelHint(found.uri);
-          if (hint) links.showLinkTarget(event, found.uri, term.element, null, false, hint);
+          if (hint) links.showLinkTarget(event, found.uri, view.element, null, false, hint);
         },
         leave: hideWebLinkTarget,
         activate: (event) => activateWeb(event, found.uri, false),
@@ -1330,54 +1325,56 @@
     };
 
     /**
-     * A printed path, from the addon's link for it: the same path, range
-     * and checks, with the grid's ranges. The hovered object is this one, so
-     * it is what the addon is told it is hovering, and the hand the addon
-     * shows once the check succeeds lands on it.
+     * A printed path (`files.pathLinks`'s `{path, range}`) as a grid link,
+     * with `FileLinks`' checks. The hovered object is this one, so it is
+     * what `FileLinks` is told it is hovering, and the hand it shows once
+     * the check succeeds lands on it.
      */
-    const fromAddon = (link) => {
-      const wrapped = {
+    const pathLink = ({ path, range }) => {
+      const link = {
         kind: "file",
-        path: link.text,
+        path,
         web: false,
-        range: link.range,
-        ranges: [window.farhelmGridBuffer.fromXtermRange(link.range)],
-        decorations: { ...link.decorations },
+        range,
+        ranges: [range],
+        decorations: { underline: true, pointerCursor: false },
       };
-      wrapped.hover = (event) => fileLinks.hover(event, wrapped.path, wrapped, link.range);
-      wrapped.leave = () => fileLinks.leave();
-      wrapped.activate = (event) => {
-        if (getGrid().isLinkClick(event) && !getGrid().hasSelection()) fileLinks.download(wrapped.path, event);
+      link.hover = (event) => fileLinks.hover(event, path, link, range);
+      link.leave = () => fileLinks.leave();
+      link.activate = (event) => {
+        if (getGrid().isLinkClick(event) && !getGrid().hasSelection()) fileLinks.download(path, event);
       };
-      return wrapped;
+      return link;
     };
+    /** Grid OSC 8 links as `FileLinks.oscCandidates` takes them. */
+    const oscItems = (links) => links.map((link) => ({ uri: link.uri, range: link.range, link }));
 
     const provider = {
       row(abs, done) {
         const found = getGrid().rowLinks(abs);
         const osc = found.filter((link) => link.kind === "osc").map(oscLink);
         const text = found.filter((link) => link.kind === "text").map(textLink);
-        const row = abs + 1;
         if (!fileLinks.containerized) {
-          const paths = files.bufferLinks(term, row).map((candidate) => fromAddon(fileLinks.fileLink(candidate)));
+          const paths = files.pathLinks(view.lines(), abs).map(pathLink);
           done([...osc, ...text, ...paths]);
           return;
         }
         // A container's paths name its own filesystem: the host admits each
         // target before it is offered, for program hyperlinks and printed
-        // paths alike (the addon's `checkoutLinks`).
+        // paths alike (`FileLinks.checkoutLinks`).
         let admittedOsc = null;
         let admittedPaths = null;
         const finish = () => {
           if (admittedOsc && admittedPaths) done([...admittedOsc, ...text, ...admittedPaths]);
         };
-        const oscNow = () => fileLinks.oscCandidates(getGrid().rowLinks(abs).filter((link) => link.kind === "osc").map(oscLink));
-        void fileLinks.checkoutLinks("osc", fileLinks.oscCandidates(osc), oscNow, (admitted) => {
+        const oscNow = () => fileLinks.oscCandidates(oscItems(getGrid().rowLinks(abs).filter((link) => link.kind === "osc").map(oscLink)));
+        void fileLinks.checkoutLinks("osc", fileLinks.oscCandidates(oscItems(osc)), oscNow, (admitted) => {
           admittedOsc = admitted;
           finish();
         });
-        void fileLinks.checkoutLinks("prose", fileLinks.proseCandidates(row), () => fileLinks.proseCandidates(row), (admitted) => {
-          admittedPaths = admitted.map(fromAddon);
+        const pathsNow = () => fileLinks.proseCandidates(abs, pathLink);
+        void fileLinks.checkoutLinks("prose", pathsNow(), pathsNow, (admitted) => {
+          admittedPaths = admitted;
           finish();
         });
       },
@@ -3841,7 +3838,9 @@
           // failure, the quick-launch pill, a tooltip) while hiding part of the
           // destination, so hover-time evidence cannot stand in for this check.
           const linkCoveringRects = () => window.farhelmTerminalFiles.markedCoverRects(document);
-          const fileLinks = new window.farhelmTerminalFiles.FileLinksAddon({
+          // The xterm.js add-on form of the shared file links: it reads this
+          // terminal through the adapter to link lines (terminal-files.js).
+          const fileLinks = new window.farhelmTerminalFiles.XtermFileLinksAddon({
             endpoint: baseUrl + spec.path.split('/term')[0] + '/files',
             secret: deviceSecret,
             native: typeof window[WEBVIEW_DEVICE_SECRET] === 'string',
@@ -3984,12 +3983,16 @@
                 const target = window.farhelmTerminalFiles.oscTarget(uri);
                 hoveredWebLink = target?.kind === 'web';
                 const links = window.farhelmTerminalLinks;
-                noteWebHover(target?.kind === 'web' ? uri : null, range, links.linkRangeText(term, range));
+                // The shared link code reads link lines and their ranges;
+                // xterm.js hands its buffer and a 1-based range.
+                const lines = links.xtermLines(term);
+                const at = links.fromXtermRange(range);
+                noteWebHover(target?.kind === 'web' ? uri : null, range, links.linkRangeText(lines, at));
                 // OSC labels can change without changing target or cell range.
                 // Keep evidence only while the same displayed text remains there.
-                if (target?.kind === 'file') fileLinks.hover(event, target.path, null, range, links.linkRowText(term, range));
+                if (target?.kind === 'file') fileLinks.hover(event, target.path, null, at, links.linkRowText(lines, at));
                 else if (target?.kind === 'web') {
-                  const hoverText = links.linkHoverText(term, range, uri);
+                  const hoverText = links.linkHoverText(lines, at, uri);
                   links.showLinkTarget(event, uri, term.element, hoverText.text, hoverText.kind === 'fragment', tunnelHint(uri));
                 }
               },
@@ -4077,7 +4080,8 @@
             }, {
               hover(event, uri, range) {
                 hoveredWebLink = window.farhelmTerminalLinks.isPlainWebUrl(uri);
-                noteWebHover(uri, range, window.farhelmTerminalLinks.linkRangeText(term, range));
+                const links = window.farhelmTerminalLinks;
+                noteWebHover(uri, range, links.linkRangeText(links.xtermLines(term), links.fromXtermRange(range)));
                 const hint = tunnelHint(uri);
                 if (hint) window.farhelmTerminalLinks.showLinkTarget(event, uri, term.element, null, false, hint);
               },
