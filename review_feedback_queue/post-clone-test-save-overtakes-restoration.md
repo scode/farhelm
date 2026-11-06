@@ -9,6 +9,9 @@ restoration. Adverse scheduling is unmeasured; no production user-work loss is c
 
 A Hosts-panel test has the same ordering gap for its asynchronous sort save, described below.
 
+The bulk-Delete test adds another optimistic sort-save instance with the same late-write/restoration gap; the adverse
+ordering remains unverified after investigation.
+
 ## Details
 
 Suggested bucket: **other**. Confidence: Source-only assessment; the established mechanism, contract ambiguity and
@@ -94,3 +97,47 @@ Source and provenance, run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`:
 - `g176/f2`: `e2e/tests/host-short-names.spec.ts:24-42,77-79,259-295`.
 
 Proposed drop: none for the retained remainder. No runtime reproduction, fix or triage decision was performed.
+
+## Bulk-Delete test sort-save instance
+
+Reviewed commit: a2f38b21870d0c705defc81fc5e53b6f13a3ae2a
+
+### TLDR
+
+An optimistic sort save can arrive after test restoration and overwrite it. The adverse browser ordering remains
+unverified after investigation.
+
+### Details
+
+Confidence: unverified after investigation; established source facts and missing premises are distinguished below.
+Suggested bucket: other.
+
+Source location: `e2e/tests/bulk-session-actions.spec.ts:1070 at a2f38b21870d0c705defc81fc5e53b6f13a3ae2a`.
+
+Source assessment (read with the later corrections below) (review record g089/c8, event 19):
+
+Second-discovery finding revision adds server-side last-write behavior. Reviewed commit
+a2f38b21870d0c705defc81fc5e53b6f13a3ae2a. TLDR: the browser test can leave Title sort behind if its earlier asynchronous
+save commits after its final preference reset, contaminating the shared test stack. Assigned test:1070 calls
+chooseSort(page,title); helpers/list-header.ts:17-23 waits only for menu removal and optimistic data-sort.
+view.rs:2192-2203 sets the sort before remember_sort:467-469 queues persistence. api.rs:1619-1647 runs the PUT
+independently through spawn_forever; Sort is excluded from configuration-save tickets by orders_requests:984-988, and
+send_preference_patch:1653-1662 only waits on unrelated tracked saves. The test's finally:1157-1160 resets preferences
+through its separate APIRequestContext; helpers/fleet.ts:1091-1114 directly PUTs that reset, with no sort-response
+drain. Additional source check: helm preferences.rs:87-105 defines sparse unconditional replacement, and
+store.rs:5696-5738,5764-5765 serializes each transaction but unconditionally replaces list_sort when the field is
+present. Thus serialization does not reject a stale title PUT that arrives after the null reset. Confidence likely,
+unverified after investigation for actual cross-test contamination. Missing premise: this specific page sort PUT must
+remain pending until after the reset commits, then commit successfully. Available source establishes independent writes
+and last-commit overwrite, but cannot establish a particular run's request scheduling or commit order. A retained trace
+or source-controlled delayed sort-save fixture followed by cleanup/readback would settle occurrence. Fix: install an
+observer before chooseSort and await the specific list_sort:title PUT response before restoring preferences, or drain
+owned preference saves before reset. Bucket other (test reliability/isolation); no highest consequence established.
+proposed_drop:false; possible_cover:not searched, parent handles it. Distinct root from g015:l5/d1 (earlier displayed
+activity order versus accepted order in the pacing test) and c3 (suspended raw Promise bypassing finally): c8 is the
+different mixed-Delete test's successful-body preference restoration racing pending persistence. Later history through
+8a8c9579e04299410652f0e4681975a7198dfc7b shows no changes to this test/list-header/fleet/api writer; no later repair
+claimed. No runtime or network experiment performed.
+
+Review provenance: trailing review run `dc410e54-098d-481c-be02-f2f9b4826f83`, canonical `g089/c8`. The retained private
+log preserves earlier wording and its corrections. This record does not claim runtime reproduction.

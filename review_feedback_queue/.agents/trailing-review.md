@@ -6,9 +6,10 @@ the range to the review-result PR. It belongs to the "Trailing code review" read
 
 ## Trigger and default reviewer
 
-"Perform trailing code review", or similar wording around "trailing code review", means adversarially review every
-commit after the last trailing-reviewed commit through the current tip of `main`, then feed the findings into this
-queue's existing recording flow. The saved checkpoint is in `review_feedback_queue/TRAILING_REVIEW.md`; the procedure is
+"Perform trailing code review", or similar wording around "trailing code review", means adversarially review the
+in-scope changes in every commit after the last trailing-reviewed commit through the current tip of `main`, then feed
+the findings into this queue's existing recording flow. "Review scope" below defines which changes are in scope. The
+saved checkpoint is in `review_feedback_queue/TRAILING_REVIEW.md`; the procedure is
 `review_feedback_queue/.agents/trailing-review.md`, "Procedure".
 
 Use the `persistent-review` skill for the primary review of the pinned range, with an adversarial charter emphasizing
@@ -18,6 +19,32 @@ backend, model and reasoning effort. Honor any requested backend, agents, models
 the skill's supported backends and observable-delegation requirements. Do not ask the user to choose a reviewer when
 they have not specified one. If the requested or default configuration cannot meet the skill's requirements, report the
 limitation and leave the review incomplete rather than silently substituting.
+
+## Review scope
+
+Review landed product code, product tests and their helpers and fixtures, and executable maintainer tooling, including
+build, validation, provisioning and release scripts. Include build and runtime configuration that determines how that
+code behaves or what is shipped, such as dependency manifests, lockfiles and CI workflows. Also review changes to the
+current product specifications, `SPEC.md` and `SPEC_impl.md`, including product contracts with those names in
+subdirectories.
+
+Repository workflow metadata is not a review target: plans and their reports, the review feedback queue, triage and
+decision ledgers, TODO and flake records, agent instructions, historical records, and similar descriptions of how work
+on the repository is organized. Ordinary documentation, release prose and other prose specifications are also excluded.
+These exclusions apply even when a metadata file contains code examples; they do not exclude executable maintainer
+scripts merely because those scripts operate the planning, review or release workflows. Classify changes by their
+purpose, not just their file extension or top-level directory.
+
+Excluded material may still be read selectively as context needed to judge an in-scope change, interpret its contract,
+or apply the recording coverage checks. Do not assign it mandatory review ranges, create review groups for it, or search
+it for independent findings. Reading instructions and checking existing coverage remain required; those reads do not
+expand the review targets.
+
+Inventory every commit in the pinned range, but assign only its in-scope changes to reviewers. Preserve each selected
+commit's patch rather than replacing the history with an aggregate endpoint diff. Record excluded paths and their scope
+reasons so coverage is auditable. Deliberately excluded changes are not unread coverage gaps and do not block the
+checkpoint. If the entire range is excluded, launch no reviewers: record that no in-scope changes were present and
+prepare the checkpoint proposal through the normal result PR procedure.
 
 ## Procedure
 
@@ -30,15 +57,16 @@ triage, fixes, or execution of triage outcomes.
    stale checkout cannot supply an older checkpoint. Verify that the saved full hash exists and is an ancestor of
    `review-tip`. If the checkpoint is missing or invalid, or the ancestry check fails, report the problem without
    inventing a replacement. If the two commits are equal, report that there is nothing new to review.
-2. Use `persistent-review` to pin the required inputs and divide them into bounded functional groups, mapping every
-   commit's changes to those groups. Include the surrounding code and specification context needed to judge them. A net
-   diff between the endpoints is not sufficient: it can hide changes introduced and later reverted within the range. Use
-   the pinned revisions rather than an unrelated or dirty working tree. Give each reviewer the two full hashes, the
-   complete commit list, its assigned scope, and the instructions in `review_feedback_queue/.agents/recording.md`,
-   "Running an agent review that feeds this queue". Also tell each reviewer to record every proposed drop of a finding
-   in its findings log, whatever bucket it suggests, with the proposed basis and whatever text it cites; a drop
-   mentioned only in prose is not recorded. The skill's findings log and progress files are required and stay in the
-   agent scratch space; they are not the report files the queue's reviewer instructions forbid.
+2. Apply "Review scope" to every commit's changed paths before grouping or launching reviewers. Use `persistent-review`
+   to pin the selected inputs and divide them into bounded functional groups, mapping every in-scope change to those
+   groups. Include the surrounding code and specification context needed to judge them. A net diff between the endpoints
+   is not sufficient: it can hide changes introduced and later reverted within the range. Use the pinned revisions
+   rather than an unrelated or dirty working tree. Give each reviewer the two full hashes, the complete commit list, its
+   assigned scope, and the instructions in `review_feedback_queue/.agents/recording.md`, "Running an agent review that
+   feeds this queue". Also tell each reviewer to record every proposed drop of a finding in its findings log, whatever
+   bucket it suggests, with the proposed basis and whatever text it cites; a drop mentioned only in prose is not
+   recorded. The skill's findings log and progress files are required and stay in the agent scratch space; they are not
+   the report files the queue's reviewer instructions forbid.
 3. Run the groups under `persistent-review`, including concurrent launches, immediate findings logs, delivery audits,
    same-session continuation and later-turn synthesis. Monitor them as described under "Monitoring reviewers" below.
    Keep the skill's manifests, logs and completion evidence in the session's agent scratch space. Each reviewer's
@@ -59,15 +87,15 @@ triage, fixes, or execution of triage outcomes.
    `review_feedback_queue/.agents/recording.md`, "Independent drop check", describes, outside `persistent-review`.
    Record retained findings in feedback files and `INDEX.md`, preserving their reviewed commits and provenance. A
    trailing review is an automated review of committed code for the purposes of `FILTER.md`.
-4. Only after every group meets `persistent-review`'s completion requirements, every commit in the range has been
-   reviewed, every finding and proposed drop has been handled, and all retained findings have been recorded, update
-   `TRAILING_REVIEW.md` to `review-tip` in the same change as the queue updates. Findings need not be fixed for the
-   review to be complete. An incomplete persistent review, unread scope, or an unresolved recording step or independent
-   drop check leaves the checkpoint unchanged; retain findings already produced and report the gap. Do not advance to
-   commits that landed after the pinned tip, and do not overwrite a checkpoint another run has advanced without
-   reconciling its coverage and queue changes. Besides its heading and preamble, `TRAILING_REVIEW.md` holds only the
-   `Last reviewed commit:` line, whose format step 1 relies on, and the latest run's completion record. Before writing
-   this run's record there, move the record already there to the top of
+4. Only after every group meets `persistent-review`'s completion requirements, every commit has been inventoried and
+   every in-scope change reviewed, every finding and proposed drop has been handled, and all retained findings have been
+   recorded, update `TRAILING_REVIEW.md` to `review-tip` in the same change as the queue updates. Findings need not be
+   fixed for the review to be complete. An incomplete persistent review, unread scope, or an unresolved recording step
+   or independent drop check leaves the checkpoint unchanged; retain findings already produced and report the gap. Do
+   not advance to commits that landed after the pinned tip, and do not overwrite a checkpoint another run has advanced
+   without reconciling its coverage and queue changes. Besides its heading and preamble, `TRAILING_REVIEW.md` holds only
+   the `Last reviewed commit:` line, whose format step 1 relies on, and the latest run's completion record. Before
+   writing this run's record there, move the record already there to the top of
    `review_feedback_queue/TRAILING_REVIEW_HISTORY.md`, below its NOTE. The history file is not read during a review.
    When rebasing over another run's review result, reconcile the history file so that each record appears in it once.
 5. Use `jjstack` to put the checkpoint update, the move into the history file and any queue updates in one review-result
@@ -75,9 +103,9 @@ triage, fixes, or execution of triage outcomes.
    merged; preparing the result alone does not advance it there. Merging is a separate manual step for the maintainer.
    Do not merge automatically.
 
-Report the exact range reviewed, any coverage gaps, the findings recorded or extended, and whether the checkpoint update
-is pending in a draft PR or has reached `main`. Include the compact completion record required by `persistent-review`,
-with references to the retained evidence.
+Report the exact range reviewed, the selected scope and deliberate exclusions, any coverage gaps within that scope, the
+findings recorded or extended, and whether the checkpoint update is pending in a draft PR or has reached `main`. Include
+the compact completion record required by `persistent-review`, with references to the retained evidence.
 
 Close the findings report with the total number of new queue items and a summary grouped by priority bucket, in order:
 `highest`, `high`, `other`. Show each bucket's count, including zero, and give a short user-facing TLDR for every new

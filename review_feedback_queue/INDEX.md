@@ -12,6 +12,56 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
   same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.
 
+- [`cancelled-orphan-delete-accepts-queued-confirmation.md`](cancelled-orphan-delete-accepts-queued-confirmation.md) — A
+  queued Delete answer can still destroy orphaned cloud resources after Cancel was accepted in the same rendered
+  question.
+
+- [`openssh-floor-percent-path-disables-stable-host-pin.md`](openssh-floor-percent-path-disables-stable-host-pin.md) —
+  On supported OpenSSH 7.6, a percent-bearing managed path can prevent the host key from being retained, so later
+  connections accept a new key again.
+
+- [`codex-endpoint-change-retains-environment-key.md`](codex-endpoint-change-retains-environment-key.md) — Changing
+  Codex's API endpoint can leave its old environment-key setting active and send that credential to the newly selected
+  endpoint.
+
+- [`claude-endpoint-change-retains-custom-headers.md`](claude-endpoint-change-retains-custom-headers.md) — Changing
+  Claude's API endpoint can retain custom authorization headers and send their old secret to the new endpoint.
+
+- [`short-helm-tag-collision-destroys-other-builder.md`](short-helm-tag-collision-destroys-other-builder.md) — Two helms
+  sharing a Tensorlake project can collide in their short ownership tag; a build can then terminate the other's builder
+  and delete its snapshots.
+
+- [`agent-settings-save-overwrites-concurrent-editor.md`](agent-settings-save-overwrites-concurrent-editor.md) — Saving
+  agent settings can overwrite a benign concurrent edit, including a first settings file created while Farhelm was
+  preparing its save.
+
+- [`recipe-delete-warning-omits-newly-finished-snapshot.md`](recipe-delete-warning-omits-newly-finished-snapshot.md) — A
+  recipe Delete question opened before its build finishes can omit the resulting snapshot even though deletion
+  subsequently removes it.
+
+- [`generated-host-name-collision-adopts-unrelated-sandbox.md`](generated-host-name-collision-adopts-unrelated-sandbox.md)
+  — A generated host-name collision can make first-time Add adopt an unrelated sandbox and replace its endpoint
+  credentials before later copied-state checks can refuse it.
+
+- [`orphan-cleanup-uses-pre-adoption-ownership-snapshot.md`](orphan-cleanup-uses-pre-adoption-ownership-snapshot.md) —
+  Orphan cleanup can use an old ownership snapshot to terminate a sandbox after Add has adopted it and ordinary user
+  work has begun.
+
+- [`removed-ssh-host-can-reappear-with-old-grants.md`](removed-ssh-host-can-reappear-with-old-grants.md) — A power loss
+  can roll back ordinary SSH-host removal and restore its old identity, connection authority, and grants.
+
+- [`guarded-container-launch-approval-omits-sensitive-options.md`](guarded-container-launch-approval-omits-sensitive-options.md)
+  — A guarded launch approval can omit the container image, ports, and token-file choice while authorizing the resulting
+  launch and credential access.
+
+- [`older-browser-approves-undisclosed-container-options.md`](older-browser-approves-undisclosed-container-options.md) —
+  An already loaded older released browser page can refresh and approve container choices it cannot display, despite the
+  current renderer's disclosure repair.
+
+- [`right-edge-zero-width-sign-reorders-retained-text.md`](right-edge-zero-width-sign-reorders-retained-text.md) — With
+  wrapping disabled, zero-width terminal output at the right edge can attach to the preceding cell and change retained
+  text order.
+
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
@@ -72,6 +122,24 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`extreme-history-numbering-hangs-selection.md`](extreme-history-numbering-hangs-selection.md) — Extreme peer-supplied
   history numbering can hang the page when the user selects text in a later screen row. The record now supplies its
   missing hostile-host acceptance context and preserves the unresolved browser scope.
+
+- [`gone-retry-forgets-pinned-foreground-child.md`](gone-retry-forgets-pinned-foreground-child.md) — Recovery can
+  discard a previously identified foreground child after its terminal host disappears. A complete production sequence
+  leaving that program running after removal remains unverified after investigation.
+
+- [`missing-agent-terminal-blocks-surviving-tmux-tabs.md`](missing-agent-terminal-blocks-surviving-tmux-tabs.md) — After
+  the agent terminal disappears, surviving older shell tabs can remain listed while opening or closing them is refused.
+
+- [`cancelled-suspend-can-accept-queued-answer.md`](cancelled-suspend-can-accept-queued-answer.md) — A queued Suspend
+  answer can still pause a host and its working agents after Cancel was accepted in the same rendered question.
+
+- [`orphan-cleanup-overlay-forgets-failed-discovery.md`](orphan-cleanup-overlay-forgets-failed-discovery.md) — When
+  discovery fails while cleanup remains unfinished, earlier orphan rows disappear and unrelated fleet updates keep
+  retrying the failed read.
+
+- [`sandbox-ssh-agent-key-ordering-unresolved.md`](sandbox-ssh-agent-key-ordering-unresolved.md) — Configured SSH-agent
+  keys can precede Farhelm's selected key and may prevent sandbox access. The current gateway's authentication behavior
+  remains unverified after investigation.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -302,8 +370,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   indication/dispatch consequences remain ambiguously covered.
 
 - [`post-clone-test-save-overtakes-restoration.md`](post-clone-test-save-overtakes-restoration.md) — Post-clone, Hosts,
-  naming and bolt-test saves can remain in flight after private-stack restoration, then overwrite it. Adverse scheduling
-  and required incoming values remain unmeasured; no production user-work loss is claimed.
+  naming, bolt-test and bulk-Delete saves can remain in flight after private-stack restoration, then overwrite it.
+  Adverse scheduling and required incoming values remain unmeasured; no production user-work loss is claimed.
 
 - [`auth-skew-remount-retains-row-operation-count.md`](auth-skew-remount-retains-row-operation-count.md) — After another
   tab restores shared credentials, a build-skew remount can leave the old GUI usable but keep an abandoned mutation
@@ -1575,3 +1643,345 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`long-launch-status-crops-painted-edge.md`](long-launch-status-crops-painted-edge.md) — Long launch-status labels
   crop the pill's decorative edge in both static engines; elapsed text remains visible.
+
+- [`launcher-diagnosis-overstates-unscoped-name-rule.md`](launcher-diagnosis-overstates-unscoped-name-rule.md) — The
+  recorded launcher diagnosis incorrectly says only unscoped text can offer a session-name action; explicit name
+  searches can offer it too.
+
+- [`attention-list-refresh-failure-scope-unresolved.md`](attention-list-refresh-failure-scope-unresolved.md) — A
+  connected host's session list can stop refreshing without entering the attention list. Whether that omission violates
+  the intended scope remains unverified after investigation.
+
+- [`sandbox-create-cancel-lacks-opening-guard.md`](sandbox-create-cancel-lacks-opening-guard.md) — Cancel lacks the
+  creation question's opening check. A normal input sequence dismissing a later question remains unverified after
+  investigation.
+
+- [`successful-suspend-flashes-connecting.md`](successful-suspend-flashes-connecting.md) — A confirmed sandbox
+  suspension can briefly change back to Connecting during its status recheck, even though the sandbox remains suspended.
+
+- [`templates-close-targets-disabled-bulk-button.md`](templates-close-targets-disabled-bulk-button.md) — Closing
+  Templates during a bulk operation can lose keyboard return focus because it targets a disabled button.
+
+- [`bulk-pacing-test-samples-before-quiet-regrouping.md`](bulk-pacing-test-samples-before-quiet-regrouping.md) — The
+  bulk Stop pacing test can compare requests with an earlier row order that its own quiet fixtures may legitimately
+  change before Stop is accepted.
+
+- [`empty-filter-padding-overridden-by-status-rule.md`](empty-filter-padding-overridden-by-status-rule.md) — A generic
+  style overrides the intended spacing between an empty-filter explanation and its clear-filter links.
+
+- [`filter-escape-test-accepts-earlier-query.md`](filter-escape-test-accepts-earlier-query.md) — The removed-host filter
+  test can credit an earlier unfiltered request instead of proving that clearing the filter sent a new one.
+
+- [`modified-keyboard-row-activation-marks-instead-of-opens.md`](modified-keyboard-row-activation-marks-instead-of-opens.md)
+  — Shift-modified keyboard activation can mark sessions instead of opening them in the inspected browser sources;
+  native platform coverage remains unverified after investigation.
+
+- [`upload-failure-test-lacks-pipe-holder-witness.md`](upload-failure-test-lacks-pipe-holder-witness.md) — The
+  failed-upload regression can pass without starting the pipe-holding fixture needed to test the original hang.
+
+- [`brick-recovery-truncates-checkpoint-budget.md`](brick-recovery-truncates-checkpoint-budget.md) — A recoverable
+  provider refusal can cut release checks below their required time budget or wrongly prevent their retry.
+
+- [`checkpoint-image-triage-rootless-path-unresolved.md`](checkpoint-image-triage-rootless-path-unresolved.md) — The
+  prior checkpoint-image assessment's root-only exclusion does not establish what happens through the plain-run
+  inspection path. Actual rootless workload restoration remains unverified after investigation.
+
+- [`sandbox-termination-poll-exceeds-phase-deadline.md`](sandbox-termination-poll-exceeds-phase-deadline.md) — Sandbox
+  deletion can exceed its stated termination-polling allowance because each lookup receives a fresh timeout beyond the
+  phase's remaining time.
+
+- [`ambiguous-resume-retains-old-connection-token.md`](ambiguous-resume-retains-old-connection-token.md) — A successful
+  retry after an uncertain Resume can retain the old connection token. Resulting gateway or operation failures remain
+  unverified after investigation.
+
+- [`sandbox-status-diagnosis-bypasses-cleaning.md`](sandbox-status-diagnosis-bypasses-cleaning.md) — Accepted sandbox
+  failure descriptions bypass normal cleaning and redaction before reaching clients. An actual provider description
+  containing a credential remains unverified after investigation.
+
+- [`failed-setup-refresh-overwrites-held-lifecycle-status.md`](failed-setup-refresh-overwrites-held-lifecycle-status.md)
+  — After setup's registry synchronization fails, a later refresh can replace in-progress Suspend or Resume with
+  Connecting while the operation is still running.
+
+- [`retired-connection-leaves-suspend-progress-stuck.md`](retired-connection-leaves-suspend-progress-stuck.md) — A
+  failed Suspend on a retired connection can leave the host showing Suspending with lifecycle controls disabled until a
+  separate recovery action.
+
+- [`resume-launch-test-records-session-after-assertion.md`](resume-launch-test-records-session-after-assertion.md) — The
+  resume-launch test can create a session and then fail before saving its ID, causing per-test cleanup to skip that
+  session.
+
+- [`resume-test-retires-create-stub-before-client-settles.md`](resume-test-retires-create-stub-before-client-settles.md)
+  — Failure cleanup may remove the create stub before a pending launcher settles, allowing a real test session to start
+  afterward. The complete browser ordering remains unverified after investigation.
+
+- [`lifecycle-fixture-cleanup-stops-after-release-failure.md`](lifecycle-fixture-cleanup-stops-after-release-failure.md)
+  — One fixture-release failure can skip the remaining browser-test cleanup and leave shared settings or resources
+  behind.
+
+- [`route-retirement-failure-skips-owned-session-cleanup.md`](route-retirement-failure-skips-owned-session-cleanup.md) —
+  A route-retirement exception can prevent cleanup of sessions the test already owns.
+
+- [`snapshot-cleanup-spec-omits-unrecorded-builder-exception.md`](snapshot-cleanup-spec-omits-unrecorded-builder-exception.md)
+  — The product says reusing any Farhelm-built snapshot is refused, but an unrecorded build snapshot can be accepted as
+  a recipe source and later deleted by builder cleanup.
+
+- [`recipe-leave-save-live-draft-mismatch-unresolved.md`](recipe-leave-save-live-draft-mismatch-unresolved.md) — Save
+  before leaving a recipe reads the live draft. A supported input sequence saving data different from the visible draft
+  remains unverified after investigation.
+
+- [`unreadable-sandbox-ssh-key-reports-ready.md`](unreadable-sandbox-ssh-key-reports-ready.md) — A damaged or unreadable
+  saved SSH key pair can still be presented as ready, postponing the failure until later sandbox operations.
+
+- [`tunnel-helper-exit-may-block-flushing-stdout.md`](tunnel-helper-exit-may-block-flushing-stdout.md) — A tunnel helper
+  may remain alive after its silence deadline if exit cleanup flushes buffered output into a full pipe. The exact
+  ordering and shipped-library premise remain unverified after investigation.
+
+- [`identity-adoption-overwrites-held-lifecycle-display.md`](identity-adoption-overwrites-held-lifecycle-display.md) —
+  Concurrent installation adoption can overwrite the displayed Suspend or Resume progress while that operation still
+  holds the connection.
+
+- [`sandbox-diagnostic-json-shape-compatibility-unresolved.md`](sandbox-diagnostic-json-shape-compatibility-unresolved.md)
+  — Structured sandbox failure descriptions would be rejected instead of displayed. Whether the configured production
+  origin sends those shapes remains unverified after investigation.
+
+- [`suspended-plan-test-erases-its-suspension-premise.md`](suspended-plan-test-erases-its-suspension-premise.md) — The
+  suspended-host setup test changes installation paths and erases its own Suspended state before checking the guard. The
+  resulting failing scheduler ordering remains unverified after investigation.
+
+- [`tunnel-control-exit-can-open-new-ssh-connection.md`](tunnel-control-exit-can-open-new-ssh-connection.md) — Closing
+  an old tunnel can start a new SSH connection if the control handshake fails after connecting. The deployed ordering
+  and resulting delay remain unverified after investigation.
+
+- [`openssh-floor-misparses-managed-known-host-path.md`](openssh-floor-misparses-managed-known-host-path.md) — The
+  supported older OpenSSH parser can misread managed known-hosts paths containing quoting characters, preventing normal
+  sandbox access.
+
+- [`snapshot-cleanup-races-new-host-registration.md`](snapshot-cleanup-races-new-host-registration.md) — Snapshot
+  cleanup can remove a generated snapshot before a newly admitted host records its use, causing setup failure and
+  rebuild cost.
+
+- [`tunnel-fixture-assumes-simple-short-temporary-root.md`](tunnel-fixture-assumes-simple-short-temporary-root.md) — The
+  tunnel transport tests can reject correct behavior when the temporary root needs path escaping or is too long for SSH
+  sharing.
+
+- [`mixed-setup-plans-escape-cache-bound.md`](mixed-setup-plans-escape-cache-bound.md) — A mixture of setup-plan kinds
+  can accumulate retained plan entries beyond the intended cache bound.
+
+- [`agent-settings-write-exceeds-next-read-limit.md`](agent-settings-write-exceeds-next-read-limit.md) — Saving agent
+  settings can produce a file larger than Farhelm's own next-read limit, making later settings operations refuse it.
+
+- [`old-suspension-stamp-labels-later-external-pause.md`](old-suspension-stamp-labels-later-external-pause.md) — A
+  suspension remembered from an earlier operation can be reused to describe a later independent pause, misattributing
+  its timing.
+
+- [`provider-error-cleaning-can-miss-transformed-secret.md`](provider-error-cleaning-can-miss-transformed-secret.md) —
+  Error cleaning can miss a key after truncation or normalization changes its spelling. An actual provider response
+  echoing that key remains unverified after investigation.
+
+- [`sandbox-timestamp-wire-contract-unresolved.md`](sandbox-timestamp-wire-contract-unresolved.md) — Sandbox timestamp
+  decoding accepts only a narrow numeric form and unit. Compatibility with the configured production origin remains
+  unverified after investigation.
+
+- [`sandbox-list-pagination-contract-unresolved.md`](sandbox-list-pagination-contract-unresolved.md) — Sandbox and
+  snapshot listings use one response and ignore possible continuation cursors. Whether the configured production origin
+  paginates these results remains unverified after investigation.
+
+- [`redirect-regression-omits-location-header.md`](redirect-regression-omits-location-header.md) — The redirect
+  regression does not supply a redirect destination, so it cannot prove that Farhelm refuses to follow one.
+
+- [`cancelled-ssh-capture-can-retain-local-readers.md`](cancelled-ssh-capture-can-retain-local-readers.md) — Cancelling
+  an SSH capture may leave local helpers or pipe readers alive beyond the caller. Their actual surviving lifetime
+  remains unverified after investigation.
+
+- [`remote-version-display-retains-format-characters.md`](remote-version-display-retains-format-characters.md) — Remote
+  version text bypasses the promised presentation cleaning and can retain invisible formatting characters; no execution
+  sink or harmful ordinary producer was established.
+
+- [`fake-filesystem-cancellation-outlives-test-transaction.md`](fake-filesystem-cancellation-outlives-test-transaction.md)
+  — A cancelled asynchronous fake-filesystem operation can continue into a later test transaction and change its state.
+
+- [`settings-close-tooltip-promises-immediate-discard.md`](settings-close-tooltip-promises-immediate-discard.md) —
+  Settings' Close tooltip says edits will be discarded even though unsaved recipe changes open a guarded leave question.
+
+- [`restart-with-does-not-resume-suspended-host.md`](restart-with-does-not-resume-suspended-host.md) — Restart with on a
+  suspended sandbox does not perform the resume step, so the requested restart fails instead of continuing.
+
+- [`old-keep-editing-clears-new-leave-continuation.md`](old-keep-editing-clears-new-leave-continuation.md) — An earlier
+  Keep editing answer can erase a later pending close request, so Save or Discard returns to the form without closing
+  its dialog.
+
+- [`disabled-lifecycle-items-receive-roving-focus.md`](disabled-lifecycle-items-receive-roving-focus.md) — Keyboard
+  navigation can target disabled lifecycle actions and lose the intended focus movement.
+
+- [`long-host-name-progress-reachability-unresolved.md`](long-host-name-progress-reachability-unresolved.md) — A long
+  host name may push progress content beyond its available layout. Actual supported native geometry remains unverified
+  after investigation.
+
+- [`settings-save-replies-arrive-out-of-order.md`](settings-save-replies-arrive-out-of-order.md) — An older
+  settings-save reply can overwrite the displayed result of a newer save even though the persisted settings remain
+  correct.
+
+- [`account-save-visible-draft-mismatch-unresolved.md`](account-save-visible-draft-mismatch-unresolved.md) — Account
+  Save reads the live API-key field. A native input sequence saving a key different from the visible field remains
+  unverified after investigation.
+
+- [`ssh-key-tooltip-test-lacks-loading-witness.md`](ssh-key-tooltip-test-lacks-loading-witness.md) — The SSH-key tooltip
+  regression can make its assertion without establishing the key-loading state it intends to test.
+
+- [`package-name-trailing-minus-requests-removal.md`](package-name-trailing-minus-requests-removal.md) — A recipe
+  package ending in a minus sign is passed to apt with its removal meaning instead of being rejected or treated as a
+  literal package name.
+
+- [`recipe-destination-refuses-absolute-dns-name.md`](recipe-destination-refuses-absolute-dns-name.md) — A valid final
+  DNS dot is refused in recipe tunnel destinations and agent endpoint hostnames.
+
+- [`agent-endpoint-refuses-valid-at-sign-path.md`](agent-endpoint-refuses-valid-at-sign-path.md) — A valid at-sign in an
+  agent endpoint's URL path is rejected as though it supplied credentials.
+
+- [`privileged-sandbox-tunnel-port-compatibility-unresolved.md`](privileged-sandbox-tunnel-port-compatibility-unresolved.md)
+  — Recipe tunnels accept privileged sandbox listener ports that the gateway may refuse. Actual gateway enforcement
+  remains unverified after investigation.
+
+- [`tunnel-remove-uses-shifting-row-index.md`](tunnel-remove-uses-shifting-row-index.md) — Remove clicks from one
+  rendered tunnel list can use shifted indices and remove a different unsaved row.
+
+- [`queued-recipe-edits-after-save-unresolved.md`](queued-recipe-edits-after-save-unresolved.md) — Form events arriving
+  after Save captures its draft may disappear when the editor closes. A complete native producer remains unverified
+  after investigation.
+
+- [`removed-tunnel-retains-validation-error.md`](removed-tunnel-retains-validation-error.md) — Removing an invalid
+  tunnel entry can leave its obsolete validation error displayed against the remaining draft.
+
+- [`old-recipe-admission-builds-same-name-replacement.md`](old-recipe-admission-builds-same-name-replacement.md) — A
+  previously admitted build can act on a later recipe recreated under the same name instead of the definition that was
+  originally admitted.
+
+- [`failed-recipe-refresh-test-lacks-baseline-row.md`](failed-recipe-refresh-test-lacks-baseline-row.md) — The
+  failed-refresh regression does not establish the prior recipe row needed to prove that a failed refresh preserves it.
+
+- [`late-snapshot-visibility-escapes-builder-cleanup.md`](late-snapshot-visibility-escapes-builder-cleanup.md) — A
+  snapshot becoming visible only after cleanup's last listing could remain after builder removal. The provider's
+  relevant visibility guarantees remain unverified after investigation.
+
+- [`changed-project-key-cleanup-absence-unresolved.md`](changed-project-key-cleanup-absence-unresolved.md) — After an
+  account key changes projects, cleanup may confuse inaccessible resources with absent ones. The provider's foreign-ID
+  response behavior remains unverified after investigation.
+
+- [`detached-recipe-write-crosses-recreated-generation.md`](detached-recipe-write-crosses-recreated-generation.md) — A
+  detached database write can outlive its recipe generation and update a later recipe recreated with the same name.
+
+- [`package-repair-does-not-wait-for-dpkg-lock.md`](package-repair-does-not-wait-for-dpkg-lock.md) — The repair step
+  does not share the package installer's lock-wait policy and could fail under contention. A supported concurrent
+  package-manager trigger remains unverified after investigation.
+
+- [`apt-regex-fallback-can-accept-package-typo.md`](apt-regex-fallback-can-accept-package-typo.md) — A misspelled
+  package may be accepted through apt's pattern fallback instead of failing plainly. The shipped distribution behavior
+  remains unverified after investigation.
+
+- [`snapshot-state-races-build-admission.md`](snapshot-state-races-build-admission.md) — Adding a host as a build
+  finishes can select a just-deleted snapshot or start an unnecessary charged build.
+
+- [`packages-build-result-retired-under-changed-image-source.md`](packages-build-result-retired-under-changed-image-source.md)
+  — A build that captured a Packages source can have its result retired after the recipe's current source changes to
+  Image.
+
+- [`rebuild-order-test-misses-persistence-boundary.md`](rebuild-order-test-misses-persistence-boundary.md) — The
+  rebuild-order regression observes calls without proving the database state was persisted at the boundary it claims to
+  protect.
+
+- [`orphan-cleanup-start-does-not-invalidate-feed.md`](orphan-cleanup-start-does-not-invalidate-feed.md) — Starting
+  orphan cleanup does not notify the live feed, so other views may miss its new in-progress state.
+
+- [`orphan-test-setup-precedes-cleanup-guard.md`](orphan-test-setup-precedes-cleanup-guard.md) — Failure while preparing
+  orphan-test recipes can leave earlier acquired fixture state outside the test's cleanup guard.
+
+- [`orphan-test-cleanup-stops-after-first-error.md`](orphan-test-cleanup-stops-after-first-error.md) — One
+  orphan-fixture cleanup failure can skip cleanup of its remaining owned resources.
+
+- [`orphan-fixture-edits-shared-model-without-lock.md`](orphan-fixture-edits-shared-model-without-lock.md) — The orphan
+  browser fixture changes its shared fake model outside the synchronization used by its other readers and writers.
+
+- [`orphan-fixture-cleanup-ignores-http-refusals.md`](orphan-fixture-cleanup-ignores-http-refusals.md) — Fixture cleanup
+  can treat a refused HTTP operation as completed because it never checks the response status.
+
+- [`orphan-confirmation-opens-outside-visible-scroll.md`](orphan-confirmation-opens-outside-visible-scroll.md) — With a
+  long orphan list, the new confirmation can open outside the visible area without scrolling or moving focus to it; its
+  controls remain reachable by scrolling.
+
+- [`account-test-does-not-refresh-healthy-orphan-list.md`](account-test-does-not-refresh-healthy-orphan-list.md) — After
+  another window changes the account key, Test alone does not refresh a healthy orphan list. Whether the specification
+  requires that refresh remains unverified after investigation.
+
+- [`neighbor-status-redraw-cancels-stable-url-click.md`](neighbor-status-redraw-cancels-stable-url-click.md) — A status
+  change elsewhere can cancel a click on an unchanged terminal URL.
+
+- [`first-state-directory-ancestor-durability-unresolved.md`](first-state-directory-ancestor-durability-unresolved.md) —
+  A first-created state directory does not flush every required ancestor explicitly. Whether supported filesystem
+  behavior can lose the admitted state remains unverified after investigation.
+
+- [`automatic-update-opt-out-can-roll-back.md`](automatic-update-opt-out-can-roll-back.md) — A power loss can roll back
+  opting out of automatic updates and allow later unattended updates. Whether the general preference-loss acceptance
+  covers this authorization remains unresolved.
+
+- [`terminal-attachment-trace-retains-raw-session-id.md`](terminal-attachment-trace-retains-raw-session-id.md) —
+  Terminal attachment diagnostics retain a raw peer-supplied session identifier instead of the promised cleaned
+  presentation copy.
+
+- [`peer-text-normalization-contract-overstates-retained-scope.md`](peer-text-normalization-contract-overstates-retained-scope.md)
+  — The specification's universal normalization rule for retained peer text contradicts its explicit raw-byte identity
+  and diagnostic exceptions.
+
+- [`escaped-token-path-display-collision-unresolved.md`](escaped-token-path-display-collision-unresolved.md) — Escaped
+  and literal token-file paths can look identical in approval text. A supported harmful pair of real files remains
+  unverified after investigation.
+
+- [`attention-dismissal-membership-scope-unresolved.md`](attention-dismissal-membership-scope-unresolved.md) —
+  Dismissing optional updates also suppresses later reminders for hosts currently shown as problems. Whether dismissal
+  should include those hidden offers remains unverified after investigation.
+
+- [`attention-update-accessible-name-omits-target.md`](attention-update-accessible-name-omits-target.md) —
+  Attention-list Update buttons omit their host and version from the accessible name, leaving identical actions
+  difficult to distinguish.
+
+- [`attention-update-removes-focused-control.md`](attention-update-removes-focused-control.md) — Starting Update from
+  the attention list removes the focused action without handing keyboard focus to a surviving control.
+
+- [`pinned-session-menu-placement-uses-outdated-item-count.md`](pinned-session-menu-placement-uses-outdated-item-count.md)
+  — Pinned-session menu placement still budgets for eight actions after the menu grew to ten, causing unnecessary
+  scrolling even when the full menu could fit above.
+
+- [`drag-preview-neighbor-diverges-from-drop-unresolved.md`](drag-preview-neighbor-diverges-from-drop-unresolved.md) —
+  The drag preview and final drop can use different neighboring rows. A complete supported native ordering producing the
+  mismatch remains unverified after investigation.
+
+- [`pointer-capture-drop-crosses-new-modal-unresolved.md`](pointer-capture-drop-crosses-new-modal-unresolved.md) — A
+  captured drag may finish after a new modal appears and still reorder rows beneath it. The native event sequence
+  remains unverified after investigation.
+
+- [`primary-row-drag-continues-through-middle-button.md`](primary-row-drag-continues-through-middle-button.md) —
+  Releasing the primary button during a middle-button chord leaves a row drag active; releasing the other button can
+  then commit the move.
+
+- [`shift-range-uses-refreshed-row-order-unresolved.md`](shift-range-uses-refreshed-row-order-unresolved.md) — A Shift
+  range can use a newer row order than the earlier anchor interaction. A consequential sequence beyond the accepted
+  short delivery interval remains unverified after investigation.
+
+- [`macos-control-click-suppresses-row-marking.md`](macos-control-click-suppresses-row-marking.md) — On the inspected
+  macOS Chromium route, Control-click is consumed as a context-menu gesture instead of marking the session.
+
+- [`marked-count-reflow-leaves-popup-at-old-anchor.md`](marked-count-reflow-leaves-popup-at-old-anchor.md) — A changed
+  marked count may move the menu button onto another toolbar line while its popup stays put. The necessary rendered
+  geometry remains unverified after investigation.
+
+- [`bulk-test-preference-latch-bypasses-finally.md`](bulk-test-preference-latch-bypasses-finally.md) — An unresolved
+  preference latch can outlive the test timeout without unwinding its finally block, skipping owned session and
+  preference cleanup.
+
+- [`empty-filter-actions-escape-keeps-session-marks.md`](empty-filter-actions-escape-keeps-session-marks.md) — Escape
+  from empty-filter actions leaves session marks active instead of clearing them under the list's Escape policy.
+
+- [`truncated-empty-filter-result-omits-clear-actions.md`](truncated-empty-filter-result-omits-clear-actions.md) — A
+  truncated empty-filter result can omit the clear-filter links needed to recover through that view.
+
+- [`bulk-screenshot-test-expects-wrong-local-alias.md`](bulk-screenshot-test-expects-wrong-local-alias.md) — The
+  bulk-action screenshot regression expects a local-host alias that its own fixture does not provide.
