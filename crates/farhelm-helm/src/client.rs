@@ -4230,11 +4230,11 @@ impl SupervisorClient {
     /// owns the watch's sender, is dropped by both its holders) or with the
     /// connection.
     ///
-    /// A browser's own pause and resume for the same channel are forwarded
-    /// as they are, beside these, and the supervisor keeps one paused flag
-    /// per attachment, so the two could undo each other. The grid client
-    /// never sends them; a client that did would only lose the helm's
-    /// pause, leaving the queue's bounds and the stall detach in force.
+    /// These are the only pause and resume the supervisor gets for a grid
+    /// channel: the socket relay drops a browser's own on a grid socket
+    /// (`terminal.rs`, the inbound task), since the supervisor keeps one
+    /// paused flag per attachment and a browser's would undo the helm's or
+    /// hold the stream paused until the stall detach.
     fn spawn_grid_flow(&self, channel: u32, mut decisions: watch::Receiver<bool>) {
         let writer_tx = self.writer_tx.clone();
         tokio::spawn(async move {
