@@ -11,8 +11,10 @@ Intel Macs and other platforms are refused. Only the installer is limited: Linux
 hosts, and a helm sets up its remote hosts over SSH.
 
 Installation needs `curl`, `tar` with gzip support, and one of `sha256sum`, `shasum` or `openssl` for checksum
-verification. The Mac also needs tmux 3.7c or newer to run sessions, installed separately; missing tmux does not prevent
-installation itself.
+verification. The Mac also needs tmux 3.7c or newer, installed separately: the app refuses to start without it. New
+sessions do not run in tmux, and Farhelm runs no tmux on a Mac whose sessions all have new terminals, but sessions from
+earlier versions still do, so the requirement stays for the transition. Missing tmux does not prevent installation
+itself; the installer only advises.
 
 Run the installer as your normal user:
 
