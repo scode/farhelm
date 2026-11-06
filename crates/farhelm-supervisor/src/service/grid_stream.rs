@@ -5,13 +5,12 @@
 //! A terminal in a terminal host has no byte stream a viewer could render:
 //! its screen lives in the supervisor's emulator (`crate::hosts::terminal`),
 //! and reaches a viewer as grid messages (`farhelm_proto::grid`). An attach
-//! that asks for a grid gets one [`GridSender`] task, which takes the place
-//! a tmux attachment's `Forwarder` has (it is the attachment's
-//! `ActiveAttach::forwarder`, shut down and joined the same way), and one
-//! [`HostAttach`], the attachment's `AttachBackend`, which takes its input.
-//! Everything around them (takeover, detach, the pause watch, the stall
-//! detach, the detach verdicts) is the attachment machinery tmux terminals
-//! use, unchanged.
+//! that asks for a grid gets one [`GridSender`] task, which fills the
+//! attachment's `ActiveAttach::forwarder` slot (shut down and joined like an
+//! old terminal's `Forwarder`), and one [`HostAttach`], the attachment's
+//! `AttachBackend`, which takes its input. Everything around them (takeover,
+//! detach, the pause watch, the stall detach, the detach verdicts) is the
+//! attachment machinery every terminal's attachment shares.
 //!
 //! # The stream
 //!
@@ -46,7 +45,7 @@
 //!   viewer; the client draws at most once per animation frame anyway.
 //! - **Exit and end**: the program's exit is the `state` message's `exit`;
 //!   the attachment stays, showing the final screen. A host that is gone
-//!   ends the attachment as a dead tmux pane's does ("session terminal
+//!   ends the attachment as any terminal that ended does ("session terminal
 //!   ended"), after one last cycle; one that became unavailable ends it as a
 //!   failed stream. An attach to a host that is unavailable already (a
 //!   startup placeholder included, which has no runtime) is refused before
@@ -96,8 +95,10 @@
 //! telling which rows do would mean scanning the history on every change.
 //! A theme script that sets the palette once costs one resend.
 //!
-//! The stall timeout and stall detach are a tmux attachment's: a pause that
-//! outlives the stall timeout ends the attachment as stalled, from any
+//! The stall timeout and stall detach are the shared attachment machinery's
+//! (`SupervisorTimeouts::stall_detach`, by default
+//! `super::core::STALL_DETACH_TIMEOUT`, the same for every terminal): a pause
+//! that outlives the stall timeout ends the attachment as stalled, from any
 //! point the sender can wait at (`super::connection::park_while_paused`,
 //! `super::connection::stalled_past_deadline`).
 //!
@@ -144,13 +145,13 @@
 //!   short is the runtime's to close (`crate::hosts::terminal`, "A paste
 //!   goes in whole"), and the attachment's input fails.
 //! - **Failures end the attachment.** A malformed message, a broken format
-//!   rule (input in the middle of a paste), input past the backlog, or
-//!   input whose fate is unknown or that was not sent ends the attachment
-//!   as an input failure, as a failed tmux send does: accepting later input
-//!   after losing some can turn a command into a different one. Input the
-//!   program's pty discarded (a program that exited) is not a failure, as
-//!   typing into a dead pane is not. The sender notices a failure at once,
-//!   wherever it waits, a pause included.
+//!   rule (input in the middle of a paste), input past the backlog, or input
+//!   whose fate is unknown or that was not sent ends the attachment as an input
+//!   failure: accepting later input after losing some can turn a command into a
+//!   different one. Input the program's pty discarded (a program that exited)
+//!   is not a failure: the program it was for is gone, so no later input
+//!   depends on it. The sender notices a failure at once, wherever it waits, a
+//!   pause included.
 //! - **The pump ends with the attachment.** When the attachment ends, its
 //!   pump drops whatever input it has not yet handed to the host's runtime
 //!   (the viewer was told its attachment ended) and stops at once. Input it
@@ -570,10 +571,10 @@ impl GridStream {
         }
     }
 
-    /// Tell the client its attach's catch-up is over, as a tmux
-    /// attachment's forwarder does (`Forwarder::send_replay_complete`):
-    /// not held back by a pause, which is about terminal output, but raced
-    /// against the stall deadline.
+    /// Tell the client its attach's catch-up is over, with the same control
+    /// message every attachment sends (`Forwarder::send_replay_complete` for
+    /// an old terminal): not held back by a pause, which is about terminal
+    /// output, but raced against the stall deadline.
     async fn send_replay_complete(&mut self) -> Result<(), ForwarderEnd> {
         let frame = Frame::control(&ControlMsg::ReplayComplete {
             channel: self.channel,
@@ -915,9 +916,9 @@ fn with_exit(state: TerminalState, liveness: &Liveness) -> TerminalState {
 // ---- The task ------------------------------------------------------------------
 
 /// One grid attachment's output task: a [`GridStream`] run until it ends or
-/// the attachment is torn down, then the verdict reported as a tmux
-/// attachment's forwarder reports its own (`super::connection::
-/// report_forwarder_end`).
+/// the attachment is torn down, then the verdict reported through the
+/// shared attachment machinery (`super::connection::report_forwarder_end`),
+/// as every attachment's output task reports its own.
 ///
 /// Like the forwarder, it never takes `Supervisor::attachments` (the
 /// verdicts that need it run on tasks of their own), so teardown can

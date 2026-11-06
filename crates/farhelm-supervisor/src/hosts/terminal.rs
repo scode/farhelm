@@ -322,10 +322,17 @@ use crate::tmux::{PaneProbe, PaneProcess};
 
 // ---- Limits --------------------------------------------------------------------
 
-/// Lines of history each host terminal keeps by default: the same as a tmux
-/// pane's `history-limit`, so a terminal keeps as much scrollback in a host
-/// as it does in tmux.
-pub const DEFAULT_SCROLLBACK_LINES: usize = crate::tmux::HISTORY_LIMIT as usize;
+/// Lines of history each host terminal keeps by default.
+///
+/// SPEC.md promises that a terminal keeps, and a viewer's replay covers, at
+/// least the screen plus 10,000 lines of scrollback; this keeps a margin
+/// above that floor. The emulator's memory budget is measured at this size
+/// (the `farhelm-terminal-emulator` crate docs, "Memory budget"), so raising
+/// it raises every terminal's worst case. Old terminals keep the same amount
+/// (tmux's `HISTORY_LIMIT`), so a session restarted from one into a host
+/// loses nothing to a smaller limit; a compile-time assertion beside
+/// `HISTORY_LIMIT` keeps this at least as large, and nothing else ties them.
+pub const DEFAULT_SCROLLBACK_LINES: usize = 12_000;
 
 /// How many `send_input` calls may wait in the task's queue. Each holds at
 /// most `MAX_INPUT` bytes, so this bounds what callers can queue to 1 MiB

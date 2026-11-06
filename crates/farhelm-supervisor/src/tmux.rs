@@ -58,6 +58,13 @@ use tracing::warn;
 /// else forces the two numbers to move together.
 pub const HISTORY_LIMIT: u32 = 12_000;
 
+// A Restart that moves an old terminal's agent into a terminal host seeds the
+// host with this pane's history (`Supervisor::tmux_restart_seed`); a host that
+// kept fewer lines than the pane would drop the oldest of them. The host's
+// limit is its own constant, so this is what keeps the two from drifting apart
+// that way.
+const _: () = assert!(HISTORY_LIMIT as usize <= crate::hosts::terminal::DEFAULT_SCROLLBACK_LINES);
+
 /// How far behind a control client's pane stream may fall, in seconds,
 /// before tmux applies its own flow control to it (`pause-after` — see
 /// `attach_cutover_command`).
