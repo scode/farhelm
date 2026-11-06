@@ -82,8 +82,7 @@ pub(crate) fn host_row(id: &str, socket: &Path) -> StoredSession {
             agent_kind: AgentKind::Generic,
             resume_template: None,
         },
-        tmux_name: session_tmux_name(id),
-        pane: socket.file_name().unwrap().to_str().unwrap().to_string(),
+        terminal_address: socket.file_name().unwrap().to_str().unwrap().to_string(),
         terminal_kind: crate::store::TerminalKind::Host,
         outcome: LastOutcome::Running,
         canonical_cwd: None,
@@ -919,7 +918,7 @@ async fn a_terminal_less_host_row_restarts_in_a_host_never_in_tmux() {
     assert_eq!(
         (
             after.terminal_kind,
-            after.pane.as_str(),
+            after.terminal_address.as_str(),
             &after.outcome,
             after.generation
         ),
@@ -972,7 +971,7 @@ async fn a_retry_finds_the_sessions_own_published_host() {
         dedup_scope: DedupScope::SessionLifetime,
     };
     let mut row = host_row("s1", test_host.socket());
-    row.pane = String::new();
+    row.terminal_address = String::new();
     row.outcome = LastOutcome::Launching;
     sup.store
         .insert_session(row, Some(claim.clone()))
@@ -1073,7 +1072,7 @@ fn record_s1(state: &StateDir, socket: &Path) {
 async fn terminal_less_tmux_s1(sup: &Arc<Supervisor>) {
     let mut row = host_row("s1", Path::new("/nonexistent/hosts/ABCDEFGH"));
     row.terminal_kind = crate::store::TerminalKind::Tmux;
-    row.pane = "%1".to_string();
+    row.terminal_address = "%1".to_string();
     sup.store
         .insert_session(row, None)
         .await
@@ -1585,7 +1584,7 @@ async fn spare_claims_read_a_host_rows_own_host() {
     let row = sup.store.session(&origin.id).await.unwrap().unwrap();
     assert_eq!(row.terminal_kind, crate::store::TerminalKind::Host);
     assert_eq!(
-        row.pane, "h",
+        row.terminal_address, "h",
         "premise: the row names the stand-in's socket"
     );
     assert!(
@@ -1599,7 +1598,7 @@ async fn spare_claims_read_a_host_rows_own_host() {
         .lock()
         .await
         .insert(origin.id.clone(), Arc::new(with_terminal(&entry, None)));
-    let named = crate::hosts::hosts_dir(state.path()).join(&row.pane);
+    let named = crate::hosts::hosts_dir(state.path()).join(&row.terminal_address);
     assert!(
         !named.exists(),
         "premise: nothing at the named socket's path"
@@ -1711,7 +1710,7 @@ async fn a_stop_request_survives_a_restart_whose_replay_has_not_reached_the_exit
         },
     );
     let mut row = host_row("s1", test_host.socket());
-    row.pane = name;
+    row.terminal_address = name;
     row.outcome = LastOutcome::StopRequested;
     sup.store.insert_session(row, None).await.expect("the row");
 
@@ -1780,7 +1779,7 @@ async fn an_unreadable_launch_record_leaves_its_session_unavailable() {
         },
     );
     let mut row = host_row("s1", stranger.socket());
-    row.pane = String::new();
+    row.terminal_address = String::new();
     row.outcome = LastOutcome::Launching;
     sup.store.insert_session(row, None).await.expect("the row");
     let artifacts = crate::launch::LaunchArtifacts::for_launch(state.path(), "s1", 0);
@@ -2028,7 +2027,7 @@ async fn placeholder_session(sup: &Supervisor, test_host: &TestHost, name: &str)
         None,
     );
     let mut row = host_row("s1", test_host.socket());
-    row.pane = name.to_string();
+    row.terminal_address = name.to_string();
     sup.store.insert_session(row, None).await.expect("the row");
     sup.sessions.lock().await.insert(
         "s1".to_string(),
@@ -2617,7 +2616,7 @@ async fn readoption_tab_fixture(state: &StateDir) -> (Arc<Supervisor>, TestHost)
     .expect("tab tag");
     let (host, test_host) = adopt_test_host_at(&socket, tag, None).await;
     let mut row = host_row("s1", &socket);
-    row.pane.clear(); // No agent host: this fixture isolates tab attribution.
+    row.terminal_address.clear(); // No agent host: this fixture isolates tab attribution.
     sup.store.insert_session(row, None).await.expect("row");
     let entry = Arc::new(entry_with(None, LastOutcome::Running));
     entry.session.host_tabs.lock().unwrap().push(HostTab {
@@ -4063,7 +4062,7 @@ async fn host_session_with(
         .set_terminal_for_test(
             &id,
             crate::store::TerminalKind::Host,
-            Terminal::Host(old.clone()).recorded_pane(),
+            Terminal::Host(old.clone()).recorded_address(),
         )
         .await
         .expect("make the row a host row");
@@ -4317,7 +4316,7 @@ async fn host_agent_with_an_earlier_start(
         .set_terminal_for_test(
             &id,
             crate::store::TerminalKind::Host,
-            Terminal::Host(current.clone()).recorded_pane(),
+            Terminal::Host(current.clone()).recorded_address(),
         )
         .await
         .expect("make the row a host row");

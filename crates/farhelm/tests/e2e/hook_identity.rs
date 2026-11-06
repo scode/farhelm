@@ -2363,8 +2363,7 @@ async fn a_historical_identity_survives_restart_and_reaches_resume_argv() {
         .expect("open fixture store");
     let mut legacy = store.session(&session.id).await.unwrap().unwrap();
     legacy.id = uuid::Uuid::new_v4().to_string();
-    legacy.tmux_name = format!("fh-{}", legacy.id);
-    legacy.pane = String::new();
+    legacy.terminal_address = String::new();
     legacy.outcome = LastOutcome::Interrupted;
     legacy.captured_conversation = Some("historical-conversation".to_string());
     legacy.conversation_source = None;
@@ -2503,7 +2502,7 @@ pub(crate) async fn type_without_supervisor(state: &std::path::Path, session_id:
         .expect("read the row")
         .expect("the row exists");
     if row.terminal_kind == farhelm_supervisor::store::TerminalKind::Host {
-        let socket = farhelm_supervisor::hosts::hosts_dir(state).join(&row.pane);
+        let socket = farhelm_supervisor::hosts::hosts_dir(state).join(&row.terminal_address);
         let mut connection = farhelm_supervisor::hosts::HostConnection::connect(&socket)
             .await
             .expect("connect to the session's terminal host");

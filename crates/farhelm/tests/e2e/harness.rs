@@ -2405,7 +2405,7 @@ impl RecordedTerminal {
             .expect("the row exists");
         if row.terminal_kind == farhelm_supervisor::store::TerminalKind::Host {
             return RecordedTerminal::Host(
-                farhelm_supervisor::hosts::hosts_dir(state_dir).join(&row.pane),
+                farhelm_supervisor::hosts::hosts_dir(state_dir).join(&row.terminal_address),
             );
         }
         RecordedTerminal::Tmux {
@@ -2500,7 +2500,7 @@ pub(crate) async fn end_agent_terminal(
         .expect("read the row")
         .expect("the row exists");
     if row.terminal_kind == farhelm_supervisor::store::TerminalKind::Host {
-        let socket = farhelm_supervisor::hosts::hosts_dir(state_dir).join(&row.pane);
+        let socket = farhelm_supervisor::hosts::hosts_dir(state_dir).join(&row.terminal_address);
         let outcome = farhelm_supervisor::hosts::end_host_at(
             &socket,
             farhelm_supervisor::hosts::StopLimits::default(),

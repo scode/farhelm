@@ -215,9 +215,10 @@ curl_auth() {
 # The app's supervisor runs the bare `farhelm supervisor run`, so every
 # session this script creates runs in a terminal host, while a supervisor
 # built before terminal hosts (or a session from one) runs it in tmux. The
-# session's row says which (`terminal_kind`) and where (`pane`: the host's
-# socket name, or the tmux pane), so the check follows the row: a tmux
-# terminal is alive when the private server still has its tmux session, a
+# session's row says which (`terminal_kind`) and where (`terminal_address`:
+# the host's socket name, or the tmux pane), so the check follows the row: a
+# tmux terminal is alive when the private server still has its tmux session
+# (named `fh-` and the session's id, the only name one ever has), a
 # host one when a process still listens on its socket. The socket table is
 # read rather than the socket connected to, because a host serves exactly
 # one client, its supervisor, and a socket file outlives the host that bound
@@ -227,16 +228,16 @@ session_terminal_alive() {
 import os, sqlite3, subprocess, sys
 state, sid = sys.argv[1], sys.argv[2]
 db = sqlite3.connect("file:" + os.path.join(state, "supervisor.db") + "?mode=ro", uri=True, timeout=5)
-row = db.execute("select terminal_kind, pane, tmux_name from sessions where id = ?", (sid,)).fetchone()
+row = db.execute("select terminal_kind, terminal_address from sessions where id = ?", (sid,)).fetchone()
 if row is None:
     sys.exit(1)
-kind, pane, tmux_name = row
+kind, address = row
 if kind == "tmux":
-    probe = ["tmux", "-S", os.path.join(state, "tmux.sock"), "has-session", "-t", tmux_name]
+    probe = ["tmux", "-S", os.path.join(state, "tmux.sock"), "has-session", "-t", "fh-" + sid]
     sys.exit(subprocess.run(probe, capture_output=True).returncode)
-if kind != "host" or not pane:
+if kind != "host" or not address:
     sys.exit(1)
-socket = os.path.join(state, "hosts", pane)
+socket = os.path.join(state, "hosts", address)
 wanted = {socket, os.path.realpath(socket)}
 LISTENING = 0x10000  # __SO_ACCEPTCON in /proc/net/unix's flags column
 with open("/proc/net/unix") as table:

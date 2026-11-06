@@ -368,7 +368,7 @@ async fn an_old_session_restarts_into_a_host_with_its_history_and_tabs() {
             row.generation,
             row.terminal_kind,
             &row.outcome,
-            row.pane.as_str()
+            row.terminal_address.as_str()
         ),
         (
             1,
@@ -479,7 +479,11 @@ async fn with_the_switch_off_a_restart_stays_in_tmux() {
         .expect("the restart succeeds in tmux");
     let row = stored_row(stack.state.path(), &id).await;
     assert_eq!((row.generation, row.terminal_kind), (1, TerminalKind::Tmux));
-    assert!(row.pane.starts_with('%'), "a tmux pane: {:?}", row.pane);
+    assert!(
+        row.terminal_address.starts_with('%'),
+        "a tmux pane: {:?}",
+        row.terminal_address
+    );
     assert!(sup.agent_host_for_test(&id).await.is_none());
     assert!(host_sockets_in(stack.state.path()).is_empty());
     client.delete_session(&id).await.expect("delete");
@@ -537,7 +541,11 @@ async fn a_move_whose_host_refuses_keeps_the_tmux_session_and_a_retry_moves_it()
     );
     let row = stored_row(stack.state.path(), &id).await;
     assert_eq!(
-        (row.generation, row.terminal_kind, row.pane.as_str()),
+        (
+            row.generation,
+            row.terminal_kind,
+            row.terminal_address.as_str()
+        ),
         (1, TerminalKind::Tmux, old.pane.as_str())
     );
     assert_ne!(row.outcome, LastOutcome::Launching);
@@ -626,7 +634,11 @@ async fn a_move_whose_history_cannot_be_read_is_refused_and_the_next_supervisor_
     );
     let row = stored_row(stack.state.path(), &id).await;
     assert_eq!(
-        (row.generation, row.terminal_kind, row.pane.as_str()),
+        (
+            row.generation,
+            row.terminal_kind,
+            row.terminal_address.as_str()
+        ),
         (0, TerminalKind::Tmux, old.pane.as_str())
     );
     assert_ne!(row.outcome, LastOutcome::Launching);
@@ -960,7 +972,7 @@ async fn a_move_interrupted_after_its_claim_restarts_empty_and_delete_ends_the_o
             row.generation,
             row.terminal_kind,
             &row.outcome,
-            row.pane.as_str()
+            row.terminal_address.as_str()
         ),
         (1, TerminalKind::Host, &LastOutcome::Launching, "")
     );
@@ -1021,7 +1033,7 @@ async fn assert_move_converged(interrupted: Interrupted) {
             row.generation,
             row.terminal_kind,
             &row.outcome,
-            row.pane.as_str()
+            row.terminal_address.as_str()
         ),
         (
             1,
@@ -1216,7 +1228,11 @@ async fn an_orderly_stop_during_a_moves_seed_refuses_it() {
     );
     let row = stored_row(stack.state.path(), &id).await;
     assert_eq!(
-        (row.generation, row.terminal_kind, row.pane.as_str()),
+        (
+            row.generation,
+            row.terminal_kind,
+            row.terminal_address.as_str()
+        ),
         (0, TerminalKind::Tmux, old.pane.as_str())
     );
     assert_ne!(row.outcome, LastOutcome::Launching);
@@ -1410,7 +1426,7 @@ async fn clone_and_replace_of_an_old_session_create_host_sessions() {
     );
     let source = stored_row(stack.state.path(), &id).await;
     assert_eq!(
-        (source.terminal_kind, source.pane.as_str()),
+        (source.terminal_kind, source.terminal_address.as_str()),
         (TerminalKind::Tmux, old.pane.as_str()),
         "the source is untouched"
     );

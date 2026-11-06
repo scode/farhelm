@@ -4637,6 +4637,17 @@ Builds between the two record each session's terminal kind but do not yet handle
 they would misread such a session the same way; the second upgrade makes them refuse the database in the same manner,
 with the same consequences.
 
+A third supervisor database upgrade stops storing tmux details for terminals that do not run in tmux: a session no
+longer records a tmux session name (a tmux session's name follows from the session itself, so existing tmux sessions
+keep running and are found as before), and where a session's terminal is recorded no longer borrows tmux's field for a
+terminal outside tmux. Nothing a user sees changes, and every session survives the upgrade. It is accepted as one-way
+with the same consequences: a supervisor from before it refuses the upgraded database as having a newer schema version
+than it understands, so that machine stays unreachable until a build at least as new runs there again; an older helm
+from v0.31.0 on refuses to Update a host already on it, naming the host's newer schema; and going back otherwise needs a
+copy of the state directory taken before the upgrade, restored together with the older version. An upgrade that finds a
+stored tmux session name other than the one the session's own identity gives (only a hand edit makes one) refuses,
+naming the session (or the pending create request), rather than change it by a guess.
+
 Until upgrade epochs exist (TODO.md), no change may break the upgrade path of the desktop app, the helm, or the
 supervisor. An installation of any stable release from v0.23.0 on, the first one the in-app updater and get.farhelm.io
 serve, must update to the new release through its normal path and come up on its existing state, and the new helm must

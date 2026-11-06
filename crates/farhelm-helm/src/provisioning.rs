@@ -12625,16 +12625,17 @@ mod tests {
 
     /// The ended or running session `session_id`'s host socket on this
     /// machine, read from the supervisor's own database: the row must be a
-    /// host row, and its `pane` names the socket in `<state>/hosts/`.
+    /// host row, and its `terminal_address` names the socket in
+    /// `<state>/hosts/`.
     fn host_socket_of(state_dir: &Path, session_id: &str) -> PathBuf {
         let db = rusqlite::Connection::open_with_flags(
             state_dir.join("supervisor.db"),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )
         .expect("open the supervisor's database read-only");
-        let (kind, pane): (String, String) = db
+        let (kind, socket): (String, String) = db
             .query_row(
-                "SELECT terminal_kind, pane FROM sessions WHERE id = ?1",
+                "SELECT terminal_kind, terminal_address FROM sessions WHERE id = ?1",
                 [session_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -12644,10 +12645,10 @@ mod tests {
             "the session {session_id} is not a terminal-host row"
         );
         assert!(
-            !pane.is_empty(),
+            !socket.is_empty(),
             "the host row of {session_id} names no socket"
         );
-        state_dir.join("hosts").join(pane)
+        state_dir.join("hosts").join(socket)
     }
 
     /// Prove server absence through tmux's exact socket diagnostic before

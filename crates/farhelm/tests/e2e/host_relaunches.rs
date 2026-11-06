@@ -549,7 +549,7 @@ async fn a_restart_starts_a_new_host_that_keeps_the_history_on_a_blank_screen() 
             row.generation,
             row.terminal_kind,
             &row.outcome,
-            row.pane.as_str()
+            row.terminal_address.as_str()
         ),
         (
             1,
@@ -619,7 +619,11 @@ async fn a_refused_replacement_keeps_the_previous_host_for_this_and_the_next_sup
 
     let row = stored_row(stack.state.path(), &session.id).await;
     assert_eq!(
-        (row.generation, row.terminal_kind, row.pane.as_str()),
+        (
+            row.generation,
+            row.terminal_kind,
+            row.terminal_address.as_str()
+        ),
         (1, TerminalKind::Host, socket_name(&old_socket).as_str())
     );
     assert_ne!(row.outcome, LastOutcome::Launching);
@@ -725,7 +729,7 @@ async fn an_unusable_replacement_host_is_ended_and_the_restart_unwound() {
     wait_until_pid_gone(listener, WAIT_SECS).await;
     let row = stored_row(h.state.path(), &session.id).await;
     assert_eq!(
-        (row.generation, row.pane.as_str()),
+        (row.generation, row.terminal_address.as_str()),
         (1, socket_name(&old_socket).as_str())
     );
     assert_ne!(row.outcome, LastOutcome::Launching);
@@ -783,11 +787,14 @@ async fn interrupted_restart(stage: HostRestartStage) -> Interrupted {
     match stage {
         HostRestartStage::ReplacementStarted => {
             assert_eq!((row.generation, &row.outcome), (1, &LastOutcome::Launching));
-            assert!(row.pane.is_empty(), "nothing confirmed the new launch");
+            assert!(
+                row.terminal_address.is_empty(),
+                "nothing confirmed the new launch"
+            );
         }
         HostRestartStage::BeforeOldHostEnded => {
             assert_eq!(
-                (row.generation, &row.outcome, row.pane.as_str()),
+                (row.generation, &row.outcome, row.terminal_address.as_str()),
                 (1, &LastOutcome::Running, new_name.as_str())
             );
         }
@@ -838,7 +845,7 @@ async fn assert_converged(interrupted: Interrupted) {
     } = interrupted;
     let row = stored_row(stack.state.path(), &session.id).await;
     assert_eq!(
-        (row.generation, &row.outcome, row.pane.as_str()),
+        (row.generation, &row.outcome, row.terminal_address.as_str()),
         (1, &LastOutcome::Running, socket_name(&new_socket).as_str())
     );
     let new = agent_host(&sup, &session.id).await;
@@ -1279,7 +1286,7 @@ async fn claim_window_crash_recovers_the_old_terminal(stage: HostRestartStage, r
     );
     let row = stored_row(stack.state.path(), &session.id).await;
     assert_eq!(
-        (row.generation, &row.outcome, row.pane.as_str()),
+        (row.generation, &row.outcome, row.terminal_address.as_str()),
         (1, &LastOutcome::Launching, ""),
         "premise: the generation is claimed and nothing confirmed"
     );
@@ -1305,7 +1312,7 @@ async fn claim_window_crash_recovers_the_old_terminal(stage: HostRestartStage, r
     assert!(history_text(&back).await.contains("history line 01"));
     let row = stored_row(stack.state.path(), &session.id).await;
     assert_eq!(
-        (row.generation, row.pane.as_str()),
+        (row.generation, row.terminal_address.as_str()),
         (1, socket_name(&old_socket).as_str()),
         "the old host's socket is recorded as the row's"
     );
@@ -1396,7 +1403,7 @@ async fn a_failed_confirmation_write_still_ends_the_old_host() {
     wait_for_screen(&new, RESUMED).await;
     let row = stored_row(h.state.path(), &session.id).await;
     assert_eq!(
-        (row.generation, &row.outcome, row.pane.as_str()),
+        (row.generation, &row.outcome, row.terminal_address.as_str()),
         (1, &LastOutcome::Launching, "")
     );
     assert_host_ended(old_pid, &old_socket).await;
@@ -1739,7 +1746,7 @@ async fn claim_window_crash(stack: &Stack) -> ClaimWindow {
     );
     let row = stored_row(stack.state.path(), &session.id).await;
     assert_eq!(
-        (row.generation, &row.outcome, row.pane.as_str()),
+        (row.generation, &row.outcome, row.terminal_address.as_str()),
         (2, &LastOutcome::Launching, "")
     );
     retire(stack.state.path(), sup, client).await;
