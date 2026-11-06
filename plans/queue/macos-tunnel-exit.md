@@ -425,3 +425,56 @@ If keep-alive does not end it within the wait (the local ssh still running, or t
 open), block again with that evidence: the measured times, the `-v` output's reason or its absence, the control run and
 the local process table. Do not add a watcher or any other mechanism; the maintainer wants to discuss it with that
 evidence in hand.
+
+## Blocked
+
+Blocked on 2026-11-06 (claim a3e09b).
+
+### Keep-alives do not finish the tunnel after its sandbox session ends
+
+A force quit or crash of the desktop app can leave its recipe-tunnel SSH process and sandbox listeners running. The
+chosen fix was a helm-owned stdin pipe, a heartbeat every 30 seconds and a 120-second remote silence limit. The full
+requirement includes ending the local SSH process and its held connection to the local service. Your latest decision
+required a real-gateway check lasting at least three minutes, using production arguments and a control with keep-alives
+disabled, then another block if normal keep-alives did not finish that cleanup.
+
+That check now fails the required local teardown. Both runs established a held reverse connection with a unique
+roundtrip before closing stdin, and observed it for 185 seconds after the write end closed:
+
+| Observation                                                            | Normal keep-alive, 30 seconds / 3 misses | Control, keep-alive disabled |
+| ---------------------------------------------------------------------- | ---------------------------------------- | ---------------------------- |
+| Sandbox peer observed EOF/reset                                        | 94 ms                                    | 85 ms                        |
+| Original remote command and SSH session process gone; listener refused | By 377 ms                                | By 371 ms                    |
+| Local SSH process after 185 seconds                                    | Still present                            | Still present                |
+| Owning process's wait after 185 seconds                                | Unresolved                               | Unresolved                   |
+| Local service's held connection after 185 seconds                      | Still open                               | Still open                   |
+| Verbose SSH exit or keep-alive timeout reason                          | None                                     | None                         |
+
+The treatment used the actual production argument builder and unchanged remote command, including
+`ServerAliveInterval=30` and `ServerAliveCountMax=3`. The control changed only the interval to zero. Direct
+process-table observations before and after the window identified the same local SSH processes; the owning native child
+waits were separate from output draining. Both verbose streams showed the session channel being freed while the
+forwarded channel remained. Why the gateway/client combination leaves that channel open is an inference, not established
+by these diagnostics.
+
+The retained recorder runs are `6c056f69-f776-46c5-8b18-57c7d26a268c` (normal keep-alive) and
+`cd0092d4-81b4-4624-8b34-98c054b394c5` (control). Both measurement commands completed with complete, untruncated
+evidence; their zero command exits mean the observations completed, not that tunnel acceptance passed. This used Linux
+OpenSSH 9.6p1 and closed the pipe in-process, isolating the pipe from Linux's existing kernel parent-death cleanup. An
+independent observer connection deliberately kept the sandbox awake during each window, so these runs make no
+idle-suspension claim or native macOS claim.
+
+One additional small sandbox was used, bringing the plan total to 3 of its authorized 20. It is terminated, its snapshot
+sweep found nothing to remove, and the test SSH key is deregistered. No owned cloud resources remain.
+
+[Draft #3072](https://github.com/scode/farhelm/pull/3072/changes) still contains only the previously successful macOS
+test-server prerequisite. No product fix or alternative lifetime mechanism has been pushed. The remaining silence,
+lease-kill, idle-suspension and final macOS regression checks were not run because this required gateway check failed.
+
+Should the full local teardown requirement remain while a separate local lifetime mechanism, such as a watcher, is
+investigated, or should the requirement be narrowed to ending the sandbox session and listeners while allowing local
+connections to linger? Retaining full teardown requires agreeing on a new local cleanup design, then implementing and
+validating it. A watcher would be a separate local process that notices the helm's exit and stops its tunnel; no such
+design is validated or authorized. Narrowing the requirement accepts a local SSH process and held service connection
+that these measurements did not show closing within 185 seconds. I recommend retaining full teardown and discussing the
+revised design before authorizing its implementation.
