@@ -4,4 +4,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight 6e398e] `settings-credentials.md` — Settings → Credentials: named GitHub tokens, Claude Code and Codex subscription logins and endpoint tokens for Tensorlake recipes, delivered per host; GH_TOKEN with gh for private checkouts; "not encrypted on disk" warnings
 - [blocked] `macos-tunnel-exit.md` — Recipe tunnels end when the helm dies (a stdin pipe the sandbox side waits on) or goes silent (30 s heartbeat, 120 s timeout), verified on macOS CI and real sandboxes
-- [in-flight d11566] `one-press-suspended-checkout.md` — A fresh GitHub checkout on a suspended host takes one Launch press: the host resumes and the session starts in an automatically picked folder
+- [complete] `one-press-suspended-checkout.md` — A fresh GitHub checkout on a suspended host takes one Launch press: the host resumes and the session starts in an automatically picked folder
