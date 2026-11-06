@@ -102,14 +102,13 @@ impl LaunchAttempt {
 }
 
 /// Preparation belongs to one form and one host, through both the vendor
-/// request and SSH recovery. It grants no launch authority: fresh checkouts
-/// still need a reviewed preview and a second press after the host connects.
+/// request and SSH recovery. It grants no checkout authority: a fresh checkout
+/// waits for the form's own preview on the recovered connection before creating.
 #[derive(Clone, PartialEq)]
 struct HostResumePreparation {
     host: HostId,
     /// Display-escaped and phase-free, captured before suspension changes the row.
     name: String,
-    review_checkout: bool,
 }
 
 /// Keep preparation distinct from session creation in both the normal form
@@ -123,11 +122,7 @@ fn HostResumeProgress(preparation: HostResumePreparation) -> Element {
                 "Resuming "
                 bdi { "{preparation.name}" }
                 ", then connecting… "
-                if preparation.review_checkout {
-                    "you’ll review the checkout and launch again"
-                } else {
-                    "the session starts when it’s ready"
-                }
+                "the session starts when it’s ready"
             }
         }
     }
@@ -912,11 +907,38 @@ fn answer_launcher_yolo(
     true
 }
 
-/// One accepted guarded answer waiting only for its refreshed checkout preview.
+/// Bind a fresh preview to the accepted draft, even before a render publishes it.
+/// Choice-and-Enter can apply a repository and submit in one event, so borrowing
+/// the last rendered preview authority could capture a different destination.
+fn checkout_preview_authority(
+    host: &HostOption,
+    draft: &LaunchDraft,
+    config_revision: i64,
+    agent: String,
+) -> Option<PreviewAuthority> {
+    Some(PreviewAuthority {
+        generation: 0,
+        config_revision,
+        host: host.id.to_string(),
+        incarnation: host.connection,
+        installation_identity: host.identity.clone()?,
+        repo: draft.destination().repo()?.clone(),
+        title: Some(draft.effective_title()),
+        agent,
+    })
+}
+
+/// One accepted submission waiting only for its refreshed checkout preview.
 ///
 /// Permissions participate in preview authority, so changing YOLO to guarded
 /// deliberately replaces the preview generation. Ignore only that generation;
 /// any other draft or opening change cancels the accepted automatic submit.
+/// Resume additionally names the fresh connection; its predecessor is allowed
+/// only while the independent host reader catches up, never for submission.
+/// Automatic names may advance within the press's unchanged source policy;
+/// typed and fixed names keep the exact-title comparison.
+/// Resume also allows checkout configuration to be discovered or refreshed:
+/// allocation belongs to the ready host's configuration, not its old epoch.
 /// Prompt and conversation are launch inputs outside preview authority.
 ///
 /// The opening and the Replace precondition are the ones the answered render
@@ -928,6 +950,8 @@ fn answer_launcher_yolo(
 struct GuardedSubmitStamp {
     opening: u64,
     authority: PreviewAuthority,
+    resuming_from: Option<u64>,
+    resume_naming: Option<CheckoutNameSource>,
     prompt: Option<String>,
     conversation: String,
     replace_guard: crate::DeleteGuard,
@@ -948,14 +972,35 @@ impl GuardedSubmitStamp {
         Self {
             opening,
             authority,
+            resuming_from: None,
+            resume_naming: None,
             prompt,
             conversation,
             replace_guard,
         }
     }
 
+    /// Wait across the display handoff, then accept only Resume's connection.
+    /// The old token cannot authorize even a Ready preview. Any third token
+    /// cancels the press instead of following another reconnection implicitly.
+    fn after_resume(mut self, connection: u64, naming: Option<CheckoutNameSource>) -> Self {
+        self.resuming_from = Some(self.authority.incarnation);
+        self.authority.incarnation = connection;
+        self.resume_naming = naming;
+        self
+    }
+
+    /// Whether the form still sees the connection Resume just replaced.
+    /// When Resume preserves a connection, no display handoff is needed.
+    fn waiting_for_connection(&self, authority: &PreviewAuthority) -> bool {
+        self.resuming_from == Some(authority.incarnation)
+            && authority.incarnation != self.authority.incarnation
+    }
+
     /// The precondition to send when the live launch is still the one this
-    /// answer accepted, or `None` when anything that identifies it changed.
+    /// answer or press accepted, or `None` when its identity changed. A match
+    /// during the old connection's display handoff still requires waiting:
+    /// callers must check `waiting_for_connection` before using the guard.
     /// The captured precondition is never compared: it is what the submit
     /// sends, and the live one moving (a source restarted meanwhile) must not
     /// turn the accepted launch into a different deletion.
@@ -965,8 +1010,28 @@ impl GuardedSubmitStamp {
         mut authority: PreviewAuthority,
         prompt: &Option<String>,
         conversation: &str,
+        naming: Option<&CheckoutNameSource>,
     ) -> Option<crate::DeleteGuard> {
         authority.generation = 0;
+        if self.waiting_for_connection(&authority) {
+            authority.incarnation = self.authority.incarnation;
+        }
+        if self.resuming_from.is_some() {
+            // A shortcut can press before this host's history reveals its
+            // checkout epoch. The press accepts allocation after Resume; only
+            // the form's current Ready preview, checked in full at dispatch,
+            // authorizes a directory under that configuration.
+            authority.config_revision = self.authority.config_revision;
+        }
+        // The press accepts allocation from an automatic name series, not its
+        // pre-suspension candidate. Only the unchanged source policy may advance;
+        // typing a name retires that source and cancels the accepted press.
+        if let Some(accepted) = &self.resume_naming {
+            if Some(accepted) != naming {
+                return None;
+            }
+            authority.title.clone_from(&self.authority.title);
+        }
         (self.opening == opening
             && self.authority == authority
             && &self.prompt == prompt
@@ -3681,19 +3746,15 @@ pub(super) fn CreateSessionForm(
         observe_title_fields();
         draft.snapshot().effective_title()
     };
-    let mut proposed_authority = destination_draft().repo().cloned().and_then(|repo| {
+    let mut proposed_authority = destination_draft().repo().and_then(|_| {
         let host = hosts.iter().find(|host| Some(host.id) == selected)?;
-        Some(PreviewAuthority {
-            generation: 0,
-            config_revision: observed_checkout_revision(),
-            host: host.id.to_string(),
-            incarnation: host.connection,
-            installation_identity: host.identity.clone()?,
-            repo,
-            // Only built while a repository is the destination, hence `true`.
-            title: Some(title_for_launch()),
-            agent: preview_agent_now(),
-        })
+        observe_title_fields();
+        checkout_preview_authority(
+            host,
+            &draft.snapshot(),
+            observed_checkout_revision(),
+            preview_agent_now(),
+        )
     });
     let mut previous_authority = live_preview_authority.peek().clone();
     if let Some(previous) = &mut previous_authority {
@@ -4050,15 +4111,28 @@ pub(super) fn CreateSessionForm(
             Some("Correct the command before restarting")
         } else { None }
     });
-    let displayed_preview = retry_binding
-        .as_ref()
-        .and_then(|binding| {
-            binding
-                .github_checkout
+    // A suspended destination promises allocation after Resume, not a path
+    // offered by the previous connection. Hide it in every summary/field too.
+    let allocate_after_resume =
+        selected_host_suspended && matches!(destination_draft(), DestinationDraft::Github { .. });
+    let allocation_notice = if draft.snapshot().effective_title().is_empty() {
+        "The folder is picked automatically when the host is ready"
+    } else {
+        "The folder is named after the session when the host is ready"
+    };
+    let displayed_preview = (!allocate_after_resume)
+        .then(|| {
+            retry_binding
                 .as_ref()
-                .map(|checkout| checkout.preview.clone())
+                .and_then(|binding| {
+                    binding
+                        .github_checkout
+                        .as_ref()
+                        .map(|checkout| checkout.preview.clone())
+                })
+                .or(current_preview)
         })
-        .or(current_preview);
+        .flatten();
     let summary_folder = match destination_draft() {
         DestinationDraft::Existing { cwd } => display_peer(&cwd),
         DestinationDraft::GithubInput { query } if query.trim().is_empty() => {
@@ -4068,6 +4142,7 @@ pub(super) fn CreateSessionForm(
             "Managed checkout: {} (select a repository)",
             display_peer(&query)
         ),
+        DestinationDraft::Github { .. } if allocate_after_resume => allocation_notice.into(),
         DestinationDraft::Github { repo, .. } => displayed_preview.as_ref().map_or_else(
             || format!("gh:{} (preview pending)", display_peer(&repo.identifier())),
             |preview| preview.cwd.escaped(),
@@ -4079,6 +4154,9 @@ pub(super) fn CreateSessionForm(
     let (folder_field_value, folder_placeholder, checkout_mode) = match destination_draft() {
         DestinationDraft::Existing { .. } => (cwd(), "", false),
         DestinationDraft::GithubInput { .. } => (String::new(), "Select a repository", true),
+        DestinationDraft::Github { .. } if allocate_after_resume => {
+            (String::new(), allocation_notice, true)
+        }
         DestinationDraft::Github { .. } => (
             displayed_preview
                 .as_ref()
@@ -5070,7 +5148,7 @@ pub(super) fn CreateSessionForm(
             if rendered_opening != *opening_generation.peek() {
                 return;
             }
-            // Any ordinary submit supersedes a guarded answer still waiting
+            // Any ordinary submit supersedes an accepted press still waiting
             // for preview, including a submit refused before a request exists.
             guarded_submit_pending.set(None);
             // A queued submit can outlive the render that exposed Launch.
@@ -5250,6 +5328,32 @@ pub(super) fn CreateSessionForm(
             {
                 let host = selected_now.expect("the suspended host was found");
                 let base = base.clone();
+                let current = draft.snapshot();
+                let Some(authority) = hosts.iter().find(|row| row.id == host).and_then(|host| {
+                    checkout_preview_authority(
+                        host,
+                        &current,
+                        observed_checkout_revision(),
+                        preview_agent_now(),
+                    )
+                }) else {
+                    return;
+                };
+                let naming = current.checkout_naming();
+                let automatic_name = naming
+                    .default_title(
+                        current.title_edited(),
+                        current.title_raw_seed().as_deref(),
+                        current.destination().repo(),
+                    )
+                    .and(naming.source);
+                let pending = GuardedSubmitStamp::new(
+                    rendered_opening,
+                    authority,
+                    current.prompt(),
+                    current.conversation(),
+                    replace_guard,
+                );
                 resume_display_handoff.set(None);
                 resuming_host.set(Some(HostResumePreparation {
                     host,
@@ -5258,7 +5362,6 @@ pub(super) fn CreateSessionForm(
                         .find(|row| row.id == host)
                         .map(HostOption::display_name)
                         .unwrap_or_else(|| "host".into()),
-                    review_checkout: true,
                 }));
                 launch_attempted.set(LaunchAttempt::None);
                 error.set(None);
@@ -5274,7 +5377,18 @@ pub(super) fn CreateSessionForm(
                     resume_display_handoff.set(handoff);
                     resuming_host.set(None);
                     error.set(match result {
-                        Ok(_) => Some("The host resumed. Review the refreshed checkout preview, then launch again".into()),
+                        Ok(fresh) => {
+                            let connection = super::shared::host_options(&fresh).into_iter().find(|row| {
+                                row.id == host && Some(CreateTarget::new(row.id, row.incarnation.clone())) == target_now
+                            }).map(|row| row.connection);
+                            if let Some(connection) = connection {
+                                guarded_submit_pending.set(Some(pending.after_resume(connection, automatic_name)));
+                                None
+                            } else {
+                                launch_attempted.set(LaunchAttempt::Refused);
+                                Some("The target host changed while resuming; check the target and launch again".into())
+                            }
+                        },
                         Err(reason) => {
                             launch_attempted.set(LaunchAttempt::Refused);
                             Some(format!("Resuming the host failed: {reason}"))
@@ -5732,7 +5846,6 @@ pub(super) fn CreateSessionForm(
                     resuming_host.set(Some(HostResumePreparation {
                         host: binding.host,
                         name: yolo_host_name.clone(),
-                        review_checkout: false,
                     }));
                     let result = api::resume_host_connected(&base, binding.host).await;
                     let fresh = match result {
@@ -6259,12 +6372,29 @@ pub(super) fn CreateSessionForm(
         };
         let answered_guard = live_preview_authority().and_then(|mut authority| {
             authority.agent = preview_agent_now();
-            pending.guard_if_current(opening_generation(), authority, &prompt(), &conversation())
+            pending.guard_if_current(
+                opening_generation(),
+                authority,
+                &prompt(),
+                &conversation(),
+                draft.snapshot().checkout_naming().source.as_ref(),
+            )
         });
         let Some(answered_guard) = answered_guard else {
             guarded_submit_pending.set(None);
             return;
         };
+        if live_preview_authority()
+            .as_ref()
+            .is_some_and(|authority| pending.waiting_for_connection(authority))
+        {
+            return;
+        }
+        // A fresh token may already be visible in Connecting. Even a Ready
+        // preview must wait until this form observes the host as connected.
+        if pending.resuming_from.is_some() && live_resume_display().is_some() {
+            return;
+        }
         if ops.busy() || ops.busy_now() {
             return;
         }
@@ -7241,10 +7371,15 @@ pub(super) fn CreateSessionForm(
                                             PreviewState::Failed { .. } => "failed",
                                         },
                                         "Managed checkout of {display_peer(&repo.identifier())} on {selected_host_label}"
-                                        if let Some(preview) = &displayed_preview {
+                                        if allocate_after_resume {
+                                            div { "{allocation_notice}" }
+                                        } else if let Some(preview) = &displayed_preview {
                                             div { class: "font-mono", dir: "ltr", "{preview.cwd.escaped()}" }
                                         }
-                                        if retry_binding.is_some() {
+                                        if allocate_after_resume {
+                                            // The old preview's pending/failure state says
+                                            // nothing about allocation after the host wakes.
+                                        } else if retry_binding.is_some() {
                                             div { "Retry reconciles the original request at this path" }
                                         } else {
                                             match preview_state() {
@@ -10902,7 +11037,7 @@ mod tests {
         // The live source may now imply `Unconditional`; the stamp's answer
         // to "what does the submit send" is still what the user saw.
         assert_eq!(
-            stamp.guard_if_current(3, authority(6), &prompt, "conversation"),
+            stamp.guard_if_current(3, authority(6), &prompt, "conversation", None),
             Some(crate::DeleteGuard::NothingAlive)
         );
         for (opening, prompt, conversation) in [
@@ -10911,15 +11046,127 @@ mod tests {
             (3, prompt.clone(), "another"),
         ] {
             assert_eq!(
-                stamp.guard_if_current(opening, authority(6), &prompt, conversation),
+                stamp.guard_if_current(opening, authority(6), &prompt, conversation, None),
                 None
             );
         }
         let mut moved = authority(6);
         moved.incarnation = 3;
         assert_eq!(
-            stamp.guard_if_current(3, moved, &prompt, "conversation"),
+            stamp.guard_if_current(3, moved, &prompt, "conversation", None),
             None
+        );
+        let mut changed_config = authority(6);
+        changed_config.config_revision += 1;
+        assert!(
+            stamp
+                .guard_if_current(3, changed_config, &prompt, "conversation", None)
+                .is_none(),
+            "a guarded answer still binds the configuration it accepted"
+        );
+    }
+
+    /// Resume must survive a lagging host read without using its stale preview.
+    /// Only the returned connection can submit; a changed opening, draft or
+    /// installation cancels the press even during that display handoff.
+    #[test]
+    fn resumed_submit_stamp_waits_only_for_its_fresh_connection() {
+        let authority = PreviewAuthority {
+            generation: 5,
+            config_revision: 1,
+            host: "7".into(),
+            incarnation: 2,
+            installation_identity: "installation-a".into(),
+            repo: GithubRepo::parse("acme/bar").unwrap(),
+            title: Some(String::new()),
+            agent: "codex".into(),
+        };
+        let stamp = GuardedSubmitStamp::new(
+            3,
+            authority.clone(),
+            None,
+            String::new(),
+            crate::DeleteGuard::NothingAlive,
+        )
+        .after_resume(4, None);
+        assert!(stamp.waiting_for_connection(&authority));
+        assert!(
+            stamp
+                .guard_if_current(3, authority.clone(), &None, "", None)
+                .is_some()
+        );
+        let mut fresh = authority.clone();
+        fresh.incarnation = 4;
+        fresh.generation = 6;
+        fresh.config_revision = 7;
+        assert!(!stamp.waiting_for_connection(&fresh));
+        assert!(
+            stamp
+                .guard_if_current(3, fresh.clone(), &None, "", None)
+                .is_some(),
+            "learning the checkout configuration cannot cancel auto-allocation"
+        );
+        for mut changed in [authority.clone(), fresh.clone()] {
+            changed.installation_identity = "another-installation".into();
+            assert!(
+                stamp
+                    .guard_if_current(3, changed, &None, "", None)
+                    .is_none()
+            );
+        }
+        for connection in [1, 3, 5] {
+            fresh.incarnation = connection;
+            assert!(
+                stamp
+                    .guard_if_current(3, fresh.clone(), &None, "", None)
+                    .is_none()
+            );
+        }
+        for (opening, prompt, conversation) in [
+            (4, None, ""),
+            (3, Some("edit".into()), ""),
+            (3, None, "other"),
+        ] {
+            assert!(
+                stamp
+                    .guard_if_current(opening, authority.clone(), &prompt, conversation, None)
+                    .is_none()
+            );
+        }
+        let mut edited = authority.clone();
+        edited.title = Some("typed".into());
+        assert!(
+            stamp
+                .guard_if_current(3, edited.clone(), &None, "", None)
+                .is_none()
+        );
+        let naming = CheckoutNameSource::Template {
+            base: "review".into(),
+            kind: farhelm_proto::launcher::TemplateNameKind::Base,
+        };
+        let numbered = GuardedSubmitStamp::new(
+            3,
+            PreviewAuthority {
+                title: Some("review".into()),
+                ..authority
+            },
+            None,
+            String::new(),
+            crate::DeleteGuard::NothingAlive,
+        )
+        .after_resume(4, Some(naming.clone()));
+        edited.incarnation = 4;
+        edited.title = Some("review-2".into());
+        assert!(
+            numbered
+                .guard_if_current(3, edited.clone(), &None, "", Some(&naming))
+                .is_some()
+        );
+        assert!(
+            numbered
+                .guard_if_current(3, edited, &None, "", None)
+                .is_none(),
+            "a hand edit retires the automatic name policy"
         );
     }
 

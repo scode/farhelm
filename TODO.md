@@ -395,14 +395,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   idle-suspending. Make the tunnels die with the helm on macOS too, for example with a small watcher that notices the
   helm's exit (kqueue `NOTE_EXIT`) and ends them. Plan: `plans/queue/macos-tunnel-exit.md`.
 
-- **One click for a fresh checkout on a suspended host.** Launching a fresh GitHub checkout on a suspended Tensorlake
-  host resumes the host, then stops and asks the user to review the refreshed checkout preview and press Launch again.
-  The preview made over the connection from before the suspension must not authorize work on the new connection, which
-  is why the second press exists; existing-folder and template launches resume and launch in one press. Find a way to
-  make the fresh-checkout case one press without letting a stale preview authorize the create (for example, launch
-  automatically when the refreshed preview matches what the user reviewed, and stop only when it differs). Plan:
-  `plans/queue/one-press-suspended-checkout.md`.
-
 - **Live resize of Tensorlake hosts.** A host is created at its recipe's size, and a recipe's size change affects only
   hosts created afterwards. Tensorlake can resize a running sandbox in place (CAS image format only): it takes one to
   two seconds and keeps processes running; CPUs go up and down, but memory never shrinks below what the sandbox booted

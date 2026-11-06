@@ -771,103 +771,224 @@ test("a delayed create after resume shows the host name without Suspended", asyn
   }
 });
 
-/** A fresh checkout cannot reuse a preview from before suspension. The first
- * press resumes only, and a second press requires the new preview. */
-test("a fresh checkout resumes first and requests a new preview", async ({ page, request }) => {
-  const fixture = await fleet(page, request);
-  const gate = routeGate();
-  let lag: ReturnType<typeof fixture.holdNextRead> | undefined;
-  let resumes = 0;
-  let retiring = false;
-  const stop = await drainedRoute(page, `**/api/hosts/${fixture.remote.id}/resume`, async (route) => {
-    resumes++;
-    await fixture.publishState({ phase: "tensorlake-changing", direction: "resuming", requested_at: Date.now() });
-    await gate.wait();
-    if (!retiring) {
-      lag = fixture.holdNextRead();
-      await fixture.publishState({ phase: "connecting", attempt: 0, stage: null, last_error: null });
-      await lag.entered;
+/** A fresh checkout spends one press only after the form observes Resume's
+ * connection and its own preview. Held host/preview replies prove both fences;
+ * named templates also exercise the existing occupied-name suffix search.
+ * Creates stop at a controlled refusal: this specifies launcher dispatch, while
+ * github-checkouts.spec.ts exercises actual cloning and lost directory races. */
+for (const mode of ["form", "recent-enter", "typed-taken", "quick", "number", "lost-race"] as const) {
+  test(`a suspended fresh checkout uses one press: ${mode}`, async ({ page, request }) => {
+    const fixture = await fleet(page, request);
+    const gate = routeGate();
+    const previewGate = routeGate();
+    const historyGate = routeGate();
+    let delayedHistoryReads = 0;
+    const previous = await readPreferences(request);
+    const templateName = `suspended-checkout-${mode}-${Date.now()}`;
+    const stops: Array<() => Promise<void>> = [];
+    let lag: ReturnType<typeof fixture.holdNextRead> | undefined;
+    let resumes = 0;
+    let retiring = false;
+    let bodyFailed = true;
+    const stop = await drainedRoute(page, `**/api/hosts/${fixture.remote.id}/resume`, async (route) => {
+      resumes++;
+      await fixture.publishState({ phase: "tensorlake-changing", direction: "resuming", requested_at: Date.now() });
+      await gate.wait();
+      if (!retiring) {
+        lag = fixture.holdNextRead();
+        await fixture.publishState({ phase: "connecting", attempt: 0, stage: null, last_error: null });
+        await lag.entered;
+      }
+      await fixture.publishState();
+      await route.fulfill({ status: 200, headers: { "x-farhelm-build": fixture.buildStamp }, json: {} });
+    });
+    try {
+      const history = await request.get(`/api/launch-history?host=${fixture.remote.id}`);
+      expect(history.ok()).toBe(true);
+      const templated = mode === "quick" || mode === "number";
+      // A fresh stack starts at revision0, which hides late-discovery bugs.
+      // Force a newer authoritative revision, unknown at the shortcut press.
+      const configRevision = (await history.json()).checkout_config_revision + (templated ? 1 : 0);
+      const creates: any[] = [];
+      const previewConnections: number[] = [];
+      const freshTitles: string[] = [];
+      if (mode === "recent-enter" || templated) {
+        stops.push(await drainedRoute(page, "**/api/launch-history**", async (route) => {
+          const response = await route.fetch();
+          const json = await response.json();
+          if (new URL(route.request().url()).searchParams.get("host") === String(fixture.remote.id)) {
+            if (templated) {
+              delayedHistoryReads++;
+              await historyGate.wait();
+              json.checkout_config_revision = configRevision;
+            } else json.launches = [{ host: fixture.remote.id, cwd: "/tmp/previous-checkout", canonical_cwd: "/tmp/previous-checkout",
+              github_repo: { source: "github.com", owner: "acme", name: "bar" },
+              selection: { harness: "codex", model: null, effort: null, permissions: "guarded", workspace_trust: null },
+              created_at: 1, creation_seq: 1 }];
+          }
+          await route.fulfill({ response, json });
+        }));
+      }
+      if (templated) {
+        const saved = await request.put(`/api/templates/${encodeURIComponent(templateName)}`, { data: {
+          kind: "agent", agent: "codex", permissions: "guarded", host: fixture.remote.identity,
+          destination: { github: "acme/bar" }, name: "review", name_kind: "base",
+        } });
+        expect(saved.ok(), await saved.text()).toBe(true);
+      }
+      await patchPreferences(request, {
+        quick_launch_template: mode === "quick" ? templateName : null,
+        template_shortcuts: mode === "number" ? { "1": templateName } : {},
+      });
+      stops.push(await drainedRoute(page, "**/api/github-repositories", async (route) => {
+        const input = route.request().postDataJSON();
+        await route.fulfill({
+          status: 200,
+          headers: { "x-farhelm-build": (await request.get("/api/hosts")).headers()["x-farhelm-build"] },
+          json: {
+            host: String(input.host),
+            incarnation: input.expected_incarnation,
+            installation_identity: fixture.remote.identity,
+            repos: [],
+            truncated: true,
+            scan_error: "fixture scan unavailable",
+          },
+        });
+      }));
+      stops.push(await drainedRoute(page, "**/api/github-checkout-preview", async (route) => {
+        const response = await request.get("/api/hosts");
+        const input = route.request().postDataJSON();
+        previewConnections.push(input.expected_incarnation);
+        if (input.expected_incarnation === fixture.remote.incarnation) {
+          freshTitles.push(input.title);
+          await previewGate.wait();
+          if (mode === "typed-taken" || (templated && input.title === "review")) {
+            await route.fulfill({ status: 409, headers: { "x-farhelm-build": fixture.buildStamp },
+              json: { error: "a directory with that checkout name already exists" } });
+            return;
+          }
+        }
+        const basename = creates.length ? "bar-2" : (input.title ? `bar-${input.title}` : "bar-1");
+        await route.fulfill({
+          status: 200,
+          headers: { "x-farhelm-build": response.headers()["x-farhelm-build"] },
+          json: {
+            canonical_root: "/tmp",
+            basename,
+            cwd: `/tmp/${basename}`,
+            config_revision: configRevision,
+            host: String(input.host),
+            incarnation: input.expected_incarnation,
+            installation_identity: fixture.remote.identity,
+          },
+        });
+      }));
+      stops.push(await drainedRoute(page, "**/api/sessions", async (route) => {
+        if (route.request().method() === "POST") {
+          const body = route.request().postDataJSON();
+          expect(body.expected_incarnation).toBe(fixture.remote.incarnation);
+          expect(body.github_checkout.preview.incarnation).toBe(fixture.remote.incarnation);
+          creates.push(body);
+          await route.fulfill({ status: 409, headers: { "x-farhelm-build": fixture.buildStamp,
+            "x-farhelm-create-outcome": "definitely-unaccepted" },
+            json: { error: mode === "lost-race" ? "checkout path taken; nothing was accepted" : "fresh create boundary" } });
+        } else await route.continue();
+      }));
+      await page.goto("/");
+      if (templated) {
+        await expect(page.locator(".quick-launch-trigger")).toBeEnabled();
+        if (mode === "quick") {
+          const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
+          await page.keyboard.press(mac ? "Meta+p" : "Control+Shift+p");
+        } else {
+          await expect(page.locator('.template-number-trigger[data-number-key="1"]')).toBeEnabled();
+          await page.keyboard.press("Control+Shift+Digit1");
+        }
+      } else {
+        await page.locator(".new-session-button").click();
+        const form = page.locator(".create-session-form");
+        await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+        await chooseLauncherHost(form.getByRole("combobox", { name: "Host", exact: true }), String(fixture.remote.id));
+        if (mode === "recent-enter") {
+          // Enter applies and submits in one handler. There has deliberately
+          // been no GitHub draft/preview in the preceding render.
+          await expect(form.locator(".launch-composer-checkout-preview")).toHaveCount(0);
+          const recent = form.locator(".launch-composer-recents button").filter({ hasText: "acme/bar" });
+          await expect(recent).toHaveCount(1);
+          await recent.focus();
+          await expect(recent).toBeFocused();
+          await recent.press("Enter");
+        } else {
+          const search = form.locator('.launch-composer-search input[role="combobox"]');
+          await search.fill("gh:acme/bar");
+          await expect(form.getByRole("option", { name: "Managed checkout: acme/bar", exact: true })).toBeVisible();
+          await search.press("Enter");
+          if (mode === "typed-taken") await form.getByLabel("Name (optional)").fill("taken");
+          const preview = form.locator(".launch-composer-checkout-preview");
+          await expect(preview).toContainText(mode === "typed-taken" ? "named after the session" : "picked automatically");
+          await expect(preview.locator(".font-mono")).toHaveCount(0);
+          await expect(preview).toHaveAttribute("data-preview-state", "ready");
+          await expect(form.getByRole("textbox", { name: "Folder", exact: true })).toHaveValue("");
+          await expect(form.locator(".create-session-submit")).not.toContainText("/tmp");
+          await form.locator(".create-session-submit").click();
+        }
+      }
+      const form = page.locator(".create-session-form");
+      await expect.poll(() => resumes).toBe(1);
+      if (templated) {
+        await expect.poll(() => delayedHistoryReads, { message: "the shortcut pressed before this host's history completed" }).toBeGreaterThan(0);
+        historyGate.release();
+      }
+      const preparation = form.locator(".host-resume-progress");
+      await expect(preparation).toContainText("Resuming Sandbox test");
+      const progress = templated ? page.locator(".launch-progress-pill .host-resume-progress") : preparation;
+      await expect(progress).toContainText("the session starts when it’s ready");
+      await expect(form).not.toContainText("The selected host is unavailable");
+      expect(creates, "preparation cannot authorize a checkout from the new connection").toHaveLength(0);
+      gate.release();
+      await expect(progress).toHaveCount(0);
+      await expect.poll(() => previewConnections).toContain(fixture.remote.incarnation);
+      expect(creates, "a held current preview cannot be replaced by an old Ready offer").toHaveLength(0);
+      lag!.release();
+      previewGate.release();
+      if (mode === "typed-taken") {
+        await expect(form.getByRole("alert")).toContainText("a directory with that checkout name already exists");
+        expect(creates).toHaveLength(0);
+        expect(freshTitles).toEqual(["taken"]);
+      } else {
+        await expect(form).toBeVisible();
+        await expect(form.getByRole("alert")).toContainText(mode === "lost-race" ? "nothing was accepted" : "fresh create boundary");
+        if (mode === "lost-race") {
+          await expect(form.locator(".launch-composer-checkout-preview")).toContainText("/tmp/bar-2");
+        }
+        expect(creates, "preview refreshes never retry a spent press").toHaveLength(1);
+        if (templated) {
+          expect(freshTitles).toContain("review-2");
+          expect(creates[0].title).toBe("review-2");
+        }
+      }
+      expect(resumes).toBe(1);
+      bodyFailed = false;
+    } finally {
+      retiring = true;
+      gate.release();
+      previewGate.release();
+      lag?.release();
+      historyGate.release();
+      await cleanupOwnedSteps(bodyFailed, [
+        ["resume route", stop],
+        ...stops.map((stop, index): [string, () => Promise<void>] => [`checkout route ${index}`, stop]),
+        ["shortcut choices", () => patchPreferences(request, {
+          quick_launch_template: previous.quick_launch_template ?? null, template_shortcuts: previous.template_shortcuts ?? {},
+        })],
+        ["checkout template", async () => {
+          const removed = await request.delete(`/api/templates/${encodeURIComponent(templateName)}`);
+          expect(removed.ok() || removed.status() === 404).toBe(true);
+        }],
+      ]);
     }
-    await fixture.publishState();
-    await route.fulfill({ status: 200, headers: { "x-farhelm-build": fixture.buildStamp }, json: {} });
   });
-  try {
-    const history = await request.get(`/api/launch-history?host=${fixture.remote.id}`);
-    expect(history.ok()).toBe(true);
-    const configRevision = (await history.json()).checkout_config_revision;
-    let creates = 0;
-    const previewConnections: number[] = [];
-    await page.route("**/api/github-repositories", async (route) => {
-      const input = route.request().postDataJSON();
-      await route.fulfill({
-        status: 200,
-        headers: { "x-farhelm-build": (await request.get("/api/hosts")).headers()["x-farhelm-build"] },
-        json: {
-          host: String(input.host),
-          incarnation: input.expected_incarnation,
-          installation_identity: fixture.remote.identity,
-          repos: [],
-          truncated: true,
-          scan_error: "fixture scan unavailable",
-        },
-      });
-    });
-    await page.route("**/api/github-checkout-preview", async (route) => {
-      const response = await request.get("/api/hosts");
-      const input = route.request().postDataJSON();
-      previewConnections.push(input.expected_incarnation);
-      await route.fulfill({
-        status: 200,
-        headers: { "x-farhelm-build": response.headers()["x-farhelm-build"] },
-        json: {
-          canonical_root: "/tmp",
-          basename: "bar-1",
-          cwd: "/tmp/bar-1",
-          config_revision: configRevision,
-          host: String(input.host),
-          incarnation: input.expected_incarnation,
-          installation_identity: fixture.remote.identity,
-        },
-      });
-    });
-    await page.route("**/api/sessions", async (route) => {
-      if (route.request().method() === "POST") {
-        creates++;
-        await route.abort();
-      } else await route.continue();
-    });
-    await page.goto("/");
-    await page.locator(".new-session-button").click();
-    const form = page.locator(".create-session-form");
-    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-    await chooseLauncherHost(form.getByRole("combobox", { name: "Host", exact: true }), String(fixture.remote.id));
-    const search = form.locator('.launch-composer-search input[role="combobox"]');
-    await search.fill("gh:acme/bar");
-    await expect(form.getByRole("option", { name: "Managed checkout: acme/bar", exact: true })).toBeVisible();
-    await search.press("Enter");
-    await form.locator(".create-session-submit").click();
-    await expect.poll(() => resumes).toBe(1);
-    const preparation = form.locator(".host-resume-progress");
-    await expect(preparation).toContainText("Resuming Sandbox test");
-    await expect(preparation).toContainText("review the checkout and launch again");
-    await expect(form.getByRole("combobox", { name: "Host", exact: true })).toContainText("Resuming");
-    await expect(preparation).not.toContainText("the session starts when it’s ready");
-    await expect(form).not.toContainText("The selected host is unavailable");
-    expect(creates, "preparation cannot authorize a checkout from the new connection").toBe(0);
-    gate.release();
-    await expect(form).toContainText("Review the refreshed checkout preview");
-    await expect(form).not.toContainText("The selected host is unavailable");
-    lag!.release();
-    await expect.poll(() => previewConnections).toContain(fixture.remote.incarnation);
-    await expect(preparation).toHaveCount(0);
-    expect(creates).toBe(0);
-  } finally {
-    retiring = true;
-    gate.release();
-    lag?.release();
-    await stop();
-  }
-});
+}
 
 /** Suspension consent needs the same readable frame as other host questions.
  * Capture the real dialog and details in each palette, prove its actions are
