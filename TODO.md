@@ -372,30 +372,36 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   value as the default. Today the only per-host override is `farhelm helm checkout-config set-root --host <id>`, which
   takes a numeric host ID that nothing shows the user.
 
+- **Credentials for containerized sessions and ordinary hosts.** The Credentials section of Settings (planned in
+  `plans/queue/settings-credentials.md`) serves only Tensorlake hosts, through their recipes. Extend it so containerized
+  sessions and ordinary SSH hosts can use the same named credentials, for example a GitHub token in place of the
+  containerized sessions' token file.
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
   approval.
 
 - **Agent subscription logins in Tensorlake sandboxes.** Support subscription logins and credential upload for agents in
-  sandboxes, alongside the existing API endpoint settings.
+  sandboxes, alongside the existing API endpoint settings. Plan: `plans/queue/settings-credentials.md`.
 
 - **GH_TOKEN in Tensorlake sandboxes.** Inject `GH_TOKEN` into Tensorlake sandboxes like containerized sessions, from a
-  named file on the host.
+  named file on the host. Plan: `plans/queue/settings-credentials.md`.
 
 - **Tunnels outliving a killed desktop helm on macOS.** Each recipe tunnel is an `ssh -N -R` child of the helm. An
   orderly quit stops them, and on Linux the kernel kills them when the helm dies (`PR_SET_PDEATHSIG`), but macOS has no
   parent-death signal: after a force quit, SIGKILL or crash of the desktop app, the tunnel ssh keeps running until its
   connection ends on its own, leaving the recipe's listeners open on the sandbox and possibly keeping the sandbox from
   idle-suspending. Make the tunnels die with the helm on macOS too, for example with a small watcher that notices the
-  helm's exit (kqueue `NOTE_EXIT`) and ends them.
+  helm's exit (kqueue `NOTE_EXIT`) and ends them. Plan: `plans/queue/macos-tunnel-exit.md`.
 
 - **One click for a fresh checkout on a suspended host.** Launching a fresh GitHub checkout on a suspended Tensorlake
   host resumes the host, then stops and asks the user to review the refreshed checkout preview and press Launch again.
   The preview made over the connection from before the suspension must not authorize work on the new connection, which
   is why the second press exists; existing-folder and template launches resume and launch in one press. Find a way to
   make the fresh-checkout case one press without letting a stale preview authorize the create (for example, launch
-  automatically when the refreshed preview matches what the user reviewed, and stop only when it differs).
+  automatically when the refreshed preview matches what the user reviewed, and stop only when it differs). Plan:
+  `plans/queue/one-press-suspended-checkout.md`.
 
 - **Live resize of Tensorlake hosts.** A host is created at its recipe's size, and a recipe's size change affects only
   hosts created afterwards. Tensorlake can resize a running sandbox in place (CAS image format only): it takes one to
