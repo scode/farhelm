@@ -84,20 +84,20 @@ that its required systemd or SSH substrate ran.
   test process with its own recorded nextest report. Keep this explicit release subset while the full e2e target remains
   excluded there. A successful local workspace nextest run already covers these tests on the same pinned substrate; do
   not duplicate them merely because this script is listed. A distro tmux loses the affected-version coverage.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p terminal-host`
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p terminal-host`
   — the terminal host crate (`crates/terminal-host/`, contract in its `SPEC.md`): real-pty tests of the built
   `terminal-host` binary (lifecycle, input, resizes, busy and takeover, shutdown, SIGTERM and SIGKILL, the exit while a
   descendant holds the pty, stuck input on the client's own connection, malformed peers, snapshots and trimming, the
   child's signals, environment and descriptors, the host's own signal mask, descriptors and command line, terminal
-  settings byte-equal to a tmux 3.7c pane's when that tmux is first on `PATH`, else said as `SKIPPED`), in-process tests
-  of its event loop (among them the order of replies and the stream's first record that clients rely on), golden
-  fixtures of every version-1 frame (`tests/golden/v1/`), and property tests of the codec and of the journal against a
-  model. Seconds. Part of the workspace nextest run; the focused macOS CI job runs it too, in a step of its own after
-  the uninstall acceptance. Nextest runs each test in a process of its own, which these fixtures need: under libtest
-  (`cargo test`, and the coverage and mutation runs below) run them with one test thread (`RUST_TEST_THREADS=1` or
-  `-- --test-threads=1`). Plain parallel `cargo test` is not supported for this crate: a child one test forks holds
-  every descriptor of the test process until it execs, and on macOS, which cannot open a pty or socket close-on-exec in
-  one call, it can keep another test's for good; that test then waits for an end of output or a close that never comes
+  settings byte-equal to a new pty's with only erase and IUTF8 changed), in-process tests of its event loop (among them
+  the order of replies and the stream's first record that clients rely on), golden fixtures of every version-1 frame
+  (`tests/golden/v1/`), and property tests of the codec and of the journal against a model. Seconds. Part of the
+  workspace nextest run; the focused macOS CI job runs it too, in a step of its own after the uninstall acceptance.
+  Nextest runs each test in a process of its own, which these fixtures need: under libtest (`cargo test`, and the
+  coverage and mutation runs below) run them with one test thread (`RUST_TEST_THREADS=1` or `-- --test-threads=1`).
+  Plain parallel `cargo test` is not supported for this crate: a child one test forks holds every descriptor of the test
+  process until it execs, and on macOS, which cannot open a pty or socket close-on-exec in one call, it can keep another
+  test's for good; that test then waits for an end of output or a close that never comes
   (`crates/terminal-host/TESTING.md`).
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host spawning, client, discovery and cleanup' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor -p farhelm-teststate -p farhelm --lib --test terminal_host_spawn --test terminal_host_client --test terminal_host_stop --test terminal_host_registry -E 'test(/^hosts::/) | binary(terminal_host_spawn) | binary(terminal_host_client) | binary(terminal_host_stop) | binary(terminal_host_registry)'`
   — the supervisor's side of terminal hosts and the harnesses' cleanup of them. The supervisor's `hosts::` unit tests

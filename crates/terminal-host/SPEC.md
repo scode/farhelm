@@ -122,8 +122,10 @@ signal mask: ignored dispositions survive `exec` and a shell cannot undo them, s
 ignored would leave Ctrl-C and broken pipes dead in everything it runs. It inherits no other descriptor.
 
 The pty starts with the kernel's default terminal settings for a new pty, then `VERASE` set to DEL (0x7f) and `IUTF8`
-set. These match what tmux 3.7c gives a new pane, so a program sees the same terminal either way. Its window size is
-`cols` x `rows` (pixel sizes 0).
+set: DEL is what terminals send for Backspace, so the line discipline's erase works on it, and IUTF8 makes that erase
+remove a whole UTF-8 character rather than one byte of it. Both are also what an old Farhelm terminal's tmux pane has,
+so a program that ran in an old terminal sees the same settings when it runs in a host. Its window size is `cols` x
+`rows` (pixel sizes 0).
 
 ### Child exit and end of output
 
