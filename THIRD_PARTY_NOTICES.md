@@ -16,6 +16,14 @@ website's vendored Inter fonts. Copyright 2016 The Inter Project Authors
 ([`rsms/inter`](https://github.com/rsms/inter)). They are licensed under the SIL Open Font License, Version 1.1; the
 complete notice is in `crates/farhelm-ui/assets/fonts/OFL-Inter.txt` and ships in the app as `/assets/OFL-Inter.txt`.
 
+## xterm.js and its add-ons
+
+The web UI and the desktop app ship unmodified npm bundles of xterm.js (`@xterm/xterm` 6.0.0, which compiles in part of
+Visual Studio Code's `vs/base`) and its fit, clipboard, web-links and unicode-graphemes add-ons, in
+`crates/farhelm-ui/assets/vendor/`. They are MIT-licensed; the clipboard add-on also bundles `js-base64` under the
+BSD-3-Clause license. Each bundle's complete notices are in the matching `*-LICENSES.txt` file beside it
+(`xterm-LICENSES.txt` covers `xterm.js` and `xterm.css`) and ship in the app under `/assets/`.
+
 ## Harness marks
 
 The session sidebar's harness marks in `crates/farhelm-ui/src/icons.rs` vendor geometry from the sources below. Each is

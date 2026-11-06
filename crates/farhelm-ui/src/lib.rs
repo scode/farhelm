@@ -1317,11 +1317,26 @@ declare_assets! {
     // (https://registry.npmjs.org/@xterm/xterm/-/xterm-6.0.0.tgz), identified by
     // SHA-256 match against the published tarball — the bundle embeds no version
     // string of its own. `addon-fit.js` is `lib/addon-fit.js` from
-    // `@xterm/addon-fit`, vendored alongside it. `addon-clipboard.js` (below) was
+    // `@xterm/addon-fit` 0.11.0, the add-on released with xterm 6.0.0, also
+    // matched by SHA-256 against its tarball. `addon-clipboard.js` (below) was
     // vendored later, against this same xterm version.
     const VENDOR_XTERM_CSS: Asset = asset!("/assets/vendor/xterm.css");
     const VENDOR_XTERM_JS: Asset = asset!("/assets/vendor/xterm.js");
     const VENDOR_FIT_JS: Asset = asset!("/assets/vendor/addon-fit.js");
+    // The MIT notices for the three files above, shipped as files for the
+    // reason WEB_LINKS_LICENSES gives below. The xterm.js notice also carries
+    // Visual Studio Code's, because the bundle compiles in part of VS Code's
+    // `vs/base` and the npm package ships no notice for it.
+    #[used]
+    static XTERM_LICENSES: Asset = asset!(
+        "/assets/vendor/xterm-LICENSES.txt",
+        AssetOptions::builder().with_hash_suffix(false)
+    );
+    #[used]
+    static FIT_LICENSES: Asset = asset!(
+        "/assets/vendor/addon-fit-LICENSES.txt",
+        AssetOptions::builder().with_hash_suffix(false)
+    );
     // Unmodified lib/addon-unicode-graphemes.js from the 0.4.0 npm package,
     // the add-on paired with xterm 6.0.0 in its upstream release. Its Unicode
     // 15 grapheme provider makes emoji widths agree with agent cursor updates
