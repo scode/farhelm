@@ -43,7 +43,7 @@ use super::uploads::{
     run_upload,
 };
 use crate::store::{DedupScope, IntentClaim, LastOutcome, Transition};
-use crate::tmux::PaneProbe;
+use crate::terminal_process::TerminalProbe;
 
 use farhelm_proto::{
     AgentVerb, ControlMsg, DetachCode, ErrorKind, Frame, MAX_SESSION_ID_BYTES,
@@ -812,8 +812,8 @@ async fn handle_stop_session(
         // all. See `service::sweep`'s `kill_process_tree` docs.
         let pane_state = match entry.terminal.as_ref() {
             Some(terminal) => match terminal.probe_process(&sup).await {
-                Ok(PaneProbe::Owned(pane)) => Some(pane),
-                Ok(PaneProbe::Gone) => None,
+                Ok(TerminalProbe::Owned(pane)) => Some(pane),
+                Ok(TerminalProbe::Gone) => None,
                 // A RECOGNIZED owner folds into the dead-or-absent path,
                 // which is what makes the record below honest rather than
                 // merely convenient: another farhelm session holding this
@@ -832,7 +832,7 @@ async fn handle_stop_session(
                 // may be this session's own live agent under a renamed
                 // tmux session, and recording a plain exit for a process
                 // that never exited is a lie the user would act on.
-                Ok(PaneProbe::ForeignOwner { owner }) => {
+                Ok(TerminalProbe::ForeignOwner { owner }) => {
                     if !sup.known_session_tmux_name(&owner).await {
                         reply_error(
                             &tx,
@@ -1268,7 +1268,7 @@ async fn handle_delete_session(
                 .await
                 .map_err(|error| {
                 let message = match error {
-                    TeardownError::PaneProbe(error) => {
+                    TeardownError::TerminalProbe(error) => {
                         format!("querying pane process: {error:#}")
                     }
                     TeardownError::TabRediscovery(error) => format!(

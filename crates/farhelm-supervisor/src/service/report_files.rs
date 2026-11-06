@@ -51,7 +51,7 @@
 //! (`procs::anchor_chain`): by pid and start token while that process is
 //! alive, by pid alone once it has exited and tmux still lists the pane (on
 //! tmux 3.8, which no longer reports a dead pane's pid, such a report is
-//! refused instead; see `Supervisor::owned_pane_anchor`). Every
+//! refused instead; see `Supervisor::owned_terminal_anchor`). Every
 //! launch runs a new pane process, so a report made under an earlier launch,
 //! or one whose pane is gone entirely (a reboot killed tmux), is discarded.
 //! The per-kind attribution (Claude's position, Codex's, Grok's and OMP's
@@ -319,7 +319,7 @@ impl Supervisor {
                 )
             })?;
         let ended = report.ancestry_ended.as_deref().map(sanitized_ended);
-        let pane = self.owned_pane_anchor(row).await?;
+        let pane = self.owned_terminal_anchor(row).await?;
         let anchored = crate::procs::anchor_chain(&chain, ended.as_deref(), pane)
             .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?;
         self.report_conversation(

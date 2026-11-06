@@ -30,6 +30,7 @@ pub use sink::SessionSink;
 pub(crate) use stream::ReplayStreamCandidate;
 pub use stream::{OutputEvent, OutputReaper, OutputStream};
 
+use crate::terminal_process::{TabScope, TerminalProbe, TerminalProcess};
 use anyhow::{Context, bail};
 #[cfg(test)]
 use control_codec::tmux_ordinal;
@@ -435,32 +436,17 @@ pub const AGENT_WINDOW_OPTION: &str = "@farhelm-agent";
 /// Written before the tab marker so that every window rediscovery can see
 /// as a tab also carries this answer. Windows from builds that predate it
 /// carry neither value, and close falls back to the session inference for
-/// them (see [`TabScopeMarker::Unmarked`]). Like every window option it is
+/// them (see [`TabScope::Unknown`]). Like every window option it is
 /// writable by same-account processes inside the tab; a tab that forges
 /// `no` only weakens the cleanup of its own processes, which the private
 /// tmux server's same-account trust model already allows.
 pub const TAB_SCOPED_WINDOW_OPTION: &str = "@farhelm-tab-scoped";
 
-/// What a tab window's [`TAB_SCOPED_WINDOW_OPTION`] says about its shell's
-/// launch, as read back by [`TmuxDriver::tab_scope_marker`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TabScopeMarker {
-    /// The tab's shell was launched in its own cgroup scope.
-    Scoped,
-    /// The tab's shell was launched without a scope.
-    Unscoped,
-    /// No usable answer: the window predates the marker, holds a value
-    /// this supervisor never writes, or is no longer the pane and tab the
-    /// caller asked about. The caller has to decide from other evidence.
-    Unmarked,
-}
-
-impl TabScopeMarker {
-    /// The value written to [`TAB_SCOPED_WINDOW_OPTION`] for a launch that
-    /// was, or was not, scoped.
-    pub fn option_value(scoped: bool) -> &'static str {
-        if scoped { "yes" } else { "no" }
-    }
+/// The value written to [`TAB_SCOPED_WINDOW_OPTION`] for a tab shell's
+/// launch that was, or was not, scoped; [`TmuxDriver::tab_scope_marker`]
+/// reads it back.
+pub fn tab_scoped_option_value(scoped: bool) -> &'static str {
+    if scoped { "yes" } else { "no" }
 }
 
 /// One deadline covers attaching the control client, taking the replay
@@ -1685,118 +1671,6 @@ impl PaneModes {
     }
 }
 
-/// A pane's process state as stop/delete need it: the OS pid
-/// `kill_process_tree` (service.rs) reaps from, and whether tmux has
-/// already marked the pane dead.
-///
-/// Anything that signals, walks or anchors a kill reads the pid through
-/// [`Self::live_pid`], never the raw field: the raw field may be a stale
-/// number left over from a process that is long gone.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PaneProcess {
-    /// The pane's ORIGINAL child, the one `new-session`/`split-window`
-    /// forked (a shell, or the exec'd argv when tmux runs it directly) —
-    /// not whatever the agent turns into after its own exec chain. Every
-    /// process the agent starts keeps that pid as an ancestor, which is
-    /// exactly the property a tree-kill needs.
-    ///
-    /// `None` only for a dead pane whose tmux reported no pid. tmux 3.8
-    /// stopped expanding `#{pane_pid}` once it has closed the pane's
-    /// terminal, which every dead pane has; tmux 3.7c, the pinned build,
-    /// always expands it. Assuming it was always there is what made every
-    /// restart of an exited agent fail on tmux 3.8 with "cannot parse
-    /// integer from empty string". A pane that is NOT dead always has a
-    /// pid here: [`parse_pane_process_line`] refuses the other 3.8 shape
-    /// (terminal closed, exit status not yet collected) rather than
-    /// letting a live pane through with nothing to kill.
-    ///
-    /// When `dead` is `true` and this is `Some`, it is the LAST pid tmux
-    /// remembers for the pane: stale, and it must never be walked or
-    /// signaled, since `remain-on-exit`'s whole point is keeping the pane
-    /// around after that process (and everything under it) is long gone,
-    /// and the number may already be recycled to something unrelated by
-    /// the time anyone reads it.
-    pub pid: Option<u32>,
-    /// tmux's own `#{pane_dead}` flag: set once the process backing this
-    /// pane has exited. A dead pane means nothing is running in it — stop
-    /// and delete both treat this as "no process tree to touch" rather
-    /// than attempting to signal the stale `pid` above.
-    pub dead: bool,
-}
-
-impl PaneProcess {
-    /// The pid a kill or sweep may root at: the pane's process while tmux
-    /// has not flagged the pane dead, and `None` for a dead pane, whose
-    /// pid (when tmux still reports one) is stale.
-    ///
-    /// Whether the agent is running is still decided by `dead`, so stop,
-    /// restart and delete pick the same path on every tmux version; this
-    /// only keeps a dead pane's leftover number away from code that
-    /// signals or walks processes.
-    pub fn live_pid(&self) -> Option<u32> {
-        if self.dead { None } else { self.pid }
-    }
-}
-
-/// Outcome of [`TmuxDriver::pane_process`]: a recorded pane id is either
-/// still this session's terminal, gone, or demonstrably somebody else's.
-///
-/// The third case exists because tmux pane ids (`%N`) come from a
-/// server-wide counter that is monotonic only WITHIN one server's
-/// lifetime: it restarts at `%0` with the server. Several unrelated
-/// things therefore produce a foreign owner, and the list is not closed:
-/// the recorded id may predate the current server generation and have
-/// been handed to a session that started later (the 2026-08-16 incident:
-/// the private tmux server segfaulted out from under a running
-/// supervisor, whose in-memory `Terminal` rows kept pointing at the dead
-/// server's `%0`); the pane's own session may have been renamed
-/// out-of-band, so the pane is still ours but no longer answers to the
-/// recorded name; or panes may have been rearranged across sessions
-/// (`move-pane`/`break-pane`). Nothing in farhelm does the latter two on
-/// its private server, but the socket is reachable by whoever owns the
-/// account.
-///
-/// Those causes do NOT share a safety profile, which is why this type
-/// deliberately stops at "the recorded name is not what tmux reports" and
-/// leaves the verdict to callers. A recycled id means the old terminal
-/// provably died with its server; a rename or a move may mean the
-/// recorded pane is still a LIVE agent of ours under another name, and
-/// tearing it down would kill an agent without consent. The discriminator
-/// — is `owner` the tmux name of another session this supervisor knows? —
-/// and the reasoning behind it live at
-/// `Supervisor::known_session_tmux_name`, which every lifecycle call site
-/// consults.
-///
-/// Modelled as an outcome rather than an error because a foreign owner is
-/// not a failure to ask tmux anything. It is a decisive answer about the
-/// NAME, and each
-/// caller decides what that means for its own operation: the lifecycle
-/// verbs proceed on other kill mechanisms for a recycled id and refuse
-/// otherwise, while a pane this process created moments ago being foreign
-/// is an invariant violation under any cause. What NO caller may do is
-/// read the foreign pane's pid: it anchors kills and descendant sweeps,
-/// and pointing those at a stranger is precisely the cross-wiring the
-/// session scoping exists to prevent.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PaneProbe {
-    /// The pane exists and `#{session_name}` matches the session it was
-    /// recorded under: the recorded terminal is real and its
-    /// [`PaneProcess::live_pid`], when there is one, may anchor a kill.
-    Owned(PaneProcess),
-    /// The pane id resolves to nothing — an unassigned id, a session
-    /// killed out from under us, or no server at all. Callers read this
-    /// as "nothing is running", the same as a positively dead pane.
-    Gone,
-    /// The pane exists but `#{session_name}` is `owner`, not the name it
-    /// was recorded under. `owner` is the COMPLETE name including any
-    /// spaces, because callers compare it against their own session names
-    /// to tell a recycled id from a rename (see the type's docs); a
-    /// truncated name would silently fail that comparison. The pid is
-    /// deliberately not carried, because no caller has any business using
-    /// it.
-    ForeignOwner { owner: String },
-}
-
 /// Classify the `#{pane_pid} #{pane_dead} #{session_name}` line that
 /// [`TmuxDriver::pane_process_within`] asks tmux for, as recorded under
 /// `session`.
@@ -1804,7 +1678,7 @@ pub enum PaneProbe {
 /// Split out of the query so the shapes different tmux versions print
 /// can be tested without running those versions: the pinned 3.7c always
 /// prints a pid, while 3.8 prints an empty one once the pane's terminal
-/// has closed (see [`PaneProcess::pid`]).
+/// has closed (see [`TerminalProcess::pid`]).
 ///
 /// An empty pid is accepted only on a dead pane. tmux 3.8 can also print
 /// an empty pid for a pane it does not yet call dead: the terminal has
@@ -1818,7 +1692,7 @@ pub enum PaneProbe {
 /// strict parse gave before tmux 3.8. Anything else that is not a number
 /// is an error too, because a pid this parser guessed at would anchor
 /// kills.
-fn parse_pane_process_line(session: &str, out: &str) -> anyhow::Result<PaneProbe> {
+fn parse_pane_process_line(session: &str, out: &str) -> anyhow::Result<TerminalProbe> {
     // Only the line terminator is stripped, never surrounding spaces:
     // a session name's own leading or trailing whitespace is part of
     // the name, and the trailing field must survive verbatim so
@@ -1841,7 +1715,7 @@ fn parse_pane_process_line(session: &str, out: &str) -> anyhow::Result<PaneProbe
     // `session_name`, so nothing real expands to whitespace alone, even
     // on a tmux that leaves `pane_pid` empty.
     if line.trim().is_empty() {
-        return Ok(PaneProbe::Gone);
+        return Ok(TerminalProbe::Gone);
     }
     // Exactly two splits: the third piece is the session name, spaces
     // and all.
@@ -1860,7 +1734,7 @@ fn parse_pane_process_line(session: &str, out: &str) -> anyhow::Result<PaneProbe
         // stranger's pid never becomes a value any caller could reach
         // for — and a foreign pane with output this parser would
         // reject still classifies rather than erroring.
-        return Ok(PaneProbe::ForeignOwner {
+        return Ok(TerminalProbe::ForeignOwner {
             owner: found_session.to_string(),
         });
     }
@@ -1880,7 +1754,7 @@ fn parse_pane_process_line(session: &str, out: &str) -> anyhow::Result<PaneProbe
                 .with_context(|| format!("parsing pane_pid from {line:?}"))?,
         )
     };
-    Ok(PaneProbe::Owned(PaneProcess { pid, dead }))
+    Ok(TerminalProbe::Owned(TerminalProcess { pid, dead }))
 }
 
 /// Only tmux's exact boolean expansion authorizes a paste. Older versions
@@ -1927,7 +1801,7 @@ mod prompt_mode_tests {
 /// tmux 3.8's source.
 #[cfg(test)]
 mod pane_process_line_tests {
-    use super::{PaneProbe, PaneProcess, parse_pane_process_line};
+    use super::{TerminalProbe, TerminalProcess, parse_pane_process_line};
 
     const SESSION: &str = "fh-7c60a315-bae7-488e-9931-b661478e3a04";
 
@@ -1940,7 +1814,7 @@ mod pane_process_line_tests {
             .expect("tmux 3.8's dead-pane line parses");
         assert_eq!(
             probe,
-            PaneProbe::Owned(PaneProcess {
+            TerminalProbe::Owned(TerminalProcess {
                 pid: None,
                 dead: true
             })
@@ -1964,7 +1838,7 @@ mod pane_process_line_tests {
     /// a kill root: the number may already belong to another process.
     #[farhelm_testtrace::test]
     fn tmux_3_7c_dead_pane_pid_is_parsed_but_not_live() {
-        let PaneProbe::Owned(process) =
+        let TerminalProbe::Owned(process) =
             parse_pane_process_line(SESSION, &format!("4242 1 {SESSION}\n")).expect("parses")
         else {
             panic!("an own pane must classify as owned");
@@ -1977,7 +1851,7 @@ mod pane_process_line_tests {
     /// The ordinary live pane, on any version: the pid is the kill root.
     #[farhelm_testtrace::test]
     fn live_pane_offers_its_pid() {
-        let PaneProbe::Owned(process) =
+        let TerminalProbe::Owned(process) =
             parse_pane_process_line(SESSION, &format!("4242 0 {SESSION}\n")).expect("parses")
         else {
             panic!("an own pane must classify as owned");
@@ -2006,11 +1880,11 @@ mod pane_process_line_tests {
     fn gone_and_foreign_shapes_are_unchanged() {
         assert_eq!(
             parse_pane_process_line(SESSION, "  \n").expect("parses"),
-            PaneProbe::Gone
+            TerminalProbe::Gone
         );
         assert_eq!(
             parse_pane_process_line(SESSION, " 1 someone else\n").expect("parses"),
-            PaneProbe::ForeignOwner {
+            TerminalProbe::ForeignOwner {
                 owner: "someone else".to_string()
             }
         );
@@ -2035,7 +1909,7 @@ const CAPTURE_READ_CHUNK: usize = 64 * 1024;
 const TAIL_RETAIN_ALLOWANCE: usize = 64 * 1024;
 
 /// One pane's liveness as [`TmuxDriver::pane_states`] reports it —
-/// `ListSessions`'s cheaper cousin of [`PaneProcess`]: no pid (status
+/// `ListSessions`'s cheaper cousin of [`TerminalProcess`]: no pid (status
 /// never needs one, only whether the pane is alive and, if not, its exit
 /// code), and gathered for every pane on the server in one query rather
 /// than one round trip per session.
@@ -2061,9 +1935,9 @@ pub struct PaneState {
     /// entry's to judge by: under another farhelm session's name it is
     /// read as recycled (ours is gone), and under a name no session
     /// answers to it is left unattributed rather than read as an exit
-    /// (`service::status::PaneEvidence` has the rule).
+    /// (`service::status::TerminalEvidence` has the rule).
     pub session_name: String,
-    /// tmux's own `#{pane_dead}` flag, exactly as [`PaneProcess::dead`].
+    /// tmux's own `#{pane_dead}` flag, exactly as [`TerminalProcess::dead`].
     pub dead: bool,
     /// The id (`@N`) of the window this pane lives in.
     ///
@@ -4006,8 +3880,8 @@ impl TmuxDriver {
     /// target whose pane has vanished falls back to the session's CURRENT
     /// pane (see [`pane_in_session`]). So the pane id and the window's tab
     /// marker are read in the same query as the answer, and any mismatch
-    /// is [`TabScopeMarker::Unmarked`] rather than a sibling tab's
-    /// verdict. A target tmux reports as already gone is `Unmarked` too;
+    /// is [`TabScope::Unknown`] rather than a sibling tab's verdict. A
+    /// target tmux reports as already gone is `Unknown` too;
     /// any other failure propagates, because guessing here would decide
     /// whether a scope is checked at all.
     pub async fn tab_scope_marker(
@@ -4015,7 +3889,7 @@ impl TmuxDriver {
         session: &str,
         pane: &str,
         tab_id: &str,
-    ) -> anyhow::Result<TabScopeMarker> {
+    ) -> anyhow::Result<TabScope> {
         let format =
             format!("#{{pane_id}}\t#{{{TAB_WINDOW_OPTION}}}\t#{{{TAB_SCOPED_WINDOW_OPTION}}}");
         let out = match self
@@ -4029,22 +3903,22 @@ impl TmuxDriver {
             .await
         {
             Ok(out) => out,
-            Err(e) if self.refusal(&e).is_some() => return Ok(TabScopeMarker::Unmarked),
+            Err(e) if self.refusal(&e).is_some() => return Ok(TabScope::Unknown),
             Err(e) => return Err(e).context("reading a terminal tab's scope marker"),
         };
         let mut fields = out.trim_end_matches('\n').split('\t');
         let (Some(read_pane), Some(read_tab), Some(value)) =
             (fields.next(), fields.next(), fields.next())
         else {
-            return Ok(TabScopeMarker::Unmarked);
+            return Ok(TabScope::Unknown);
         };
         if read_pane != pane || read_tab != tab_id {
-            return Ok(TabScopeMarker::Unmarked);
+            return Ok(TabScope::Unknown);
         }
         Ok(match value {
-            "yes" => TabScopeMarker::Scoped,
-            "no" => TabScopeMarker::Unscoped,
-            _ => TabScopeMarker::Unmarked,
+            "yes" => TabScope::Scoped,
+            "no" => TabScope::Unscoped,
+            _ => TabScope::Unknown,
         })
     }
 
@@ -4255,7 +4129,7 @@ impl TmuxDriver {
     /// was restarted. The invariant holds only at load; the mismatch is
     /// reachable in normal operation.
     ///
-    /// So the three outcomes of [`PaneProbe`] are the contract, and each
+    /// So the three outcomes of [`TerminalProbe`] are the contract, and each
     /// caller owns the decision its own operation needs. The
     /// `#{session_name}` check that produces `ForeignOwner` stays exactly
     /// as strict as before — it is the same belt this crate applies
@@ -4270,8 +4144,8 @@ impl TmuxDriver {
     /// or output that would not parse. Those tolerated diagnostics —
     /// the same ones `has_session`/`kill_session` recognize, covering a
     /// concurrent external `kill-session` and the whole private server
-    /// having gone away — are [`PaneProbe::Gone`] instead.
-    pub async fn pane_process(&self, session: &str, pane: &str) -> anyhow::Result<PaneProbe> {
+    /// having gone away — are [`TerminalProbe::Gone`] instead.
+    pub async fn pane_process(&self, session: &str, pane: &str) -> anyhow::Result<TerminalProbe> {
         self.pane_process_within(session, pane, None).await
     }
 
@@ -4284,7 +4158,7 @@ impl TmuxDriver {
         session: &str,
         pane: &str,
         deadline: Option<std::time::Duration>,
-    ) -> anyhow::Result<PaneProbe> {
+    ) -> anyhow::Result<TerminalProbe> {
         let out = match self
             .run_bytes_within(
                 &[
@@ -4320,7 +4194,7 @@ impl TmuxDriver {
                     .refusal(&e)
                     .is_some_and(TmuxRefusal::means_session_gone) =>
             {
-                return Ok(PaneProbe::Gone);
+                return Ok(TerminalProbe::Gone);
             }
             Err(e) => return Err(e).context("querying pane process state"),
         };
@@ -5229,7 +5103,7 @@ enum TmuxRefusal {
 
 impl TmuxRefusal {
     /// The session a target named no longer exists: tolerated by
-    /// [`TmuxDriver::kill_session`] and answered as [`PaneProbe::Gone`] by
+    /// [`TmuxDriver::kill_session`] and answered as [`TerminalProbe::Gone`] by
     /// `pane_process`. A vanished server counts, since there is nothing left
     /// to kill or ask either way.
     fn means_session_gone(self) -> bool {
@@ -7333,7 +7207,10 @@ mod tests {
                 .pane_process(session, pane)
                 .await
                 .expect("query fixture pane");
-            if matches!(state, PaneProbe::Owned(PaneProcess { dead: true, .. })) {
+            if matches!(
+                state,
+                TerminalProbe::Owned(TerminalProcess { dead: true, .. })
+            ) {
                 return;
             }
             assert!(
@@ -7508,7 +7385,7 @@ mod tests {
                 .pane_process(session, &pane)
                 .await
                 .expect("fixture liveness"),
-            PaneProbe::Owned(PaneProcess { dead: false, .. })
+            TerminalProbe::Owned(TerminalProcess { dead: false, .. })
         ));
         server
             .driver
@@ -7582,7 +7459,7 @@ mod tests {
                 .pane_process(session, &pane)
                 .await
                 .expect("fixture liveness"),
-            PaneProbe::Owned(PaneProcess { dead: false, .. })
+            TerminalProbe::Owned(TerminalProcess { dead: false, .. })
         ));
         let fence = server
             .driver
@@ -7600,7 +7477,7 @@ mod tests {
                 .pane_process(session, &pane)
                 .await
                 .expect("still alive before release"),
-            PaneProbe::Owned(PaneProcess { dead: false, .. })
+            TerminalProbe::Owned(TerminalProcess { dead: false, .. })
         ));
         server
             .driver
@@ -8004,7 +7881,7 @@ mod tests {
                 .pane_process("window-owner", &sibling)
                 .await
                 .unwrap(),
-            PaneProbe::Owned(PaneProcess { dead: false, .. })
+            TerminalProbe::Owned(TerminalProcess { dead: false, .. })
         ));
         assert!(
             server
@@ -8020,7 +7897,7 @@ mod tests {
                 .pane_process("window-owner", &pane)
                 .await
                 .unwrap(),
-            PaneProbe::Gone
+            TerminalProbe::Gone
         );
         let before = server
             .driver
@@ -8062,7 +7939,7 @@ mod tests {
                     .pane_process("window-owner", &sibling)
                     .await
                     .unwrap(),
-                PaneProbe::Owned(PaneProcess { dead: false, .. })
+                TerminalProbe::Owned(TerminalProcess { dead: false, .. })
             ),
             "a vanished target must not kill its session's current window"
         );
@@ -8077,7 +7954,7 @@ mod tests {
                 .pane_process("window-owner", &sibling)
                 .await
                 .unwrap(),
-            PaneProbe::Gone
+            TerminalProbe::Gone
         );
         server
             .driver
@@ -8156,7 +8033,7 @@ mod tests {
                 .pane_process("owner-excerpt", &sibling)
                 .await
                 .expect("sibling liveness"),
-            PaneProbe::Owned(PaneProcess { dead: false, .. })
+            TerminalProbe::Owned(TerminalProcess { dead: false, .. })
         ));
         assert_eq!(
             server

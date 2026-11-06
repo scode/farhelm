@@ -22,7 +22,8 @@ use super::core::{
 };
 use super::sweep::capture_process_identity;
 use crate::store::{LastOutcome, TerminalKind};
-use crate::tmux::{InputClient, PaneProbe, PaneProcess, ReplayStreamCandidate, SessionSink};
+use crate::terminal_process::{TerminalProbe, TerminalProcess};
+use crate::tmux::{InputClient, ReplayStreamCandidate, SessionSink};
 use anyhow::Context;
 use farhelm_proto::{ErrorKind, Frame, RestartOffer, TerminalSelector};
 use std::collections::{HashMap, HashSet};
@@ -135,7 +136,7 @@ pub(crate) enum Terminal {
     /// ([`tmux_tab_home`]). A host that cannot be read
     /// ([`crate::hosts::Liveness::Unavailable`]) answers every question
     /// here as "could not tell": an error from the probes, no evidence for
-    /// status ([`super::status::PaneEvidence::Unattributed`]), and nothing
+    /// status ([`super::status::TerminalEvidence::Unattributed`]), and nothing
     /// done to it (the plan's D-16), except by an unconditional Delete,
     /// which ends the session for good and the host with it
     /// (`super::session_hosts`).
@@ -146,7 +147,7 @@ impl Terminal {
     /// Whether this terminal's process is running, dead, gone, or (for
     /// tmux) now reported under another tmux session: the liveness question
     /// Stop, Restart, Delete (and its consent guard), prompt delivery and
-    /// a tab's process reap each ask before acting. [`PaneProbe`]'s
+    /// a tab's process reap each ask before acting. [`TerminalProbe`]'s
     /// three-way answer, and why each caller owns its own reading of it,
     /// are [`crate::tmux::TmuxDriver::pane_process`]'s contract.
     ///
@@ -155,7 +156,7 @@ impl Terminal {
     /// owner is its tag, not a name that could be recycled), and an error
     /// for a host that cannot be read, which every caller already treats as
     /// "could not tell" and refuses on.
-    pub(crate) async fn probe_process(&self, sup: &Supervisor) -> anyhow::Result<PaneProbe> {
+    pub(crate) async fn probe_process(&self, sup: &Supervisor) -> anyhow::Result<TerminalProbe> {
         match self {
             Terminal::Tmux(tmux) => sup.tmux.pane_process(&tmux.tmux_name, &tmux.pane).await,
             Terminal::Host(host) => host.probe(),
@@ -177,7 +178,10 @@ impl Terminal {
     /// its root is that pinned identity, checked against the process table
     /// again ([`crate::hosts::HostStatus::live_root`]) rather than read
     /// afresh from a bare pid.
-    pub(crate) fn live_root(&self, process: &PaneProcess) -> anyhow::Result<Option<(u32, u64)>> {
+    pub(crate) fn live_root(
+        &self,
+        process: &TerminalProcess,
+    ) -> anyhow::Result<Option<(u32, u64)>> {
         let Some(pid) = process.live_pid() else {
             return Ok(None);
         };
@@ -239,7 +243,7 @@ impl Terminal {
         }
     }
 
-    /// The refusal for a [`PaneProbe::ForeignOwner`] answer from
+    /// The refusal for a [`TerminalProbe::ForeignOwner`] answer from
     /// [`Self::probe_process`] whose owner this supervisor does not know.
     /// The wording and why it refuses are [`unknown_pane_owner_refusal`]'s.
     ///
@@ -434,7 +438,7 @@ pub(crate) fn tmux_tab_home<'a>(
 /// a session created in a host never asks. A tmux agent, or a session with
 /// no terminal, asks whenever a server may run at all, not only under its
 /// own name: its pane may be reported under another session's name (see
-/// `status::PaneEvidence`), and that is an answer the listing must still
+/// `status::TerminalEvidence`), and that is an answer the listing must still
 /// give.
 pub(crate) fn may_have_tmux_terminals(
     tmux: &crate::tmux::TmuxDriver,

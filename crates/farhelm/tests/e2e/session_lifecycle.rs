@@ -4141,7 +4141,7 @@ async fn delete_succeeds_when_the_recorded_pane_was_recycled_onto_another_sessio
         .expect("probing a recycled pane id is an answer, not a failure");
     assert_eq!(
         probe,
-        farhelm_supervisor::tmux::PaneProbe::ForeignOwner {
+        farhelm_supervisor::terminal_process::TerminalProbe::ForeignOwner {
             owner: format!("fh-{}", w.new.id)
         },
         "the probe must name the session that now owns the pane, so callers can log the \
@@ -4327,7 +4327,7 @@ async fn the_pane_probe_reports_a_spaced_owner_name_whole() {
         .expect("a poisoned owner name is an answer to classify, not a query failure");
     assert_eq!(
         probe,
-        farhelm_supervisor::tmux::PaneProbe::ForeignOwner {
+        farhelm_supervisor::terminal_process::TerminalProbe::ForeignOwner {
             owner: expected_owner
         },
         "the probe must carry the whole owner name: truncating it at the first space would \

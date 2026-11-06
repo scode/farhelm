@@ -109,7 +109,7 @@
 //! Each row ends in one of three classes ([`RowHost`]), and the reload treats
 //! them as it treats a found, an unattributed and an absent pane, except that
 //! an unavailable host records nothing durable at all, not even a launch
-//! sentinel (the plan's D-16, as `status::PaneEvidence::Unattributed` says for
+//! sentinel (the plan's D-16, as `status::TerminalEvidence::Unattributed` says for
 //! hosts):
 //!
 //! - **Adopted**: a runtime now drives the host, recovered from its stored

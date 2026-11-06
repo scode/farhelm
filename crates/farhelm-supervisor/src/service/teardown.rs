@@ -66,7 +66,7 @@ use super::sweep::{
 };
 use super::terminals::{ActiveAttach, AttachmentKey, SinkReapWait, Terminal, tmux_tab_home};
 use super::uploads::abort_session_uploads;
-use crate::tmux::PaneProbe;
+use crate::terminal_process::TerminalProbe;
 
 use std::path::PathBuf;
 use tracing::{debug, error, warn};
@@ -77,7 +77,7 @@ use tracing::{debug, error, warn};
 /// later retry whenever teardown cannot prove the process tree and terminal
 /// are gone.
 pub(crate) enum TeardownError {
-    PaneProbe(anyhow::Error),
+    TerminalProbe(anyhow::Error),
     TabRediscovery(anyhow::Error),
     TabScopeEnumeration(anyhow::Error),
     Sweep(anyhow::Error),
@@ -209,11 +209,11 @@ impl Supervisor {
             if state.session_name != tmux_name || state.dead || Some(pane.as_str()) == agent_pane {
                 continue;
             }
-            if let PaneProbe::Owned(process) = self
+            if let TerminalProbe::Owned(process) = self
                 .tmux
                 .pane_process(&tmux_name, pane)
                 .await
-                .map_err(TeardownError::PaneProbe)?
+                .map_err(TeardownError::TerminalProbe)?
                 && let Some(pid) = process.live_pid()
             {
                 roots.extend(capture_process_identity(pid).map_err(TeardownError::Sweep)?);
@@ -345,12 +345,12 @@ impl Supervisor {
             Some(terminal @ Terminal::Tmux(_)) => match terminal
                 .probe_process(self)
                 .await
-                .map_err(TeardownError::PaneProbe)?
+                .map_err(TeardownError::TerminalProbe)?
             {
-                PaneProbe::Owned(pane) => {
+                TerminalProbe::Owned(pane) => {
                     terminal.live_root(&pane).map_err(TeardownError::Sweep)?
                 }
-                PaneProbe::Gone => None,
+                TerminalProbe::Gone => None,
                 // The headline case of the 2026-08-16 incident: a pane id
                 // recycled onto another session used to make this probe a
                 // hard error, and delete became impossible for the rest of
@@ -373,9 +373,9 @@ impl Supervisor {
                 // success. The row and the map entry survive the refusal,
                 // so a retry — or an operator undoing the rename — can
                 // finish the job.
-                PaneProbe::ForeignOwner { owner } => {
+                TerminalProbe::ForeignOwner { owner } => {
                     if !self.known_session_tmux_name(&owner).await {
-                        return Err(TeardownError::PaneProbe(anyhow::anyhow!(
+                        return Err(TeardownError::TerminalProbe(anyhow::anyhow!(
                             terminal.unknown_owner_refusal(&owner)
                         )));
                     }

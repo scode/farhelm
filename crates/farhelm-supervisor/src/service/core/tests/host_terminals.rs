@@ -234,7 +234,9 @@ async fn an_unreadable_host_records_nothing_and_its_verbs_refuse() {
     std::fs::create_dir_all(sentinel.parent().unwrap()).expect("launch dir");
     std::fs::write(&sentinel, "exec failed: no such file").expect("a current sentinel");
     let terminal = entry.terminal.as_ref().unwrap();
-    let crate::tmux::PaneProbe::Owned(live) = terminal.probe_process(&sup).await.unwrap() else {
+    let crate::terminal_process::TerminalProbe::Owned(live) =
+        terminal.probe_process(&sup).await.unwrap()
+    else {
         panic!("premise: the child is owned and live");
     };
     assert!(!live.dead, "premise: the child runs");
@@ -423,7 +425,10 @@ async fn a_host_agents_hook_anchor_is_its_child() {
     let row = host_row("s1", test_host.socket());
     let child = ProcessIdentity::read(test_host.child_pid()).expect("the host's child");
 
-    let gap = sup.owned_pane_anchor(&row).await.expect_err("no entry yet");
+    let gap = sup
+        .owned_terminal_anchor(&row)
+        .await
+        .expect_err("no entry yet");
     assert_eq!(gap.kind, ErrorKind::Internal, "{}", gap.message);
 
     sup.sessions
@@ -431,8 +436,8 @@ async fn a_host_agents_hook_anchor_is_its_child() {
         .await
         .insert("s1".to_string(), Arc::clone(&entry));
     assert_eq!(
-        sup.owned_pane_anchor(&row).await.expect("the anchor"),
-        crate::procs::PaneAnchor {
+        sup.owned_terminal_anchor(&row).await.expect("the anchor"),
+        crate::procs::TerminalAnchor {
             pid: child.pid,
             start: Some(child.start)
         }
@@ -443,7 +448,7 @@ async fn a_host_agents_hook_anchor_is_its_child() {
         ..row.clone()
     };
     let other = sup
-        .owned_pane_anchor(&later)
+        .owned_terminal_anchor(&later)
         .await
         .expect_err("another generation's entry");
     assert_eq!(other.kind, ErrorKind::Internal, "{}", other.message);
@@ -456,7 +461,7 @@ async fn a_host_agents_hook_anchor_is_its_child() {
         )),
     );
     let mismatch = sup
-        .owned_pane_anchor(&row)
+        .owned_terminal_anchor(&row)
         .await
         .expect_err("a tmux entry for a host row");
     assert_eq!(mismatch.kind, ErrorKind::Conflict, "{}", mismatch.message);
@@ -790,7 +795,7 @@ async fn a_host_terminal_holds_its_final_state_only_once_its_exit_record_arrives
     assert!(
         matches!(
             host.probe(),
-            Ok(crate::tmux::PaneProbe::Owned(process)) if process.dead
+            Ok(crate::terminal_process::TerminalProbe::Owned(process)) if process.dead
         ),
         "premise: the probe says dead"
     );

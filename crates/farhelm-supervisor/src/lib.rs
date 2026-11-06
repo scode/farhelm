@@ -84,6 +84,7 @@ pub mod scope;
 pub mod service;
 pub mod session_hold;
 pub mod store;
+pub mod terminal_process;
 pub mod tmux;
 pub mod version_lock;
 pub mod working_copies;
