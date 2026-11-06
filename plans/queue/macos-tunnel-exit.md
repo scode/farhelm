@@ -346,39 +346,82 @@ entry must also be satisfied. Then close the plan per `plans/.agents/executing.m
 12): deliver its report through the queue script, write a closing entry in its log, and stop the watchdog. Never edit
 `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-11-06 (claim 90feb8).
+### 2026-11-06: answer to a blocked question
 
-### The heartbeat pipe does not fully close a tunnel through the gateway
+The question, as the executor put it:
 
-A force quit or crash on macOS can leave a recipe tunnel's SSH process and sandbox listeners running. The chosen fix was
-a helm-owned stdin pipe, a heartbeat every 30 seconds and a remote 120-second silence limit. You required the whole SSH
-connection to end even with a forwarded connection open, and explicitly required a block if the pipe could not do that;
-no watcher was authorized.
+> Blocked on 2026-11-06 (claim 90feb8).
+>
+> ### The heartbeat pipe does not fully close a tunnel through the gateway
+>
+> A force quit or crash on macOS can leave a recipe tunnel's SSH process and sandbox listeners running. The chosen fix
+> was a helm-owned stdin pipe, a heartbeat every 30 seconds and a remote 120-second silence limit. You required the
+> whole SSH connection to end even with a forwarded connection open, and explicitly required a block if the pipe could
+> not do that; no watcher was authorized.
+>
+> The pipe works against local OpenSSH, but the real Tensorlake gateway failed the held-forward EOF check twice. A fresh
+> roundtrip established the forwarded connection before stdin closed. In the diagnostic repeat, independent inspection
+> before cleanup confirmed that the remote command and its SSH session process were gone and the sandbox listener
+> refused connections. The remote forwarded peer saw EOF/reset. However, after ten seconds the local SSH command's
+> result was still pending and the service-side endpoint had seen neither EOF nor reset. The probe did not separately
+> inspect the local SSH process table. The gateway appears to retain the forwarded channel after the sandbox-side SSH
+> session ends; that explanation is an inference, while the failed teardown is observed.
+>
+> The failed recorder runs are `dca6ab7d-e116-4341-994a-9a66e1cba923` and `119dfa4b-cdb8-4571-a28a-31739e456a55`. Eight
+> focused local tunnel tests passed, including real OpenSSH EOF and silence with a held forward, in
+> `f4ce3d72-fd05-48ff-81fd-cca772a05b81`. The macOS unprivileged server prerequisite passed in
+> [CI run 42153996017](https://github.com/scode/farhelm/actions/runs/42153996017), using portable OpenSSH with the
+> system macOS client. These passes do not resolve the gateway failure. Full gateway silence and lease-kill checks and
+> the final macOS regression dispatch were not run because the required EOF guarantee already failed.
+>
+> [Draft #3072](https://github.com/scode/farhelm/pull/3072/changes) contains only the successful test-server
+> prerequisite. The proposed product change remains unpublished and is not ready: its review also found a
+> failure-diagnostic issue. Both owned sandboxes and their snapshots were removed, and the test SSH key was
+> deregistered. The working log retains the unshipped proposal and evidence.
+>
+> Should the full teardown requirement remain, with a revised design allowed to investigate a local watcher or another
+> gateway-compatible mechanism, or should the requirement be narrowed to ending the sandbox session and listeners while
+> allowing the local SSH process and service-side connection to linger? I recommend keeping the full requirement and
+> revising the design before implementation resumes; the narrower guarantee leaves local connections behind, and the
+> watcher alternative still needs its details settled.
 
-The pipe works against local OpenSSH, but the real Tensorlake gateway failed the held-forward EOF check twice. A fresh
-roundtrip established the forwarded connection before stdin closed. In the diagnostic repeat, independent inspection
-before cleanup confirmed that the remote command and its SSH session process were gone and the sandbox listener refused
-connections. The remote forwarded peer saw EOF/reset. However, after ten seconds the local SSH command's result was
-still pending and the service-side endpoint had seen neither EOF nor reset. The probe did not separately inspect the
-local SSH process table. The gateway appears to retain the forwarded channel after the sandbox-side SSH session ends;
-that explanation is an inference, while the failed teardown is observed.
+The maintainer's answer:
 
-The failed recorder runs are `dca6ab7d-e116-4341-994a-9a66e1cba923` and `119dfa4b-cdb8-4571-a28a-31739e456a55`. Eight
-focused local tunnel tests passed, including real OpenSSH EOF and silence with a held forward, in
-`f4ce3d72-fd05-48ff-81fd-cca772a05b81`. The macOS unprivileged server prerequisite passed in
-[CI run 42153996017](https://github.com/scode/farhelm/actions/runs/42153996017), using portable OpenSSH with the system
-macOS client. These passes do not resolve the gateway failure. Full gateway silence and lease-kill checks and the final
-macOS regression dispatch were not run because the required EOF guarantee already failed.
+The maintainer decided on 2026-11-06, in conversation with the landing monitor: "send it back, and make sure that the
+agent actually tests it properly to make sure that SSH keep-alive isn't already solving the problem. If that is solving
+the problem, proceed with the plan. If that is not solving the problem, block the plan again, and we can discuss."
 
-[Draft #3072](https://github.com/scode/farhelm/pull/3072/changes) contains only the successful test-server prerequisite.
-The proposed product change remains unpublished and is not ready: its review also found a failure-diagnostic issue. Both
-owned sandboxes and their snapshots were removed, and the test SSH key was deregistered. The working log retains the
-unshipped proposal and evidence.
+Why: the tunnel's ssh already runs with `ServerAliveInterval=30` and the default `ServerAliveCountMax` of 3, so it gives
+up on a peer that stops answering after about 90 seconds. Both failed held-forward checks gave up waiting after 10
+seconds, so they could not show whether keep-alive ends the tunnel's ssh on its own. What the gateway does with a
+connection whose sandbox side has ended is not known: if it answers keep-alives itself, the local ssh stays up; if it
+does not, keep-alive ends it.
 
-Should the full teardown requirement remain, with a revised design allowed to investigate a local watcher or another
-gateway-compatible mechanism, or should the requirement be narrowed to ending the sandbox session and listeners while
-allowing the local SSH process and service-side connection to linger? I recommend keeping the full requirement and
-revising the design before implementation resumes; the narrower guarantee leaves local connections behind, and the
-watcher alternative still needs its details settled.
+Before any redesign, measure that properly against the real Tensorlake gateway:
+
+- Repeat the held-forward end-of-input check with the tunnel ssh started with exactly the production arguments (the
+  shared argument builder, keep-alive options included), and wait at least three minutes after the pipe's write end
+  closes, well past keep-alive's timeout.
+- Observe the local ssh directly: its own exit status and time (from the owning process's wait, not only a pending
+  command result), and whether its process is still in the local process table at the end of the wait. Also record when
+  the local service's end of the held connection sees end-of-file or a reset, and keep the existing checks that the
+  remote command and session are gone and the sandbox listener refuses connections.
+- Show that keep-alive is what ended it: run ssh with `-v` and record its reason for exiting (a keep-alive timeout reads
+  "Timeout, server ... not responding"), and run one control with `ServerAliveInterval=0` that stays up for the same
+  window. If the control also exits, find out what ended it before drawing a conclusion.
+- Retain every run as before and stay within the plan's sandbox budget.
+
+If keep-alive ends the local ssh, the local service's connection and everything in the sandbox, proceed with the plan as
+designed. For a forwarded connection held open through the gateway, the local ssh exiting at keep-alive's timeout (about
+90 seconds after the sandbox side ends) then satisfies "the tunnel ssh exits"; the sandbox-side criteria keep their
+"within a few seconds". Fix the review's open finding about the failure diagnostic, finish the remaining gateway checks
+(the silence drop, the lease-drop SIGKILL and idle suspension) and the macOS CI regression, and say in the SPEC.md
+Security bullet, SPEC_impl.md and the report that through Tensorlake's gateway the local ssh ends by keep-alive rather
+than at once, with the measured times.
+
+If keep-alive does not end it within the wait (the local ssh still running, or the local service's connection still
+open), block again with that evidence: the measured times, the `-v` output's reason or its absence, the control run and
+the local process table. Do not add a watcher or any other mechanism; the maintainer wants to discuss it with that
+evidence in hand.
