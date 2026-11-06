@@ -39,7 +39,7 @@
 //! **Best-effort atomic** ([`overwrite_private_file_sync`]). Write a fresh 0600
 //! temp file, `fsync` it, `rename` it over the destination; no fsync of
 //! the parent directory. Two file classes: the generated tmux config
-//! (`tmux.rs`'s `TmuxDriver::ensure_server`), and the Running record
+//! (`tmux.rs`'s `TmuxDriver::prepare_server_start`), and the Running record
 //! (`crate::app_bundle::publish_running_record`). Losing a Running-record
 //! update to a power loss is acceptable for the same reason: the supervisor
 //! that wrote it died with the machine, and the next one to serve rewrites
@@ -52,7 +52,7 @@
 //! reverting the destination to whatever it pointed at before. That is an
 //! acceptable loss for this file class: a lost tmux-config update is
 //! rebuilt from `TmuxDriver::config_body` on the very next
-//! `ensure_server` call regardless. Paying for a directory fsync on every
+//! `prepare_server_start` call regardless. Paying for a directory fsync on every
 //! server start to protect trivially regenerable state would be spending
 //! durability budget where nothing durability-sensitive is at stake.
 //!

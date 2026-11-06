@@ -171,7 +171,16 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
     // the truth (a session migrated into a host can still have live tmux
     // tabs). A private server that is simply not running reads as an empty
     // map, not an error, so a fleet of host terminals without tmux lists.
-    let needs_tmux = !entries.is_empty();
+    // Asked only when some listed session may have old terminals to find
+    // (`terminals::may_have_tmux_terminals`): a host whose sessions are all
+    // new terminals lists without a tmux command.
+    let needs_tmux = entries.iter().any(|entry| {
+        super::terminals::may_have_tmux_terminals(
+            &sup.tmux,
+            &entry.info.id,
+            entry.terminal.as_ref(),
+        )
+    });
     let pane_states = if needs_tmux {
         // An error here is reached only for a genuinely
         // UNCLASSIFIED tmux failure: `TmuxDriver::pane_states`

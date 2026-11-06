@@ -485,9 +485,13 @@ that its required systemd or SSH substrate ran.
   path shorter than the supervisor's) and the terminal works; and, with a real helm on the same state directory, a
   session created through the helm's API reaches a hand-rolled browser WebSocket with `?grid=1` as a `grid` stream
   notice and then grid messages showing the agent's screen, and `text` and `key` messages sent up the socket reach the
-  program. Needs the pinned tmux first on `PATH`. Linux only (the e2e suite), a minute or two; part of the workspace
-  nextest run. Run it when the flag, the startup's wiring of it, the schema, the orderly stop, reload, the host socket's
-  path, or the helm's grid relay changes.
+  program; a bare supervisor given a recording `--tmux` running no tmux at all through a host session's create, attach,
+  tab, listing, rename, several ticker intervals, Delete and SIGTERM, with no tmux socket left; an old session's private
+  server adopted by a bare supervisor, still serving it, and ending when it is deleted; and an old session listed as
+  exited with no terminal by a supervisor whose `--tmux` does not exist, which still creates host sessions and leaves
+  the server running. Needs the pinned tmux first on `PATH`. Linux only (the e2e suite), a minute or two; part of the
+  workspace nextest run. Run it when the flag, the startup's wiring of it, the schema, the orderly stop, reload, the
+  host socket's path, the helm's grid relay, or when and whether the supervisor uses tmux changes.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'grid streams' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^grid_output::/) | test(/^service::grid_stream::/)'`
   — how a host terminal reaches a grid viewer: the encoding (`crates/farhelm-supervisor/src/grid_output.rs`: cells to
   runs with styles, redefined palette colors, wide and combining characters and links, a row with more links than a
@@ -717,20 +721,22 @@ that its required systemd or SSH substrate ran.
   stderr line and exit status 1 (the app's own preflight, run before it would spawn its managed supervisor), and a
   non-tmux bootstrap failure (an unusable state directory) exits 1 through the ordinary fallback path with no panic. The
   non-pixel Xvfb integration gate that follows covers the embedded helm, managed supervisor, desktop authentication, the
-  tmux override reaching the managed supervisor, the supervisor outliving a hard exit and an ordinary quit (reused, then
-  replaced by a launch whose program file changed, with a session surviving the replacement), a second launch with
-  another program refusing beside the open app without stopping its supervisor, a replacement that would fail its tmux
-  preflight stopping nothing, a frozen (SIGSTOP) supervisor being replaced with a kill after the grace, restart
-  persistence, that every asset the window requested went through the desktop asset handler, and that the teardown's
-  terminal-host stop ends a real host planted in the answering-supervisor leg's state directory. The app's supervisor
-  creates its sessions in terminal hosts, as every shipped one does, and the smoke requires every session it creates to
-  be a host row; a session's terminal counts as alive by its database row (`terminal_kind` and `pane`: a listening host
-  socket in the kernel's socket table, or a tmux session for a tmux row). Which session the relaunched window holds
-  open, and that a token rotation left that attachment open, are read from the embedded helm's attachment trace (the
-  `farhelm_helm::terminal_attachments` debug events, turned on through the launches' `RUST_LOG`), and after the
-  supervisor replacement the kept session is attached as a grid viewer through the replacement and a typed command must
-  write its file. API checks retain host-qualified session references; row and scope checks use their local session IDs.
-  The optional coordinate-driven leg is not part of CI; it checks typed input through a file the typed command writes.
+  tmux override reaching the managed supervisor (read from its environment) while it runs no tmux and starts no tmux
+  server, since its sessions are all new terminals (the sentinel tmux logs only the preflight's `-V`), the supervisor
+  outliving a hard exit and an ordinary quit (reused, then replaced by a launch whose program file changed, with a
+  session surviving the replacement), a second launch with another program refusing beside the open app without stopping
+  its supervisor, a replacement that would fail its tmux preflight stopping nothing, a frozen (SIGSTOP) supervisor being
+  replaced with a kill after the grace, restart persistence, that every asset the window requested went through the
+  desktop asset handler, and that the teardown's terminal-host stop ends a real host planted in the answering-supervisor
+  leg's state directory. The app's supervisor creates its sessions in terminal hosts, as every shipped one does, and the
+  smoke requires every session it creates to be a host row; a session's terminal counts as alive by its database row
+  (`terminal_kind` and `pane`: a listening host socket in the kernel's socket table, or a tmux session for a tmux row).
+  Which session the relaunched window holds open, and that a token rotation left that attachment open, are read from the
+  embedded helm's attachment trace (the `farhelm_helm::terminal_attachments` debug events, turned on through the
+  launches' `RUST_LOG`), and after the supervisor replacement the kept session is attached as a grid viewer through the
+  replacement and a typed command must write its file. API checks retain host-qualified session references; row and
+  scope checks use their local session IDs. The optional coordinate-driven leg is not part of CI; it checks typed input
+  through a file the typed command writes.
 - `DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh` — optional Linux native appearance integration using the
   ordinary owned Xvfb/openbox setup. Four fresh/stored dark/light cases check native media-query premises, palette
   before renderer content, real Settings choices, private WebKit profile persistence, Inter, embedded assets and the

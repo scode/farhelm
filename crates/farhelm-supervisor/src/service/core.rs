@@ -6413,9 +6413,9 @@ impl Supervisor {
         // tmux server yet existing — liveness is only decided later, once
         // one does. Doing this first means a DB failure aborts
         // construction having started nothing persistent; the old
-        // ordering (`ensure_server` first) left a freshly started tmux
-        // server — `exit-empty off`, so it does not even exit on its own —
-        // behind a constructor that then failed on the database.
+        // ordering (starting tmux first) left a freshly started tmux
+        // server, which at the time did not even exit on its own, behind a
+        // constructor that then failed on the database.
         let store =
             SessionStore::open(&state_dir.join("supervisor.db"), ownership.is_some()).await?;
         // Gated on `ownership`, unlike the schema migration above sharing
@@ -6455,7 +6455,13 @@ impl Supervisor {
             },
             seams.tmux_program.clone(),
         );
-        tmux.ensure_server().await?;
+        // Adopt a private tmux server only if one already runs: it holds
+        // the old terminals an earlier supervisor created, and without one
+        // there are none, so nothing here starts a server or needs a usable
+        // tmux (`TmuxDriver::adopt_running_server`). A server is started
+        // again only by an old terminal's create under the test-only
+        // `--new-terminals tmux` switch.
+        tmux.adopt_running_server(ownership.is_some()).await?;
         // Anything attached to the private server at this instant
         // predates this supervisor, and a control client whose owner
         // died with output in flight can be wedged in tmux's
@@ -13011,6 +13017,17 @@ impl Supervisor {
                 .await?
                 .is_some_and(|row| row.terminal_kind == TerminalKind::Host),
         };
+        // An old session whose private tmux server runs but cannot be used
+        // (`TmuxDriver::adopt_running_server`) reads as not alive, yet its
+        // agent may well still run there: a Restart would start a second
+        // one beside it, in the same checkout. Refused, with nothing
+        // stopped, until tmux is fixed or that agent is stopped.
+        if !host_agent && let Some(refusal) = self.tmux.unusable_refusal_if_any() {
+            return Err(anyhow::Error::new(RequestError::new(
+                ErrorKind::Conflict,
+                format!("not restarting: {refusal:#}"),
+            )));
+        }
         // Where the new launch goes: a host agent stays in hosts, and with
         // the switch on a tmux session moves into one (`host_restart`, "From
         // a tmux pane"; `Self::new_terminals` is the one reading of the
@@ -26940,6 +26957,8 @@ exit 0
             )
             .await
             .expect("supervisor");
+            // The fake answers for a server that does not exist.
+            sup.tmux.forget_presence_for_test();
             crate::pi_extension::materialize_asset(state.path(), &crate::pi_extension::OMP_ASSET)
                 .await
                 .expect("asset publish");
@@ -28267,6 +28286,8 @@ exit 0
         )
         .await
         .expect("reopened supervisor");
+        // The fake answers for a server that does not exist.
+        reopened.tmux.forget_presence_for_test();
         assert!(
             reopened.owns_state_dir(),
             "the reopened supervisor must own the state dir, or the handoff exercised read-only mode"
@@ -28657,6 +28678,8 @@ exit 0
         )
         .await
         .expect("supervisor");
+        // The fake answers for a server that does not exist.
+        sup.tmux.forget_presence_for_test();
         let id = uuid::Uuid::new_v4().to_string();
         sup.store
             .insert_session(
@@ -33311,9 +33334,9 @@ exit 0
     /// `tmux new-session` can fail after the session already exists (a
     /// lost reply, a timeout mid-command), so deleting the row on the
     /// strength of the error alone would orphan a running agent — no row,
-    /// no id, nothing left that knows to reap it. Provoked here by
-    /// removing the tmux binary from this supervisor's reach, which makes
-    /// both the create AND the has-session probe that follows it fail;
+    /// no id, nothing left that knows to reap it. Provoked here by making
+    /// the private socket unreachable, which makes both the create AND the
+    /// has-session probe that follows it fail;
     /// with the probe unable to confirm absence, the row must survive and
     /// the error must say so. The surviving row must also remain published:
     /// lifecycle operations resolve through the in-memory map, so durability
@@ -33325,21 +33348,20 @@ exit 0
             .await
             .expect("supervisor");
         let work = tempfile::tempdir().expect("workdir");
-        // Kill the server and put a DIRECTORY where its socket belongs:
-        // tmux can then neither connect to it nor create it, so
-        // `new-session` fails AND the has-session probe that decides the
-        // rollback fails too — an unconfirmable failure. Deliberately not
-        // done by freezing the state directory, which would break SQLite
-        // (its journal lives there) and fail the create before a row was
-        // ever written, testing nothing.
-        std::process::Command::new("tmux")
-            .arg("-S")
-            .arg(state.path().join("tmux.sock"))
-            .arg("kill-server")
-            .output()
-            .expect("kill-server");
-        std::fs::remove_file(state.path().join("tmux.sock")).ok();
-        std::fs::create_dir(state.path().join("tmux.sock")).expect("block the socket path");
+        // Put a symlink loop where the socket belongs: tmux can then
+        // neither connect to it nor create it, so `new-session` fails AND
+        // the has-session probe that decides the rollback fails too, with
+        // a diagnostic ("Symbolic link loop") that says
+        // nothing about whether a session exists — an unconfirmable
+        // failure. Not a directory: connecting to one is refused like a
+        // stale socket, which tmux reports as "no server running", and no
+        // server is a definitive absence. Deliberately not done by freezing
+        // the state directory, which would break SQLite (its journal lives
+        // there) and fail the create before a row was ever written,
+        // testing nothing.
+        let sock = state.path().join("tmux.sock");
+        std::fs::remove_file(&sock).ok();
+        std::os::unix::fs::symlink(&sock, &sock).expect("block the socket path");
 
         let error = sup
             .create_session_without_overrides(
@@ -41571,14 +41593,14 @@ exit 0
             dedup_scope: DedupScope::Permanent,
         };
         let failing_tmux = state.path().join("failing-tmux");
-        // The fake tmux answers the version probe (every supervisor asks
-        // it once at startup) and refuses EVERYTHING else — new-session,
+        // The fake tmux answers the version probe (a create's preparation
+        // asks it once) and refuses EVERYTHING else — new-session,
         // has-session — which is the post-allocation failure class. The
         // driver prefixes its own socket/config arguments, so the flags
         // are matched anywhere in the argument list, not at $1.
         std::fs::write(
             &failing_tmux,
-            b"#!/bin/sh\n# The supervisor's STARTUP and preflight run several benign commands\n# (-V, display-message version probes, start-server, set-option) that must\n# succeed before the create path runs. Only the session-shaped commands\n# are refused: new-session -- the command the create path itself issues --\n# fails, and has-session reports absence (exit 1), so the failure\n# classifies as a genuine session-creation failure, the post-allocation\n# class this test exists for.\nfor arg in \"$@\"; do\n  if [ \"$arg\" = -V ]; then echo \"tmux 3.7c\"; exit 0; fi\n  if [ \"$arg\" = \"#{version}\" ]; then echo \"3.7c\"; exit 0; fi\n  if [ \"$arg\" = new-session ]; then exit 1; fi\n  if [ \"$arg\" = has-session ]; then echo \"no current target\" >&2; exit 1; fi\ndone\nexit 0\n",
+            b"#!/bin/sh\n# The create's preparation runs a benign version probe (-V) that must\n# succeed before its new-session runs. Only the session-shaped commands\n# are refused: new-session -- the command the create path itself issues --\n# fails, and has-session reports absence (exit 1), so the failure\n# classifies as a genuine session-creation failure, the post-allocation\n# class this test exists for.\nfor arg in \"$@\"; do\n  if [ \"$arg\" = -V ]; then echo \"tmux 3.7c\"; exit 0; fi\n  if [ \"$arg\" = \"#{version}\" ]; then echo \"3.7c\"; exit 0; fi\n  if [ \"$arg\" = new-session ]; then exit 1; fi\n  if [ \"$arg\" = has-session ]; then echo \"no current target\" >&2; exit 1; fi\ndone\nexit 0\n",
         )
         .expect("failing tmux fixture");
         {

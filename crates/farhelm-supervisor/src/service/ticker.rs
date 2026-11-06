@@ -1015,10 +1015,13 @@ pub(crate) fn start_ticker(sup: &Arc<Supervisor>) -> TickerHandle {
         // future kills the `tmux wait-for` client (see
         // `TmuxDriver::wait_for_pane_death`).
         //
-        // A failed wait is paced by one interval before the next attempt:
-        // it fails at once when there is no server, and retrying straight
-        // away would spin tmux spawns for as long as the server is gone.
-        // The tick's own reap still covers that stretch.
+        // While no private server runs (a host with no old terminals), the
+        // wait itself waits without spawning anything, so this arm stays
+        // quiet for the life of the process (`TmuxDriver::wait_for_pane_death`).
+        // A failed wait is still paced by one interval before the next
+        // attempt: a server that went away unseen fails it at once, and so
+        // can anything else, and retrying straight away would spin tmux
+        // spawns. The tick's own reap still covers that stretch.
         let tmux = sup_tmux;
         let mut pane_died = pane_death_wait(tmux.clone(), None);
         loop {
@@ -1132,6 +1135,33 @@ fn pane_death_wait(
     })
 }
 
+/// The whole server's pane states, or the empty map tmux would give, without
+/// asking, when no entry may have an old terminal to find
+/// (`terminals::may_have_tmux_terminals`).
+///
+/// The ticker's passes run every couple of seconds for every session, so on
+/// a host whose sessions are all new terminals they must not poll a server
+/// that only holds tmux sessions no entry owns (a husk, or something a
+/// program made on the private socket), which would otherwise keep tmux
+/// traffic going for the life of the process.
+async fn pane_states_if_needed(
+    sup: &Supervisor,
+    entries: &[Arc<SessionEntry>],
+) -> anyhow::Result<std::collections::HashMap<String, crate::tmux::PaneState>> {
+    let needed = entries.iter().any(|entry| {
+        super::terminals::may_have_tmux_terminals(
+            &sup.tmux,
+            &entry.info.id,
+            entry.terminal.as_ref(),
+        )
+    });
+    if needed {
+        sup.tmux.pane_states().await
+    } else {
+        Ok(std::collections::HashMap::new())
+    }
+}
+
 /// Reap dead tabs and commit newly dead owned agents between ticks.
 ///
 /// Two wakes run it: tmux's `pane-died` hook, and a host terminal's runtime
@@ -1159,7 +1189,7 @@ async fn reap_pass(sup: &Arc<Supervisor>, stop: &mut oneshot::Receiver<()>) {
         return;
     }
     let probe_started = tokio::time::Instant::now();
-    let states = match sup.tmux.pane_states().await {
+    let states = match pane_states_if_needed(sup, &entries).await {
         Ok(states) => Some(states),
         Err(e) => {
             debug!(
@@ -1556,7 +1586,7 @@ async fn sample_pass(
     let probe_started = tokio::time::Instant::now();
     let states = match injected_sample_fault(sup, SampleRead::PaneStates) {
         Some(fault) => Err(fault),
-        None => sup.tmux.pane_states().await,
+        None => pane_states_if_needed(sup, &entries).await,
     };
     // Only tmux terminals depend on this probe. A host terminal's evidence
     // and screen come from its runtime, so a failed probe ends the pass for

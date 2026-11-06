@@ -33,6 +33,8 @@ impl TmuxDriver {
         // still reaches only `pane`, through the session-paired `send-keys`
         // target below.
         let session_target = format!("={session}");
+        // No server, no session to attach to: refused without a spawn.
+        self.refuse_if_absent()?;
         let mut child = self
             .attached_client_command()
             .arg("-C")

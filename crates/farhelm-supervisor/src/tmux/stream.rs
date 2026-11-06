@@ -274,6 +274,8 @@ impl TmuxDriver {
         pane: &str,
     ) -> anyhow::Result<ReplayStreamCandidate> {
         let deadline = tokio::time::Instant::now() + self.exchange_timeout;
+        // No server, no session to attach to: refused without a spawn.
+        self.refuse_if_absent()?;
         let mut child = self
             .attached_client_command()
             .arg("-C")

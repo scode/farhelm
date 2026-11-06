@@ -526,8 +526,16 @@ async fn session_info_now(
     // Every session may retain old tmux tabs, including after its agent
     // terminal is lost. As in `listing::list_all`, a failed query cannot
     // produce an authoritative empty tab list. Only a tmux agent needs the
-    // registry snapshot to classify its pane's ownership.
+    // registry snapshot to classify its pane's ownership. A session with no
+    // old terminals to find asks nothing (`terminals::may_have_tmux_terminals`):
+    // not asking gives the same empty answer tmux would.
+    let asks_tmux = super::terminals::may_have_tmux_terminals(
+        &sup.tmux,
+        &entry.info.id,
+        entry.terminal.as_ref(),
+    );
     let (pane_states, known) = match &entry.terminal {
+        _ if !asks_tmux => (Default::default(), KnownTmuxNames::default()),
         Some(Terminal::Tmux(_)) => (sup.tmux.pane_states().await?, sup.known_tmux_names().await),
         Some(Terminal::Host(_)) | None => {
             (sup.tmux.pane_states().await?, KnownTmuxNames::default())
@@ -10312,9 +10320,12 @@ mod tests {
 
     /// Only an empty listing can skip tmux: a terminal-less session may
     /// still have old tabs, so a failed query cannot prove its tab list empty.
-    /// A stopped server can be a tolerated empty answer; removing its socket
-    /// supplies a verified propagating error that both list and rename must
-    /// preserve rather than hide tabs behind a successful empty result.
+    /// A stopped server is a tolerated empty answer, and so is one this
+    /// supervisor knows does not run; a socket path that is a symlink loop
+    /// supplies a verified propagating error, on a supervisor that has
+    /// created an old terminal and so believes a server may run, that both
+    /// list and rename must preserve rather than hide tabs behind a
+    /// successful empty result.
     #[farhelm_testtrace::test]
     async fn only_an_empty_listing_skips_failed_pane_queries() {
         let state = StateDir::new();
@@ -10322,6 +10333,19 @@ mod tests {
             .await
             .expect("supervisor construction touches only tmux, not the launch shim");
 
+        // An old terminal starts the server, so the supervisor believes one
+        // may run from here on and asks tmux for a terminal-less session.
+        sup.tmux
+            .create_session(
+                "fh-premise",
+                "/",
+                80,
+                24,
+                &[],
+                &["sleep".into(), "60".into()],
+            )
+            .await
+            .expect("an old terminal starts the private server");
         let sock = state.path().join("tmux.sock");
         let killed = std::process::Command::new("tmux")
             .arg("-S")
@@ -10339,9 +10363,13 @@ mod tests {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => panic!("remove the stopped server's socket: {error}"),
         }
+        // A symlink loop: tmux reports it as a connection error that says
+        // nothing about whether a server runs (a directory would read as a
+        // refused stale socket, "no server running", a tolerated answer).
+        std::os::unix::fs::symlink(&sock, &sock).expect("obstruct the socket path");
         assert!(
             sup.tmux.pane_states().await.is_err(),
-            "fixture premise: querying the missing socket must propagate an error"
+            "fixture premise: querying the obstructed socket must propagate an error"
         );
         assert!(list_sessions(&sup, 0).await.0.is_empty());
 

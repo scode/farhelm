@@ -51,8 +51,8 @@ pub(super) struct ScratchServer {
 static REAL_TMUX_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 
 impl ScratchServer {
-    /// Take a concurrency slot, then start a server on a fresh
-    /// socket. The slot is acquired here rather than in each test so
+    /// Take a concurrency slot, then prepare a server on a fresh socket,
+    /// which the test's first session starts. The slot is acquired here rather than in each test so
     /// that standing up a real tmux is the thing that is bounded —
     /// every scratch server supplied by this shared harness goes
     /// through this constructor.
@@ -69,7 +69,13 @@ impl ScratchServer {
             driver.socket.clone(),
             &driver.program,
         );
-        driver.ensure_server().await.expect("tmux server");
+        // Prepared, not started: as in production, the first session a
+        // test creates starts the server (the config's `exit-empty on`
+        // would end a server started empty at once).
+        driver
+            .prepare_server_start()
+            .await
+            .expect("tmux server preparation");
         ScratchServer {
             driver,
             _server: server,

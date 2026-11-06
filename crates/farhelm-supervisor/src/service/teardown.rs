@@ -193,6 +193,12 @@ impl Supervisor {
                 None => return Ok(Vec::new()),
             },
         };
+        // A name this process knows holds no tmux session has no panes to
+        // root at, and asking would be a tmux command for a session that has
+        // only new terminals.
+        if !self.tmux.may_hold_session(&tmux_name) {
+            return Ok(Vec::new());
+        }
         let states = self
             .tmux
             .pane_states()
@@ -734,11 +740,16 @@ impl Supervisor {
             // teardown here tolerates finding nothing.
             let tmux_name = match entry.terminal.as_ref() {
                 Some(Terminal::Tmux(terminal)) => Some(terminal.tmux_name.clone()),
+                // Not even asked when this process knows the name holds
+                // nothing: no server runs, or the server it adopted had no
+                // tmux session for this one (`TmuxDriver::may_hold_session`),
+                // which is every session created in a host.
+                Some(Terminal::Host(_)) if !self.tmux.may_hold_session(&session_tmux_name(session_id)) => None,
                 Some(Terminal::Host(_)) => {
                     let tmux_name = session_tmux_name(session_id);
                     match self
                         .tmux
-                        .has_session_for_terminal_less_delete(&tmux_name)
+                        .has_session(&tmux_name)
                         .await
                     {
                         Ok(true) => Some(tmux_name),
@@ -752,9 +763,14 @@ impl Supervisor {
                     }
                 }
                 None => match self.store.tmux_name(session_id).await {
+                    // Not asked when this process knows the name holds
+                    // nothing (`TmuxDriver::knows_session_absent`). Asked
+                    // while the server cannot be used, which refuses: the
+                    // agent may still run there.
+                    Ok(Some(tmux_name)) if self.tmux.knows_session_absent(&tmux_name) => None,
                     Ok(Some(tmux_name)) => match self
                         .tmux
-                        .has_session_for_terminal_less_delete(&tmux_name)
+                        .has_session(&tmux_name)
                         .await
                     {
                         Ok(true) => Some(tmux_name),
@@ -1900,7 +1916,7 @@ mod tests {
         );
         assert!(
             !sup.tmux
-                .has_session_for_terminal_less_delete(&tmux_name)
+                .has_session(&tmux_name)
                 .await
                 .expect("tmux liveness after Delete"),
             "Delete kills the tmux session"
@@ -1942,7 +1958,7 @@ mod tests {
             !fixture
                 .sup
                 .tmux
-                .has_session_for_terminal_less_delete(&fixture.tmux_name)
+                .has_session(&fixture.tmux_name)
                 .await
                 .expect("tmux liveness after Delete"),
             "Delete kills the tmux session after the wait"
@@ -2064,7 +2080,7 @@ mod tests {
         );
         assert!(
             !sup.tmux
-                .has_session_for_terminal_less_delete(&tmux_name)
+                .has_session(&tmux_name)
                 .await
                 .expect("tmux liveness after partial Delete"),
             "first Delete must kill tmux even though it retains the row"

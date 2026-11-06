@@ -418,9 +418,11 @@ ANSWERING_DESKTOP_PID=""
 # The supervisor runs in its own process group (the leg starts it under
 # setsid) and the whole group is stopped and waited for, not just the
 # supervisor's pid. A supervisor killed during startup, before it installs its
-# SIGTERM handler, dies at once and leaves its in-flight `tmux start-server`
-# child behind, and that child could create the tmux server after the
-# kill-server below had already run. The tmux server itself daemonizes out of
+# SIGTERM handler, dies at once and leaves any in-flight tmux child behind
+# (a supervisor runs tmux at startup only to adopt a server that already
+# runs, and earlier builds always ran `start-server`), and that child could
+# create or touch the tmux server after the kill-server below had already
+# run. The tmux server itself daemonizes out of
 # the group, so it is stopped through its socket afterwards; it outlives the
 # supervisor by design (sessions survive a supervisor restart). That has to
 # happen before teardown's `rm -r` of the state directory, which deletes the
@@ -701,18 +703,14 @@ HOST_TMUX=$(command -v tmux)
 SENTINEL_TMUX="$X/sentinel-tmux/tmux"
 mkdir -p "$(dirname "$SENTINEL_TMUX")"
 # Logs the COMPLETE argv of every invocation, one per line, rather than
-# writing a single fixed marker: the desktop's own tmux preflight now
-# calls this wrapper with `-V` too (immediately before the managed
-# supervisor it is about to spawn), and the managed supervisor's own
-# `ensure_server` (crates/farhelm-supervisor/src/tmux.rs) issues a SECOND
-# `-V` — this one prefixed with its private-server `-u -S <socket> -f
-# <config>` — before it ever touches the server. A marker that only
-# recorded "was this program run at all", or even "was it run with
-# anything other than exactly `-V`", would already be satisfied by that
-# second probe line and would prove nothing about whether the SUPERVISOR
-# went on to actually use this tmux. The later assertion greps for a
-# logged line naming `start-server` specifically — the operational
-# command `ensure_server` issues right after its version check succeeds.
+# writing a single fixed marker: the desktop's own tmux preflight calls
+# this wrapper with a plain `-V` (immediately before the managed
+# supervisor it is about to spawn), and every invocation by the managed
+# supervisor itself carries its private-server `-u -S <socket> -f <config>`
+# prefix. The smoke's sessions are all new terminals, so the supervisor
+# must run none at all (crates/farhelm-supervisor/src/tmux.rs,
+# `adopt_running_server`); the later assertion requires every logged line
+# to be the preflight's plain `-V`.
 printf '%s\n' \
   '#!/bin/sh' \
   'printf "%s\n" "$*" >>"$FARHELM_SMOKE_TMUX_MARKER"' \
@@ -1354,20 +1352,21 @@ assert "another process owns token control" in message, message
 PY_SECOND
 kill -0 "$OPEN_SUPERVISOR_PID" 2>/dev/null || fail "the other-program launch stopped the open app's supervisor"
 curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null || fail "the other-program launch disturbed the incumbent helm"
-[ -s "$X/tmux-override-used" ] || fail "managed supervisor did not run the tmux named by FARHELM_TMUX"
-# A nonempty marker alone is not enough: the desktop's own tmux preflight
-# calls this same wrapper with plain `-V` before the managed supervisor
-# spawns, AND the supervisor's own `ensure_server` (crates/farhelm-supervisor/
-# src/tmux.rs) issues its own private-server version check — `-u -S <socket>
-# -f <config> -V` — before it ever touches the server. That second probe line
-# still ENDS in `-V`, so a check for "any logged line that is not exactly
-# `-V`" is satisfied by it alone and proves nothing about whether the
-# supervisor went on to actually use this tmux. Require a line naming a
-# known OPERATIONAL command instead — `start-server`, the very next thing
-# `ensure_server` runs after its version check succeeds — which only a real
-# session-owning invocation can produce.
-grep -qw 'start-server' "$X/tmux-override-used" ||
-  fail "the sentinel tmux never ran an operational command (start-server); only version probes were logged"
+[ -s "$X/tmux-override-used" ] || fail "the desktop's tmux preflight did not run the tmux named by FARHELM_TMUX"
+# A supervisor whose sessions are all new terminals runs no tmux server and
+# no tmux command (SPEC.md, "Terminal experience"), so the only lines the
+# sentinel may have logged are the desktop preflight's plain `-V`: any other
+# line is the managed supervisor running tmux (all of its invocations carry
+# the private `-u -S <socket> -f <config>` prefix), and a socket in the state
+# directory is a server it started. The override must still REACH the
+# supervisor, for the day it has an old terminal to serve, and nothing it
+# runs can show that now, so its environment is read instead.
+if grep -vx -- '-V' "$X/tmux-override-used" >"$X/tmux-supervisor-invocations"; then
+  fail "the managed supervisor ran tmux with only new terminals: $(head -3 "$X/tmux-supervisor-invocations")"
+fi
+[ ! -e "$X/state/tmux.sock" ] || fail "a tmux server socket exists in the app's state directory"
+tr '\0' '\n' <"/proc/$OPEN_SUPERVISOR_PID/environ" | grep -qxF "FARHELM_TMUX=$SENTINEL_TMUX" ||
+  fail "the managed supervisor's environment does not name the tmux the app chose (FARHELM_TMUX)"
 [ ! -e "$(dirname "$APP")/tmux" ] || fail "the app directory must not carry a tmux of its own"
 
 # Wait for the client-log marker to land in $1 (a log file), proving the
