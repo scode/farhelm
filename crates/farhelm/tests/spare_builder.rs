@@ -98,6 +98,16 @@ impl Fixture {
         command
     }
 
+    /// Exercise cache-only work through the same private format the worker uses.
+    /// Keep the unused target present so tests can prove cleanup never clones or
+    /// depends on its identity when no spare is requested.
+    fn cache_only(&self) {
+        let mut spec: serde_json::Value =
+            serde_json::from_slice(&fs::read(&self.spec).unwrap()).unwrap();
+        spec["target"] = serde_json::Value::Null;
+        fs::write(&self.spec, serde_json::to_vec(&spec).unwrap()).unwrap();
+    }
+
     /// Owner-death tests also exec a disposable libtest owner. Give that child
     /// exactly the same isolated Git/config inputs as a direct guard invocation.
     fn environment(&self, command: &mut Command) {
@@ -363,7 +373,9 @@ async fn spare_builder_cli_real_clone_scrubs_after_login_and_dissociates() {
     assert!(lines[1].starts_with(
         "-c gc.autoDetach=false -c maintenance.autoDetach=false -c gc.autoPackLimit=10 --git-dir "
     ));
-    assert!(lines[2].starts_with("-c core.commitGraph=false clone --reference "));
+    assert!(lines[2].starts_with(
+        "-c core.commitGraph=false -c gc.auto=0 -c maintenance.auto=false clone --reference "
+    ));
     assert!(lines[2].contains(" --dissociate -- https://github.com/acme/bar.git "));
     assert!(
         fs::read_to_string(fixture.root.join("nice"))
@@ -434,13 +446,67 @@ async fn spare_builder_password_required_fails_without_prompting_or_completion()
     );
 }
 
-/// Shell success without reaching the helper must not produce accepted clone
-/// completion. A directory or rc-created .git is not evidence of a finished clone.
+/// Targetless work must still cross the actual login-shell guard and produce a
+/// promoted receipt. Its one Git command is foreground cache consolidation;
+/// neither fetch nor clone is needed when no spare is requested.
 #[farhelm_testtrace::test]
-async fn spare_builder_rc_exit_zero_has_no_helper_receipt() {
+async fn spare_builder_cache_only_uses_guarded_login_and_no_checkout() {
     let fixture = Fixture::new(
-        "mkdir -p \"$BUILD_ROOT/checkouts/.farhelm-spares/acme/fake.git\"; exit 0",
+        "printf login > \"$BUILD_ROOT/login-ran\"; export GIT_TERMINAL_PROMPT=1",
         10_000,
+    );
+    fixture.cache_only();
+    git(
+        &fixture.root,
+        &["init", "--bare", "-q", fixture.cache.to_str().unwrap()],
+    );
+    assert!(fixture.target.is_dir() && fs::read_dir(&fixture.target).unwrap().next().is_none());
+    let mut child =
+        GroupChild::spawn_detached_tethered(&mut fixture.command("build-spare-guard").into(), CAPS)
+            .unwrap();
+    let ended = child
+        .finish(tokio::time::Instant::now() + Duration::from_secs(10), CAPS)
+        .await
+        .unwrap();
+    assert!(
+        matches!(ended, Ended::Exited(ref output) if output.status.signal() == Some(libc::SIGKILL)),
+        "{ended:?}"
+    );
+    assert_eq!(
+        fs::read(fixture.spec.with_extension("result")).unwrap(),
+        b"true"
+    );
+    assert_eq!(fs::read(fixture.root.join("login-ran")).unwrap(), b"login");
+    let argv = fs::read_to_string(fixture.root.join("git-argv")).unwrap();
+    assert_eq!(argv.lines().count(), 1, "{argv}");
+    assert_eq!(
+        argv.trim(),
+        format!(
+            "-c gc.autoDetach=false -c maintenance.autoDetach=false -c gc.autoPackLimit=10 --git-dir {} gc --auto",
+            fixture.cache.display()
+        )
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.root.join("git-env"))
+            .unwrap()
+            .trim(),
+        "0:/bin/false:/bin/false:never:unset:unset:unset"
+    );
+    assert!(
+        fs::read_dir(&fixture.target).unwrap().next().is_none(),
+        "cache-only work must leave checkout content alone"
+    );
+}
+
+/// A missing cache is an ordinary failed background attempt, not permission to
+/// invent a clone or certify cleanup. The guard's expected kill alone is no pass.
+#[farhelm_testtrace::test]
+async fn spare_builder_cache_only_failure_has_no_completion() {
+    let fixture = Fixture::new("", 10_000);
+    fixture.cache_only();
+    assert!(
+        !fixture.cache.exists(),
+        "premise: no repository to consolidate"
     );
     let mut child =
         GroupChild::spawn_detached_tethered(&mut fixture.command("build-spare-guard").into(), CAPS)
@@ -450,11 +516,42 @@ async fn spare_builder_rc_exit_zero_has_no_helper_receipt() {
         .await
         .unwrap();
     assert!(
-        matches!(ended, Ended::Exited(ref output) if output.status.signal() == Some(libc::SIGKILL))
+        matches!(ended, Ended::Exited(ref output) if output.status.signal() == Some(libc::SIGKILL)),
+        "{ended:?}"
     );
     assert!(!fixture.spec.with_extension("result").exists());
     assert!(!fixture.spec.with_extension("receipt").exists());
-    assert!(!fixture.root.join("git-argv").exists());
+    assert!(!fixture.cache.exists());
+}
+
+/// Shell success without reaching the helper must certify neither a clone nor
+/// consolidation. Both modes require the receipt from actual completed Git work.
+#[farhelm_testtrace::test]
+async fn spare_builder_rc_exit_zero_has_no_helper_receipt() {
+    for cache_only in [false, true] {
+        let fixture = Fixture::new(
+            "mkdir -p \"$BUILD_ROOT/checkouts/.farhelm-spares/acme/fake.git\"; exit 0",
+            10_000,
+        );
+        if cache_only {
+            fixture.cache_only();
+        }
+        let mut child = GroupChild::spawn_detached_tethered(
+            &mut fixture.command("build-spare-guard").into(),
+            CAPS,
+        )
+        .unwrap();
+        let ended = child
+            .finish(tokio::time::Instant::now() + Duration::from_secs(10), CAPS)
+            .await
+            .unwrap();
+        assert!(
+            matches!(ended, Ended::Exited(ref output) if output.status.signal() == Some(libc::SIGKILL))
+        );
+        assert!(!fixture.spec.with_extension("result").exists());
+        assert!(!fixture.spec.with_extension("receipt").exists());
+        assert!(!fixture.root.join("git-argv").exists());
+    }
 }
 
 /// A manual invocation in the caller's existing session must refuse before

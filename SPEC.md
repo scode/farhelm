@@ -1354,6 +1354,8 @@ removing the cache cannot break it. A cache failure fails the clone stage with t
 fallback to a clone without it. Cache refresh, clone, configured hook, and agent run in that order inside the session
 terminal, so progress, authentication prompts and failures are visible. A failed stage prevents later stages and
 preserves partial content. A checkout is not permission to run a hook unless the maintainer configured that hook.
+Farhelm disables automatic Git gc and maintenance for the cache refresh, clone, spare fetch and fast-forward that a
+launch waits on. This command-local policy does not change the user's later Git commands or configured hook.
 
 With **Keep a checkout ready for faster launches** on (the default), a managed-checkout create may instead take a
 complete independent clone prepared earlier for that repository on that host. The reserved hidden container is
@@ -1378,22 +1380,25 @@ failed spare fetch fails the clone stage visibly, without another clone or crede
 has moved retains partial content and refuses automatic repetition. The shim never recursively deletes a claimed tree;
 supervisor cleanup owns leftovers.
 
-After a new managed-checkout launch's clone stage has ended, including a recorded clone failure, the supervisor may make
-one attempt to build the next spare. It runs the ordinary cache refresh and clone through the user's login shell,
-without a terminal or credential prompts, at low CPU priority, with a deadline of about ten minutes. Ordinary Git hooks
-and filters run; Farhelm's post-clone command, trust edit and agent do not. Failure is logged and leaves no spare, so a
-later launch can clone normally. One live supervisor builds one spare at a time across its host; pending or running
-requests for the same repository coalesce, with no automatic retry after failure. A spare becomes available only as a
-complete clone; concurrent launches can take it only once.
+After a new managed-checkout launch's clone stage has ended, including a recorded clone failure, the supervisor makes
+one background cache/spare attempt, whether spares are on or off and whether a spare was taken. When a spare is needed,
+its cache refresh consolidates accumulated packs before cloning; otherwise the attempt only consolidates the cache.
+Cleanup runs under the cache lock, so a later launch of that repository can still wait for it. It runs through the
+user's login shell, without a terminal or credential prompts, at low CPU priority, with a deadline of about ten minutes.
+Ordinary Git hooks and filters run; Farhelm's post-clone command, trust edit and agent do not. Failure is logged; a
+failed build leaves no spare, so a later launch can clone normally. One live supervisor builds one spare at a time
+across its host; pending or running requests for the same repository coalesce, with no automatic retry after failure. A
+spare becomes available only as a complete clone; concurrent launches can take it only once.
 
-Turning the global switch off affects future creates. Each repository's next create on that host discards its spare
-instead of building, and a create using another checkout root discards the spare at the old root first. Accepted creates
-and retries keep their frozen choices. Startup removes leftover building and claimed directories except claims still in
-a live launch's clone stage, and spares are evicted with their caches after more than 30 days unused. Discard renames
-owned content to private trash names and uses the existing identity-checked confined removal, which never follows
-symlinks or crosses mounts. Nothing under `.farhelm-spares` that Farhelm did not put there is protected: a spare or
-building folder there that was removed and recreated, or otherwise replaced, is out of band, and Farhelm may adopt it
-and delete it (see the dedicated-ownership paragraph under Supported user environments).
+Turning the global switch off affects future creates. After each repository's next clone stage ends on that host, the
+background attempt discards its spare instead of building, and a create using another checkout root discards the spare
+at the old root first. Accepted creates and retries keep their frozen choices. Startup removes leftover building and
+claimed directories except claims still in a live launch's clone stage, and spares are evicted with their caches after
+more than 30 days unused. Discard renames owned content to private trash names and uses the existing identity-checked
+confined removal, which never follows symlinks or crosses mounts. Nothing under `.farhelm-spares` that Farhelm did not
+put there is protected: a spare or building folder there that was removed and recreated, or otherwise replaced, is out
+of band, and Farhelm may adopt it and delete it (see the dedicated-ownership paragraph under Supported user
+environments).
 
 Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete. A
 completed preparation permits ordinary restart without repeating clone or hook. Interrupted, missing, corrupt or
