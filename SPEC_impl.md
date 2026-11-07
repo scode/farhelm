@@ -2770,32 +2770,59 @@ journal cap and `MAX_SNAPSHOT`.
 
 This section covers the old terminals for as long as both kinds exist. Terminals created with the supervisor's switch on
 run in terminal hosts instead ("Terminal host"), and a session moves its agent there one Restart at a time, its old tabs
-staying in tmux until they are closed. tmux stays required, installed and version-checked exactly as below for the whole
-transition, and this path changes only for what the switch needs and for bug fixes.
+staying in tmux until they are closed. Installation keeps requiring, installing and version-checking tmux exactly as
+below for the whole transition (the installer, the desktop app's preflight, provisioning and `farhelm helm setup`). The
+running supervisor does not: it uses tmux only for old terminals, and only while a private server holding them runs.
+This path changes only for what the switch needs and for bug fixes.
 
-Each supervisor runs a dedicated tmux server on a private socket (`~/.local/state/farhelm/tmux.sock`) with a locked-down
-generated config: status bar off, `history-limit` sized to SPEC.md's replay floor, `remain-on-exit on`. Every tmux
-command the supervisor runs passes `-u`, so tmux treats it as a UTF-8 client whatever its locale: without it, a
+A supervisor's old terminals live in a dedicated tmux server on a private socket (`~/.local/state/farhelm/tmux.sock`)
+with a locked-down generated config: status bar off, `history-limit` sized to SPEC.md's replay floor,
+`remain-on-exit on`, `exit-empty on`. The server runs only while it holds old terminals. At startup the supervisor
+connects to the socket once, a plain connect that runs no tmux and needs none installed: nothing answering means no old
+terminals this run, and from then on the supervisor runs no tmux command at all (listings, session details, tab lookups,
+the ticker's passes and its `wait-for` client, Delete, shutdown) until it creates an old terminal itself, which only the
+test-only `--new-terminals tmux` switch does. That create's `new-session` starts the server, which reads the config as
+it starts; nothing runs `start-server` (with `exit-empty on` it would leave no server). A server that answers is
+adopted: the two floor checks below, then its session names become the set of tmux sessions this process asks about, and
+`exit-empty on`, `focus-events on` and the `pane-died` hook are set explicitly, since an adopted server never reads the
+config. A session whose agent runs in a terminal host asks tmux about old tabs only while that set holds its tmux
+session (a host session never gains a tmux tab), so a session created in a host never asks; a session with a tmux agent,
+or with no terminal, asks while any server runs. The set shrinks as whole-server listings stop showing a session and as
+the supervisor kills one; tmux ends the server with its last session (an adopted server with none ends at once), and a
+command that reports no server stops all tmux traffic for the rest of the process unless an old terminal is created
+again. A server that answers but cannot be used (the tmux binary missing or below the floor, or the server below it) is
+left running untouched and treated as unusable: the supervisor starts all the same, never asks that server anything, and
+reports its sessions not alive. Their agents may still run there, so while it lasts (a state of the running supervisor,
+not stored) the supervisor refuses to Delete or Restart a session whose agent may live on that server (Delete would
+leave the agent running with nothing to end it and the server alive for it; Restart would start a second agent beside
+it) and refuses to create old terminals, naming the server and the way out: install a supported tmux and restart the
+supervisor, or stop those agents. What is not held back: reload and the ticker record those sessions as exited, as for a
+server that is gone, since nothing can be read from it; once tmux is fixed and the supervisor restarted, the server is
+adopted again and Delete ends such a session's agent with its tmux session. Old tabs of a session whose agent runs in a
+terminal host are not looked for in an unusable server, so that session's Delete does not end them. `exit-empty` and
+`wait-for` were verified against tmux 3.7c: setting `exit-empty on` ends an empty server at once, and a pending
+`wait-for` client does not keep an emptying server alive (tmux releases it, successfully, as the server exits). Every
+tmux command the supervisor runs passes `-u`, so tmux treats it as a UTF-8 client whatever its locale: without it, a
 supervisor whose first set of `LC_ALL`, `LC_CTYPE` and `LANG` names no UTF-8 locale (the Mac's, since an app opened from
 Finder or the Dock gets no `LANG`, or a Linux host whose user manager has none) gets format output with control
 characters and non-ASCII characters replaced by `_`, which broke every tab-separated read and every pane title holding a
-non-ASCII character (found on the Mac in v0.34.0-rc.2). Every start, fresh or adopting a running server, also sets a
-global `pane-died` hook that signals a `wait-for` channel; the supervisor's ticker keeps one `tmux wait-for` client
-blocked on it and runs its dead-tab reap as soon as it fires, so a tab whose shell exits is closed right away instead of
-on the next tick, which remains the fallback. One tmux session per Farhelm session; window 0 is the agent terminal in
-practice, additional windows are the terminal tabs. Neither is identified by position: the supervisor stamps each window
-it creates with a tmux user option — the agent's window with the session id, a tab's window with a minted tab id that is
-also that tab's whole record. The agent terminal is identified by its durable pane record first, with the marker as the
-recovery aid for a session whose record is empty; tabs have no durable record at all and are rediscovered from their
-markers alone, because anything that reaches the private server can conjure windows a positional scan would adopt: a
-program pointed at its socket, a process the agent login shell's startup files started before the launch removed `TMUX`,
-or a session or tab launched by a version that did not remove it yet. Agents and tabs no longer inherit
-`TMUX`/`TMUX_PANE` (removed by the launch shim for agents, after the login shell's startup files, and by the tab helper
-before starting its shell; see `PRIVATE_TMUX_ENV_VARS` in launch.rs). That was checked statically against Claude Code
-2.1.286 and Codex 0.159.3, not by running them: both wrap clipboard and similar escapes in tmux passthrough when `TMUX`
-is set, and the supervisor unwraps passthrough itself, so either form reaches xterm.js; Claude Code also keeps truecolor
-without `TMUX` instead of dropping to 256 colors (the private tmux advertises RGB) and stops showing its tmux scroll
-hint. The user's own tmux usage and config are untouched.
+non-ASCII character (found on the Mac in v0.34.0-rc.2). Every server, fresh (from the config) or adopted (explicitly),
+also has a global `pane-died` hook that signals a `wait-for` channel; while a server runs, the supervisor's ticker keeps
+one `tmux wait-for` client blocked on it and runs its dead-tab reap as soon as it fires, so a tab whose shell exits is
+closed right away instead of on the next tick, which remains the fallback. One tmux session per Farhelm session; window
+0 is the agent terminal in practice, additional windows are the terminal tabs. Neither is identified by position: the
+supervisor stamps each window it creates with a tmux user option — the agent's window with the session id, a tab's
+window with a minted tab id that is also that tab's whole record. The agent terminal is identified by its durable pane
+record first, with the marker as the recovery aid for a session whose record is empty; tabs have no durable record at
+all and are rediscovered from their markers alone, because anything that reaches the private server can conjure windows
+a positional scan would adopt: a program pointed at its socket, a process the agent login shell's startup files started
+before the launch removed `TMUX`, or a session or tab launched by a version that did not remove it yet. Agents and tabs
+no longer inherit `TMUX`/`TMUX_PANE` (removed by the launch shim for agents, after the login shell's startup files, and
+by the tab helper before starting its shell; see `PRIVATE_TMUX_ENV_VARS` in launch.rs). That was checked statically
+against Claude Code 2.1.286 and Codex 0.159.3, not by running them: both wrap clipboard and similar escapes in tmux
+passthrough when `TMUX` is set, and the supervisor unwraps passthrough itself, so either form reaches xterm.js; Claude
+Code also keeps truecolor without `TMUX` instead of dropping to 256 colors (the private tmux advertises RGB) and stops
+showing its tmux scroll hint. The user's own tmux usage and config are untouched.
 
 The private server is an implementation detail. Direct interaction with it, by the user or by a program running in a
 session, is unsupported (SPEC.md, "Ownership during cleanup and provisioning"): Farhelm handles its own objects going
@@ -2842,18 +2869,20 @@ chosen is version-checked and refused by name (binary path, version found, floor
 TWICE, because a tmux server outlives the supervisor by design: once to the client executable before any server is
 started, and once more to the server the supervisor adopts on a socket that already has one — the server is the
 component that holds sessions and the component that has crashed, so a 3.7c client driving a pre-floor server left over
-from before an upgrade is exactly the case the floor exists for. A below-floor adopted server is refused without being
-killed: the message names the socket, both versions, and the floor, and the operator drains or kills that server
-deliberately. The override is "you own the substrate": a way to run something newer or differently built, not a
-supported configuration. Linux releases bundle a private musl tmux build per architecture, which provisioning installs
-only when the host has nothing acceptable (Linuxbrew's tmux is the documented alternative); either way the unit
-provisioning writes names the accepted binary through `FARHELM_TMUX`, so a private build left behind by an earlier
-installation cannot shadow a host tmux that was accepted later. The Mac app bundles none: the desktop app takes an
-ambient `FARHELM_TMUX` as given, otherwise probes `/opt/homebrew/bin`, `/usr/local/bin` (Homebrew on the two
-architectures) and `/opt/local/bin` (MacPorts) in that order — because GUI apps do not inherit the shell `PATH` — and
-hands a hit to its managed supervisor through `FARHELM_TMUX`; with no hit it sets nothing and the supervisor's ordinary
-`PATH` lookup applies. Homebrew's tmux is the recommended way to meet the floor on a Mac, not the only one the code
-accepts.
+from before an upgrade is exactly the case the floor exists for. A below-floor adopted server is not used and not
+killed: the supervisor logs the socket, both versions and the floor, starts, and reports that server's sessions as not
+alive (refusing their Delete and Restart, above) until the operator drains or kills it deliberately. Earlier builds
+refused to start instead; now that a supervisor serves new terminals without tmux, refusing would take those down over
+sessions it cannot serve anyway. A supervisor that finds no server runs neither check. The override is "you own the
+substrate": a way to run something newer or differently built, not a supported configuration. Linux releases bundle a
+private musl tmux build per architecture, which provisioning installs only when the host has nothing acceptable
+(Linuxbrew's tmux is the documented alternative); either way the unit provisioning writes names the accepted binary
+through `FARHELM_TMUX`, so a private build left behind by an earlier installation cannot shadow a host tmux that was
+accepted later. The Mac app bundles none: the desktop app takes an ambient `FARHELM_TMUX` as given, otherwise probes
+`/opt/homebrew/bin`, `/usr/local/bin` (Homebrew on the two architectures) and `/opt/local/bin` (MacPorts) in that order
+— because GUI apps do not inherit the shell `PATH` — and hands a hit to its managed supervisor through `FARHELM_TMUX`;
+with no hit it sets nothing and the supervisor's ordinary `PATH` lookup applies. Homebrew's tmux is the recommended way
+to meet the floor on a Mac, not the only one the code accepts.
 
 The desktop app additionally owns a PREFLIGHT of its own: before it spawns its managed supervisor — never before, and
 never for a supervisor it merely discovers already answering — it probes the SAME candidate it is about to hand that

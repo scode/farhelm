@@ -435,7 +435,8 @@ async fn an_inherited_ignored_hangup_leaves_the_supervisor_running() {
 /// is waiting on never returns.
 ///
 /// Why: building a supervisor runs tmux commands with no timeout of their
-/// own (starting the private server among them). If the stop were only
+/// own (adopting a private server left running with old terminals, which
+/// lists its sessions). If the stop were only
 /// watched once serving began, a tethering parent that went away during a
 /// hung startup would leave its supervisor running with no parent.
 /// Nothing streams before startup finishes, so there is nothing to close in
@@ -445,21 +446,21 @@ async fn a_closed_tether_stops_a_supervisor_stuck_in_startup() {
     use std::os::unix::fs::PermissionsExt as _;
     let state = farhelm_teststate::tempdir().expect("supervisor state dir");
     let real = farhelm_supervisor::tmux::resolve_tmux_program(None, None);
-    let pidfile = state.path().join("stuck-start-server.pid");
+    let pidfile = state.path().join("stuck-list-sessions.pid");
     let quote = |path: &std::path::Path| shell_words::quote(&path.to_string_lossy()).into_owned();
-    // `start-server` parks in a sleep whose pid the test records (so it can
-    // be reaped afterwards); everything else, including the version probe,
-    // is real tmux.
+    // `list-sessions`, the adoption's listing, parks in a sleep whose pid
+    // the test records (so it can be reaped afterwards); everything else,
+    // including the version probes, is real tmux.
     let script = format!(
         "#!/bin/sh\n\
          case \" $* \" in\n\
-         *\" start-server \"*) echo $$ > {pidfile}; exec sleep 120;;\n\
+         *\" list-sessions \"*) echo $$ > {pidfile}; exec sleep 120;;\n\
          esac\n\
          exec {real} \"$@\"\n",
         pidfile = quote(&pidfile),
         real = quote(&real),
     );
-    let wrapper = state.path().join("tmux-stuck-start-server");
+    let wrapper = state.path().join("tmux-stuck-list-sessions");
     std::fs::write(&wrapper, script).expect("write the tmux wrapper");
     std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755))
         .expect("make the tmux wrapper executable");
@@ -476,6 +477,25 @@ async fn a_closed_tether_stops_a_supervisor_stuck_in_startup() {
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
     let _tmux = tmux_guard_for_supervisor_child(state.path().join("tmux.sock"), command.as_std());
+    // Premise: a private server holding an old terminal, which is what makes
+    // startup ask tmux at all (a supervisor with none runs no tmux command).
+    let started = tokio::process::Command::new(&real)
+        .arg("-S")
+        .arg(state.path().join("tmux.sock"))
+        .args([
+            "-f",
+            "/dev/null",
+            "new-session",
+            "-d",
+            "-s",
+            "old",
+            "sleep",
+            "600",
+        ])
+        .status()
+        .await
+        .expect("start the private server's old terminal");
+    assert!(started.success(), "premise: the private server started");
     let mut child = command.spawn().expect("spawn supervisor");
     let stuck = wait_for_pid_file(&pidfile, 20).await;
     let _reap_stuck = PidKillGuard::arm(stuck);

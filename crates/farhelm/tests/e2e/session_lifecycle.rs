@@ -1563,10 +1563,15 @@ async fn create_with_relative_cwd_is_rejected() {
     // saw nothing; a rejected create could in principle still have raced a
     // tmux `new-session` before validation ran. Probe the private socket
     // directly. No prior test in this harness created a tmux session, so
-    // the server may not even be running yet — that absence itself proves
-    // there is no session, the same shape `harness::kill_tmux_server_and_wait`
-    // relies on.
-    let probe = tmux_query(&h.state.path().join("tmux.sock"), &["list-sessions"]).await;
+    // the server may not even be running — and a supervisor that has made
+    // no old terminal never starts one, so the socket file may not exist at
+    // all. Either absence proves there is no session, the same shape
+    // `harness::kill_tmux_server_and_wait` relies on.
+    let socket = h.state.path().join("tmux.sock");
+    if !socket.exists() {
+        return;
+    }
+    let probe = tmux_query(&socket, &["list-sessions"]).await;
     if probe.status.success() {
         assert!(
             String::from_utf8_lossy(&probe.stdout).trim().is_empty(),
@@ -2268,41 +2273,40 @@ fn looks_like_a_tmux_timeout(error: &anyhow::Error) -> bool {
 }
 
 /// The adopted-server gap: tmux reads a `-f` config only when it STARTS a
-/// server, so `ensure_server`'s adopt-a-surviving-server path (the
-/// ordinary case across a supervisor restart or upgrade) never rereads
-/// `TmuxDriver::config_body` at all — which is exactly why `focus-events`
-/// is not in that config in the first place, and is instead reconciled by
-/// an explicit, unconditional `set-option` every time `ensure_server` runs
-/// (see that call's own doc for the full rationale, including what this
-/// option does and does not actually change for us). A test that only
-/// ever hits the fresh-start path would keep passing even if that
-/// explicit reconciliation silently regressed back to "rely on the config
-/// file", because fresh starts read the config regardless. This test
-/// provokes adoption specifically: a server is started by hand, on this
-/// state dir's socket, with focus-events deliberately off — standing in
-/// for a survived server an upgraded supervisor binary reattaches to,
-/// whose config predates this option (or simply had it off) — and only
-/// THEN does a `Supervisor` get constructed against the same socket,
-/// which `ensure_server` must adopt rather than start fresh.
+/// server, so a supervisor adopting a surviving server (the ordinary case
+/// across a supervisor restart or upgrade, for a host with old terminals)
+/// never rereads `TmuxDriver::config_body` at all, which is why
+/// `TmuxDriver::adopt_running_server` sets the options it manages
+/// explicitly. Two are pinned here: `focus-events` (see
+/// `reconcile_adopted_server` for what it does and does not change for
+/// us) and `exit-empty`, without which an earlier build's server, started
+/// with `exit-empty off`, would outlive the host's last old terminal. A
+/// test that only ever hits the fresh-start path would keep passing even if
+/// that explicit reconciliation silently regressed back to "rely on the
+/// config file", because fresh starts read the config regardless. This
+/// test provokes adoption specifically: a server is started by hand, on
+/// this state dir's socket, holding one session, with both options
+/// deliberately off — standing in for a survived server an upgraded
+/// supervisor binary reattaches to, whose config predates them — and only
+/// THEN does a `Supervisor` get constructed against the same socket, which
+/// must adopt it rather than start fresh.
 ///
-/// `focus-events` is a SERVER option (`set -s`), so the live query below
-/// uses `show-options -s` to match — a `-g` query would rely on tmux's
-/// scope inference rather than pinning the same table the fix itself
-/// names explicitly.
+/// Both are SERVER options (`set -s`), so the live queries below use
+/// `show-options -s` to match — a `-g` query would rely on tmux's scope
+/// inference rather than pinning the same table the fix itself names
+/// explicitly.
 #[farhelm_testtrace::test]
-async fn adopted_tmux_server_gets_focus_events_explicitly_not_just_from_config() {
+async fn adopted_tmux_server_gets_its_options_explicitly_not_just_from_config() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("state");
     let sock = state.path().join("tmux.sock");
     let _tmux = TmuxServerGuard::new(sock.clone());
 
     // Hand-roll a server on this socket BEFORE any farhelm code touches
-    // this state dir, deliberately with the option off — this is the
+    // this state dir, deliberately with both options off — this is the
     // "survived server" half of the adoption gap, so it must exist first.
-    // `start-server` alone (rather than `new-session`) is enough to leave
-    // a live, queryable server: `exit-empty off` keeps it up with no
-    // sessions, so there is no need to spawn a pointless shell just to
-    // give it something to hold open.
+    // It holds one session, as a survived server with old terminals does:
+    // a supervisor ends a session-less server it adopts.
     let off_conf = state.path().join("pre-existing.conf");
     tokio::fs::write(
         &off_conf,
@@ -2315,15 +2319,15 @@ async fn adopted_tmux_server_gets_focus_events_explicitly_not_just_from_config()
         .arg(&sock)
         .arg("-f")
         .arg(&off_conf)
-        .arg("start-server")
+        .args(["new-session", "-d", "-s", "survivor", "sleep", "600"])
         .status()
         .await
         .expect("spawn scratch tmux");
     assert!(started.success(), "test setup: scratch tmux must start");
 
-    // Now let the real code run: `ensure_server` (via `Supervisor::new_with_exe`)
-    // finds this socket already live and must ADOPT it, not start a fresh
-    // server whose config it would otherwise get to read.
+    // Now let the real code run: `Supervisor::new_with_exe` finds this
+    // socket already live and must ADOPT it, not start a fresh server whose
+    // config it would otherwise get to read.
     Supervisor::new_with_exe(state.path(), farhelm_bin().into())
         .await
         .expect("supervisor construction must adopt the pre-existing server");
@@ -2339,6 +2343,13 @@ async fn adopted_tmux_server_gets_focus_events_explicitly_not_just_from_config()
         "focus-events on",
         "adopting a pre-existing server must still bring focus-events on, not just \
          a fresh server's config"
+    );
+    let out = tmux_query(&sock, &["show-options", "-s", "exit-empty"]).await;
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "exit-empty on",
+        "an adopted server must end with its last session: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
 }
 
@@ -3113,7 +3124,6 @@ async fn control_mode_attach_to_missing_session_reports_tmux_reason() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
     let driver = TmuxDriver::new(state.path());
-    driver.ensure_server().await.expect("ensure server");
     let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     // A decoy session, so tmux's refusal names the missing session
     // ("can't find session: ...") instead of the generic "no sessions" a
@@ -3795,10 +3805,8 @@ async fn persisted_sessions_survive_a_supervisor_restart() {
 /// for "the host rebooted" or "tmux crashed independently of the
 /// supervisor" — the case M1 had no answer for at all (the session simply
 /// vanished from the in-memory map). The second `Supervisor` construction
-/// starts a fresh, empty tmux server on the same socket (an ordinary
-/// consequence of `ensure_server`'s idempotent-adopt-or-start behavior),
-/// so `has_session` genuinely finds nothing for the reloaded row's
-/// `tmux_name` — this is not a mocked failure.
+/// finds no server on the same socket and starts none, so the reloaded
+/// row's pane genuinely is not there — this is not a mocked failure.
 #[farhelm_testtrace::test]
 async fn restart_gap_lists_sessions_without_a_terminal_and_attach_fails() {
     let h = harness().await;

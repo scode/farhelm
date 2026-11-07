@@ -17,6 +17,7 @@
 
 mod control_codec;
 mod input;
+mod presence;
 mod query_strip;
 mod sink;
 mod stream;
@@ -578,6 +579,15 @@ pub struct TmuxDriver {
     /// wake many reapers together, so clones share this admission limit rather
     /// than amplifying one stuck server into unbounded process churn.
     shutdown_admission: Arc<tokio::sync::Semaphore>,
+    /// Whether a server runs and which sessions it holds, as this process
+    /// knows it, shared by every clone (see the `presence` module). A
+    /// supervisor's driver answers without asking tmux once it knows no
+    /// server runs; a driver nobody probed asks every time.
+    presence: Arc<presence::ServerPresence>,
+    /// Set once [`Self::prepare_server_start`] has checked the binary and
+    /// written the config, so that only the first old terminal a process
+    /// creates pays for them. Shared by every clone.
+    prepared: Arc<tokio::sync::OnceCell<()>>,
     /// A deterministic hold around the shutdown command, tests only.
     ///
     /// The production handoff is an external tmux command whose process exit
@@ -1186,9 +1196,9 @@ fn search_path(path_var: &std::ffi::OsStr, program: &Path) -> Option<PathBuf> {
 ///
 /// This covers only HALF the substrate. Clearing it means a fresh server
 /// would be started from an acceptable binary; it says nothing about a
-/// server already running on the private socket, which `start-server`
+/// server already running on the private socket, which the supervisor
 /// adopts instead of replacing. [`TmuxDriver::require_supported_server`]
-/// is the other half and runs right after.
+/// is the other half and runs right after it on adoption.
 fn require_supported_tmux(program: &Path, v_output: &str) -> anyhow::Result<()> {
     let found = parse_tmux_version(v_output)
         .with_context(|| format!("checking the tmux at {}", program.display()))?;
@@ -1820,8 +1830,8 @@ fn parse_pane_process_line(session: &str, out: &str) -> anyhow::Result<PaneProbe
     // A stale pane id against a server that has since dropped every
     // session it knew (this one killed, nothing else ever created)
     // does NOT error the way `has_session`'s docs describe for
-    // `has-session` — verified empirically against this exact
-    // config's `exit-empty off` server — it exits zero with every
+    // `has-session` — verified empirically against an `exit-empty off`
+    // server, the configuration earlier builds started — it exits zero with every
     // format variable expanding empty, mirroring the same "nothing to
     // inspect" shape `bracket_paste_flag_is_missing` already handles
     // for pane-mode queries. With the fields reordered, that case is
@@ -2420,9 +2430,13 @@ fn scrub_secrets(text: &str, secrets: &[String]) -> String {
 
 impl TmuxDriver {
     /// `state_dir` owns the socket and generated config. The config file
-    /// is rewritten whenever the driver starts, while a server already
-    /// running on the private socket retains its live option values until
-    /// explicitly changed or restarted.
+    /// is rewritten before the first server this driver starts, while a
+    /// server already running on the private socket retains its live
+    /// option values until explicitly changed or restarted.
+    ///
+    /// The driver claims nothing about whether a server runs until
+    /// [`Self::adopt_running_server`] has probed: an unprobed driver asks
+    /// tmux every time, as test and tool drivers want.
     ///
     /// Uses the production control-mode budgets ([`CONTROL_EXCHANGE_TIMEOUT`],
     /// [`PANE_LIST_TIMEOUT`]); callers that need different ones (integration
@@ -2474,16 +2488,25 @@ impl TmuxDriver {
             exchange_timeout: budgets.exchange,
             pane_list_timeout: budgets.pane_list,
             shutdown_admission: Arc::new(tokio::sync::Semaphore::new(4)),
+            presence: Arc::new(presence::ServerPresence::new()),
+            prepared: Arc::new(tokio::sync::OnceCell::new()),
             #[cfg(test)]
             disable_output_gate: None,
         }
     }
 
-    /// The generated server config. Every line is load-bearing:
-    /// - `exit-empty off`: without it `start-server` on a fresh socket
-    ///   leaves no server at all (verified: `list-sessions` reports "no
-    ///   server running"), and an existing server would exit the moment
-    ///   its last session was killed.
+    /// The generated server config, read by every server this driver
+    /// starts: the server is started by the `new-session` of the first old
+    /// terminal ([`Self::create_session`]), never by `start-server`. Every
+    /// line is load-bearing:
+    /// - `exit-empty on`: the server ends with its last session, so a
+    ///   machine whose old terminals are gone runs no tmux at all (SPEC.md,
+    ///   "Terminal substrate"). tmux's default, stated so that the intent
+    ///   survives a reader who remembers the `exit-empty off` earlier
+    ///   builds set because they started the server empty with
+    ///   `start-server` (which, with this on, leaves no server: verified).
+    ///   A server adopted from an earlier build gets it by `set-option`
+    ///   ([`Self::adopt_running_server`]).
     /// - `status off` / no prefix: tmux UI must never appear (SPEC_impl).
     /// - `history-limit`: the SPEC.md replay floor. New servers derive it
     ///   from the same `HISTORY_LIMIT` that replay capture requests. An
@@ -2518,13 +2541,14 @@ impl TmuxDriver {
     ///   pay. Like every line here it reaches FRESH servers only — tmux
     ///   reads a `-f` config when it starts a server, so an adopted one
     ///   keeps whatever `escape-time` it was started with, and this
-    ///   driver does not reconcile it after the fact (`focus-events`,
-    ///   below, is the one option that gets that treatment).
-    ///
-    /// NOT set here: `focus-events`. It is a server option that must be
-    /// reconciled on EVERY `ensure_server` call, not just a fresh start —
-    /// see `ensure_server`'s own doc for why a config-file line alone
-    /// cannot do that job, and for what the option actually buys us.
+    ///   driver does not reconcile it after the fact (`exit-empty`,
+    ///   `focus-events` and the `pane-died` hook are the ones that get that
+    ///   treatment, in [`Self::reconcile_adopted_server`]).
+    /// - `focus-events on` and the `pane-died` hook: see
+    ///   [`Self::reconcile_adopted_server`] for what each buys. They are
+    ///   here so that a fresh server has them before its first pane can
+    ///   die, and set again explicitly on an adopted server, which never
+    ///   reads this file.
     ///
     /// NOT set here: `window-size manual`. It crashes the tmux 3.4 server
     /// outright — `new-session` then returns "server exited unexpectedly",
@@ -2546,15 +2570,17 @@ impl TmuxDriver {
     /// a failure mode worth re-earning on the next floor change.
     pub(crate) fn config_body() -> String {
         format!(
-            "set -s exit-empty off\n\
+            "set -s exit-empty on\n\
              set -s escape-time 0\n\
+             set -s focus-events on\n\
              set -s default-terminal 'xterm-256color'\n\
              set -as terminal-features ',xterm-256color:RGB'\n\
              setw -g window-style 'fg=#ffffff,bg=#282c34'\n\
              set -g status off\n\
              set -g prefix None\n\
              set -g history-limit {HISTORY_LIMIT}\n\
-             setw -g remain-on-exit on\n"
+             setw -g remain-on-exit on\n\
+             set-hook -g pane-died 'wait-for -S {PANE_DIED_CHANNEL}'\n"
         )
     }
 
@@ -2565,8 +2591,8 @@ impl TmuxDriver {
     /// own tmux server and config would be a serious violation, and a
     /// forgotten flag is exactly how that happens. The same funnel is what
     /// makes the `--tmux` / `FARHELM_TMUX` override total — see
-    /// [`TmuxDriver::program`] — with NO exceptions, `ensure_server`'s
-    /// `-V` floor probe included. That probe runs before any server
+    /// [`TmuxDriver::program`] — with NO exceptions, the
+    /// [`Self::check_client_floor`] `-V` probe included. That probe runs before any server
     /// exists, but the extra `-S`/`-f` arguments cost it nothing: tmux
     /// answers `-V` from the client binary and exits without contacting a
     /// server or loading the config file (verified against 3.7c with both
@@ -2621,6 +2647,133 @@ impl TmuxDriver {
         cmd
     }
 
+    /// Refuse, without spawning tmux, a command this process knows has no
+    /// server to answer it, with the error tmux itself gives for an absent
+    /// server.
+    ///
+    /// Answering as tmux would, rather than with an error of its own, is
+    /// what keeps every caller's handling unchanged: each one already reads
+    /// [`TmuxRefusal::NoServer`] (a listing as empty, a kill as done, a
+    /// pane probe as gone). The only difference a caller can see is that no
+    /// process ran, which is the point: a supervisor whose sessions are all
+    /// new terminals issues no tmux command at all, and one whose tmux is
+    /// missing or unusable starts anyway.
+    fn refuse_if_absent(&self) -> anyhow::Result<()> {
+        if !self.presence.known_absent() {
+            return Ok(());
+        }
+        let stderr = format!("no server running on {}", self.socket.display());
+        let refusal = Err(anyhow::Error::new(TmuxCommandFailure::new(
+            stderr.into_bytes(),
+            &[],
+        )));
+        match self.presence.unusable_reason() {
+            None => {
+                refusal.context("no tmux server runs on the private socket, so tmux was not asked")
+            }
+            Some(reason) => refusal.context(format!(
+                "the tmux server on the private socket cannot be used ({reason}), so tmux was \
+                 not asked"
+            )),
+        }
+    }
+
+    /// Refuse a question whose "absent" answer would discard or duplicate
+    /// an old agent, while the server that may hold it cannot be used.
+    ///
+    /// [`Self::refuse_if_absent`] answers such a server as tmux answers for
+    /// none, which is right for a listing (its sessions read as not alive)
+    /// and wrong for [`Self::has_session`] and [`Self::kill_session`]:
+    /// Delete would drop a row whose agent still runs there, leaving it
+    /// with nothing that knows to end it and the server held alive by it
+    /// forever, and Restart would start a second agent beside it. So these
+    /// get an error tmux never gives, which no caller reads as "gone", and
+    /// which says what to do.
+    fn refuse_if_unusable(&self) -> anyhow::Result<()> {
+        match self.presence.unusable_reason() {
+            None => Ok(()),
+            Some(reason) => Err(self.unusable_refusal(&reason)),
+        }
+    }
+
+    /// The error of [`Self::refuse_if_unusable`], also given by the
+    /// supervisor's own refusals ([`Self::unusable_reason`]).
+    fn unusable_refusal(&self, reason: &str) -> anyhow::Error {
+        anyhow::anyhow!(
+            "the private tmux server on {} holds old terminals, but this supervisor cannot use it \
+             ({reason}); their agents may still be running there. Install a supported tmux and \
+             restart the supervisor, or stop those agents, then try again",
+            self.socket.display()
+        )
+    }
+
+    /// Why the private server that answers cannot be used, when that is
+    /// the case: the supervisor refuses Restart of an old session then
+    /// rather than start a second agent beside one that may still run.
+    pub(crate) fn unusable_refusal_if_any(&self) -> Option<anyhow::Error> {
+        self.presence
+            .unusable_reason()
+            .map(|reason| self.unusable_refusal(&reason))
+    }
+
+    /// Whether this process knows the tmux session `name` does not exist
+    /// (no server runs, or the server it adopted or started does not hold
+    /// it), so that asking about it would only waste a command. Unlike
+    /// `!may_hold_session(name)`, false while the server cannot be used:
+    /// its sessions are unknown, not absent.
+    pub(crate) fn knows_session_absent(&self, name: &str) -> bool {
+        self.presence.knows_absent(name)
+    }
+
+    /// Learn from a failed command that the server is gone: tmux said no
+    /// server runs, or its socket file is missing. Every later command is
+    /// then refused without asking ([`Self::refuse_if_absent`]) until this
+    /// process creates an old terminal again.
+    ///
+    /// `started` is where the command began ([`presence::ServerPresence::listing_started`]):
+    /// a session whose create finished after that may have started the
+    /// server this command missed, and is kept.
+    fn observe_failure(&self, error: &anyhow::Error, started: u64) {
+        if matches!(
+            self.refusal(error),
+            Some(TmuxRefusal::NoServer | TmuxRefusal::SocketMissing)
+        ) {
+            self.presence.no_server(started);
+        }
+    }
+
+    /// Whether a private server may run: false once this process knows
+    /// none does. Callers with nothing but tmux to ask (a session whose
+    /// agent is a tmux terminal, or that has no terminal) skip the query
+    /// then, though asking would only be refused without a spawn anyway.
+    pub(crate) fn server_may_run(&self) -> bool {
+        !self.presence.known_absent()
+    }
+
+    /// Whether the tmux session `name` may exist on the private server:
+    /// false when this process knows it does not, because no server runs
+    /// or the server it adopted did not hold it and this process has not
+    /// created it since.
+    ///
+    /// This is how a session whose agent runs in a terminal host decides
+    /// whether to ask tmux about old tabs at all. Its old tabs, if any,
+    /// live in a tmux session that existed when this process adopted the
+    /// server (a host session never gets a new tmux tab), so a name the
+    /// adoption did not see has none.
+    pub(crate) fn may_hold_session(&self, name: &str) -> bool {
+        self.presence.may_hold(name)
+    }
+
+    /// Make this driver claim nothing about the server again, as an
+    /// unprobed one does, for in-process supervisor tests whose fake tmux
+    /// program answers queries for a server that does not exist: with no
+    /// socket to find, startup would know no server runs, and the fake
+    /// would never be asked.
+    #[cfg(test)]
+    pub(crate) fn forget_presence_for_test(&self) {
+        self.presence.forget();
+    }
+
     /// Run one tmux command against the private server and return its
     /// stdout, turning a non-zero exit into an error carrying tmux's own
     /// stderr — tmux explains its refusals in prose ("can't find session",
@@ -2634,7 +2787,7 @@ impl TmuxDriver {
     /// server, returning how many were signaled.
     ///
     /// Called exactly once, from supervisor startup, right after
-    /// [`Self::ensure_server`] — the one moment when "attached control
+    /// [`Self::adopt_running_server`] — the one moment when "attached control
     /// client" and "stale" coincide by construction: this process owns
     /// no clients yet, the state dir is exclusively claimed, and the
     /// private server serves nobody else, so anything still attached
@@ -2827,6 +2980,11 @@ impl TmuxDriver {
     /// [`Self::run`] because startup reaping and the stop-expiry fallback
     /// must both return when the private tmux server is wedged.
     async fn list_client_pids_and_flags(&self) -> anyhow::Result<Option<Vec<(u32, String)>>> {
+        // No server, no clients: the same answer a clientless server gives,
+        // without spawning tmux to hear it.
+        if self.presence.known_absent() {
+            return Ok(None);
+        }
         let mut query = self.command();
         query
             .args(["list-clients", "-F", "#{client_pid} [#{client_flags}]"])
@@ -2879,6 +3037,7 @@ impl TmuxDriver {
             gate.release.notified().await;
         }
 
+        self.refuse_if_absent()?;
         let mut command = self.command();
         command
             .args(["refresh-client", "-t", target, "-f", "no-output"])
@@ -2946,6 +3105,20 @@ impl TmuxDriver {
         deadline: Option<std::time::Duration>,
         redaction: Option<(String, Vec<String>)>,
     ) -> anyhow::Result<Vec<u8>> {
+        self.refuse_if_absent()?;
+        self.run_bytes_asking(args, deadline, redaction).await
+    }
+
+    /// [`Self::run_bytes_within_redacted`] without the refusal of a known
+    /// absent server: for the one command that may start a server,
+    /// [`Self::create_session`]'s `new-session`.
+    async fn run_bytes_asking(
+        &self,
+        args: &[&str],
+        deadline: Option<std::time::Duration>,
+        redaction: Option<(String, Vec<String>)>,
+    ) -> anyhow::Result<Vec<u8>> {
+        let started = self.presence.listing_started();
         let (rendered_args, secrets) = redaction.unwrap_or_else(|| redacted_tmux_args(args));
         // `stdin` is null so tmux can never inherit the supervisor's own
         // stdin — under `farhelm internal stdio` that stdin is the
@@ -2980,40 +3153,205 @@ impl TmuxDriver {
                 out.status,
                 stderr.trim()
             );
-            return Err(anyhow::Error::new(TmuxCommandFailure::new(
-                out.stderr, &secrets,
-            )))
-            .context(context);
+            let error = anyhow::Error::new(TmuxCommandFailure::new(out.stderr, &secrets));
+            self.observe_failure(&error, started);
+            return Err(error).context(context);
         }
         Ok(out.stdout)
     }
 
-    /// Start (or adopt) the private server, floor-check whichever one we
-    /// ended up with, then reconcile the one live option this driver
-    /// actively manages, regardless of which path was taken.
+    /// Probe the private socket once, at supervisor startup, and adopt the
+    /// server that answers there, if one does and this tmux can drive it.
     ///
-    /// The running substrate itself — sessions, panes, scrollback history
-    /// — is left exactly as it is on adoption, per the discovery-first
-    /// rule: never restart a running substrate. `focus-events` is the one
-    /// deliberate exception, normalized on every call rather than only on
-    /// a fresh start, because a server started before this option existed
-    /// (or by an older farhelm build) would otherwise keep whatever stale
-    /// value it already had for the rest of its life — see the
-    /// `set-option` call below for why a config-file line cannot do this
-    /// job alone, and for what the option actually buys us.
+    /// This replaces "start or adopt a server" on every startup. A
+    /// supervisor needs tmux only for old terminals, and those exist only
+    /// while a private server holding them runs, so the server's existence
+    /// is the whole question (the `presence` module): nothing answering on
+    /// the socket means no old terminals this run, and the driver then
+    /// issues no tmux command at all until this process creates an old
+    /// terminal itself (only the test-only `--new-terminals tmux` switch
+    /// does). The probe is a plain connect to the socket, not a tmux
+    /// command, so it needs no tmux binary and starts nothing.
     ///
-    /// TWO floor checks, not one, and both are load-bearing: see
-    /// [`Self::require_supported_server`] for why upgrading the client
-    /// binary does not upgrade the server it adopts.
-    pub async fn ensure_server(&self) -> anyhow::Result<()> {
-        self.ensure_server_with_seam(crate::files::RealFs).await
+    /// A server that answers is adopted: the binary and the server are
+    /// floor-checked ([`Self::check_client_floor`],
+    /// [`Self::require_supported_server`]), its session names become the
+    /// set later queries are limited to, and the options this driver
+    /// manages are reconciled ([`Self::reconcile_adopted_server`]), among
+    /// them `exit-empty on`, so that the server ends with its last session.
+    /// An adopted server without sessions (one an earlier build left
+    /// running empty with `exit-empty off`) is ended at once.
+    ///
+    /// Not being able to use tmux does not refuse startup: with a missing
+    /// or below-floor binary, or a below-floor server, the server is left
+    /// running untouched (it may hold sessions a fixed tmux can still
+    /// serve, and Farhelm never kills a substrate to satisfy a version
+    /// policy), the problem is logged, and the driver treats the server as
+    /// unusable: its sessions read as not alive, and the questions that
+    /// would discard or duplicate one of its agents are refused
+    /// ([`Self::refuse_if_unusable`]). Any other failure to talk
+    /// to an answering server is returned, as before.
+    ///
+    /// `reconcile` is whether this process may change the server: only a
+    /// supervisor holding the state directory's claim may (see
+    /// `StateDirOwnership`). One that lost the claim to a live owner, which
+    /// may be an earlier build relying on its server staying up empty,
+    /// records what it finds and changes nothing, not even ending an empty
+    /// server.
+    pub async fn adopt_running_server(&self, reconcile: bool) -> anyhow::Result<()> {
+        if !self.socket_answers().await {
+            self.presence.set_absent();
+            tracing::info!(
+                socket = %self.socket.display(),
+                "no private tmux server runs, so there are no old terminals; none is started"
+            );
+            return Ok(());
+        }
+        let usable = match self.check_client_floor().await {
+            Ok(()) => self.require_supported_server().await,
+            Err(error) => Err(error),
+        };
+        if let Err(error) = usable {
+            self.presence.set_unusable(format!("{error:#}"));
+            warn!(
+                socket = %self.socket.display(),
+                error = %format!("{error:#}"),
+                "a private tmux server runs, but this supervisor cannot use it; its old \
+                 terminals are reported not alive, Delete and Restart of them are refused, and \
+                 the server is left running"
+            );
+            return Ok(());
+        }
+        let names = match self.run(&["list-sessions", "-F", "#{session_name}"]).await {
+            Ok(out) => out
+                .lines()
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>(),
+            Err(error) if self.is_definitively_empty(&error) => Vec::new(),
+            Err(error) => return Err(error).context("listing the adopted tmux server's sessions"),
+        };
+        if !reconcile {
+            self.presence.adopted(names);
+            return Ok(());
+        }
+        if names.is_empty() {
+            // `kill-server`, not just `exit-empty on`: tmux does not exit
+            // while any client is attached, and a dead predecessor's control
+            // client can stay attached forever (see
+            // `reap_stale_control_clients`), which would keep an empty server
+            // alive with nothing left to reap it. The refusal of a server
+            // that went first is the same outcome.
+            match self.run(&["kill-server"]).await {
+                Ok(_) => {}
+                Err(error) if self.is_definitively_empty(&error) => {}
+                Err(error) => {
+                    return Err(error).context("ending the empty private tmux server");
+                }
+            }
+            self.presence.set_absent();
+            tracing::info!(
+                socket = %self.socket.display(),
+                "ended an empty private tmux server an earlier supervisor left running"
+            );
+            return Ok(());
+        }
+        match self.reconcile_adopted_server().await {
+            Ok(()) => self.presence.adopted(names),
+            // The last session ended between the listing and now.
+            Err(error) if self.is_definitively_empty(&error) => self.presence.set_absent(),
+            Err(error) => return Err(error),
+        }
+        Ok(())
     }
 
-    /// [`Self::ensure_server`]'s real body, parameterized over the write-
-    /// atomicity seam (items 7/8: production call sites must be
+    /// Whether anything accepts a connection on the private socket. A
+    /// missing socket file and a stale one that refuses both mean no
+    /// server; any other failure is logged and read the same way, since a
+    /// server this process cannot reach is one it cannot use.
+    async fn socket_answers(&self) -> bool {
+        match tokio::net::UnixStream::connect(&self.socket).await {
+            Ok(_) => true,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                ) =>
+            {
+                false
+            }
+            Err(error) => {
+                warn!(
+                    socket = %self.socket.display(),
+                    error = %error,
+                    "could not connect to the private tmux socket; treating it as no server"
+                );
+                false
+            }
+        }
+    }
+
+    /// Set the options this driver manages on a server it adopted, which
+    /// never reads [`Self::config_body`] (tmux reads a `-f` config only
+    /// when it starts a server, and an adopted one may come from an older
+    /// build). Each `set` is idempotent.
+    ///
+    /// `focus-events on`: Claude Code inspects this option and nags
+    /// in-session when it reads off ("tmux focus-events off · add 'set -g
+    /// focus-events on' to ~/.tmux.conf and reattach"); turning it on
+    /// silences that nag and keeps the option truthful for any app that
+    /// queries it. That is ALL it does for us, verified empirically (a
+    /// scratch tmux plus a pane app enabling DEC private mode 1004, probed
+    /// with a real attached client): the option only gates whether tmux
+    /// relays a focus escape it receives from a NORMAL ATTACHED CLIENT's
+    /// pty down to a pane that asked for it. Neither of our two byte paths
+    /// is such a client — input goes in as `send-keys -H` (see
+    /// [`InputClient`]), output comes out through a non-rendering
+    /// control-mode client (see [`OutputStream`]) — so this cannot deliver
+    /// real focus awareness; it only makes the option's advertised state
+    /// match what a well-behaved agent expects to see.
+    ///
+    /// The `pane-died` hook: the ticker's wakeup for an exited tab (see
+    /// [`PANE_DIED_CHANNEL`]). `set-hook` without `-a` replaces the hook
+    /// rather than appending.
+    ///
+    /// `exit-empty on`, last: the server then ends with its last session.
+    /// Set after the others so that a server whose last session ends
+    /// meanwhile fails this call as gone rather than leaving the others
+    /// half applied on a live server.
+    async fn reconcile_adopted_server(&self) -> anyhow::Result<()> {
+        self.run(&["set-option", "-s", "focus-events", "on"])
+            .await?;
+        self.run(&[
+            "set-hook",
+            "-g",
+            "pane-died",
+            &format!("wait-for -S {PANE_DIED_CHANNEL}"),
+        ])
+        .await?;
+        self.run(&["set-option", "-s", "exit-empty", "on"]).await?;
+        Ok(())
+    }
+
+    /// Check the tmux binary against the floor and write the server config,
+    /// ready for a `new-session` that starts the server
+    /// ([`Self::create_session`] calls this before the first old terminal
+    /// a process creates, through [`Self::prepared`]).
+    ///
+    /// No server is started here: with `exit-empty on` a server started
+    /// empty would end at once, so the server is started by the session
+    /// that needs it.
+    pub(crate) async fn prepare_server_start(&self) -> anyhow::Result<()> {
+        self.prepare_server_start_with_seam(crate::files::RealFs)
+            .await
+    }
+
+    /// [`Self::prepare_server_start`]'s real body, parameterized over the
+    /// write-atomicity seam (items 7/8: production call sites must be
     /// injectable through their REAL path, not just through a synthetic
     /// call into `crate::files`). Production always calls
-    /// [`Self::ensure_server`], which supplies [`crate::files::RealFs`].
+    /// [`Self::prepare_server_start`], which supplies
+    /// [`crate::files::RealFs`].
     ///
     /// `seam` is a VALUE, `Copy + Send + 'static`, rather than a `&dyn`
     /// reference: it must cross into a `spawn_blocking` closure (the
@@ -3021,10 +3359,39 @@ impl TmuxDriver {
     /// thread — `tokio::task::block_in_place` was considered instead, but
     /// it panics under this crate's current-thread test runtimes, which
     /// construct a `TmuxDriver` in nearly every integration-style test).
-    pub async fn ensure_server_with_seam<S>(&self, seam: S) -> anyhow::Result<()>
+    pub(crate) async fn prepare_server_start_with_seam<S>(&self, seam: S) -> anyhow::Result<()>
     where
         S: crate::files::FaultSeam + Copy + Send + 'static,
     {
+        self.check_client_floor().await?;
+        if let Some(dir) = self.socket.parent() {
+            tokio::fs::create_dir_all(dir).await?;
+        }
+        // Best-effort-atomic tier (`crate::files` module docs): this
+        // config is rebuilt from `config_body()` before every server this
+        // driver starts and carries no state of its own, so a LOST update
+        // is harmless, but a TORN one could still wedge the very
+        // `new-session` that reads it, which is exactly the failure mode
+        // this tier's rename-based publish (plus, since item 19, a file
+        // fsync before that rename) rules out.
+        let path = self.config.clone();
+        let body = Self::config_body();
+        tokio::task::spawn_blocking(move || {
+            crate::files::overwrite_private_file_sync(&path, body.as_bytes(), &seam)
+        })
+        .await
+        .map_err(|join_err| anyhow::anyhow!("tmux config write task panicked: {join_err}"))??;
+        Ok(())
+    }
+
+    /// Check that the tmux binary this driver runs answers `-V` with a
+    /// version at the floor.
+    ///
+    /// TWO floor checks guard a server this driver drives, and both are
+    /// load-bearing: this one for the binary, and
+    /// [`Self::require_supported_server`] for a server it adopts, since
+    /// upgrading the binary does not upgrade a server already running.
+    async fn check_client_floor(&self) -> anyhow::Result<()> {
         // Resolved for the message only, never for the spawn: `Command`
         // does its own PATH lookup below, and pre-resolving would add a
         // time-of-check gap for nothing. See `program_display_path`.
@@ -3056,80 +3423,12 @@ impl TmuxDriver {
             );
         }
         require_supported_tmux(&named, &String::from_utf8_lossy(&version.stdout))?;
-        if let Some(dir) = self.socket.parent() {
-            tokio::fs::create_dir_all(dir).await?;
-        }
-        // Best-effort-atomic tier (`crate::files` module docs): this
-        // config is rebuilt from `config_body()` on every call and
-        // carries no state of its own, so a LOST update is harmless — the
-        // next `ensure_server` regenerates it regardless — but a TORN one
-        // could still wedge THIS very call (tmux reading a truncated `-f`
-        // file on the fresh-start path), which is exactly the failure
-        // mode this tier's rename-based publish (plus, since item 19, a
-        // file fsync before that rename) rules out.
-        let path = self.config.clone();
-        let body = Self::config_body();
-        tokio::task::spawn_blocking(move || {
-            crate::files::overwrite_private_file_sync(&path, body.as_bytes(), &seam)
-        })
-        .await
-        .map_err(|join_err| anyhow::anyhow!("tmux config write task panicked: {join_err}"))??;
-        self.run(&["start-server"]).await?;
-        // Only now is the substrate's version actually known: the call
-        // above either started a server from the binary just checked, or
-        // silently adopted one that was already there.
-        self.require_supported_server().await?;
-
-        // `focus-events` is deliberately NOT part of `config_body`: tmux
-        // only reads a `-f` config when it STARTS a server, so a config
-        // line would take effect on a fresh server but be silently
-        // skipped when this call instead ADOPTS one already running (the
-        // ordinary case across a supervisor restart or upgrade) — exactly
-        // the gap this explicit, unconditional `set-option` closes,
-        // cheaply (one more tmux round trip at startup) and idempotently
-        // (setting an already-on option to on is a no-op) on both paths
-        // alike, rather than trying to detect "did we just start this
-        // server or adopt it" first.
-        //
-        // Why it matters at all: Claude Code inspects this option and
-        // nags in-session when it reads off ("tmux focus-events off · add
-        // 'set -g focus-events on' to ~/.tmux.conf and reattach"); turning
-        // it on silences that nag and keeps the option truthful for any
-        // app that queries it. That is ALL it does for us, verified
-        // empirically (a scratch tmux plus a pane app enabling DEC
-        // private mode 1004, probed with a real attached client): the
-        // option only gates whether tmux relays a focus escape it
-        // receives from a NORMAL ATTACHED CLIENT's pty down to a pane
-        // that asked for it. Neither of our two byte paths is such a
-        // client — input goes in as `send-keys -H` (see [`InputClient`]),
-        // handing the pane literal bytes directly, never through the
-        // client-side escape parsing this option gates; output comes out
-        // through a non-rendering control-mode client (`tmux -C`, see
-        // [`OutputStream`]), which has no pty and originates no
-        // client-side escapes for this option to gate in the first place.
-        // So this call does not, and cannot, deliver real focus-in/out
-        // awareness through this system — it only makes the option's
-        // advertised state match what a well-behaved agent expects to see.
-        self.run(&["set-option", "-s", "focus-events", "on"])
-            .await?;
-        // The pane-death wakeup (see [`PANE_DIED_CHANNEL`]) is reconciled
-        // here rather than in `config_body` for the same reason as
-        // `focus-events` just above: a `-f` config line would reach only a
-        // server this call starts, never one it adopts from a previous
-        // supervisor. `set-hook` without `-a` replaces the hook rather than
-        // appending, so repeating it on every start is idempotent.
-        self.run(&[
-            "set-hook",
-            "-g",
-            "pane-died",
-            &format!("wait-for -S {PANE_DIED_CHANNEL}"),
-        ])
-        .await?;
         Ok(())
     }
 
     /// Wait until some pane on the private server has died, via the
-    /// `pane-died` hook [`Self::ensure_server`] installs.
+    /// `pane-died` hook the config and [`Self::reconcile_adopted_server`]
+    /// install.
     ///
     /// Returns `Ok` once the hook has signalled [`PANE_DIED_CHANNEL`] since
     /// the previous wait. tmux remembers a signal sent while nobody was
@@ -3138,10 +3437,15 @@ impl TmuxDriver {
     /// pane counts, agent panes included; callers re-read pane state to
     /// find out what actually died.
     ///
-    /// Returns an error as soon as tmux does, which it does at once when no
-    /// server is running. That is not retried here: a caller that loops on
-    /// this must pace its retries itself, or a missing server becomes a
-    /// busy loop of tmux spawns.
+    /// While this process knows no server runs, this waits without spawning
+    /// anything until it creates one (see the `presence` module). Otherwise
+    /// it returns an error as soon as tmux does, which it does at once when
+    /// the server went away unseen; that failure teaches the driver the
+    /// server is gone, so the next call waits instead. A caller that loops
+    /// on this still paces its retries, for failures of any other kind.
+    /// When the server ends with its last session, tmux releases a pending
+    /// waiter successfully (verified against 3.7c), and the caller's next
+    /// pane listing finds no server.
     ///
     /// The `tmux wait-for` client is killed if this future is dropped, so a
     /// waiter never outlives the task awaiting it. It is not a control-mode
@@ -3150,6 +3454,13 @@ impl TmuxDriver {
     /// killed outright can leave its blocked waiter behind; the next pane
     /// death wakes every waiter, so that orphan exits then.
     pub(crate) async fn wait_for_pane_death(&self) -> anyhow::Result<()> {
+        // No server, no panes to die: wait for this process to start one
+        // (an old terminal created under the test-only switch) rather than
+        // spawn a `wait-for` that fails at once. For a supervisor whose
+        // sessions are all new terminals this waits forever, which is how
+        // the ticker's pane-death client stops for the rest of the process.
+        self.presence.wait_until_may_run().await;
+        let started = self.presence.listing_started();
         let mut command = self.command();
         command
             .args(["wait-for", PANE_DIED_CHANNEL])
@@ -3157,11 +3468,14 @@ impl TmuxDriver {
             .kill_on_drop(true);
         let out = command.output().await.context("spawning tmux wait-for")?;
         if !out.status.success() {
-            anyhow::bail!(
+            let context = format!(
                 "tmux wait-for {PANE_DIED_CHANNEL} failed ({}): {}",
                 out.status,
                 String::from_utf8_lossy(&out.stderr).trim()
             );
+            let error = anyhow::Error::new(TmuxCommandFailure::new(out.stderr, &[]));
+            self.observe_failure(&error, started);
+            return Err(error).context(context);
         }
         Ok(())
     }
@@ -3171,7 +3485,7 @@ impl TmuxDriver {
     ///
     /// Farhelm drives a long-lived tmux server through short-lived client
     /// processes, and it keeps that server across supervisor restarts on
-    /// purpose so sessions survive an upgrade. `start-server` ADOPTS a
+    /// purpose so sessions survive an upgrade. A supervisor ADOPTS a
     /// server already owning the socket rather than replacing it. So
     /// installing a 3.7c client over a running 3.4 or 3.7b server clears
     /// the client-side check and then drives every subsequent command
@@ -3188,7 +3502,11 @@ impl TmuxDriver {
     /// user's live sessions; tearing it down to satisfy a version policy
     /// would destroy exactly what the never-restart-a-running-substrate
     /// rule protects. Draining it is a decision only its owner can make,
-    /// so the refusal says so and names what to act on.
+    /// so the refusal says so and names what to act on. The refusal no
+    /// longer stops the supervisor: [`Self::adopt_running_server`] logs
+    /// it and treats the server as unusable, so its sessions read as not
+    /// alive (and are not deleted or restarted) while the supervisor serves
+    /// its new terminals.
     async fn require_supported_server(&self) -> anyhow::Result<()> {
         let reported = self
             .run(&["display-message", "-p", "#{version}"])
@@ -3208,7 +3526,7 @@ impl TmuxDriver {
                  server that is already running: it keeps serving its existing sessions until it \
                  exits. Farhelm will not kill it for you. Drain it deliberately — stop the \
                  sessions you still need elsewhere, then `tmux -S {} kill-server` once nothing on \
-                 it matters — before running a supervisor on this state directory.",
+                 it matters. Until then this supervisor reports its sessions as not alive.",
                 self.socket.display(),
                 self.socket.display()
             ),
@@ -3224,34 +3542,32 @@ impl TmuxDriver {
         Ok(())
     }
 
-    /// Whether a tmux session by this name still exists on the private
-    /// server.
+    /// Whether a tmux session by this name exists on the private server.
     ///
-    /// Used only at startup (`Supervisor::reload_sessions`'s persisted-
-    /// session load) to decide whether a session row read back from
-    /// SQLite describes a still-live terminal or one that ended along
-    /// with a prior tmux server.
+    /// Asked where a session's tmux side may or may not exist: a retried
+    /// create looking for its reserved launch, a failed create deciding
+    /// whether to roll back, a relaunch deciding whether to keep the
+    /// session's tabs, Delete deciding whether there is a tmux session to
+    /// kill, and a tab open deciding whether there is one to open in.
     ///
     /// A nonzero exit alone does NOT answer the question: tmux uses the
-    /// same "command failed" exit status for "no such session" as it does
-    /// for "no server running at all" and other transient failures, and
-    /// only the former is this probe's honest `false`. Conflating the two
-    /// would permanently demote a live session to terminal-less on
-    /// nothing more than a hiccup reaching the private tmux server —
-    /// exactly the "do not guess" failure this module's callers are
-    /// supposed to avoid. So this inspects tmux's own diagnostic text
-    /// instead of trusting the exit code alone, and only two exact
-    /// messages (verified empirically against a scratch server) count as
-    /// the honest `false`:
-    /// - `"can't find session"`, tmux's answer when the server has at
-    ///   least one OTHER session but not this one;
-    /// - `"no current target"`, tmux's answer when the server has NO
-    ///   sessions at all (empirically, `has-session -t =name` degrades to
-    ///   this generic message rather than naming the target it could not
-    ///   find once there is nothing to compare it against) — the exact
-    ///   shape of a freshly restarted supervisor's tmux server before any
-    ///   session outlives the restart, so this case matters in practice,
-    ///   not just in principle.
+    /// same "command failed" exit status for "no such session" as for
+    /// transient failures, and conflating the two would make a hiccup
+    /// reaching the server read as a session that is gone. So this inspects
+    /// tmux's own diagnostic text, and only these count as the honest
+    /// `false` (each verified empirically against a scratch server):
+    /// - `"can't find session"`, the server has OTHER sessions but not this
+    ///   one;
+    /// - `"no current target"`, the server has NO sessions at all
+    ///   (`has-session -t =name` degrades to this generic message once there
+    ///   is nothing to compare against);
+    /// - `"no server running on <socket>"` and a missing socket file: no
+    ///   server runs, so no session does. Earlier builds kept a server
+    ///   running at all times and read its absence as a failure to ask;
+    ///   now the server runs only while it holds old terminals (the
+    ///   `presence` module), so its absence is an ordinary, definitive
+    ///   answer, and a driver that knows no server runs gives it without
+    ///   asking.
     ///
     /// Anything else propagates as an error, stderr included, for the
     /// caller to surface rather than silently misreport.
@@ -3262,6 +3578,7 @@ impl TmuxDriver {
     /// one. Today's fixed-length `fh-<8 hex>` names cannot shadow each
     /// other, but the probe should not depend on that naming detail.
     pub async fn has_session(&self, name: &str) -> anyhow::Result<bool> {
+        self.refuse_if_unusable()?;
         match self.run(&["has-session", "-t", &format!("={name}")]).await {
             Ok(_) => Ok(true),
             // Read from tmux's raw stderr, never the rendered error: the
@@ -3271,33 +3588,6 @@ impl TmuxDriver {
             Err(e)
                 if matches!(
                     self.refusal(&e),
-                    Some(TmuxRefusal::SessionMissing | TmuxRefusal::EmptyServer)
-                ) =>
-            {
-                Ok(false)
-            }
-            Err(e) => Err(e).context("checking tmux session liveness"),
-        }
-    }
-
-    /// Probe a durable tmux name for terminal-less deletion.
-    ///
-    /// This preserves [`Self::has_session`]'s stricter semantics for every
-    /// other caller: a missing private tmux server is normally a driver
-    /// failure, not proof that a particular session is absent. Delete is the
-    /// one exception because it is retiring a durable row that has no terminal
-    /// to kill; tmux's raw missing-session and exact absent-server diagnostics
-    /// prove there is no possible session behind that row. Classification stays
-    /// at the driver boundary, where typed raw stderr is still available,
-    /// rather than searching the rendered error chain in teardown.
-    pub async fn has_session_for_terminal_less_delete(&self, name: &str) -> anyhow::Result<bool> {
-        // Wider than `has_session` by exactly the two absent-server
-        // refusals, which only this caller may read as "no session".
-        match self.run(&["has-session", "-t", &format!("={name}")]).await {
-            Ok(_) => Ok(true),
-            Err(error)
-                if matches!(
-                    self.refusal(&error),
                     Some(
                         TmuxRefusal::SessionMissing
                             | TmuxRefusal::EmptyServer
@@ -3308,9 +3598,7 @@ impl TmuxDriver {
             {
                 Ok(false)
             }
-            Err(error) => {
-                Err(error).context("checking tmux session liveness for terminal-less delete")
-            }
+            Err(e) => Err(e).context("checking tmux session liveness"),
         }
     }
 
@@ -3331,21 +3619,13 @@ impl TmuxDriver {
     /// `kill-server` on the private socket, or manual cleanup someone runs
     /// directly against it.
     ///
-    /// Three tmux diagnostics (verified empirically) all mean the desired
-    /// state — this name is not a live session — was already reached, and
-    /// so are all tolerated the same way: `"can't find session"` (another
-    /// session exists but not this one), `"no current target"` (the server
-    /// is up but has no sessions at all), and `"no server running"` (the
-    /// whole private tmux server is gone). This is DELIBERATELY wider than
-    /// `has_session`'s own tolerance list: `has_session` propagates `"no
-    /// server running"` as a real error (see its own docs) because for
-    /// its one caller — deciding whether a PERSISTED row's tmux survived a
-    /// restart — a vanished server is worth surfacing rather than
-    /// silently guessing "not there". This function's caller, by
-    /// contrast, is unwinding a session it JUST tried to create (or
-    /// tearing one down that is being deleted anyway), where "the whole
-    /// server is gone" and "this one session is gone" both mean the exact
-    /// same thing: there is nothing left for `kill_session` to do.
+    /// The same diagnostics [`Self::has_session`] reads as "not there"
+    /// all mean the desired state, this name is not a live session, was
+    /// already reached, and are tolerated the same way: `"can't find
+    /// session"` (another session exists but not this one), `"no current
+    /// target"` (the server is up but has no sessions at all), and `"no
+    /// server running"` or a missing socket (the whole private tmux server
+    /// is gone, or was never started).
     /// Anything else is a real failure worth surfacing.
     ///
     /// The `=` prefix is load-bearing here even more than in
@@ -3362,17 +3642,17 @@ impl TmuxDriver {
     /// rendered chain embeds the target name and a session named after
     /// one of these phrases would otherwise launder a real failure.
     pub async fn kill_session(&self, name: &str) -> anyhow::Result<()> {
+        self.refuse_if_unusable()?;
         match self.run(&["kill-session", "-t", &format!("={name}")]).await {
-            Ok(_) => Ok(()),
+            Ok(_) => {}
             Err(e)
                 if self
                     .refusal(&e)
-                    .is_some_and(TmuxRefusal::means_session_gone) =>
-            {
-                Ok(())
-            }
-            Err(e) => Err(e),
+                    .is_some_and(TmuxRefusal::means_session_gone) => {}
+            Err(e) => return Err(e),
         }
+        self.presence.ended(name);
+        Ok(())
     }
 
     /// Create a session running `window_cmd` (argv, executed directly by
@@ -3438,8 +3718,42 @@ impl TmuxDriver {
         // should not have to keep true.
         args.push("--");
         args.extend(window_cmd.iter().map(String::as_str));
-        let pane = self.run(&args).await?;
-        Ok(pane.trim().to_string())
+        // The first old terminal a process creates starts the server, which
+        // reads its config as it starts (`new-session` starts one when
+        // none runs; nothing calls `start-server`, see `config_body`).
+        // Nothing may be created beside an old server this process cannot
+        // drive (its `new-session` would land there).
+        self.refuse_if_unusable()?;
+        // Always, once per process, even with a server believed running:
+        // one adopted from an earlier build may have died unseen, and this
+        // `new-session` would then start a fresh one from whatever config
+        // file the earlier build left (`exit-empty off`, no hook), or none.
+        self.prepared
+            .get_or_try_init(|| self.prepare_server_start())
+            .await?;
+        // Noted BEFORE the attempt, and held until it returns: a command
+        // racing this `new-session` (the ticker, a listing) can find no
+        // server because this very create has not started it yet, and
+        // must not teach the driver that none runs. And a `new-session`
+        // that fails can still have started the server and the session (a
+        // lost reply, a timeout), and the caller's next step is to ask tmux
+        // whether it did: noted only on success, a failure would leave the
+        // driver believing no server runs, so that probe would answer
+        // "absent" without asking and the caller would discard the only
+        // record of a possibly running agent. A name that never came to
+        // exist is dropped by the next whole-server listing.
+        // Finished by a guard, so that a create whose caller gave up on it
+        // mid-command is not left in progress forever.
+        struct Finish<'a>(&'a presence::ServerPresence, &'a str);
+        impl Drop for Finish<'_> {
+            fn drop(&mut self) {
+                self.0.create_finished(self.1);
+            }
+        }
+        self.presence.create_started(name);
+        let _finish = Finish(&self.presence, name);
+        let pane = self.run_bytes_asking(&args, None, None).await?;
+        Ok(String::from_utf8_lossy(&pane).trim().to_string())
     }
 
     /// Run `window_cmd` in an EXISTING pane (PLAN_M3.md item 9's terminal
@@ -4489,6 +4803,7 @@ impl TmuxDriver {
         mut retained: T,
         mut reduce: impl FnMut(&mut T, &[u8]),
     ) -> anyhow::Result<T> {
+        self.refuse_if_absent()?;
         let mut child = self
             .command()
             .args(args)
@@ -4695,6 +5010,7 @@ impl TmuxDriver {
         &self,
         refuse_duplicates: bool,
     ) -> anyhow::Result<HashMap<String, PaneState>> {
+        let started = self.presence.listing_started();
         let facts = match self
             .run(&["list-panes", "-a", "-F", PANE_FACT_FORMAT])
             .await
@@ -4709,6 +5025,7 @@ impl TmuxDriver {
                 // (a spawn failure, say) is never tolerated: there is no
                 // tmux diagnostic to even inspect.
                 if self.is_definitively_empty(&e) {
+                    self.presence.listed(started, &Default::default());
                     return Ok(HashMap::new());
                 }
                 return Err(e).context("querying pane states");
@@ -4716,6 +5033,18 @@ impl TmuxDriver {
         };
         let parsed = parse_pane_facts_flagged(&facts);
         let mut states = parsed.states;
+        // A whole-server listing is the one complete account of which tmux
+        // sessions still exist, so it is what shrinks the presence set: a
+        // last tab or agent window ending its session is seen nowhere else.
+        // A listing that dropped a duplicated pane is not complete (that
+        // pane's session may show no other), so it shrinks nothing.
+        if !parsed.duplicated {
+            let present: std::collections::HashSet<&str> = states
+                .values()
+                .map(|state| state.session_name.as_str())
+                .collect();
+            self.presence.listed(started, &present);
+        }
         if refuse_duplicates && parsed.duplicated {
             anyhow::bail!("querying pane states: tmux listed a pane twice");
         }
@@ -4860,8 +5189,9 @@ async fn shutdown_output_control_client(
 /// (derived from the user's state directory), so a session or path named after
 /// one of these phrases would otherwise make an unrelated failure look
 /// tolerated. Each caller then decides which variants it tolerates; they
-/// differ on purpose (see [`TmuxDriver::has_session`] for why a vanished
-/// server is an error there).
+/// differ on purpose (a window probe tolerates [`TmuxRefusal::WindowMissing`],
+/// a session probe does not; only listings tolerate a server caught
+/// mid-teardown).
 ///
 /// Every diagnostic below was verified empirically against tmux 3.4 and 3.7b
 /// as a complete, standalone message.
@@ -4905,7 +5235,10 @@ impl TmuxRefusal {
     fn means_session_gone(self) -> bool {
         matches!(
             self,
-            TmuxRefusal::SessionMissing | TmuxRefusal::EmptyServer | TmuxRefusal::NoServer
+            TmuxRefusal::SessionMissing
+                | TmuxRefusal::EmptyServer
+                | TmuxRefusal::NoServer
+                | TmuxRefusal::SocketMissing
         )
     }
 
@@ -4923,7 +5256,10 @@ impl TmuxRefusal {
     fn means_no_panes(self) -> bool {
         matches!(
             self,
-            TmuxRefusal::EmptyServer | TmuxRefusal::NoServer | TmuxRefusal::ServerExited
+            TmuxRefusal::EmptyServer
+                | TmuxRefusal::NoServer
+                | TmuxRefusal::SocketMissing
+                | TmuxRefusal::ServerExited
         )
     }
 }
@@ -5213,6 +5549,19 @@ mod tests {
     async fn scratch_server_captures_before_releasing_its_directory() {
         let capture = farhelm_testtrace::current_capture().expect("test capture");
         let server = ScratchServer::start().await;
+        // The first session starts the server, which the diagnostics need.
+        server
+            .driver
+            .create_session(
+                "fh-diagnosed",
+                "/",
+                80,
+                24,
+                &[],
+                &["sleep".into(), "60".into()],
+            )
+            .await
+            .expect("a session to diagnose");
         let directory = server.dir.path().to_path_buf();
         drop(server);
         let snapshots = capture.matching("tmux fixture snapshot").unwrap();
@@ -5306,6 +5655,13 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn new_window_failure_does_not_expose_session_token() {
         let server = ScratchServer::start().await;
+        // A decoy, so that a server runs and its refusal is about the
+        // session rather than the server's absence.
+        server
+            .driver
+            .create_session("fh-decoy", "/", 80, 24, &[], &["sleep".into(), "60".into()])
+            .await
+            .expect("decoy session");
         let session = "fh-redaction-missing";
         assert!(
             !server
@@ -6268,7 +6624,7 @@ mod tests {
     /// after it. A driver that checked whatever `tmux` PATH resolves to
     /// and then ran the overridden binary would be strictly worse than no
     /// override at all — it would clear the floor against one program and
-    /// drive another — so this drives `ensure_server` through a stand-in
+    /// drive another — so this drives `prepare_server_start` through a stand-in
     /// binary that reports a too-old version and proves the refusal both
     /// happens and names that binary.
     ///
@@ -6284,7 +6640,7 @@ mod tests {
 
         let driver = TmuxDriver::new_with_program(dir.path(), TmuxBudgets::default(), fake.clone());
         let error = driver
-            .ensure_server()
+            .prepare_server_start()
             .await
             .expect_err("a 3.6 substrate is below the floor");
         let message = format!("{error:#}");
@@ -6343,10 +6699,9 @@ mod tests {
     /// branch would still have passed a looser assertion here.
     ///
     /// Pinning "no config written" alongside the message matters because
-    /// the config write sits between the probe and `start-server`: a
-    /// reordering that wrote it first would leave a stale file behind on
-    /// every failed startup, in a state directory the next supervisor
-    /// reads.
+    /// the config write follows the probe: a reordering that wrote it
+    /// first would leave a stale file behind on every failed preparation,
+    /// in a state directory the next server start reads.
     #[farhelm_testtrace::test]
     async fn a_tmux_that_cannot_be_spawned_refuses_by_name() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -6355,7 +6710,7 @@ mod tests {
         let driver =
             TmuxDriver::new_with_program(dir.path(), TmuxBudgets::default(), absent.clone());
         let error = driver
-            .ensure_server()
+            .prepare_server_start()
             .await
             .expect_err("a program that does not exist cannot be driven");
         let message = format!("{error:#}");
@@ -6378,7 +6733,7 @@ mod tests {
     /// (see `tmux_not_found_message`'s doc comment), and before this test
     /// only a resolved-path fixture existed — which meant a driver change
     /// that stopped routing a bare-name `NotFound` through the helper
-    /// could still pass every `ensure_server` test in this module.
+    /// could still pass every `prepare_server_start` test in this module.
     ///
     /// The chosen name is implausible on any real `PATH` rather than
     /// engineered to be absent by mutating this test process's own
@@ -6392,7 +6747,7 @@ mod tests {
 
         let driver = TmuxDriver::new_with_program(dir.path(), TmuxBudgets::default(), bare.clone());
         let error = driver
-            .ensure_server()
+            .prepare_server_start()
             .await
             .expect_err("a bare name absent from PATH cannot be driven");
         let message = format!("{error:#}");
@@ -6425,7 +6780,7 @@ mod tests {
         let driver =
             TmuxDriver::new_with_program(dir.path(), TmuxBudgets::default(), broken.clone());
         let error = driver
-            .ensure_server()
+            .prepare_server_start()
             .await
             .expect_err("a nonzero -V cannot be treated as a version");
         let message = format!("{error:#}");
@@ -6510,15 +6865,17 @@ mod tests {
         assert_eq!(
             cfg,
             format!(
-                "set -s exit-empty off\n\
+                "set -s exit-empty on\n\
                  set -s escape-time 0\n\
+                 set -s focus-events on\n\
                  set -s default-terminal 'xterm-256color'\n\
                  set -as terminal-features ',xterm-256color:RGB'\n\
                  setw -g window-style 'fg=#ffffff,bg=#282c34'\n\
                  set -g status off\n\
                  set -g prefix None\n\
                  set -g history-limit {HISTORY_LIMIT}\n\
-                 setw -g remain-on-exit on\n"
+                 setw -g remain-on-exit on\n\
+                 set-hook -g pane-died 'wait-for -S farhelm-pane-died'\n"
             )
         );
     }
@@ -6574,26 +6931,28 @@ mod tests {
     ///
     /// Farhelm drives a long-lived server through short-lived clients and
     /// deliberately keeps that server across supervisor restarts so
-    /// sessions survive. `start-server` therefore ADOPTS whatever already
+    /// sessions survive. A supervisor therefore ADOPTS whatever already
     /// owns the private socket. Without a server-side check, the ordinary
     /// upgrade path — install a floor-clearing tmux, restart the
     /// supervisor — clears the client probe and then runs every command
     /// against the old, crash-prone server it was supposed to replace.
     ///
     /// Three things are pinned, all of them regressions someone could
-    /// reintroduce independently: the refusal HAPPENS, it names BOTH
-    /// versions (the client's floor is meaningless without saying which
-    /// server failed it), and the below-floor server is STILL RUNNING
-    /// afterwards. The last one is not politeness — that server holds the
-    /// user's live sessions, and a version policy that reaps them is worse
-    /// than the problem it solves.
+    /// reintroduce independently: the server is NOT USED (startup goes on,
+    /// and the driver treats it as absent, so its sessions read as not
+    /// alive), the server-side check's refusal names BOTH versions and the
+    /// socket (the client's floor is meaningless without saying which
+    /// server failed it, and the operator needs the socket to drain), and
+    /// the below-floor server is STILL RUNNING afterwards. The last one is
+    /// not politeness — that server holds the user's live sessions, and a
+    /// version policy that reaps them is worse than the problem it solves.
     ///
     /// Skips loudly, not silently, when `PATH` cannot supply one tmux on
     /// each side of the floor: a green run that never exercised adoption
     /// would be exactly the false assurance this test exists to remove.
     #[cfg(unix)]
     #[farhelm_testtrace::test]
-    async fn an_adopted_below_floor_server_is_refused_without_being_killed() {
+    async fn an_adopted_below_floor_server_is_left_unused_and_running() {
         let binaries = tmux_binaries_on_path().await;
         let old = binaries
             .iter()
@@ -6605,7 +6964,7 @@ mod tests {
             .cloned();
         let (Some((old, old_version)), Some((new, _))) = (old, new) else {
             println!(
-                "SKIPPED an_adopted_below_floor_server_is_refused_without_being_killed: PATH \
+                "SKIPPED an_adopted_below_floor_server_is_left_unused_and_running: PATH \
                  needs both a tmux below {TMUX_FLOOR} and one at or above it; found {binaries:?}"
             );
             return;
@@ -6619,26 +6978,39 @@ mod tests {
             driver.socket.clone(),
             &old,
         );
-        // The same config the driver would write, so the pre-existing
-        // server is the one `ensure_server` would have produced on this
-        // socket — including `exit-empty off`, without which a
-        // session-less server exits immediately and there is nothing to
-        // adopt.
+        // The same config the driver would write, and a session, so the
+        // pre-existing server is one an earlier supervisor left holding an
+        // old terminal (with `exit-empty on`, a session-less server would
+        // exit at once and there would be nothing to adopt).
         std::fs::write(&driver.config, TmuxDriver::config_body()).expect("seed the server config");
         let started = std::process::Command::new(&old)
             .arg("-S")
             .arg(&driver.socket)
             .arg("-f")
             .arg(&driver.config)
-            .arg("start-server")
+            .args(["new-session", "-d", "-s", "fh-old", "sleep", "600"])
             .status()
             .expect("spawn the below-floor tmux");
         assert!(started.success(), "the below-floor server must start");
 
+        // The check adoption runs, asked first: once adoption has refused
+        // the server, the driver no longer asks it anything.
         let error = driver
-            .ensure_server()
+            .require_supported_server()
             .await
-            .expect_err("adopting a below-floor server must refuse");
+            .expect_err("the server-side floor check refuses a below-floor server");
+        driver
+            .adopt_running_server(true)
+            .await
+            .expect("a below-floor server does not stop the supervisor's startup");
+        assert!(
+            !driver.server_may_run() && !driver.may_hold_session("fh-old"),
+            "a below-floor server is not used: its sessions read as not alive"
+        );
+        assert!(
+            driver.unusable_refusal_if_any().is_some(),
+            "refused as unusable, not mistaken for no server"
+        );
         let message = format!("{error:#}");
         assert!(
             message.contains(&old_version.to_string()),
@@ -6671,13 +7043,13 @@ mod tests {
     }
 
     /// Item 8: the generated-config write must be injectable through its
-    /// REAL production call site (`ensure_server`), not only via a
+    /// REAL production call site (`prepare_server_start`), not only via a
     /// synthetic call directly into `crate::files`. A seam that fails the
-    /// write step must surface through `ensure_server_with_seam`'s
+    /// write step must surface through `prepare_server_start_with_seam`'s
     /// returned error, and — since the failure happens before `rename` —
     /// must never leave a config file behind at all.
     #[farhelm_testtrace::test]
-    async fn ensure_server_with_seam_surfaces_an_injected_config_write_failure() {
+    async fn prepare_server_start_with_seam_surfaces_an_injected_config_write_failure() {
         #[derive(Clone, Copy)]
         struct FailWrite;
         impl crate::files::FaultSeam for FailWrite {
@@ -6690,7 +7062,7 @@ mod tests {
         let driver = TmuxDriver::new(dir.path());
 
         let err = driver
-            .ensure_server_with_seam(FailWrite)
+            .prepare_server_start_with_seam(FailWrite)
             .await
             .expect_err("an injected write failure must propagate");
         assert!(
@@ -6810,17 +7182,26 @@ mod tests {
         let tolerated = |pred: fn(TmuxRefusal) -> bool| -> Vec<TmuxRefusal> {
             all.into_iter().filter(|r| pred(*r)).collect()
         };
+        // A missing socket file is a server that was never started, which
+        // is the ordinary state of a host without old terminals: as gone as
+        // a server that exited.
         assert_eq!(
             tolerated(TmuxRefusal::means_session_gone),
-            [SessionMissing, EmptyServer, NoServer]
+            [SessionMissing, EmptyServer, NoServer, SocketMissing]
         );
         assert_eq!(
             tolerated(TmuxRefusal::means_window_gone),
-            [SessionMissing, WindowMissing, EmptyServer, NoServer]
+            [
+                SessionMissing,
+                WindowMissing,
+                EmptyServer,
+                NoServer,
+                SocketMissing
+            ]
         );
         assert_eq!(
             tolerated(TmuxRefusal::means_no_panes),
-            [EmptyServer, NoServer, ServerExited]
+            [EmptyServer, NoServer, SocketMissing, ServerExited]
         );
     }
 
@@ -8947,17 +9328,23 @@ mod tests {
         }
     }
 
-    /// Terminal-less delete must ask its own raw-stderr classifier, rather
-    /// than inheriting `has_session`'s rendered-error compatibility path.
+    /// The session probe reads absence only from tmux's raw stderr, and
+    /// reads an absent server as an absent session.
     ///
-    /// The fake driver is deliberate: each invocation fails like a tmux
-    /// command but needs no server. Raw diagnostics are checked before the
-    /// classification; negative cases use a socket path containing a missing-
-    /// session phrase to ensure it cannot mask the error. The positive cases cover a
-    /// missing session and both documented absent-server forms.
+    /// Why: Delete, a retried create and a failed create's rollback all
+    /// decide on this answer, and the server now runs only while it holds
+    /// old terminals, so "no server" is an ordinary answer, while any other
+    /// failure must stay an error rather than be guessed into "gone". The
+    /// fake driver is deliberate: each invocation fails like a tmux command
+    /// but needs no server. Raw diagnostics are checked before the
+    /// classification; negative cases use a socket path containing a
+    /// missing-session phrase to ensure it cannot mask the error. Spec: a
+    /// missing session, an empty server and both absent-server forms are
+    /// `false`; a permission failure and an unknown failure are errors
+    /// carrying tmux's stderr.
     #[cfg(unix)]
     #[farhelm_testtrace::test]
-    async fn terminal_less_delete_classifies_only_raw_session_or_server_absence() {
+    async fn the_session_probe_classifies_only_raw_session_or_server_absence() {
         let root = tempfile::tempdir().expect("fixture root");
         let state = root.path().join("owned'state");
         std::fs::create_dir(&state).expect("state directory");
@@ -8994,10 +9381,10 @@ mod tests {
             );
             assert!(
                 !driver
-                    .has_session_for_terminal_less_delete("missing")
+                    .has_session("missing")
                     .await
                     .expect("raw absence is proven"),
-                "the public delete probe must accept its raw absence diagnostic"
+                "the probe must accept its raw absence diagnostic"
             );
         }
 
@@ -9023,16 +9410,9 @@ mod tests {
             // which carries this stderr and therefore the state directory's
             // name ("no current target"): a permission failure read as
             // "session absent" there.
-            driver
-                .has_session("missing")
-                .await
-                .expect_err("has_session must not read a phrase inside the socket path as absence");
-            let error = driver
-                .has_session_for_terminal_less_delete("missing")
-                .await
-                .expect_err(
-                    "unproven liveness must remain an error even with misleading socket-path text",
-                );
+            let error = driver.has_session("missing").await.expect_err(
+                "unproven liveness must remain an error even with misleading socket-path text",
+            );
             assert_eq!(
                 error
                     .downcast_ref::<TmuxCommandFailure>()
@@ -9040,6 +9420,346 @@ mod tests {
                     .stderr_trimmed(),
                 stderr
             );
+        }
+    }
+
+    // ---- The private server only while it holds old terminals ----------
+
+    /// A stand-in tmux that appends each invocation's arguments to `log`,
+    /// one line each, and fails like tmux with no server. It is the
+    /// observable for "this driver ran tmux", which no answer a caller
+    /// gets can show: a refusal without a spawn and a spawned tmux saying
+    /// "no server" read the same to every caller.
+    #[cfg(unix)]
+    fn write_recording_tmux(path: &Path, log: &Path) {
+        write_executable(
+            path,
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> {}\necho 'no server running' >&2\nexit 1\n",
+                shell_words::quote(&log.to_string_lossy())
+            ),
+        );
+    }
+
+    /// What the recording stand-in logged; nothing at all when it never ran.
+    fn recorded_invocations(log: &Path) -> String {
+        std::fs::read_to_string(log).unwrap_or_default()
+    }
+
+    /// A tmux server process on `socket` started by `program` with
+    /// `config`, holding one session `name` when given one, so that a
+    /// driver has something to adopt. With `exit-empty off` in `config` a
+    /// session-less server stays up, the shape an earlier build left.
+    async fn start_raw_server(program: &Path, socket: &Path, config: &Path, name: Option<&str>) {
+        let mut command = tokio::process::Command::new(program);
+        command.arg("-S").arg(socket).arg("-f").arg(config);
+        match name {
+            Some(name) => command.args(["new-session", "-d", "-s", name, "sleep", "600"]),
+            None => command.arg("start-server"),
+        };
+        let status = command.status().await.expect("spawn the raw tmux server");
+        assert!(status.success(), "premise: the raw tmux server started");
+    }
+
+    /// Whether a tmux server answers on `socket`, asked with `program`
+    /// directly rather than through a driver whose knowledge is under test.
+    async fn raw_server_runs(program: &Path, socket: &Path) -> bool {
+        tokio::process::Command::new(program)
+            .arg("-S")
+            .arg(socket)
+            .args(["-f", "/dev/null", "list-sessions"])
+            .output()
+            .await
+            .expect("spawn the raw tmux probe")
+            .status
+            .success()
+    }
+
+    /// A supervisor's driver that found no server runs no tmux at all.
+    ///
+    /// Why: a machine whose sessions are all new terminals must start no
+    /// tmux server and issue no tmux command (the goal the presence model
+    /// exists for), and every path that used to ask tmux for every session
+    /// funnels through these driver calls. The premise is checked on the
+    /// same stand-in: an unprobed driver does spawn it, so an empty log is
+    /// the driver's doing, not a stand-in that never records. Spec: after
+    /// `adopt_running_server` on a socket nothing listens on, the pane
+    /// listing is empty, the session probe says absent, a kill succeeds,
+    /// the startup reap finds no client, the shutdown quiet-down succeeds,
+    /// the version query and an input client are refused, the pane-death
+    /// wait waits, and the recording tmux was never run.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    async fn a_driver_that_found_no_server_runs_no_tmux() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = dir.path().join("recording-tmux");
+        let log = dir.path().join("invocations.log");
+        write_recording_tmux(&fake, &log);
+
+        let unprobed =
+            TmuxDriver::new_with_program(dir.path(), TmuxBudgets::default(), fake.clone());
+        let _ = unprobed.pane_states().await;
+        assert!(
+            !recorded_invocations(&log).is_empty(),
+            "premise: an unprobed driver runs the stand-in, and it records"
+        );
+        std::fs::remove_file(&log).expect("reset the log");
+
+        let driver = TmuxDriver::new_with_program(dir.path(), TmuxBudgets::default(), fake);
+        driver
+            .adopt_running_server(true)
+            .await
+            .expect("no server is not a startup failure");
+        assert!(!driver.server_may_run());
+        assert!(!driver.may_hold_session("fh-anything"));
+        assert!(driver.pane_states().await.expect("listing").is_empty());
+        assert!(
+            driver
+                .pane_states_without_duplicates()
+                .await
+                .expect("listing")
+                .is_empty()
+        );
+        assert!(!driver.has_session("fh-anything").await.expect("probe"));
+        driver.kill_session("fh-anything").await.expect("kill");
+        assert_eq!(driver.reap_stale_control_clients().await.expect("reap"), 0);
+        driver
+            .quiet_control_clients_before_exit()
+            .await
+            .expect("quiet-down");
+        assert!(driver.open_input_client("fh-anything", "%0").await.is_err());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), driver.wait_for_pane_death())
+                .await
+                .is_err(),
+            "the pane-death wait waits while no server runs"
+        );
+        assert_eq!(
+            recorded_invocations(&log),
+            "",
+            "a driver that knows no server runs must not run tmux"
+        );
+    }
+
+    /// A server that answers with an unusable tmux does not stop startup:
+    /// it is left running, its sessions read as not alive, and the
+    /// questions that would discard or duplicate their agents are refused.
+    ///
+    /// Why: a supervisor's new terminals need no tmux, so a missing or
+    /// below-floor binary must not take them down over old sessions it
+    /// cannot serve anyway; the server holds the user's old sessions, which
+    /// a later fixed tmux may still serve, so it is not killed; and their
+    /// agents may still run, so "does this session exist" must not be
+    /// answered "no" (Delete would orphan the agent, Restart would start a
+    /// second). What tells this apart from finding no server is exactly
+    /// that refusal. Spec: with a real server holding a session on the
+    /// socket and a driver whose program does not exist, adoption
+    /// succeeds; listings are empty and no session may be held; the
+    /// session probe, a kill and a create are refused with an error naming
+    /// the unusable server; and the server still runs.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    async fn a_running_server_without_a_usable_tmux_is_left_alone_and_absent() {
+        let dir = farhelm_teststate::tempdir().expect("tempdir");
+        let real = PathBuf::from(DEFAULT_TMUX_PROGRAM);
+        let driver = TmuxDriver::new_with_program(
+            dir.path(),
+            TmuxBudgets::default(),
+            dir.path().join("no-such-tmux"),
+        );
+        let _server = farhelm_teststate::tmux::guard::TmuxServerGuard::with_program(
+            driver.socket.clone(),
+            &real,
+        );
+        std::fs::write(&driver.config, TmuxDriver::config_body()).expect("seed the config");
+        start_raw_server(&real, &driver.socket, &driver.config, Some("fh-old")).await;
+
+        driver
+            .adopt_running_server(true)
+            .await
+            .expect("an unusable tmux does not stop startup");
+        assert!(!driver.server_may_run());
+        assert!(!driver.may_hold_session("fh-old"));
+        assert!(!driver.knows_session_absent("fh-old"));
+        assert!(driver.pane_states().await.expect("listing").is_empty());
+        for refusal in [
+            driver
+                .has_session("fh-old")
+                .await
+                .map(|_| ())
+                .expect_err("probe"),
+            driver.kill_session("fh-old").await.expect_err("kill"),
+            driver
+                .create_session("fh-new", "/", 80, 24, &[], &["true".into()])
+                .await
+                .map(|_| ())
+                .expect_err("create"),
+        ] {
+            let message = format!("{refusal:#}");
+            assert!(message.contains("cannot use it"), "{message}");
+            assert!(
+                driver.refusal(&refusal).is_none(),
+                "no caller may read the refusal as \"gone\": {message}"
+            );
+        }
+        assert!(
+            raw_server_runs(&real, &driver.socket).await,
+            "the server holding the old session is left running"
+        );
+    }
+
+    /// An adopted server's sessions are the ones a driver asks about, and
+    /// the server ends with its last one.
+    ///
+    /// Why: an earlier build's server runs with `exit-empty off`, and it
+    /// must still end once the host's last old terminal is gone; and the
+    /// driver must stop asking once it has. Spec: adopting a real server
+    /// started with `exit-empty off` and holding `fh-a` and `fh-b` makes
+    /// exactly those the sessions it may hold; killing `fh-a` keeps the
+    /// server; killing `fh-b` ends the server (seen with tmux directly) and
+    /// leaves the driver knowing no server runs.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    async fn an_adopted_server_ends_with_its_last_session() {
+        let dir = farhelm_teststate::tempdir().expect("tempdir");
+        let real = PathBuf::from(DEFAULT_TMUX_PROGRAM);
+        let driver = TmuxDriver::new(dir.path());
+        let _server = farhelm_teststate::tmux::guard::TmuxServerGuard::with_program(
+            driver.socket.clone(),
+            &real,
+        );
+        let old_config = dir.path().join("earlier-build.conf");
+        std::fs::write(&old_config, "set -s exit-empty off\n").expect("seed the old config");
+        start_raw_server(&real, &driver.socket, &old_config, Some("fh-a")).await;
+        start_raw_server(&real, &driver.socket, &old_config, Some("fh-b")).await;
+
+        driver.adopt_running_server(true).await.expect("adopt");
+        assert!(driver.may_hold_session("fh-a") && driver.may_hold_session("fh-b"));
+        assert!(!driver.may_hold_session("fh-host"));
+        driver.kill_session("fh-a").await.expect("kill fh-a");
+        assert!(
+            raw_server_runs(&real, &driver.socket).await,
+            "fh-b still holds it"
+        );
+        driver.kill_session("fh-b").await.expect("kill fh-b");
+        assert!(!driver.server_may_run());
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while raw_server_runs(&real, &driver.socket).await {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the adopted server must end with its last session"
+            );
+            // sleep-ok: polls a server's exit, which tmux reports to no one.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// An empty server left by an earlier build is ended by adoption.
+    ///
+    /// Why: before this change every supervisor kept an `exit-empty off`
+    /// server running whether or not it held anything, so a machine whose
+    /// old sessions are all gone still has one; it must go at the first
+    /// start of a supervisor that no longer wants it. Spec: adopting a real
+    /// session-less server started with `exit-empty off` leaves the driver
+    /// knowing no server runs, and the server is gone.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    async fn adoption_ends_an_empty_leftover_server() {
+        let dir = farhelm_teststate::tempdir().expect("tempdir");
+        let real = PathBuf::from(DEFAULT_TMUX_PROGRAM);
+        let driver = TmuxDriver::new(dir.path());
+        let _server = farhelm_teststate::tmux::guard::TmuxServerGuard::with_program(
+            driver.socket.clone(),
+            &real,
+        );
+        let old_config = dir.path().join("earlier-build.conf");
+        std::fs::write(&old_config, "set -s exit-empty off\n").expect("seed the old config");
+        start_raw_server(&real, &driver.socket, &old_config, None).await;
+        assert!(
+            raw_server_runs(&real, &driver.socket).await,
+            "premise: it runs empty"
+        );
+
+        driver.adopt_running_server(true).await.expect("adopt");
+        assert!(!driver.server_may_run());
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while raw_server_runs(&real, &driver.socket).await {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the empty server must end"
+            );
+            // sleep-ok: polls a server's exit, which tmux reports to no one.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// The first old terminal a driver creates starts the server from the
+    /// generated config, and the server ends with it.
+    ///
+    /// Why: under the test-only `--new-terminals tmux` switch a supervisor
+    /// that found no server must still create old terminals, through the
+    /// config it writes (nothing runs `start-server`), and the server must
+    /// not outlive them. Spec: after adopting nothing, `create_session`
+    /// starts a server whose `exit-empty` and `focus-events` are on and
+    /// whose `pane-died` hook is set, the session is listed and may be
+    /// held, and killing it ends the server.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    async fn the_first_old_terminal_starts_the_server_and_its_end_ends_it() {
+        let dir = farhelm_teststate::tempdir().expect("tempdir");
+        let real = PathBuf::from(DEFAULT_TMUX_PROGRAM);
+        let driver = TmuxDriver::new(dir.path());
+        let _server = farhelm_teststate::tmux::guard::TmuxServerGuard::with_program(
+            driver.socket.clone(),
+            &real,
+        );
+        driver
+            .adopt_running_server(true)
+            .await
+            .expect("adopt nothing");
+        assert!(!driver.server_may_run());
+
+        let pane = driver
+            .create_session("fh-new", "/", 80, 24, &[], &["sleep".into(), "600".into()])
+            .await
+            .expect("the create starts a server");
+        assert!(driver.may_hold_session("fh-new"));
+        let states = driver.pane_states().await.expect("listing");
+        assert_eq!(states[&pane].session_name, "fh-new");
+        assert_eq!(
+            driver
+                .run(&["show-options", "-s", "exit-empty"])
+                .await
+                .expect("exit-empty")
+                .trim(),
+            "exit-empty on"
+        );
+        assert_eq!(
+            driver
+                .run(&["show-options", "-s", "focus-events"])
+                .await
+                .expect("focus-events")
+                .trim(),
+            "focus-events on"
+        );
+        assert!(
+            driver
+                .run(&["show-hooks", "-g", "pane-died"])
+                .await
+                .expect("hooks")
+                .contains(PANE_DIED_CHANNEL)
+        );
+
+        driver.kill_session("fh-new").await.expect("kill");
+        assert!(!driver.server_may_run());
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while raw_server_runs(&real, &driver.socket).await {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the server must end with its last session"
+            );
+            // sleep-ok: polls a server's exit, which tmux reports to no one.
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
 }

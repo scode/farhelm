@@ -81,6 +81,9 @@ struct HostStack {
     /// needs an old session first) [`EXPLICIT_TMUX`]. Read at each start, so
     /// a test can change it between restarts.
     kind_args: &'static [&'static str],
+    /// Further arguments for `supervisor run`, read at each start like
+    /// `kind_args`: a `--tmux` naming the program a test wants it to run.
+    extra_args: Vec<std::ffi::OsString>,
     root: farhelm_teststate::TestDir,
     work: farhelm_teststate::TestDir,
     _slot: tokio::sync::SemaphorePermit<'static>,
@@ -112,6 +115,7 @@ impl HostStack {
             tmux: None,
             state,
             kind_args: EXPLICIT_HOSTS,
+            extra_args: Vec::new(),
             root,
             work: farhelm_teststate::tempdir().expect("workdir"),
             _slot: slot,
@@ -139,6 +143,7 @@ impl HostStack {
         command
             .args(["supervisor", "run"])
             .args(self.kind_args)
+            .args(&self.extra_args)
             .arg("--state-dir")
             .arg(&self.state);
         if self.tmux.is_none() {
@@ -656,6 +661,289 @@ async fn an_old_session_after_the_switch_to_hosts_is_reported_as_one_to_move() {
         Some(farhelm_proto::TerminalKind::Host),
         "a session created now runs in a host"
     );
+    drop(client);
+    stack.finish().await;
+}
+
+// ---- The private tmux server only while it holds old terminals -------------------------
+
+/// A stand-in tmux at `path` that appends each invocation's arguments to
+/// `log`, one line each, and fails. The observable for "the supervisor ran
+/// tmux", the way the desktop smoke's sentinel is: no reply a client gets
+/// can show that a command was not issued.
+fn write_recording_tmux(path: &Path, log: &Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let script = format!(
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> {}\necho 'recording tmux: refused' >&2\nexit 1\n",
+        shell_words::quote(&log.to_string_lossy())
+    );
+    std::fs::write(path, script).expect("write the recording tmux");
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+        .expect("make the recording tmux executable");
+}
+
+/// Whether a tmux server answers on `socket`, asked with tmux directly.
+async fn tmux_server_runs(socket: &Path) -> bool {
+    tmux_query(socket, &["list-sessions"])
+        .await
+        .status
+        .success()
+}
+
+/// A supervisor whose sessions are all new terminals runs no tmux at all,
+/// through everything a user does with a session.
+///
+/// Why: new terminals do not use tmux, and a machine without old sessions
+/// must run no tmux server (old servers are meant to die out as machines
+/// reboot). Every per-session path used to ask tmux for every session (the
+/// listing, a session's details, a tab lookup, the ticker's passes and its
+/// pane-death client, Delete, shutdown), so this drives each of them. The
+/// recording tmux the supervisor is given through `--tmux` is the
+/// observable; it fails every command, so a supervisor that needed it would
+/// also show up as a failure. Spec: with `--tmux` naming a recording
+/// program, a bare supervisor starts, creates a session (a host row) whose
+/// agent draws its ready line, opens, attaches and closes a tab, lists,
+/// renames and deletes the session, keeps running across several ticker
+/// intervals, and stops on SIGTERM cleanly, and the program was never run
+/// and no tmux socket exists in the state directory.
+#[farhelm_testtrace::test]
+async fn a_supervisor_with_only_new_terminals_runs_no_tmux() {
+    let tools = farhelm_teststate::tempdir().expect("tools directory");
+    let recorder = tools.path().join("tmux");
+    let log = tools.path().join("tmux-invocations.log");
+    write_recording_tmux(&recorder, &log);
+    // Premise: the recorder records. Without this, a recorder whose append
+    // failed would leave the log empty and pass the test vacuously.
+    let ran = std::process::Command::new(&recorder)
+        .arg("premise-probe")
+        .status()
+        .expect("run the recording tmux");
+    assert!(
+        !ran.success(),
+        "premise: the recorder fails like a refused tmux"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&log).expect("premise: the recorder wrote its log"),
+        "premise-probe\n"
+    );
+    std::fs::remove_file(&log).expect("reset the log");
+    let mut stack = HostStack::bare().await;
+    stack.extra_args = vec!["--tmux".into(), recorder.clone().into_os_string()];
+
+    let client = stack.start().await;
+    // Premise: the supervisor was handed the recorder (it can run no other
+    // tmux), seen on its command line.
+    let pid = stack
+        .supervisor
+        .as_ref()
+        .and_then(|child| child.id())
+        .expect("the supervisor's pid");
+    let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).expect("read its command line");
+    assert!(
+        cmdline
+            .split(|byte| *byte == 0)
+            .any(|arg| arg == recorder.as_os_str().as_encoded_bytes()),
+        "premise: the supervisor runs with --tmux naming the recorder"
+    );
+    let session = stack.create(&client).await;
+    let socket = stack.host_socket(&session.id).await;
+    let mut viewer = GridViewer::attach(&client, &session.id).await;
+    viewer
+        .wait_for(&["FAKE-AGENT READY"], || stack.premise(&socket))
+        .await;
+    let tab = client.open_tab(&session.id).await.expect("open a tab");
+    let (tab_channel, tab_stream) = client
+        .attach_terminal(
+            &session.id,
+            80,
+            24,
+            TerminalSelector::Tab { id: tab.id.clone() },
+            "",
+            ViewerStreams::BytesOrGrid,
+        )
+        .await
+        .expect("attach the tab");
+    client.detach(tab_channel).await;
+    drop(tab_stream);
+    let listing = client.list_sessions().await.expect("list sessions");
+    assert!(
+        listing
+            .sessions
+            .iter()
+            .any(|listed| listed.id == session.id),
+        "the session is listed"
+    );
+    client
+        .rename_session(&session.id, "renamed", None)
+        .await
+        .expect("rename");
+    // The ticker's passes (sampling, the reap) run on their own every
+    // couple of seconds and report nothing a client can wait on.
+    // sleep-ok: an observation window of several ticker intervals, for passes with no completion signal.
+    tokio::time::sleep(Duration::from_secs(7)).await;
+    client
+        .close_tab(&session.id, &tab.id)
+        .await
+        .expect("close the tab");
+    drop(viewer);
+    client.delete_session(&session.id).await.expect("delete");
+    drop(client);
+    let status = stack.stop(libc::SIGTERM).await;
+    assert!(
+        status.success(),
+        "an orderly stop exits cleanly: {status:?}"
+    );
+
+    let invocations = std::fs::read_to_string(&log).unwrap_or_default();
+    assert_eq!(
+        invocations, "",
+        "a supervisor with only new terminals must not run tmux"
+    );
+    assert!(
+        !stack.state.join("tmux.sock").exists(),
+        "no tmux server was started on the private socket"
+    );
+    stack.finish().await;
+}
+
+/// The private tmux server that holds a host's old terminals is adopted,
+/// keeps serving them, and ends with the last one.
+///
+/// Why: old sessions must keep working after the update that stops
+/// starting tmux, and the server must not outlive them: an earlier build
+/// kept it running with nothing in it forever. Spec: a session a supervisor
+/// started with `--new-terminals tmux` created is, after an orderly stop
+/// and a bare start, still ready in the private server and attaches as a
+/// byte stream; a session created then is a host row; deleting the old
+/// session ends the private server.
+#[farhelm_testtrace::test]
+async fn the_private_tmux_server_ends_with_the_last_old_terminal() {
+    let mut stack = HostStack::new().await;
+    stack.kind_args = EXPLICIT_TMUX;
+    let client = stack.start().await;
+    let old = stack.create(&client).await;
+    let tmux_socket = stack.state.join("tmux.sock");
+    wait_for_agent_ready(&tmux_socket, &old.id).await;
+    drop(client);
+    let status = stack.stop(libc::SIGTERM).await;
+    assert!(
+        status.success(),
+        "an orderly stop exits cleanly: {status:?}"
+    );
+
+    stack.kind_args = &[];
+    let client = stack.start().await;
+    wait_for_agent_ready(&tmux_socket, &old.id).await;
+    let (channel, stream) = client
+        .attach_terminal(
+            &old.id,
+            80,
+            24,
+            TerminalSelector::default(),
+            "",
+            ViewerStreams::BytesOrGrid,
+        )
+        .await
+        .expect("attach the old session through the bare supervisor");
+    assert_eq!(
+        stream.stream_kind(),
+        farhelm_proto::StreamKind::Bytes,
+        "the adopted server still serves the old session"
+    );
+    client.detach(channel).await;
+    drop(stream);
+    let new = stack.create(&client).await;
+    stack.host_socket(&new.id).await;
+
+    client
+        .delete_session(&old.id)
+        .await
+        .expect("delete the old session");
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while tmux_server_runs(&tmux_socket).await {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the private tmux server must end with the last old terminal"
+        );
+        // sleep-ok: polls a server's exit, which tmux reports to no one.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    drop(client);
+    stack.finish().await;
+}
+
+/// Old terminals whose tmux cannot be used are reported not alive, are
+/// neither deleted nor restarted, and the supervisor still serves new ones.
+///
+/// Why: a supervisor's new terminals need no tmux, so a missing tmux must
+/// not keep it from starting, and an old terminal nothing can reach is not
+/// running as far as anyone can tell. But its agent may well still run in
+/// that server: a Delete that removed the row would leave it running with
+/// nothing that knows to end it (and the server alive for it), and a
+/// Restart would start a second agent beside it. Spec: with an old
+/// session's server still running, a bare supervisor started with `--tmux`
+/// naming a program that does not exist starts, lists the old session as
+/// exited with no terminal, refuses its Delete with a reason naming the
+/// unusable server (the row stays) and its Restart, creates a new session
+/// as a host row, and leaves the server running with the old agent ready.
+#[farhelm_testtrace::test]
+async fn old_terminals_without_a_usable_tmux_are_reported_not_alive() {
+    let mut stack = HostStack::new().await;
+    stack.kind_args = EXPLICIT_TMUX;
+    let client = stack.start().await;
+    let old = stack.create(&client).await;
+    let tmux_socket = stack.state.join("tmux.sock");
+    wait_for_agent_ready(&tmux_socket, &old.id).await;
+    drop(client);
+    let status = stack.stop(libc::SIGTERM).await;
+    assert!(
+        status.success(),
+        "an orderly stop exits cleanly: {status:?}"
+    );
+
+    stack.kind_args = &[];
+    stack.extra_args = vec![
+        "--tmux".into(),
+        stack.root.path().join("no-such-tmux").into_os_string(),
+    ];
+    let client = stack.start().await;
+    let listing = client.list_sessions().await.expect("list sessions");
+    let listed = listing
+        .sessions
+        .iter()
+        .find(|session| session.id == old.id)
+        .expect("the old session is still listed");
+    assert_eq!(
+        listed.status,
+        SessionStatus::Exited { exit_code: None },
+        "an old terminal no tmux can reach is not alive: {listed:?}"
+    );
+    assert_eq!(listed.agent_terminal, None, "{listed:?}");
+    let deleted = client
+        .delete_session(&old.id)
+        .await
+        .expect_err("Delete of an agent that may still run is refused");
+    assert!(
+        format!("{deleted:#}").contains("cannot use it"),
+        "{deleted:#}"
+    );
+    stack.row(&old.id).await;
+    // Restart is refused too, but this fixture's agent reports no
+    // conversation, so its refusal comes from an earlier gate than the
+    // unusable server's; what this pins is only that no second agent
+    // starts. The unusable server's own refusal is the driver's
+    // (`tmux::tests::a_running_server_without_a_usable_tmux_is_left_alone_and_absent`).
+    client
+        .restart_session(&old.id, true)
+        .await
+        .expect_err("Restart beside an agent that may still run is refused");
+    let new = stack.create(&client).await;
+    stack.host_socket(&new.id).await;
+    assert!(
+        tmux_server_runs(&tmux_socket).await,
+        "the server holding the old session is left running"
+    );
+    wait_for_agent_ready(&tmux_socket, &old.id).await;
     drop(client);
     stack.finish().await;
 }

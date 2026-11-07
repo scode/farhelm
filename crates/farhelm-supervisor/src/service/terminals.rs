@@ -421,6 +421,31 @@ pub(crate) fn tmux_tab_home<'a>(
     }
 }
 
+/// Whether asking tmux about a session's old terminals (its tmux agent
+/// pane, its old tabs) could find any, given its agent terminal: the gate
+/// every per-session tmux query (a listing, a session's details, a tab
+/// lookup) passes before it asks.
+///
+/// A session whose agent runs in a terminal host has old tabs only in a
+/// tmux session that existed when this process adopted the private server
+/// (a host session never gets a new tmux tab), so it asks only while that
+/// session may still exist ([`crate::tmux::TmuxDriver::may_hold_session`]);
+/// a session created in a host never asks. A tmux agent, or a session with
+/// no terminal, asks whenever a server may run at all, not only under its
+/// own name: its pane may be reported under another session's name (see
+/// `status::PaneEvidence`), and that is an answer the listing must still
+/// give.
+pub(crate) fn may_have_tmux_terminals(
+    tmux: &crate::tmux::TmuxDriver,
+    session_id: &str,
+    agent: Option<&Terminal>,
+) -> bool {
+    match agent {
+        Some(Terminal::Host(_)) => tmux.may_hold_session(&session_tmux_name(session_id)),
+        Some(Terminal::Tmux(_)) | None => tmux.server_may_run(),
+    }
+}
+
 /// Test-only shorthands, so the many tests that build or inspect a tmux
 /// terminal do not each spell the enum out. `expect_tmux` panics on a host
 /// terminal: it asserts the fixture, it does not decide anything.
@@ -947,12 +972,16 @@ async fn resolve_terminal_inner(
             // window markers, whatever the agent's kind (`tmux_tab_home`),
             // so a tab lookup that is not a host tab's is tmux's to answer.
             let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, agent);
-            let states = sup.tmux.pane_states().await.map_err(|e| {
-                RequestError::new(
-                    error_kind(&e),
-                    format!("could not ask tmux which terminal tabs this session has: {e:#}"),
-                )
-            })?;
+            let states = if may_have_tmux_terminals(&sup.tmux, &entry.info.id, Some(agent)) {
+                sup.tmux.pane_states().await.map_err(|e| {
+                    RequestError::new(
+                        error_kind(&e),
+                        format!("could not ask tmux which terminal tabs this session has: {e:#}"),
+                    )
+                })?
+            } else {
+                HashMap::new()
+            };
             tabs_from_pane_states(states.values(), &tmux_name, agent_pane)
                 .into_iter()
                 .find(|tab| tab.id == *id)

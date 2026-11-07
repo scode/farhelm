@@ -434,8 +434,8 @@ pub(crate) async fn tmux_query_before_deadline(
 /// Kill the harness's tmux server and wait until it has genuinely died.
 ///
 /// `kill-server` returns before the server finishes tearing down; any
-/// tmux command racing that teardown (an `ensure_server` from a fresh
-/// `Supervisor`, an auto-started server from `new-session`) can connect
+/// tmux command racing that teardown (a fresh `Supervisor` adopting the
+/// socket, an auto-started server from `new-session`) can connect
 /// to the dying server and fail with "server exited unexpectedly" — a
 /// flake observed on loaded CI runners, never a product bug. Every test
 /// that kills the server must go through this helper rather than a bare

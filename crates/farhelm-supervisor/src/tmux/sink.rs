@@ -51,6 +51,8 @@ impl TmuxDriver {
         // the sink supervisor would see a successful open and stop
         // retrying. With `=`, the attach fails and that retry loop handles
         // it.
+        // No server, no session to attach to: refused without a spawn.
+        self.refuse_if_absent()?;
         let mut child = self
             .attached_client_command()
             .arg("-C")

@@ -2519,7 +2519,11 @@ whatever the agent renders is what you see. There is no composer, no message abs
 - While terminals move out of tmux, each of a session's terminals (the agent's and each tab's) is old, in the host's
   private tmux server, or new, in a terminal host of its own, and never changes kind while it lives. A host creates new
   terminals once its supervisor is a version that has them; from then on, everything started there gets one (a new
-  session, Restart, Clone, Replace, a new tab), and existing terminals stay as they are until the user moves them. While
+  session, Restart, Clone, Replace, a new tab), and existing terminals stay as they are until the user moves them. The
+  host's private tmux server runs only while it holds old terminals: a host whose terminals are all new runs no tmux
+  server and uses no tmux, the server ends with the host's last old terminal (left to end as the user's sessions and
+  reboots retire them), and old terminals whose server is not running, or that the host's tmux cannot serve (missing, or
+  below the supported version), are reported as not running. Installing Farhelm still requires a supported tmux. While
   the session's host creates new terminals, a session that still has an old terminal shows a loud band at the top of the
   session view, below the top row, linking to the docs page that explains the move. Every message says that old
   terminals are fine for now but that a future release will stop supporting them, without naming a date. When the
