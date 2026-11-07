@@ -1051,7 +1051,12 @@ pub(super) fn SessionRow(
     on_confirm_replace: EventHandler<(Session, ConfirmToken<RowQuestion>)>,
     /// The replace prompt's cancel: this row's id and the drawn opening.
     on_cancel_replace: EventHandler<(String, ConfirmToken<RowQuestion>)>,
-    on_stop: EventHandler<String>,
+    /// The clicked row's agent state and tab count limit Stop even when questions are skipped.
+    on_stop: EventHandler<DeleteTarget>,
+    /// Stop answers carry the same opening, agent state and tab state the prompt drew.
+    #[props(default)]
+    on_confirm_stop: EventHandler<(String, ConfirmToken<RowQuestion>, bool, bool)>,
+    #[props(default)] on_cancel_stop: EventHandler<(String, ConfirmToken<RowQuestion>)>,
     on_delete: EventHandler<DeleteTarget>,
     /// The delete prompt's confirm: this row's id, the drawn opening, and
     /// the guard derived from the same render as the consequence text.
@@ -1121,6 +1126,9 @@ pub(super) fn SessionRow(
     let confirming_replace = question
         .as_ref()
         .is_some_and(|token| *token.key() == RowQuestion::Replace);
+    let confirming_stop = question
+        .as_ref()
+        .is_some_and(|token| *token.key() == RowQuestion::Stop);
     let identity = session_identity_copy(&session, deleting);
     let stale_tooltip = format!("{unavailable_cause}: this is the session's last-known state");
     #[cfg(test)]
@@ -1215,7 +1223,13 @@ pub(super) fn SessionRow(
     // These owned strings are operation inputs, not presentation products.
     let bell_close_id = session.id.raw().to_owned();
     let bell_clear_id = session.id.raw().to_owned();
-    let stop_id = session.id.raw().to_owned();
+    let stop_target = DeleteTarget::for_session(&session);
+    let confirm_stop_id = session.id.raw().to_owned();
+    let cancel_stop_id = session.id.raw().to_owned();
+    let confirm_stop_question = question.clone();
+    let cancel_stop_question = question.clone();
+    let stop_refuse_if_tabs_open = session.tabs.is_empty();
+    let stop_refuse_if_agent_running = session.status.has_ended();
     let delete_target = DeleteTarget::for_session(&session);
     let clone_target = session.clone();
     let replace_with_target = session.clone();
@@ -1269,8 +1283,13 @@ pub(super) fn SessionRow(
     // held below (or contiguous with) the original run. Keep that distinction
     // before menu rendering reduces absent directions to hidden actions.
     let pin_drag_eligible = pin_neighbors.is_some();
-    let pin_drag_disabled =
-        busy || nav_disabled || deleting || renaming || confirming || confirming_replace;
+    let pin_drag_disabled = busy
+        || nav_disabled
+        || deleting
+        || renaming
+        || confirming
+        || confirming_replace
+        || confirming_stop;
     let pin_neighbors = pin_neighbors.unwrap_or_default();
     let move_up = pin_neighbors.up.is_some();
     let move_down = pin_neighbors.down.is_some();
@@ -1278,13 +1297,15 @@ pub(super) fn SessionRow(
     // Whether the panel is currently showing its item list rather than a
     // confirmation prompt. Rename immediately closes this panel and mounts
     // ListView's stable dialog, so it is not a panel sub-state.
-    let showing_menu_items = !(confirming || confirming_replace);
+    let showing_menu_items = !(confirming || confirming_replace || confirming_stop);
     // The accessible name for the panel's prompt states. Only read when
     // one of them is showing; the menu state names its inner list
     // instead. Escape before shortening, as the toggle does, so its spoken
     // title has the same spelling as the visible confirmation quote.
     let prompt_label = if confirming {
         format!("Delete confirmation for {}", clamp_title(&session.title))
+    } else if confirming_stop {
+        format!("Stop confirmation for {}", clamp_title(&session.title))
     } else if confirming_replace {
         format!("Replace confirmation for {}", clamp_title(&session.title))
     } else {
@@ -1700,7 +1721,7 @@ pub(super) fn SessionRow(
         div {
             class: row_class,
             onkeydown: move |event| {
-                if !menu_open && !confirming && !confirming_replace && !renaming
+                if !menu_open && !confirming && !confirming_replace && !confirming_stop && !renaming
                     && bell_open.is_none() && clears_on_escape(&event)
                     && let Some(on_clear) = on_clear_marks
                 {
@@ -1764,7 +1785,7 @@ pub(super) fn SessionRow(
                     // the open button inert for the whole time a prompt is
                     // showing, rather than giving it a second, competing
                     // meaning as an implicit cancel.
-                    disabled: nav_disabled || confirming || confirming_replace
+                    disabled: nav_disabled || confirming || confirming_replace || confirming_stop
                         || renaming,
                     // Only Shift suppresses native range text selection. Plain
                     // presses retain the browser's ordinary pointer defaults.
@@ -2222,7 +2243,38 @@ pub(super) fn SessionRow(
                         // variant means and why the panel needs three
                         // states rather than a plain measured/unmeasured
                         // flag.
-                        if confirming {
+                        if confirming_stop {
+                            span {
+                                class: "confirm-consequence",
+                                onmounted: move |_| { document::eval(&crate::dialog_focus::install_js(".session-row-menu-panel.menu-prompt", crate::dialog_focus::ContainerEnter::None)); },
+                                "{crate::status::stop_consequence(&session.status, session.tabs.len())}"
+                            }
+                            PeerTitle { class: "confirm-title", title: session.title.clone(), quoted: true }
+                            crate::modal_dialog::DialogActions {
+                                button {
+                                    r#type: "button", class: "btn btn-neutral confirm-cancel",
+                                    "data-tooltip": "Cancel: keep the agent and terminal tabs running",
+                                    autofocus: busy,
+                                    onclick: move |_| {
+                                        if let Some(token) = cancel_stop_question.clone() {
+                                            on_cancel_stop.call((cancel_stop_id.clone(), token));
+                                        }
+                                    }, "Cancel"
+                                }
+                                button {
+                                    r#type: "button", class: "btn btn-danger confirm-stop",
+                                    disabled: busy, autofocus: !busy,
+                                    "data-tooltip": "Stop this session's agent and close its terminal tabs",
+                                    onkeydown: crate::guard_confirmation_enter,
+                                    onmounted: move |_| crate::focus_confirmation(".session-row-menu-panel .confirm-stop", ".session-row-menu-panel .confirm-cancel"),
+                                    onclick: move |_| {
+                                        if let Some(token) = confirm_stop_question.clone() {
+                                            on_confirm_stop.call((confirm_stop_id.clone(), token, stop_refuse_if_tabs_open, stop_refuse_if_agent_running));
+                                        }
+                                    }, "Confirm stop"
+                                }
+                            }
+                        } else if confirming {
                             // Two elements, consequence first: an
                             // untruncatable consequence and a separately
                             // truncatable title, in THIS order, so a long
@@ -2793,13 +2845,13 @@ pub(super) fn SessionRow(
                                             if busy {
                                                 return;
                                             }
-                                            on_stop.call(stop_id.clone());
+                                            on_stop.call(stop_target.clone());
                                         },
                                         MenuActionIcon { action: MenuAction::Stop }
                                         menu_panel::MenuItemCopy {
                                             label: rsx! { "Stop" },
                                             description_id: "session-menu-stop-description",
-                                            description: rsx! { "Ends the agent and its processes" },
+                                            description: rsx! { "Ends the agent and its processes, and closes terminal tabs" },
                                         }
                                     }
                                 }
@@ -3291,7 +3343,7 @@ mod tests {
             let on_replace = use_callback(|_: Session| {});
             let on_confirm_replace = use_callback(|_: (Session, ConfirmToken<RowQuestion>)| {});
             let on_cancel_replace = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
-            let on_stop = use_callback(|_: String| {});
+            let on_stop = use_callback(|_: DeleteTarget| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
             let on_confirm_delete =
                 use_callback(|_: (String, ConfirmToken<RowQuestion>, crate::DeleteGuard)| {});
@@ -3529,7 +3581,7 @@ mod tests {
         }
     }
 
-    /// Why this matters: a row's Delete or Replace question refuses a stale
+    /// Why this matters: a row's Stop, Delete or Replace question refuses a stale
     /// answer only because each of its buttons hands `ListView` the token of
     /// the showing that button was drawn for. `ListView`'s handlers act on
     /// that token and never look the question up again, so a row button that
@@ -3538,8 +3590,8 @@ mod tests {
     /// user has not seen. The slot tests in `ops` cover the comparison; this
     /// pins the row's half of the wiring.
     ///
-    /// Spec (`SessionRow`): each inline prompt button (Delete's confirm and
-    /// cancel, Replace's confirm and cancel) calls its own callback exactly
+    /// Spec (`SessionRow`): each inline prompt's confirm and cancel buttons
+    /// call their own callbacks exactly
     /// once, with this row's id (or `Session`) and exactly the token its
     /// render drew in `RowState::question`. Reopening the row's question
     /// after that render and before the click does not change what the
@@ -3590,7 +3642,16 @@ mod tests {
                 use_callback(|(row, token): (String, ConfirmToken<RowQuestion>)| {
                     record("cancel replace", row, token);
                 });
-            let on_stop = use_callback(|_: String| {});
+            let on_stop = use_callback(|_: DeleteTarget| {});
+            let on_confirm_stop = use_callback(
+                |(row, token, _, _): (String, ConfirmToken<RowQuestion>, bool, bool)| {
+                    record("confirm stop", row, token);
+                },
+            );
+            let on_cancel_stop =
+                use_callback(|(row, token): (String, ConfirmToken<RowQuestion>)| {
+                    record("cancel stop", row, token);
+                });
             let on_delete = use_callback(|_: DeleteTarget| {});
             let on_confirm_delete = use_callback(
                 |(row, token, _): (String, ConfirmToken<RowQuestion>, crate::DeleteGuard)| {
@@ -3650,6 +3711,8 @@ mod tests {
                     on_confirm_replace,
                     on_cancel_replace,
                     on_stop,
+                    on_confirm_stop,
+                    on_cancel_stop,
                     on_delete,
                     on_confirm_delete,
                     on_cancel_delete,
@@ -3666,7 +3729,7 @@ mod tests {
         /// its static class, descending into fragments and child components.
         /// The prompt buttons' classes are static template attributes, which
         /// never appear in the mutation stream, so the template is the only
-        /// place to tell the four buttons apart.
+        /// place to tell the prompt buttons apart.
         fn click_targets(dom: &VirtualDom, vnode: &VNode, found: &mut Vec<(String, ElementId)>) {
             for (index, attrs) in vnode.dynamic_attrs.iter().enumerate() {
                 if !attrs.iter().any(|attr| attr.name == "onclick") {
@@ -3720,6 +3783,13 @@ mod tests {
 
         dioxus::html::set_event_converter(Box::new(dioxus::html::SerializedHtmlEventConverter));
         for (kind, buttons) in [
+            (
+                RowQuestion::Stop,
+                [
+                    ("confirm-stop", "confirm stop"),
+                    ("confirm-cancel", "cancel stop"),
+                ],
+            ),
             (
                 RowQuestion::Delete,
                 [
@@ -3803,7 +3873,7 @@ mod tests {
             let on_replace = use_callback(|_: Session| {});
             let on_confirm_replace = use_callback(|_: (Session, ConfirmToken<RowQuestion>)| {});
             let on_cancel_replace = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
-            let on_stop = use_callback(|_: String| {});
+            let on_stop = use_callback(|_: DeleteTarget| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
             let on_confirm_delete =
                 use_callback(|_: (String, ConfirmToken<RowQuestion>, crate::DeleteGuard)| {});
@@ -3908,7 +3978,7 @@ mod tests {
             let on_replace = use_callback(|_: Session| {});
             let on_confirm_replace = use_callback(|_: (Session, ConfirmToken<RowQuestion>)| {});
             let on_cancel_replace = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
-            let on_stop = use_callback(|_: String| {});
+            let on_stop = use_callback(|_: DeleteTarget| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
             let on_confirm_delete =
                 use_callback(|_: (String, ConfirmToken<RowQuestion>, crate::DeleteGuard)| {});
@@ -4104,7 +4174,7 @@ mod tests {
                     on_replace: |_: Session| {},
                     on_confirm_replace: |_: (Session, ConfirmToken<RowQuestion>)| {},
                     on_cancel_replace: |_: (String, ConfirmToken<RowQuestion>)| {},
-                    on_stop: |_: String| {},
+                    on_stop: |_: DeleteTarget| {},
                     on_delete: |_: DeleteTarget| {},
                     on_confirm_delete: |_: (String, ConfirmToken<RowQuestion>, crate::DeleteGuard)| {},
                     on_cancel_delete: |_: (String, ConfirmToken<RowQuestion>)| {},

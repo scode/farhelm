@@ -2473,39 +2473,86 @@ pub(crate) fn invalid_request(message: String) -> anyhow::Error {
     anyhow::Error::new(SupervisorError::helm(ErrorKind::InvalidRequest, message))
 }
 
-/// Route to `id`'s owning host and kill its agent's process tree, leaving
-/// the session listed and its terminal viewable (SPEC.md's "stop").
+/// Route Stop to the owning host, leaving the agent terminal viewable and
+/// closing the session's terminal tabs. Approval of an agent-requested Stop
+/// authorizes stopping the agent and closing tabs, so that path passes
+/// `false` for both guards.
 ///
 /// Shared verbatim between [`stop_session`] below and the agent relay's
 /// `Stop` verb (`agent_requests::HelmAgentRequests::handle`): both need
-/// exactly "route, then ask the owning supervisor to stop it", and nothing
-/// else — a stop's reply carries no fresh state to record, unlike rename,
-/// which is what keeps this helper simpler than [`do_rename_session`].
+/// exactly "route, then ask the owning supervisor to stop it". The outcome
+/// carries any unresolved tab cleanup for the caller to present.
 pub(crate) async fn do_stop_session(
     state: &AppState,
     key: &store::SessionKey,
-) -> anyhow::Result<()> {
+    refuse_if_tabs_open: bool,
+    refuse_if_agent_running: bool,
+) -> anyhow::Result<farhelm_proto::SessionStopOutcome> {
     let (_claim, client) = route_session(state, key).await?;
-    client.stop_session(&key.session_id).await
+    client
+        .stop_session_guarded(
+            &key.session_id,
+            refuse_if_tabs_open,
+            refuse_if_agent_running,
+        )
+        .await
 }
 
-/// `POST /api/sessions/{id}/stop` — the recoverable operation the UI does
-/// not confirm. The body carries no information beyond success — an empty
-/// JSON object, so the response shape stays uniform with `delete_session`
-/// below and callers do not need to special-case "no content" bodies. An
+/// Consent from the state shown when the user requested Stop. Older callers
+/// never warned about closing tabs, so omitted tab consent refuses open
+/// tabs. Their original authority to stop the agent remains unchanged.
+#[derive(Deserialize)]
+#[serde(default)]
+pub(crate) struct StopRequest {
+    refuse_if_tabs_open: bool,
+    refuse_if_agent_running: bool,
+}
+
+impl Default for StopRequest {
+    /// HTTP omission cannot authorize the new tab-closing consequence.
+    /// This deliberately differs from the unrestricted internal wire default.
+    fn default() -> Self {
+        Self {
+            refuse_if_tabs_open: true,
+            refuse_if_agent_running: false,
+        }
+    }
+}
+
+/// `POST /api/sessions/{id}/stop` — return Stop's partial-cleanup notice,
+/// or an empty object when every terminal tab closed. An empty request body
+/// remains accepted, including with a JSON content type, for older callers. An
 /// `id` the merged view does not know is a 404 from [`route_session`]
 /// before any host is contacted, and a session whose host is not connected
 /// is a 409 naming that state.
 pub(crate) async fn stop_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
+    body: axum::body::Bytes,
 ) -> impl IntoResponse {
+    let request = if body.is_empty() {
+        StopRequest::default()
+    } else {
+        match serde_json::from_slice::<StopRequest>(&body) {
+            Ok(request) => request,
+            Err(error) => {
+                return http_error(invalid_request(format!("invalid Stop request: {error}")));
+            }
+        }
+    };
     let key = match resolve_session_ref(&state, &id).await {
         Ok(key) => key,
         Err(error) => return http_error(error),
     };
-    match do_stop_session(&state, &key).await {
-        Ok(()) => axum::Json(serde_json::json!({})).into_response(),
+    match do_stop_session(
+        &state,
+        &key,
+        request.refuse_if_tabs_open,
+        request.refuse_if_agent_running,
+    )
+    .await
+    {
+        Ok(outcome) => axum::Json(outcome).into_response(),
         Err(e) => http_error(e),
     }
 }
@@ -3042,7 +3089,7 @@ pub(crate) struct DeleteQuery {
 /// precondition ([`DeleteQuery`]),
 /// which the supervisor checks at the moment of deletion so a client's
 /// stale "nothing is running" cannot turn into an unconfirmed kill.
-/// Same empty-object success body as `stop_session`, except that a delete
+/// Like `stop_session`, an ordinary success is an empty object; a delete
 /// which completed but left something the user must know about answers
 /// `{"notice": "..."}` (today a checkout it could not archive and left in
 /// place; SPEC.md "Managed checkouts"). An unknown `id` maps to 404.

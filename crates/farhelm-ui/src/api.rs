@@ -3405,25 +3405,46 @@ pub(crate) async fn mint_intent_key() -> Result<String, String> {
     }
 }
 
-/// POST the stop endpoint for one session. The empty `Ok(())` on success
-/// mirrors the helm's own reply (`{}` — see farhelm-helm's `stop_session`);
-/// there is nothing in the body worth decoding.
-///
-/// A body-read failure (the connection dying mid-response, say) is
-/// reported WITH the method/URL/status that were already known, the same
-/// as `create_session` — swallowing it into an empty string via
-/// `unwrap_or_default` would silently turn "we don't know why this
-/// failed" into "it failed for no stated reason", which is a strictly
-/// worse message for the per-session error line the caller renders. The
-/// shared reader's truncated-body fixture covers this failure with a real
-/// HTTP response, keeping its status and diagnostic operation visible.
-pub(crate) async fn stop_session(base: &str, id: &str) -> Result<(), String> {
+/// Stop under the agent and tab consent shown by the clicked surface.
+/// A tabless render must refuse tabs opened since then; a prompt naming tabs
+/// authorizes closing all tabs. An ended-agent render refuses an agent that
+/// started since then, even with no tabs or with confirmations skipped.
+/// A successful reply can still carry a notice
+/// about a tab the host could not close. Older helms' empty objects decode
+/// through the outcome's defaults.
+pub(crate) async fn stop_session(
+    base: &str,
+    id: &str,
+    refuse_if_tabs_open: bool,
+    refuse_if_agent_running: bool,
+) -> Result<farhelm_proto::SessionStopOutcome, String> {
     let url = format!("{base}/api/sessions/{}/stop", encode_path_segment(id));
-    let resp = send(client().post(&url)).await?;
+    let resp = send(client().post(&url).json(&serde_json::json!({
+        "refuse_if_tabs_open": refuse_if_tabs_open,
+        "refuse_if_agent_running": refuse_if_agent_running,
+    })))
+    .await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
     }
-    Ok(())
+    // HTTP success establishes that Stop acted. Losing its body must not
+    // hide the possibility that one of the tabs was left running.
+    Ok(stop_reply(resp.text().await.map_err(http_error_text)))
+}
+
+/// Preserve Stop's successful outcome while disclosing any lost tab notice.
+fn stop_reply(body: Result<String, String>) -> farhelm_proto::SessionStopOutcome {
+    match body.and_then(|text| {
+        serde_json::from_str::<farhelm_proto::SessionStopOutcome>(&text)
+            .map_err(|error| error.to_string())
+    }) {
+        Ok(reply) => reply,
+        Err(error) => farhelm_proto::SessionStopOutcome {
+            notice: Some(format!(
+                "Stop completed, but its reply could not be read ({error}), so a notice about terminal tabs left open may have been lost."
+            )),
+        },
+    }
 }
 
 /// Fetch ONE session's current state (`GET /api/sessions/{id}`).
@@ -3604,8 +3625,8 @@ pub(crate) async fn rename_session(base: &str, id: &str, title: &str) -> Result<
 
 /// PUT the seen-state endpoint for one session: `Some(stamp)` marks it seen
 /// as of that activity stamp, `None` clears the mark (a manual "mark
-/// unread" — SPEC.md, Status). Same empty-object success body as
-/// `stop_session`, so the same `Ok(())`.
+/// unread" — SPEC.md, Status). The empty-object success body carries no
+/// outcome beyond the completed write.
 ///
 /// The low-level one-shot request only. Every caller reaches it through
 /// [`queue_seen_write`], never directly: two independent callers can want
@@ -6219,6 +6240,27 @@ mod tests {
             );
             let notice = reply.notice.expect("a notice");
             assert!(notice.contains("may have been lost"), "{notice}");
+        }
+    }
+
+    /// The HTTP success is still a completed Stop when its body is lost,
+    /// but that loss can hide a tab left running and must reach the user.
+    /// Empty old-helm replies remain compatible.
+    #[farhelm_testtrace::test]
+    fn a_stop_reply_preserves_tab_notices_and_discloses_unreadable_success() {
+        assert!(stop_reply(Ok("{}".into())).notice.is_none());
+        assert_eq!(
+            stop_reply(Ok(r#"{"notice":"Terminal 2 could not be closed"}"#.into()))
+                .notice
+                .as_deref(),
+            Some("Terminal 2 could not be closed")
+        );
+        for body in [Err("connection ended".into()), Ok("not JSON".into())] {
+            let notice = stop_reply(body)
+                .notice
+                .expect("lost replies cannot silently hide tabs");
+            assert!(notice.contains("Stop completed"));
+            assert!(notice.contains("terminal tabs left open"));
         }
     }
 

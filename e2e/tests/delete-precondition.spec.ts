@@ -73,10 +73,6 @@ test(`an ${skip ? "opted-out tabs-only" : "unconfirmed"} delete sends the precon
   let bodyFailed = false;
   try {
     await patchPreferences(request, { skip_session_confirmations: skip });
-    if (skip) {
-      const tab = await request.post(`/api/sessions/${encodeURIComponent(session.id)}/tabs`);
-      expect(tab.ok(), await tab.text()).toBe(true);
-    }
     // Creation publishes the session before its agent has necessarily started.
     // Stopping in that interval can correctly produce a startup error rather
     // than "exited"; this test needs an agent that was alive and then ended.
@@ -97,6 +93,12 @@ test(`an ${skip ? "opted-out tabs-only" : "unconfirmed"} delete sends the precon
         { timeout: 20_000 },
       )
       .toBe("exited");
+    // Stop closes existing tabs. A tabs-only Delete fixture opens its tab
+    // after Stop, when the agent has already ended.
+    if (skip) {
+      const tab = await request.post(`/api/sessions/${encodeURIComponent(session.id)}/tabs`);
+      expect(tab.ok(), await tab.text()).toBe(true);
+    }
     expect((await listSessions(request)).sessions.find((one) => one.id === session.id)?.tabs?.length ?? 0).toBe(skip ? 1 : 0);
     const build = (await request.get("/api/hosts")).headers()["x-farhelm-build"];
     expect(build, "the helm stamps every reply with its build").toBeTruthy();
@@ -164,7 +166,7 @@ test(`an ${skip ? "opted-out tabs-only" : "unconfirmed"} delete sends the precon
 
 /**
  * Open the sidebar delete prompt on a running session, then end its agent
- * (and, with `openTab`, open a terminal tab first) behind the page's back and
+ * (and, with `openTab`, open a terminal tab afterwards) behind the page's back and
  * let one listing read redraw the prompt. Confirms the reworded prompt and
  * returns the URL of the delete it sent, which is answered with a stub
  * success so nothing is actually deleted before cleanup.
@@ -194,11 +196,11 @@ async function confirmDriftedPrompt(
   const consequence = row.locator(".confirm-consequence").first();
   await expect(consequence).toContainText("Still running");
 
+  await stopSession(request, sessionId);
   if (options.openTab) {
     const opened = await request.post(`/api/sessions/${encodeURIComponent(sessionId)}/tabs`);
     expect(opened.ok(), `opening a tab: ${await opened.text()}`).toBe(true);
   }
-  await stopSession(request, sessionId);
   await expect
     .poll(
       async () => {

@@ -29,13 +29,14 @@ function row(page: Page, id: string) {
 }
 
 // The supported floor belongs to the main pane, not the whole window. Text
-// size, both split pairs, Clone and Delete keep their width; only tabs scroll.
+// size, Stop, both split pairs, Clone and Delete keep their width; only tabs scroll.
 // Smaller panes may clip, so measuring one would test a different contract.
 const SUPPORTED_MAIN_PANE_WIDTH = 650;
 const VIEWPORT_HEIGHT = 600;
 const PERSISTENT_ACTION_SELECTORS = [
   '[data-text-size="smaller"]',
   '[data-text-size="larger"]',
+  ".header-stop",
   ".restart-primary",
   ".restart-menu-toggle",
   ".header-replace",
@@ -79,6 +80,14 @@ test("native tunnel preview keeps ports and actions inside a 650px pane", async 
           const box = (await control.boundingBox())!;
           expect(box.x).toBeGreaterThanOrEqual(frame.x);
           expect(box.x + box.width).toBeLessThanOrEqual(frame.x + frame.width);
+        }
+        // The extra Stop action must remain readable beside the longest
+        // mapping, beyond merely fitting its measured box. Keep each theme
+        // for visual inspection while the owned fixture is still on screen.
+        if (state === "one") {
+          await test.info().attach(`tunnel-actions-650-${colorScheme}`, {
+            body: await page.screenshot(), contentType: "image/png",
+          });
         }
         if (state !== "error") {
           const toggle = page.locator(".session-tunnel-toggle");
@@ -302,11 +311,11 @@ test(
       );
       expect(identityOrder).toEqual(["status-badge", "title", "host", "status-time", "copy", "copy"]);
 
-      // The eight persistent buttons stay intact while the tab strip shrinks.
+      // The nine persistent buttons stay intact while the tab strip shrinks.
       // With items are deliberately absent until their caret opens a menu.
       const badgeBox = (await page.locator(".session-details .status-badge").boundingBox())!;
       const restartBox = (await restartButton.boundingBox())!;
-      await expect(page.locator(".titlebar-actions button:not([hidden])")).toHaveCount(8);
+      await expect(page.locator(".titlebar-actions button:not([hidden])")).toHaveCount(9);
       await expect(page.locator(".restart-with-trigger, .header-replace-with")).toHaveCount(0);
       const boxes: [string, typeof badgeBox][] = [["badge", badgeBox]];
       for (const selector of PERSISTENT_ACTION_SELECTORS) {
@@ -637,6 +646,7 @@ test("header actions stay ordered, copy full values, and open the right flows", 
         `${selector} has its persistent toolbar position`).toBe(true);
     }
     await expect(page.locator(".restart-primary")).toHaveText("Restart");
+    await expect(page.locator(".header-stop")).toHaveAccessibleName("Stop");
     await expect(page.locator(".header-replace")).toHaveAccessibleName("Replace");
     await expect(page.locator(".header-clone")).toHaveAccessibleName("Clone");
     await expect(page.locator(".header-delete")).toHaveAccessibleName("Delete");

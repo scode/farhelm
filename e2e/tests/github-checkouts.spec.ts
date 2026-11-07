@@ -1008,7 +1008,11 @@ test("borrowers retain the checkout until the final stopped session is deleted",
       expect((await fs.readdir(fixture.root)).sort()).toEqual([path.basename(origin.cwd), "unmanaged"].sort());
     }
     await assertLive(page, nested.id);
-    const stopped = await request.post(`/api/sessions/${encodeURIComponent(nested.id)}/stop`);
+    // This fixture Stop intentionally ends all work belonging to the owned
+    // session; the conservative HTTP omission rule must not limit cleanup.
+    const stopped = await request.post(`/api/sessions/${encodeURIComponent(nested.id)}/stop`, {
+      data: { refuse_if_tabs_open: false, refuse_if_agent_running: false },
+    });
     expect(stopped.ok(), await stopped.text()).toBe(true);
     const retained = await sessionState(request, nested.id);
     expect(retained.working_copy).toEqual(original.working_copy);
