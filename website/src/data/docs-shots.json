@@ -1,9 +1,9 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-11-05T01:00:52Z",
-  "captured_from": "2cbfdc77aba776967f3a5494e89af5bafe74862b",
-  "commit": "49ecc0b32297ec6912808a970e9127df0ec5ad03",
+  "captured_at": "2026-11-07T15:45:58Z",
+  "captured_from": "1ba99bf8c656b05ada4510fa04c876d970a8d0c6",
+  "commit": "16c8b87dae00520edaa1754906c5b1d8c45ddad7",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 576,
@@ -313,6 +313,18 @@
       "height": 1062,
       "width": 1744
     },
+    "release-notes/v0-36-0-host-filter": {
+      "height": 430,
+      "width": 1080
+    },
+    "release-notes/v0-36-0-marked-sessions": {
+      "height": 1038,
+      "width": 1284
+    },
+    "release-notes/v0-36-0-tensorlake-settings": {
+      "height": 1000,
+      "width": 1704
+    },
     "session-list/controls": {
       "height": 1160,
       "width": 1652
@@ -399,7 +411,7 @@
     },
     "work-in-a-session/header": {
       "height": 382,
-      "width": 1322
+      "width": 1308
     },
     "work-in-a-session/tabs": {
       "height": 384,
