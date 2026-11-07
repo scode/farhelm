@@ -23,6 +23,83 @@ import { shot } from "./shot";
 
 const PAGE = "release-notes";
 
+// v0.37.1's Credentials and hover controls need only navigation and unsaved
+// drafts. Migration notices need old terminals, which this fleet does not
+// create, and trash progress needs a confirmed deletion, which ordinary docs
+// shots never perform. A row's plain hover help also avoids the summary's
+// real creation timestamp beside the scenario's invented last-activity time.
+
+/** Show the named credential groups and storage warning without saving a secret. */
+test("v0.37.1 Credentials settings", async ({ page, request }) => {
+  const name = `${PAGE}/v0-37-1-credentials`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1600, height: 1300 });
+  const { director } = await open(page, request);
+  const dialog = await openSettings(page);
+  await dialog.getByRole("navigation", { name: "Settings sections" })
+    .getByRole("button", { name: "Credentials", exact: true }).click();
+  const panel = dialog.locator("#settings-credentials");
+  const groups = panel.locator(".credential-group");
+  await expect(groups).toHaveCount(3);
+  await expect(panel.getByRole("button", { name: "Add GitHub token", exact: true })).toBeEnabled();
+  await expect(panel.getByText("None saved.", { exact: true })).toHaveCount(3);
+  await expect(panel.locator(".credential-overview > .credential-storage-warning")).toBeVisible();
+  await dialog.focus();
+  await director.callout(groups.first(),
+    "Save tokens and agent logins by name here, then choose those names in Tensorlake recipes. Replacing a token here keeps its recipes using the same name.",
+    { side: "left", dy: 20 });
+  await shot(page, name, [panel], { pad: 10, maxWidth: 930 });
+});
+
+/** The Codex form explains importing a login and its one-host caveat before anything is saved. */
+test("v0.37.1 Codex login draft", async ({ page, request }) => {
+  const name = `${PAGE}/v0-37-1-codex-login`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1600, height: 1400 });
+  const { director } = await open(page, request);
+  const dialog = await openSettings(page);
+  await dialog.getByRole("navigation", { name: "Settings sections" })
+    .getByRole("button", { name: "Credentials", exact: true }).click();
+  const panel = dialog.locator("#settings-credentials");
+  const add = panel.getByRole("button", { name: "Add agent login", exact: true });
+  await expect(add).toBeEnabled();
+  await add.click();
+  const editor = panel.locator(".credential-editor");
+  const codex = editor.getByRole("radio", { name: "Codex", exact: true });
+  await codex.click();
+  await expect(codex).toHaveAttribute("aria-checked", "true");
+  await expect(editor.getByRole("textbox", { name: "auth.json", exact: true })).toBeEmpty();
+  await expect(editor.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await dialog.focus();
+  await director.callout(editor.getByRole("textbox", { name: "auth.json", exact: true }),
+    "Paste or choose a Codex login file. Keep a separate ChatGPT login for each host: sharing one leaves the other copies unable to renew.",
+    { side: "left", dy: 20 });
+  await shot(page, name, [editor], { pad: 10, maxWidth: 930 });
+});
+
+/** Hover a real agent mark so the new pointer and target ring stay visible in the still. */
+test("v0.37.1 session hover help", async ({ page, request }) => {
+  const name = `${PAGE}/v0-37-1-session-hover`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 900 });
+  const { scenario, director } = await open(page, request);
+  const row = rowOf(page, scenario, session => session.status === "waiting");
+  const mark = row.locator('.session-agent [data-tooltip]').first();
+  await expect(mark).toBeVisible();
+  const help = await mark.getAttribute("data-tooltip");
+  expect(help, "the agent mark must own nonempty hover help").toBeTruthy();
+  await mark.hover();
+  const tooltip = page.locator(".farhelm-tooltip");
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toHaveText(help!);
+  await expect(page.locator(".farhelm-tooltip-pointer")).toBeVisible();
+  await expect(mark).toHaveClass(/tooltip-target-ring/);
+  await director.callout(tooltip,
+    "Hover help opens beside the session list. Its pointer and thin ring identify the control it describes.",
+    { side: "bottom", dy: 70 });
+  await shot(page, name, [row, tooltip], { maxWidth: 930, keepPointer: true });
+});
+
 // v0.36.0's stills use only navigation and local selection. The staged fleet
 // has no Tensorlake key, recipes or pinned sessions, so recipe operations,
 // sandbox lifecycle and pin ordering cannot be shown without changing saved

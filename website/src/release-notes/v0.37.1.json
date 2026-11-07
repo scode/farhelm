@@ -1,0 +1,19 @@
+{
+  "screenshots": [
+    {
+      "entry": 3074,
+      "name": "release-notes/v0-37-1-credentials",
+      "alt": "Settings → Credentials shows its storage warning and named GitHub tokens, agent subscription logins and API endpoint tokens."
+    },
+    {
+      "entry": 3074,
+      "name": "release-notes/v0-37-1-codex-login",
+      "alt": "The unsaved Codex login form accepts auth.json and explains why each host needs its own ChatGPT login."
+    },
+    {
+      "entry": 3128,
+      "name": "release-notes/v0-37-1-session-hover",
+      "alt": "Hover help opens beside a session row, with a pointer and ring identifying its target."
+    }
+  ]
+}
