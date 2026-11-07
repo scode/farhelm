@@ -174,6 +174,14 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   keys can precede Farhelm's selected key and may prevent sandbox access. The current gateway's authentication behavior
   remains unverified after investigation.
 
+- [`cache-cleanup-leaves-packed-ref-lock.md`](cache-cleanup-leaves-packed-ref-lock.md) — Interrupted background cache
+  cleanup can leave a Git lock that repeatedly blocks later checkout launches when upstream references need pruning. The
+  route is source-confirmed for stated Git/backend conditions; existing completed checkouts are unaffected.
+
+- [`credential-push-misses-retired-lifetime.md`](credential-push-misses-retired-lifetime.md) — A replacement connection
+  can hide the last lease's zero transition, allowing obsolete credential transport work to delay reconnect. No
+  disclosure, wrong-machine delivery or user-work loss is established.
+
 ## Other: correctness, diagnostics, cleanup, or convenience
 
 - [`removed-host-strands-tunnel-listeners.md`](removed-host-strands-tunnel-listeners.md) — Removing a host leaves its
@@ -541,7 +549,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`failed-test-response-does-not-fence-settings-write.md`](failed-test-response-does-not-fence-settings-write.md) —
   Transport failure, forwarded saves and unfenced retries can let a test restore settings before its earlier owned write
   commits. Version-matched Playwright source establishes the response and cleanup boundaries; adverse scheduling is
-  unmeasured.
+  unmeasured. Additional recipe scope: independent cleanup can accept a missing row before an already accepted POST
+  inserts it, leaving fictional recipe and credential rows behind.
 
 - [`devbuild-buffers-unauthenticated-metadata.md`](devbuild-buffers-unauthenticated-metadata.md) — A compromised release
   origin can provide oversized checksum or signature files that are downloaded and fully read before rejection. Material
@@ -2204,3 +2213,28 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`capture-local-program-path.md`](capture-local-program-path.md) — Naming a Farhelm binary in the current directory
   with --farhelm ./farhelm can fail to launch it or silently run another Farhelm found on PATH, so screen inspection can
   use a different build than requested.
+
+- [`codex-auth-object-depth-contract.md`](codex-auth-object-depth-contract.md) — The declared size/object-only Codex
+  login validation contract omits a parser nesting bound. No affected vendor-produced login file or outage is
+  established.
+
+- [`credential-cancel-erases-delivery-report.md`](credential-cancel-erases-delivery-report.md) — Cancelling an unrelated
+  credential draft erases the previous save's inline failed-delivery report; the host's separate warning remains.
+
+- [`credential-catalog-success-starvation.md`](credential-catalog-success-starvation.md) — Unrelated fleet notices
+  arriving faster than successful catalog replies can keep Credentials loading or stale. A quiet interval permits
+  recovery; frequency is unmeasured.
+
+- [`claude-recreation-test-clears-old-stamp.md`](claude-recreation-test-clears-old-stamp.md) — The
+  recreated-Claude-login regression clears the old delivery stamp first, so it cannot protect the
+  same-name/same-revision incarnation check. Production currently includes that check.
+
+- [`release-shot-account-readiness.md`](release-shot-account-readiness.md) — A release capture's enabled-input check
+  accepts an unloaded or failed account form. No existing published image is established to be wrong.
+
+- [`recipe-cleanup-navigation.md`](recipe-cleanup-navigation.md) — Navigation rejection skips a browser test's owned
+  recipe and credential deletions, potentially contaminating later tests on its private stack.
+
+- [`ambiguous-codex-seed-renewal.md`](ambiguous-codex-seed-renewal.md) — Unverified after investigation: an uncertain
+  Codex login upload can replay after renewal. Whether restoring the saved seed makes authentication or later refresh
+  unusable remains unestablished; explicit exactly-once ambiguity coverage is partial.

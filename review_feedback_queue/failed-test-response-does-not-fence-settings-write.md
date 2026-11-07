@@ -107,3 +107,45 @@ Source and provenance, run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`:
   `review_feedback_queue/failed-test-response-does-not-fence-settings-write.md:55-87; TRIAGE_OUTCOMES.md:20265-20277`.
 
 Proposed drop: none for the retained remainder. No runtime reproduction, fix or triage decision was performed.
+
+## Accepted recipe creation after independent cleanup
+
+Additional reviewed commits: `d5b4a317286682edac7e3dd402f981fae8b50410` and `aebf561680cc851498c6619d28b1be1ed3600617`;
+source checked through pinned tip `49ce8cb76e9f4c841e15122a89264c7c908171dc`.
+
+The recipe-mode browser tests add another missing mutation-settlement boundary. A failed assertion can enter cleanup
+while an accepted recipe POST has not inserted its row. Independent cleanup can then accept a 404 as successful
+deletion, after which the POST inserts the recipe while its credential still exists. Credential deletion subsequently
+refuses because the recipe references it, potentially skipping the remaining owned cleanup. This leaves fabricated rows
+in the private stack, not a demonstrated loss of product credentials.
+
+At the second revision, `e2e/tests/tensorlake-recipes.spec.ts:540–542` starts creation and waits for its rendered row;
+`563–569` navigates away, removes the recipe through an independent API request context, then deletes owned credentials.
+`removeRecipes:27–32` accepts 404. The successful-path row witness does not settle an accepted POST when the assertion
+fails before that witness. The earlier revision has the same create/cleanup structure at `486–555`, with cleanup at
+`548–554`.
+
+The server explicitly preserves accepted actions: `crates/farhelm-helm/src/lib.rs:908–937` puts recipe POST/DELETE under
+ownership middleware, which transfers non-read requests into owned work before typed extraction (`middleware.rs:51–74`;
+SPEC_impl.md, Who owns an accepted action, `22–54`). Creation checks credentials and inserts in its own transaction
+(`tensorlake/recipes.rs:372–412,657–675`). DELETE's build guard (`tensorlake/recipes.rs:752–779`;
+`tensorlake/build.rs:1347–1379`) does not fence an accepted POST still before insertion. The conditional order is
+therefore DELETE observes absent, POST inserts, credential DELETE refuses. If credential deletion wins first, POST
+instead fails validation. Already-enqueued store operations retain ordinary ordering; a late PUT cannot recreate a
+missing recipe (`tensorlake/recipes.rs:431–440`).
+
+Matching reqwest 0.13.5 WASM source uses browser fetch without keepalive and aborts when its guard drops
+(`wasm/client.rs:196–278,303–305`; `wasm/mod.rs:44–84`). Undelivered work may be cancelled; server-owned work already
+accepted is not revoked. This finding does not depend on a browser task surviving document navigation. No trace
+establishes that a particular failed run reached this ordering, and no runtime frequency is claimed. Generic test
+fixtures do not independently delete these rows between tests; whole-stack cleanup only happens at run end.
+
+Suggested bucket remains **other**. Confidence: confirmed conditional source ordering, without runtime reproduction.
+Establish settlement of accepted fixture mutations before treating missing-row cleanup as final, and attempt all owned
+cleanup without first-error short-circuiting. The separately queued `recipe-cleanup-navigation.md` covers navigation
+itself rejecting before deletion is attempted. No exact specification acceptance, planned repair, known bug, ledger or
+filter coverage was found for the accepted-POST remainder; this extends the existing unfenced-write cause rather than
+adding another queue item.
+
+Provenance: run `4ca8e296-4f73-4429-a34b-031af1582085`, `g008/g008-late-post` with corroborating `g007/g007-l002`. The
+original composite `g008/g008-l003` was split with its history preserved. Proposed drop: none for this extension.
