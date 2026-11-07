@@ -17,6 +17,7 @@ fn recipe() -> RecipeSave {
         claude: None,
         codex: None,
         github_token_credential: None,
+        claude_login_credential: None,
         codex_login_credential: None,
         tunnels: vec![],
     }
@@ -427,6 +428,43 @@ fn codex_subscription_and_endpoint_are_exclusive_named_choices() {
         serde_json::from_value::<RecipeSave>(legacy)
             .unwrap()
             .codex_login_credential
+            .is_none()
+    );
+}
+
+/// Both decode directions retain only the login name. Legacy saves can omit
+/// it, while a modern save cannot combine a Claude endpoint with a subscription
+/// or smuggle an invalid credential identity into the stored recipe.
+#[test]
+fn claude_subscription_is_an_exclusive_named_choice() {
+    let mut save = recipe();
+    save.claude = None;
+    save.claude_login_credential = Some("claude-work".into());
+    assert!(check_recipe(&save).is_ok());
+    let decoded: RecipeSave = serde_json::from_value(serde_json::to_value(&save).unwrap()).unwrap();
+    assert_eq!(
+        decoded.claude_login_credential.as_deref(),
+        Some("claude-work")
+    );
+    save.claude = Some(EndpointSave {
+        base_url: "https://endpoint.test/v1".into(),
+        token_credential: None,
+    });
+    assert!(check_recipe(&save).is_err());
+    save.claude = None;
+    for invalid in ["", "Uppercase", "../login", "name-"] {
+        save.claude_login_credential = Some(invalid.into());
+        assert!(check_recipe(&save).is_err());
+    }
+    let mut legacy = serde_json::to_value(recipe()).unwrap();
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("claude_login_credential");
+    assert!(
+        serde_json::from_value::<RecipeSave>(legacy)
+            .unwrap()
+            .claude_login_credential
             .is_none()
     );
 }

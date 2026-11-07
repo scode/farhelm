@@ -12,5 +12,6 @@ Delivery failures keep the saved value and show a warning in Credentials and on 
 Tensorlake recipes can also select a named GitHub token for private checkouts and new agent terminals. New snapshots
 include `gh`; reused images need it installed, and older hosts need Farhelm's Update before new terminals receive tokens.
 
-Codex can use a named ChatGPT login from a Tensorlake recipe. Farhelm preserves Codex's refreshed login file; switching
-away leaves it on the host, so signing out there is still up to you.
+Claude Code and Codex can use named subscription logins from Tensorlake recipes. Claude may show its own first-run
+setup once on a new host. Farhelm preserves Codex's refreshed login file; switching away leaves it on the host, so
+signing out there is still up to you.

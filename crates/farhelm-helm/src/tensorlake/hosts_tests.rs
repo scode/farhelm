@@ -1772,6 +1772,7 @@ async fn lifecycle_holds_end_tunnels_and_resume_reads_the_recipe_again() {
         claude: None,
         codex: None,
         github_token_credential: None,
+        claude_login_credential: None,
         codex_login_credential: None,
         tunnels: vec![Tunnel {
             sandbox_port: 8080,

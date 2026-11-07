@@ -248,8 +248,8 @@ Git asks for, such as a password, shows up in the terminal for you to answer. A 
 helper can ask twice. If either command fails, the session's status shows error, the terminal says what went wrong,
 and any partial clone stays where it is.
 
-On a [Tensorlake sandbox](/docs/using/tensorlake-sandboxes/#managed-checkouts), set up Git credentials on the host once
-for private repositories; public repositories need none. Farhelm does not yet supply `GH_TOKEN` there.
+On a [Tensorlake sandbox](/docs/using/tensorlake-sandboxes/#managed-checkouts), private repositories need a
+GitHub token that the host's recipe selects from **Settings → Credentials**; public repositories need none.
 
 The cache makes repeated managed checkouts faster and takes roughly the disk space of one extra copy of each repository
 on each host. It lives under Farhelm's state directory on that host, in `repo-cache/<owner>/<name>.git`, outside your

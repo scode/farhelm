@@ -180,13 +180,14 @@ for (const palette of ["dark", "light"] as const) {
           editor.getByRole("spinbutton", { name: /^CPUs/ }).locator("..")
             .locator("span").first(),
         ).toHaveCSS("font-size", "13px");
+        // Agents start in None mode, so the nested label sampled here is the
+        // GitHub token picker's, which every recipe shows.
         await expect(
-          editor.getByLabel("Claude Code base URL", { exact: true }).locator(
-            "..",
-          ).locator("span").first(),
+          editor.getByLabel("GitHub token", { exact: true }).locator("..")
+            .locator("span").first(),
         ).toHaveCSS("font-size", "13px");
         const captions = editor.locator("div.checkout-root-label > span");
-        await expect(captions).toHaveCount(4);
+        await expect(captions).toHaveCount(5);
         for (const caption of await captions.all()) {
           await expect(caption).toHaveCSS("font-size", "14px");
         }
@@ -262,9 +263,11 @@ for (const palette of ["dark", "light"] as const) {
           "the footer stays fixed while the body moves",
         ).toEqual(footerBox);
         await expectInlineAnswerVisible(save);
-        const finalField = editor.getByLabel("Codex bearer token", {
+        // In None mode the editor's last control is Codex's last mode button.
+        const finalField = editor.getByRole("radiogroup", {
+          name: "Codex authentication mode",
           exact: true,
-        });
+        }).getByRole("radio", { name: "Subscription", exact: true });
         await finalField.focus();
         await expect(finalField).toBeFocused();
         await page.keyboard.press("Tab");

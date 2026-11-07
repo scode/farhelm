@@ -117,12 +117,10 @@ pub struct EndpointSave {
 
 /// Everything a recipe save sets apart from the name.
 ///
-/// `claude` is Claude Code's endpoint (written into the sandbox as
-/// `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`), `codex` is Codex's
-/// (a model provider's `base_url` and `experimental_bearer_token`). An absent
-/// Claude endpoint leaves its settings alone. Codex selects that endpoint or
-/// `codex_login_credential`; neither means explicit None and cleans only the
-/// Farhelm provider selection/token. Values belong to Settings → Credentials.
+/// Each agent selects its endpoint or its named subscription login, never
+/// both. Neither means explicit None: Claude clears its three managed env
+/// keys, while Codex clears only Farhelm's provider selection/token and keeps
+/// its auth.json. Values belong to Settings → Credentials; recipes carry names.
 ///
 /// Unknown fields are refused at every level, nested size, source, tunnel and
 /// endpoint included: a field a newer client sets and this helm would silently
@@ -137,6 +135,9 @@ pub struct RecipeSave {
     pub source: RecipeSource,
     pub claude: Option<EndpointSave>,
     pub codex: Option<EndpointSave>,
+    /// Claude's None mode clears its three managed authentication keys;
+    /// Subscription selects a saved setup-token without changing onboarding.
+    pub claude_login_credential: Option<String>,
     /// Subscription and API endpoint selection are mutually exclusive. Both
     /// absent asks Farhelm to clear only its Codex provider selection/token;
     /// the host's auth.json remains Codex's after a successful delivery.
@@ -163,6 +164,7 @@ mod strict {
         source: RecipeSource,
         claude: Option<super::EndpointSave>,
         codex: Option<super::EndpointSave>,
+        claude_login_credential: Option<String>,
         codex_login_credential: Option<String>,
         github_token_credential: Option<String>,
         tunnels: Vec<Tunnel>,
@@ -219,6 +221,7 @@ mod strict {
                 },
                 claude: save.claude,
                 codex: save.codex,
+                claude_login_credential: save.claude_login_credential,
                 codex_login_credential: save.codex_login_credential,
                 github_token_credential: save.github_token_credential,
                 tunnels: save
@@ -266,6 +269,7 @@ pub struct RecipeView {
     pub source: RecipeSource,
     pub claude: Option<EndpointView>,
     pub codex: Option<EndpointView>,
+    pub claude_login_credential: Option<String>,
     pub codex_login_credential: Option<String>,
     pub github_token_credential: Option<String>,
     pub tunnels: Vec<Tunnel>,
@@ -651,6 +655,13 @@ pub fn check_recipe(recipe: &RecipeSave) -> Result<(), String> {
             check_recipe_name(name)
                 .map_err(|_| format!("{agent}: select a valid endpoint credential name"))?;
         }
+    }
+    if recipe.claude.is_some() && recipe.claude_login_credential.is_some() {
+        return Err("Claude: select either an API endpoint or a subscription login".into());
+    }
+    if let Some(name) = recipe.claude_login_credential.as_deref() {
+        check_recipe_name(name)
+            .map_err(|_| "Claude: select a valid login credential name".to_string())?;
     }
     if recipe.codex.is_some() && recipe.codex_login_credential.is_some() {
         return Err("Codex: select either an API endpoint or a subscription login".into());
