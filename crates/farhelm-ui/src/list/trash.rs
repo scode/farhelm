@@ -1344,6 +1344,7 @@ mod tests {
             incarnation: host.incarnation,
             loading: false,
             reply: Some(Ok(CheckoutTrashListing {
+                removing: false,
                 checkouts: vec![archive("shown")],
                 issues: vec![],
             })),
@@ -1458,6 +1459,7 @@ mod tests {
         for (listing, expected_count, expected_size, expected_unchecked, expected_sidebar) in [
             (
                 CheckoutTrashListing {
+                    removing: false,
                     checkouts: vec![],
                     issues: vec![issue.clone(), issue.clone()],
                 },
@@ -1468,6 +1470,7 @@ mod tests {
             ),
             (
                 CheckoutTrashListing {
+                    removing: false,
                     checkouts: vec![checkout(Some(4096))],
                     issues: vec![
                         issue.clone(),
@@ -1484,6 +1487,7 @@ mod tests {
             ),
             (
                 CheckoutTrashListing {
+                    removing: false,
                     checkouts: vec![checkout(None)],
                     issues: vec![],
                 },
@@ -1494,6 +1498,7 @@ mod tests {
             ),
             (
                 CheckoutTrashListing {
+                    removing: false,
                     checkouts: vec![checkout(Some(4096))],
                     issues: vec![],
                 },
@@ -1539,6 +1544,7 @@ mod tests {
         let host = host();
         assert!(connected(&host));
         let mut listing = CheckoutTrashListing {
+            removing: false,
             checkouts: (0..=MAX_SELECTION)
                 .map(|id| ArchivedCheckout {
                     id: id.to_string(),
@@ -1596,6 +1602,7 @@ mod tests {
             incarnation: host.incarnation,
             loading: false,
             reply: Some(Ok(CheckoutTrashListing {
+                removing: false,
                 checkouts: vec![checkout("selected"), checkout("neighbour")],
                 issues: vec![CheckoutTrashIssue {
                     id: "issue".into(),
@@ -1647,6 +1654,7 @@ mod tests {
             incarnation: host.incarnation,
             loading: false,
             reply: Some(Ok(CheckoutTrashListing {
+                removing: false,
                 checkouts: vec![ArchivedCheckout {
                     id: "known".into(),
                     name: "old".into(),

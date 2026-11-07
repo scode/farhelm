@@ -1521,6 +1521,18 @@ folder; this protection does not cover a working folder reached through a symlin
 Missing or mismatched records can be discarded without touching a replacement folder; other failures are reported and
 remain available for retry.
 
+After those checks, permanent cleanup moves each selected folder aside inside the same trash directory and answers
+without waiting for recursive removal. Its existing working-copy record remains until the files are gone, and the folder
+no longer appears in the trash. One background remover frees the space sequentially without blocking launches, restarts
+or session Deletes. A restarted supervisor resumes accepted removals. A failed removal logs a warning and keeps its
+hidden folder and record for another attempt at the next startup, without retrying in a running supervisor. The trash
+listing optionally reports whether this supervisor is currently removing folders; retained failures alone do not count
+as removal in progress, and older supervisors omit the indication.
+
+New sessions, including fresh checkouts whose configured root is inside the trash, cannot enter a directory accepted for
+removal or its unresolved original location. Canonical aliases follow the same refusal. Startup also preserves an
+accepted directory containing any retained session's working path instead of queuing its removal.
+
 Confirmed 2026-09-28: archiving a checkout never blocks deleting its session. When the checkout cannot be archived
 safely, for any reason (its folder or root no longer matching what was recorded, the move failing, or the outcome of an
 earlier move attempt being impossible to establish), Delete still removes the session, releases the checkout from
