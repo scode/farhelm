@@ -308,30 +308,48 @@ section exists, its latest entry must also be satisfied. Then close the plan per
 "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write a closing entry in its log,
 and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked while landing on 2026-11-07 (claim acca26).
+### 2026-11-07: answer to a blocked question
 
-### A path link in a container session fails to appear after hovering a rejected path
+The question, as the executor put it:
 
-This plan makes a file path that a terminal program broke across two rows (the program's own line break, not the
-terminal wrapping a long line) work as one link; before, only the two halves were offered, and the click to download
-failed. Its draft, [#3129](https://github.com/scode/farhelm/pull/3129/changes), has not merged.
+> Blocked while landing on 2026-11-07 (claim acca26).
+>
+> ### A path link in a container session fails to appear after hovering a rejected path
+>
+> This plan makes a file path that a terminal program broke across two rows (the program's own line break, not the
+> terminal wrapping a long line) work as one link; before, only the two halves were offered, and the click to download
+> failed. Its draft, [#3129](https://github.com/scode/farhelm/pull/3129/changes), has not merged.
+>
+> At landing, one test of the terminal's links failed on both Chromium and WebKit (recorder run
+> `327273ed-ec2f-4f31-ad50-d1f5f5666888`): "a container session offers only the paths its host admits". In a container
+> session, Farhelm asks the host whether each printed path exists before offering it as a link, because the container's
+> output names its own files. The test prints `/work/real.txt /work/gone.txt` on one row, points at the path the host
+> rejects and then at the one it accepts, and expects the accepted one to show its link. With this change it never
+> shows. The same test passed on both engines with main plus the other plans landing in this round (run
+> `afd16173-4ead-44a8-8fbc-187689c5821d`), so the failure points at this plan. Whether a first hover on a valid path
+> also fails was not checked.
+>
+> No path is broken across rows in that test, so the cause is more likely the change's new rule for when to stop showing
+> a path link than its recognition of broken paths. The change stops showing a link when any row within two rows of it
+> is redrawn; in a container session the host's answer arrives after the pointer moves, and a redraw while waiting could
+> cancel the link. That is a guess from the diff, not established.
+>
+> Should this plan go back to its executor to fix the regression, with that test passing on both engines? That delays
+> the broken-path fix by another executor round. The alternative, landing now and fixing container sessions later, would
+> ship a regression in container sessions' path links. I recommend sending it back.
 
-At landing, one test of the terminal's links failed on both Chromium and WebKit (recorder run
-`327273ed-ec2f-4f31-ad50-d1f5f5666888`): "a container session offers only the paths its host admits". In a container
-session, Farhelm asks the host whether each printed path exists before offering it as a link, because the container's
-output names its own files. The test prints `/work/real.txt /work/gone.txt` on one row, points at the path the host
-rejects and then at the one it accepts, and expects the accepted one to show its link. With this change it never shows.
-The same test passed on both engines with main plus the other plans landing in this round (run
-`afd16173-4ead-44a8-8fbc-187689c5821d`), so the failure points at this plan. Whether a first hover on a valid path also
-fails was not checked.
+The maintainer's answer:
 
-No path is broken across rows in that test, so the cause is more likely the change's new rule for when to stop showing a
-path link than its recognition of broken paths. The change stops showing a link when any row within two rows of it is
-redrawn; in a container session the host's answer arrives after the pointer moves, and a redraw while waiting could
-cancel the link. That is a guess from the diff, not established.
+The landing monitor answered this on the maintainer's behalf (`plans/.agents/landing.md`, "Answering blocks"): the
+landing failed mainly on a test the plan made fail, so the plan goes back to be fixed.
 
-Should this plan go back to its executor to fix the regression, with that test passing on both engines? That delays the
-broken-path fix by another executor round. The alternative, landing now and fixing container sessions later, would ship
-a regression in container sessions' path links. I recommend sending it back.
+Fix the regression so that path links in container sessions work as before: in "a container session offers only the
+paths its host admits" (`e2e/grid-client/grid-attach.spec.ts`), the path the host accepts must show its link again, on
+Chromium and WebKit. Find the actual cause rather than relaxing the test; the block's guess about hover retirement is
+only a guess. Keep the plan's cut-path behavior and its own tests. Run the grid terminal's browser suite
+(`npx playwright test --config grid-client/playwright.config.ts` in `e2e/`) on both engines before delivering again, and
+rebase onto main first: row-hovers-beside-list and no-gc-at-launch may land meanwhile.
+
+A later change of mind by the maintainer is a follow-up, not a reason to stop the plan.
