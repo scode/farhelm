@@ -635,25 +635,28 @@ that its required systemd or SSH substrate ran.
   (`crates/farhelm-ui/assets/grid-*.js`) on a static page fed recorded grid streams (display, input, scrollback,
   selection and copy, links, paste, history applied in slices), its fit and its copy across a wide character's wrap held
   to xterm.js's, the fit in identical containers across text sizes and pixel ratios, and `terminal.js`'s plumbing for
-  grid streams against a fake socket (attach, paste and drop interception, link opening, the hyperlink mismatch warning,
-  file-path hovers and downloads, tunnels, reconnect and takeover snapshots), in Chromium and WebKit. No stack and no
-  build: the page and the shipped assets are served through request routing. Needs `npm install` and the browsers from
-  the browser suite's setup below; a few minutes. Not in CI. Run it when the grid assets, `terminal.js`'s grid handling
-  or the fixtures under `crates/farhelm-ui/js-tests/fixtures/grid/` change.
+  grid streams against a fake socket (a new terminal's grid mounted with no xterm.js built or waited for, a byte stream
+  on its attachment refused, a pending kind held until named, the swap from xterm.js for an old or unknown kind, attach,
+  paste and drop interception, link opening, the hyperlink mismatch warning, file-path hovers and downloads, tunnels,
+  reconnect and takeover snapshots), in Chromium and WebKit. No stack and no build: the page and the shipped assets are
+  served through request routing. Needs `npm install` and the browsers from the browser suite's setup below; a few
+  minutes. Not in CI. Run it when the grid assets, `terminal.js`'s grid handling or the fixtures under
+  `crates/farhelm-ui/js-tests/fixtures/grid/` change.
 - `cd e2e && npx playwright test --config host-terminals/playwright.config.ts` — the browser specs of terminals in
   terminal hosts (`e2e/host-terminals/`), against a real stack of their own: the config boots one `e2e/start-stack.sh`
   with `FARHELM_E2E_NEW_TERMINALS=host`, which starts the stack's local supervisor with `--new-terminals host`, so the
   startup session runs in a host; the main suite's ordinary stacks leave it empty, which the script turns into
   `--new-terminals tmux`, and every stack's remote supervisor gets `tmux`. In Chromium and WebKit, one worker: the
-  session's terminal mounts as the grid component (never xterm.js), draws the fake agent's ready line, and draws the
-  agent's echo of a line typed into it (`grid-terminal.spec.ts`); the helm lists the session's agent and a tab opened
-  beside it as new terminals with the switch reported on, and the session details name them so with no migration band
-  (`migration.spec.ts`); after a flood that the page stops reading during, the grid's history is full to its announced
-  capacity, all of it records, consecutive through the screen to the last (`grid-flood.spec.ts`). Needs what the browser
-  suite needs (`cargo build`, the web build, `npm install` and the browsers, the pinned tmux first on `PATH`), and runs
-  through the recorder's generic mode, since its Playwright mode pins the main config; a minute or two. Not in CI, and
-  not part of the full browser suite. Run it when the grid client's handling of a live stack, the helm's grid relay, the
-  supervisor's grid streams or the stack script's supervisor arguments change.
+  session's terminal mounts as the grid component with no xterm.js terminal constructed while xterm.js's scripts load,
+  draws the fake agent's ready line, and draws the agent's echo of a line typed into it (`grid-terminal.spec.ts`); the
+  helm lists the session's agent and a tab opened beside it as new terminals with the switch reported on, and the
+  session details name them so with no migration band (`migration.spec.ts`); after a flood that the page stops reading
+  during, the grid's history is full to its announced capacity, all of it records, consecutive through the screen to the
+  last (`grid-flood.spec.ts`). Needs what the browser suite needs (`cargo build`, the web build, `npm install` and the
+  browsers, the pinned tmux first on `PATH`), and runs through the recorder's generic mode, since its Playwright mode
+  pins the main config; a minute or two. Not in CI, and not part of the full browser suite. Run it when the grid
+  client's handling of a live stack, the helm's grid relay, the supervisor's grid streams or the stack script's
+  supervisor arguments change.
 - `cd e2e && FARHELM_E2E_SUITE_TERMINALS=host python3 ../scripts/record-test-run.py --kind development --tmux required --keep-farhelm-env FARHELM_E2E_SUITE_TERMINALS --selection 'host terminals: <projects>' --concurrency '3 browser workers, one stack each; retries 0' -- npx playwright test --project=<project> ... --retries=0`
   — the browser suite's host-terminal run, which is how the new terminal's parity with today's is shown, with the pinned
   tmux first on `PATH` as for the browser suite. The `--keep-farhelm-env` is required: the recorder scrubs the variable

@@ -599,7 +599,9 @@ test("switching sessions tears down the mounted terminal; reselecting mounts a f
 // the fix.
 //
 // This version forces the pending state for real (withholding
-// `window.Terminal`, which `mountWhenReady` cannot proceed without) and
+// `window.farhelmGridTerminal`, the grid component, which `mountWhenReady`
+// waits for on both kinds of terminal: a new terminal's mount waits for
+// nothing of xterm.js, so withholding xterm.js's globals would not hold it) and
 // makes the resulting race deterministic with Playwright's fake clock
 // instead of hoping real wall-clock timing falls out favorably: with the
 // clock frozen, session A's retry and session B's retry are scheduled
@@ -639,9 +641,9 @@ test("switching sessions before the first terminal is ready mounts the second se
   // failure capture. The same restoration is safe before and after the race.
   const restoreMountGlobals = () => page.evaluate(() => {
     const state = window as any;
-    if (Object.hasOwn(state, "__testStashedTerminal")) {
-      state.Terminal = state.__testStashedTerminal;
-      delete state.__testStashedTerminal;
+    if (Object.hasOwn(state, "__testStashedGridTerminal")) {
+      state.farhelmGridTerminal = state.__testStashedGridTerminal;
+      delete state.__testStashedGridTerminal;
     }
     if (state.__testOriginalMountWhenReady) {
       state.farhelmTerm.mountWhenReady = state.__testOriginalMountWhenReady;
@@ -677,12 +679,13 @@ test("switching sessions before the first terminal is ready mounts the second se
     await page.clock.pauseAt(new Date(Date.now() + 5_000));
 
     // Withhold a global `mountWhenReady` genuinely cannot proceed
-    // without, so opening session A puts a REAL pending retry into
+    // without, whichever kind of terminal A is, so opening session A puts
+    // a REAL pending retry into
     // flight (rather than resolving on its first synchronous check, as
     // it almost always would on an unloaded box).
     await page.evaluate(() => {
-      (window as any).__testStashedTerminal = (window as any).Terminal;
-      delete (window as any).Terminal;
+      (window as any).__testStashedGridTerminal = (window as any).farhelmGridTerminal;
+      delete (window as any).farhelmGridTerminal;
       const bridge = (window as any).farhelmTerm;
       const original = bridge.mountWhenReady;
       (window as any).__testOriginalMountWhenReady = original;
@@ -693,7 +696,7 @@ test("switching sessions before the first terminal is ready mounts the second se
     });
 
     await sharedSessionRow(page).click();
-    // Seeing the call return while Terminal is absent proves A entered the
+    // Seeing the call return while the grid component is absent proves A entered the
     // pending retry path. The clock stays fixed through both selections.
     await expect.poll(() => page.evaluate(() => (window as any).__testLastMountPath))
       .toBe(`/api/sessions/${encodeURIComponent(idA)}/term`);
@@ -3109,9 +3112,10 @@ test("submitting the create form twice while one create is in flight produces ex
     expect(postCount).toBe(1);
     release(true);
 
-    // Auto-select means __farhelmTermReady is ALREADY true (the page
-    // attached a session at load), so it cannot gate on the create any
-    // more; the created session's own title taking the pane is what
+    // Auto-select means the page attached a session at load, so a
+    // readiness flag (__farhelmTermReady, which only an old terminal sets)
+    // cannot gate on the create any more; the created session's own title
+    // taking the pane is what
     // proves the POST completed and creation selected it.
     await expect(page.locator(".session-details .title")).toHaveText(title, { timeout: 15_000 });
     expect(postCount).toBe(1);

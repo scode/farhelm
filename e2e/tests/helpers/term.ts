@@ -5,10 +5,12 @@
 //
 // A session's terminal is old (tmux, drawn by xterm.js from a byte stream)
 // or new (a terminal host, drawn by the grid component from a grid stream).
-// terminal.js picks the component per attachment from the helm's stream
-// notice, and publishes it in its island registry (`__farhelmIslands[el]`,
-// whose `kind` is `bytes` or `grid`) and, for the agent's terminal, as
-// `window.__farhelmTerm` or `window.__farhelmGrid`. The readers here
+// terminal.js picks the component from the kind the session listing gives
+// (a new terminal mounts the grid directly; an old or unknown one mounts
+// xterm.js, which a grid stream notice can still swap for the grid), and
+// publishes it in its island registry (`__farhelmIslands[el]`, whose `kind`
+// is `bytes` or `grid` and which holds only that component) and, for the
+// agent's terminal, as `window.__farhelmTerm` or `window.__farhelmGrid`. The readers here
 // dispatch on what the island actually holds, never on what a spec expects,
 // so a product-level assertion (text arrived, the terminal has the keyboard)
 // runs unchanged against either kind. The xterm.js path is the one these
@@ -217,9 +219,10 @@ export function terminalLinkPointer(page: Page, elementId = "terminal"): Locator
 /**
  * Which component draws the terminal mounted at `elementId`: `xterm` for a
  * byte stream, `grid` for a grid stream, or null before anything mounted.
- * A fresh mount is xterm.js until the stream notice says otherwise, so a
- * caller that needs the settled kind waits for the attachment's reveal
- * first (`waitForSessionRevealed`), which follows the notice.
+ * A new terminal is the grid from its mount; an old or unknown one is
+ * xterm.js until the stream notice says otherwise, so a caller that needs
+ * the settled kind waits for the attachment's reveal first
+ * (`waitForSessionRevealed`), which follows the notice.
  */
 export async function terminalKind(page: Page, elementId = "terminal"): Promise<"xterm" | "grid" | null> {
   return page.evaluate((el) => {

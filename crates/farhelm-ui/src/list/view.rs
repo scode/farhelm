@@ -188,7 +188,42 @@ pub(crate) enum HeaderPrefillRequest {
 pub(crate) struct RestartBridge {
     pub(crate) current: Signal<Session>,
     pub(crate) before: Callback<api::RestartEdit, Result<(), String>>,
-    pub(crate) after: EventHandler<bool>,
+    pub(crate) after: EventHandler<RestartOutcome>,
+}
+
+/// What one finished Restart POST tells the session view that reattaches
+/// after it: whether it succeeded, and, when it did, which kind of terminal
+/// the restarted agent now runs in.
+///
+/// The kind is the reply's (`SessionInfo::agent_terminal`) because the
+/// reattach happens before any listing has caught up with the restart: a
+/// Restart can move an old agent into a new terminal, and the listing the
+/// view holds still says old. terminal.js mounts a new terminal's grid
+/// directly only when it is told the terminal is new, so the reply's word is
+/// what keeps that remount from building xterm.js first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RestartOutcome {
+    pub(crate) succeeded: bool,
+    /// The restarted agent's terminal kind from a successful reply; `None`
+    /// for a refusal, a lost reply, or a reply that names no kind (an older
+    /// supervisor, or a restart that left the session without a terminal).
+    pub(crate) agent_terminal: Option<farhelm_proto::TerminalKind>,
+}
+
+impl RestartOutcome {
+    /// The outcome of a Restart POST's result, whatever its error type.
+    pub(crate) fn of<E>(result: &Result<Session, E>) -> Self {
+        match result {
+            Ok(session) => Self {
+                succeeded: true,
+                agent_terminal: session.agent_terminal,
+            },
+            Err(_) => Self {
+                succeeded: false,
+                agent_terminal: None,
+            },
+        }
+    }
 }
 
 impl RestartBridge {
@@ -202,9 +237,9 @@ impl RestartBridge {
     }
 
     /// Every actual POST result reattaches, including refusals and lost replies.
-    pub(crate) fn finish(self, succeeded: bool) {
+    pub(crate) fn finish(self, outcome: RestartOutcome) {
         if self.current.try_read().is_ok() {
-            self.after.call(succeeded);
+            self.after.call(outcome);
         }
     }
 }

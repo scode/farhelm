@@ -597,12 +597,12 @@ test("replacing a live session creates a fresh row in its place, selected, with 
     await page.keyboard.press("Enter");
     await waitForTermText(page, "echo:PRE-REPLACE-MARKER");
 
-    // A test-only SENTINEL on the source's own xterm instance, the same
+    // A test-only SENTINEL on the source's own terminal component, the same
     // stale-singleton guard `terminal.spec.ts`'s own session-switch test
-    // uses: `__farhelmTermReady` and the READY banner are already true for
-    // THIS instance, so neither can tell the replacement's terminal apart
-    // from the source's — only a marker that a fresh mount could not
-    // possibly carry can.
+    // uses: the READY banner (and, for an old terminal, `__farhelmTermReady`;
+    // a grid terminal never sets it) is already true for THIS instance, so
+    // neither can tell the replacement's terminal apart from the source's —
+    // only a marker that a fresh mount could not possibly carry can.
     await page.evaluate(() => {
       // The component, whichever kind: xterm.js or the grid.
       ((window as any).__farhelmTerm ?? (window as any).__farhelmGrid).__testMarker = "pre-replace";
@@ -654,15 +654,17 @@ test("replacing a live session creates a fresh row in its place, selected, with 
     // reused the old terminal (or the old session's id under a new label)
     // would leave the marker right there.
     //
-    // `__farhelmTermReady` and the READY text are already TRUE for the
-    // source's own instance before any of this runs, so neither one can
+    // The READY text (and, for an old terminal, `__farhelmTermReady`) is
+    // already TRUE for the source's own instance before any of this runs,
+    // so neither one can
     // prove the replacement's terminal has actually been published by the
     // time this test inspects it — a correct implementation and one that
     // left the stale source instance mounted a moment too long would both
     // satisfy them. The sentinel closes that gap instead (the same
     // stale-singleton fix `terminal.spec.ts`'s session-switch test uses):
-    // poll until `__farhelmTerm` is DEFINED (not merely absent during an
-    // unmount), no longer carries the marker stamped on the source's
+    // poll until the component (`__farhelmTerm`, or `__farhelmGrid` for a
+    // new terminal) is DEFINED (not merely absent during an unmount), no
+    // longer carries the marker stamped on the source's
     // instance above, and its socket has actually reached OPEN — only THEN
     // is it safe to wait for READY and read the buffer.
     await expect

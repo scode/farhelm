@@ -5630,7 +5630,7 @@ pub(super) fn CreateSessionForm(
                     )
                     .await;
                     pending_launch.set(None);
-                    bridge.finish(result.is_ok());
+                    bridge.finish(crate::list::RestartOutcome::of(&result));
                     match result {
                         Ok(_) => {
                             drop(op_guard);

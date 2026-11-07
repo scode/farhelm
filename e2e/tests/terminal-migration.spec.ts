@@ -215,6 +215,13 @@ test("an old session's band hides until the next visit and offers only what the 
  * the obvious move and here it does nothing for the tabs, so the band must
  * say what does. */
 test("a new agent with an old tab is told to reopen that tab", async ({ page, request }) => {
+  // The seeded kinds are also what the page mounts by: an agent seeded as a
+  // new terminal gets the grid alone, and an old terminal's byte stream then
+  // ends its attachment as a broken contract, so the session never becomes
+  // ready. The host-terminal run has real new terminals under these seeds
+  // (the old tab's seed is the compatibility path, xterm.js swapped for the
+  // grid), and covers this case there.
+  test.skip(!onHostTerminals(), "seeds a new agent, which needs a real new terminal; covered on the host-terminal run");
   const session = await createSession(request, { title: `migration-tabs-${Date.now()}` });
   try {
     await openTab(request, session.id);
