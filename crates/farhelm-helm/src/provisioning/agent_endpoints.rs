@@ -4,11 +4,11 @@
 //! never argv, and parse errors deliberately omit the input and parser detail:
 //! either may contain a token. An incompatible document is refused intact.
 
-use crate::tensorlake::recipes::StoredEndpoint;
+use crate::tensorlake::recipes::ResolvedEndpoint;
 
 /// Set only Claude Code's two Farhelm-owned environment keys. Other top-level
 /// settings and environment entries survive; a non-object cannot be merged.
-pub(super) fn claude(bytes: Option<&[u8]>, endpoint: &StoredEndpoint) -> Result<Vec<u8>, String> {
+pub(super) fn claude(bytes: Option<&[u8]>, endpoint: &ResolvedEndpoint) -> Result<Vec<u8>, String> {
     let mut value = match bytes {
         Some(bytes) => serde_json::from_slice(bytes)
             .map_err(|_| "~/.claude/settings.json is not valid JSON".to_string())?,
@@ -34,7 +34,7 @@ pub(super) fn claude(bytes: Option<&[u8]>, endpoint: &StoredEndpoint) -> Result<
 
 /// Select a dedicated Codex provider, retaining the rest of the TOML document,
 /// including comments. Existing provider tables may contain unrelated keys.
-pub(super) fn codex(bytes: Option<&[u8]>, endpoint: &StoredEndpoint) -> Result<Vec<u8>, String> {
+pub(super) fn codex(bytes: Option<&[u8]>, endpoint: &ResolvedEndpoint) -> Result<Vec<u8>, String> {
     let text = std::str::from_utf8(bytes.unwrap_or_default())
         .map_err(|_| "~/.codex/config.toml is not UTF-8".to_string())?;
     let mut doc = text
@@ -77,7 +77,7 @@ mod tests {
     /// providers, rather than making an endpoint save a config replacement.
     #[test]
     fn merges_preserve_unrelated_settings() {
-        let endpoint = StoredEndpoint {
+        let endpoint = ResolvedEndpoint {
             base_url: "http://127.0.0.1:8080".into(),
             token: Some("secret".into()),
         };
@@ -116,7 +116,7 @@ mod tests {
     /// must not repeat the token a parser may have encountered.
     #[test]
     fn incompatible_documents_fail_without_echoing_contents() {
-        let endpoint = StoredEndpoint {
+        let endpoint = ResolvedEndpoint {
             base_url: "https://example.test".into(),
             token: None,
         };

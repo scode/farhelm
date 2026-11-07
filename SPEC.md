@@ -369,19 +369,22 @@ as hosts, kept in Settings → **Tensorlake**. A recipe has a size (CPUs, memory
 software source, optional Claude Code and Codex API endpoints, and outbound tunnels. The source either installs Ubuntu
 packages (Farhelm builds a snapshot from Tensorlake's Ubuntu image with those packages, Claude Code and Codex) or reuses
 an existing Tensorlake image name or snapshot ID as is, which must have systemd installed, enabled and running as the
-init system at startup. Each endpoint is a base URL plus an optional token (Claude Code's auth token, Codex's bearer
-token); a tunnel makes a sandbox loopback port reach a host and port as seen from the helm's machine. A recipe's name is
-lowercase letters, digits and hyphens, starts with a letter, does not end with a hyphen, is at most 32 characters, and
-never changes: hosts refer to their recipe by name, and renaming means creating a new recipe. Creating a recipe under a
-name that exists is refused rather than overwriting it, and deleting a recipe a host uses is refused. Endpoint tokens
-are stored unencrypted in the helm's state, like the ntfy token, and are never returned: the editor shows whether one is
-saved, keeps it when the field is left blank and the endpoint's server is unchanged, and clears it on request or when
-the server changes, saying so before saving. Edits to size and packages affect only hosts created afterwards (packages
-after the next snapshot build); tunnels are read when a host connects. The list shows each recipe's name, size, package
-count or reused image or snapshot, and tunnel count. The editor replaces the list in place; leaving it with unsaved
-changes, whether by its own Back or Cancel or by closing Settings with Escape or a close control, asks whether to save,
-discard or keep editing, and saving or discarding then completes the close. Delete asks for confirmation. A list refresh
-that fails keeps the rows shown, says they may be out of date, and offers **Retry loading**.
+init system at startup. Each endpoint is a base URL plus an optional named API endpoint credential from Settings →
+Credentials; a tunnel makes a sandbox loopback port reach a host and port as seen from the helm's machine. A recipe's
+name is lowercase letters, digits and hyphens, starts with a letter, does not end with a hyphen, is at most 32
+characters, and never changes: hosts refer to their recipe by name, and renaming means creating a new recipe. Creating a
+recipe under a name that exists is refused rather than overwriting it, and deleting a recipe a host uses is refused.
+Endpoint tokens belong to the credential catalog, and recipes store only their names. Create and update refuse missing
+or wrong-kind credentials; deleting a credential a recipe uses is refused. The endpoint picker offers None and
+endpoint-token names, preserves the selected name across URL changes, and points to Settings → Credentials for entering
+or replacing values. An unavailable draft choice stays visible until the user chooses another or None; it cannot be
+saved as a missing reference. Upgrading drops old recipe-embedded tokens rather than importing them; the user re-enters
+them in Credentials. Edits to size and packages affect only hosts created afterwards (packages after the next snapshot
+build); tunnels are read when a host connects. The list shows each recipe's name, size, package count or reused image or
+snapshot, and tunnel count. The editor replaces the list in place; leaving it with unsaved changes, whether by its own
+Back or Cancel or by closing Settings with Escape or a close control, asks whether to save, discard or keep editing, and
+saving or discarding then completes the close. Delete asks for confirmation. A list refresh that fails keeps the rows
+shown, says they may be out of date, and offers **Retry loading**.
 
 In Settings the editor opens at its top, including Back, with field labels smaller than its section captions. Its
 actions and leave/delete questions and refusal messages stay visible at the bottom of the scrolling panel, above the
@@ -1904,7 +1907,10 @@ Back, Name, a write-only secret field, Delete, Cancel and Save. The agent-login 
 Claude accepts the token from `claude setup-token`; Codex accepts a pasted or selected `auth.json`, validated only as a
 JSON object of at most 64 KiB. An empty replacement keeps the saved value. Settings never returns a saved secret; a
 failed save keeps the draft and shows its reason. Closing discards unsaved text without a recipe-style departure
-question. The catalog stores these values; recipe selection and delivery are separate capabilities.
+question. Recipes select API endpoint tokens by name, and setup resolves their current saved values. GitHub tokens and
+subscription logins are stored in the catalog; recipe delivery for those kinds is separate. Delete is unavailable while
+a recipe uses a credential, with the recipe names shown. Reference changes refresh an open credential editor without
+discarding its unsaved replacement text.
 
 The Credentials overview, every credential editor, and both Tensorlake key forms show a prominent danger-tinted **Not
 encrypted on disk** warning explaining that anyone who can read the helm's state directory can read the values.

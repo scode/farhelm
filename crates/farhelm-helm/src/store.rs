@@ -336,7 +336,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 75;
+pub(crate) const SCHEMA_VERSION: i64 = 76;
 
 /// Named secrets have their own table so list responses never need to decode a
 /// secret-bearing configuration object. The monotonically increasing revision
@@ -2493,6 +2493,7 @@ pub struct HelmStore {
 ///   Rebuild the table so fresh and upgraded databases share one DDL;
 ///   preserve existing positions on version-only fixture rewinds.
 /// - 75: an empty named, write-only credential catalog, kept outside preferences.
+/// - 76: drop recipe-embedded endpoint tokens; recipes now select credential names.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2815,7 +2816,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 75;",
+              PRAGMA user_version = 76;",
             announcement_schema = crate::announcements::SCHEMA,
         ))
         .context("creating schema")?;
@@ -4491,6 +4492,16 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         tx.execute_batch("PRAGMA user_version = 75;")
             .context("migrating helm.db to schema version 75")?;
         version = 75;
+    }
+    if version == 75 {
+        // The maintainer chose re-entry over importing old recipe secrets.
+        // Only spec_json changes: state_json owns billed resource identities
+        // and must survive this credential migration byte for byte.
+        tx.execute_batch(
+            "UPDATE tensorlake_recipes SET spec_json = json_remove(spec_json, '$.claude.token', '$.codex.token');
+             PRAGMA user_version = 76;",
+        ).map_err(|_| anyhow::anyhow!("could not migrate Tensorlake recipe endpoint credentials"))?;
+        version = 76;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to

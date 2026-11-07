@@ -366,9 +366,10 @@ for (const palette of ["dark", "light"] as const) {
           });
         }
 
-        const finalField = editor.getByLabel("Codex bearer token", {
+        const finalField = editor.getByLabel("Codex endpoint token", {
           exact: true,
         });
+        await expect(finalField).toBeEnabled();
         await finalField.focus();
         await expect(finalField).toBeFocused();
         await page.keyboard.press("Tab");
@@ -471,21 +472,26 @@ for (const palette of ["dark", "light"] as const) {
 
 /** Spec: a managed recipe created in the editor is stored with its size,
  * packages (split on spaces and new lines), tunnel and Claude Code endpoint;
- * the list summarizes it; the token is never returned, and reopening shows the
- * name read-only and an empty token field that says a token is saved. An edit
- * that leaves the token blank keeps it, and Delete asks first and removes it.
+ * the list summarizes it; only its credential name is returned. Reopening keeps
+ * the explicit selection, including across a URL change, and deleting the
+ * credential is refused until the recipe no longer uses it.
  *
  * Why: this is the whole create/edit/delete loop a user goes through, and the
- * write-only token is the part a regression would quietly break (a token
- * echoed into the page, or cleared by an unrelated edit). */
+ * named token is the part a regression would quietly break (a value echoed
+ * into the page, or a selection cleared by an unrelated edit). */
 test("a managed recipe is created, edited and deleted without exposing its token", async ({ page, request }) => {
   const name = "e2e-rust";
+  const credentialName = "e2e-rust-endpoint";
+  let ownsCredential = false;
   await page.goto("/");
   expect(
     (await recipes(request)).map((r) => r.name),
     "fixture premise: no leftover recipe",
   ).not.toContain(name);
   try {
+    const created = await request.post("/api/credentials", { data: { name: credentialName, kind: "endpoint_token", secret: TOKEN } });
+    expect(created.status(), await created.text()).toBe(201);
+    ownsCredential = true;
     const list = await openRecipes(page);
     await list.getByRole("button", { name: "New recipe", exact: true }).click();
     const editor = page.getByRole("region", {
@@ -524,12 +530,12 @@ test("a managed recipe is created, edited and deleted without exposing its token
       name: "Claude Code base URL",
       exact: true,
     }).fill("http://127.0.0.1:8080");
-    await claude.getByLabel("Claude Code auth token", { exact: true }).fill(
-      TOKEN,
-    );
+    const picker = claude.getByLabel("Claude Code endpoint token", { exact: true });
+    await expect(picker).toBeEnabled();
+    await picker.selectOption(credentialName);
     await expect(
       editor.getByText(
-        "Tokens are stored unencrypted in the helm's state on this machine.",
+        "Add or replace endpoint tokens in Settings → Credentials.",
         { exact: false },
       ),
     ).toBeVisible();
@@ -549,7 +555,7 @@ test("a managed recipe is created, edited and deleted without exposing its token
       name,
       size: { cpus: 2, memory_gb: 4, disk_gb: 20 },
       source: { kind: "packages", packages: ["git", "ripgrep", "jq"] },
-      claude: { base_url: "http://127.0.0.1:8080", token_set: true },
+      claude: { base_url: "http://127.0.0.1:8080", token_credential: credentialName },
       codex: null,
       tunnels: [{ sandbox_port: 8080, host: "127.0.0.1", port: 8080 }],
       snapshot: null,
@@ -558,7 +564,9 @@ test("a managed recipe is created, edited and deleted without exposing its token
     });
     expect(await page.content()).not.toContain(TOKEN);
 
-    // Reopen: the name is fixed and the saved token stays out of the form.
+    const refusedDelete = await request.delete(`/api/credentials/${credentialName}`);
+    expect(refusedDelete.status()).toBe(409);
+    // Reopen: the recipe's name is fixed and the chosen identity is visible.
     await row.getByRole("button", { name: `Edit ${name}`, exact: true })
       .click();
     const reopened = page.getByRole("region", {
@@ -567,14 +575,11 @@ test("a managed recipe is created, edited and deleted without exposing its token
     });
     await expect(reopened.getByRole("textbox", { name: "Name", exact: true }))
       .not.toBeEditable();
-    const token = reopened.getByLabel("Claude Code auth token", {
+    const token = reopened.getByLabel("Claude Code endpoint token", {
       exact: true,
     });
-    await expect(token).toHaveValue("");
-    await expect(token).toHaveAttribute(
-      "placeholder",
-      "Token saved; leave blank to keep it",
-    );
+    await expect(token).toHaveValue(credentialName);
+    await reopened.getByLabel("Claude Code base URL", { exact: true }).fill("https://another.example/v1");
     await expect(
       reopened.getByRole("textbox", { name: "Ubuntu packages", exact: true }),
     ).toHaveValue("git\nripgrep\njq");
@@ -585,8 +590,7 @@ test("a managed recipe is created, edited and deleted without exposing its token
     );
     const edited = (await recipes(request)).find((r) => r.name === name);
     expect(edited.size.disk_gb).toBe(30);
-    expect(edited.claude.token_set, "a blank token field kept the saved token")
-      .toBe(true);
+    expect(edited.claude.token_credential, "a URL change retains the explicit named choice").toBe(credentialName);
 
     // Delete asks first, then removes the recipe.
     await row.getByRole("button", { name: `Edit ${name}`, exact: true })
@@ -611,6 +615,10 @@ test("a managed recipe is created, edited and deleted without exposing its token
     expect((await recipes(request)).map((r) => r.name)).not.toContain(name);
   } finally {
     await removeRecipes(request, [name]);
+    if (ownsCredential) {
+      const removed = await request.delete(`/api/credentials/${credentialName}`);
+      expect([200, 404], await removed.text()).toContain(removed.status());
+    }
   }
 });
 
