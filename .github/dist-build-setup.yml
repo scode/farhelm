@@ -380,10 +380,20 @@
 - name: Install the pinned Dioxus CLI
   # Pinned to the `dioxus` version in the ROOT Cargo.toml's
   # `[workspace.dependencies]`; dx refuses to build against a dioxus crate at
-  # a different version, so the two numbers move together. The only `dx`
-  # install left in ci.yml is the disabled browser job; release setup is the
-  # active hosted path that installs this tool.
-  run: cargo install --locked dioxus-cli --version 0.7.10
+  # a different version, so the two numbers move together, and the installer
+  # refuses a `.github/dx-pins.json` whose version has fallen behind. The only
+  # `dx` install left in ci.yml is the disabled browser job; release setup is
+  # the active hosted path that installs this tool.
+  #
+  # The binary is the one the Dioxus project publishes with its GitHub
+  # release, accepted only when both its archive and its executable match the
+  # pinned digests, the same way the pinned nextest is installed. Compiling it
+  # with `cargo install` instead cost six to eleven minutes on every build job,
+  # on the critical path of the slowest one, for a tool whose output is the
+  # same either way.
+  run: |
+    dx_dir=$(python3 scripts/install-pinned-dx.py --output-root "$RUNNER_TEMP/dx-tools") || exit 1
+    printf '%s\n' "$dx_dir" >> "$GITHUB_PATH"
 
 # ---------------------------------------------------------------------------
 # Native Linux desktop gate, after its wasm and dx prerequisites but before

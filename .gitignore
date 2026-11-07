@@ -32,6 +32,7 @@ e2e/.stacks/
 
 # Verified local runner binaries; release jobs install into their temporary directory.
 .ci-nextest/
+.ci-dx/
 
 # Personal use-it-for-real dev-loop script; carries user-specific hostnames
 # and stays out of the repo on purpose.
