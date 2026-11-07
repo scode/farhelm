@@ -210,6 +210,9 @@ pub(super) fn NotificationBell(
                 aria_expanded: is_open,
                 aria_haspopup: "dialog",
                 "data-tooltip": "{tooltip}",
+                // The overlay is still a row target; help inside the opened
+                // notification list remains ordinary flyout help.
+                "data-tooltip-anchor": "session-row",
                 onmounted: move |element| {
                     bell_handle.set(Some(element.data()));
                     if should_measure_on_mount(is_open, *placement.peek()) {

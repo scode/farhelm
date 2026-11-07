@@ -390,11 +390,14 @@ pub(crate) fn BranchIcon() -> Element {
 /// accessible name once. Other callers retain that name in hidden text. A
 /// cwd differing byte for byte from the recorded root, including a symlink
 /// spelling, is shown separately so a subdirectory's location remains known.
+/// Row callers opt into beside-the-list help; the session header keeps the
+/// ordinary tooltip placement despite using the same checkout explanation.
 #[component]
 pub(crate) fn ManagedCheckoutMark(
     checkout: crate::github_checkout::WorkingCopyInfo,
     cwd: crate::peer::PeerText,
     #[props(default = false)] show_repository: bool,
+    #[props(default = false)] session_row: bool,
 ) -> Element {
     let repo = crate::peer::display_peer(&checkout.repo.identifier());
     let path = checkout.canonical_path.escaped();
@@ -408,6 +411,7 @@ pub(crate) fn ManagedCheckoutMark(
     let tooltip = format!("Managed checkout of {repo}{description}");
     rsx! {
         span { class: "managed-checkout-mark", "data-tooltip": tooltip,
+            "data-tooltip-anchor": if session_row { "session-row" },
             BranchIcon {}
             if show_repository {
                 span { class: "visually-hidden", "Managed checkout" }
@@ -722,6 +726,10 @@ pub(crate) fn HostMark(
     /// Leave ordinary row callers' locality explanation unchanged.
     #[props(default)]
     tooltip: Option<String>,
+    /// Only session-list rows use beside-the-list hover placement. Host
+    /// panels and pickers share this mark but retain their ordinary help.
+    #[props(default = false)]
+    session_row: bool,
 ) -> Element {
     use farhelm_proto::host_appearance::{HostColor, HostIcon};
     let tint = if color == HostColor::Default {
@@ -734,6 +742,7 @@ pub(crate) fn HostMark(
             class: "host-kind-icon", "data-glyph": icon.as_str(),
             "data-host-color": color.as_str(), style: "{tint}",
             "data-tooltip": tooltip.unwrap_or_else(|| if local { "Local: on this machine, where the helm runs" } else { "Remote: on another machine, reached over SSH" }.to_string()),
+            "data-tooltip-anchor": if session_row { "session-row" },
             view_box: "0 0 16 16", fill: "none", stroke: "currentColor",
             stroke_width: "1.3", stroke_linecap: "round", stroke_linejoin: "round",
             "aria-hidden": "true",
