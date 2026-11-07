@@ -4214,3 +4214,36 @@ was clean. Run UUIDs address retained temporary evidence, which expires with cle
 Class: readiness
 
 Cause: hypothesis
+
+## 2026-11-07 — a held host-settings save leaves the dialog body without a keyboard stop on WebKit (e2e/tests/modal-layout.spec.ts)
+
+`host-settings scrollports stay reachable while saving` failed on WebKit twice on 2026-11-07, each time once in a full
+browser run of the plans landing monitor on Tensorlake sandboxes, and passed every re-run. The test holds an ssh host's
+destination save, shrinks the viewport to 360x300 so the dialog body overflows, and requires every overflowing scroll
+area to be reachable by keyboard: with all of the body's controls disabled during the save, the body itself must be a
+named, focusable region. Both times the scan found the body scrolling but not reachable. First: run
+`627f4a69-8586-40fa-93f6-395295f760d5` (tested commit `47ca3c1b`, named credentials for Tensorlake hosts, which does not
+change this dialog's scrolling), the only failure in its shard; three repeats passed
+(`2144e44a-3ab6-436b-886e-9360ea84bd6b`). Second: run `0e536f3c-fa3d-4a52-8182-0596188a0e0e` (tested commit `43459022`,
+a trash change with a Stop change on top), beside a recorded quick-launch focus flake and two sidebar failures that the
+Stop change caused; the same spec file passed on both engines without the Stop change
+(`2c518375-6a3f-4bab-9321-28b492f1dc5d`). Chromium passed in both runs. The assertion fails at once, not on a timeout.
+Hypothesis: the body's region attributes or Tab stop follow a re-render after the viewport shrinks, and under a loaded
+shard the scan can run before WebKit has applied them. Open; excluded from deflake sweeps; no fix attempted.
+
+```text
+Error: each scrollport has a named Tab stop or an enabled tabbable control
++   "div.dialog-body.host-settings-body (y)",
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested trees pin. The pinned tmux 3.7c the shard runner installs;
+its executable SHA256 was not copied into this entry. Locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` after the recorder
+scrubbed ambient `FARHELM_*`; tracked-tree status was not checked for this entry. Run UUIDs address retained temporary
+evidence, which expires with cleanup.
+
+Class: readiness
+
+Cause: hypothesis

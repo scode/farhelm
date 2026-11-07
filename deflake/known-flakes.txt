@@ -30,3 +30,4 @@ playwright provisioning.spec.ts expanded setup failure closes the menu below it 
 playwright settings.spec.ts post-clone commands with carriage returns refuse edits but can be cleared  # settings-save-cleanup-request-finished
 playwright settings.spec.ts a pending checkout folder save survives closing settings  # settings-save-cleanup-request-finished
 playwright provisioning.spec.ts incarnation churn keeps a followed run while a target change detaches it  # update-progress-step-name-late
+playwright modal-layout.spec.ts host-settings scrollports stay reachable while saving  # host-settings-scrollport-held-save
