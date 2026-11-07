@@ -2288,11 +2288,15 @@ struct SessionIdentity {
 }
 
 /// How long delivering one prompt into a host terminal may take, from the
-/// first part queued to the submit's acknowledgement: the same budget a tmux
-/// input client has for one exchange ([`crate::tmux::CONTROL_EXCHANGE_TIMEOUT`]),
-/// since both bound how long one prompt may hold its session's lifecycle
-/// claim behind a program that does not read its terminal.
-const HOST_PROMPT_DELIVERY_TIMEOUT: Duration = crate::tmux::CONTROL_EXCHANGE_TIMEOUT;
+/// first part queued to the submit's acknowledgement.
+///
+/// It bounds how long one prompt may hold its session's lifecycle claim (and so
+/// hold back Stop, Restart and Delete) behind a program that does not read its
+/// terminal: long enough for a busy program to get to its input, short enough
+/// that a wedged one fails the prompt with a visible error instead of holding
+/// the session. Ten seconds matches the budget old terminals give one input
+/// exchange; nothing ties the two otherwise.
+const HOST_PROMPT_DELIVERY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Type a prompt into a host terminal: the bracketed `paste`, then the
 /// harness's `submit` keys.

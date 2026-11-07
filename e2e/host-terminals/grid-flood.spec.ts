@@ -26,10 +26,10 @@ const FLOOD_RECORDS = 800_000;
 /**
  * The scrollback a terminal in a terminal host keeps, which its grid stream
  * announces as its history capacity: the supervisor's
- * `hosts::terminal::DEFAULT_SCROLLBACK_LINES`, which is tmux's
- * `HISTORY_LIMIT` (crates/farhelm-supervisor/src/tmux.rs). Duplicated so the
- * test can say how much history a flood must leave, independently of what
- * the stream announces.
+ * `hosts::terminal::DEFAULT_SCROLLBACK_LINES`
+ * (crates/farhelm-supervisor/src/hosts/terminal.rs). Duplicated so the test
+ * can say how much history a flood must leave, independently of what the
+ * stream announces.
  */
 const SCROLLBACK_LINES = 12_000;
 

@@ -65,16 +65,15 @@ use farhelm_terminal_emulator::alacritty_terminal::vte::ansi::{
 use farhelm_terminal_emulator::{Emulator, MouseReporting};
 
 /// About how many bytes of JSON a `rows` or `history` message is packed
-/// to: the supervisor's terminal data chunk (`REPLAY_CHUNK`), well below
-/// [`GRID_MAX_MESSAGE`].
+/// to, well below [`GRID_MAX_MESSAGE`].
 ///
-/// The format allows 1 MiB, but the connection's writer queue is bounded
-/// by frame count (64 frames), so message size is what bounds the bytes
-/// one attachment can have queued: at this size about 2 MiB, as for a tmux
-/// terminal's output. It also keeps an ordinary row's message within the
-/// 64 KiB a helm admits per terminal data frame today. A single row larger
-/// than this (a long row of non-ASCII cells, or one with many links) still
-/// goes, alone, in a message of its own.
+/// The format allows 1 MiB, but the connection's writer queue is bounded by
+/// frame count (64 frames), so message size is what bounds the bytes one
+/// attachment can have queued: at this size about 2 MiB, the same bound an old
+/// terminal's byte stream has with its 32 KiB chunks. It also keeps an ordinary
+/// row's message within the 64 KiB a helm admits per terminal data frame today.
+/// A single row larger than this (a long row of non-ASCII cells, or one with
+/// many links) still goes, alone, in a message of its own.
 pub const MESSAGE_TARGET: usize = 32 * 1024;
 
 /// What a message's own fields take beyond its rows and links, rounded up:
