@@ -165,12 +165,18 @@ Triggers: "perform trailing code review", or similar wording around "trailing co
 - `AGENTS.md`, "Conventional Commits" (root, already in context for agents started at the checkout root)
 - the coverage sources, for each finding
 
+Scope: landed product code, product tests, executable maintainer tooling and their behavior-bearing configuration, plus
+`SPEC.md` and `SPEC_impl.md`. Repository workflow metadata, including plans and this queue, is excluded as a review
+target. Apply `review_feedback_queue/.agents/trailing-review.md`, "Review scope", before assigning groups; excluded
+material may still be necessary context or recording coverage.
+
 Fence: use `persistent-review` for the primary review of the pinned range, and not for the independent drop check; the
 request authorizes recording findings and updating the checkpoint only, not triage, fixes or execution; the checkpoint
-advances only after every commit in the range meets the skill's completion requirements and every finding is handled;
-the review-result PR stays a draft and is never merged automatically. Trailing-review result and merge reports end with
-a loud Markdown banner only when the review is incomplete or checkpoint handling is exceptional; an ordinary draft PR
-awaiting merge needs no banner. Follow `review_feedback_queue/.agents/trailing-review.md`, "Closing status banner".
+advances only after every commit is inventoried, every in-scope change meets the skill's completion requirements and
+every finding is handled; the review-result PR stays a draft and is never merged automatically. Trailing-review result
+and merge reports end with a loud Markdown banner only when the review is incomplete or checkpoint handling is
+exceptional; an ordinary draft PR awaiting merge needs no banner. Follow
+`review_feedback_queue/.agents/trailing-review.md`, "Closing status banner".
 
 ### Triage ("triage review feedback")
 
