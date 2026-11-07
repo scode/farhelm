@@ -127,6 +127,7 @@ pub mod open_extensions;
 /// What counts as a YOLO launch (see the module's own docs).
 pub mod yolo;
 
+pub mod credentials;
 /// The feedback submission the UI composes and the helm forwards, with the
 /// caps both enforce (see the module's own docs).
 pub mod feedback;

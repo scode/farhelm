@@ -17,6 +17,8 @@
 //!
 //! Requests survive the dialog closing, but component state is touched only
 //! while mounted, as in the other explicit-save fields.
+//! The account context belongs to the Settings opening: Credentials mounts the
+//! same key form with an independent secret draft and shared saved-key metadata.
 //!
 //! The recipe list sits between the ssh key and the switch. It is its own
 //! component (`crate::tensorlake::recipes::RecipeList`) with its own reads
@@ -25,7 +27,7 @@
 //! revision so discovery can recover from a rejected key without retrying
 //! on unrelated renders or fleet changes. A successful saved-key Test also
 //! resumes failed discovery once. Refresh and remount recover independently;
-//! another tab's key save does not advance these component-local revisions.
+//! another browser tab's key save does not advance this opening's revisions.
 
 use crate::{
     ApiBase,
@@ -79,40 +81,30 @@ pub(crate) const EXPERIMENTAL_WARNING: &str = "EXPERIMENTAL: Tensorlake support 
     releases. Try at your own risk. You are responsible for making sure sandboxes are not running and billing \
     you when you don't want them to.";
 
-/// The Tensorlake panel's content below its heading.
-///
-/// The snapshot (`settings`) is the helm's last answer and the only source
-/// of what the section shows as saved; the key field is a draft that is
-/// cleared after every successful key save.
-#[component]
-pub(crate) fn TensorlakeSettings() -> Element {
+/// One saved account snapshot for both mounted Settings sections. Secret drafts
+/// stay with each form; only acknowledged metadata and discovery revisions are
+/// shared. Serializing key actions also prevents two hidden forms racing saves.
+#[derive(Clone, Copy)]
+pub(crate) struct AccountState {
+    load: Resource<Result<Settings, String>>,
+    settings: Signal<Option<Settings>>,
+    key_revision: Signal<u64>,
+    test_revision: Signal<u64>,
+    busy: Signal<bool>,
+}
+
+/// Install the account owner above both panels for this opening of Settings.
+/// Closing drops unsaved fields; a section change only hides their components.
+pub(crate) fn provide_account() {
     let base = use_context::<ApiBase>().0;
-    let read_base = base.clone();
-    let mut load = use_resource(move || {
-        let base = read_base.clone();
+    let load = use_resource(move || {
+        let base = base.clone();
         async move { fetch_tensorlake_settings(&base).await }
     });
     let mut settings = use_signal(|| None::<Settings>);
-    let mut key = use_signal(String::new);
-    // Discovery needs to notice key replacement as well as set/cleared.
-    // The counter carries no credential and changes only on acknowledged saves.
-    let mut key_revision = use_signal(|| 0_u64);
-    // Test can validate a key replaced elsewhere while this dialog stayed
-    // mounted. Only successful Tests release failed discovery.
-    let mut test_revision = use_signal(|| 0_u64);
-    let mut busy = use_signal(|| false);
-    let mut outcome = use_signal(|| None::<Result<String, String>>);
-    let mut toggling = use_signal(|| false);
-    let mut toggle_error = use_signal(|| None::<String>);
-    // The click that set the "Command copied" line, so a click's timer clears
-    // only its own feedback, as in the session view's copy buttons.
-    let mut copied = use_signal(|| None::<u64>);
-    let mut copy_clicks = use_signal(|| 0_u64);
-    let mut creating = use_signal(|| false);
-    let mut create_error = use_signal(|| None::<String>);
-    let mounted = use_hook(|| Rc::new(Cell::new(true)));
-    let drop_mounted = mounted.clone();
-    use_drop(move || drop_mounted.set(false));
+    let key_revision = use_signal(|| 0_u64);
+    let test_revision = use_signal(|| 0_u64);
+    let busy = use_signal(|| false);
     use_effect(move || {
         if settings.peek().is_none()
             && let Some(Ok(loaded)) = load.read().as_ref()
@@ -120,6 +112,31 @@ pub(crate) fn TensorlakeSettings() -> Element {
             settings.set(Some(loaded.clone()));
         }
     });
+    use_context_provider(|| AccountState {
+        load,
+        settings,
+        key_revision,
+        test_revision,
+        busy,
+    });
+}
+
+/// The same write-only key form in both panels, with separate replacement drafts.
+/// Saved metadata and discovery revisions belong to the enclosing Settings dialog.
+#[component]
+pub(crate) fn TensorlakeKey(#[props(default)] credentials_location: bool) -> Element {
+    let base = use_context::<ApiBase>().0;
+    let account = use_context::<AccountState>();
+    let mut load = account.load;
+    let mut settings = account.settings;
+    let mut key_revision = account.key_revision;
+    let mut test_revision = account.test_revision;
+    let mut busy = account.busy;
+    let mut key = use_signal(String::new);
+    let mut outcome = use_signal(|| None::<Result<String, String>>);
+    let mounted = use_hook(|| Rc::new(Cell::new(true)));
+    let drop_mounted = mounted.clone();
+    use_drop(move || drop_mounted.set(false));
     let load_error = load
         .read()
         .as_ref()
@@ -128,14 +145,13 @@ pub(crate) fn TensorlakeSettings() -> Element {
     let snapshot = settings();
     let loaded = snapshot.is_some();
     let key_set = snapshot.as_ref().is_some_and(|s| s.api_key_set);
-    let ask_skipped = snapshot.as_ref().is_some_and(|s| s.create_without_asking);
     let locked = !loaded || busy();
-
-    // One runner for Save and Clear: both are key saves with the same
-    // lifecycle and only differ in the request and the success message.
     let save_base = base.clone();
     let save_mounted = mounted.clone();
     let run_key_save = use_callback(move |(request, success): (SaveSettings, &'static str)| {
+        if *busy.peek() {
+            return;
+        }
         busy.set(true);
         outcome.set(None);
         let mounted = save_mounted.clone();
@@ -148,7 +164,11 @@ pub(crate) fn TensorlakeSettings() -> Element {
             busy.set(false);
             match result {
                 Ok(saved) => {
-                    settings.set(Some(saved));
+                    // Other account controls own their fields; an older key
+                    // reply cannot roll back a newer acknowledged switch.
+                    if let Some(current) = settings.write().as_mut() {
+                        current.api_key_set = saved.api_key_set;
+                    }
                     key_revision += 1;
                     key.set(String::new());
                     outcome.set(Some(Ok(success.into())));
@@ -158,23 +178,8 @@ pub(crate) fn TensorlakeSettings() -> Element {
         });
     });
     let test_base = base.clone();
-    let create_base = base.clone();
-    let create_mounted = mounted.clone();
     let test_mounted = mounted.clone();
-    let toggle_base = base.clone();
-    let toggle_mounted = mounted.clone();
-
     rsx! {
-        // First in the section, ahead of the API key that every Tensorlake user
-        // has to set up, so nobody starts without seeing it. The wording is the
-        // maintainer's, reproduced exactly (2026-11-04); change it only on their
-        // say. It shows unconditionally, even when Settings cannot load.
-        div { class: "tensorlake-experimental", role: "note", aria_label: "Tensorlake support is experimental",
-            p { "{EXPERIMENTAL_WARNING}" }
-        }
-        p { class: "host-settings-help",
-            "Tensorlake sandboxes are cloud machines Farhelm can create and use as hosts. Farhelm creates them in the Tensorlake project your API key belongs to."
-        }
         section { class: "host-settings-section tensorlake-settings", aria_label: "Tensorlake API key",
             // A failed load seeds nothing editable: every control stays
             // locked until a retry brings the helm's own snapshot.
@@ -184,6 +189,7 @@ pub(crate) fn TensorlakeSettings() -> Element {
                     "data-tooltip": "Load the saved Tensorlake settings again",
                     onclick: move |_| load.restart(), "Retry loading" }
             }
+            StorageWarning { multiple: false }
             label { class: "checkout-root-label", span { "API key" }
                 // `new-password`, not `off`: browsers ignore `off` when they
                 // fill saved logins into a password field, and the helm's own
@@ -196,7 +202,11 @@ pub(crate) fn TensorlakeSettings() -> Element {
                     oninput: move |event| { key.set(event.value()); outcome.set(None); } }
             }
             p { class: "host-settings-help",
-                "Create a key in the Tensorlake dashboard, in the project you want sandboxes in. Farhelm stores it in this helm's state on the machine the helm runs on. It is not encrypted there, and Farhelm never shows it again. Test lists your sandboxes to check that the saved key works."
+                "Create a key in the Tensorlake dashboard, in the project you want sandboxes in. Test lists your sandboxes to check that the saved key works."
+            }
+            p { class: "host-settings-help",
+                if credentials_location { "The same key as in Settings → Tensorlake. Changing it here changes it there." }
+                else { "You can also change it in Settings → Credentials." }
             }
             crate::modal_dialog::DialogActions {
                 button { r#type: "button", class: "btn btn-neutral", disabled: locked || !key_set,
@@ -237,6 +247,61 @@ pub(crate) fn TensorlakeSettings() -> Element {
                 }
             }
         }
+    }
+}
+
+/// Plaintext storage is a deliberate policy the user sees before entering a secret.
+#[component]
+pub(crate) fn StorageWarning(multiple: bool) -> Element {
+    rsx! {
+        div { class: "credential-storage-warning", role: "note",
+            strong { "Not encrypted on disk" }
+            p {
+                if multiple { "Farhelm stores these in plain text in this helm's state, on the machine the helm runs on. Anyone who can read that folder can read them. Farhelm never shows a saved value again." }
+                else { "Farhelm stores this key in plain text in this helm's state, on the machine the helm runs on. Anyone who can read that folder can read it. Farhelm never shows a saved value again." }
+            }
+        }
+    }
+}
+
+/// Account controls, recipes and cleanup share the key's acknowledged state.
+/// This panel owns the non-key fields and never stores a credential draft.
+#[component]
+pub(crate) fn TensorlakeSettings() -> Element {
+    let base = use_context::<ApiBase>().0;
+    let account = use_context::<AccountState>();
+    let mut settings = account.settings;
+    let key_revision = account.key_revision;
+    let test_revision = account.test_revision;
+    let mut toggling = use_signal(|| false);
+    let mut toggle_error = use_signal(|| None::<String>);
+    let mut copied = use_signal(|| None::<u64>);
+    let mut copy_clicks = use_signal(|| 0_u64);
+    let mut creating = use_signal(|| false);
+    let mut create_error = use_signal(|| None::<String>);
+    let mounted = use_hook(|| Rc::new(Cell::new(true)));
+    let drop_mounted = mounted.clone();
+    use_drop(move || drop_mounted.set(false));
+    let snapshot = settings();
+    let loaded = snapshot.is_some();
+    let key_set = snapshot.as_ref().is_some_and(|s| s.api_key_set);
+    let ask_skipped = snapshot.as_ref().is_some_and(|s| s.create_without_asking);
+    let create_base = base.clone();
+    let create_mounted = mounted.clone();
+    let toggle_base = base.clone();
+    let toggle_mounted = mounted.clone();
+    rsx! {
+        // First in the section, ahead of the API key that every Tensorlake user
+        // has to set up, so nobody starts without seeing it. The wording is the
+        // maintainer's, reproduced exactly (2026-11-04); change it only on their
+        // say. It shows unconditionally, even when Settings cannot load.
+        div { class: "tensorlake-experimental", role: "note", aria_label: "Tensorlake support is experimental",
+            p { "{EXPERIMENTAL_WARNING}" }
+        }
+        p { class: "host-settings-help",
+            "Tensorlake sandboxes are cloud machines Farhelm can create and use as hosts. Farhelm creates them in the Tensorlake project your API key belongs to."
+        }
+        TensorlakeKey {}
         section { class: "host-settings-section tensorlake-settings", aria_label: "Farhelm's SSH key",
             h4 { class: "host-settings-section-title", "SSH key" }
             p { class: "host-settings-help",
@@ -257,7 +322,7 @@ pub(crate) fn TensorlakeSettings() -> Element {
                                 if !mounted.get() { return; }
                                 creating.set(false);
                                 match result {
-                                    Ok(saved) => settings.set(Some(saved)),
+                                    Ok(saved) => { if let Some(current) = settings.write().as_mut() { current.ssh_key = saved.ssh_key; } },
                                     Err(error) => create_error.set(Some(error)),
                                 }
                             });
@@ -321,7 +386,7 @@ pub(crate) fn TensorlakeSettings() -> Element {
                                 if !mounted.get() { return; }
                                 toggling.set(false);
                                 match result {
-                                    Ok(saved) => settings.set(Some(saved)),
+                                    Ok(saved) => { if let Some(current) = settings.write().as_mut() { current.create_without_asking = saved.create_without_asking; } },
                                     Err(error) => toggle_error.set(Some(error)),
                                 }
                             });

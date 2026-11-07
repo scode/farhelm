@@ -148,6 +148,7 @@ mod checkout_root;
 mod checkout_spare;
 mod claude_trust;
 mod container_controls;
+mod credentials_settings;
 #[cfg(native_desktop)]
 pub mod desktop;
 

@@ -1887,14 +1887,31 @@ answer; a client that has already loaded its preferences keeps its previous beha
 automatic session selection rereads the shared visits immediately before choosing, template shortcuts read their
 bindings on each invocation and the desktop helm reads the current file-opening list for each hover and open request.
 The gear at the foot of the host rail opens a settings dialog. Its left sidebar lists **Sessions**, **Appearance**,
-**Hosts**, **Tensorlake**, **Terminal**, **Checkouts**, **Agent trust** and **Notifications**, followed by **App** only
-in a desktop app whose updater is active. Each section has an icon; the selected one uses the solid selection fill. One
-selected section appears beside the list, with a matching heading; notifications keeps **Sounds** and **ntfy alerts**
-sub-headings. The header and footer stay pinned while the body scrolls. At 620px wide and below, the dialog shows either
-the selected section or the list; **‹ Settings** returns to the list. The gear always opens sessions and focuses its
-first switch, including at phone width. Trust hints instead open agent trust at the relevant switch and scroll its block
-into view. Section buttons follow the platform's normal Tab rules. Switching sections preserves unsaved fields, outcome
-lines and pending saves; closing discards unsaved fields. Escape and either close control return focus to the gear.
+**Hosts**, **Tensorlake**, **Credentials**, **Terminal**, **Checkouts**, **Agent trust** and **Notifications**, followed
+by **App** only in a desktop app whose updater is active. Each section has an icon; the selected one uses the solid
+selection fill. One selected section appears beside the list, with a matching heading; notifications keeps **Sounds**
+and **ntfy alerts** sub-headings. The header and footer stay pinned while the body scrolls. At 620px wide and below, the
+dialog shows either the selected section or the list; **‹ Settings** returns to the list. The gear always opens sessions
+and focuses its first switch, including at phone width. Trust hints instead open agent trust at the relevant switch and
+scroll its block into view. Section buttons follow the platform's normal Tab rules. Switching sections preserves unsaved
+fields, outcome lines and pending saves; closing discards unsaved fields. Escape and either close control return focus
+to the gear.
+
+**Credentials**, with a lock icon, holds named GitHub tokens, agent subscription logins and API endpoint tokens in three
+lists. Names use the recipe-name grammar, are unique across all kinds, and cannot be changed after creation; neither can
+the kind of a saved credential. Lists show the name, recipe use and saved or replaced time. Editing opens in place with
+Back, Name, a write-only secret field, Delete, Cancel and Save. The agent-login editor selects Claude Code or Codex:
+Claude accepts the token from `claude setup-token`; Codex accepts a pasted or selected `auth.json`, validated only as a
+JSON object of at most 64 KiB. An empty replacement keeps the saved value. Settings never returns a saved secret; a
+failed save keeps the draft and shows its reason. Closing discards unsaved text without a recipe-style departure
+question. The catalog stores these values; recipe selection and delivery are separate capabilities.
+
+The Credentials overview, every credential editor, and both Tensorlake key forms show a prominent danger-tinted **Not
+encrypted on disk** warning explaining that anyone who can read the helm's state directory can read the values.
+Credentials also includes the same Tensorlake API key form as Tensorlake, with Save, Test and Clear. A save or clear in
+either updates both forms' saved-key metadata immediately; each keeps its own unsaved replacement draft. Credentials
+does not rename or duplicate the stored Tensorlake key.
+
 **Appearance** chooses **System**, **Dark** or **Light** for this device, with System as the default. System follows the
 device's current appearance, including changes while Farhelm stays open; an explicit choice overrides it. The browser or
 desktop webview remembers the choice locally, independently of the helm. The resolved palette applies before application
@@ -3850,9 +3867,11 @@ Further requirements:
   suspended or is removed, and retry with backoff while it stays connected. The host details show their status and each
   mapping; a failure makes the host's dot amber and shows the reason. Recipe edits take effect on the next connection. A
   tunnel alone does not prevent Tensorlake's idle suspension.
-- Agent credentials (e.g. Claude subscription auth) live on the host running the agent, in the agent's own standard
-  configuration. The system must not extract, proxy, or repurpose agent OAuth credentials. Claude Code authenticates
-  directly with a consumer subscription, unmodified.
+- Agent credentials normally live on the host running the agent, in the agent's own standard configuration. The Settings
+  credential catalog is an explicit exception: the helm stores logins and tokens the user enters there, unencrypted, and
+  never returns their saved values. Farhelm never reads credentials out of any machine's agent configuration, proxies
+  them, logs them or passes them as command-line arguments. Claude Code authenticates directly with a consumer
+  subscription, unmodified.
 - Updates are never forced: the desktop app installs new stable releases in the background by default, but the user can
   turn that off and then update by hand or pin a version with the installer; an installed update takes effect at the
   next start of Farhelm, which Restart to update only brings forward; remote hosts are updated by an explicit Update

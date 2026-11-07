@@ -71,7 +71,9 @@ use crate::skew;
 use crate::{CommandLaunch, Host, HostId, LaunchSelection, Session, Tab};
 use serde::Deserialize;
 
+mod credentials;
 mod save_order;
+pub(crate) use credentials::{delete_credential, fetch_credentials, write_credential};
 /// The Tensorlake recipe calls (see the module's own docs).
 mod tensorlake_recipes;
 pub(crate) use tensorlake_recipes::{

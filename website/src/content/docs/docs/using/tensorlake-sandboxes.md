@@ -38,6 +38,22 @@ Farhelm stores the API key **unencrypted on the helm's machine**, in its state d
 again. Farhelm cannot check SSH key registration with an API key; an unregistered key shows up as an error during the
 first sandbox setup or snapshot build.
 
+You can also save, test or clear the same API key in Settings → **Credentials**. Both places show whether a key is
+saved; neither shows its value again.
+
+## Save named credentials
+
+Settings → **Credentials** has lists for GitHub tokens, agent subscription logins and API endpoint tokens. Each has a
+name you choose, fixed once saved. **Edit** replaces its value while keeping that name. A blank replacement keeps the
+saved value; closing Settings discards text you have not saved.
+
+**Not encrypted on disk:** Farhelm stores these values in plain text on the machine running the helm. Anyone who can
+read its state directory can read them. Farhelm never shows a saved value again.
+
+For Claude Code, save the token printed by `claude setup-token`. For Codex, run `codex login` on a machine with a
+browser, sign in with ChatGPT, then paste or choose `~/.codex/auth.json`. Saving a named credential does not yet select
+it for a recipe or send it to a host; the recipe controls below still use their existing API endpoint fields.
+
 ## Make a recipe
 
 Choose **New recipe** in Settings → **Tensorlake**. A recipe keeps the choices for hosts you create from it; it is

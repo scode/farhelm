@@ -1,0 +1,251 @@
+//! A write-only catalog: callers can replace secrets but can only read metadata.
+//!
+//! Secret-bearing rows never implement Debug or Serialize. Routes deliberately
+//! discard database and JSON diagnostics, which can include submitted contents.
+
+use std::sync::Arc;
+
+use axum::{
+    Json,
+    extract::{Path, State, rejection::JsonRejection},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
+use farhelm_proto::credentials::{
+    CreateCredential, Credential, CredentialKind, SaveCredential, check_secret,
+};
+use rusqlite::{OptionalExtension, params};
+
+use crate::{AppState, store::HelmStore};
+
+/// JSON encoding can expand a bounded pasted file; the value itself has a
+/// separate smaller limit, shared with the client validation.
+pub(crate) const BODY_LIMIT: usize = 512 * 1024;
+
+/// Refusals are fixed text: neither a malformed paste nor a storage failure
+/// has authority to put credential contents into a response or a log.
+#[derive(Debug)]
+pub(crate) enum Refusal {
+    Invalid(&'static str),
+    Exists,
+    Missing,
+    Storage,
+}
+
+impl Refusal {
+    fn response(self) -> Response {
+        let (status, reason) = match self {
+            Self::Invalid(reason) => (StatusCode::BAD_REQUEST, reason),
+            Self::Exists => (StatusCode::CONFLICT, "a credential already has that name"),
+            Self::Missing => (StatusCode::NOT_FOUND, "the credential no longer exists"),
+            Self::Storage => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Farhelm could not access the credential catalog",
+            ),
+        };
+        (status, reason).into_response()
+    }
+}
+
+/// Decode only the non-secret columns selected by catalog reads.
+fn metadata(row: &rusqlite::Row<'_>) -> rusqlite::Result<Credential> {
+    let kind: String = row.get(1)?;
+    let kind = serde_json::from_str(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?;
+    Ok(Credential {
+        name: row.get(0)?,
+        kind,
+        created_at: row.get(2)?,
+        updated_at: row.get(3)?,
+        revision: u64::try_from(row.get::<_, i64>(4)?)
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        used_by: Vec::new(),
+    })
+}
+
+impl HelmStore {
+    /// List metadata without even selecting the secret column.
+    pub(crate) async fn credentials(&self) -> Result<Vec<Credential>, Refusal> {
+        self.conn()
+            .call("credential metadata read", |conn| {
+                let mut statement = conn.prepare(
+                    "SELECT name, kind, created_at, updated_at, revision
+                     FROM credentials ORDER BY name",
+                )?;
+                Ok(statement
+                    .query_map([], metadata)?
+                    .collect::<Result<Vec<_>, _>>()?)
+            })
+            .await
+            .map_err(|_| Refusal::Storage)
+    }
+
+    /// Create a fixed name and kind, refusing collisions instead of replacing
+    /// whatever another Settings window saved under that name.
+    pub(crate) async fn create_credential(
+        &self,
+        create: CreateCredential,
+    ) -> Result<Credential, Refusal> {
+        farhelm_proto::tensorlake::recipes::check_recipe_name(&create.name)
+            .map_err(|_| Refusal::Invalid("credential names use lowercase letters, digits and hyphens, start with a letter, end with a letter or digit, and have at most 32 characters"))?;
+        check_secret(create.kind, &create.secret).map_err(Refusal::Invalid)?;
+        let name = create.name;
+        let kind = serde_json::to_string(&create.kind).map_err(|_| Refusal::Storage)?;
+        let secret = create.secret.trim().to_owned();
+        // Names can be reused after deletion and revisions restart at one.
+        // Delivery must distinguish that new credential from an old seed.
+        let incarnation = uuid::Uuid::new_v4().to_string();
+        let now = crate::tensorlake::recipes::now_secs();
+        self.conn()
+            .call("credential create", move |conn| {
+                let tx =
+                    conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                let inserted = tx.execute(
+                    "INSERT INTO credentials (name, kind, secret, created_at, updated_at, revision, incarnation)
+                     VALUES (?1, ?2, ?3, ?4, ?4, 1, ?5) ON CONFLICT (name) DO NOTHING",
+                    params![name, kind, secret, now, incarnation],
+                )?;
+                if inserted == 0 {
+                    return Ok(Err(Refusal::Exists));
+                }
+                // A second Settings window may replace or delete immediately
+                // after commit; acknowledge precisely the row this save made.
+                let row = read_metadata(&tx, &name)?;
+                tx.commit()?;
+                Ok(Ok(row))
+            })
+            .await
+            .map_err(|_| Refusal::Storage)?
+    }
+
+    /// Resolve a blank replacement against the current row under the same
+    /// immediate transaction as the write. Revisions never wrap or become REAL
+    /// when SQLite's signed integer range has been exhausted.
+    pub(crate) async fn save_credential(
+        &self,
+        name: String,
+        save: SaveCredential,
+    ) -> Result<Credential, Refusal> {
+        self.conn()
+            .call("credential replacement", move |conn| {
+                let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                let previous: Option<(String, i64)> = tx
+                    .query_row(
+                        "SELECT kind, revision FROM credentials WHERE name = ?1",
+                        [&name],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()?;
+                let Some((kind, revision)) = previous else {
+                    return Ok(Err(Refusal::Missing));
+                };
+                if let Some(secret) = save.secret.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                    let kind: CredentialKind = serde_json::from_str(&kind)?;
+                    if let Err(reason) = check_secret(kind, secret) {
+                        return Ok(Err(Refusal::Invalid(reason)));
+                    }
+                    let Some(next) = revision.checked_add(1) else {
+                        return Ok(Err(Refusal::Storage));
+                    };
+                    tx.execute(
+                        "UPDATE credentials SET secret = ?2, updated_at = ?3, revision = ?4 WHERE name = ?1",
+                        params![name, secret, crate::tensorlake::recipes::now_secs(), next],
+                    )?;
+                }
+                let row = read_metadata(&tx, &name)?;
+                tx.commit()?;
+                Ok(Ok(row))
+            })
+            .await
+            .map_err(|_| Refusal::Storage)?
+    }
+
+    /// Delete the named entry without reading its saved value.
+    pub(crate) async fn delete_credential(&self, name: String) -> Result<(), Refusal> {
+        let deleted = self
+            .conn()
+            .call("credential delete", move |conn| {
+                let tx =
+                    conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                let deleted = tx.execute("DELETE FROM credentials WHERE name = ?1", [name])?;
+                tx.commit()?;
+                Ok(deleted)
+            })
+            .await
+            .map_err(|_| Refusal::Storage)?;
+        if deleted == 0 {
+            Err(Refusal::Missing)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Read the acknowledgement while its writer still excludes competing edits.
+fn read_metadata(conn: &rusqlite::Connection, name: &str) -> rusqlite::Result<Credential> {
+    conn.query_row(
+        "SELECT name, kind, created_at, updated_at, revision FROM credentials WHERE name = ?1",
+        [name],
+        metadata,
+    )
+}
+
+/// Catalog reads return metadata only, including after a failed replacement.
+pub(crate) async fn list(State(state): State<Arc<AppState>>) -> Response {
+    match state.store.credentials().await {
+        Ok(rows) => Json(rows).into_response(),
+        Err(reason) => reason.response(),
+    }
+}
+
+/// Reject malformed bodies without serde's diagnostic, which may quote secrets.
+pub(crate) async fn create(
+    State(state): State<Arc<AppState>>,
+    body: Result<Json<CreateCredential>, JsonRejection>,
+) -> Response {
+    let Ok(Json(create)) = body else {
+        return Refusal::Invalid("could not read the credential request").response();
+    };
+    match state.store.create_credential(create).await {
+        Ok(row) => {
+            state.manager.events().bump();
+            (StatusCode::CREATED, Json(row)).into_response()
+        }
+        Err(reason) => reason.response(),
+    }
+}
+
+/// A replacement changes only its fixed identity's secret and revision.
+pub(crate) async fn save(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    body: Result<Json<SaveCredential>, JsonRejection>,
+) -> Response {
+    let Ok(Json(save)) = body else {
+        return Refusal::Invalid("could not read the credential request").response();
+    };
+    match state.store.save_credential(name, save).await {
+        Ok(row) => {
+            state.manager.events().bump();
+            Json(row).into_response()
+        }
+        Err(reason) => reason.response(),
+    }
+}
+
+/// Deletion never needs to select, deserialize or return the saved value.
+pub(crate) async fn delete(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Response {
+    match state.store.delete_credential(name).await {
+        Ok(()) => {
+            state.manager.events().bump();
+            Json(serde_json::json!({})).into_response()
+        }
+        Err(reason) => reason.response(),
+    }
+}
+
+#[cfg(test)]
+#[path = "credentials_tests.rs"]
+mod tests;

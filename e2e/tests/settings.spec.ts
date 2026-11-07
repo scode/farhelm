@@ -28,7 +28,7 @@ import {
 } from "./helpers/fleet";
 
 /** The web fixture has no updater, so its navigation omits the app pane. */
-const webSettingsSections: SettingsSection[] = ["sessions", "Appearance", "hosts", "tensorlake", "terminal", "checkouts", "agent trust", "notifications"];
+const webSettingsSections: SettingsSection[] = ["sessions", "Appearance", "hosts", "tensorlake", "credentials", "terminal", "checkouts", "agent trust", "notifications"];
 
 /** A checked switch's inverse outline must be drawn against its own fill.
  * Real native Tab focus and a supported gap click protect the failure premise:
