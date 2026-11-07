@@ -11,7 +11,8 @@
 //! nicer API: the host it runs on has no route to the machine the helm
 //! runs on, no address for it, and no credential it could present. The
 //! arrows all point the other way, by design (SPEC.md: the supervisor
-//! listens on no network port; the helm always dials out).
+//! listens on no network port beyond a Tensorlake host's claimed recipe
+//! tunnel ports; the helm always dials out).
 //!
 //! What the session DOES have is its own supervisor's unix socket and the
 //! per-session credential already injected for `farhelm spawn`. So the

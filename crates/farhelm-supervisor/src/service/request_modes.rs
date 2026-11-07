@@ -163,6 +163,14 @@ pub(crate) struct ConformanceContext<'a> {
 
 declare_execution_classes! {
     inbound {
+        ClaimTcpTunnelPorts => InlineChannel => |c| ControlMsg::ClaimTcpTunnelPorts {
+            req_id: c.req_id, ports: Vec::new(),
+        };
+        BeginAcceptedTcpRelay => InlineChannel => |c| ControlMsg::BeginAcceptedTcpRelay {
+            req_id: c.req_id, accepted: 1, channel: c.channel,
+        };
+        RejectTcpTunnel => InlineControl => |_c| ControlMsg::RejectTcpTunnel { accepted: 1 };
+        TcpRelayEof => InlineControl => |c| ControlMsg::TcpRelayEof { channel: c.channel };
         BeginTcpRelay => InlineChannel => |c| ControlMsg::BeginTcpRelay {
             req_id: c.req_id,
             session_id: c.session_id.into(),
@@ -312,6 +320,8 @@ declare_execution_classes! {
         };
     }
     not_requests {
+        ControlMsg::TcpTunnelPortsClaimed { .. },
+        ControlMsg::TcpTunnelAccepted { .. },
         ControlMsg::TcpRelayStarted { .. },
         ControlMsg::TcpRelayEnded { .. },
         ControlMsg::BrowserForwardingSet { .. },

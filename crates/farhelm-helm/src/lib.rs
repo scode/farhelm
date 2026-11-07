@@ -93,8 +93,8 @@ mod client;
 mod downloads;
 pub use client::{
     CreateExtras, Detach, DownloadGuard, ErrorOrigin, PeerHello, SessionListing, SupervisorClient,
-    SupervisorError, SupervisorTransportError, TermDetachSignal, TermEvent, TermStream,
-    ViewerStreams,
+    SupervisorError, SupervisorTransportError, TcpTunnelAccepted, TermDetachSignal, TermEvent,
+    TermStream, ViewerStreams,
 };
 
 /// The merged multi-host session list, served whole — what

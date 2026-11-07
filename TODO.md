@@ -433,7 +433,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   queues, with bulk drained only when the other two are empty, so sustained terminal output can starve relays and
   downloads; no cap on concurrent relays; no half-close on relays; and a 60-second write stall that ends the whole
   connection. Challenge the chunk sizes, window sizes, queue depths and the fairness between streams, measure where it
-  matters, and change what does not hold up.
+  matters, and change what does not hold up. Since that reading, recipe tunnels moved onto this connection, which added
+  a cap of 64 tunneled connections per host and half-close for every relay.
 
 ### Tensorlake
 

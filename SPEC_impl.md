@@ -3176,8 +3176,9 @@ socket limit for the usernames SPEC.md supports on Linux and most of them on mac
 longer, and each connection decides its own fit. Where a socket cannot fit, or the state path contains a literal `${`
 (which OpenSSH would expand even inside the quoted `ControlPath`), that connection runs with connection sharing
 explicitly off (`ControlMaster=no`, `ControlPath=none`) instead of failing. The supervisor is reached by executing
-`farhelm internal stdio` on the remote side, which proxies stdio to the supervisor's unix socket. Supervisors listen on
-that unix socket only — no network port, exactly as SPEC.md requires.
+`farhelm internal stdio` on the remote side, which proxies stdio to the supervisor's unix socket. That Unix socket is
+the supervisor's connection doorway. Its only network listeners are the IPv4 loopback ports a full-authority helm
+connection claims for configured recipe tunnels; they are not protocol doorways and end with that connection.
 
 The stdio helper writes one exact, newline-terminated `farhelm-supervisor-connected-v1` line to stderr after its socket
 connect succeeds, before either copy direction starts. This proves only that a supervisor socket accepted the
@@ -3350,11 +3351,26 @@ data retains the existing connection-wide upload enqueue allowance through the w
 ending or cancellation, and a relay cannot inherit an earlier terminal/upload/download channel.
 
 Each relay future owns its accepted TCP socket, route and pending admission cleanup. Connection death or cancellation
-ends parked work; EOF ends both directions, with no half-close. Successful remote EOF drains preceding bytes before
-closing the local socket, and a failure cannot be overwritten by a later success. There is no per-relay idle timer: an
-idle WebSocket is healthy, and task ownership plus transport teardown supply cancellation. Existing shared-writer stall
-limits still apply to actual transport writes. Session-authenticated peers cannot open, acknowledge or close these
-channels; the restricted operation allowlist does not admit them.
+ends parked work. `TcpRelayEof` ends only its sender's direction, after preceding data in the same FIFO; the receiver
+drains those bytes and shuts down its socket's write half while the opposite pump continues. Both directions ending
+completes the relay; a failure cancels both pumps and cannot be overwritten by a later success. There is no per-relay
+idle timer: an idle WebSocket is healthy, and task ownership plus transport teardown supply cancellation. Existing
+shared-writer stall limits still apply to actual transport writes. Session-authenticated peers cannot open, acknowledge
+or close these channels; the restricted operation allowlist does not admit them.
+
+The same relay pump carries supervisor-accepted connections. A full-authority connection sends `ClaimTcpTunnelPorts`
+once for at most 32 distinct nonzero ports other than 22. The supervisor binds every IPv4 loopback listener or none, and
+a failed claim can be retried. There is no release or takeover: listeners, pending accepted sockets and active relays
+belong to the claiming connection and are withdrawn before its unrelated teardown waits. The supervisor knows neither
+Tensorlake nor the recipe's destinations; the helm restricts claims to Tensorlake hosts.
+
+`TcpTunnelAccepted` names only the claimed port and a connection-local accepted id. The helm selects a destination from
+its own recipe snapshot, dials it with a bounded timeout, and either sends `BeginAcceptedTcpRelay` with its own fresh
+channel id or refuses that acceptance. The supervisor never chooses a destination or a channel. A supervisor-wide
+64-connection budget covers accepted sockets still waiting for an answer and active accepted relays; excess sockets
+close at once. The helm independently reserves one of its 64 permits at event ingress, keeping it through queued events,
+destination dialing and active relays, so an untrusted supervisor cannot exceed that bound. Session-authenticated peers
+cannot claim ports or manage either kind of relay. These messages and directional EOF require a protocol bump.
 
 The embedded helm owns IPv4 loopback listeners by session, canonical target and remote port. Each listens on a
 kernel-selected port bound without `SO_REUSEADDR` and never on the remote port number: that number could be the

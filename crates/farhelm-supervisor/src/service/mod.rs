@@ -4,8 +4,9 @@
 //! stdio proxy) and every future caller speak the same protocol to the
 //! same handlers, which is what keeps "CLI flags bypass the creation UI,
 //! never the creation API" true. The supervisor listens on no network
-//! port (SPEC.md): the unix socket plus ssh exec is the entire reachable
-//! surface.
+//! port (SPEC.md) beyond the loopback ports a helm claims for a Tensorlake
+//! host's recipe tunnels: the unix socket plus ssh exec is the entire
+//! surface reachable from outside the host.
 //!
 //! State model: SQLite (`crate::store`) is the truth that a session exists
 //! and what its metadata is, written at creation and reloaded at startup

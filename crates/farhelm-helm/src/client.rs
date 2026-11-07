@@ -10,6 +10,7 @@
 mod downloads;
 mod tcp_relays;
 pub use downloads::DownloadGuard;
+pub use tcp_relays::TcpTunnelAccepted;
 
 use anyhow::bail;
 use farhelm_proto::io::{
@@ -1298,6 +1299,12 @@ pub struct SupervisorClient {
     /// Bidirectional raw TCP channels. Their futures own route retirement;
     /// demux only appends bounded bytes or publishes credit/terminal state.
     tcp_relays: Mutex<HashMap<u32, Arc<farhelm_proto::tcp_relay::TcpRelayState>>>,
+    /// Recipe listeners have one owner on a connection. The synchronous lock
+    /// also lets cancellation withdraw an event receiver without an async task.
+    tcp_tunnel_claim: std::sync::Mutex<tcp_relays::TunnelClaim>,
+    /// Admission includes events queued for the recipe manager and destination
+    /// dials, not just channels which have already begun forwarding bytes.
+    tcp_tunnel_admission: Arc<Semaphore>,
     /// The connection-wide ration of bulk frames allowed to occupy the
     /// shared writer queue at once — see [`UPLOAD_ENQUEUE_FRAMES`].
     upload_enqueue: Arc<Semaphore>,
@@ -1880,6 +1887,10 @@ impl SupervisorClient {
             uploads: Mutex::new(HashMap::new()),
             downloads: Mutex::new(HashMap::new()),
             tcp_relays: Mutex::new(HashMap::new()),
+            tcp_tunnel_claim: std::sync::Mutex::new(tcp_relays::TunnelClaim::default()),
+            tcp_tunnel_admission: Arc::new(Semaphore::new(
+                farhelm_proto::MAX_TCP_TUNNEL_CONNECTIONS,
+            )),
             upload_enqueue: Arc::new(Semaphore::new(UPLOAD_ENQUEUE_FRAMES)),
             upload_stall,
             next_req: AtomicU64::new(1),
@@ -2083,6 +2094,11 @@ impl SupervisorClient {
         for state in self.tcp_relays.lock().await.values() {
             state.finish(Err(reason.to_string()));
         }
+        self.tcp_tunnel_admission.close();
+        *self
+            .tcp_tunnel_claim
+            .lock()
+            .expect("TCP tunnel claim mutex poisoned") = tcp_relays::TunnelClaim::Closed;
         // Flag and drain in one lock hold; see `Pending` for why.
         let mut pending = self.pending.lock().await;
         pending.closed = true;
@@ -2307,6 +2323,14 @@ impl SupervisorClient {
                     return Ok(());
                 }
                 match &msg {
+                    ControlMsg::TcpTunnelAccepted { accepted, port } => {
+                        self.deliver_tcp_tunnel(*accepted, *port);
+                    }
+                    ControlMsg::TcpRelayEof { channel } => {
+                        if let Some(state) = self.tcp_relays.lock().await.get(channel) {
+                            state.eof();
+                        }
+                    }
                     ControlMsg::TcpRelayAck { channel, received } => {
                         if let Some(state) = self.tcp_relays.lock().await.get(channel) {
                             state.ack(*received);
