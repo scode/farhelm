@@ -465,37 +465,37 @@ async fn the_agent_in_a_host_keeps_its_launch_scope() {
     end_runtime(&host, host_pid).await;
 }
 
-/// The agent's login shell starts with the environment a tmux pane's
-/// command gets, except for the pane's own `TMUX` and `TMUX_PANE`, and
-/// startup files see a `TMUX` that holds back a tmux autostart.
+/// The agent's login shell starts in Farhelm's own terminal: the
+/// supervisor's environment with `TERM_PROGRAM=farhelm` and Farhelm's
+/// version, and no `TMUX` at any point, so a startup file's tmux autostart
+/// runs as it would in any terminal outside tmux.
 ///
-/// Why: the plan's D-13 promises the child's environment baseline equals a
-/// tmux pane's (SPEC.md's "as if the user had SSHed in" contract was
-/// delivered by tmux passing the supervisor's environment through), and
-/// D-12 keeps the protection a pane gives against a startup file that
-/// starts tmux when `TMUX` is unset: without it, every agent's login shell
-/// would start the user's own tmux and the agent would never run in the
-/// terminal Farhelm drives. Spec: two supervisors, one creating in tmux and
-/// one in hosts, run the same command in the same directory through a login
-/// shell (a stand-in that records its environment and then runs Bash with
-/// a fixture home whose `.bash_profile` records `TMUX` and marks an
-/// autostart when `TMUX` is unset). Every recording is written to a
+/// Why: a new terminal must not claim to be tmux (no `TERM_PROGRAM=tmux`,
+/// no tmux version, no stand-in `TMUX`), since agents adapt to what these
+/// variables say, and SPEC.md's "as if the user had SSHed in" contract
+/// needs the supervisor's own environment to reach the login shell. The
+/// autostart is the accepted cost of not faking `TMUX` (SPEC.md, "Session
+/// view"). Spec: a supervisor creating in hosts runs a command through a
+/// login shell stand-in that records its environment and then runs Bash
+/// with a fixture home whose `.bash_profile` records `TMUX` and marks an
+/// autostart when `TMUX` is unset. Every recording is written to a
 /// temporary name and renamed into place, so it is read only once whole.
-/// The recorded environments are equal once `TMUX` and `TMUX_PANE` are
-/// left out (`TERM_PROGRAM=tmux` and `TERM_PROGRAM_VERSION` included);
-/// tmux set both (premise), and the host only `TMUX`, which is the startup
-/// placeholder; in both, the profile saw `TMUX` set, no autostart was
-/// marked, and the agent's own environment has neither `TMUX` nor
-/// `TMUX_PANE`.
+/// The login shell gets `TERM=xterm-256color`, `COLORTERM=truecolor`,
+/// `TERM_PROGRAM=farhelm`, `TERM_PROGRAM_VERSION` equal to this build's
+/// version, `PATH` equal to the supervisor's (this test process's), `HOME`
+/// from the launch environment, a `SHELL` that is not the stand-in, and
+/// neither `TMUX` nor `TMUX_PANE`; the profile saw `TMUX` unset and marked
+/// the autostart; the agent's own environment has `TERM_PROGRAM=farhelm`
+/// and neither `TMUX` nor `TMUX_PANE`.
 #[farhelm_testtrace::test]
-async fn the_login_shell_gets_a_panes_environment_and_startup_files_see_tmux_set() {
+async fn the_login_shell_starts_in_farhelms_terminal_with_no_tmux() {
     let fixture = farhelm_teststate::tempdir().expect("fixture directory");
     let home = fixture.path().join("home");
     std::fs::create_dir(&home).unwrap();
     std::fs::write(
         home.join(".bash_profile"),
-        "printf '%s' \"${TMUX-}\" > \"$HOME/tmux-during-startup-$FIXTURE_KIND\"\n\
-         if [ -z \"$TMUX\" ]; then\n  : > \"$HOME/tmux-autostarted-$FIXTURE_KIND\"\nfi\n",
+        "printf '%s' \"${TMUX-}\" > \"$HOME/tmux-during-startup\"\n\
+         if [ -z \"$TMUX\" ]; then\n  : > \"$HOME/tmux-autostarted\"\nfi\n",
     )
     .unwrap();
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -503,116 +503,90 @@ async fn the_login_shell_gets_a_panes_environment_and_startup_files_see_tmux_set
         .into_iter()
         .find(|path| Path::new(path).is_file())
         .expect("premise: Bash is installed");
-
-    let mut recorded = BTreeMap::new();
-    for kind in [NewTerminals::Tmux, NewTerminals::Host] {
-        let name = match kind {
-            NewTerminals::Tmux => "tmux",
-            NewTerminals::Host => "host",
-        };
-        let dump = fixture.path().join(format!("shell-{name}.env"));
-        let shell = script(
-            &fixture.path().join(format!("login-shell-{name}")),
+    let dump = fixture.path().join("shell.env");
+    let shell = script(
+        &fixture.path().join("login-shell"),
+        &format!(
+            "/usr/bin/env -0 > {partial} && /bin/mv {partial} {dump} || exit 1\nexec {bash} \"$@\"",
+            partial = shell_words::quote(&format!("{}.partial", dump.to_string_lossy())),
+            dump = shell_words::quote(&dump.to_string_lossy()),
+        ),
+    );
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            launch_shell: Some(shell.to_string_lossy().into_owned()),
+            launch_env: vec![("HOME".into(), home.to_string_lossy().into_owned())],
+            ..host_seams()
+        },
+    )
+    .await;
+    let agent_dump = work.path().join("agent.env");
+    h.client
+        .create_session(
+            &work.path().to_string_lossy(),
             &format!(
-                "/usr/bin/env -0 > {partial} && /bin/mv {partial} {dump} || exit 1\n\
-                 FIXTURE_KIND={name}\nexport FIXTURE_KIND\nexec {bash} \"$@\"",
-                partial = shell_words::quote(&format!("{}.partial", dump.to_string_lossy())),
-                dump = shell_words::quote(&dump.to_string_lossy()),
+                "env -0 > {partial} && mv {partial} {dump} && exec sleep 600",
+                partial = shell_words::quote(&format!("{}.partial", agent_dump.to_string_lossy())),
+                dump = shell_words::quote(&agent_dump.to_string_lossy())
             ),
-        );
-        let h = harness_with_seams(
-            SupervisorTimeouts::default(),
-            SupervisorSeams {
-                new_terminals: kind,
-                launch_shell: Some(shell.to_string_lossy().into_owned()),
-                launch_env: vec![("HOME".into(), home.to_string_lossy().into_owned())],
-                ..host_seams()
-            },
+            None,
+            80,
+            24,
         )
-        .await;
-        let agent_dump = work.path().join(format!("agent-{name}.env"));
-        h.client
-            .create_session(
-                &work.path().to_string_lossy(),
-                &format!(
-                    "env -0 > {partial} && mv {partial} {dump} && exec sleep 600",
-                    partial =
-                        shell_words::quote(&format!("{}.partial", agent_dump.to_string_lossy())),
-                    dump = shell_words::quote(&agent_dump.to_string_lossy())
-                ),
-                None,
-                80,
-                24,
-            )
-            .await
-            .expect("create");
-        let shell_env = parse_env(&wait_for_file(&dump, WAIT_SECS).await);
-        let agent_env = parse_env(&wait_for_file(&agent_dump, WAIT_SECS).await);
-        assert!(!agent_env.contains_key("TMUX"), "{name}: {agent_env:?}");
-        assert!(
-            !agent_env.contains_key("TMUX_PANE"),
-            "{name}: {agent_env:?}"
-        );
-        let during_startup =
-            std::fs::read_to_string(home.join(format!("tmux-during-startup-{name}")))
-                .expect("the profile ran");
-        assert!(
-            !during_startup.is_empty(),
-            "{name}: startup files saw TMUX unset"
-        );
-        assert!(
-            !home.join(format!("tmux-autostarted-{name}")).exists(),
-            "{name}: a startup file would have started tmux"
-        );
-        recorded.insert(name, (shell_env, during_startup));
-        // A host is ended through its runtime before the harness goes, so
-        // that the runtime does not fight the state directory's cleanup for
-        // the host's connection; a tmux session ends with its server.
-        if kind == NewTerminals::Host {
-            let session = &h.client.list_sessions().await.expect("list").sessions[0];
-            let host = agent_host(&h, &session.id).await;
-            let pid = host_process(host.socket()).expect("the host's process serves its socket");
-            end_runtime(&host, pid).await;
-        }
-        drop(h);
-    }
+        .await
+        .expect("create");
+    let shell_env = parse_env(&wait_for_file(&dump, WAIT_SECS).await);
+    let agent_env = parse_env(&wait_for_file(&agent_dump, WAIT_SECS).await);
 
-    let (mut pane, pane_startup) = recorded.remove("tmux").unwrap();
-    let (mut host, host_startup) = recorded.remove("host").unwrap();
-    assert!(
-        pane_startup.contains("tmux.sock"),
-        "premise: a pane's startup files see the private server: {pane_startup}"
+    let get = |name: &str| shell_env.get(name).map(String::as_str);
+    assert_eq!(get("TERM"), Some("xterm-256color"));
+    assert_eq!(get("COLORTERM"), Some("truecolor"));
+    assert_eq!(get("TERM_PROGRAM"), Some("farhelm"));
+    assert_eq!(
+        get("TERM_PROGRAM_VERSION"),
+        Some(farhelm_proto::BUILD_VERSION)
     );
-    assert_eq!(host_startup, "/dev/null/farhelm-terminal-host,0,0");
-    assert_eq!(host.remove("TMUX").as_deref(), Some(host_startup.as_str()));
-    assert!(pane.remove("TMUX").is_some());
-    assert!(
-        pane.remove("TMUX_PANE").is_some(),
-        "premise: tmux sets TMUX_PANE in a pane"
+    assert_eq!(
+        get("PATH"),
+        std::env::var("PATH").ok().as_deref(),
+        "the supervisor's PATH reaches the login shell"
     );
+    assert_eq!(get("HOME"), Some(home.to_str().unwrap()));
     assert!(
-        !host.contains_key("TMUX_PANE"),
-        "a host's child got TMUX_PANE"
+        get("SHELL").is_some_and(|value| Some(value) != shell.to_str()),
+        "SHELL is missing or names the stand-in: {:?}",
+        get("SHELL")
     );
-    assert_eq!(host.get("TERM").map(String::as_str), Some("xterm-256color"));
-    assert_eq!(host.get("TERM_PROGRAM").map(String::as_str), Some("tmux"));
+    for name in ["TMUX", "TMUX_PANE"] {
+        assert!(
+            !shell_env.contains_key(name),
+            "the login shell got {name}: {shell_env:?}"
+        );
+        assert!(
+            !agent_env.contains_key(name),
+            "the agent got {name}: {agent_env:?}"
+        );
+    }
+    assert_eq!(
+        agent_env.get("TERM_PROGRAM").map(String::as_str),
+        Some("farhelm")
+    );
+    let during_startup =
+        std::fs::read_to_string(home.join("tmux-during-startup")).expect("the profile ran");
+    assert_eq!(during_startup, "", "startup files saw a TMUX");
     assert!(
-        pane.contains_key("TERM_PROGRAM_VERSION"),
-        "premise: tmux sets TERM_PROGRAM_VERSION in a pane"
+        home.join("tmux-autostarted").exists(),
+        "a startup file's tmux autostart did not run"
     );
-    let differing: Vec<_> = pane
-        .keys()
-        .chain(host.keys())
-        .filter(|name| pane.get(*name) != host.get(*name))
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .map(|name| (name, pane.get(name), host.get(name)))
-        .collect();
-    assert!(
-        differing.is_empty(),
-        "a host's child sees another environment than a pane's command (name, pane, host): \
-         {differing:#?}"
-    );
+
+    // A host is ended through its runtime before the harness goes, so that
+    // the runtime does not fight the state directory's cleanup for the
+    // host's connection.
+    let session = &h.client.list_sessions().await.expect("list").sessions[0];
+    let host = agent_host(&h, &session.id).await;
+    let pid = host_process(host.socket()).expect("the host's process serves its socket");
+    end_runtime(&host, pid).await;
 }
 
 /// A wrapper launch's wrapper runs inside the host, around the agent, as it

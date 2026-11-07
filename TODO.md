@@ -501,12 +501,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   rule.
 - Tell users that closing, exiting, or deleting a terminal tab also stops services the tab shell's startup files started
   there first (an `ssh-agent`, an editor daemon, a detached tmux server), and that services the agent's launch started
-  first are not affected, though a tmux autostart guarded by `TMUX` never fires during the agent's launch, so when no
-  tmux server of the user's is running yet, the first tab usually starts and owns it, and with `exec tmux` a detach ends
-  the tab and the server. Likewise, a personal tmux server or an ssh ControlMaster that the agent is the first to start
-  ends with Stop, Restart, Replace or Delete, and one a command in a tab is the first to start ends when the tab closes
-  or the session is deleted, each with everything the user later ran in it or through it, including from outside
-  Farhelm. SPEC.md's session view section and "Ownership during cleanup and provisioning" state the rules.
+  first are not affected. In an old terminal a tmux autostart guarded by `TMUX` never fires during the agent's launch,
+  so when no tmux server of the user's is running yet, the first tab usually starts and owns it, and with `exec tmux` a
+  detach ends the tab and the server; in a new terminal it fires during the agent's launch instead, and one that execs
+  tmux keeps the agent from starting. Likewise, a personal tmux server or an ssh ControlMaster that the agent is the
+  first to start ends with Stop, Restart, Replace or Delete, and one a command in a tab is the first to start ends when
+  the tab closes or the session is deleted, each with everything the user later ran in it or through it, including from
+  outside Farhelm. SPEC.md's session view section and "Ownership during cleanup and provisioning" state the rules.
 - Tell users what Stop, Restart, Delete and closing a tab can and cannot kill on a Mac, and on a Linux host whose
   supervisor runs without a usable systemd user manager. There, a background process that has detached from the
   session's terminal is found only through an environment marker, so one that hides or overwrites its environment
@@ -518,8 +519,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   login shell, and other shells, csh and tcsh included, may fail to launch them. SPEC.md's supported user environments
   section states the rule.
 - Tell users that agents and terminal tabs run without the private tmux server's `TMUX` and `TMUX_PANE`, as in an SSH
-  login, so shells an agent starts for its own work see no tmux either. A startup file that starts tmux when `TMUX` is
-  unset without first checking for an interactive shell (`[[ $- == *i* ]]`) or a terminal can then cut short the
+  login, so shells an agent starts for its own work see no tmux either (a new terminal sets neither at any point, and
+  tells programs it is Farhelm's own terminal with `TERM_PROGRAM=farhelm`). A startup file that starts tmux when `TMUX`
+  is unset without first checking for an interactive shell (`[[ $- == *i* ]]`) or a terminal can then cut short the
   environment an agent captures from it (Claude Code sources `.zshrc` without a terminal), leaving the agent without
   setup made later in that file, such as a PATH entry; this is the same as running the agent in a terminal outside tmux.
   SPEC.md's "Ownership during cleanup and provisioning" section states the rule.

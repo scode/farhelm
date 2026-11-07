@@ -256,34 +256,35 @@ that its required systemd or SSH substrate ran.
   — a create starting its agent in a terminal host under the supervisor's switch (`SupervisorSeams::new_terminals`,
   `crates/farhelm-supervisor/src/service/core/host_launch.rs`; on in every shipped launch through
   `farhelm supervisor run`'s default, off in the in-process harnesses unless a test turns it on). The unit tests pin the
-  host child's environment as a function of its inputs (what tmux gives a pane's command, `TERM_PROGRAM` and its
-  version, the `TMUX` placeholder, where the launch environment applies, the default `PATH`), the launch record's
-  encoding and its refusals, a first stage started apart from its spec (pinned, given nothing until finished, killed
-  having read nothing when dropped, a taken name refused), a retry that finds the session's own published host with no
-  other evidence. The e2e tests (`crates/farhelm/tests/e2e/host_creates.rs`) run in-process supervisors with the switch
-  on, starting hosts from the built `farhelm`: the row recorded as a host row with the socket's name, no tmux session,
-  Stop ending the agent and sparing the host; the create reply, its keyed replay and the listing naming the agent's
-  terminal as a host and reporting the switch on (what the client's migration band and session details read); the host's
-  command line and empty environment holding no credential or marker while its child has the markers; the agent in its
-  launch scope with the host outside it (with a user manager, else `SKIPPED`); the login shell's environment compared
-  with a real tmux pane's under the same command (equal but for `TMUX` and `TMUX_PANE`), and a startup file's tmux
-  autostart held back in both; a wrapper prefix running in the host; a create interrupted after its host started retried
-  without a second agent; a first stage that outlived an interrupted create (holding its spec, before binding) waited
-  for by the retry, which then finds its host, or ended by the verified signal when it does not finish, with one host
-  and one agent either way, and fenced the same way by an unconditional Delete of that session after a restart, which
-  then leaves no host and no agent; a process the interrupted first stage forked that still names the socket (a stand-in
-  second stage) leaving the retry unresolved while it stays, and letting the same retry relaunch when it ends during the
-  retry's wait; a launch error's cleanup after a restart keeping the host record of a host that still runs; a cleanup
-  whose runtime is held by a snapshot encode (an encode gate) falling back to ending the host by its socket after the
-  runtime's 15 s bound, while the encode is still held (the gate shows no encode passed or expired); a create that lost
-  to Delete ending its host; a start whose first stage dies after readiness leaving nothing, and one the spawn reports
-  may have left a host, which the create ends and removes the socket of; stand-in hosts that cannot be used, ended by
-  the verified signal and rolled back, or kept as a launching record when the signal must not touch them; and a retry
-  keeping its row's kind with the switch flipped either way across a restart. Needs the pinned tmux first on `PATH` and
-  Python 3 at `/usr/bin/python3` (the stand-in hosts). Linux only, two or three minutes (several tests wait out client
-  deadlines); part of the workspace nextest run. The container launch kind's test is in the containerized suite above
-  (`containerized_sessions::podman_agent_runs_from_a_terminal_host`). Run it when the create path, the launch spec's
-  composition, the host spawn or the launch identity's rollback or evidence changes.
+  host child's environment as a function of its inputs (the supervisor's environment passed through,
+  `TERM_PROGRAM=farhelm` with the version the emulator's XTVERSION answer names, no `TMUX`, `TMUX_PANE` or `LISTEN_*`,
+  where the launch environment applies, the default `PATH`), the launch record's encoding and its refusals, a first
+  stage started apart from its spec (pinned, given nothing until finished, killed having read nothing when dropped, a
+  taken name refused), a retry that finds the session's own published host with no other evidence. The e2e tests
+  (`crates/farhelm/tests/e2e/host_creates.rs`) run in-process supervisors with the switch on, starting hosts from the
+  built `farhelm`: the row recorded as a host row with the socket's name, no tmux session, Stop ending the agent and
+  sparing the host; the create reply, its keyed replay and the listing naming the agent's terminal as a host and
+  reporting the switch on (what the client's migration band and session details read); the host's command line and empty
+  environment holding no credential or marker while its child has the markers; the agent in its launch scope with the
+  host outside it (with a user manager, else `SKIPPED`); the login shell's environment (Farhelm's terminal variables,
+  the supervisor's `PATH`, the launch environment's `HOME`, no `TMUX` or `TMUX_PANE`) and a startup file's tmux
+  autostart guarded by `TMUX` running; a wrapper prefix running in the host; a create interrupted after its host started
+  retried without a second agent; a first stage that outlived an interrupted create (holding its spec, before binding)
+  waited for by the retry, which then finds its host, or ended by the verified signal when it does not finish, with one
+  host and one agent either way, and fenced the same way by an unconditional Delete of that session after a restart,
+  which then leaves no host and no agent; a process the interrupted first stage forked that still names the socket (a
+  stand-in second stage) leaving the retry unresolved while it stays, and letting the same retry relaunch when it ends
+  during the retry's wait; a launch error's cleanup after a restart keeping the host record of a host that still runs; a
+  cleanup whose runtime is held by a snapshot encode (an encode gate) falling back to ending the host by its socket
+  after the runtime's 15 s bound, while the encode is still held (the gate shows no encode passed or expired); a create
+  that lost to Delete ending its host; a start whose first stage dies after readiness leaving nothing, and one the spawn
+  reports may have left a host, which the create ends and removes the socket of; stand-in hosts that cannot be used,
+  ended by the verified signal and rolled back, or kept as a launching record when the signal must not touch them; and a
+  retry keeping its row's kind with the switch flipped either way across a restart. Needs the pinned tmux first on
+  `PATH` and Python 3 at `/usr/bin/python3` (the stand-in hosts). Linux only, two or three minutes (several tests wait
+  out client deadlines); part of the workspace nextest run. The container launch kind's test is in the containerized
+  suite above (`containerized_sessions::podman_agent_runs_from_a_terminal_host`). Run it when the create path, the
+  launch spec's composition, the host spawn or the launch identity's rollback or evidence changes.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'restarting host agents' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/host_handover::tests::/) | test(a_terminal_less_host_row_restarts_in_a_host_never_in_tmux) | test(/a_restart_seed_|_seed_of_an?_|a_seed_whose_runtime|a_stop_during_a_restarts_seed|a_restart_without_consent_touches_no_program|a_restart_asks_again_for_consent/) | test(a_failed_host_restart_after_a_stop_began_restores_a_placeholder) | test(restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts) | test(/^host_relaunches::/)'`
   — Restart of an agent in a terminal host (`crates/farhelm-supervisor/src/service/core/host_restart.rs`) and the
   startup rules for the hosts a restart left (`host_handover`, "Superseded agent hosts" and a restart that never started

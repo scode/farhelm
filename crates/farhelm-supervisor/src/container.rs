@@ -313,6 +313,9 @@ impl ContainerRuntime {
 
     /// Build only the host-side exec client. Podman forwards exactly these named
     /// variables; no host credential or Farhelm reporter is an in-container env entry.
+    /// `TERM` is the terminal's own (`xterm-256color` from either kind of terminal);
+    /// `TERM_PROGRAM` and its version are not forwarded, so a containerized agent is
+    /// told no terminal program at all, neither tmux nor Farhelm.
     pub(crate) fn exec_command(&self, argv: &[String]) -> anyhow::Result<Command> {
         let mut command = Command::new(&self.podman);
         command.args(["exec", "-it", "--workdir"]).arg(&self.cwd);
