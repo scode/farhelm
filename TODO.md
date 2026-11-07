@@ -418,6 +418,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     `@old-terminal` tag) and the Rust tests that ask for old terminals by name (`harness_tmux`,
     `supervisor_process_tmux`, `tests::tmux_supervisor`).
 
+- **Scroll the grid terminal entirely from a back buffer it keeps itself, instead of history sent by the supervisor.**
+  The page already keeps the scrollback it shows and scrolling sends nothing
+  (`crates/farhelm-ui/assets/grid-terminal.js`, "Scrollback"), but that history arrives as `history` messages from the
+  supervisor's emulator, one message per line that scrolled off, each line at the width it was written
+  (`crates/farhelm-proto/src/grid.rs`, "History"), and a `history_reset` rebuilds it whenever the emulator resizes.
+  Consider dropping that half of the stream: the grid client appends the rows a `frame.shift` pushed off the top to a
+  back buffer of its own, keeping each line at the size it was shown at (the terminal's current size, not reflowed by a
+  later resize), so scrolling never depends on the supervisor re-reading its emulator. Two constraints decide whether
+  that works. Flow control skips screen frames while a client is behind but still sends every line that scrolled off as
+  history, which is how it never loses output (SPEC.md), so a buffer fed only by the frames the client saw would have
+  gaps; and a client attaching to a terminal that already has output has no local history to show. Both need an answer
+  before the shape is settled. Related to, but not the same as, the grid stream encoding overhaul in this bucket, which
+  keeps the split and changes how the same lines are encoded.
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
