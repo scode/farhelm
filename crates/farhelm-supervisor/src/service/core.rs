@@ -90,9 +90,10 @@ use crate::store::{
     Claimed, IntentClaim, LastOutcome, Reservation, ReservationOutcome, RetryClaim, SessionStore,
     Settlement, StoredSession, TerminalKind, Transition, now_unix,
 };
+use crate::terminal_process::{TabScope, TerminalProbe};
 use crate::tmux::{
-    AGENT_WINDOW_OPTION, LaunchExcerptFence, PaneProbe, PaneState, TAB_SCOPED_WINDOW_OPTION,
-    TAB_WINDOW_OPTION, TabScopeMarker, TmuxDriver,
+    AGENT_WINDOW_OPTION, LaunchExcerptFence, PaneState, TAB_SCOPED_WINDOW_OPTION,
+    TAB_WINDOW_OPTION, TmuxDriver,
 };
 use anyhow::Context;
 use farhelm_proto::{
@@ -5573,15 +5574,15 @@ pub struct Supervisor {
 /// pane owner — delete, stop, restart, and close-tab all say this
 /// same sentence, which is why it is written once.
 ///
-/// It has to carry both halves an operator needs to act: which tmux
-/// session actually holds the pane, and why an unrecognized name is what
-/// stops the verb rather than merely being logged. The wording keeps the
-/// substance of the `bail!` this classification replaced
-/// ([`crate::tmux::PaneProbe`]), because that text is what the 2026-08-16
-/// incident's journal entries and any search for it will match — the
-/// change is that it now appears only for the case that still deserves it.
-/// [`Supervisor::known_session_tmux_name`] holds the reasoning for the
-/// split.
+/// It has to carry both halves an operator needs to act: which tmux session
+/// actually holds the pane, and why an unrecognized name is what stops the
+/// verb rather than merely being logged. The wording keeps the substance of
+/// the `bail!` this classification replaced
+/// ([`crate::terminal_process::TerminalProbe`]), because that text is what
+/// the 2026-08-16 incident's journal entries and any search for it will
+/// match — the change is that it now appears only for the case that still
+/// deserves it. [`Supervisor::known_session_tmux_name`] holds the reasoning
+/// for the split.
 pub(crate) fn unknown_pane_owner_refusal(pane: &str, owner: &str, expected: &str) -> String {
     format!(
         "pane {pane} belongs to session {owner:?}, not {expected:?}, and {owner:?} is not a \
@@ -7082,7 +7083,7 @@ impl Supervisor {
         let mut sentinel_hits: HashMap<String, String> = HashMap::new();
         // The same rule the list and the lifecycle verbs apply to a pane
         // that tmux now reports under another session name (see
-        // `status::PaneEvidence`), built from the rows because the session
+        // `status::TerminalEvidence`), built from the rows because the session
         // map does not exist yet.
         let known = super::status::KnownTmuxNames::from_sessions(
             rows.iter().map(|row| (row.id.as_str(), None)),
@@ -7130,12 +7131,12 @@ impl Supervisor {
                         &pane_states,
                         &known,
                     ) {
-                        super::status::PaneEvidence::Owned(_) => state(),
-                        super::status::PaneEvidence::Absent => None,
+                        super::status::TerminalEvidence::Owned(_) => state(),
+                        super::status::TerminalEvidence::Absent => None,
                         // An Error row is settled already: it takes no
                         // terminal from a pane it cannot claim, and still gets
                         // the idempotent artifact cleanup below.
-                        super::status::PaneEvidence::Unattributed
+                        super::status::TerminalEvidence::Unattributed
                             if matches!(row.outcome, LastOutcome::Error { .. }) =>
                         {
                             None
@@ -7143,7 +7144,7 @@ impl Supervisor {
                         // Possibly this session's own agent, renamed or moved
                         // out of band: held aside below rather than treated as
                         // found.
-                        super::status::PaneEvidence::Unattributed => {
+                        super::status::TerminalEvidence::Unattributed => {
                             unattributed = state();
                             None
                         }
@@ -8241,7 +8242,7 @@ impl Supervisor {
             Terminal::Host(_) => hold.terminal.probe_process(self).await,
         };
         match probe {
-            Ok(PaneProbe::Owned(pane)) if !pane.dead => {
+            Ok(TerminalProbe::Owned(pane)) if !pane.dead => {
                 crate::session_hold::read_mark(&hold.held) == pane.live_pid()
             }
             Ok(_) => true,
@@ -8302,9 +8303,9 @@ impl Supervisor {
             };
             let may_be_live = if let Some(evidence) = evidence {
                 match evidence {
-                    super::status::PaneEvidence::Owned(pane) => !pane.dead,
-                    super::status::PaneEvidence::Absent => false,
-                    super::status::PaneEvidence::Unattributed => true,
+                    super::status::TerminalEvidence::Owned(pane) => !pane.dead,
+                    super::status::TerminalEvidence::Absent => false,
+                    super::status::TerminalEvidence::Unattributed => true,
                 }
             } else {
                 // Error rows can retain a recorded but unattributed pane even
@@ -8323,9 +8324,9 @@ impl Supervisor {
                                 states,
                                 &known,
                             ) {
-                                super::status::PaneEvidence::Owned(pane) => !pane.dead,
-                                super::status::PaneEvidence::Absent => false,
-                                super::status::PaneEvidence::Unattributed => true,
+                                super::status::TerminalEvidence::Owned(pane) => !pane.dead,
+                                super::status::TerminalEvidence::Absent => false,
+                                super::status::TerminalEvidence::Unattributed => true,
                             },
                             // A host row's address is a socket name, which no pane
                             // lookup may read: every such row would read as
@@ -12461,7 +12462,7 @@ impl Supervisor {
 
     /// Is `owner` the tmux session name of a session this supervisor
     /// currently holds in its map? This is the discriminator every
-    /// lifecycle verb applies to a [`PaneProbe::ForeignOwner`], and it
+    /// lifecycle verb applies to a [`TerminalProbe::ForeignOwner`], and it
     /// separates two situations the probe itself cannot tell apart but
     /// which have opposite safety profiles.
     ///
@@ -12581,8 +12582,8 @@ impl Supervisor {
             .await
             .context("rechecking the prompt target's live pane")?
         {
-            PaneProbe::Owned(pane) if !pane.dead => {}
-            PaneProbe::Owned(_) | PaneProbe::Gone | PaneProbe::ForeignOwner { .. } => {
+            TerminalProbe::Owned(pane) if !pane.dead => {}
+            TerminalProbe::Owned(_) | TerminalProbe::Gone | TerminalProbe::ForeignOwner { .. } => {
                 return Err(RequestError::new(
                     ErrorKind::Conflict,
                     "the target agent is not running in its owned pane",
@@ -13050,8 +13051,8 @@ impl Supervisor {
                 .await
                 .context("rechecking whether this session's agent is still running")?
             {
-                PaneProbe::Owned(pane) => Some(pane),
-                PaneProbe::Gone => None,
+                TerminalProbe::Owned(pane) => Some(pane),
+                TerminalProbe::Gone => None,
                 // A RECOGNIZED owner reads exactly as `Gone`, and the
                 // consent question below is why that is not merely a
                 // convenience. Pane ids are unique within a server
@@ -13075,7 +13076,7 @@ impl Supervisor {
                 // agent under a renamed tmux session, and a restart that
                 // guessed otherwise would kill a live agent without the
                 // consent `stop_if_running` exists to obtain.
-                PaneProbe::ForeignOwner { owner } => {
+                TerminalProbe::ForeignOwner { owner } => {
                     if !self.known_session_tmux_name(&owner).await {
                         return Err(anyhow::anyhow!(terminal.unknown_owner_refusal(&owner))
                             .context("rechecking whether this session's agent is still running"));
@@ -14342,8 +14343,8 @@ impl Supervisor {
                     .pane_process(&terminal.tmux_name, &terminal.pane)
                     .await
                     .map(|probe| match probe {
-                        PaneProbe::Owned(pane) => Some(!pane.dead),
-                        PaneProbe::Gone => Some(false),
+                        TerminalProbe::Owned(pane) => Some(!pane.dead),
+                        TerminalProbe::Gone => Some(false),
                         // Ambiguous for EITHER kind of foreign owner, which is
                         // why this is the one site that does not ask
                         // `known_session_tmux_name` which kind it has. The
@@ -14357,7 +14358,7 @@ impl Supervisor {
                         // delete a live agent's spec out from under it, so
                         // this stays conservative and keeps the launching
                         // record.
-                        PaneProbe::ForeignOwner { .. } => None,
+                        TerminalProbe::ForeignOwner { .. } => None,
                     }),
                 None if preserved_session => Ok(None),
                 None => self.tmux.has_session(tmux_name).await.map(Some),
@@ -14798,14 +14799,14 @@ impl Supervisor {
                 .await
                 .context("checking whether this session's agent is still running")?
             {
-                PaneProbe::Owned(pane) if !pane.dead => {
+                TerminalProbe::Owned(pane) if !pane.dead => {
                     return Ok((
                         Some("this session's agent is still running".to_string()),
                         None,
                     ));
                 }
-                PaneProbe::Owned(_) | PaneProbe::Gone => {}
-                PaneProbe::ForeignOwner { owner } => {
+                TerminalProbe::Owned(_) | TerminalProbe::Gone => {}
+                TerminalProbe::ForeignOwner { owner } => {
                     if !self.known_session_tmux_name(&owner).await {
                         return Ok((
                             Some(
@@ -15669,9 +15670,9 @@ impl Supervisor {
         // failed-open unwind, which must not depend on the marker having
         // been written.
         let tab_scope = if scope_prefix.is_empty() {
-            TabScopeMarker::Unscoped
+            TabScope::Unscoped
         } else {
-            TabScopeMarker::Scoped
+            TabScope::Scoped
         };
         let env = self.tab_environment(session_id, session_token, &tab_id);
         let (window_cmd, shell) = self.tab_command(cwd, container, scope_prefix).await?;
@@ -15744,7 +15745,7 @@ impl Supervisor {
                         &terminal.tmux_name,
                         &terminal.pane,
                         TAB_SCOPED_WINDOW_OPTION,
-                        TabScopeMarker::option_value(tab_scope == TabScopeMarker::Scoped),
+                        crate::tmux::tab_scoped_option_value(tab_scope == TabScope::Scoped),
                     )
                     .await
             }
@@ -16279,7 +16280,7 @@ impl Supervisor {
         session_id: &str,
         terminal: &TmuxTerminal,
         tab_id: &str,
-        tab_scope: TabScopeMarker,
+        tab_scope: TabScope,
         because: String,
     ) -> RequestError {
         info!(session = %session_id, tab = %tab_id, pane = %terminal.pane,
@@ -16349,7 +16350,7 @@ impl Supervisor {
     async fn settled_tab_pane(
         &self,
         terminal: &TmuxTerminal,
-    ) -> anyhow::Result<Option<crate::tmux::PaneProcess>> {
+    ) -> anyhow::Result<Option<crate::terminal_process::TerminalProcess>> {
         let deadline = tokio::time::Instant::now() + TAB_LAUNCH_SETTLE;
         loop {
             let observed = match self
@@ -16357,9 +16358,9 @@ impl Supervisor {
                 .pane_process(&terminal.tmux_name, &terminal.pane)
                 .await?
             {
-                PaneProbe::Owned(state) => Some(state),
-                PaneProbe::Gone => None,
-                PaneProbe::ForeignOwner { owner } => {
+                TerminalProbe::Owned(state) => Some(state),
+                TerminalProbe::Gone => None,
+                TerminalProbe::ForeignOwner { owner } => {
                     anyhow::bail!(
                         "pane {} belongs to session {owner:?}, not {:?}; refusing to treat it \
                          as this tab's terminal (a stale or reused pane id would otherwise \
@@ -16452,7 +16453,7 @@ impl Supervisor {
         session_id: &str,
         terminal: &Terminal,
         tab_id: &str,
-        tab_scope: TabScopeMarker,
+        tab_scope: TabScope,
         anchor: TabReapAnchor,
     ) -> anyhow::Result<()> {
         let root_identity = match anchor {
@@ -16464,8 +16465,8 @@ impl Supervisor {
                 // The root at the probe's boundary, per kind
                 // (`Terminal::live_root`): a host child's pinned identity,
                 // never one read again from a bare pid.
-                PaneProbe::Owned(state) => terminal.live_root(&state)?,
-                PaneProbe::Gone => None,
+                TerminalProbe::Owned(state) => terminal.live_root(&state)?,
+                TerminalProbe::Gone => None,
                 // A RECOGNIZED foreign owner gives no root to walk from —
                 // the recorded pane died with a previous tmux server, and
                 // walking the stranger that inherited its id would reap
@@ -16481,7 +16482,7 @@ impl Supervisor {
                 // while its window, pane, and shell went on living. The
                 // failed-open unwind inherits that too — it reports an
                 // incomplete cleanup instead of claiming removal.
-                PaneProbe::ForeignOwner { owner } => {
+                TerminalProbe::ForeignOwner { owner } => {
                     if !self.known_session_tmux_name(&owner).await {
                         anyhow::bail!(terminal.unknown_owner_refusal(&owner));
                     }
@@ -16503,7 +16504,7 @@ impl Supervisor {
         &self,
         session_id: &str,
         tab_id: &str,
-        tab_scope: TabScopeMarker,
+        tab_scope: TabScope,
         root_identity: Option<(u32, u64)>,
     ) -> anyhow::Result<()> {
         // Which provenance the tab's scope name gets decides what a negative
@@ -16525,9 +16526,9 @@ impl Supervisor {
         // had a manager, where refusing would leave it unclosable.
         let tab_unit = crate::scope::tab_unit_name(session_id, tab_id);
         let units = match tab_scope {
-            TabScopeMarker::Scoped => ScopeUnits::recorded(tab_unit),
-            TabScopeMarker::Unscoped => ScopeUnits::derived(tab_unit.into_iter().collect()),
-            TabScopeMarker::Unmarked => {
+            TabScope::Scoped => ScopeUnits::recorded(tab_unit),
+            TabScope::Unscoped => ScopeUnits::derived(tab_unit.into_iter().collect()),
+            TabScope::Unknown => {
                 let session_scoped = self
                     .sessions
                     .lock()
@@ -18487,7 +18488,7 @@ impl Supervisor {
 
     /// Resolve the session's owned pane to the anchor its reports' recorded
     /// chains must reach: the pane process's pid, plus its start token while
-    /// it is alive (see `procs::PaneAnchor`). The pane is recovered from tmux
+    /// it is alive (see `procs::TerminalAnchor`). The pane is recovered from tmux
     /// during publication gaps. No lifecycle lock: a reporting hook may be
     /// running inside the launch whose publication that lock protects.
     ///
@@ -18498,10 +18499,10 @@ impl Supervisor {
     /// A row whose agent runs in a terminal host is anchored at the host's
     /// child instead ([`Self::host_agent_anchor`]); its terminal address is
     /// the host's socket name, which no tmux lookup may read as a pane.
-    pub(crate) async fn owned_pane_anchor(
+    pub(crate) async fn owned_terminal_anchor(
         &self,
         row: &StoredSession,
-    ) -> Result<crate::procs::PaneAnchor, RequestError> {
+    ) -> Result<crate::procs::TerminalAnchor, RequestError> {
         match row.terminal_kind {
             crate::store::TerminalKind::Tmux => {}
             crate::store::TerminalKind::Host => return self.host_agent_anchor(row).await,
@@ -18535,14 +18536,14 @@ impl Supervisor {
                     "the session's foreground process could not be inspected",
                 )
             })?;
-        let crate::tmux::PaneProbe::Owned(process) = process else {
+        let crate::terminal_process::TerminalProbe::Owned(process) = process else {
             return Err(RequestError::new(
                 ErrorKind::Conflict,
                 "the session's foreground pane is no longer owned by this session",
             ));
         };
         // tmux 3.8 stops reporting a pid once the pane's terminal closes
-        // (see `PaneProcess::pid`), so a report still waiting to be applied
+        // (see `TerminalProcess::pid`), so a report still waiting to be applied
         // after the agent exited has nothing to anchor to there and is
         // refused, where the pinned tmux 3.7c would still anchor it by the
         // stale pid below. A known gap, recorded in SPEC_impl.md: such a
@@ -18564,7 +18565,7 @@ impl Supervisor {
                 _ => None,
             }
         };
-        Ok(crate::procs::PaneAnchor { pid, start })
+        Ok(crate::procs::TerminalAnchor { pid, start })
     }
 
     /// The hook anchor of a row whose agent runs in a terminal host: the
@@ -18585,7 +18586,7 @@ impl Supervisor {
     async fn host_agent_anchor(
         &self,
         row: &StoredSession,
-    ) -> Result<crate::procs::PaneAnchor, RequestError> {
+    ) -> Result<crate::procs::TerminalAnchor, RequestError> {
         let entry = self.sessions.lock().await.get(&row.id).cloned();
         let not_yet = || {
             RequestError::new(
@@ -21085,7 +21086,7 @@ pub(crate) mod tests {
                 session,
                 &a_terminal(),
                 tab,
-                TabScopeMarker::Scoped,
+                TabScope::Scoped,
                 TabReapAnchor::MarkerOnly,
             )
             .await
@@ -21156,7 +21157,7 @@ pub(crate) mod tests {
                 session,
                 &a_terminal(),
                 tab,
-                TabScopeMarker::Unmarked,
+                TabScope::Unknown,
                 TabReapAnchor::MarkerOnly,
             )
             .await
@@ -21227,12 +21228,12 @@ pub(crate) mod tests {
         }
 
         for (session, marker, refuses) in [
-            (unscoped, TabScopeMarker::Scoped, true),
-            (scoped, TabScopeMarker::Scoped, true),
-            (scoped, TabScopeMarker::Unscoped, false),
-            (unscoped, TabScopeMarker::Unscoped, false),
-            (scoped, TabScopeMarker::Unmarked, true),
-            (unscoped, TabScopeMarker::Unmarked, false),
+            (unscoped, TabScope::Scoped, true),
+            (scoped, TabScope::Scoped, true),
+            (scoped, TabScope::Unscoped, false),
+            (unscoped, TabScope::Unscoped, false),
+            (scoped, TabScope::Unknown, true),
+            (unscoped, TabScope::Unknown, false),
         ] {
             let result = sup
                 .reap_tab_tree(
@@ -21261,7 +21262,7 @@ pub(crate) mod tests {
     /// different tab (a vanished pane's target resolves to the session's
     /// current pane) would apply a sibling's verdict. Specified: after a real
     /// open, the marker matches whether this host's scope manager is usable,
-    /// and asking with another tab id yields `Unmarked`.
+    /// and asking with another tab id yields `Unknown`.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn an_opened_tab_records_whether_it_was_scoped() {
         let state = StateDir::new();
@@ -21292,9 +21293,9 @@ pub(crate) mod tests {
             .expect("the opened tab's pane");
 
         let expected = if sup.seams.scopes.available().await {
-            TabScopeMarker::Scoped
+            TabScope::Scoped
         } else {
-            TabScopeMarker::Unscoped
+            TabScope::Unscoped
         };
         assert_eq!(
             sup.tmux
@@ -21312,7 +21313,7 @@ pub(crate) mod tests {
                 )
                 .await
                 .expect("read the marker"),
-            TabScopeMarker::Unmarked,
+            TabScope::Unknown,
             "the marker must not answer for a different tab"
         );
     }
@@ -21370,7 +21371,7 @@ pub(crate) mod tests {
             .find(|(_, state)| state.tab.as_deref() == Some(tab.id.as_str()))
             .map(|(pane, _)| pane)
             .expect("the opened tab's pane");
-        let PaneProbe::Owned(tab_shell) = sup
+        let TerminalProbe::Owned(tab_shell) = sup
             .tmux
             .pane_process(&tmux_name, &tab_pane)
             .await
@@ -22322,7 +22323,7 @@ pub(crate) mod tests {
     ) -> Vec<crate::procs::ChainLink> {
         let row = sup.store.session(id).await.unwrap().unwrap();
         let pane = sup
-            .owned_pane_anchor(&row)
+            .owned_terminal_anchor(&row)
             .await
             .expect("the session's pane anchors");
         let ancestry = crate::procs::collect_ancestry(reporter).expect("collect");
@@ -23211,7 +23212,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
             assert!(
-                matches!(probe, PaneProbe::Owned(ref process) if !process.dead),
+                matches!(probe, TerminalProbe::Owned(ref process) if !process.dead),
                 "fixture recorder must remain alive: {probe:?}"
             );
             let enabled = sup
@@ -23256,7 +23257,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
             assert!(
-                matches!(probe, PaneProbe::Owned(ref process) if !process.dead),
+                matches!(probe, TerminalProbe::Owned(ref process) if !process.dead),
                 "recorder died before consuming the prompt: {probe:?}"
             );
             let observed = std::fs::read(path).unwrap();
@@ -23466,7 +23467,7 @@ pub(crate) mod tests {
             .unwrap();
         wait_for_dead_fixture_pane(&sup, "prompt target exited", |pane, _| pane == dead_pane).await;
         assert!(
-            matches!(sup.tmux.pane_process(&dead_name, &dead_pane).await.unwrap(), PaneProbe::Owned(process) if process.dead)
+            matches!(sup.tmux.pane_process(&dead_name, &dead_pane).await.unwrap(), TerminalProbe::Owned(process) if process.dead)
         );
         let mut dead = entry_with(
             Some(Terminal::tmux(dead_name, dead_pane)),
@@ -23490,7 +23491,7 @@ pub(crate) mod tests {
                 .pane_process(&agent.tmux_name, &agent.pane)
                 .await
                 .unwrap(),
-            PaneProbe::Gone
+            TerminalProbe::Gone
         ));
         assert!(sup.prompt_session("s1", "dead target").await.is_err());
         assert!(std::fs::read(&path).unwrap().is_empty());
@@ -23567,7 +23568,7 @@ pub(crate) mod tests {
                     .await
                     .expect("agent process probe")
                 {
-                    PaneProbe::Owned(process) => process.live_pid(),
+                    TerminalProbe::Owned(process) => process.live_pid(),
                     _ => None,
                 }
             };
@@ -23758,7 +23759,7 @@ pub(crate) mod tests {
             .await
             .expect("tab process probe")
         {
-            PaneProbe::Owned(crate::tmux::PaneProcess {
+            TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
                 pid: Some(pid),
                 dead: false,
             }) => pid,
@@ -23800,7 +23801,7 @@ pub(crate) mod tests {
             .await
             .expect("tab process after restart")
         {
-            PaneProbe::Owned(crate::tmux::PaneProcess {
+            TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
                 pid: Some(pid),
                 dead: false,
             }) => pid,
@@ -23927,7 +23928,7 @@ pub(crate) mod tests {
         assert!(
             matches!(
                 sup.tmux.pane_process(&agent.tmux_name, &agent.pane).await.expect("agent probe"),
-                PaneProbe::Owned(process) if !process.dead
+                TerminalProbe::Owned(process) if !process.dead
             ),
             "fixture premise: the agent pane must be live before Restart"
         );
@@ -23942,7 +23943,7 @@ pub(crate) mod tests {
             .await
             .expect("tab process probe")
         {
-            PaneProbe::Owned(crate::tmux::PaneProcess {
+            TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
                 pid: Some(pid),
                 dead: false,
             }) => pid,
@@ -23966,7 +23967,7 @@ pub(crate) mod tests {
             .await
             .expect("tab process after restart")
         {
-            PaneProbe::Owned(crate::tmux::PaneProcess {
+            TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
                 pid: Some(pid),
                 dead: false,
             }) => pid,
@@ -24185,7 +24186,7 @@ pub(crate) mod tests {
         assert!(
             matches!(
                 sup.tmux.pane_process(&agent.tmux_name, &agent.pane).await.expect("agent probe"),
-                PaneProbe::Owned(process) if !process.dead
+                TerminalProbe::Owned(process) if !process.dead
             ),
             "fixture premise: a live agent pane must reach the ordinary restart path"
         );
@@ -24315,7 +24316,7 @@ pub(crate) mod tests {
             .await
             .expect("tab process probe")
         {
-            PaneProbe::Owned(crate::tmux::PaneProcess {
+            TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
                 pid: Some(pid),
                 dead: false,
             }) => pid,
@@ -24371,7 +24372,7 @@ pub(crate) mod tests {
                 .await
                 .expect("tab process after restart")
             {
-                PaneProbe::Owned(crate::tmux::PaneProcess {
+                TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
                     pid: Some(pid),
                     dead: false,
                 }) => pid,
@@ -24443,7 +24444,7 @@ pub(crate) mod tests {
                 .await
                 .expect("tab process probe")
             {
-                PaneProbe::Owned(crate::tmux::PaneProcess {
+                TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
                     pid: Some(pid),
                     dead: false,
                 }) => pid,
@@ -24507,7 +24508,7 @@ pub(crate) mod tests {
                 .await
                 .expect("tab process after failed restart")
             {
-                PaneProbe::Owned(crate::tmux::PaneProcess {
+                TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
                     pid: Some(pid),
                     dead: false,
                 }) => pid,
@@ -24566,7 +24567,7 @@ pub(crate) mod tests {
     /// recorded terminal.
     ///
     /// Why: that is the shape an out-of-band rename or move of the still
-    /// running agent leaves (see `status::PaneEvidence::Unattributed`).
+    /// running agent leaves (see `status::TerminalEvidence::Unattributed`).
     /// Reload used to drop the terminal and record an exit; dropping the
     /// terminal alone would still let the first list after startup infer
     /// one from a terminal-less entry, which is why the terminal has to
@@ -29430,7 +29431,7 @@ exit 0
             )
             .await
             .expect("create a live pane directly");
-        let PaneProbe::Owned(process) = sup
+        let TerminalProbe::Owned(process) = sup
             .tmux
             .pane_process(tmux_name, &pane)
             .await
@@ -30525,7 +30526,7 @@ exit 0
             .await
             .expect("a window standing in for a new session's");
         let pane_pid = match sup.tmux.pane_process(name, &pane).await.expect("probe") {
-            PaneProbe::Owned(crate::tmux::PaneProcess {
+            TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
                 pid: Some(pid),
                 dead: false,
             }) => pid,
@@ -30596,7 +30597,7 @@ exit 0
             .await
             .expect("a window standing in for a new session's");
         let pane_pid = match sup.tmux.pane_process(name, &pane).await.expect("probe") {
-            PaneProbe::Owned(crate::tmux::PaneProcess {
+            TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
                 pid: Some(pid),
                 dead: false,
             }) => pid,
@@ -30773,7 +30774,7 @@ exit 0
             .await
             .expect("a window standing in for the new sessions'");
         let pane_pid = match sup.tmux.pane_process(name, &pane).await.expect("probe") {
-            PaneProbe::Owned(crate::tmux::PaneProcess {
+            TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
                 pid: Some(pid),
                 dead: false,
             }) => pid,

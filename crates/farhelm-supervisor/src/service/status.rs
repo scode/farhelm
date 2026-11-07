@@ -58,7 +58,7 @@
 //! which no non-error stored outcome may
 //! override; then, with no pane to ask, the stored outcome, which beats
 //! the blanket exited-unknown fallback. A pane tmux reports under a name no
-//! session here answers to ([`PaneEvidence::Unattributed`]) sits beside
+//! session here answers to ([`TerminalEvidence::Unattributed`]) sits beside
 //! that ladder rather than on it: the sentinel still speaks (it is about
 //! this launch, not about any pane), but no pane-based inference is drawn
 //! and an unsettled outcome reads as unknown. `session_status` and
@@ -150,7 +150,7 @@ impl From<&PaneState> for OwnedTerminal {
 /// terminal falls into one differs ([`pane_evidence`] for a tmux pane,
 /// `crate::hosts::HostStatus::evidence` for a host terminal).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PaneEvidence {
+pub(crate) enum TerminalEvidence {
     /// The terminal answers for this session's program: its dead flag and
     /// exit status are this session's. For tmux, the pane is present under
     /// the tmux session name this session recorded; for a host, the host's
@@ -182,14 +182,14 @@ pub(crate) enum PaneEvidence {
     Unattributed,
 }
 
-impl From<crate::hosts::HostEvidence> for PaneEvidence {
+impl From<crate::hosts::HostEvidence> for TerminalEvidence {
     fn from(evidence: crate::hosts::HostEvidence) -> Self {
         match evidence {
             crate::hosts::HostEvidence::Owned { dead, exit_code } => {
-                PaneEvidence::Owned(OwnedTerminal { dead, exit_code })
+                TerminalEvidence::Owned(OwnedTerminal { dead, exit_code })
             }
-            crate::hosts::HostEvidence::Absent => PaneEvidence::Absent,
-            crate::hosts::HostEvidence::Unattributed => PaneEvidence::Unattributed,
+            crate::hosts::HostEvidence::Absent => TerminalEvidence::Absent,
+            crate::hosts::HostEvidence::Unattributed => TerminalEvidence::Unattributed,
         }
     }
 }
@@ -205,17 +205,17 @@ pub(crate) fn pane_evidence(
     tmux_name: &str,
     pane_states: &HashMap<String, PaneState>,
     known: &KnownTmuxNames,
-) -> PaneEvidence {
+) -> TerminalEvidence {
     match pane_states.get(pane) {
-        None => PaneEvidence::Absent,
-        Some(state) if state.session_name == tmux_name => PaneEvidence::Owned(state.into()),
-        Some(state) if known.contains(&state.session_name) => PaneEvidence::Absent,
-        Some(_) => PaneEvidence::Unattributed,
+        None => TerminalEvidence::Absent,
+        Some(state) if state.session_name == tmux_name => TerminalEvidence::Owned(state.into()),
+        Some(state) if known.contains(&state.session_name) => TerminalEvidence::Absent,
+        Some(_) => TerminalEvidence::Unattributed,
     }
 }
 
 /// The evidence for an entry's recorded terminal; no terminal at all is
-/// [`PaneEvidence::Absent`].
+/// [`TerminalEvidence::Absent`].
 ///
 /// A tmux pane is classified from the caller's `pane_states` snapshot
 /// ([`pane_evidence`]); a host terminal from its runtime's state now, which
@@ -224,13 +224,13 @@ fn terminal_evidence(
     terminal: Option<&Terminal>,
     pane_states: &HashMap<String, PaneState>,
     known: &KnownTmuxNames,
-) -> PaneEvidence {
+) -> TerminalEvidence {
     match terminal {
         Some(Terminal::Tmux(tmux)) => {
             pane_evidence(&tmux.pane, &tmux.tmux_name, pane_states, known)
         }
         Some(Terminal::Host(host)) => host.evidence().into(),
-        None => PaneEvidence::Absent,
+        None => TerminalEvidence::Absent,
     }
 }
 
@@ -251,7 +251,7 @@ fn terminal_evidence(
 ///   inherit the new session's liveness.
 ///
 /// A pane present under a name NO session here answers to is different
-/// ([`PaneEvidence::Unattributed`]): the likeliest explanation is an
+/// ([`TerminalEvidence::Unattributed`]): the likeliest explanation is an
 /// out-of-band rename or move of our own still-running agent, so a session
 /// whose outcome is not already settled reports `Unknown` rather than an
 /// exit that may never have happened.
@@ -326,14 +326,14 @@ pub(crate) fn session_status(
     // on the hottest path the list reply has.
     let recorded = entry.run.outcome.lock().expect("outcome mutex poisoned");
     let live = match terminal_evidence(entry.terminal.as_ref(), pane_states, known) {
-        PaneEvidence::Owned(state) => Some(state),
-        PaneEvidence::Absent => None,
+        TerminalEvidence::Owned(state) => Some(state),
+        TerminalEvidence::Absent => None,
         // A settled outcome is retained knowledge and still speaks below; an
         // unsettled one has nothing observable to decide it.
-        PaneEvidence::Unattributed if !recorded.is_terminal() => {
+        TerminalEvidence::Unattributed if !recorded.is_terminal() => {
             return (SessionStatus::Unknown, None);
         }
-        PaneEvidence::Unattributed => None,
+        TerminalEvidence::Unattributed => None,
     };
     match (&*recorded, live) {
         (LastOutcome::Error { detail }, _) => (
@@ -793,9 +793,9 @@ pub(crate) async fn observe_entry_with_capture_budget(
     // plan's D-16 leaves it to whoever can read it. The renamed-pane
     // exception below is tmux's alone.
     let unreadable_host = match (&evidence, entry.terminal.as_ref()) {
-        (PaneEvidence::Unattributed, Some(Terminal::Host(_))) => true,
-        (PaneEvidence::Unattributed, Some(Terminal::Tmux(_)) | None) => false,
-        (PaneEvidence::Owned(_) | PaneEvidence::Absent, _) => false,
+        (TerminalEvidence::Unattributed, Some(Terminal::Host(_))) => true,
+        (TerminalEvidence::Unattributed, Some(Terminal::Tmux(_)) | None) => false,
+        (TerminalEvidence::Owned(_) | TerminalEvidence::Absent, _) => false,
     };
     if unreadable_host {
         return Ok(EntryObservation {
@@ -809,10 +809,10 @@ pub(crate) async fn observe_entry_with_capture_budget(
     // is about this launch rather than any pane, may speak for it. The
     // wrapper-failure, preparation and exit inferences all read the pane,
     // which is how the ticker and the lifecycle verbs already treat it.
-    let unattributed = matches!(evidence, PaneEvidence::Unattributed);
+    let unattributed = matches!(evidence, TerminalEvidence::Unattributed);
     let live = match evidence {
-        PaneEvidence::Owned(state) => Some(state),
-        PaneEvidence::Absent | PaneEvidence::Unattributed => None,
+        TerminalEvidence::Owned(state) => Some(state),
+        TerminalEvidence::Absent | TerminalEvidence::Unattributed => None,
     };
 
     // Two different questions, deliberately not one: "no live

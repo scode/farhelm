@@ -1623,9 +1623,9 @@ async fn the_childs_exit_ends_its_root_and_is_announced() {
         }
     );
     match terminal.probe().unwrap() {
-        PaneProbe::Owned(process) => assert_eq!(
+        TerminalProbe::Owned(process) => assert_eq!(
             process,
-            PaneProcess {
+            TerminalProcess {
                 pid: None,
                 dead: true
             }
@@ -1642,7 +1642,7 @@ async fn the_childs_exit_ends_its_root_and_is_announced() {
     assert_eq!(terminal.exit_code(), Some(3));
     assert_eq!(
         terminal.anchor(),
-        Some(PaneAnchor {
+        Some(TerminalAnchor {
             pid: own.pid,
             start: Some(own.start)
         })
@@ -1697,7 +1697,7 @@ async fn an_exit_from_info_is_announced_only_with_its_record() {
     assert_eq!(terminal.child_root(), None);
     assert_eq!(
         terminal.probe().unwrap(),
-        PaneProbe::Owned(PaneProcess {
+        TerminalProbe::Owned(TerminalProcess {
             pid: None,
             dead: true
         })
@@ -1826,11 +1826,11 @@ fn the_adapters_map_each_liveness_like_a_pane() {
         .modes(),
         size: Size { cols: 80, rows: 24 },
     };
-    let anchor = Some(PaneAnchor {
+    let anchor = Some(TerminalAnchor {
         pid: own.pid,
         start: Some(own.start),
     });
-    let owned = |pid, dead| Some(PaneProbe::Owned(PaneProcess { pid, dead }));
+    let owned = |pid, dead| Some(TerminalProbe::Owned(TerminalProcess { pid, dead }));
     let alive = HostEvidence::Owned {
         dead: false,
         exit_code: None,
@@ -1895,7 +1895,7 @@ fn the_adapters_map_each_liveness_like_a_pane() {
         (
             Liveness::Gone,
             None,
-            Some(PaneProbe::Gone),
+            Some(TerminalProbe::Gone),
             HostEvidence::Absent,
             None,
             anchor,

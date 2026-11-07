@@ -188,13 +188,14 @@
 //!   so that one task can wait for the exits of every host terminal at
 //!   once.
 //! - **Adapters** map a host terminal's state onto the types the supervisor
-//!   already decides with for tmux panes: [`HostStatus::probe`] gives a
-//!   [`PaneProbe`], [`HostStatus::live_root`] the kill root beside it, and
+//!   decides with for a terminal of either kind (`crate::terminal_process`):
+//!   [`HostStatus::probe`] gives a [`TerminalProbe`],
+//!   [`HostStatus::live_root`] the kill root beside it, and
 //!   [`HostStatus::exit_code`] and `HostStatus::anchor` the exit code and
 //!   hook anchor a pane would give. [`HostStatus::evidence`] gives the
 //!   three classes of status evidence ([`HostEvidence`]) with the owned
 //!   facts status reads (dead, exit code) and no tmux fields, which
-//!   `service::status::PaneEvidence` maps one to one.
+//!   `service::status::TerminalEvidence` maps one to one.
 //! - **Checkpoints** (`checkpoint`): once enough output has passed since
 //!   the previous attempt (the plan's D-8, revised), the runtime snapshots
 //!   its emulator at the next clean boundary and hands the host the
@@ -317,8 +318,8 @@ use super::client::{
 use super::process::HostProcess;
 use super::tag::HostTag;
 use crate::grid_input::PASTE_END;
-use crate::procs::{self, PaneAnchor, ProcessIdentity, ProcessState};
-use crate::tmux::{PaneProbe, PaneProcess};
+use crate::procs::{self, ProcessIdentity, ProcessState, TerminalAnchor};
+use crate::terminal_process::{TerminalProbe, TerminalProcess};
 
 // ---- Limits --------------------------------------------------------------------
 
@@ -691,7 +692,7 @@ pub struct HostStatus {
 }
 
 /// A host terminal's state in the three classes the supervisor's status
-/// evidence has for a tmux pane (`service::status::PaneEvidence`), with
+/// evidence has for any terminal (`service::status::TerminalEvidence`), with
 /// what each class carries there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostEvidence {
@@ -799,9 +800,9 @@ impl HostStatus {
         }
     }
 
-    /// What `TmuxDriver::pane_process` would answer for a pane in this
-    /// state, for the verbs that decide on that answer (Stop, Restart,
-    /// Delete, prompt delivery, the tab reap).
+    /// This state's answer to the process question the verbs decide on
+    /// (Stop, Restart, Delete, prompt delivery, the tab reap), the one
+    /// `TmuxDriver::pane_process` gives for a pane.
     ///
     /// A child that [`Self::child_root`] gives is an owned, live process. A
     /// child without a root (reaped, or the exit recorded) is an owned, dead
@@ -813,30 +814,30 @@ impl HostStatus {
     /// tell" and refuse. It has no `ForeignOwner` answer: a host terminal's
     /// owner is its tag, not a name that could be recycled.
     ///
-    /// `PaneProcess` carries a pid only. A caller that kills or sweeps from
-    /// it must take the root with its start identity from
+    /// `TerminalProcess` carries a pid only. A caller that kills or sweeps
+    /// from it must take the root with its start identity from
     /// [`Self::child_root`] rather than read an identity from the bare pid
     /// again, which could be a process that took the pid since.
-    pub fn probe(&self) -> anyhow::Result<PaneProbe> {
+    pub fn probe(&self) -> anyhow::Result<TerminalProbe> {
         match &self.liveness {
             Liveness::Running { .. } => match self.pinned_child() {
-                Some(Ok(root)) => Ok(PaneProbe::Owned(PaneProcess {
+                Some(Ok(root)) => Ok(TerminalProbe::Owned(TerminalProcess {
                     pid: Some(root.pid),
                     dead: false,
                 })),
                 Some(Err(why)) => Err(anyhow::anyhow!(
                     "the terminal host's child could not be checked: {why}"
                 )),
-                None => Ok(PaneProbe::Owned(PaneProcess {
+                None => Ok(TerminalProbe::Owned(TerminalProcess {
                     pid: None,
                     dead: true,
                 })),
             },
-            Liveness::Exited { .. } => Ok(PaneProbe::Owned(PaneProcess {
+            Liveness::Exited { .. } => Ok(TerminalProbe::Owned(TerminalProcess {
                 pid: None,
                 dead: true,
             })),
-            Liveness::Gone => Ok(PaneProbe::Gone),
+            Liveness::Gone => Ok(TerminalProbe::Gone),
             Liveness::Unavailable { reason, .. } => Err(anyhow::anyhow!(
                 "the terminal host is unavailable: {reason}"
             )),
@@ -872,19 +873,20 @@ impl HostStatus {
     }
 
     /// Where a hook report's recorded process chain must end to be
-    /// attributed to this terminal: the child, as `procs::PaneAnchor`
-    /// describes a pane's process. Kept after the child exits, like a dead
-    /// pane's, because a report written before the exit may still be
-    /// waiting to be applied; with the start identity read while the child
-    /// lived, so a pid reused since cannot match. A child that had already
-    /// exited when the runtime adopted its host was never pinned, and is
-    /// anchored by its pid alone, as tmux anchors a dead pane. `None`
-    /// without a child pid, and for a host that cannot be read.
-    pub(crate) fn anchor(&self) -> Option<PaneAnchor> {
+    /// attributed to this terminal: the child, as `procs::TerminalAnchor`
+    /// describes a terminal's root process. Kept after the child exits,
+    /// like a dead pane's, because a report written before the exit may
+    /// still be waiting to be applied; with the start identity read while
+    /// the child lived, so a pid reused since cannot match. A child that
+    /// had already exited when the runtime adopted its host was never
+    /// pinned, and is anchored by its pid alone, as tmux anchors a dead
+    /// pane. `None` without a child pid, and for a host that cannot be
+    /// read.
+    pub(crate) fn anchor(&self) -> Option<TerminalAnchor> {
         match &self.liveness {
             Liveness::Unavailable { .. } => None,
             Liveness::Running { .. } | Liveness::Exited { .. } | Liveness::Gone => {
-                (self.child_pid > 1).then_some(PaneAnchor {
+                (self.child_pid > 1).then_some(TerminalAnchor {
                     pid: self.child_pid,
                     start: self.child_start,
                 })
@@ -2513,7 +2515,7 @@ impl HostTerminal {
     }
 
     /// See [`HostStatus::probe`].
-    pub fn probe(&self) -> anyhow::Result<PaneProbe> {
+    pub fn probe(&self) -> anyhow::Result<TerminalProbe> {
         self.inner.status.borrow().probe()
     }
 
@@ -2528,7 +2530,7 @@ impl HostTerminal {
     }
 
     /// See `HostStatus::anchor`.
-    pub(crate) fn anchor(&self) -> Option<PaneAnchor> {
+    pub(crate) fn anchor(&self) -> Option<TerminalAnchor> {
         self.inner.status.borrow().anchor()
     }
 }

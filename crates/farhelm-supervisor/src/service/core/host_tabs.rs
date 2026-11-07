@@ -127,7 +127,7 @@ use crate::hosts::{
 use crate::service::terminals::{
     TAB_LAUNCH_SETTLE, TAB_LAUNCH_SETTLE_STEP, Terminal, TmuxTerminal,
 };
-use crate::tmux::{PaneProbe, TabScopeMarker};
+use crate::terminal_process::{TabScope, TerminalProbe};
 
 // ---- The session's host tabs -----------------------------------------------------
 
@@ -254,11 +254,11 @@ impl HostTab {
     }
 
     /// The scope answer `Supervisor::reap_tab_tree` takes, from the tag.
-    fn scope_marker(&self) -> TabScopeMarker {
+    fn tab_scope(&self) -> TabScope {
         if self.scoped {
-            TabScopeMarker::Scoped
+            TabScope::Scoped
         } else {
-            TabScopeMarker::Unscoped
+            TabScope::Unscoped
         }
     }
 }
@@ -446,9 +446,9 @@ impl Supervisor {
             },
         };
         let scope = if scoped {
-            TabScopeMarker::Scoped
+            TabScope::Scoped
         } else {
-            TabScopeMarker::Unscoped
+            TabScope::Unscoped
         };
         let StartedTab { host, spawning } = match self
             .start_tab_host(&record, argv, &env, cwd, size, &tag, &shell)
@@ -739,10 +739,10 @@ impl Supervisor {
         let deadline = tokio::time::Instant::now() + TAB_LAUNCH_SETTLE;
         loop {
             match host.probe()? {
-                PaneProbe::Owned(process) if process.dead => return Ok(false),
-                PaneProbe::Owned(_) => {}
-                PaneProbe::Gone => anyhow::bail!("the tab's terminal host ended"),
-                PaneProbe::ForeignOwner { owner } => {
+                TerminalProbe::Owned(process) if process.dead => return Ok(false),
+                TerminalProbe::Owned(_) => {}
+                TerminalProbe::Gone => anyhow::bail!("the tab's terminal host ended"),
+                TerminalProbe::ForeignOwner { owner } => {
                     anyhow::bail!(Terminal::Host(host.clone()).unknown_owner_refusal(&owner))
                 }
             }
@@ -771,7 +771,7 @@ impl Supervisor {
         &self,
         session_id: &str,
         tab_id: &str,
-        scope: TabScopeMarker,
+        scope: TabScope,
         record: &Path,
         left: HostLeft,
         error: anyhow::Error,
@@ -840,7 +840,7 @@ impl Supervisor {
                 session_id,
                 &Terminal::Host(tab.host.clone()),
                 &tab.tab_id,
-                tab.scope_marker(),
+                tab.tab_scope(),
                 TabReapAnchor::PaneIfLive,
             )
             .await
@@ -857,7 +857,7 @@ impl Supervisor {
         // What outlived the host's hangup, by the tab's marker and scope, as
         // a close's second pass does.
         if let Err(error) = self
-            .reap_tab_processes(session_id, &tab.tab_id, tab.scope_marker(), None)
+            .reap_tab_processes(session_id, &tab.tab_id, tab.tab_scope(), None)
             .await
         {
             left_behind.push(format!("its processes ({error:#})"));
@@ -1028,7 +1028,7 @@ impl Supervisor {
         } else {
             TabReapAnchor::PaneIfLive
         };
-        self.reap_tab_tree(session_id, &terminal, tab_id, tab.scope_marker(), anchor)
+        self.reap_tab_tree(session_id, &terminal, tab_id, tab.tab_scope(), anchor)
             .await
             .map_err(|e| {
                 RequestError::new(
@@ -1051,7 +1051,7 @@ impl Supervisor {
                 session_id,
                 &terminal,
                 tab_id,
-                tab.scope_marker(),
+                tab.tab_scope(),
                 TabReapAnchor::MarkerOnly,
             )
             .await;

@@ -381,16 +381,19 @@ fn link_argv_bytes(link: &ChainLink) -> usize {
     link.argv.iter().flatten().map(Vec::len).sum()
 }
 
-/// Where an attribution chain must end: the session's owned pane process.
+/// Where an attribution chain must end: the root process of the session's
+/// own terminal (a tmux pane's process, or a terminal host's child).
 ///
-/// `start` is the pane process's kernel start token while it is alive, and
-/// `None` once it has exited but tmux still lists the pane (`remain-on-exit`):
-/// a dead process has no start token left to read, so only its pid can be
-/// compared. On tmux 3.8, which no longer reports a dead pane's pid, there is
-/// no anchor at all once the process has exited. Every launch runs a new pane process, which is what ties a chain
-/// to the launch it was collected under.
+/// `start` is the root process's kernel start token while it is alive, and
+/// `None` once it has exited but the terminal is still there (tmux's
+/// `remain-on-exit`, or a host whose child exited before its runtime pinned
+/// it): a dead process has no start token left to read, so only its pid can
+/// be compared. On tmux 3.8, which no longer reports a dead pane's pid, there
+/// is no anchor at all once the process has exited. Every launch runs a new
+/// root process, which is what ties a chain to the launch it was collected
+/// under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PaneAnchor {
+pub(crate) struct TerminalAnchor {
     pub(crate) pid: u32,
     pub(crate) start: Option<u64>,
 }
@@ -546,7 +549,7 @@ fn unchanged_prefix(chain: &[ChainLink], still_same: impl Fn(&ChainLink) -> bool
 pub(crate) fn anchor_chain<'c>(
     chain: &'c [ChainLink],
     ended: Option<&str>,
-    pane: PaneAnchor,
+    pane: TerminalAnchor,
 ) -> Result<&'c [ChainLink], String> {
     let index = chain
         .iter()
@@ -2398,7 +2401,7 @@ mod tests {
         let me = std::process::id();
         let peer = ProcessIdentity::read(me).expect("this process is live");
         let ancestry = collect_ancestry(peer).expect("a live process collects its ancestry");
-        let me_alone = PaneAnchor {
+        let me_alone = TerminalAnchor {
             pid: me,
             start: Some(peer.start),
         };
@@ -2465,7 +2468,7 @@ mod tests {
         let parent = read_process(me).expect("read").expect("listed").0;
         let walk = |pane: u32| {
             let ancestry = collect_ancestry(peer)?;
-            let anchor = PaneAnchor {
+            let anchor = TerminalAnchor {
                 pid: pane,
                 start: None,
             };
@@ -2504,7 +2507,7 @@ mod tests {
     }
 
     /// The anchor of [`ancestry_above_a_pane`]'s pane process while alive.
-    const LIVE_PANE: PaneAnchor = PaneAnchor {
+    const LIVE_PANE: TerminalAnchor = TerminalAnchor {
         pid: 10,
         start: Some(10_000),
     };
@@ -2525,19 +2528,19 @@ mod tests {
             kept.iter().map(|link| link.pid).collect::<Vec<_>>(),
             [12, 11, 10]
         );
-        let dead = PaneAnchor {
+        let dead = TerminalAnchor {
             pid: 10,
             start: None,
         };
         let kept = anchor_chain(&chain, None, dead).expect("a dead pane anchors by pid");
         assert_eq!(kept.len(), 3);
-        let recycled = PaneAnchor {
+        let recycled = TerminalAnchor {
             pid: 10,
             start: Some(10_001),
         };
         let error = anchor_chain(&chain, None, recycled).expect_err("another launch's pane");
         assert!(error.contains("cannot be attributed"), "{error}");
-        let elsewhere = PaneAnchor {
+        let elsewhere = TerminalAnchor {
             pid: 7,
             start: None,
         };
@@ -2559,7 +2562,7 @@ mod tests {
                 link
             })
             .collect();
-        let past_depth = PaneAnchor {
+        let past_depth = TerminalAnchor {
             pid: deep[MAX_ATTRIBUTION_ANCESTORS].pid,
             start: None,
         };
@@ -2620,7 +2623,7 @@ mod tests {
             })
             .collect();
         many_links.push(corridor_link(83, "/opt/agent/bin/agent", &["agent"]));
-        let pane = PaneAnchor {
+        let pane = TerminalAnchor {
             pid: 83,
             start: None,
         };

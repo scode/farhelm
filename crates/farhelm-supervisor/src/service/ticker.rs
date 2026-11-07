@@ -3315,7 +3315,9 @@ mod tests {
                 .pane_process("fh-recheck-reap", &pane)
                 .await
                 .unwrap(),
-            crate::tmux::PaneProbe::Owned(crate::tmux::PaneProcess { dead: false, .. })
+            crate::terminal_process::TerminalProbe::Owned(
+                crate::terminal_process::TerminalProcess { dead: false, .. }
+            )
         ));
         held.release.add_permits(1);
         wait_until("automatic close released its lifecycle claim", || {
@@ -3328,7 +3330,9 @@ mod tests {
                     .pane_process("fh-recheck-reap", &pane)
                     .await
                     .unwrap(),
-                crate::tmux::PaneProbe::Owned(crate::tmux::PaneProcess { dead: false, .. })
+                crate::terminal_process::TerminalProbe::Owned(
+                    crate::terminal_process::TerminalProcess { dead: false, .. }
+                )
             ),
             "a revived tab must survive automatic cleanup based on stale evidence"
         );

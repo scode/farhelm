@@ -848,7 +848,7 @@ mod tests {
             cwd: None,
         }]);
         let chain = long.chain().expect("decodes").expect("has ancestry");
-        let pane = procs::PaneAnchor {
+        let pane = procs::TerminalAnchor {
             pid: 1,
             start: None,
         };
