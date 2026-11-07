@@ -23,6 +23,9 @@ use std::collections::{HashMap, HashSet};
 /// Allocation stays on the reader, so no later frame can race route installation.
 #[derive(Default)]
 pub(crate) struct ConnectionChannels {
+    // Tunnel listeners and undecided sockets must disappear even when the
+    // reader unwinds before reaching its explicit asynchronous shutdown tail.
+    pub(crate) tunnels: super::tcp_relays::TunnelClaims,
     // A cancelled or panicking reader skips its explicit shutdown tail. Rust
     // drops fields in declaration order, so retain the reverse declaration
     // order of the former connection locals even on that path. Normal shutdown
@@ -51,8 +54,14 @@ impl ConnectionChannels {
 
     /// Keep the id reserved before starting its producer, including failed starts.
     pub(crate) fn begin_relay(&mut self, channel: u32, start: impl FnOnce() -> RelayRoute) {
-        self.relay_ids.insert(channel);
+        self.reserve_relay(channel);
         self.relays.insert(channel, start());
+    }
+
+    /// Refused accepted-socket admissions also reserve their channel: late
+    /// bytes from that attempt must never feed a later accepted connection.
+    pub(crate) fn reserve_relay(&mut self, channel: u32) {
+        self.relay_ids.insert(channel);
     }
 
     /// Old relay data still belongs to this id after its route is removed.
@@ -68,6 +77,21 @@ impl ConnectionChannels {
     /// Cancel only the producer; queued relay frames still reserve the id.
     pub(crate) fn close_relay(&mut self, channel: u32) {
         self.relays.remove(&channel);
+    }
+
+    /// Disconnect cancels every socket pump before any unrelated teardown
+    /// wait. Return unfinished task ids so the connection can reap those
+    /// cancellations and prove sockets closed before touching other cleanup.
+    /// Already-finished tasks may have been reaped by the ordinary reader.
+    pub(crate) fn close_relays(&mut self) -> HashSet<tokio::task::Id> {
+        let pending = self
+            .relays
+            .values()
+            .filter(|route| !route.task.is_finished())
+            .map(|route| route.task.id())
+            .collect();
+        self.relays.clear();
+        pending
     }
 
     /// Reserve before spawning, so even a refused file read keeps its id.
@@ -190,5 +214,21 @@ mod tests {
         assert!(channels.download(7).is_none());
         assert!(!channels.can_begin_relay(7));
         assert!(channels.can_begin_stream(7));
+    }
+
+    /// An unknown accepted-socket id still spends a fresh relay channel. A
+    /// refusal must not let later bytes for that attempt become a different
+    /// socket's input, even though no route was installed by the failed begin.
+    #[test]
+    fn a_refused_relay_channel_cannot_be_reused_by_any_stream() {
+        let mut channels = ConnectionChannels::default();
+        assert!(channels.can_begin_relay(7));
+        channels.reserve_relay(7);
+        assert!(channels.relay(7).is_none());
+        assert!(!channels.can_begin_relay(7));
+        assert!(!channels.can_begin_stream(7));
+        channels.prune_finished();
+        channels.drop_transfers();
+        assert!(channels.relay_reserved(7));
     }
 }

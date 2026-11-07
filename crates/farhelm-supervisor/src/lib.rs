@@ -2,13 +2,16 @@
 //!
 //! Per SPEC.md's Concepts, the supervisor launches agents, owns their
 //! terminals, and is the authority on its sessions. It has no UI and no
-//! knowledge of other hosts, and listens on no network port — it is
-//! reached over a unix socket, remotely via `farhelm internal stdio`
+//! knowledge of other hosts. Its protocol is reached over a unix socket,
+//! remotely via `farhelm internal stdio`
 //! through the user's ssh. The terminal substrate is a private headless
 //! tmux server (`tmux` module); the wire protocol is farhelm-proto
 //! (`service` module); the launch path through the user's login shell and
 //! the exec shim lives in `launch`; SQLite-backed session metadata lives
 //! in `store`.
+//! A full-authority connection may also claim IPv4 loopback listeners for
+//! recipe tunnels. They carry only relayed TCP, never this protocol, and end
+//! with that connection; the helm restricts their use to Tensorlake hosts.
 //!
 //! State model: SQLite (`store` module) is the truth that a session
 //! exists and what its metadata is; tmux remains the truth for whether

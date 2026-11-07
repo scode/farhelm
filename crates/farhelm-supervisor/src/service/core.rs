@@ -5079,6 +5079,9 @@ pub struct Supervisor {
     /// this struct's docs state: `helm_link_for_session` releases
     /// `attachments` before taking this, and nothing else takes both.
     pub(crate) helm_links: Mutex<Vec<Arc<super::agent_relay::HelmLink>>>,
+    /// Pending and active accepted tunnel sockets share one host-wide cap,
+    /// including sockets held by overlapping helm connections during reconnect.
+    pub(crate) tcp_tunnel_budget: Arc<tokio::sync::Semaphore>,
     /// Owed "sessions changed" hints to the connections in `helm_links`;
     /// see [`super::hints`]. Marking it takes no lock, so it sits outside
     /// the lock-ordering rules entirely.
@@ -6651,6 +6654,9 @@ impl Supervisor {
             attachments: Mutex::new(HashMap::new()),
             deletes_in_progress: std::sync::Mutex::new(HashMap::new()),
             helm_links: Mutex::new(Vec::new()),
+            tcp_tunnel_budget: Arc::new(tokio::sync::Semaphore::new(
+                farhelm_proto::MAX_TCP_TUNNEL_CONNECTIONS,
+            )),
             change_hints: Arc::new(super::hints::ChangeHints::default()),
             output_reaps: Arc::new(std::sync::Mutex::new(HashMap::new())),
             sinks: Arc::new(std::sync::Mutex::new(Default::default())),

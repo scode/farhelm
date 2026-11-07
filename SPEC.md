@@ -202,18 +202,20 @@ machine has no uninstall in the panel: Farhelm there is removed with `farhelm un
 
 Connections are direct: the helm connects straight to each registered supervisor, over the user's own SSH access —
 passwordless SSH from the helm's machine to the host is the requirement, and the helm handles connectivity itself,
-transparently. Supervisors listen on no network port. The helm's own machine is a host without registration: its
-supervisor (the desktop app's managed local one, or one running beside a Linux helm) is reached locally, no SSH-to-self
-involved. The helm manages it through the same discovery-first flow as remote hosts, minus SSH: a supervisor that
-answers is discovered and registered like any other, and the panel never touches the unit file that runs it. What the
-panel does NOT do on the helm's own machine is install one. On Linux that job belongs to `farhelm helm setup`, which
-writes and owns the helm's and the supervisor's systemd user units; the local row says so instead of offering to
-install, so a machine has exactly one thing writing its units. Until a supervisor exists the local host appears with
-that instruction, not as a phantom unreachable host. There is no relay, no supervisor-to-supervisor connection, and no
-transitive aggregation — the helm sees exactly the hosts in its registry. The machine running the helm must therefore be
-able to reach every registered supervisor over the user's network fabric (Tailscale, SSH tunnel); a browser only needs
-to reach the helm — which in v1 means loopback on the helm's machine, tunneled when the browser is elsewhere (see
-Security).
+transparently. Supervisors listen on no network port except IPv4 loopback ports claimed by a helm for a Tensorlake
+host's configured recipe tunnels. Those listeners belong to the claiming connection and close when it ends. The helm
+limits these claims to Tensorlake hosts; the supervisor's transport-independent protocol does not know the host kind.
+The helm's own machine is a host without registration: its supervisor (the desktop app's managed local one, or one
+running beside a Linux helm) is reached locally, no SSH-to-self involved. The helm manages it through the same
+discovery-first flow as remote hosts, minus SSH: a supervisor that answers is discovered and registered like any other,
+and the panel never touches the unit file that runs it. What the panel does NOT do on the helm's own machine is install
+one. On Linux that job belongs to `farhelm helm setup`, which writes and owns the helm's and the supervisor's systemd
+user units; the local row says so instead of offering to install, so a machine has exactly one thing writing its units.
+Until a supervisor exists the local host appears with that instruction, not as a phantom unreachable host. There is no
+relay, no supervisor-to-supervisor connection, and no transitive aggregation — the helm sees exactly the hosts in its
+registry. The machine running the helm must therefore be able to reach every registered supervisor over the user's
+network fabric (Tailscale, SSH tunnel); a browser only needs to reach the helm — which in v1 means loopback on the
+helm's machine, tunneled when the browser is elsewhere (see Security).
 
 The host registry belongs to the helm: each entry is a host's SSH destination. A host can carry an optional alias, shown
 in place of its destination everywhere except the host details view, which keeps the real destination visible; aliases
@@ -3928,9 +3930,11 @@ file in the helm's state directory, never in the user's own.
   `cross-site` or `same-site`: a page on another loopback port has no authority over this helm. This also prevents an
   ordinary link from such a page from opening the standalone helm; address-bar launches and bookmarks still work.
 - **Helm to supervisor**: SSH, and only SSH, for every remote supervisor. Passwordless access from the helm's machine,
-  as the user, is the requirement; authentication is the user's SSH keys, and supervisors listen on no network port of
-  their own. Registering a host means giving the helm its SSH destination — there is no supervisor token to manage. The
-  helm's own machine's supervisor is reached locally, no SSH involved.
+  as the user, is the requirement; authentication is the user's SSH keys. Supervisors listen on no network port except
+  IPv4 loopback listeners claimed for configured Tensorlake recipe tunnels, owned by that full-authority connection. The
+  helm limits claims to Tensorlake hosts; the supervisor does not know its host kind. Registering a host means giving
+  the helm its SSH destination — there is no supervisor token to manage. The helm's own machine's supervisor is reached
+  locally, no SSH involved.
 - **Session to supervisor (spawn)**: the spawn CLI reaches its own supervisor over local IPC only, never the network.
   Its per-session credential identifies the asking session and dies with that session. It does not restrict permitted
   operations to that session: fleet operations follow the Agent-spawned sessions contract and the confirmed trust

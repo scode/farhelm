@@ -3238,6 +3238,12 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
         // point if that interception is bypassed — which this arm reports
         // like any other message that should not have arrived.
         other @ (ControlMsg::BeginTcpRelay { .. }
+        | ControlMsg::ClaimTcpTunnelPorts { .. }
+        | ControlMsg::TcpTunnelPortsClaimed { .. }
+        | ControlMsg::TcpTunnelAccepted { .. }
+        | ControlMsg::BeginAcceptedTcpRelay { .. }
+        | ControlMsg::RejectTcpTunnel { .. }
+        | ControlMsg::TcpRelayEof { .. }
         | ControlMsg::TcpRelayAck { .. }
         | ControlMsg::CloseTcpRelay { .. }
         | ControlMsg::StatFile { .. }
@@ -7612,6 +7618,15 @@ mod tests {
                 address: None,
                 port: 3000,
             },
+            ControlMsg::ClaimTcpTunnelPorts {
+                req_id: 45,
+                ports: vec![3000],
+            },
+            ControlMsg::BeginAcceptedTcpRelay {
+                req_id: 46,
+                accepted: 1,
+                channel: 9,
+            },
         ] {
             let req_id = request.request_req_id().unwrap();
             handle_restricted_control(&sup, request, &tx, &auth).await;
@@ -7632,6 +7647,13 @@ mod tests {
                 channel: 8,
                 received: 1,
             },
+            ControlMsg::RejectTcpTunnel { accepted: 1 },
+            ControlMsg::TcpRelayEof { channel: 8 },
+            ControlMsg::TcpTunnelAccepted {
+                accepted: 1,
+                port: 3000,
+            },
+            ControlMsg::TcpTunnelPortsClaimed { req_id: 45 },
             ControlMsg::CloseTcpRelay { channel: 8 },
             ControlMsg::TcpRelayStarted {
                 req_id: 42,
@@ -11100,6 +11122,25 @@ mod tests {
                 async move {
                     let mut host = shared.lock().await;
                     assert_conformance_gates(&sup, &target, &intent);
+                    // Accepted-socket operations need a real pending socket,
+                    // otherwise they could pass by taking only the absent-id
+                    // refusal path. Keep its peer owned through observation.
+                    let mut tunnel_peer = None;
+                    if matches!(&message, ControlMsg::BeginAcceptedTcpRelay { .. } | ControlMsg::RejectTcpTunnel { .. }) {
+                        let reservation = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+                        let port = reservation.local_addr().unwrap().port();
+                        drop(reservation);
+                        host.send(ControlMsg::ClaimTcpTunnelPorts { req_id: 11, ports: vec![port] }).await;
+                        assert_eq!(host.reply(11).await, ControlMsg::TcpTunnelPortsClaimed { req_id: 11 });
+                        tunnel_peer = Some(tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).await.unwrap());
+                        tokio::time::timeout(BUSY_HOST_WAIT, async {
+                            while !host.replies.iter().any(|reply| matches!(reply,
+                                ControlMsg::TcpTunnelAccepted { accepted: 1, port: actual } if *actual == port)) {
+                                host.read_one("candidate's pending accepted tunnel socket").await;
+                            }
+                        }).await.expect("the claimed listener must publish its pending socket");
+                        assert_eq!(sup.tcp_tunnel_budget.available_permits(), farhelm_proto::MAX_TCP_TUNNEL_CONNECTIONS - 1);
+                    }
                     // Controls need a live route: an absent route would skip
                     // exactly the branch whose shared waits this test guards.
                     match &message {
@@ -11194,7 +11235,8 @@ mod tests {
                             assert_eq!(host.secondary_bytes, farhelm_proto::UPLOAD_WINDOW_BYTES);
                             // The file exceeds the window; draining without ACK grants no credit.
                         }
-                        ControlMsg::TcpRelayAck { .. } | ControlMsg::CloseTcpRelay { .. } => {
+                        ControlMsg::TcpRelayAck { .. } | ControlMsg::TcpRelayEof { .. }
+                        | ControlMsg::CloseTcpRelay { .. } => {
                             host.send(ControlMsg::BeginTcpRelay {
                                 req_id: 10,
                                 session_id: target.clone(),
@@ -11210,6 +11252,7 @@ mod tests {
                             );
                         }
                         ControlMsg::SetBrowserForwarding { .. } => {}
+                        ControlMsg::RejectTcpTunnel { .. } => {}
                         other => assert_ne!(
                             execution_class(other),
                             ExecutionClass::InlineControl,
@@ -11235,6 +11278,16 @@ mod tests {
                         )
                         .await
                         .expect("the registered upload must reach the held lifecycle claim");
+                    }
+                    if name == "BeginAcceptedTcpRelay" {
+                        assert!(matches!(host.reply(2).await, ControlMsg::TcpRelayStarted { channel: 2, .. }));
+                    }
+                    if name == "RejectTcpTunnel" {
+                        let mut byte = [0];
+                        let peer = tunnel_peer.as_mut().expect("the pending socket premise is owned");
+                        let result = tokio::time::timeout(BUSY_HOST_WAIT, tokio::io::AsyncReadExt::read(peer, &mut byte)).await
+                            .expect("refusal must close its pending socket");
+                        assert!(matches!(result, Ok(0)) || result.is_err(), "refused socket received unexpected bytes");
                     }
                     if name == "DeleteSession" {
                         tokio::time::timeout(

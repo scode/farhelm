@@ -227,13 +227,14 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 ///
 /// Two standing decisions shape what this protocol carries. There is no
 /// supervisor-to-helm push channel except [`ControlMsg::AgentRequest`]
-/// (answered by [`ControlMsg::AgentResponse`]), which exists because an
-/// agent inside a session has no route back to the helm's machine; the helm
-/// learns session and terminal state by drain and post-write wake. And
+/// (an agent inside a session has no route back to the helm's machine) and
+/// [`ControlMsg::TcpTunnelAccepted`] (only the helm can select the destination
+/// of a socket accepted on the host). The helm learns session and terminal
+/// state by drain and post-write wake. And
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_68` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_69` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -244,7 +245,15 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 68;
+/// Version 69 adds supervisor-accepted TCP tunnels and directional relay EOF;
+/// old peers cannot decode these messages or preserve half-close semantics.
+pub const PROTOCOL_VERSION: u32 = 69;
+
+/// Bound pending and active recipe tunnel sockets per supervisor and per helm.
+pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
+
+/// A claim cannot exceed the recipe's existing mapping limit.
+pub const MAX_TCP_TUNNEL_PORTS: usize = 32;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -2817,6 +2826,27 @@ pub struct GithubCheckoutRecovery {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ControlMsg {
+    /// Claim IPv4 loopback listeners for this full-authority connection's
+    /// lifetime. Ports must be unique, nonzero, not 22, and at most
+    /// MAX_TCP_TUNNEL_PORTS. One successful all-or-nothing claim is allowed;
+    /// failed claims may be retried and no claim takes over another owner.
+    ClaimTcpTunnelPorts { req_id: u64, ports: Vec<u16> },
+    /// Every requested listener is bound and belongs to this connection.
+    TcpTunnelPortsClaimed { req_id: u64 },
+    /// An owned listener accepted a socket. The id is unique within this
+    /// connection. The helm alone chooses its destination from its recipe;
+    /// the event carries no destination address or port on the helm's machine.
+    TcpTunnelAccepted { accepted: u64, port: u16 },
+    /// Consume this connection's pending accepted socket on a fresh channel.
+    /// Admission answers with TcpRelayStarted or Error, as BeginTcpRelay does.
+    BeginAcceptedTcpRelay {
+        req_id: u64,
+        accepted: u64,
+        channel: u32,
+    },
+    /// Refuse a pending accepted socket. Unknown ids are harmless and cannot
+    /// affect another connection or a socket already admitted to a relay.
+    RejectTcpTunnel { accepted: u64 },
     /// Open one raw, bidirectional TCP stream on the session's host. Only
     /// full-authority helm connections may open relays. A missing address
     /// tries IPv4 loopback then IPv6 loopback, without DNS; wildcard literals
@@ -2838,11 +2868,15 @@ pub enum ControlMsg {
     /// Counts are monotonic and never exceed bytes sent; duplicates are
     /// harmless and invalid credit ends the relay. No idle timer is implied.
     TcpRelayAck { channel: u32, received: u64 },
-    /// Close both directions. Unknown or already-ended channels are harmless;
-    /// no half-close exists. This need not produce an admission reply.
+    /// End only this sender's byte direction, after earlier data in the same
+    /// bulk FIFO. The receiver drains those bytes before shutting down its
+    /// socket's write half; the opposite direction and its credit remain live.
+    TcpRelayEof { channel: u32 },
+    /// Abort both directions. Unknown or already-ended channels are harmless.
+    /// This need not produce an admission reply.
     CloseTcpRelay { channel: u32 },
-    /// Supervisor EOF or failure, queued after all preceding relay data.
-    /// EOF drains received bytes before closing; a failure ends immediately.
+    /// Full relay termination, after both directions end or on failure.
+    /// Success drains preceding data; a failure ends both directions at once.
     TcpRelayEnded {
         channel: u32,
         reason: Option<String>,
@@ -4153,6 +4187,7 @@ impl ControlMsg {
             | ControlMsg::FileStat { req_id, .. }
             | ControlMsg::DownloadStarted { req_id, .. }
             | ControlMsg::TcpRelayStarted { req_id, .. }
+            | ControlMsg::TcpTunnelPortsClaimed { req_id }
             | ControlMsg::SessionCreated { req_id, .. }
             | ControlMsg::GithubCheckoutReconciled { req_id, .. }
             | ControlMsg::SessionList { req_id, .. }
@@ -4187,6 +4222,8 @@ impl ControlMsg {
             | ControlMsg::StatFile { .. }
             | ControlMsg::BeginDownload { .. }
             | ControlMsg::BeginTcpRelay { .. }
+            | ControlMsg::ClaimTcpTunnelPorts { .. }
+            | ControlMsg::BeginAcceptedTcpRelay { .. }
             | ControlMsg::CreateSession { .. }
             | ControlMsg::ReconcileGithubCheckout { .. }
             | ControlMsg::ListSessions { .. }
@@ -4214,6 +4251,9 @@ impl ControlMsg {
             // here has a `req_id` field to return in the first place.
             ControlMsg::DownloadAck { .. }
             | ControlMsg::TcpRelayAck { .. }
+            | ControlMsg::TcpRelayEof { .. }
+            | ControlMsg::TcpTunnelAccepted { .. }
+            | ControlMsg::RejectTcpTunnel { .. }
             | ControlMsg::CloseTcpRelay { .. }
             | ControlMsg::TcpRelayEnded { .. }
             | ControlMsg::AbortDownload { .. }
@@ -4244,6 +4284,8 @@ impl ControlMsg {
             | ControlMsg::StatFile { req_id, .. }
             | ControlMsg::BeginDownload { req_id, .. }
             | ControlMsg::BeginTcpRelay { req_id, .. }
+            | ControlMsg::ClaimTcpTunnelPorts { req_id, .. }
+            | ControlMsg::BeginAcceptedTcpRelay { req_id, .. }
             | ControlMsg::CreateSession { req_id, .. }
             | ControlMsg::ReconcileGithubCheckout { req_id, .. }
             | ControlMsg::ListSessions { req_id, .. }
@@ -4271,6 +4313,10 @@ impl ControlMsg {
             | ControlMsg::FileStat { .. }
             | ControlMsg::DownloadStarted { .. }
             | ControlMsg::TcpRelayStarted { .. }
+            | ControlMsg::TcpTunnelPortsClaimed { .. }
+            | ControlMsg::TcpTunnelAccepted { .. }
+            | ControlMsg::RejectTcpTunnel { .. }
+            | ControlMsg::TcpRelayEof { .. }
             | ControlMsg::TcpRelayAck { .. }
             | ControlMsg::CloseTcpRelay { .. }
             | ControlMsg::TcpRelayEnded { .. }
@@ -4334,6 +4380,12 @@ impl ControlMsg {
     pub fn variant_name(&self) -> &'static str {
         match self {
             ControlMsg::BeginTcpRelay { .. } => "BeginTcpRelay",
+            ControlMsg::ClaimTcpTunnelPorts { .. } => "ClaimTcpTunnelPorts",
+            ControlMsg::TcpTunnelPortsClaimed { .. } => "TcpTunnelPortsClaimed",
+            ControlMsg::TcpTunnelAccepted { .. } => "TcpTunnelAccepted",
+            ControlMsg::BeginAcceptedTcpRelay { .. } => "BeginAcceptedTcpRelay",
+            ControlMsg::RejectTcpTunnel { .. } => "RejectTcpTunnel",
+            ControlMsg::TcpRelayEof { .. } => "TcpRelayEof",
             ControlMsg::TcpRelayStarted { .. } => "TcpRelayStarted",
             ControlMsg::TcpRelayAck { .. } => "TcpRelayAck",
             ControlMsg::CloseTcpRelay { .. } => "CloseTcpRelay",
@@ -5564,8 +5616,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_68() {
-        assert_eq!(PROTOCOL_VERSION, 68);
+    fn protocol_version_is_pinned_at_69() {
+        assert_eq!(PROTOCOL_VERSION, 69);
     }
 
     /// A follow-up is an approved mutation even though its success has no
@@ -5628,6 +5680,69 @@ mod tests {
             let encoded = serde_json::to_string(&event).unwrap();
             assert_eq!(serde_json::from_str::<ControlMsg>(&encoded).unwrap(), event);
         }
+    }
+
+    /// Claims and accepted sockets introduce another direction of events but
+    /// never another destination authority. Pin every new tag and correlate
+    /// only admission requests and replies; EOF/refusal remain unsolicited.
+    #[farhelm_testtrace::test]
+    fn accepted_tcp_tunnel_messages_have_pinned_tags_and_classification() {
+        let messages = [
+            (
+                ControlMsg::ClaimTcpTunnelPorts {
+                    req_id: 3,
+                    ports: vec![3000, 4000],
+                },
+                r#"{"type":"claim_tcp_tunnel_ports","req_id":3,"ports":[3000,4000]}"#,
+                Some(3),
+                None,
+            ),
+            (
+                ControlMsg::TcpTunnelPortsClaimed { req_id: 3 },
+                r#"{"type":"tcp_tunnel_ports_claimed","req_id":3}"#,
+                None,
+                Some(3),
+            ),
+            (
+                ControlMsg::TcpTunnelAccepted {
+                    accepted: 9,
+                    port: 3000,
+                },
+                r#"{"type":"tcp_tunnel_accepted","accepted":9,"port":3000}"#,
+                None,
+                None,
+            ),
+            (
+                ControlMsg::BeginAcceptedTcpRelay {
+                    req_id: 4,
+                    accepted: 9,
+                    channel: 7,
+                },
+                r#"{"type":"begin_accepted_tcp_relay","req_id":4,"accepted":9,"channel":7}"#,
+                Some(4),
+                None,
+            ),
+            (
+                ControlMsg::RejectTcpTunnel { accepted: 9 },
+                r#"{"type":"reject_tcp_tunnel","accepted":9}"#,
+                None,
+                None,
+            ),
+            (
+                ControlMsg::TcpRelayEof { channel: 7 },
+                r#"{"type":"tcp_relay_eof","channel":7}"#,
+                None,
+                None,
+            ),
+        ];
+        for (message, wire, request, reply) in messages {
+            assert_eq!(serde_json::to_string(&message).unwrap(), wire);
+            assert_eq!(serde_json::from_str::<ControlMsg>(wire).unwrap(), message);
+            assert_eq!(message.request_req_id(), request);
+            assert_eq!(message.reply_req_id(), reply);
+        }
+        assert_eq!(MAX_TCP_TUNNEL_CONNECTIONS, 64);
+        assert_eq!(MAX_TCP_TUNNEL_PORTS, 32);
     }
 
     /// Delete must retain mutation fencing and approval time, with distinct

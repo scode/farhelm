@@ -21,6 +21,8 @@ pub struct TcpRelayState {
 /// Counts have independent directions: sent/acked describe our producer,
 /// accepted/written describe the peer's. The inbox excludes an in-progress
 /// socket write, but accepted minus written includes it in the byte bound.
+/// Peer EOF closes only accepted/written; end is the independent full-channel
+/// outcome, which alone can stop sent/acked credit in the other direction.
 #[derive(Default)]
 struct Inner {
     inbox: VecDeque<u8>,
@@ -28,6 +30,7 @@ struct Inner {
     written: u64,
     sent: u64,
     acked: u64,
+    peer_eof: bool,
     end: Option<Result<(), String>>,
 }
 
@@ -43,10 +46,11 @@ impl Default for TcpRelayState {
 impl TcpRelayState {
     /// Append a short or full data frame without waiting. Packet count is
     /// immaterial; oversized frames or a peer exceeding byte credit end only
-    /// this relay. Late bytes after an ending are discarded.
+    /// this relay. Late bytes after EOF or a terminal outcome are discarded;
+    /// they must never extend a direction the peer already closed.
     pub fn push(&self, bytes: &[u8]) {
         let mut inner = self.inner.lock().expect("TCP relay mutex poisoned");
-        if inner.end.is_some() {
+        if inner.end.is_some() || inner.peer_eof {
             return;
         }
         let accepted = inner.accepted.checked_add(bytes.len() as u64);
@@ -80,7 +84,7 @@ impl TcpRelayState {
                     let count = inner.inbox.len().min(UPLOAD_CHUNK_BYTES);
                     return Ok(Some(inner.inbox.drain(..count).collect()));
                 }
-                if inner.end.is_some() {
+                if inner.peer_eof || inner.end.is_some() {
                     return Ok(None);
                 }
             }
@@ -89,6 +93,17 @@ impl TcpRelayState {
                 .await
                 .map_err(|_| "TCP relay closed".to_string())?;
         }
+    }
+
+    /// Close the peer's sending direction without consuming our outbound
+    /// credit or ending the channel. Earlier data still drains through next();
+    /// repeating EOF is harmless and later data cannot reopen the stream.
+    pub fn eof(&self) {
+        self.inner
+            .lock()
+            .expect("TCP relay mutex poisoned")
+            .peer_eof = true;
+        self.wake();
     }
 
     /// Record bytes actually written to the destination and return cumulative
@@ -166,8 +181,8 @@ impl TcpRelayState {
     }
 
     /// Snapshot the first outcome without consuming it. A socket pump which
-    /// wakes on successful remote EOF must allow the opposite pump to drain
-    /// already-received bytes before closing the local socket.
+    /// wakes on successful termination must allow already-received bytes to
+    /// drain. Directional EOF alone never publishes a terminal outcome.
     pub fn outcome(&self) -> Option<Result<(), String>> {
         self.inner
             .lock()
@@ -177,13 +192,30 @@ impl TcpRelayState {
     }
 
     /// Resolve only on failure, including while a socket write is parked.
-    /// Successful EOF is handled by next(), which must drain earlier data.
+    /// Directional EOF is handled by next(), which must drain earlier data.
     pub async fn failed(&self) -> String {
         let mut changed = self.changed.subscribe();
         loop {
             changed.borrow_and_update();
             if let Some(Err(reason)) = self.outcome() {
                 return reason;
+            }
+            changed
+                .changed()
+                .await
+                .expect("the relay owns its change sender");
+        }
+    }
+
+    /// Wait for the peer's full terminal outcome after both byte directions
+    /// drain. EOF alone cannot establish success: the peer may still report
+    /// a socket failure while finishing its remaining direction.
+    pub async fn finished(&self) -> Result<(), String> {
+        let mut changed = self.changed.subscribe();
+        loop {
+            changed.borrow_and_update();
+            if let Some(outcome) = self.outcome() {
+                return outcome;
             }
             changed
                 .changed()
@@ -212,11 +244,18 @@ mod tests {
         for _ in 0..1000 {
             state.push(b"x");
         }
-        state.finish(Ok(()));
+        state.eof();
         let bytes = state.next().await.unwrap().unwrap();
         assert_eq!(bytes, vec![b'x'; 1000]);
         assert_eq!(state.written(bytes.len()), 1000);
         assert!(state.next().await.unwrap().is_none());
+        assert!(state.outcome().is_none());
+        state.reserve(3).await.unwrap();
+        state.ack(3);
+        state.eof();
+        state.push(b"late");
+        assert!(state.next().await.unwrap().is_none());
+        assert!(state.outcome().is_none());
     }
 
     /// A receiver cannot acknowledge unsent bytes to manufacture credit, and
@@ -257,5 +296,36 @@ mod tests {
         state.ack(2);
         state.ack(1);
         assert_eq!(state.failed().await, "invalid TCP relay credit");
+    }
+
+    /// Peer EOF must not release or revoke the opposite direction's credit.
+    /// A caller waiting for the full terminal outcome stays pending until the
+    /// peer explicitly finishes, even after all inbound bytes have drained.
+    #[farhelm_testtrace::test]
+    async fn directional_eof_keeps_outbound_credit_and_terminal_waiter_live() {
+        use std::future::Future;
+        let state = TcpRelayState::default();
+        for _ in 0..UPLOAD_WINDOW_BYTES as usize / UPLOAD_CHUNK_BYTES {
+            state.reserve(UPLOAD_CHUNK_BYTES).await.unwrap();
+        }
+        state.push(b"response");
+        state.eof();
+        let bytes = state.next().await.unwrap().unwrap();
+        assert_eq!(bytes, b"response");
+        assert_eq!(state.written(bytes.len()), 8);
+        assert!(state.next().await.unwrap().is_none());
+
+        let reserve = state.reserve(1);
+        let finished = state.finished();
+        tokio::pin!(reserve, finished);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(reserve.as_mut().poll(&mut context).is_pending());
+        assert!(finished.as_mut().poll(&mut context).is_pending());
+        state.ack(1);
+        reserve.await.unwrap();
+        state.finish(Err("write failed after EOF".into()));
+        assert_eq!(finished.await.unwrap_err(), "write failed after EOF");
+        state.finish(Ok(()));
+        assert_eq!(state.next().await.unwrap_err(), "write failed after EOF");
     }
 }

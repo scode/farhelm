@@ -9,7 +9,7 @@
 
 use super::capture::note_first_input;
 use super::channels::ConnectionChannels;
-use super::core::Supervisor;
+use super::core::{Supervisor, error_kind};
 use super::handlers::{handle_control, handle_restricted_control};
 use super::terminals::{ActiveAttach, AttachmentKey, OutputReapOutcome, TerminalId};
 use super::uploads::{UPLOAD_PRIORITY_QUEUE, UploadCommand, UploadRoute, UploadSignal};
@@ -606,6 +606,40 @@ where
                         // because `ConnectionCtx` deliberately stops at
                         // the per-message handlers.
                         None => match msg {
+                            ControlMsg::ClaimTcpTunnelPorts { req_id, ports } => {
+                                let reply = match channels.tunnels.claim(ports, Arc::clone(&sup.tcp_tunnel_budget), tx.clone()) {
+                                    Ok(()) => ControlMsg::TcpTunnelPortsClaimed { req_id },
+                                    Err(error) => ControlMsg::Error {
+                                        create_unaccepted: false, req_id,
+                                        kind: error_kind(&error), message: format!("{error:#}"),
+                                    },
+                                };
+                                send_reply(&tx, &reply).await;
+                            }
+                            ControlMsg::BeginAcceptedTcpRelay { req_id, accepted, channel } => {
+                                if !channels.can_begin_relay(channel) {
+                                    send_reply(&tx, &ControlMsg::Error {
+                                        create_unaccepted: false, req_id,
+                                        kind: farhelm_proto::ErrorKind::InvalidRequest,
+                                        message: "TCP relay channel is invalid or was already used".into(),
+                                    }).await;
+                                } else if let Some(socket) = channels.tunnels.take(accepted) {
+                                    channels.begin_relay(channel, || super::tcp_relays::start_accepted(
+                                        &mut tasks, socket, bulk_tx.clone(), priority_tx.clone(), req_id, channel,
+                                    ));
+                                } else {
+                                    channels.reserve_relay(channel);
+                                    send_reply(&tx, &ControlMsg::Error {
+                                        create_unaccepted: false, req_id,
+                                        kind: farhelm_proto::ErrorKind::NotFound,
+                                        message: "pending TCP tunnel connection not found".into(),
+                                    }).await;
+                                }
+                            }
+                            ControlMsg::RejectTcpTunnel { accepted } => { drop(channels.tunnels.take(accepted)); }
+                            ControlMsg::TcpRelayEof { channel } => {
+                                if let Some(route) = channels.relay(channel) { route.state.eof(); }
+                            }
                             ControlMsg::BeginTcpRelay { req_id, session_id, channel, address, port } => {
                                 if !channels.can_begin_relay(channel) {
                                     send_reply(&tx, &ControlMsg::Error {
@@ -683,7 +717,33 @@ where
     }
     .await;
 
-    // Connection gone: retire its upward channel FIRST, before the slower
+    // Tunnel sockets cannot wait for an attachment or request's cleanup. Close
+    // pending sockets and cancel active pumps first, then reap accept loops so
+    // their listening descriptors are gone before the other teardown waits.
+    channels.tunnels.close();
+    let mut closing_relays = channels.close_relays();
+    channels.tunnels.shutdown().await;
+    // Aborting a Tokio task schedules its destruction. Reap those particular
+    // tasks here so unrelated attachment waits cannot retain active sockets.
+    // Other completed handlers are collected just as in steady-state reaping.
+    while !closing_relays.is_empty() {
+        let Some(joined) = tasks.join_next_with_id().await else {
+            break;
+        };
+        match joined {
+            Ok((id, ())) => {
+                closing_relays.remove(&id);
+            }
+            Err(error) => {
+                closing_relays.remove(&error.id());
+                if !error.is_cancelled() {
+                    warn!(%error, "spawned request handler task panicked");
+                }
+            }
+        }
+    }
+
+    // Connection gone: retire its upward channel before the slower
     // attachment and handler teardown below. A session waiting on an
     // agent request has no deadline of its own, so every moment this is
     // deferred is a moment it waits for an answer that provably cannot
