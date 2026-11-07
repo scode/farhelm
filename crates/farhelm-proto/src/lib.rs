@@ -305,15 +305,15 @@ pub const LIST_SESSIONS_CAP: usize = 500;
 /// between two refreshes a helm runs because of them.
 ///
 /// Both ends hold to it, for different reasons. Each hint costs the helm a
-/// whole `ListSessions` round trip (an ssh round trip for a remote host,
-/// plus the supervisor's pane query), and each refresh that answers
-/// one raises a fleet-wide event that makes every open client re-read the
-/// list and every open session view do a live read of its own host. An
-/// honest supervisor spaces its hints this far apart to bound that during a
-/// burst. The helm enforces the same gap on its side, because supervisor
-/// messages are untrusted (SPEC.md): without it, a host that hints after
-/// every reply would drive back-to-back refreshes at round-trip rate, and
-/// with it a hostile host costs the helm no more than a busy honest one.
+/// whole `ListSessions` round trip (an ssh round trip for a remote host, plus
+/// the supervisor's reading of every session's terminals), and each refresh
+/// that answers one raises a fleet-wide event that makes every open client
+/// re-read the list and every open session view do a live read of its own
+/// host. An honest supervisor spaces its hints this far apart to bound that
+/// during a burst. The helm enforces the same gap on its side, because
+/// supervisor messages are untrusted (SPEC.md): without it, a host that hints
+/// after every reply would drive back-to-back refreshes at round-trip rate,
+/// and with it a hostile host costs the helm no more than a busy honest one.
 ///
 /// Well under the three-second poll the hint is meant to beat. Lowering it
 /// on one side only does nothing: the slower of the two ends sets the pace.
@@ -726,23 +726,22 @@ impl Frame {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum SessionStatus {
-    /// The default exists for wire tolerance first: a peer built before
-    /// this field existed sends `SessionInfo` JSON with no `state` at
-    /// all, and `#[serde(default)]` on the field decodes that as
-    /// `Unknown` — never as a fabricated liveness claim one way or the
-    /// other. This build's own supervisor ALSO produces `Unknown`
-    /// deliberately, for the exact same reason: `SessionCreated`'s reply
-    /// carries it as a create-time placeholder, because creation
-    /// establishes only that the session and terminal exist, not that
-    /// the agent's later `exec` inside it succeeded (see
-    /// `ControlMsg::SessionCreated`'s own docs) — a fast-exiting command
+    /// The default exists for wire tolerance first: a peer built before this
+    /// field existed sends `SessionInfo` JSON with no `state` at all, and
+    /// `#[serde(default)]` on the field decodes that as `Unknown` — never as
+    /// a fabricated liveness claim one way or the other. This build's own
+    /// supervisor ALSO produces `Unknown` deliberately, for the exact same
+    /// reason: `SessionCreated`'s reply carries it as a create-time
+    /// placeholder, because creation establishes only that the session and
+    /// terminal exist, not that the agent's later `exec` inside it succeeded
+    /// (see `ControlMsg::SessionCreated`'s own docs) — a fast-exiting command
     /// can already be dead by the time that reply reaches the caller, so
     /// claiming a live status there would itself be a fabricated liveness
-    /// claim.
-    /// List and rename replies compute fresh pane liveness from tmux and
-    /// read the supervisor's cached classification. Create and restart
-    /// replies instead use this placeholder: "not yet known", not "known
-    /// to be running".
+    /// claim. List and rename replies ask the agent's terminal afresh whether
+    /// its program still runs (an old terminal's tmux pane, a new terminal's
+    /// terminal host) and read the supervisor's cached classification. Create
+    /// and restart replies instead use this placeholder: "not yet known", not
+    /// "known to be running".
     ///
     /// ## Internal/compat vocabulary: this variant MUST NEVER RENDER
     ///
@@ -779,13 +778,15 @@ pub enum SessionStatus {
     /// status, and the one a session gets whenever nothing more specific
     /// has been established, including before it has ever been sampled.
     ///
-    /// Alive-ness is tmux's pane being not-dead, exactly as `Alive` was
-    /// before version 10; what is NEW is the claim about activity, which is
-    /// sampled rather than observed and therefore heuristic. A consumer that
-    /// needs "is this session live" must ask that question directly (its own
-    /// liveness predicate over all three live variants), never by comparing
-    /// against this one variant — that comparison is exactly what the
-    /// version-10 split turned into a silent wrong answer.
+    /// Alive-ness is the agent's terminal reporting its program not ended (an
+    /// old terminal's tmux pane not dead, a terminal host's child not
+    /// exited), exactly as `Alive` was before version 10; what is NEW is the
+    /// claim about activity, which is sampled rather than observed and
+    /// therefore heuristic. A consumer that needs "is this session live" must
+    /// ask that question directly (its own liveness predicate over all three
+    /// live variants), never by comparing against this one variant — that
+    /// comparison is exactly what the version-10 split turned into a silent
+    /// wrong answer.
     Running,
     /// The agent is alive and appears to be blocked on the user — a detected
     /// question or an approval prompt sitting unanswered.
@@ -807,14 +808,16 @@ pub enum SessionStatus {
     /// to surface. Distinct from `Exited` in the other direction: the agent
     /// is still there, and typing into it still works.
     Idle,
-    /// The agent's process has ended. `exit_code` is tmux's own
-    /// `#{pane_dead_status}` when parseable — `None` covers a signal
-    /// death tmux cannot reduce to a plain code, and the restart-gap and
-    /// stale-lookup cases where there is no live pane to ask at all (see
-    /// the supervisor's `ListSessions` handler). As of PLAN_M3.md item 2 a
-    /// code the supervisor witnessed EARLIER is retained once the pane
-    /// that held it is gone, so `None` now means nothing ever observed one
-    /// — not merely that nothing can observe one right now.
+    /// The agent's process has ended. `exit_code` is the status it exited
+    /// with, as its terminal reports it: a new terminal's terminal host
+    /// records the child's exit, an old terminal's tmux pane gives
+    /// `#{pane_dead_status}` when parseable. `None` covers a death by
+    /// signal, which neither reduces to a plain code, and the restart-gap
+    /// and stale-lookup cases where there is no terminal to ask at all
+    /// (see the supervisor's `ListSessions` handler). As of PLAN_M3.md
+    /// item 2 a code the supervisor witnessed EARLIER is retained once the
+    /// terminal that held it is gone, so `None` now means nothing ever
+    /// observed one — not merely that nothing can observe one right now.
     Exited { exit_code: Option<i32> },
     /// The agent's process could not be started at all — the launch
     /// shim's exec-failure sentinel (PLAN_M3.md item 3), never inferred
@@ -824,18 +827,18 @@ pub enum SessionStatus {
     /// as a plain required `String` rather than `Option` (unlike
     /// `Exited::exit_code`) because a sentinel is only ever read when it
     /// exists — there is no "error, but no detail" case the way there is
-    /// a "exited, but tmux could not reduce it to a code" case.
+    /// an "exited, but its terminal could not reduce it to a code" case.
     Error { detail: String },
-    /// The host rebooted while this session's durable last-known outcome
-    /// was launching or running, and tmux — the only liveness truth this
-    /// system keeps — did not survive that reboot (PLAN_M3.md item 2,
+    /// The host rebooted while this session's durable last-known outcome was
+    /// launching or running, and the agent's terminal (its terminal host, or
+    /// for an old terminal the private tmux server) — the only liveness truth
+    /// this system keeps — did not survive that reboot (PLAN_M3.md item 2,
     /// SPEC.md's Durability section). Distinct from `Unknown`: `Unknown`
-    /// means "not yet asked"; `Interrupted` means "asked, via the one
-    /// reboot detector this system has (a changed stored boot id), and
-    /// the answer is structurally unknowable now, not merely unasked
-    /// yet." Persists until the user acts (restart, archive, delete);
-    /// nothing — including another supervisor restart on the same boot —
-    /// clears it on its own.
+    /// means "not yet asked"; `Interrupted` means "asked, via the one reboot
+    /// detector this system has (a changed stored boot id), and the answer is
+    /// structurally unknowable now, not merely unasked yet." Persists until
+    /// the user acts (restart, archive, delete); nothing — including another
+    /// supervisor restart on the same boot — clears it on its own.
     Interrupted,
 }
 
@@ -955,7 +958,7 @@ pub struct SessionInfo {
     #[serde(default)]
     pub created_at: i64,
     /// Seconds since the Unix epoch when the supervisor last saw this
-    /// session's agent pane CHANGE — the stamp behind the displayed age and
+    /// session's agent screen CHANGE — the stamp behind the displayed age and
     /// the seen/unseen comparison, and nothing more. It is deliberately not
     /// the activity sort's key: that order groups by reported status first
     /// and compares work-start keys inside each group.
@@ -1054,19 +1057,21 @@ pub struct SessionInfo {
     pub agent_kind: AgentKind,
     /// `Unknown`, the live statuses (`Running`/`Waiting`/`Idle`), and
     /// `Exited` are computed fresh by the supervisor on
-    /// every `ListSessions` reply through LIVE tmux probing — that half of
-    /// this field is never persisted, because tmux's own pane state is the
-    /// only truth for a currently-reachable session, and it does not
-    /// survive a supervisor restart on its own terms either.
-    /// `Interrupted` and `Error` (PLAN_M3.md items 2 and 3) are the
-    /// opposite case: they exist BECAUSE live tmux probing has nothing to
-    /// say (tmux itself did not survive the reboot, or never started at
-    /// all) and are instead read back from the supervisor's own durable
-    /// last-known-outcome record — so "never persisted" describes the
-    /// live-probed variants only, not this field as a whole. `Exited` is
-    /// now BOTH: computed from a live dead pane where one still exists,
-    /// and otherwise retained from that same record — which is what lets
-    /// an exit code and a stop annotation outlive the pane that held them.
+    /// every `ListSessions` reply from the LIVE state of the agent's
+    /// terminal (a terminal host's report of its child, an old terminal's
+    /// tmux pane) — that half of this field is never persisted, because
+    /// the terminal's own state is the only truth for a currently-reachable
+    /// session, and it does not survive a supervisor restart on its own
+    /// terms either. `Interrupted` and `Error` (PLAN_M3.md items 2 and 3)
+    /// are the opposite case: they exist BECAUSE the live terminal has
+    /// nothing to say (it did not survive the reboot, or the agent never
+    /// started in it at all) and are instead read back from the
+    /// supervisor's own durable last-known-outcome record — so "never
+    /// persisted" describes the live-probed variants only, not this field
+    /// as a whole. `Exited` is now BOTH: computed from the terminal while
+    /// it still holds the ended program, and otherwise retained from that
+    /// same record — which is what lets an exit code and a stop annotation
+    /// outlive the terminal that held them.
     /// Either way, this field is never trusted from an older sender.
     /// `#[serde(default)]` is what makes this field additive within
     /// `PROTOCOL_VERSION` 3: an old peer's JSON has no `status` at all and
@@ -1102,10 +1107,12 @@ pub struct SessionInfo {
     #[serde(default)]
     pub restart_offer: RestartOffer,
     /// The session's terminal tabs, in creation order (PLAN_M4.md item
-    /// 2). Rediscovered from tmux for every reply that carries a
-    /// `SessionInfo` — never persisted, exactly like the live-probed half
-    /// of `status`, and for the same reason: tmux is the only truth for
-    /// what windows exist, and SPEC.md makes tabs non-durable anyway.
+    /// 2). Read from the terminals themselves for every reply that carries
+    /// a `SessionInfo` (the terminal hosts the supervisor holds for new
+    /// tabs, an old session's marked tmux windows) — never stored in the
+    /// session's row, exactly like the live-probed half of `status`, and
+    /// for the same reason: the terminals are the only truth for which
+    /// tabs exist, and SPEC.md makes tabs non-durable anyway.
     /// Rides on `SessionInfo` rather than behind a dedicated list message
     /// for `RestartOffer`'s reason (see that type's design-decision doc):
     /// every client that could ask already holds a `SessionInfo`, so a
@@ -1657,12 +1664,13 @@ pub const STOP_ANNOTATION: &str = "stopped by user";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TerminalSelector {
-    /// The agent's own terminal — the AGENT-MARKED window, which is
-    /// window 0 in practice (creation order) but is resolved by its
-    /// marker, never by position: PLAN_M4.md item 2 makes rediscovery
-    /// marker-based because anything that reaches the private server can
-    /// conjure windows the supervisor never made. The only terminal
-    /// that existed before M4.
+    /// The agent's own terminal, the one the supervisor holds for the
+    /// session's agent: for a new terminal, the terminal host the
+    /// session's row names. For an old terminal it is the AGENT-MARKED
+    /// tmux window, resolved by its marker and never by position
+    /// (PLAN_M4.md item 2), because anything that reaches the private tmux
+    /// server can conjure windows the supervisor never made. The only
+    /// terminal that existed before M4.
     #[default]
     Agent,
     /// A terminal tab by id. The id is the one `TabInfo::id` carries;
@@ -1744,8 +1752,9 @@ where
 
 /// One terminal tab as the supervisor reports it (PLAN_M4.md item 2). Not
 /// durable metadata — SPEC.md says tabs are gone after a reboot or
-/// archive and nothing recreates them — so this is a live-rediscovered
-/// fact (from tmux, via the window markers), never a stored row.
+/// archive and nothing recreates them — so this is a live fact read from
+/// the tab's terminal (its terminal host, or an old tab's marked tmux
+/// window), never a stored row.
 ///
 /// Deliberately minimal: SPEC.md gives tabs no names and close is their
 /// only operation, so an id is the whole identity. Clients derive their
@@ -1753,12 +1762,13 @@ where
 /// the supervisor keeps stable (creation order) across rediscovery.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TabInfo {
-    /// Supervisor-assigned opaque tab identity — MINTED per tab and
-    /// stored in the window's marker, deliberately not the raw tmux
-    /// window id, so it is unique across tmux-server lifetimes, not just
-    /// within one: a client holding a selector from before a reboot must
-    /// get `NotFound`, never a recycled window index that happens to
-    /// name someone else's new tab. Clients echo it back
+    /// Supervisor-assigned opaque tab identity — MINTED per tab and kept
+    /// with the tab's terminal (a new tab's terminal host and its launch
+    /// record, an old tab's tmux window marker), deliberately never a
+    /// name the terminal itself assigns, such as a tmux window index, so
+    /// it is unique across terminal lifetimes: a client holding a selector
+    /// from before a reboot must get `NotFound`, never a recycled id that
+    /// happens to name someone else's new tab. Clients echo it back
     /// (`TerminalSelector::Tab`, `ControlMsg::CloseTab`) and never parse
     /// it.
     pub id: String,
@@ -2382,8 +2392,10 @@ pub enum AgentReply {
     /// `sessions` listing observes rather than something this reply could
     /// know synchronously.
     Stopped {},
-    /// Both the prompt paste and submit were accepted by tmux. This does not
-    /// acknowledge vendor processing or completion; retrying sends another prompt.
+    /// Both the prompt paste and submit were confirmed delivered by the
+    /// agent's terminal (its terminal host, or tmux for an old terminal).
+    /// This does not acknowledge vendor processing or completion; retrying
+    /// sends another prompt.
     Prompted {},
     /// A completed session deletion. A checkout notice is part of the
     /// success and must be reported even though the session is gone.
@@ -3055,12 +3067,13 @@ pub enum ControlMsg {
     /// succeeded. M1 has no structured launch-status message; failures
     /// remain visible as terminal diagnostics for future classification.
     ///
-    /// Consequently `session.status` here is `SessionStatus::Unknown`, not
-    /// a live status — a create-time placeholder consistent with the paragraph
+    /// Consequently `session.status` here is `SessionStatus::Unknown`, not a
+    /// live status — a create-time placeholder consistent with the paragraph
     /// above, since a fast-exiting command can already be dead by the time
-    /// this reply reaches the caller. `ListSessions` computes the real
-    /// answer from tmux (`service.rs`'s `session_status`); nothing about
-    /// creation itself can honestly claim more.
+    /// this reply reaches the caller. `ListSessions` computes the real answer
+    /// from the agent's terminal (the supervisor's `status.rs`,
+    /// `session_status`); nothing about creation itself can honestly claim
+    /// more.
     SessionCreated { req_id: u64, session: SessionInfo },
     /// Reconcile an already-recorded fresh create using its original client
     /// identity before consulting current configuration or launch catalogs.
@@ -3251,13 +3264,14 @@ pub enum ControlMsg {
         repos: Vec<GithubRepo>,
         truncated: bool,
     },
-    /// Kill the agent's entire process tree (MCP servers, dev servers,
-    /// every descendant), leaving the session and its terminal in place —
-    /// SPEC.md's "stop" (as distinct from "delete", below). The pane
-    /// survives (`remain-on-exit`), so the terminal stays viewable,
-    /// including replaying to a client that was attached when the agent
-    /// died. Stop touches nothing else: not the session's DB row, not the
-    /// in-memory session map, not any live attachment.
+    /// Kill the agent's entire process tree (MCP servers, dev servers, every
+    /// descendant), leaving the session and its terminal in place — SPEC.md's
+    /// "stop" (as distinct from "delete", below). The terminal survives the
+    /// program (a terminal host keeps running with the final screen; an old
+    /// terminal's pane is kept by `remain-on-exit`), so it stays viewable,
+    /// including replaying to a client that was attached when the agent died.
+    /// Stop touches nothing else: not the session's DB row, not the in-memory
+    /// session map, not any live attachment.
     ///
     /// Idempotent by design, not by accident: stopping a session whose
     /// agent already exited (or one whose terminal never existed, the
@@ -3286,13 +3300,14 @@ pub enum ControlMsg {
     /// list as an ordinary exit.
     StopSession { req_id: u64, session_id: String },
     /// Acknowledges `StopSession`: sent only once the kill sweep has
-    /// actually run to completion (or been confirmed unnecessary — a dead
-    /// or absent pane, the restart-gap case), never merely because the
-    /// request was accepted.
+    /// actually run to completion (or been confirmed unnecessary — an
+    /// ended program or no terminal, the restart-gap case), never merely
+    /// because the request was accepted.
     SessionStopped { req_id: u64 },
     /// Remove a session and all its stored state — the DB row, the
     /// in-memory entry, and (if the terminal is still live) the agent's
-    /// process tree and its tmux session — regardless of whether the
+    /// process tree and its terminals (terminal hosts, and an old
+    /// session's tmux session) — regardless of whether the
     /// agent is running, stopped, or was never live this process
     /// (SPEC.md's delete works "in any state"). Unlike `StopSession`, this
     /// ends the session's existence outright; a subsequent `ListSessions`
@@ -3307,8 +3322,9 @@ pub enum ControlMsg {
         session_id: String,
         /// Refuse, with `Conflict`, instead of deleting when anything of the
         /// session is still alive at handling time: an agent that has not
-        /// ended (a live pane, or a launch not yet confirmed that has no
-        /// terminal to probe) or any open terminal tab.
+        /// ended (a program still running in its terminal, or a launch not
+        /// yet confirmed that has no terminal to probe) or any open
+        /// terminal tab.
         ///
         /// A client sets it on a delete it did NOT ask the user to confirm,
         /// because its own row said nothing was running, and on a confirmed
@@ -3343,14 +3359,14 @@ pub enum ControlMsg {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         refuse_if_agent_request_in_flight: bool,
     },
-    /// Acknowledges `DeleteSession`: sent only once the row, the tmux
-    /// session, and (if one existed) the process tree are all positively
-    /// confirmed gone. A teardown failure never yields this reply — it
-    /// yields `Error` instead, with the row and in-memory entry left in
-    /// place for a retry (see the supervisor's delete handler and
+    /// Acknowledges `DeleteSession`: sent only once the row, the session's
+    /// terminals, and (if one existed) the process tree are all positively
+    /// confirmed gone. A teardown failure never yields this reply — it yields
+    /// `Error` instead, with the row and in-memory entry left in place for a
+    /// retry (see the supervisor's delete handler and
     /// lore/2026-07-27-m2-process-tree-stop.md for why removing the last
-    /// handle on a possibly-running agent is the one outcome that must
-    /// never happen silently).
+    /// handle on a possibly-running agent is the one outcome that must never
+    /// happen silently).
     ///
     /// `notice` is set when the delete completed but left something for the
     /// user to know about, today a managed checkout it could not archive
@@ -3472,7 +3488,7 @@ pub enum ControlMsg {
     /// the approved agent-request relay rather than inspecting targets directly.
     PromptTargetInfo { req_id: u64, session_id: String },
     /// Approval-time information, allowed to go stale while the user decides.
-    /// `attached` includes terminal tabs, not just the agent's pane.
+    /// `attached` includes terminal tabs, not just the agent's terminal.
     PromptTarget {
         req_id: u64,
         session: SessionInfo,
@@ -3486,8 +3502,10 @@ pub enum ControlMsg {
         session_id: String,
         prompt: String,
     },
-    /// Both paste and submit were confirmed by tmux; this says nothing about
-    /// whether the agent has started or completed the requested work.
+    /// Both paste and submit were confirmed delivered by the agent's
+    /// terminal (its terminal host, or tmux for an old terminal); this says
+    /// nothing about whether the agent has started or completed the
+    /// requested work.
     SessionPrompted { req_id: u64 },
     /// Rename a session (PLAN_M5.md item 1) — SPEC.md's v1 client-surface
     /// rename verb. The supervisor is the authority on accepted title text;
@@ -3543,15 +3561,18 @@ pub enum ControlMsg {
     /// that lies about everything but the one field this request changed.
     SessionRenamed { req_id: u64, session: SessionInfo },
     /// Open a terminal tab: a plain shell in the session's working
-    /// directory, as a new window on the session's tmux session
-    /// (PLAN_M4.md item 2). Refused — with the session untouched — when
-    /// the working directory has vanished (M3's restart precondition,
-    /// same error shape), when the session's tmux session no longer
-    /// exists (a rebooted session must be restarted first;
-    /// a tab-only terminal substrate is not a state this system has),
-    /// and when the shell is already dead by reply time (the pane's last
-    /// words travel as the error detail — a launch that failed must not
-    /// masquerade as a successful open holding a dead pane).
+    /// directory, in a terminal host of its own (PLAN_M4.md item 2; a
+    /// supervisor started with the test-only `--new-terminals tmux` opens
+    /// it as a window on an old session's tmux session instead, and refuses
+    /// it for a session whose agent runs in a terminal host). Refused —
+    /// with the session untouched — when the working directory has
+    /// vanished (M3's restart precondition, same error shape), when the
+    /// agent's terminal no longer exists (a rebooted session must be
+    /// restarted first; a tab-only session is not a state this system
+    /// has), when the agent's terminal cannot be read, and when the shell
+    /// is already dead by reply time (its last words travel as the error
+    /// detail — a launch that failed must not masquerade as a successful
+    /// open holding a dead shell).
     OpenTab { req_id: u64, session_id: String },
     /// Success reply to `OpenTab`. The tab exists and its shell was alive
     /// when this was sent; attach it via `Attach` with
@@ -3566,21 +3587,22 @@ pub enum ControlMsg {
     TabOpened { req_id: u64, tab: TabInfo },
     /// Close a terminal tab: kill its shell and every process it left
     /// behind (SPEC.md: close "kills that shell and its processes" —
-    /// daemonized children included), then drop the window. The reap runs
-    /// in M2's stop ordering, scoped to the one tab (PLAN_M4.md item 2);
-    /// the agent terminal and other tabs are untouched. An unknown
-    /// `tab_id` is `NotFound`; closing a tab whose shell already exited
-    /// still succeeds — like `StopSession`, "make sure nothing is
-    /// running" already holds, and the window is dropped either way.
+    /// daemonized children included), then end its terminal (its terminal
+    /// host, or an old tab's tmux window). The reap runs in M2's stop
+    /// ordering, scoped to the one tab (PLAN_M4.md item 2); the agent
+    /// terminal and other tabs are untouched. An unknown `tab_id` is
+    /// `NotFound`; closing a tab whose shell already exited still succeeds
+    /// — like `StopSession`, "make sure nothing is running" already holds,
+    /// and the terminal is ended either way.
     CloseTab {
         req_id: u64,
         session_id: String,
         tab_id: String,
     },
     /// Acknowledges `CloseTab`: sent only once the tab-scoped reap ran to
-    /// completion and the window is gone — `SessionStopped`'s honesty
-    /// rule, per tab. A reap or teardown failure yields `Error` instead,
-    /// never a false success.
+    /// completion and the tab's terminal is gone — `SessionStopped`'s
+    /// honesty rule, per tab. A reap or teardown failure yields `Error`
+    /// instead, never a false success.
     TabClosed { req_id: u64 },
     /// Attach to one of a session's terminals. The requester picks the
     /// (connection-unique) data channel; the supervisor replays history
@@ -3702,19 +3724,22 @@ pub enum ControlMsg {
         reason: String,
         code: DetachCode,
     },
-    /// Unsolicited: this attach's initial catch-up is over — every byte
-    /// the supervisor is going to replay from history FOR THE ATTACH has
-    /// been written to `channel`, and the live stream follows
-    /// (PLAN_M5.md item 1).
+    /// Unsolicited: this attach's initial catch-up is over — everything
+    /// the supervisor is going to replay FOR THE ATTACH has been written to
+    /// `channel`, and the live stream follows (PLAN_M5.md item 1).
     ///
     /// The contract in one sentence: **exactly once per attach that
-    /// completes its catch-up**, after the pane-mode re-synthesis and
-    /// snapshot prefill for that attach and before any live output. That
+    /// completes its catch-up**, after that attach's catch-up and before
+    /// any live output. A grid stream's catch-up is its `hello`, `state`,
+    /// screen and history ([`grid`], "Attach sequence"); a byte stream's is
+    /// the old terminal's pane-mode re-synthesis and snapshot prefill. That
     /// is a consequence of the attach-cutover contract (PLAN_M5.md item
-    /// 2) rather than a best-effort claim — one task writes the replay,
+    /// 2) rather than a best-effort claim — one task writes the catch-up,
     /// this marker, and then the live stream into one ordered pipe. A
-    /// dead-pane attach emits it right after its own snapshot; a fresh
-    /// terminal with nothing to replay emits it immediately.
+    /// terminal whose program has ended is caught up like any other (its
+    /// final screen, and on a grid stream its history), and a terminal with
+    /// no history still gets the fixed part first: nothing on a byte
+    /// stream, `hello`, `state` and the screen on a grid stream.
     ///
     /// The qualifier is load-bearing: an attach whose catch-up is ENDED
     /// early never receives one. The attachment can be torn down wherever
@@ -3738,18 +3763,20 @@ pub enum ControlMsg {
     /// a second attach to the same terminal gets its own marker and a
     /// takeover's incumbent never sees the replacement's.
     ///
-    /// One boundary is drawn deliberately narrow: "the live stream
-    /// follows" does not promise history can never appear on this
-    /// channel again. M2.5's flow-control recovery — the supervisor's
-    /// catch-up after a tmux `%pause` cut this client's stream — replays
-    /// retained history into the SAME attachment mid-stream, and that
-    /// recovery arrives as ordinary output with no marker of its own.
-    /// The marker bounds the attach's catch-up, not every catch-up the
-    /// attachment will ever perform; pause-recovery presentation is
-    /// explicitly outside M5's scope (PLAN_M5.md scopes REATTACH
-    /// presentation), and a consumer that assumed
-    /// all-bytes-after-marker-are-fresh would misrender exactly that
-    /// recovery path.
+    /// One boundary is drawn deliberately narrow: "the live stream follows"
+    /// does not promise history can never appear on this channel again. A
+    /// grid stream sends its history again after a `history_reset`: when
+    /// history changed shape (a resize, an erasure, a restored emulator or a
+    /// redefined palette entry), or when the viewer fell so far behind that
+    /// lines it was owed were evicted ([`grid`], "History" and "Flow
+    /// control"). A byte stream's flow-control recovery (M2.5's catch-up
+    /// after tmux paused an old terminal's output for this client) replays
+    /// retained history into the SAME attachment mid-stream. Neither comes
+    /// with a `ReplayComplete` of its own. The marker bounds the attach's
+    /// catch-up, not every catch-up the attachment will ever perform;
+    /// recovery presentation is explicitly outside M5's scope (PLAN_M5.md
+    /// scopes REATTACH presentation), and a consumer that assumed everything
+    /// after the marker is fresh would misrender exactly those paths.
     ///
     /// The emitting side is the supervisor's attach cutover (PLAN_M5.md
     /// item 2). The contract is stated HERE because the wire vocabulary is
@@ -3800,37 +3827,55 @@ pub enum ControlMsg {
     ///
     /// Protocol 33.
     SessionsChanged,
-    /// Set the session's terminal dimensions. Fire-and-forget: no
-    /// `req_id`, no reply, and the supervisor ignores it unless `channel`
-    /// is the session's live attachment on the sending connection —
-    /// otherwise a resize still in flight from a client that just lost a
-    /// takeover would reflow the winner's terminal. `channel` is what
-    /// makes that enforceable when several clients multiplex over one
-    /// connection (every browser tab rides the helm's single supervisor
-    /// connection, so connection identity alone cannot tell them apart).
+    /// Set the dimensions of the terminal `channel` is attached to (the
+    /// session's agent terminal or one of its tabs, whichever that
+    /// attachment named). The target comes from `channel` alone;
+    /// `session_id` is only a cross-check, and a resize whose channel
+    /// belongs to another session is ignored. Fire-and-forget: no `req_id`,
+    /// no reply, and the supervisor ignores it unless `channel` is a live
+    /// attachment of `session_id` on the sending connection — otherwise a
+    /// resize still in flight from a client that just lost a takeover would
+    /// reflow the winner's terminal. `channel` is what makes that
+    /// enforceable when several clients multiplex over one connection (every
+    /// browser tab rides the helm's single supervisor connection, so
+    /// connection identity alone cannot tell them apart). A grid terminal
+    /// ignores a resize to the size it already has ([`grid`], "Client to
+    /// supervisor").
     Resize {
         session_id: String,
         channel: u32,
         cols: u16,
         rows: u16,
     },
-    /// The client's terminal cannot keep up: stop sending this
-    /// attachment's output until a matching `ResumeOutput`. This is
-    /// PLAN_M2_5.md's watermark-driven flow control — the intended sender
-    /// is xterm.js once its unflushed `term.write()` backlog crosses the
-    /// high-water mark, a sender that lands with the UI work in
-    /// PLAN_M2_5.md step 4. Fire-and-forget like `Resize`, and `channel`
-    /// exists for exactly `Resize`'s reason: see that variant's doc
-    /// comment for why the supervisor must be able to ignore a pause
-    /// still in flight from a client that just lost this attachment's
-    /// takeover.
+    /// The attachment's viewer cannot keep up: stop sending this
+    /// attachment's output until a matching `ResumeOutput`. Watermark
+    /// flow control (PLAN_M2_5.md), with one message for both stream
+    /// kinds, whose senders and catch-up differ:
     ///
+    /// - **Grid stream.** The helm sends it once its own queue for the
+    ///   attachment passes a mark, since the grid client applies messages
+    ///   as they arrive and sends no pause of its own. A paused grid stream
+    ///   is sent no terminal output until the resume, history included,
+    ///   beyond finishing an update already under way; then it sends one
+    ///   screen update to the current screen and the history lines it is
+    ///   owed ([`grid`], "Flow control").
+    /// - **Byte stream** (an old terminal). The browser's xterm.js terminal
+    ///   sends it once its unflushed `term.write()` backlog crosses its
+    ///   high-water mark, and the helm forwards it unchanged.
+    ///
+    /// Either way, an attachment that stays paused past the supervisor's
+    /// stall timeout is ended as stalled ([`DETACH_REASON_STALLED`]), which
+    /// is what ends a viewer that stopped reading. Fire-and-forget like
+    /// `Resize`, and `channel` exists for exactly `Resize`'s reason: see
+    /// that variant's doc comment for why the supervisor must be able to
+    /// ignore a pause still in flight from a client that just lost this
+    /// attachment's takeover.
     PauseOutput { channel: u32 },
-    /// The client has drained its backlog below the low-water mark; output
-    /// may flow again. Pairs with `PauseOutput` and shares its rationale
-    /// for carrying `channel` (see `Resize`'s doc comment) and its
-    /// fire-and-forget shape.
-    ///
+    /// The viewer has caught up (for a grid stream, the helm's queue for
+    /// it has drained to its resume mark; for a byte stream, the browser's
+    /// backlog is below its low-water mark); output may flow again. Pairs
+    /// with `PauseOutput` and shares its rationale for carrying `channel`
+    /// (see `Resize`'s doc comment) and its fire-and-forget shape.
     ResumeOutput { channel: u32 },
     /// Start an attachment upload into a session's attachments directory
     /// (PLAN_M4.md items 1 and 4). The requester picks a

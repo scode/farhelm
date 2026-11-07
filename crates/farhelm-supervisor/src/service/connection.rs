@@ -2114,9 +2114,9 @@ fn detach_naturally(
 /// a terminal the sender no longer owns until its real owner resumes it.
 ///
 /// The lookup is by channel rather than by session id because
-/// `PauseOutput` carries no session id — unlike `Resize`, which needs one
-/// to reach tmux. Mirrors the `Detach` arm's own search for the same
-/// reason.
+/// `PauseOutput` carries no session id — unlike `Resize`, whose session id
+/// is only a cross-check against the channel's route. Mirrors the `Detach`
+/// arm's own search for the same reason.
 ///
 /// A pause records WHEN it started and a resume clears it, and a pause
 /// arriving while already paused changes nothing at all. That last part is
