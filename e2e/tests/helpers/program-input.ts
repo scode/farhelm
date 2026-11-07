@@ -55,7 +55,7 @@ export function recordInput(socket: FrameSource, frames: InputFrame[]): void {
  * The bytes the supervisor writes for the named keys these specs send, keyed
  * by `mods:kc` (Shift is 1), with the `key` the client sends beside them: the
  * supervisor chooses a named key's bytes by its numeric code, not its name
- * (crates/farhelm-supervisor/src/grid_input.rs, `xterm_key`), and Farhelm's
+ * (crates/farhelm-supervisor/src/grid_input.rs, `key_sequence`), and Farhelm's
  * key table (crates/farhelm-supervisor/tests/fixtures/grid-keys.jsonl) is the
  * authority. Only combinations whose bytes are fixed whatever the program's
  * modes are here.
@@ -69,7 +69,7 @@ const NAMED_KEYS: Record<string, { key: string; bytes: string }> = {
   "0:27": { key: "Escape", bytes: "\x1b" },
 };
 
-/** The numeric codes `xterm_key` gives a meaning of their own above 47 (F1 to F12). */
+/** The numeric codes `key_sequence` gives a meaning of their own above 47 (F1 to F12). */
 const FUNCTION_KEY_CODES = { first: 112, last: 123 };
 
 /**

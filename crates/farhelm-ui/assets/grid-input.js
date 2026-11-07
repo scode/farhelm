@@ -24,7 +24,7 @@
 // without knowing them.
 //
 // `keydownAction` makes the decision. Its rules, and the keyboard rules in
-// `xtermKeyboardResult` that it asks whether a sequence exists, are ported
+// `keyboardResult` that it asks whether a sequence exists, are ported
 // from the vendored xterm.js 6.0.0 (`evaluateKeyboardEvent` and the filters
 // around it in `CoreBrowserTerminal._keyDown`), so a new terminal types
 // exactly like an old one. Farhelm's checked-in tables pin both over the
@@ -121,7 +121,7 @@
    * (src/common/input/Keyboard.ts), MIT; THIRD_PARTY_NOTICES.md, "Code ported
    * from xterm.js".
    */
-  function xtermKeyboardResult(ev, applicationCursorMode, isMac, macOptionIsMeta) {
+  function keyboardResult(ev, applicationCursorMode, isMac, macOptionIsMeta) {
     const result = { type: KEY_RESULT.SEND_KEY, cancel: false, key: undefined };
     const mods = modifiers(ev);
     const cursor = (letter) => (mods ? `${C0.ESC}[1;${mods + 1}${letter}` : applicationCursorMode ? `${C0.ESC}O${letter}` : `${C0.ESC}[${letter}`);
@@ -327,7 +327,7 @@
     if (ev.isComposing || ev.keyCode === 229) return { action: "ignore", cancel: false, deadKeyPending };
     let pending = !!deadKeyPending || ev.key === "Dead" || ev.key === "AltGraph";
     const { isMac } = platformOf(platform);
-    const result = xtermKeyboardResult(ev, false, isMac, false);
+    const result = keyboardResult(ev, false, isMac, false);
     const outcome = (action, cancel) => ({ action, cancel, deadKeyPending: pending });
     if (result.type === KEY_RESULT.PAGE_UP) return outcome("page-up", true);
     if (result.type === KEY_RESULT.PAGE_DOWN) return outcome("page-down", true);
@@ -822,7 +822,7 @@
     textMessages,
     wheelButton,
     wheelGoesToProgram,
-    xtermKeyboardResult,
+    keyboardResult,
   };
   root.farhelmGridInput = api;
   if (typeof module === "object" && module.exports) module.exports = api;

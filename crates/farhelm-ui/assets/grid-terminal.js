@@ -248,8 +248,8 @@
   }
 
   /**
-   * The exit line shown over a terminal whose program has ended, outside
-   * the emulator's content (there is no tmux "Pane is dead" banner).
+   * The exit line shown below the final screen of a terminal whose program
+   * has ended, drawn by the page outside the emulator's content.
    */
   function exitText(exit) {
     if (!exit) return "";
@@ -847,9 +847,8 @@
      * Place the exit line directly below the program's last row, never over
      * one. When the space under the rows is less than a line, the screen
      * moves up by whole rows (so no row is left half visible) until the
-     * line fits, which is what tmux's "Pane is dead" line did (it scrolled
-     * the pane by a row). Re-run whenever the rows, the metrics or the
-     * container change.
+     * line fits, so the line never hides one of the program's rows.
+     * Re-run whenever the rows, the metrics or the container change.
      */
     function layoutExit() {
       if (!exitEl.textContent || !cellHeight || !model.started) {
