@@ -2,18 +2,19 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
-## v0.37.0 - 2026-11-07
-
-**DRAFT release notes - not yet finalized**
+## v0.37.1 - 2026-11-07
 
 ### 💥 Breaking
 
-- Tensorlake recipes no longer keep their own API endpoint tokens, and upgrading removes the ones they had. Re-enter those tokens in Settings → **Credentials** and choose them by name in the recipes that used them. (#3077)
+- This release *requires* you to update your remote hosts. (#3135)
+- Tensorlake (which remains EXPERIMENTAL) recipes no longer keep their own API endpoint tokens, and upgrading removes the ones they had. Re-enter those tokens in Settings → **Credentials** and choose them by name in the recipes that used them. (#3077)
 
 ### 🚀 Added
 
 - Every session with something still running in an old terminal (one run by tmux) now gets a notification in the session list, linking to [Move sessions to new terminals](https://farhelm.io/docs/using/new-terminals/), because an upcoming release will forcibly terminate those terminals. Remote hosts show it only once you update them to this release. (#3137, #3139)
-- EXPERIMENTAL: Tensorlake recipes can now use named GitHub tokens, Claude Code and Codex subscription logins, and API endpoint tokens from the new Settings → **Credentials**, which stores them unencrypted on the machine running the helm. A ChatGPT login used on more than one host stops renewing on all but one; [Tensorlake sandboxes](https://farhelm.io/docs/using/tensorlake-sandboxes/) has the details. (#3074, #3081, #3082, #3086, #3126)
+- EXPERIMENTAL: Tensorlake recipes can now use a named GitHub token for private checkouts, Claude Code and Codex subscription logins, and named API endpoint tokens from the new Settings → **Credentials**, which stores them unencrypted on the machine running the helm. A ChatGPT login used on more than one host stops renewing on all but one; [Tensorlake sandboxes](https://farhelm.io/docs/using/tensorlake-sandboxes/) has the details. (#3074, #3082, #3086, #3126)
+- EXPERIMENTAL: Replacing a saved credential in Settings → **Credentials** updates the Tensorlake hosts already using it, and disconnected hosts get the new value when they next connect. (#3081)
+- EXPERIMENTAL: Tensorlake recipe tunnels now work with the host's SSH settings, including ProxyJump. (#3138)
 
 ### 🔄 Changed
 
@@ -26,6 +27,9 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 *Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
 
 - Starting a session in a new managed checkout no longer stops in its terminal while Git tidies the repository cache; Farhelm now does that in the background afterwards, though another launch of the same repository can still wait for it to finish. (#3130)
+- On a Mac, Tensorlake recipe tunnels now close when the desktop app is force-quit or crashes, instead of possibly staying open and still reaching services on your Mac. (#3138)
+- Localhost tunnels in the Mac app no longer cut off a service's response when the program using the tunnel finishes sending its request first. (#3135)
+- Clicking a file path that a program printed across two lines, breaking it itself near the right edge, now downloads the whole path from either half instead of looking up only the half you clicked. (#3129)
 
 ## v0.36.0 - 2026-11-07
 
