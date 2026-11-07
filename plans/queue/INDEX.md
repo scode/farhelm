@@ -6,4 +6,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight a33fb3] `cut-path-links.md` — A printed path that a program broke across two lines links to the whole path from both halves, specced as a deliberate exception to conservative recognition
 - [complete] `instant-trash-delete.md` — Trash deletes answer at once and hosts remove the files in the background; the dialog closes on a confirmed bulk delete and the trash icon animates until the space is freed
 - [complete] `stop-closes-tabs.md` — Stop closes the session's terminal tabs, asking first when tabs are open (skippable), with a precondition when it did not ask; Restart keeps tabs
-- [complete] `no-gc-at-launch.md` — No automatic git cleanup on any git command a launch waits on; the repository cache consolidates in the background after every launch, spares on or off
+- [landing 2ffe04] `no-gc-at-launch.md` — No automatic git cleanup on any git command a launch waits on; the repository cache consolidates in the background after every launch, spares on or off
