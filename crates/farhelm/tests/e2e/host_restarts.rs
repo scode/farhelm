@@ -28,11 +28,9 @@ use std::path::Path;
 // ---- Fixtures -------------------------------------------------------------------
 
 /// One test's state across its supervisors: the state directory (whose
-/// drop ends any host left in it), its private tmux server, and the
-/// session's working directory. The tmux guard is declared before the state
-/// directory so the server stops before its socket's directory goes.
+/// drop ends any host left in it) and the session's working directory. No
+/// tmux guard: these supervisors create only terminal hosts.
 pub(crate) struct Stack {
-    _tmux: TmuxServerGuard,
     pub(crate) state: farhelm_teststate::TestDir,
     pub(crate) work: farhelm_teststate::TestDir,
     _slot: tokio::sync::SemaphorePermit<'static>,
@@ -43,7 +41,6 @@ impl Stack {
         let slot = SLOTS.acquire().await.expect("semaphore is never closed");
         let state = farhelm_teststate::tempdir().expect("state");
         Self {
-            _tmux: TmuxServerGuard::new(state.path().join("tmux.sock")),
             state,
             work: farhelm_teststate::tempdir().expect("workdir"),
             _slot: slot,

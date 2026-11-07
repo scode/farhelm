@@ -193,7 +193,7 @@ async fn send_and_wait(
 ) {
     let from = seen.len();
     client
-        .send_input(channel, format!("{command}\r").into_bytes())
+        .send_keys(channel, format!("{command}\r").into_bytes())
         .await;
     wait_for_after_from(stream, seen, from, command, marker, 30).await;
     wait_for_marker_line(stream, seen, from, marker).await;
@@ -259,26 +259,7 @@ async fn assert_resident_launcher(h: &Harness, id: &str, transcript: &[u8]) {
     let child: u32 = fields[1].parse().expect("child PID");
     assert_eq!(fields[2], "codex");
     assert_ne!(launcher, child);
-    let row = SessionStore::open(&h.state.path().join("supervisor.db"), false)
-        .await
-        .unwrap()
-        .session(id)
-        .await
-        .unwrap()
-        .unwrap();
-    let output = tmux_query(
-        &h.state.path().join("tmux.sock"),
-        &["display-message", "-p", "-t", &row.pane, "#{pane_pid}"],
-    )
-    .await;
-    assert!(output.status.success());
-    assert_eq!(
-        String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .parse::<u32>()
-            .unwrap(),
-        launcher
-    );
+    assert_eq!(agent_pid(h, id).await, launcher);
     let output = tokio::process::Command::new("ps")
         .args(["-o", "ppid=,pgid=", "-p", &child.to_string()])
         .output()
@@ -1180,7 +1161,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     report_armed.store(true, std::sync::atomic::Ordering::SeqCst);
     let clear_from = seen.len();
     h.client
-        .send_input(channel, b"clear-fileless\r".to_vec())
+        .send_keys(channel, b"clear-fileless\r".to_vec())
         .await;
     tokio::time::timeout(Duration::from_secs(5), report_entered.notified())
         .await
@@ -1290,7 +1271,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     let race_log_offset = std::fs::read(&hook_log)
         .expect("read prior hook outcomes")
         .len();
-    h.client.send_input(channel, b"compact\r".to_vec()).await;
+    h.client.send_keys(channel, b"compact\r".to_vec()).await;
     // The hook only saves its report; a reconciliation pass is what carries
     // it to the gate. Wait for the saved report, then drive that pass here
     // rather than leaving it to the ticker's timing.
@@ -1635,37 +1616,24 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     drop(sup);
-    let socket = state.path().join("tmux.sock");
-    let tmux_name = format!("fh-{}", session.id);
-    let peer = tmux_query(&socket, &["has-session", "-t", &tmux_name]).await;
     assert!(
-        peer.status.success(),
+        RecordedTerminal::of(state.path(), &session.id)
+            .await
+            .exists()
+            .await,
         "the owned vendor survives the supervisor outage"
     );
-    let sent = tmux_query(
-        &socket,
-        &[
-            "send-keys",
-            "-t",
-            &tmux_name,
-            "clear-pending",
-            "Enter",
-            "persist",
-            "Enter",
-        ],
-    )
-    .await;
-    assert!(sent.status.success());
+    crate::hook_identity::type_without_supervisor(state.path(), &session.id, "clear-pending").await;
+    crate::hook_identity::type_without_supervisor(state.path(), &session.id, "persist").await;
     let dir = farhelm_supervisor::hook_report::session_dir(state.path(), &session.id).unwrap();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     loop {
         if dir.join("selection.json").exists() && dir.join("enrichment.json").exists() {
             break;
         }
-        let pane = tmux_query(&socket, &["capture-pane", "-p", "-t", &tmux_name]).await;
         assert!(
             tokio::time::Instant::now() < deadline,
-            "both outage slots missing; pane={pane:?}"
+            "both outage slots missing"
         );
         // sleep-ok: poll independent hook slots while the owned vendor finishes both commands.
         tokio::time::sleep(Duration::from_millis(50)).await;

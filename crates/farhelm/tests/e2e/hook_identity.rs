@@ -154,7 +154,7 @@ async fn watch_applies_a_burst_of_reports_from_several_sessions() {
     }
     for (_, chan, _, _, conversation) in &peers {
         h.client
-            .send_input(*chan, format!("report {conversation}\r").into_bytes())
+            .send_keys(*chan, format!("report {conversation}\r").into_bytes())
             .await;
     }
     for (session, _, rx, seen, conversation) in &mut peers {
@@ -429,7 +429,7 @@ async fn nested_report(
 ) {
     let from = seen.len();
     h.client
-        .send_input(chan, format!("nested-report {conversation}\r").into_bytes())
+        .send_keys(chan, format!("nested-report {conversation}\r").into_bytes())
         .await;
     wait_for_after_from(
         rx,
@@ -462,6 +462,12 @@ async fn nested_report(
 /// Observe one callback's own completion and silence markers before any drain.
 /// A transcript offset distinguishes a repeated callback from the same markers
 /// left by an earlier turn; both callback types have the same output contract.
+///
+/// On a grid stream an offset alone does not: a scroll can send every screen
+/// row again, an earlier turn's markers included (`harness::grid_text`), so
+/// a repeated callback's markers can be found before it ran. A test that
+/// repeats a callback for one id therefore also waits on the hook log, which
+/// gains one line per run.
 async fn write_hook_report_client(
     client: &SupervisorClient,
     chan: u32,
@@ -472,7 +478,7 @@ async fn write_hook_report_client(
 ) {
     let from = seen.len();
     client
-        .send_input(chan, format!("{command} {conversation}\r").into_bytes())
+        .send_keys(chan, format!("{command} {conversation}\r").into_bytes())
         .await;
     wait_for_after_from(
         rx,
@@ -537,13 +543,13 @@ pub(crate) async fn wait_for_after_from(
         }
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         match tokio::time::timeout(remaining, rx.recv()).await {
-            Ok(Some(TermEvent::Data(bytes))) => seen.extend_from_slice(&bytes),
+            Ok(Some(TermEvent::Data(bytes))) => append_transcript(rx.is_grid(), seen, &bytes),
             // Presentation-only metadata, carrying no bytes for a text
             // scan to consider (see `wait_for`'s twin arm).
             Ok(Some(TermEvent::ReplayComplete)) => {}
             Ok(Some(TermEvent::Detached(detach))) => {
                 while let Ok(TermEvent::Data(bytes)) = rx.try_recv() {
-                    seen.extend_from_slice(&bytes);
+                    append_transcript(rx.is_grid(), seen, &bytes);
                 }
                 ended = Some(detach.reason);
             }
@@ -1013,26 +1019,12 @@ async fn assert_two_resident_wrappers(
     });
     let [outer, inner, emitter] = pids;
     assert!(outer != inner && inner != emitter && outer != emitter);
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    let pane = tmux_query_before_deadline(
-        &h.state.path().join("tmux.sock"),
-        &[
-            "display-message",
-            "-p",
-            "-t",
-            &format!("fh-{id}"),
-            "#{pane_pid}",
-        ],
-        deadline,
-    )
-    .await
-    .expect("pane probe budget");
-    assert!(pane.status.success(), "pane probe: {pane:?}");
     assert_eq!(
-        String::from_utf8_lossy(&pane.stdout).trim().parse::<u32>(),
-        Ok(outer),
-        "the outer resident wrapper must own this pane"
+        agent_pid(h, id).await,
+        outer,
+        "the outer resident wrapper must be the terminal's own process"
     );
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     let mut command = std::process::Command::new("ps");
     command.args([
         "-o",
@@ -1422,17 +1414,33 @@ async fn a_repeated_report_of_one_id_is_two_hook_runs() {
     let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
 
     report(&h, chan, &mut rx, &mut seen, "conv-1").await;
-    let after_first = seen.len();
     report(&h, chan, &mut rx, &mut seen, "conv-1").await;
-    assert!(
-        String::from_utf8_lossy(&seen[after_first..]).contains("HOOK-REPORTED:conv-1"),
-        "the second report must be observed in transcript written after the first one \
-         finished; transcript:\n{}",
-        String::from_utf8_lossy(&seen)
-    );
+
+    // On a grid stream the second report's transcript markers can be the
+    // first one's rows sent again, so its completion is read from the log:
+    // two `written` lines, then a drain, then the supervisor's two verdicts.
+    let word = |line: &String| line.split_whitespace().nth(1).map(str::to_string);
+    let count = |log: &[String], what: &str| {
+        log.iter()
+            .filter(|line| word(line).as_deref() == Some(what))
+            .count()
+    };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let log = hook_log_lines(&h, &session.id);
+        if count(&log, "written") >= 2 && count(&log, "acked") >= 2 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the second hook run never completed and was judged: {log:?}"
+        );
+        h.sup.reconcile_for_test().await;
+        // sleep-ok: poll the hook log, which gains a line per hook run and per verdict, within its deadline.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 
     let log = hook_log_lines(&h, &session.id);
-    let word = |line: &String| line.split_whitespace().nth(1).map(str::to_string);
     let runs: Vec<_> = log
         .iter()
         .filter(|line| word(line).as_deref() == Some("written"))
@@ -2226,7 +2234,7 @@ async fn claude_hook_command_carries_announce(supervisor: &SupervisorProcess) ->
 #[farhelm_testtrace::test]
 async fn farhelm_agent_instructions_off_suppresses_announce_through_the_real_cli() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let supervisor = supervisor_process_tmux_with_env([
+    let supervisor = supervisor_process_with_env([
         (
             "FARHELM_AGENT_INSTRUCTIONS",
             std::ffi::OsString::from("off"),
@@ -2262,7 +2270,7 @@ async fn farhelm_agent_instructions_non_utf8_falls_back_to_default_through_the_r
 
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let malformed = std::ffi::OsString::from_vec(vec![0xff, 0xfe]);
-    let supervisor = supervisor_process_tmux_with_env([
+    let supervisor = supervisor_process_with_env([
         ("FARHELM_AGENT_INSTRUCTIONS", malformed),
         // See the sibling test above: pinned so a suite run under
         // `FARHELM_AGENT_HOOKS=none` cannot fail this assertion for a
@@ -2305,7 +2313,7 @@ async fn an_unhooked_claude_session_cannot_be_restarted_after_input() {
         snapshot_of(&h, &session.id).await.kind,
         farhelm_proto::AgentKind::Claude
     );
-    h.client.send_input(chan, b"first prompt\r".to_vec()).await;
+    h.client.send_keys(chan, b"first prompt\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
     let before = snapshot_of(&h, &session.id).await;
     assert_eq!(before.captured_conversation, None);
@@ -2313,8 +2321,7 @@ async fn an_unhooked_claude_session_cannot_be_restarted_after_input() {
         before.restart_offer,
         farhelm_proto::RestartOffer::NotCaptured
     );
-    let sock = h.state.path().join("tmux.sock");
-    let pane = pane_id_of(&sock, &format!("fh-{}", session.id)).await;
+    let terminal = agent_terminal_identity(&h, &session.id).await;
 
     let err = h
         .client
@@ -2337,8 +2344,8 @@ async fn an_unhooked_claude_session_cannot_be_restarted_after_input() {
         "a refused restart must not open a relaunch generation"
     );
     assert_eq!(
-        pane_id_of(&sock, &format!("fh-{}", session.id)).await,
-        pane,
+        agent_terminal_identity(&h, &session.id).await,
+        terminal,
         "the running agent is left where it was"
     );
 }
@@ -2438,9 +2445,10 @@ async fn a_historical_identity_survives_restart_and_reaches_resume_argv() {
 // On the Mac the supervisor runs inside the desktop app, so closing the app
 // stops it while sessions keep running. Hooks keep firing in that window, and
 // their reports must wait on disk for the supervisor that starts next rather
-// than being lost. These tests stop the supervisor for real, drive the
-// still-running agent through tmux directly (there is no supervisor to attach
-// through), and start a successor on the same state directory.
+// than being lost. These tests stop the supervisor for real, type into the
+// still-running agent directly (its terminal host over a connection of the
+// test's own, or its tmux pane; there is no supervisor to attach through),
+// and start a successor on the same state directory.
 // ---------------------------------------------------------------------
 
 /// Stop `h`'s supervisor for real and wait until nothing holds it, returning
@@ -2455,7 +2463,7 @@ async fn stop_supervisor(
     serving: ServeTask,
 ) -> (
     farhelm_teststate::TestDir,
-    TmuxServerGuard,
+    Option<TmuxServerGuard>,
     tokio::sync::SemaphorePermit<'static>,
 ) {
     let Harness {
@@ -2477,9 +2485,52 @@ async fn stop_supervisor(
     (state, _tmux, _slot)
 }
 
-/// Type `line` into the session's agent through tmux itself, the way a
-/// person types into a session whose supervisor is not running.
-async fn type_without_supervisor(state: &std::path::Path, session_id: &str, line: &str) {
+/// Type `line` and Enter into the session's agent while no supervisor
+/// runs, the way a person types into a terminal whose supervisor is down:
+/// straight to the session's terminal host when its row is a host row, and
+/// through tmux itself for an old terminal.
+///
+/// For a host, the input goes over a connection of the test's own, which
+/// the host allows since nothing else is connected, and waits for the host
+/// to say it wrote every byte to the program, then closes it so that the
+/// next supervisor's adoption finds the host free.
+pub(crate) async fn type_without_supervisor(state: &std::path::Path, session_id: &str, line: &str) {
+    let row = SessionStore::open(&state.join("supervisor.db"), false)
+        .await
+        .expect("open the store")
+        .session(session_id)
+        .await
+        .expect("read the row")
+        .expect("the row exists");
+    if row.terminal_kind == farhelm_supervisor::store::TerminalKind::Host {
+        let socket = farhelm_supervisor::hosts::hosts_dir(state).join(&row.pane);
+        let mut connection = farhelm_supervisor::hosts::HostConnection::connect(&socket)
+            .await
+            .expect("connect to the session's terminal host");
+        let ticket = connection
+            .send_input(format!("{line}\r").as_bytes())
+            .await
+            .expect("type into the session's terminal host");
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                match connection.next_event().await.expect("the host answers") {
+                    farhelm_supervisor::hosts::HostEvent::InputAcknowledged(counts)
+                        if counts.written + counts.discarded >= ticket.end =>
+                    {
+                        assert!(
+                            counts.written >= ticket.end,
+                            "the host discarded the typed line"
+                        );
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("the host acknowledges the typed line");
+        return;
+    }
     let sent = tmux_query(
         &state.join("tmux.sock"),
         &[
@@ -2752,7 +2803,7 @@ async fn a_report_from_an_earlier_launch_is_discarded() {
     // The first launch's report, kept aside before the supervisor takes it.
     let from = seen.len();
     h.client
-        .send_input(chan, b"report conv-old\r".to_vec())
+        .send_keys(chan, b"report conv-old\r".to_vec())
         .await;
     wait_for_after_from(
         &mut rx,

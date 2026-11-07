@@ -822,7 +822,6 @@ async fn a_create_that_loses_to_delete_ends_its_host() {
     )
     .await
     .expect("supervisor");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let client = connect_client(&sup).await;
     let error = client
         .create_session(
@@ -1380,7 +1379,6 @@ async fn a_retry_ends_an_interrupted_first_stage_that_does_not_finish() {
 #[farhelm_testtrace::test]
 async fn deleting_a_session_fences_its_unbound_recorded_start() {
     let state = farhelm_teststate::tempdir().expect("state");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let fixture = farhelm_teststate::tempdir().expect("fixture directory");
     let gate = fixture.path().join("gate");
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -1545,7 +1543,7 @@ async fn a_retry_keeps_a_tmux_rows_kind_with_the_switch_on() {
     assert_eq!(row.terminal_kind, TerminalKind::Tmux);
     assert!(!row.pane.is_empty(), "the launch was confirmed");
     assert!(sup.agent_host_for_test(&session.id).await.is_none());
-    wait_for_agent_ready(&state.path().join("tmux.sock"), &session.id).await;
+    wait_for_tmux_agent_ready(&state.path().join("tmux.sock"), &session.id).await;
 }
 
 /// The reverse: a host row stays in a host with the switch off.
@@ -1628,7 +1626,6 @@ fn unexecutable_agent(program: &Path) -> farhelm_proto::SessionLaunch {
 async fn a_launch_error_keeps_the_host_record_of_a_live_host() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("state");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let work = farhelm_teststate::tempdir().expect("workdir");
     let sup = Supervisor::new_with_seams(
         state.path(),
@@ -1915,7 +1912,6 @@ async fn ending_a_host_whose_runtime_is_encoding_falls_back_in_bounded_time() {
     )
     .await
     .expect("supervisor");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let client = connect_client(&sup).await;
     let started = tokio::time::Instant::now();
     let error = client

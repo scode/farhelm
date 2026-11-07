@@ -1,9 +1,12 @@
-//! `RestartSession` against a real client and real tmux, pinning the
-//! terminal-reuse behavior tmux itself provides on a respawned pane.
+//! `RestartSession` against a real client and a real supervisor: what a
+//! Restart resumes, what Restart with changes, and what it refuses, on new
+//! terminals; a reboot is simulated by ending every terminal host
+//! (`end_all_terminals`). The three tests of the terminal reuse tmux
+//! provides on a respawned pane stay on old terminals (`harness_tmux`).
 
 use crate::harness::*;
 
-use crate::boot_id_durable_outcome::{listed, wait_for_dead_pane};
+use crate::boot_id_durable_outcome::listed;
 use crate::create_idempotency::handoff_to_new_supervisor;
 use crate::hook_identity::{
     ServeTask, attach_ready, hook_log, hook_log_at, report as report_conversation, report_client,
@@ -142,7 +145,7 @@ async fn named_restart_with_refuses_malformed_argv_without_stopping_the_old_run(
         let from = seen.len();
         let marker = format!("named-refusal-live-{index}");
         h.client
-            .send_input(channel, format!("{marker}\r").into_bytes())
+            .send_keys(channel, format!("{marker}\r").into_bytes())
             .await;
         crate::hook_identity::wait_for_after_from(
             &mut stream,
@@ -781,7 +784,7 @@ async fn wait_for_new_run_below_history(sock: &std::path::Path, tmux_name: &str)
 /// clause under test.
 #[farhelm_testtrace::test]
 async fn restarting_a_live_session_stops_its_tree_and_reuses_the_terminal() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let sock = h.state.path().join("tmux.sock");
     let work = farhelm_teststate::tempdir().unwrap();
     let session = create_resumable_session(
@@ -855,7 +858,7 @@ async fn restarting_a_live_session_stops_its_tree_and_reuses_the_terminal() {
 /// a working input roundtrip in the exact directory after Restart.
 #[farhelm_testtrace::test]
 async fn restarting_in_a_directory_with_a_closing_brace_reuses_the_terminal() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let sock = h.state.path().join("tmux.sock");
     let work = farhelm_teststate::tempdir().unwrap();
     let directory = work.path().join("left}right");
@@ -869,7 +872,7 @@ async fn restarting_in_a_directory_with_a_closing_brace_reuses_the_terminal() {
     )
     .await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
-    wait_for_agent_ready(&sock, &session.id).await;
+    wait_for_tmux_agent_ready(&sock, &session.id).await;
     let tmux_name = format!("fh-{}", session.id);
     let pane = pane_id_of(&sock, &tmux_name).await;
     let before = tmux_query(
@@ -926,7 +929,7 @@ async fn restarting_in_a_directory_with_a_closing_brace_reuses_the_terminal() {
         .expect("attach to restarted agent");
     let mut seen = replay;
     h.client
-        .send_input(channel, b"BRACE-RESTART-ROUNDTRIP\r".to_vec())
+        .send_keys(channel, b"BRACE-RESTART-ROUNDTRIP\r".to_vec())
         .await;
     wait_for_after(&mut rx, &mut seen, "echo:", "BRACE-RESTART-ROUNDTRIP", 20).await;
     h.client.detach(channel).await;
@@ -1012,7 +1015,7 @@ async fn restarting_a_working_session_without_consent_is_refused_and_kills_nothi
 /// retention rather than about the relaunch having printed something.
 #[farhelm_testtrace::test]
 async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let sock = h.state.path().join("tmux.sock");
     let (session, _work) = resumable_basic_session(&h).await;
     let tmux_name = format!("fh-{}", session.id);
@@ -1025,14 +1028,14 @@ async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
     let mut seen = initial_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     h.client
-        .send_input(chan, b"PRIOR-RUN-MARKER\r".to_vec())
+        .send_keys(chan, b"PRIOR-RUN-MARKER\r".to_vec())
         .await;
     wait_for(&mut rx, &mut seen, "echo:", 10).await;
     wait_for(&mut rx, &mut seen, "PRIOR-RUN-MARKER", 10).await;
     // Into history: more lines than the window has rows. The last spam
     // line is the barrier, so the restart cannot land while the marker is
     // still on the grid the respawn is about to wipe.
-    h.client.send_input(chan, b"spam 60\r".to_vec()).await;
+    h.client.send_keys(chan, b"spam 60\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "spam-line-60", 10).await;
     // And one marker that stays on the VISIBLE GRID only: typed after the
     // spam, so nothing ever scrolls it into history before the restart.
@@ -1042,7 +1045,7 @@ async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
     // Waited for AFTER the last spam line so the echo provably reached
     // the grid before the restart is issued.
     h.client
-        .send_input(chan, b"GRID-ONLY-MARKER\r".to_vec())
+        .send_keys(chan, b"GRID-ONLY-MARKER\r".to_vec())
         .await;
     wait_for_after(&mut rx, &mut seen, "spam-line-60", "GRID-ONLY-MARKER", 10).await;
 
@@ -1168,10 +1171,13 @@ async fn a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotati
         create_resumable_session(&h, &cwd, &fixture_cmd("fake-agent --script basic"), 80, 24).await;
 
     h.client.stop_session(&session.id).await.expect("stop");
-    assert_eq!(
-        listed(&h.client, &session.id).await.annotation.as_deref(),
-        Some("stopped by user")
-    );
+    // On a new terminal the annotation arrives with the host's exit record,
+    // which a listing right after Stop can still precede.
+    wait_for_reconciled_listing(&h.sup, &h.client, 20, "the stop annotation", |rows| {
+        rows.iter()
+            .any(|row| row.id == session.id && row.annotation.as_deref() == Some("stopped by user"))
+    })
+    .await;
 
     // The directory goes away under the session, exactly as a user
     // deleting a worktree would leave it.
@@ -1294,7 +1300,6 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
         .expect("symlink the farhelm binary under the agent's own name");
     let state = farhelm_teststate::tempdir().expect("state dir");
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
 
     let seams = |boot: &str| SupervisorSeams {
         boot_id: {
@@ -1326,7 +1331,7 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
             farhelm_bin().into(),
             // Built by hand (not `harness()`) for the boot-id seam below;
             // `suite_timeouts()` still gives this real attach the suite's
-            // loaded-CI tmux floors.
+            // loaded-CI timeout floors.
             suite_timeouts(),
             seams("boot-a"),
         )
@@ -1383,7 +1388,7 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
                 "boot-A {kind} argv lost selected options {options:?}: {argv}"
             );
         }
-        client.send_input(chan, b"first prompt\r".to_vec()).await;
+        client.send_keys(chan, b"first prompt\r".to_vec()).await;
         wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
         let conversation = marker_value(&seen, "RECORD-WRITTEN:");
         report_client(&sup, &client, chan, &mut rx, &mut seen, &conversation).await;
@@ -1460,7 +1465,7 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
 
     // The reboot: tmux dies with the host, and the next supervisor reads a
     // different boot id.
-    kill_tmux_server_and_wait(&state.path().join("tmux.sock")).await;
+    end_all_terminals(state.path()).await;
     let sup = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
@@ -1519,14 +1524,7 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
             words.windows(options.len()).any(|window| window == options),
             "reconstructed Claude argv lost selected options {options:?}: {argv}"
         );
-        crate::structured_launches::assert_live_exchange(
-            &client,
-            chan,
-            &mut rx,
-            state.path(),
-            &session.id,
-        )
-        .await;
+        crate::structured_launches::assert_live_exchange(&client, chan, &mut rx, &session.id).await;
         let live = listed(&client, &session.id).await;
         assert_eq!(
             live.launch.agent_selection().cloned(),
@@ -1564,7 +1562,7 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
     // `append` command is its stand-in for a real agent writing more of
     // the SAME conversation (see `record_agent`'s docs), and it can only
     // do that because the relaunch handed it the id it was resuming.
-    client.send_input(chan, b"append\r".to_vec()).await;
+    client.send_keys(chan, b"append\r".to_vec()).await;
     wait_for(
         &mut rx,
         &mut seen,
@@ -1631,7 +1629,6 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
         .expect("symlink the farhelm binary under the agent's own name");
     let state = farhelm_teststate::tempdir().expect("state dir");
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
 
     let seams = |boot: &str| SupervisorSeams {
         boot_id: {
@@ -1712,7 +1709,7 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
             .expect("attach");
         let mut seen = initial_replay;
         wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
-        client.send_input(chan, b"report conv-h\r".to_vec()).await;
+        client.send_keys(chan, b"report conv-h\r".to_vec()).await;
         wait_for(&mut rx, &mut seen, "HOOK-REPORTED:conv-h", 30).await;
         // The hook has dropped its report; apply it now rather than waiting
         // for the ticker's pass.
@@ -1741,7 +1738,7 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
 
     // The reboot: tmux dies with the host, and the next supervisor reads a
     // different boot id.
-    kill_tmux_server_and_wait(&state.path().join("tmux.sock")).await;
+    end_all_terminals(state.path()).await;
     let sup = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
@@ -1781,13 +1778,12 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
     // could have read out of its own environment.
     wait_for(&mut rx, &mut seen, "RECORD-RESUME-MISSING:conv-h", 30).await;
 
-    // The permit goes back only once the successor and its tmux server are
-    // gone: `SLOTS` bounds concurrent tmux servers and supervisors, and
-    // releasing it here — before the implicit drops at the end of scope —
-    // would admit the next harness onto a machine still carrying this one.
+    // The permit goes back only once the successor is gone: `SLOTS` bounds
+    // concurrent supervisors and their terminals, and releasing it here —
+    // before the implicit drops at the end of scope — would admit the next
+    // harness onto a machine still carrying this one.
     drop(client);
     drop(sup);
-    drop(_tmux);
     drop(slot);
 }
 
@@ -1954,7 +1950,6 @@ async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
 #[farhelm_testtrace::test]
 async fn a_restart_clears_a_previous_launch_error() {
     let h = harness().await;
-    let sock = h.state.path().join("tmux.sock");
     let work = farhelm_teststate::tempdir().expect("workdir");
     let missing_binary = work.path().join("no-such-farhelm-agent");
     let session = h
@@ -1996,7 +1991,7 @@ async fn a_restart_clears_a_previous_launch_error() {
         .record_conversation_for_test(&session.id, RESUMABLE_TEST_CONVERSATION)
         .await;
 
-    wait_for_dead_pane(&sock, &format!("fh-{}", session.id)).await;
+    wait_for_dead_agent(&h.sup, h.state.path(), &session.id).await;
     h.sup.reconcile_for_test().await;
     let errored = wait_for_non_live_status(&h.client, &session.id, 30).await;
     assert!(

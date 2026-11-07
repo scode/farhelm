@@ -1,5 +1,12 @@
 //! Boot-id classification, the durable last-known outcome, and the
 //! durable stop annotation across simulated reboots.
+//!
+//! These run on new terminals: a reboot is simulated by ending every
+//! terminal host of the state directory (`end_all_terminals`), and an exit
+//! while no supervisor watches is read from the host runtime's own record of
+//! its child. Each restart drains the previous supervisor first
+//! (`Harness::restart_supervisor`), since a host serves one supervisor at a
+//! time.
 
 use crate::harness::*;
 
@@ -76,15 +83,39 @@ pub(crate) async fn supervisor_believing_boot(
 /// id, so a later supervisor can be told a different one without the test
 /// depending on whether this host publishes a real boot id at all.
 pub(crate) async fn harness_believing_boot(boot: &str) -> Harness {
+    harness_believing_boot_with(boot, SupervisorSeams::default()).await
+}
+
+/// [`harness_believing_boot`] for old terminals (see `harness_tmux`), with
+/// the private tmux server's guard.
+pub(crate) async fn harness_believing_boot_tmux(boot: &str) -> Harness {
+    harness_believing_boot_with(boot, SupervisorSeams::tmux_terminals()).await
+}
+
+/// [`harness_believing_boot`] built on `base`, whose boot id source the
+/// harness replaces.
+async fn harness_believing_boot_with(boot: &str, base: SupervisorSeams) -> Harness {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let sup = supervisor_believing_boot(state.path(), Some(boot)).await;
-    let guard = TmuxServerGuard::new(state.path().join("tmux.sock"));
+    let tmux = (base.new_terminals == farhelm_supervisor::service::NewTerminals::Tmux)
+        .then(|| TmuxServerGuard::new(state.path().join("tmux.sock")));
+    let boot = boot.to_string();
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        farhelm_bin().into(),
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            boot_id: Arc::new(move || Ok(Some(boot.clone()))),
+            ..base
+        },
+    )
+    .await
+    .expect("supervisor construction on an existing state dir");
     let client = connect_client(&sup).await;
     Harness {
         client,
         sup,
-        _tmux: guard,
+        _tmux: tmux,
         state,
         _slot: slot,
     }
@@ -140,12 +171,13 @@ pub(crate) async fn listed(client: &SupervisorClient, id: &str) -> SessionInfo {
 /// happened to the host.
 ///
 /// Three sessions, three different fates while no supervisor is watching:
-/// one agent exits on its own (its pane survives holding the code), one
-/// has its tmux session killed outright (nothing survives to ask), and one
-/// is simply left alone. The reloading supervisor must report exactly
-/// those three answers — including the true exit code from the surviving
-/// dead pane, which is the "retained knowledge is not a guess" half of the
-/// contract, and exited-UNKNOWN where nothing retained anything.
+/// one agent exits on its own (its terminal survives holding the code: a
+/// terminal host keeps its exited child's status, as a dead tmux pane
+/// does), one has its terminal ended outright (nothing survives to ask),
+/// and one is simply left alone. The reloading supervisor must report
+/// exactly those three answers — including the true exit code from the
+/// surviving terminal, which is the "retained knowledge is not a guess" half
+/// of the contract, and exited-UNKNOWN where nothing retained anything.
 ///
 /// The exits deliberately happen without any intervening `list_sessions`:
 /// a list is how this supervisor witnesses an exit, so listing first would
@@ -153,7 +185,6 @@ pub(crate) async fn listed(client: &SupervisorClient, id: &str) -> SessionInfo {
 #[farhelm_testtrace::test]
 async fn same_boot_classification_is_per_session_and_never_interrupted() {
     let h = harness().await;
-    let sock = h.state.path().join("tmux.sock");
     let work = farhelm_teststate::tempdir().expect("workdir");
 
     let exiting = h
@@ -170,46 +201,28 @@ async fn same_boot_classification_is_per_session_and_never_interrupted() {
     let (killed, _killed_work) = basic_session(&h).await;
     let (untouched, _untouched_work) = basic_session(&h).await;
 
-    wait_for_dead_pane(&sock, &format!("fh-{}", exiting.id)).await;
-    let out = tmux_query(
-        &sock,
-        &["kill-session", "-t", &format!("=fh-{}", killed.id)],
-    )
-    .await;
-    assert!(
-        out.status.success(),
-        "test setup: killing one session's tmux session must succeed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    wait_for_dead_agent(&h.sup, h.state.path(), &exiting.id).await;
+    end_agent_terminal(Some(&h.sup), h.state.path(), &killed.id).await;
 
-    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
-        .await
-        .expect("second supervisor on the same boot");
-    let client2 = connect_client(&sup2).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_on(&state)
+                .await
+                .expect("second supervisor on the same boot")
+        })
+        .await;
+    let client2 = Arc::clone(&h.client);
 
-    // Asserted against what the dead pane ACTUALLY retains, not against a
-    // version gate: on a tmux that records exit statuses reliably that is
-    // `3`, and on one that loses them under load it is empty — either way
-    // the supervisor must report exactly what tmux still holds and never
-    // more (`tmux_records_exit_codes_reliably` documents the 3.4 behavior
-    // this tolerates). A supervisor that fabricated a code, or dropped one
-    // tmux still had, fails this on every host.
-    let retained = tmux_query(
-        &sock,
-        &[
-            "display-message",
-            "-p",
-            "-t",
-            &format!("fh-{}", exiting.id),
-            "#{pane_dead_status}",
-        ],
-    )
-    .await;
-    let retained: Option<i32> = String::from_utf8_lossy(&retained.stdout)
-        .trim()
-        .parse()
-        .ok();
-    if tmux_records_exit_codes_reliably() {
+    // Asserted against what the terminal ACTUALLY retains, not against a
+    // version gate: a terminal host always keeps the code, `3`, and so does
+    // a tmux that records exit statuses reliably, while one that loses them
+    // under load keeps none — either way the supervisor must report exactly
+    // what the terminal still holds and never more
+    // (`tmux_records_exit_codes_reliably` documents the 3.4 behavior this
+    // tolerates). A supervisor that fabricated a code, or dropped one the
+    // terminal still had, fails this on every host.
+    let retained = agent_exit_code(&h, &exiting.id).await;
+    if is_host_row(h.state.path(), &exiting.id).await || tmux_records_exit_codes_reliably() {
         assert_eq!(
             retained,
             Some(3),
@@ -232,13 +245,8 @@ async fn same_boot_classification_is_per_session_and_never_interrupted() {
     );
     // An untouched session continues live across a supervisor restart.
     // This in-process supervisor has no serve-loop sampler; inspect the
-    // pane directly rather than waiting for a cached live status.
-    wait_for_live_pane(
-        &h.state.path().join("tmux.sock"),
-        &format!("fh-{}", untouched.id),
-        30,
-    )
-    .await;
+    // terminal directly rather than waiting for a cached live status.
+    wait_for_live_agent(&h.sup, h.state.path(), &untouched.id, 30).await;
 }
 
 /// M3 acceptance 3 and 5: after a reboot, sessions that were live become
@@ -288,36 +296,39 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
         "a user-initiated stop annotates the session immediately, not only after a restart"
     );
 
-    // A plain supervisor restart first — same boot, tmux still up, so the
-    // stopped session's pane is still there to be probed. This is the path
-    // where a live probe and the durable record BOTH have something to
-    // say, and the annotation has to come from the record even though the
-    // status comes from tmux.
-    let sup_restarted = supervisor_believing_boot(h.state.path(), Some("boot-a")).await;
-    let client_restarted = connect_client(&sup_restarted).await;
+    // A plain supervisor restart first — same boot, terminals still up, so
+    // the stopped session's terminal is still there to be probed. This is
+    // the path where a live probe and the durable record BOTH have something
+    // to say, and the annotation has to come from the record even though the
+    // status comes from the terminal.
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_believing_boot(&state, Some("boot-a")).await
+        })
+        .await;
     assert_eq!(
-        listed(&client_restarted, &stopped.id)
-            .await
-            .annotation
-            .as_deref(),
+        listed(&h.client, &stopped.id).await.annotation.as_deref(),
         Some("stopped by user"),
         "the annotation survives a supervisor restart, not merely a reboot"
     );
-    // No reboot happened yet, so the pane must remain live. This reloaded
-    // in-process supervisor has no serve-loop sampler to refresh its status.
-    wait_for_live_pane(
-        &h.state.path().join("tmux.sock"),
-        &format!("fh-{}", live.id),
-        30,
-    )
-    .await;
+    // No reboot happened yet, so the live session's terminal must remain:
+    // read without any supervisor, then as the reloaded one holds it (it
+    // has no serve-loop sampler to refresh its status).
+    assert!(
+        RecordedTerminal::of(h.state.path(), &live.id)
+            .await
+            .exists()
+            .await,
+        "a same-boot supervisor restart leaves the live session's terminal running"
+    );
+    wait_for_live_agent(&h.sup, h.state.path(), &live.id, 30).await;
 
     // Older tmux versions can first report an exited pane without its code,
     // then enrich that durable outcome on a later list. Accept only that
     // monotonic refinement before using the final observation as the snapshot
     // the reboot must preserve; a broader allowance would hide corruption by
     // the same-boot supervisor restart above.
-    let ended_before_reboot = listed(&client_restarted, &ended.id).await.status;
+    let ended_before_reboot = listed(&h.client, &ended.id).await.status;
     assert!(
         ended_before_reboot == ended_settled.status
             || matches!(
@@ -333,11 +344,15 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
         ended_settled.status
     );
 
-    // The reboot: tmux dies with the host, and the next supervisor reads a
-    // different boot id.
-    kill_tmux_server_and_wait(&h.state.path().join("tmux.sock")).await;
-    let sup2 = supervisor_believing_boot(h.state.path(), Some("boot-b")).await;
-    let client2 = connect_client(&sup2).await;
+    // The reboot: every terminal dies with the host, and the next
+    // supervisor reads a different boot id.
+    end_all_terminals(h.state.path()).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_believing_boot(&state, Some("boot-b")).await
+        })
+        .await;
+    let client2 = Arc::clone(&h.client);
 
     let interrupted = listed(&client2, &live.id).await;
     assert_eq!(
@@ -438,7 +453,6 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
 async fn a_database_without_a_stored_boot_id_does_not_claim_a_reboot() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let sup1 = supervisor_believing_boot(state.path(), None).await;
     let client1 = connect_client(&sup1).await;
     let work = farhelm_teststate::tempdir().expect("workdir");
@@ -456,22 +470,19 @@ async fn a_database_without_a_stored_boot_id_does_not_claim_a_reboot() {
     // test owns two supervisors over one state dir; the barrier is the
     // same one for the same reason — the live-status check below must be
     // about an agent that execed, not a login shell holding a pane.
-    wait_for_agent_ready(&state.path().join("tmux.sock"), &session.id).await;
+    wait_for_agent_ready_on(&sup1, state.path(), &session.id).await;
 
+    retire_supervisor(state.path(), sup1, client1).await;
     let sup2 = supervisor_believing_boot(state.path(), Some("boot-b")).await;
-    let _client2 = connect_client(&sup2).await;
+    let client2 = connect_client(&sup2).await;
     // With nothing stored to compare against, a differing boot id is not
-    // evidence of a reboot — and the live tmux session proves the point
+    // evidence of a reboot — and the live terminal proves the point
     // independently of cached status, which has no sampler in this fixture.
-    wait_for_live_pane(
-        &state.path().join("tmux.sock"),
-        &format!("fh-{}", session.id),
-        30,
-    )
-    .await;
+    wait_for_live_agent(&sup2, state.path(), &session.id, 30).await;
 
     // `boot-b` is stored now, so a THIRD boot id is a real reboot.
-    kill_tmux_server_and_wait(&state.path().join("tmux.sock")).await;
+    end_all_terminals(state.path()).await;
+    retire_supervisor(state.path(), sup2, client2).await;
     let sup3 = supervisor_believing_boot(state.path(), Some("boot-c")).await;
     let client3 = connect_client(&sup3).await;
     assert_eq!(
@@ -505,7 +516,6 @@ async fn a_database_without_a_stored_boot_id_does_not_claim_a_reboot() {
 async fn a_crash_after_the_launching_record_leaves_evidence_and_stays_pending() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let sup1 = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
@@ -533,17 +543,23 @@ async fn a_crash_after_the_launching_record_leaves_evidence_and_stays_pending() 
         .await
         .expect_err("the injected crash must fail the create");
 
-    // Nothing external happened: no tmux session was ever created.
+    // Nothing external happened: no terminal host was ever started (and no
+    // tmux session created, for a supervisor of old terminals).
+    let hosts = std::fs::read_dir(farhelm_supervisor::hosts::hosts_dir(state.path()))
+        .map(|entries| entries.count())
+        .unwrap_or(0);
+    assert_eq!(
+        hosts, 0,
+        "the crash landed before the terminal's start, so no host may exist"
+    );
     let sessions = tmux_query(&state.path().join("tmux.sock"), &["list-sessions"]).await;
     assert!(
         !String::from_utf8_lossy(&sessions.stdout).contains("fh-"),
-        "the crash landed before the tmux side effect, so no session may exist: {}",
+        "the crash landed before the terminal's start, so no tmux session may exist: {}",
         String::from_utf8_lossy(&sessions.stdout)
     );
 
-    let sup2 = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
-        .await
-        .expect("the next startup");
+    let sup2 = supervisor_on(state.path()).await.expect("the next startup");
     let client2 = connect_client(&sup2).await;
     let listing = client2.list_sessions().await.expect("list");
     assert_eq!(
@@ -561,7 +577,7 @@ async fn a_crash_after_the_launching_record_leaves_evidence_and_stays_pending() 
 
     // And it stays pending across further restarts — nothing degrades it
     // into a fabricated exit later.
-    let sup3 = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
+    let sup3 = supervisor_on(state.path())
         .await
         .expect("a further startup");
     let client3 = connect_client(&sup3).await;
@@ -576,9 +592,9 @@ async fn a_crash_after_the_launching_record_leaves_evidence_and_stays_pending() 
 /// stop happens and read back by a supervisor that never saw it.
 ///
 /// The two sessions are the contrast that gives the assertion meaning: one
-/// ends because the user stopped it, the other because its tmux session
-/// was killed out from under it (a stand-in for any ending the user had
-/// nothing to do with). Both come back exited from the fresh supervisor —
+/// ends because the user stopped it, the other because its terminal was
+/// ended out from under it (a stand-in for any ending the user had nothing
+/// to do with). Both come back exited from the fresh supervisor —
 /// only one of them says who did it. Without that contrast, an annotation
 /// applied to every ended session would pass just as well.
 ///
@@ -589,22 +605,18 @@ async fn a_crash_after_the_launching_record_leaves_evidence_and_stays_pending() 
 #[farhelm_testtrace::test]
 async fn a_stop_annotation_is_written_where_it_happens_and_read_back_elsewhere() {
     let h = harness().await;
-    let sock = h.state.path().join("tmux.sock");
     let (stopped, _stopped_work) = basic_session(&h).await;
     let (killed, _killed_work) = basic_session(&h).await;
 
     h.client.stop_session(&stopped.id).await.expect("stop");
-    let out = tmux_query(
-        &sock,
-        &["kill-session", "-t", &format!("=fh-{}", killed.id)],
-    )
-    .await;
-    assert!(out.status.success(), "test setup: kill the other session");
+    end_agent_terminal(Some(&h.sup), h.state.path(), &killed.id).await;
 
-    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
-        .await
-        .expect("the next startup");
-    let client2 = connect_client(&sup2).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_on(&state).await.expect("the next startup")
+        })
+        .await;
+    let client2 = Arc::clone(&h.client);
 
     let after = listed(&client2, &stopped.id).await;
     assert!(
@@ -696,10 +708,12 @@ async fn a_list_polling_through_a_stop_never_erases_the_annotation() {
     );
 
     // And it is DURABLE, not just what this supervisor happens to hold.
-    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
-        .await
-        .expect("the next startup");
-    let client2 = connect_client(&sup2).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_on(&state).await.expect("the next startup")
+        })
+        .await;
+    let client2 = Arc::clone(&h.client);
     assert_eq!(
         listed(&client2, &id).await.annotation.as_deref(),
         Some("stopped by user")
@@ -727,21 +741,19 @@ async fn stopping_an_already_exited_session_records_no_annotation() {
         )
         .await
         .expect("create");
-    wait_for_dead_pane(
-        &h.state.path().join("tmux.sock"),
-        &format!("fh-{}", session.id),
-    )
-    .await;
+    wait_for_dead_agent(&h.sup, h.state.path(), &session.id).await;
 
     h.client
         .stop_session(&session.id)
         .await
         .expect("stopping an already-dead session still succeeds");
 
-    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
-        .await
-        .expect("the next startup");
-    let client2 = connect_client(&sup2).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_on(&state).await.expect("the next startup")
+        })
+        .await;
+    let client2 = Arc::clone(&h.client);
     let after = listed(&client2, &session.id).await;
     assert!(
         matches!(after.status, SessionStatus::Exited { .. }),
@@ -770,7 +782,7 @@ async fn an_unreadable_boot_id_defers_rather_than_deciding() {
     let (session, _work) = basic_session(&h).await;
 
     // The reboot happens; the next supervisor cannot read the boot id.
-    kill_tmux_server_and_wait(&h.state.path().join("tmux.sock")).await;
+    end_all_terminals(h.state.path()).await;
     let degraded = supervisor_reading_boot(h.state.path(), Err("/proc is unavailable")).await;
     let degraded_client = connect_client(&degraded).await;
     assert_eq!(

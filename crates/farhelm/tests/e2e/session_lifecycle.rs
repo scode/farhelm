@@ -9,6 +9,12 @@
 //! small fixtures live here too (`ToggleWriteFailure`, `with_status`,
 //! `hex_tokens`, and friends) because nothing outside this module ever
 //! calls them.
+//!
+//! Most of it runs on new terminals, as every harness does. The tests whose
+//! subject is the old terminal (byte-stream replay and its escape sequences,
+//! resizes read back from tmux, pane ids and their reuse, killing the tmux
+//! server or session underneath the supervisor) ask for old terminals by
+//! name (`harness_tmux`, `tmux_supervisor_on`).
 
 use crate::harness::*;
 
@@ -63,19 +69,35 @@ impl AsyncWrite for ToggleWriteFailure {
     }
 }
 
-/// Poll tmux until the window reports `expected` ("COLSxROWS"), failing
-/// the test if it never does. Resizes are fire-and-forget, so there is
-/// no completion to await — polling is the only observation available.
-async fn wait_for_geometry(h: &Harness, expected: &str) {
-    let sock = h.state.path().join("tmux.sock");
+/// The size session `session`'s agent terminal is at, as "COLSxROWS":
+/// the size its terminal host reports in force (the runtime's record of
+/// the host's resize records), or its tmux window's.
+async fn terminal_geometry(h: &Harness, session: &str) -> String {
+    if let Some(host) = h.sup.agent_host_for_test(session).await {
+        let size = host.size();
+        return format!("{}x{}", size.cols, size.rows);
+    }
+    let out = tmux_query(
+        &h.state.path().join("tmux.sock"),
+        &[
+            "display-message",
+            "-p",
+            "-t",
+            &format!("fh-{session}"),
+            "#{window_width}x#{window_height}",
+        ],
+    )
+    .await;
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// Poll until `session`'s terminal reports `expected` ("COLSxROWS"),
+/// failing the test if it never does. Resizes are fire-and-forget, so there
+/// is no completion to await — polling is the only observation available.
+async fn wait_for_geometry(h: &Harness, session: &str, expected: &str) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        let out = tmux_query(
-            &sock,
-            &["display-message", "-p", "#{window_width}x#{window_height}"],
-        )
-        .await;
-        let got = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let got = terminal_geometry(h, session).await;
         if got == expected {
             return;
         }
@@ -83,29 +105,19 @@ async fn wait_for_geometry(h: &Harness, expected: &str) {
             tokio::time::Instant::now() < deadline,
             "window geometry never reached {expected} (last: {got})"
         );
-        // sleep-ok: tmux applies the requested geometry asynchronously; poll the window until the caller's target is visible.
+        // sleep-ok: the terminal applies the requested geometry asynchronously; poll it until the caller's target is visible.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
-/// Require the window geometry to STAY at `expected` for a settle
+/// Require the terminal's geometry to STAY at `expected` for a settle
 /// window. Asserting an absence needs a period of observation, not a
 /// single read: the resize that must be ignored is in flight, and a
 /// single check could run before it would have landed.
-async fn assert_geometry_stays(h: &Harness, expected: &str, why: &str) {
-    let sock = h.state.path().join("tmux.sock");
+async fn assert_geometry_stays(h: &Harness, session: &str, expected: &str, why: &str) {
     let settle = tokio::time::Instant::now() + Duration::from_secs(2);
     while tokio::time::Instant::now() < settle {
-        let out = tmux_query(
-            &sock,
-            &["display-message", "-p", "#{window_width}x#{window_height}"],
-        )
-        .await;
-        assert_eq!(
-            String::from_utf8_lossy(&out.stdout).trim(),
-            expected,
-            "{why}"
-        );
+        assert_eq!(terminal_geometry(h, session).await, expected, "{why}");
         // sleep-ok: this helper observes a forbidden resize for the full window; an immediate check could precede the in-flight request.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -184,7 +196,7 @@ async fn create_attach_and_roundtrip_input() {
     let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
-    h.client.send_input(chan, b"hello-farhelm\r".to_vec()).await;
+    h.client.send_keys(chan, b"hello-farhelm\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "echo:", 10).await;
     wait_for(&mut rx, &mut seen, "hello-farhelm", 5).await;
 }
@@ -349,7 +361,7 @@ async fn wait_for_echo_activity(
 ) -> i64 {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     loop {
-        h.client.send_input(chan, b"nudge\r".to_vec()).await;
+        h.client.send_keys(chan, b"nudge\r".to_vec()).await;
         let listed = h.client.list_sessions().await.expect("list");
         let found = listed
             .sessions
@@ -477,7 +489,7 @@ async fn pane_forensics(h: &Harness, session_id: &str) -> String {
 /// mid-write on.
 #[farhelm_testtrace::test]
 async fn reattach_replays_history_and_modes() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
 
     let (chan, rx_replay, mut rx) = h
@@ -509,7 +521,7 @@ async fn reattach_replays_history_and_modes() {
     // `"> "` alone is not unique to startup.
     wait_for_after(&mut rx, &mut seen, "FAKE-AGENT READY", "> ", 20).await;
     h.client
-        .send_input(chan, b"before-reattach\r".to_vec())
+        .send_keys(chan, b"before-reattach\r".to_vec())
         .await;
     wait_for(&mut rx, &mut seen, "echo:", 10).await;
 
@@ -567,7 +579,7 @@ async fn reattach_replays_history_and_modes() {
     // content arrives either way — only new output distinguishes a live
     // terminal from a frozen one.
     h.client
-        .send_input(chan2, b"live-after-reattach\r".to_vec())
+        .send_keys(chan2, b"live-after-reattach\r".to_vec())
         .await;
     wait_for(&mut rx2, &mut replay, "echo:", 15).await;
     wait_for(&mut rx2, &mut replay, "live-after-reattach", 10).await;
@@ -582,7 +594,7 @@ async fn reattach_replays_history_and_modes() {
 /// capture duplicates them or triggers the frozen-stream regression.
 #[farhelm_testtrace::test]
 async fn reattach_cutover_has_no_missing_or_duplicated_output() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
@@ -637,7 +649,7 @@ async fn reattach_cutover_has_no_missing_or_duplicated_output() {
 /// cannot exercise recovery triggered by the supervisor's lifecycle.
 #[farhelm_testtrace::test]
 async fn non_utf8_terminal_output_survives_live_stream() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     // The socket handshake, unlike merely seeing the socket file, proves
     // startup reached the accept loop after starting the ticker. JoinSet
     // owns the serve task on assertion failures as well as the success path.
@@ -681,7 +693,7 @@ async fn non_utf8_terminal_output_survives_live_stream() {
     let mut readiness = replay;
     wait_for(&mut live, &mut readiness, "FAKE-AGENT READY", 20).await;
     let mut live_bytes = Vec::new();
-    client.send_input(channel, b"\n".to_vec()).await;
+    client.send_keys(channel, b"\n".to_vec()).await;
     // `send_input` returning proves only that the frame was queued. The
     // supervisor's tmux `send-keys` exchange behind it is allowed 30 s under
     // load, so the marker's budget has to cover that whole exchange plus the
@@ -764,7 +776,7 @@ async fn second_attach_detaches_first() {
     // Second attachment is live.
     let mut seen2 = rx2_replay;
     wait_for(&mut rx2, &mut seen2, "FAKE-AGENT READY", 10).await;
-    h.client.send_input(c2, b"still-alive\r".to_vec()).await;
+    h.client.send_keys(c2, b"still-alive\r".to_vec()).await;
     wait_for(&mut rx2, &mut seen2, "still-alive", 10).await;
 }
 
@@ -809,10 +821,10 @@ async fn an_attach_under_a_different_lease_takes_over_and_silences_the_loser() {
     // decided the ghost's fate by the time the marker echoes back (the
     // ordering trick `kicked_client_cannot_still_send_input` uses).
     h.client
-        .send_input(loser_chan, b"ghost-lease\r".to_vec())
+        .send_keys(loser_chan, b"ghost-lease\r".to_vec())
         .await;
     h.client
-        .send_input(winner_chan, b"marker-lease\r".to_vec())
+        .send_keys(winner_chan, b"marker-lease\r".to_vec())
         .await;
     wait_for(&mut rx2, &mut seen2, "marker-lease", 15).await;
     let transcript = String::from_utf8_lossy(&seen2);
@@ -883,7 +895,7 @@ async fn an_unattended_attach_is_refused_while_another_lease_holds_the_session()
 
     // The owner never noticed: no detach notice, and input still lands.
     h.client
-        .send_input(owner_chan, b"still-mine\r".to_vec())
+        .send_keys(owner_chan, b"still-mine\r".to_vec())
         .await;
     wait_for(&mut owner_rx, &mut seen, "still-mine", 15).await;
 
@@ -938,7 +950,7 @@ async fn a_same_lease_reattach_to_the_same_terminal_is_an_ordinary_cutover() {
     let mut seen1 = rx1_replay;
     wait_for(&mut rx1, &mut seen1, "FAKE-AGENT READY", 20).await;
     h.client
-        .send_input(chan1, b"before-same-lease\r".to_vec())
+        .send_keys(chan1, b"before-same-lease\r".to_vec())
         .await;
     wait_for(&mut rx1, &mut seen1, "before-same-lease", 15).await;
 
@@ -962,7 +974,7 @@ async fn a_same_lease_reattach_to_the_same_terminal_is_an_ordinary_cutover() {
     let mut seen2 = rx2_replay;
     wait_for(&mut rx2, &mut seen2, "before-same-lease", 20).await;
     h.client
-        .send_input(chan2, b"after-same-lease\r".to_vec())
+        .send_keys(chan2, b"after-same-lease\r".to_vec())
         .await;
     wait_for(&mut rx2, &mut seen2, "after-same-lease", 15).await;
 }
@@ -1074,7 +1086,7 @@ async fn an_over_cap_lease_is_refused_without_disturbing_the_incumbent() {
         "a refused over-cap attach detached the session's live attachment"
     );
     h.client
-        .send_input(holder_chan, b"survived-the-lease\r".to_vec())
+        .send_keys(holder_chan, b"survived-the-lease\r".to_vec())
         .await;
     wait_for(&mut holder_rx, &mut holder_seen, "survived-the-lease", 15).await;
 }
@@ -1214,7 +1226,7 @@ async fn attaching_a_terminal_tab_is_a_not_found_that_names_the_tab() {
         "a refused tab attach detached the session's live attachment"
     );
     h.client
-        .send_input(holder_chan, b"survived-the-tab\r".to_vec())
+        .send_keys(holder_chan, b"survived-the-tab\r".to_vec())
         .await;
     wait_for(&mut holder_rx, &mut holder_seen, "survived-the-tab", 15).await;
 }
@@ -1280,9 +1292,8 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
             terminal: TerminalSelector::default(),
             lease: String::new(),
             if_unowned: false,
-            // A client that can draw grids still gets bytes from a tmux
-            // terminal: the stream kind follows the terminal, not the
-            // capability (protocol 68).
+            // A client that can draw grids gets the stream the terminal
+            // sends, a grid for this new terminal (protocol 68).
             grid: true,
         })
         .await
@@ -1292,7 +1303,7 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
         ControlMsg::Attached {
             req_id: 2,
             channel: 7,
-            stream: farhelm_proto::StreamKind::Bytes,
+            stream: farhelm_proto::StreamKind::Grid,
         }
     ));
 
@@ -1306,7 +1317,7 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
             terminal: TerminalSelector::default(),
             lease: String::new(),
             if_unowned: false,
-            grid: false,
+            grid: true,
         })
         .await
         .unwrap();
@@ -1511,7 +1522,7 @@ async fn create_in_missing_directory_errors() {
     );
     assert!(h.client.list_sessions().await.unwrap().sessions.is_empty());
 
-    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
+    let sup2 = supervisor_on(h.state.path())
         .await
         .expect("second supervisor construction reading the same state dir");
     let client2 = connect_client(&sup2).await;
@@ -1567,6 +1578,13 @@ async fn create_with_relative_cwd_is_rejected() {
     // no old terminal never starts one, so the socket file may not exist at
     // all. Either absence proves there is no session, the same shape
     // `harness::kill_tmux_server_and_wait` relies on.
+    let hosts = std::fs::read_dir(farhelm_supervisor::hosts::hosts_dir(h.state.path()))
+        .map(|entries| entries.count())
+        .unwrap_or(0);
+    assert_eq!(
+        hosts, 0,
+        "a rejected create must not have started a terminal host"
+    );
     let socket = h.state.path().join("tmux.sock");
     if !socket.exists() {
         return;
@@ -1660,7 +1678,7 @@ async fn create_with_tilde_cwd_expands_against_the_supervisors_home() {
         "a bare ~ create's default title is the home directory's basename, not ~"
     );
 
-    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
+    let sup2 = supervisor_on(h.state.path())
         .await
         .expect("second supervisor construction reading the same state dir");
     let client2 = connect_client(&sup2).await;
@@ -1849,7 +1867,7 @@ async fn reattach_replays_content_scrolled_off_screen() {
 
     // 80 lines against a 24-row window: spam-line-1 is far off screen by
     // the time spam-line-80 lands.
-    h.client.send_input(chan, b"spam 80\r".to_vec()).await;
+    h.client.send_keys(chan, b"spam 80\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "spam-line-80", 15).await;
     h.client.detach(chan).await;
 
@@ -1871,7 +1889,7 @@ async fn reattach_replays_content_scrolled_off_screen() {
 /// the assertion checks the switch precedes the content.
 #[farhelm_testtrace::test]
 async fn reattach_to_alt_screen_app_preserves_content() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let work = farhelm_teststate::tempdir().unwrap();
 
     let session = h
@@ -1920,7 +1938,7 @@ async fn reattach_to_alt_screen_app_preserves_content() {
 /// tmux actually holds.
 #[farhelm_testtrace::test]
 async fn resize_reaches_tmux() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
     let (chan, rx_replay, mut rx) = h
         .client
@@ -1931,7 +1949,7 @@ async fn resize_reaches_tmux() {
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     h.client.resize(&session.id, chan, 100, 30).await;
-    wait_for_geometry(&h, "100x30").await;
+    wait_for_geometry(&h, &session.id, "100x30").await;
 }
 
 /// Attach-time resize must happen before replay capture, not merely
@@ -1959,15 +1977,10 @@ async fn attach_replay_uses_the_requested_geometry() {
     wait_for(&mut first, &mut initial, "FAKE-AGENT READY", 20).await;
     let payload = format!("geometry-{}", "x".repeat(50));
     h.client
-        .send_input(channel, format!("{payload}\r").into_bytes())
+        .send_keys(channel, format!("{payload}\r").into_bytes())
         .await;
-    wait_for(
-        &mut first,
-        &mut initial,
-        &format!("echo:\x1b[36m{payload}"),
-        10,
-    )
-    .await;
+    let echoed = agent_echo(&first, &payload);
+    wait_for(&mut first, &mut initial, &echoed, 10).await;
     h.client.detach(channel).await;
 
     let (channel, second_replay, mut second) = h
@@ -1977,15 +1990,10 @@ async fn attach_replay_uses_the_requested_geometry() {
         .expect("reattach");
     let mut replay = second_replay;
     h.client
-        .send_input(channel, b"geometry-barrier\r".to_vec())
+        .send_keys(channel, b"geometry-barrier\r".to_vec())
         .await;
-    wait_for(
-        &mut second,
-        &mut replay,
-        "echo:\x1b[36mgeometry-barrier",
-        10,
-    )
-    .await;
+    let barrier = agent_echo(&second, "geometry-barrier");
+    wait_for(&mut second, &mut replay, &barrier, 10).await;
 
     assert!(
         !replay
@@ -2029,7 +2037,7 @@ async fn resize_from_a_kicked_connection_is_ignored() {
 
     // Winner establishes a known geometry first.
     winner.resize(&session.id, winner_chan, 100, 30).await;
-    wait_for_geometry(&h, "100x30").await;
+    wait_for_geometry(&h, &session.id, "100x30").await;
 
     h.client.resize(&session.id, loser_chan, 111, 33).await;
     h.client
@@ -2038,6 +2046,7 @@ async fn resize_from_a_kicked_connection_is_ignored() {
         .expect("barrier after kicked resize");
     assert_geometry_stays(
         &h,
+        &session.id,
         "100x30",
         "a kicked client's resize reflowed the winner's terminal",
     )
@@ -2079,7 +2088,7 @@ async fn resize_from_a_stale_channel_on_the_same_connection_is_ignored() {
     wait_for(&mut rx2, &mut seen2, "FAKE-AGENT READY", 15).await;
 
     h.client.resize(&session.id, live_chan, 100, 30).await;
-    wait_for_geometry(&h, "100x30").await;
+    wait_for_geometry(&h, &session.id, "100x30").await;
 
     h.client.resize(&session.id, stale_chan, 111, 33).await;
     h.client
@@ -2088,6 +2097,7 @@ async fn resize_from_a_stale_channel_on_the_same_connection_is_ignored() {
         .expect("barrier after stale-channel resize");
     assert_geometry_stays(
         &h,
+        &session.id,
         "100x30",
         "a stale channel's resize reflowed the live attachment's terminal",
     )
@@ -2119,10 +2129,10 @@ async fn wait_for_launch_directory_report(marker: &std::path::Path) -> String {
 
 /// A session whose agent exits stays viewable and replayable.
 ///
-/// This is what `remain-on-exit on` buys (SPEC.md: a stopped or exited
-/// session's terminal stays viewable while its host is up). Without that
-/// config line the tmux session disappears on exit and the reattach
-/// below fails outright.
+/// SPEC.md: a stopped or exited session's terminal stays viewable while its
+/// host is up. A terminal host keeps its exited child's final screen; an old
+/// terminal needs `remain-on-exit on` for the same, and without it the tmux
+/// session disappears on exit and the reattach below fails outright.
 #[farhelm_testtrace::test]
 async fn exited_agent_leaves_a_viewable_terminal() {
     let h = harness().await;
@@ -2134,23 +2144,22 @@ async fn exited_agent_leaves_a_viewable_terminal() {
         .expect("attach");
     let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
-    h.client.send_input(chan, b"quit\r".to_vec()).await;
+    h.client.send_keys(chan, b"quit\r".to_vec()).await;
 
-    quit_until_pane_dead(&h, chan, &rx).await;
+    quit_until_pane_dead(&h, &session.id, chan, &rx).await;
     h.client.detach(chan).await;
 
-    // The attach succeeding IS the contract: without `remain-on-exit on`
-    // the window closes when the process exits, taking the only-window
-    // session with it, and every tmux call in the attach path then fails.
-    // (The replayed content is deliberately not asserted — a dead pane's
-    // captured screen depends on what the exiting program left behind.)
+    // The attach succeeding IS the contract: a terminal that went away with
+    // its process (on an old terminal, a window closed for want of
+    // `remain-on-exit on`) leaves nothing to attach to. (The replayed
+    // content is deliberately not asserted — an exited terminal's screen
+    // depends on what the exiting program left behind.)
     //
     // Retried while the failure looks transient, because the contract is
     // "an exited session's terminal is still attachable", not "attachable
-    // on the first try". An attach is several bounded tmux exchanges (the
-    // replay command group among them), and a machine loaded enough to
-    // blow one of those budgets says nothing about whether the window
-    // survived the exit. Anything that does NOT look like a timeout fails
+    // on the first try". An attach is several bounded exchanges with the
+    // terminal, and a machine loaded enough to blow one of those budgets
+    // says nothing about whether the terminal survived the exit. Anything that does NOT look like a timeout fails
     // at once: a closed window is a permanent, differently-shaped error
     // and must not be retried into a slow pass.
     let (_chan2, _rx2) = attach_exited_pane(&h, &session.id).await;
@@ -2161,9 +2170,9 @@ async fn exited_agent_leaves_a_viewable_terminal() {
 /// The caller is testing retained terminal state after exit. Farewell text
 /// alone is not the exit boundary, and a detached peer cannot receive the
 /// idempotent quit stimulus this helper repeats while waiting for tmux.
-async fn quit_until_pane_dead(h: &Harness, chan: u32, rx: &TermStream) {
-    // Wait for the pane to actually be dead by asking tmux, not by
-    // watching for the agent's farewell text. Output-watching would race
+async fn quit_until_pane_dead(h: &Harness, session: &str, chan: u32, rx: &TermStream) {
+    // Wait for the agent to have actually exited by asking its terminal
+    // (`agent_has_exited`), not by watching for the agent's farewell text. Output-watching would race
     // the process teardown this test deliberately provokes; `pane_dead`
     // is the state the assertion below actually depends on.
     //
@@ -2179,11 +2188,9 @@ async fn quit_until_pane_dead(h: &Harness, chan: u32, rx: &TermStream) {
     // of the queue can be empty for the entire life of a detached
     // attachment and never report it.
     let mut detached = rx.detach_signal();
-    let sock = h.state.path().join("tmux.sock");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     loop {
-        let out = tmux_query(&sock, &["display-message", "-p", "#{pane_dead}"]).await;
-        if String::from_utf8_lossy(&out.stdout).trim() == "1" {
+        if agent_has_exited(h, session).await {
             break;
         }
         assert!(
@@ -2196,7 +2203,7 @@ async fn quit_until_pane_dead(h: &Harness, chan: u32, rx: &TermStream) {
         // send is a bounded exchange with tmux that a loaded machine can
         // lose outright — one lost send would otherwise leave this loop
         // waiting the full 30s for an exit nobody ever asked for.
-        h.client.send_input(chan, b"quit\r".to_vec()).await;
+        h.client.send_keys(chan, b"quit\r".to_vec()).await;
         // The pause between polls is also where the detach is watched.
         // Both arms of this select are cancel-safe (a watch `changed()`
         // and a sleep), so losing either race costs nothing.
@@ -2325,10 +2332,11 @@ async fn adopted_tmux_server_gets_its_options_explicitly_not_just_from_config() 
         .expect("spawn scratch tmux");
     assert!(started.success(), "test setup: scratch tmux must start");
 
-    // Now let the real code run: `Supervisor::new_with_exe` finds this
-    // socket already live and must ADOPT it, not start a fresh server whose
-    // config it would otherwise get to read.
-    Supervisor::new_with_exe(state.path(), farhelm_bin().into())
+    // Now let the real code run: a supervisor finds this socket already
+    // live and must ADOPT it, not start a fresh server whose config it
+    // would otherwise get to read. One of new terminals, as after an
+    // upgrade: a server with an old session in it is adopted all the same.
+    supervisor_on(state.path())
         .await
         .expect("supervisor construction must adopt the pre-existing server");
 
@@ -2355,7 +2363,7 @@ async fn adopted_tmux_server_gets_its_options_explicitly_not_just_from_config() 
 
 /// PLAN_M2.md's list-status contract: once an agent exits ON ITS OWN — no
 /// stop or delete involved — the next `ListSessions` must reflect that as
-/// `Exited` with the exact exit code tmux observed, not stay live
+/// `Exited` with the exact exit code the terminal observed, not stay live
 /// forever. `exited_agent_leaves_a_viewable_terminal` already proves the
 /// terminal itself survives; this proves the status field tracks the same
 /// event. The basic fake agent's own `quit` path exits 0, which is what
@@ -2371,7 +2379,7 @@ async fn exited_agent_lists_as_exited_with_its_exit_code() {
         .expect("attach");
     let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
-    h.client.send_input(chan, b"quit\r".to_vec()).await;
+    h.client.send_keys(chan, b"quit\r".to_vec()).await;
 
     // Exit-code precision, version-gated: see `wait_for_exit_code`.
     wait_for_exit_code(&h.client, &session.id, 0, 30).await;
@@ -2380,9 +2388,11 @@ async fn exited_agent_lists_as_exited_with_its_exit_code() {
 /// A nonzero exit is reported precisely, not just "not alive" — the whole
 /// point of carrying `exit_code` through instead of a boolean liveness
 /// flag. A plain shell exit needs no fake-agent script at all: its code
-/// is exactly what tmux's `#{pane_dead_status}` reports.
+/// is exactly what the terminal records for its exited child (tmux's
+/// `#{pane_dead_status}` on an old terminal).
 ///
-/// The half-second sleep before the exit is load-bearing, not padding: a
+/// The half-second sleep before the exit dates from old terminals and is
+/// load-bearing there, not padding: a
 /// pane whose process dies while tmux is still setting the pane up can
 /// lose the recorded exit status entirely (observed on loaded CI runners
 /// as a permanent `Exited { exit_code: None }`; never reproduced locally,
@@ -2570,8 +2580,8 @@ async fn kicked_client_cannot_still_send_input() {
     // Ghost first, marker second, both on the same connection so the
     // supervisor processes them in order — by the time the marker echo
     // arrives, the ghost has already been accepted or dropped.
-    h.client.send_input(c1, b"ghost-input\r".to_vec()).await;
-    h.client.send_input(c2, b"marker-input\r".to_vec()).await;
+    h.client.send_keys(c1, b"ghost-input\r".to_vec()).await;
+    h.client.send_keys(c2, b"marker-input\r".to_vec()).await;
     wait_for(&mut rx2, &mut seen2, "marker-input", 15).await;
 
     let transcript = String::from_utf8_lossy(&seen2);
@@ -2618,14 +2628,14 @@ async fn input_from_a_kicked_connection_is_dropped() {
     // supervisor processed the ghost before the winner marker lets this
     // test finish.
     h.client
-        .send_input(loser_chan, b"ghost-xconn\r".to_vec())
+        .send_keys(loser_chan, b"ghost-xconn\r".to_vec())
         .await;
     h.client
         .list_sessions()
         .await
         .expect("barrier after kicked input");
     winner
-        .send_input(winner_chan, b"marker-xconn\r".to_vec())
+        .send_keys(winner_chan, b"marker-xconn\r".to_vec())
         .await;
     wait_for(&mut rx2, &mut seen2, "marker-xconn", 15).await;
 
@@ -2738,7 +2748,7 @@ async fn connection_loss_detaches_terminals_and_fails_requests() {
     let mut seen2 = rx2_replay;
     wait_for(&mut rx2, &mut seen2, "FAKE-AGENT READY", 20).await;
     h.client
-        .send_input(chan, b"alive-after-loss\r".to_vec())
+        .send_keys(chan, b"alive-after-loss\r".to_vec())
         .await;
     wait_for(&mut rx2, &mut seen2, "echo:", 15).await;
     wait_for(&mut rx2, &mut seen2, "alive-after-loss", 10).await;
@@ -2898,16 +2908,16 @@ async fn writer_never_reading_peer_does_not_hang_connection_shutdown() {
 async fn stdio_proxy_carries_a_real_session() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let sup =
-        Supervisor::new_with_exe_and_timeouts(state.path(), farhelm_bin().into(), suite_timeouts())
-            .await
-            .expect("supervisor");
-    // Declared after `state`, so it drops first: kill the server, then
-    // delete the directory holding its socket. Without this guard a
-    // panic anywhere below leaked the tmux server (plus login shell and
-    // fake agent) forever — the exact accumulation Harness exists to
-    // prevent, on the one test that cannot use it.
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        farhelm_bin().into(),
+        suite_timeouts(),
+        SupervisorSeams::default(),
+    )
+    .await
+    .expect("supervisor");
+    // No tmux guard: this supervisor creates new terminals, whose hosts the
+    // state directory's `TestDir` ends at drop, panic or not.
 
     // An orphaned launch spec from a "previous run": serve() must sweep
     // it once — and only once — it owns the socket. It holds an agent
@@ -2976,7 +2986,7 @@ async fn stdio_proxy_carries_a_real_session() {
     let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 25).await;
     client
-        .send_input(chan, b"through-the-proxy\r".to_vec())
+        .send_keys(chan, b"through-the-proxy\r".to_vec())
         .await;
     wait_for(&mut rx, &mut seen, "through-the-proxy", 15).await;
 }
@@ -2998,9 +3008,13 @@ async fn stdio_proxy_carries_a_real_session() {
 /// line at MAX_CANON (4095 bytes on Linux) and silently discards the
 /// excess — a single >32 KiB line can never round-trip, no matter how
 /// correct the chunking is.
+///
+/// Old terminals: a grid transcript did not hold every one of the 3,200
+/// scrolled lines (line 1260 missing on a new terminal); checking them needs a
+/// read of the host's scrollback, a follow-up.
 #[farhelm_testtrace::test]
 async fn large_input_survives_chunking() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let work = farhelm_teststate::tempdir().unwrap();
 
     let session = h
@@ -3034,21 +3048,26 @@ async fn large_input_survives_chunking() {
         input.len() > 32 * 1024,
         "payload must exceed one 32 KiB frame to exercise the frame-chunking layer"
     );
-    h.client.send_input(chan, input).await;
+    h.client.send_keys(chan, input).await;
 
-    // Wait for the final echo, then verify every line echoed in order.
-    // The needle includes the fake agent's echo prefix and color code so
-    // it cannot match the PTY's input echo of the same text.
-    let last = format!("echo:\x1b[36mchunkline-{:04}", LINES - 1);
+    // Wait for the final echo, then verify every line echoed, in order on a
+    // byte stream. The needle includes the fake agent's echo prefix (and, in
+    // a byte stream, its color code) so it cannot match the PTY's input
+    // echo of the same text. A grid transcript holds screen rows in the
+    // order they were sent, not printed (`harness::grid_text`), so on a new
+    // terminal only presence is checked: a dropped piece still fails.
+    let last = agent_echo(&rx, &format!("chunkline-{:04}", LINES - 1));
     wait_for(&mut rx, &mut seen, &last, 60).await;
     let transcript = String::from_utf8_lossy(&seen);
+    let ordered = !rx.is_grid();
     let mut pos = 0;
     for i in 0..LINES {
-        let needle = format!("echo:\x1b[36mchunkline-{i:04}");
-        match transcript[pos..].find(&needle) {
-            Some(at) => pos += at + needle.len(),
+        let needle = agent_echo(&rx, &format!("chunkline-{i:04}"));
+        let from = if ordered { pos } else { 0 };
+        match transcript[from..].find(&needle) {
+            Some(at) => pos = from + at + needle.len(),
             None => panic!(
-                "echo for line {i} missing or out of order after byte {pos} — \
+                "echo for line {i} missing or out of order after byte {from} — \
                  a chunk was dropped or reordered at a chunking boundary"
             ),
         }
@@ -3064,9 +3083,12 @@ async fn large_input_survives_chunking() {
 /// the clamped geometry — without the second assertion, deleting the
 /// clamp passes this test, because a failed resize during attach is
 /// deliberately warn-only.
+///
+/// Old terminals: on new terminals a 0x0 attach leaves the terminal at its old
+/// size (80x24) instead of clamping it to 1x1, a found difference.
 #[farhelm_testtrace::test]
 async fn attach_with_degenerate_size_still_works() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session_mid_launch(&h).await;
     let (_chan, rx_replay, mut rx) = h
         .client
@@ -3095,18 +3117,11 @@ async fn attach_with_degenerate_size_still_works() {
     )
     .await;
 
-    // attach_live consumed the replay boundary after the attach's resize,
-    // so the geometry is settled even if READY arrived as later live output.
-    let out = tmux_query(
-        &h.state.path().join("tmux.sock"),
-        &["display-message", "-p", "#{window_width}x#{window_height}"],
-    )
-    .await;
-    assert_eq!(
-        String::from_utf8_lossy(&out.stdout).trim(),
-        "1x1",
-        "0x0 must clamp to 1x1, not fail or leave the old geometry"
-    );
+    // On an old terminal attach_live consumed the replay boundary after the
+    // attach's resize, so the geometry is settled even if READY arrived as
+    // later live output; a terminal host reports a resize in force only once
+    // its own resize record arrives, so the size is waited for.
+    wait_for_geometry(&h, &session.id, "1x1").await;
 }
 
 /// Attaching to a tmux session that does not exist must fail with tmux's
@@ -3198,7 +3213,7 @@ async fn created_sessions_are_listed_with_a_derived_title() {
     );
     assert_eq!(listed.sessions[0].invocation, invocation);
     // This first reply proves the create's metadata reached the list intact.
-    // Liveness is sampled from tmux and may lag that reply, so it has its own
+    // Liveness is sampled from the terminal and may lag that reply, so it has its own
     // bounded observation rather than weakening the metadata assertion.
     wait_for_live_status(&h.client, &session.id, 30).await;
 }
@@ -3250,7 +3265,7 @@ async fn attach_to_unknown_session_errors_and_connection_survives() {
 /// the post-takeover error path rather than the early unknown-id check.
 #[farhelm_testtrace::test]
 async fn cutover_failure_is_request_local() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
     let socket = h.state.path().join("tmux.sock");
     let sessions = tmux_query(&socket, &["list-sessions", "-F", "#{session_name}"]).await;
@@ -3310,19 +3325,14 @@ async fn serve_refuses_a_second_supervisor_but_replaces_a_stale_socket() {
 
     // Half 1: live supervisor → second serve() refuses.
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let sup1 = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
-        .await
-        .expect("supervisor 1");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
+    let sup1 = supervisor_on(state.path()).await.expect("supervisor 1");
     let serving = Arc::clone(&sup1);
     tokio::spawn(async move {
         let _ = serving.serve().await;
     });
     let sock = state.path().join("supervisor.sock");
     wait_for_supervisor_ready(state.path()).await;
-    let sup2 = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
-        .await
-        .expect("supervisor 2");
+    let sup2 = supervisor_on(state.path()).await.expect("supervisor 2");
     let err = sup2
         .serve()
         .await
@@ -3340,10 +3350,7 @@ async fn serve_refuses_a_second_supervisor_but_replaces_a_stale_socket() {
 
     // Half 2: stale socket file (no listener behind it) → serve() binds.
     let state2 = farhelm_teststate::tempdir().expect("tempdir");
-    let sup3 = Supervisor::new_with_exe(state2.path(), farhelm_bin().into())
-        .await
-        .expect("supervisor 3");
-    let _tmux2 = TmuxServerGuard::new(state2.path().join("tmux.sock"));
+    let sup3 = supervisor_on(state2.path()).await.expect("supervisor 3");
     let stale = state2.path().join("supervisor.sock");
     std::fs::write(&stale, b"").expect("plant stale socket file");
     let serving = Arc::clone(&sup3);
@@ -3389,10 +3396,7 @@ async fn stdio_proxy_half_close_delivers_in_flight_replies() {
 
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let sup = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
-        .await
-        .expect("supervisor");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
+    let sup = supervisor_on(state.path()).await.expect("supervisor");
     let serving = Arc::clone(&sup);
     tokio::spawn(async move {
         let _ = serving.serve().await;
@@ -3484,15 +3488,16 @@ async fn detach_from_a_kicked_connection_does_not_kill_the_winner() {
         .await
         .expect("barrier after foreign detach");
     winner
-        .send_input(winner_chan, b"survived-foreign-detach\r".to_vec())
+        .send_keys(winner_chan, b"survived-foreign-detach\r".to_vec())
         .await;
     wait_for(&mut rx2, &mut seen2, "survived-foreign-detach", 15).await;
 }
 
 /// Creating a session with degenerate dimensions must clamp, exactly
-/// like the resize path: `new-session -x 0` is a hard tmux error, so
-/// without the clamp the create fails outright — and every other test
-/// creates at sane sizes, so deleting the clamp used to fail nothing.
+/// like the resize path. On an old terminal `new-session -x 0` is a hard
+/// tmux error, so without the clamp the create fails outright — and every
+/// other test creates at sane sizes, so deleting the clamp used to fail
+/// nothing.
 #[farhelm_testtrace::test]
 async fn create_with_degenerate_size_clamps_to_1x1() {
     let h = harness().await;
@@ -3509,7 +3514,7 @@ async fn create_with_degenerate_size_clamps_to_1x1() {
         )
         .await
         .expect("create with 0x0 must succeed via the clamp");
-    wait_for_geometry(&h, "1x1").await;
+    wait_for_geometry(&h, &session.id, "1x1").await;
 
     // And the session is real, not just accepted: it must be listed.
     let listed = h.client.list_sessions().await.expect("list");
@@ -3571,9 +3576,13 @@ fn hex_tokens_survive_a_cursor_address_glued_to_the_first_token() {
 /// difference. `hexecho` reads its stdin in raw mode specifically so
 /// nothing between the wire and this assertion can paper over a mangled
 /// byte.
+///
+/// Old terminals: the regression is in tmux's input path. A new terminal's
+/// input is grid messages the supervisor encodes itself, pinned by the
+/// `grid_input` unit tests.
 #[farhelm_testtrace::test]
 async fn input_bytes_survive_verbatim_through_hexecho() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
@@ -3597,9 +3606,7 @@ async fn input_bytes_survive_verbatim_through_hexecho() {
 
     // Exactly the bytes paste-buffer was observed to mangle: DEL, ESC
     // (as the opener of the ArrowUp sequence "\x1b[A"), and ETX (ctrl-C).
-    h.client
-        .send_input(chan, b"a\x7fb\x1b[A\x03".to_vec())
-        .await;
+    h.client.send_keys(chan, b"a\x7fb\x1b[A\x03".to_vec()).await;
     // A plain printable byte with no special meaning to tmux or a
     // raw-mode pty, sent as a separate call. Its emitted `7a` token is the
     // sync point that proves every earlier byte crossed the ordered helm
@@ -3608,7 +3615,7 @@ async fn input_bytes_survive_verbatim_through_hexecho() {
     // contains it. This end-to-end acknowledgement is stronger than a
     // separate metadata request, which would only prove the supervisor had
     // handled the input frame.
-    h.client.send_input(chan, b"z".to_vec()).await;
+    h.client.send_keys(chan, b"z".to_vec()).await;
     wait_for(&mut rx, &mut seen, "7a", 10).await;
 
     // Reassemble the hex byte stream across every line before asserting:
@@ -3643,7 +3650,7 @@ async fn input_bytes_survive_verbatim_through_hexecho() {
 /// the ordered acknowledgment prevents a truncated prefix from passing.
 #[farhelm_testtrace::test]
 async fn printable_and_binary_input_preserve_bytes_across_commands() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
@@ -3663,7 +3670,7 @@ async fn printable_and_binary_input_preserve_bytes_across_commands() {
         .expect("attach");
     let mut seen = replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
-    h.client.send_input(chan, b"!".to_vec()).await;
+    h.client.send_keys(chan, b"!".to_vec()).await;
     wait_for(&mut rx, &mut seen, "21", 10).await;
     seen.clear();
 
@@ -3691,10 +3698,10 @@ async fn printable_and_binary_input_preserve_bytes_across_commands() {
     expected.extend_from_slice(&binary);
     expected.extend_from_slice(acknowledgment);
     for message in literal_messages {
-        h.client.send_input(chan, message).await;
+        h.client.send_keys(chan, message).await;
     }
-    h.client.send_input(chan, binary).await;
-    h.client.send_input(chan, acknowledgment.to_vec()).await;
+    h.client.send_keys(chan, binary).await;
+    h.client.send_keys(chan, acknowledgment.to_vec()).await;
 
     // Decode across reads: neither the PTY nor output frames promise that
     // one input command produces one output record. Retain only a small
@@ -3729,43 +3736,39 @@ async fn printable_and_binary_input_preserve_bytes_across_commands() {
 }
 
 /// PLAN_M2.md's headline SQLite behavior: session metadata must survive
-/// the supervisor process, not just the tmux server underneath it.
+/// the supervisor process, not just the terminal underneath it.
 ///
-/// A brand-new `Supervisor` on the harness's state dir stands in for a
-/// restarted process — `new_with_exe` (unlike `serve()`) takes no
-/// socket-exclusivity lock, so nothing here fights the harness's own
-/// supervisor for the same reason `serve_refuses_a_second_supervisor_...`
-/// already runs several `Supervisor`s side by side. The harness's private
-/// tmux server is left running throughout (its `TmuxServerGuard` only
-/// tears it down when the harness itself drops, at the end of the test),
-/// which is the normal shape PLAN_M2.md describes: the tmux server
-/// outliving a supervisor restart. Listing alone would not catch a bug
-/// that persists metadata but loses the live reconnect, so this also
-/// attaches and round-trips input through the reloaded entry.
+/// The harness's supervisor is drained and replaced by a brand-new one on
+/// the same state dir (`Harness::restart_supervisor`), standing in for a
+/// restarted process. The session's terminal host is left running
+/// throughout, which is the normal shape PLAN_M2.md describes: the terminal
+/// outliving a supervisor restart. Listing alone would not catch a bug that
+/// persists metadata but loses the live reconnect, so this also attaches and
+/// round-trips input through the reloaded entry.
 #[farhelm_testtrace::test]
 async fn persisted_sessions_survive_a_supervisor_restart() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let sup2 = Supervisor::new_with_exe_and_timeouts(
-        h.state.path(),
-        farhelm_bin().into(),
-        suite_timeouts(),
-    )
-    .await
-    .expect("second supervisor construction on the same state dir");
-    let client2 = connect_client(&sup2).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            Supervisor::new_with_seams(
+                &state,
+                farhelm_bin().into(),
+                suite_timeouts(),
+                SupervisorSeams::default(),
+            )
+            .await
+            .expect("second supervisor construction on the same state dir")
+        })
+        .await;
+    let (sup2, client2) = (Arc::clone(&h.sup), Arc::clone(&h.client));
 
     // The in-process replacement has no activity ticker, so its deliberately
-    // provisional status remains `Unknown` even though tmux already proves
-    // the pane is live. Assert the lifecycle fact directly before reading the
-    // durable row whose status may still await sampler evidence.
-    wait_for_live_pane(
-        &h.state.path().join("tmux.sock"),
-        &format!("fh-{}", session.id),
-        30,
-    )
-    .await;
+    // provisional status remains `Unknown` even though its terminal already
+    // runs. Assert the lifecycle fact directly before reading the durable
+    // row whose status may still await sampler evidence.
+    wait_for_live_agent(&sup2, h.state.path(), &session.id, 30).await;
     let listed = client2
         .list_sessions()
         .await
@@ -3790,35 +3793,37 @@ async fn persisted_sessions_survive_a_supervisor_restart() {
         .expect("attach must succeed: the tmux session is still alive");
     let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
-    client2.send_input(chan, b"still-alive\r".to_vec()).await;
+    client2.send_keys(chan, b"still-alive\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "echo:", 10).await;
     wait_for(&mut rx, &mut seen, "still-alive", 5).await;
 }
 
-/// PLAN_M2.md's "restart gap": a session whose tmux server did NOT
-/// survive a supervisor restart must still be listed — the whole point of
-/// persisting metadata separately from tmux liveness — but attaching to
-/// it must fail loudly rather than fabricate a terminal that no longer
-/// exists.
+/// PLAN_M2.md's "restart gap": a session whose terminal did NOT survive a
+/// supervisor restart must still be listed — the whole point of persisting
+/// metadata separately from terminal liveness — but attaching to it must
+/// fail loudly rather than fabricate a terminal that no longer exists.
 ///
-/// The private tmux server is killed directly on its socket, standing in
-/// for "the host rebooted" or "tmux crashed independently of the
-/// supervisor" — the case M1 had no answer for at all (the session simply
-/// vanished from the in-memory map). The second `Supervisor` construction
-/// finds no server on the same socket and starts none, so the reloaded
-/// row's pane genuinely is not there — this is not a mocked failure.
+/// Every terminal of the state directory is ended directly
+/// (`end_all_terminals`), standing in for "the machine rebooted" or "the
+/// terminal died independently of the supervisor" — the case M1 had no
+/// answer for at all (the session simply vanished from the in-memory map).
+/// The second supervisor finds no host at the row's socket, so the reloaded
+/// row's terminal genuinely is not there — this is not a mocked failure.
 #[farhelm_testtrace::test]
 async fn restart_gap_lists_sessions_without_a_terminal_and_attach_fails() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let sock = h.state.path().join("tmux.sock");
-    kill_tmux_server_and_wait(&sock).await;
+    end_all_terminals(h.state.path()).await;
 
-    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
-        .await
-        .expect("second supervisor construction after the tmux server died");
-    let client2 = connect_client(&sup2).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_on(&state)
+                .await
+                .expect("second supervisor construction after the tmux server died")
+        })
+        .await;
+    let client2 = Arc::clone(&h.client);
 
     let listed = client2
         .list_sessions()
@@ -3900,7 +3905,7 @@ async fn restart_gap_lists_sessions_without_a_terminal_and_attach_fails() {
 /// session whose tmux is actually gone.
 #[farhelm_testtrace::test]
 async fn list_sessions_survives_when_the_tmux_server_is_gone() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, work) = basic_session(&h).await;
 
     let sock = h.state.path().join("tmux.sock");
@@ -3974,7 +3979,7 @@ async fn list_sessions_survives_when_the_tmux_server_is_gone() {
 /// these two same-numbered panes apart.
 #[farhelm_testtrace::test]
 async fn stale_pane_id_after_server_restart_does_not_inherit_a_new_sessions_status() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (old_session, _work1) = basic_session(&h).await;
     let sock = h.state.path().join("tmux.sock");
     let old_pane_id = pane_id_of(&sock, &format!("fh-{}", old_session.id)).await;
@@ -4081,7 +4086,7 @@ struct RecycledPaneWedge {
 /// below would keep passing while exercising nothing at all. This is
 /// what fails instead.
 async fn recycled_pane_wedge() -> RecycledPaneWedge {
-    let h = harness().await;
+    let h = harness_tmux().await;
     // Resumable, because one test below restarts it.
     let (old, _work_old) = resumable_basic_session(&h).await;
     let sock = h.state.path().join("tmux.sock");
@@ -4333,11 +4338,11 @@ async fn the_pane_probe_reports_a_spaced_owner_name_whole() {
 /// The restart-gap decision is PER SESSION, not one answer applied to the
 /// whole reloaded batch.
 ///
-/// Two sessions exist; only one's tmux session is killed directly (the
-/// other, and the private tmux server itself, are left untouched). An
-/// implementation that probes `has_session` once and reuses the answer
-/// for every row — or that otherwise conflates "the server is gone" with
-/// "this one session is gone" — would either lose the live session too or
+/// Two sessions exist; only one's terminal is ended directly (the other is
+/// left untouched). An implementation that probes once and reuses the
+/// answer for every row — or that otherwise conflates "every terminal is
+/// gone" with "this one session's terminal is gone" — would either lose
+/// the live session too or
 /// wrongly keep the dead one attachable; this test fails either way,
 /// which is exactly the coverage gap a single-session restart-gap test
 /// cannot close.
@@ -4347,30 +4352,26 @@ async fn restart_gap_is_decided_per_session() {
     let (alive_session, _work1) = basic_session(&h).await;
     let (dead_session, _work2) = basic_session(&h).await;
 
-    // Mirrors `create_session`'s own derivation (`service.rs`): the tmux
-    // session name is `fh-` plus the FULL session id (not a truncated
-    // prefix — see that call site for why a prefix is unsafe).
-    let dead_tmux_name = format!("fh-{}", dead_session.id);
-    let sock = h.state.path().join("tmux.sock");
-    let killed = tmux_query(&sock, &["kill-session", "-t", &dead_tmux_name]).await;
-    assert!(
-        killed.status.success(),
-        "test setup: kill-session must succeed, got: {}",
-        String::from_utf8_lossy(&killed.stderr)
-    );
+    end_agent_terminal(Some(&h.sup), h.state.path(), &dead_session.id).await;
 
-    let sup2 = Supervisor::new_with_exe_and_timeouts(
-        h.state.path(),
-        farhelm_bin().into(),
-        suite_timeouts(),
-    )
-    .await
-    .expect("second supervisor construction after one session's tmux died");
-    let client2 = connect_client(&sup2).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            Supervisor::new_with_seams(
+                &state,
+                farhelm_bin().into(),
+                suite_timeouts(),
+                SupervisorSeams::default(),
+            )
+            .await
+            .expect("second supervisor construction after one session's tmux died")
+        })
+        .await;
+    let (sup2, client2) = (Arc::clone(&h.sup), Arc::clone(&h.client));
 
     // As above, the replacement has no sampler task in this in-process
-    // harness. Tmux is the lifecycle oracle; status may remain provisional.
-    wait_for_live_pane(&sock, &format!("fh-{}", alive_session.id), 30).await;
+    // harness. The terminal is the lifecycle oracle; status may remain
+    // provisional.
+    wait_for_live_agent(&sup2, h.state.path(), &alive_session.id, 30).await;
     let mut listed = client2
         .list_sessions()
         .await
@@ -4386,7 +4387,7 @@ async fn restart_gap_is_decided_per_session() {
     // The surviving session's live status is asserted as LIVENESS while
     // the dead one's is asserted exactly: which of running/waiting/idle a
     // healthy agent reports is the sampler's call, but "exited with no
-    // code" is a specific claim about a session whose tmux really is gone.
+    // code" is a specific claim about a session whose terminal really is gone.
     let survivor = find(&alive_session.id);
     assert!(
         survivor.status.is_live() || survivor.status == SessionStatus::Unknown,
@@ -4421,7 +4422,7 @@ async fn restart_gap_is_decided_per_session() {
         .expect("the untouched session must still attach");
     let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
-    client2.send_input(chan, b"still-alive\r".to_vec()).await;
+    client2.send_keys(chan, b"still-alive\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "echo:", 10).await;
     wait_for(&mut rx, &mut seen, "still-alive", 5).await;
 
@@ -4504,15 +4505,16 @@ async fn stop_kills_the_whole_process_tree() {
     wait_until_pid_gone(child_pid, 15).await;
     wait_until_pid_gone(grandchild_pid, 15).await;
 
-    // Status is computed fresh from tmux at list time, not pushed, so the
-    // pane's `pane_dead` flag flipping and this list call race each
+    // Status is computed fresh from the terminal at list time, not pushed,
+    // so the agent's death being recorded and this list call race each
     // other — this polls for the EVENTUAL exited classification rather
     // than asserting on a single read that might land before the flip.
     // What is under test is only that the session ends up classified
     // `Exited`, not which exact code it carries: PLAN_M2.md's status test
     // list, item (e), says "assert exited, don't over-pin the code" —
-    // a SIGKILL death's `pane_dead_status` is not pinned to one value
-    // across tmux versions, so the code is deliberately left unasserted.
+    // a SIGKILL death's recorded status is not pinned to one value (tmux's
+    // `pane_dead_status` varies across versions), so the code is
+    // deliberately left unasserted.
     let found = wait_for_non_live_status(&h.client, &session.id, 15).await;
     assert_eq!(found.id, session.id);
     assert_eq!(found.title, session.title);
@@ -4528,10 +4530,14 @@ async fn stop_kills_the_whole_process_tree() {
     // the row survived in SQLite, not just this process's own map — the
     // same reasoning `persisted_sessions_survive_a_supervisor_restart`
     // applies to create.
-    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
-        .await
-        .expect("second supervisor construction on the same state dir");
-    let client2 = connect_client(&sup2).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_on(&state)
+                .await
+                .expect("second supervisor construction on the same state dir")
+        })
+        .await;
+    let client2 = Arc::clone(&h.client);
     let listed2 = client2
         .list_sessions()
         .await
@@ -4818,18 +4824,15 @@ async fn stop_is_idempotent() {
     // A restart-gap (terminal-less) session, mirroring
     // `restart_gap_lists_sessions_without_a_terminal_and_attach_fails`.
     let (gap_session, _work2) = basic_session(&h).await;
-    let gap_tmux_name = format!("fh-{}", gap_session.id);
-    let sock = h.state.path().join("tmux.sock");
-    let killed = tmux_query(&sock, &["kill-session", "-t", &gap_tmux_name]).await;
-    assert!(
-        killed.status.success(),
-        "test setup: kill-session must succeed, got: {}",
-        String::from_utf8_lossy(&killed.stderr)
-    );
-    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
-        .await
-        .expect("second supervisor construction after one session's tmux died");
-    let client2 = connect_client(&sup2).await;
+    end_agent_terminal(Some(&h.sup), h.state.path(), &gap_session.id).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_on(&state)
+                .await
+                .expect("second supervisor construction after one session's tmux died")
+        })
+        .await;
+    let client2 = Arc::clone(&h.client);
     client2
         .stop_session(&gap_session.id)
         .await
@@ -4872,7 +4875,7 @@ async fn delete_unknown_session_is_not_found() {
 }
 
 /// Delete must remove all three of a session's traces: the in-memory
-/// entry, the tmux session backing its terminal, and the SQLite row —
+/// entry, the terminal backing it, and the SQLite row —
 /// the last checked through a SECOND, independent `Supervisor` on the same
 /// state dir, exactly like `create_in_missing_directory_errors` does for
 /// creation, since only that proves the row is really gone rather than
@@ -4881,7 +4884,11 @@ async fn delete_unknown_session_is_not_found() {
 async fn delete_removes_session_terminal_and_row() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
-    let tmux_name = format!("fh-{}", session.id);
+    let terminal = RecordedTerminal::of(h.state.path(), &session.id).await;
+    assert!(
+        terminal.exists().await,
+        "premise: the session's terminal runs"
+    );
 
     h.client.delete_session(&session.id).await.expect("delete");
 
@@ -4890,17 +4897,19 @@ async fn delete_removes_session_terminal_and_row() {
         "a deleted session must not stay listed"
     );
 
-    let sock = h.state.path().join("tmux.sock");
-    let out = tmux_query(&sock, &["has-session", "-t", &format!("={tmux_name}")]).await;
     assert!(
-        !out.status.success(),
-        "the tmux session backing a deleted session's terminal must be gone"
+        !terminal.exists().await,
+        "the terminal backing a deleted session must be gone"
     );
 
-    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
-        .await
-        .expect("second supervisor construction on the same state dir");
-    let client2 = connect_client(&sup2).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_on(&state)
+                .await
+                .expect("second supervisor construction on the same state dir")
+        })
+        .await;
+    let client2 = Arc::clone(&h.client);
     assert!(
         client2.list_sessions().await.unwrap().sessions.is_empty(),
         "the row must really be gone, not just absent from the original process's map"
@@ -5078,13 +5087,16 @@ async fn delete_works_on_a_terminal_less_session() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let sock = h.state.path().join("tmux.sock");
-    kill_tmux_server_and_wait(&sock).await;
+    end_all_terminals(h.state.path()).await;
 
-    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
-        .await
-        .expect("second supervisor construction after the tmux server died");
-    let client2 = connect_client(&sup2).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_on(&state)
+                .await
+                .expect("second supervisor construction after the tmux server died")
+        })
+        .await;
+    let client2 = Arc::clone(&h.client);
 
     client2
         .delete_session(&session.id)
@@ -5100,7 +5112,7 @@ async fn delete_works_on_a_terminal_less_session() {
 /// uses, but exercised on its own path (delete's handler, not stop's) and
 /// down to the same three-level chain — every discovered descendant
 /// (agent, its `sh` child, that child's own `sleep`) must actually be
-/// gone once delete returns, not merely the tmux session removed around
+/// gone once delete returns, not merely the terminal removed around
 /// them.
 #[farhelm_testtrace::test]
 async fn delete_kills_the_whole_process_tree() {
@@ -5355,27 +5367,21 @@ async fn wait_for_supervisor_connections_to_drain(sup: &Arc<Supervisor>) {
     }
 }
 
-/// Delete must tolerate a tmux session that disappeared out from under a
-/// LIVE `SessionEntry` — someone (or something) else killed it directly
-/// on the private socket, distinct from the restart-gap case
-/// (`delete_works_on_a_terminal_less_session`) where the whole tmux
-/// server, not just one session, failed to survive. `pane_process`'s
-/// tolerated-absence path (the same tmux diagnostics `has_session`/
-/// `kill_session` already treat as "not there") is what makes this
-/// succeed rather than fail-closed.
+/// Delete must tolerate a terminal that disappeared out from under a LIVE
+/// `SessionEntry` — someone (or something) else ended it directly, distinct
+/// from the restart-gap case (`delete_works_on_a_terminal_less_session`)
+/// where every terminal, not just this session's, failed to survive. On a
+/// new terminal the session's host is ended through its own protocol and
+/// Delete finds it gone; on an old one its tmux session is killed and
+/// `pane_process`'s tolerated-absence path (the same tmux diagnostics
+/// `has_session`/`kill_session` treat as "not there") is what lets it
+/// succeed rather than fail closed.
 #[farhelm_testtrace::test]
-async fn delete_after_externally_killed_tmux_session_succeeds() {
+async fn delete_after_its_terminal_was_ended_externally_succeeds() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let tmux_name = format!("fh-{}", session.id);
-    let sock = h.state.path().join("tmux.sock");
-    let killed = tmux_query(&sock, &["kill-session", "-t", &tmux_name]).await;
-    assert!(
-        killed.status.success(),
-        "test setup: kill-session must succeed, got: {}",
-        String::from_utf8_lossy(&killed.stderr)
-    );
+    end_agent_terminal(Some(&h.sup), h.state.path(), &session.id).await;
 
     // This process's own Supervisor still has a LIVE SessionEntry for
     // this session (entries are never demoted from Some to None within
@@ -5422,7 +5428,7 @@ async fn delete_after_externally_killed_tmux_session_succeeds() {
 /// name that never existed.
 #[farhelm_testtrace::test]
 async fn delete_after_renamed_tmux_session_fails_closed() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
@@ -5566,11 +5572,12 @@ async fn stop_kills_a_reparented_marked_daemon() {
 /// must fail if stop ever goes back to SKIPPING the sweep when the pane
 /// looks dead or absent, which is what the first cut of this code did.
 ///
-/// The pane is made dead by killing the agent process directly (not by
-/// calling stop first, which would already reap the daemon via the live-
-/// pane path and prove nothing about the dead-pane path specifically).
-/// `remain-on-exit` keeps the pane around to report `pane_dead`, exactly
-/// like `exited_agent_leaves_a_viewable_terminal` relies on elsewhere.
+/// The agent is made dead by killing its process directly (not by calling
+/// stop first, which would already reap the daemon via the live-agent path
+/// and prove nothing about the dead-agent path specifically). Its terminal
+/// stays to report the exit (a terminal host keeps its exited child's
+/// status, as `remain-on-exit` keeps a tmux pane), exactly like
+/// `exited_agent_leaves_a_viewable_terminal` relies on elsewhere.
 #[farhelm_testtrace::test]
 async fn stop_kills_a_reparented_daemon_with_no_live_pane_to_walk_from() {
     // A scope kill would reach the survivor even if the dead-pane sweep were
@@ -5797,26 +5804,15 @@ async fn a_scope_launched_stop_kills_through_the_cgroup_and_still_runs_the_sweep
     );
 
     // The tree-shape audit, asserted rather than merely reasoned about:
-    // `systemd-run --user --scope` must `exec` in place, so the pane's
+    // `systemd-run --user --scope` must `exec` in place, so the terminal's
     // process IS the agent, exactly as it is without the wrapper. Anything
-    // that forked instead would leave the pane pointing at an intermediary
-    // — and `pane_process` liveness, `pane_dead_status` exit codes, and the
-    // sweep's PPID closure all read that pid.
-    let pane_pid_out = tmux_query(
-        &h.state.path().join("tmux.sock"),
-        &[
-            "display-message",
-            "-p",
-            "-t",
-            &format!("fh-{}", session.id),
-            "#{pane_pid}",
-        ],
-    )
-    .await;
+    // that forked instead would leave the terminal's child an intermediary
+    // — and the terminal's liveness, its exit codes, and the sweep's PPID
+    // closure all read that pid.
     assert_eq!(
-        String::from_utf8_lossy(&pane_pid_out.stdout).trim(),
-        self_pid.to_string(),
-        "the scope wrapper must exec in place: the pane's process must still be the agent \
+        agent_pid(&h, &session.id).await,
+        self_pid,
+        "the scope wrapper must exec in place: the terminal's process must still be the agent \
          itself, with nothing spliced in between"
     );
 
@@ -5927,7 +5923,7 @@ async fn a_recorded_scope_survives_a_supervisor_restart_and_still_kills() {
         farhelm_bin().into(),
         // Built by hand for the scope seam below, so `suite_timeouts()`
         // rather than `harness_with_seams` — the stop this restarted
-        // supervisor runs still does real tmux work through the sweep.
+        // supervisor runs still does real terminal work through the sweep.
         suite_timeouts(),
         SupervisorSeams {
             scopes,
@@ -6238,25 +6234,12 @@ async fn a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit() {
     std::fs::write(&spec, br#"{"scope_waypoint_expected":true}"#)
         .expect("plant an unconsumed launch spec with this build's waypoint contract");
 
-    // Kill the agent outright so the pane is dead with no sentinel — the
-    // state a failed wrapper leaves, reached the only way a test can.
-    let sock = h.state.path().join("tmux.sock");
-    let pid_out = tmux_query(
-        &sock,
-        &[
-            "display-message",
-            "-p",
-            "-t",
-            &format!("fh-{}", session.id),
-            "#{pane_pid}",
-        ],
-    )
-    .await;
-    let pane_pid: u32 = String::from_utf8_lossy(&pid_out.stdout)
-        .trim()
-        .parse()
-        .expect("a live pane must report a pid");
-    // SAFETY: a real, currently-live pid this test just read from tmux.
+    // Kill the agent outright so its terminal holds an exited agent with no
+    // sentinel — the state a failed wrapper leaves, reached the only way a
+    // test can.
+    let pane_pid = agent_pid(&h, &session.id).await;
+    // SAFETY: a real, currently-live pid this test just read from the
+    // agent's terminal.
     unsafe {
         libc::kill(pane_pid as libc::pid_t, libc::SIGKILL);
     }
@@ -6387,15 +6370,7 @@ async fn an_unscoped_login_shell_startup_failure_classifies_as_error() {
         },
         "the quote must be durable, not only a live-pane diagnostic"
     );
-    let removed = tmux_query(
-        &h.state.path().join("tmux.sock"),
-        &["kill-session", "-t", &format!("=fh-{}", session.id)],
-    )
-    .await;
-    assert!(
-        removed.status.success(),
-        "remove this fixture's dead terminal"
-    );
+    end_agent_terminal(Some(&h.sup), h.state.path(), &session.id).await;
     assert_eq!(
         store.session(&session.id).await.unwrap().unwrap().outcome,
         LastOutcome::Error {
@@ -6452,20 +6427,8 @@ async fn stopping_during_login_shell_startup_keeps_the_stop_annotation() {
         spec.exists(),
         "fixture premise: the shell has not reached the shim"
     );
-    let live = tmux_query(
-        &h.state.path().join("tmux.sock"),
-        &[
-            "display-message",
-            "-p",
-            "-t",
-            &format!("fh-{}", session.id),
-            "#{pane_dead}",
-        ],
-    )
-    .await;
-    assert_eq!(
-        String::from_utf8_lossy(&live.stdout).trim(),
-        "0",
+    assert!(
+        !agent_has_exited(&h, &session.id).await,
         "fixture premise: startup is still live"
     );
     h.client.stop_session(&session.id).await.unwrap();
@@ -6693,6 +6656,18 @@ async fn delete_fails_closed_when_a_launch_artifact_cannot_be_removed() {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => panic!("remove the fixture's completed wrapper waypoint: {error}"),
     }
+    // A new terminal's launch record (`<id>.0.host`) sits beside the spec,
+    // and the same artifact removal unlinks it, in the directory's own
+    // order. Removed here so that the spec is the one blocked file and the
+    // exact-path assertion below pins the spec's fail-closed unlink on every
+    // run. The record is not needed for this Delete: it names the host the
+    // agent's runtime holds, which Delete ends through that runtime.
+    let host_record = launch_dir.join(format!("{}.0.host", session.id));
+    match std::fs::remove_file(&host_record) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("remove the session's host launch record: {error}"),
+    }
     let entries: Vec<_> = std::fs::read_dir(&launch_dir)
         .unwrap()
         .map(|entry| entry.unwrap().path())
@@ -6729,8 +6704,8 @@ async fn delete_fails_closed_when_a_launch_artifact_cannot_be_removed() {
         "an unremovable artifact is a server-side sweep problem, not a caller precondition"
     );
     // `Internal` alone is not enough: the teardown steps before the artifact
-    // sweep (process sweeping, tmux teardown, scope enumeration) report the
-    // same kind and would leave the same exited row behind, so an unrelated
+    // sweep (process sweeping, ending the terminal, scope enumeration) report
+    // the same kind and would leave the same exited row behind, so an unrelated
     // failure could impersonate this one. The message names the removal and
     // the exact path, and the file it could not remove is still there.
     assert!(
@@ -6758,17 +6733,22 @@ async fn delete_fails_closed_when_a_launch_artifact_cannot_be_removed() {
         "the live supervisor must still list a session whose delete failed closed"
     );
 
-    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
-        .await
-        .expect("second supervisor construction on the same state dir");
-    let client2 = connect_client(&sup2).await;
+    let h = h
+        .restart_supervisor(|state| async move {
+            supervisor_on(&state)
+                .await
+                .expect("second supervisor construction on the same state dir")
+        })
+        .await;
+    let client2 = Arc::clone(&h.client);
     // Delete's process-tree sweep ran to completion (it happens before
     // the artifact removal that actually failed — see the handler's
     // ordering), so the agent is already dead by the time the row is
     // still-listed here — but it must be a genuinely EXITED row, not
     // live, even though the delete itself failed closed. Status is
-    // computed fresh from tmux at list time, so this polls rather than a
-    // single read (same reasoning as `wait_for_non_live_status`'s docs).
+    // computed from the terminal at list time (and a reloaded host row is
+    // provisional until read), so this polls rather than a single read
+    // (same reasoning as `wait_for_non_live_status`'s docs).
     let found = wait_for_non_live_status(&client2, &session.id, 15).await;
     assert_eq!(found.id, session.id);
     assert_eq!(found.title, session.title);

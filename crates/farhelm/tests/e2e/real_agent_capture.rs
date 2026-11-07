@@ -4,6 +4,12 @@
 //! tests establish that the vendor still runs the installed hook and reports
 //! changes such as `/clear` or `/new`. They require vendor authentication and
 //! network access, and are never part of ordinary CI.
+//!
+//! Still on old terminals: they drive and read the real agent through its
+//! tmux pane (`send-keys`, `capture-pane`). Moving them to terminal hosts,
+//! where a shipped agent now runs, means reading and typing through a viewer
+//! instead, and needs a run with real vendor logins to validate; it is a
+//! known follow-up.
 
 use crate::harness::*;
 use crate::hook_identity::ServeTask;
@@ -75,7 +81,7 @@ async fn pane_within(
 /// path into the user's real agent config. That is the vendor's own write,
 /// and the same class of consequence these tests already embrace by
 /// observing the real HOME.
-async fn wait_for_agent_ready(
+async fn wait_for_tmux_agent_ready(
     client: &SupervisorClient,
     sock: &std::path::Path,
     session_id: &str,
@@ -106,7 +112,7 @@ async fn wait_for_agent_ready(
                 } else {
                     b"\r"
                 };
-            client.send_input(chan, answer.to_vec()).await;
+            client.send_keys(chan, answer.to_vec()).await;
             // sleep-ok: pace dialog-answer retries; the next rendered marker decides readiness.
             tokio::time::sleep(Duration::from_secs(2)).await;
             continue;
@@ -183,7 +189,7 @@ async fn serving_supervisor(
         state,
         farhelm_bin().into(),
         suite_timeouts(),
-        SupervisorSeams::default(),
+        SupervisorSeams::tmux_terminals(),
     )
     .await
     .expect("supervisor");
@@ -435,7 +441,7 @@ async fn real_claude_session_reports_its_identity_across_clear() {
     // keystrokes. These tests read the PANE for their assertions, so the
     // stream's only job is to keep the attachment alive.
     let drain = tokio::spawn(async move { while rx.recv().await.is_some() {} });
-    wait_for_agent_ready(
+    wait_for_tmux_agent_ready(
         &client,
         &state.path().join("tmux.sock"),
         &session.id,
@@ -485,7 +491,7 @@ async fn real_claude_session_reports_its_identity_across_clear() {
             tokio::time::Instant::now() < deadline,
             "the composer never showed the typed /clear; rendered pane:\n{text}"
         );
-        client.send_input(chan, b"/clear".to_vec()).await;
+        client.send_keys(chan, b"/clear".to_vec()).await;
         // sleep-ok: pace command retries while polling a new rendered occurrence of /clear.
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
@@ -499,7 +505,7 @@ async fn real_claude_session_reports_its_identity_across_clear() {
     // an empty composer are inert, and the wait below is the final word.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
     'entered: loop {
-        client.send_input(chan, b"\r".to_vec()).await;
+        client.send_keys(chan, b"\r".to_vec()).await;
         for _ in 0..10 {
             // sleep-ok: sample identity between Enter retries; the outer loop checks the deadline.
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -633,7 +639,7 @@ async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation()
         .expect("attach");
     // Drained for the same reason as in the `/clear` audit above.
     let drain = tokio::spawn(async move { while rx.recv().await.is_some() {} });
-    wait_for_agent_ready(
+    wait_for_tmux_agent_ready(
         &client,
         &sock,
         &session.id,
@@ -646,7 +652,7 @@ async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation()
         wait_for_reported_identity(&sup, &client, state.path(), &session.id, None, 120).await;
 
     let prompt = "Use your Bash tool to run exactly this command and nothing else: sh ./child.sh";
-    client.send_input(chan, prompt.as_bytes().to_vec()).await;
+    client.send_keys(chan, prompt.as_bytes().to_vec()).await;
     let log_path = state
         .path()
         .join("hook-log")
@@ -673,7 +679,7 @@ async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation()
         // Enter is re-pressed only while the prompt still sits in the
         // composer, as in `submit_prompt`.
         if pane.contains(prompt) {
-            client.send_input(chan, b"\r".to_vec()).await;
+            client.send_keys(chan, b"\r".to_vec()).await;
         }
         // sleep-ok: pace conditional Enter retries while polling the hook log in this manual audit.
         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -755,7 +761,7 @@ async fn real_codex_session_reports_its_identity_across_new() {
     let drain = tokio::spawn(async move { while rx.recv().await.is_some() {} });
     // No dialog markers: trust is seeded in the synthetic config, so the
     // modal must not appear at all.
-    wait_for_agent_ready(
+    wait_for_tmux_agent_ready(
         &client,
         &state.path().join("tmux.sock"),
         &session.id,
@@ -838,16 +844,16 @@ async fn real_codex_session_reports_its_identity_across_new() {
             // This vendor prompt can cover the composer after the reply.
             // Dismiss it without changing the model or saving preferences;
             // the next pane observation must still prove `/new` is ready.
-            client.send_input(chan, b"\x1b".to_vec()).await;
+            client.send_keys(chan, b"\x1b".to_vec()).await;
         } else if news(&text) <= baseline {
-            client.send_input(chan, b"/new".to_vec()).await;
+            client.send_keys(chan, b"/new".to_vec()).await;
         }
         // sleep-ok: poll the command popup and pace guarded retyping between deadline checks.
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
-        client.send_input(chan, b"\r".to_vec()).await;
+        client.send_keys(chan, b"\r".to_vec()).await;
         // sleep-ok: pace Enter retries before checking the old conversation's resume marker.
         tokio::time::sleep(Duration::from_secs(2)).await;
         let text = pane_within(&sock, &tmux_name, deadline).await;
@@ -1135,7 +1141,7 @@ async fn submit_prompt(
     let prompt = format!("Reply with the single word {word}.");
     let tmux_name = format!("fh-{session_id}");
 
-    client.send_input(chan, prompt.as_bytes().to_vec()).await;
+    client.send_keys(chan, prompt.as_bytes().to_vec()).await;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
         let text = pane_within(sock, &tmux_name, deadline).await;
@@ -1168,7 +1174,7 @@ async fn submit_prompt(
             "Enter never produced the {marker:?} answer; rendered pane:\n{text}"
         );
         if text.contains(&prompt) {
-            client.send_input(chan, b"\r".to_vec()).await;
+            client.send_keys(chan, b"\r".to_vec()).await;
         }
         // sleep-ok: pace conditional Enter retries and poll the answer marker in this manual audit.
         tokio::time::sleep(Duration::from_secs(3)).await;

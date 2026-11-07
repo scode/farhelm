@@ -73,7 +73,12 @@ pub(crate) async fn attach_terminal(
     secret: &str,
     session: &str,
 ) -> tokio::net::TcpStream {
-    hold_gui_socket(helm, secret, &format!("/api/sessions/{session}/term")).await
+    hold_gui_socket(
+        helm,
+        secret,
+        &format!("/api/sessions/{session}/term?grid=1"),
+    )
+    .await
 }
 
 /// Hold one authenticated GUI channel without consuming its frames. Terminal channels
@@ -246,7 +251,7 @@ async fn await_cli_approval(
 #[farhelm_testtrace::test]
 async fn host_add_cli_reports_accepted_edited_destination_and_declined() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let supervisor = supervisor_process_tmux().await;
+    let supervisor = supervisor_process().await;
     let helm = helm_process(supervisor.state.path(), None).await;
     let secret = device_secret(supervisor.state.path(), &helm.base).await;
     let client = client_with_secret(&secret);
@@ -347,7 +352,7 @@ async fn host_add_cli_reports_accepted_edited_destination_and_declined() {
 #[farhelm_testtrace::test]
 async fn browser_link_cli_waits_without_fencing_and_reports_each_answer() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let supervisor = supervisor_process_tmux().await;
+    let supervisor = supervisor_process().await;
     let helm = helm_process(supervisor.state.path(), None).await;
     let secret = device_secret(supervisor.state.path(), &helm.base).await;
     let client = client_with_secret(&secret);
@@ -711,7 +716,7 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
     // harness slot, held for the whole test.
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
 
-    let supervisor = supervisor_process_tmux().await;
+    let supervisor = supervisor_process().await;
     let helm = helm_process(supervisor.state.path(), None).await;
     let secret = device_secret(supervisor.state.path(), &helm.base).await;
     let client = client_with_secret(&secret);
@@ -862,7 +867,7 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
 async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
 
-    let supervisor = supervisor_process_tmux().await;
+    let supervisor = supervisor_process().await;
     let helm = helm_process(supervisor.state.path(), None).await;
     let secret = device_secret(supervisor.state.path(), &helm.base).await;
     let client = client_with_secret(&secret);
@@ -949,11 +954,7 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
     // not a readiness oracle. The shared post-exec marker proves the fake
     // agent ran before Stop; otherwise stopping the wrapper legitimately
     // records "never started" rather than the exit this test must exercise.
-    wait_for_agent_ready(
-        &supervisor.state.path().join("tmux.sock"),
-        &bare_session_id(&target_id),
-    )
-    .await;
+    wait_for_agent_ready_at(supervisor.state.path(), &bare_session_id(&target_id)).await;
 
     // `stop`, with an explicit `--session` naming the
     // TARGET — see the module docs for why acting on a different session
@@ -1053,7 +1054,7 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
 async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
 
-    let supervisor = supervisor_process_tmux().await;
+    let supervisor = supervisor_process().await;
     let helm = helm_process(supervisor.state.path(), None).await;
     let secret = device_secret(supervisor.state.path(), &helm.base).await;
     let client = client_with_secret(&secret);
@@ -1331,7 +1332,7 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
 async fn an_authenticated_agent_clone_starts_a_structured_successor() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let fixture = fake_harness();
-    let supervisor = supervisor_process_tmux_with_env([
+    let supervisor = supervisor_process_with_env([
         ("HOME", fixture.login_home_with_fake_path()),
         ("SHELL", fixture.bash_shell()),
     ])
@@ -1483,7 +1484,7 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
 #[farhelm_testtrace::test]
 async fn keyed_agent_create_and_clone_need_fresh_approval_after_delete() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let supervisor = supervisor_process_tmux().await;
+    let supervisor = supervisor_process().await;
     let helm = helm_process(supervisor.state.path(), None).await;
     let secret = device_secret(supervisor.state.path(), &helm.base).await;
     let client = client_with_secret(&secret);
@@ -1525,8 +1526,7 @@ async fn keyed_agent_create_and_clone_need_fresh_approval_after_delete() {
     .await;
     assert!(status.is_success(), "create the asking session: {body}");
     let asker: SessionInfo = serde_json::from_str(&body).expect("asking session JSON");
-    let sock = supervisor.state.path().join("tmux.sock");
-    wait_for_agent_ready(&sock, &bare_session_id(&asker.id)).await;
+    wait_for_agent_ready_at(supervisor.state.path(), &bare_session_id(&asker.id)).await;
     let _terminal = attach_terminal(&helm, &secret, &asker.id).await;
     let token = session_token(supervisor.state.path(), &asker.id).await;
     let socket = supervisor.state.path().join("supervisor.sock");
@@ -1623,7 +1623,7 @@ async fn keyed_agent_create_and_clone_need_fresh_approval_after_delete() {
                 Some(&id),
                 "the deleted identity must not return"
             );
-            wait_for_agent_ready(&sock, &bare_session_id(&id)).await;
+            wait_for_agent_ready_at(supervisor.state.path(), &bare_session_id(&id)).await;
             let created = store
                 .session(&bare_session_id(&id))
                 .await

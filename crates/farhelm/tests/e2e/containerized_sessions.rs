@@ -731,7 +731,11 @@ read -r finish
             .unwrap();
         let name = format!("farhelm-{}", session.id);
         let _cleanup = ContainerCleanup(name.clone());
-        let (channel, mut stream) = h.client.attach(&session.id, 100, 30).await.unwrap();
+        let (channel, mut stream) = h
+            .client
+            .attach_at_boundary(&session.id, 100, 30)
+            .await
+            .unwrap();
         let mut seen = Vec::new();
         wait_for(&mut stream, &mut seen, "CONTAINER READY", 60).await;
         assert_eq!(state(&name), "running");
@@ -805,7 +809,7 @@ read -r finish
         assert!(h.client.restart_session(&session.id, true).await.is_err());
         if !scoped {
             // The dead-agent path still owns a running keeper that Stop must end.
-            h.client.send_input(channel, b"finish\r".to_vec()).await;
+            h.client.send_keys(channel, b"finish\r".to_vec()).await;
             wait_for_exit(&h, &session.id).await;
             assert_eq!(
                 state(&name),
@@ -980,7 +984,7 @@ async fn podman_tabs_and_downloads_share_the_existing_container() {
         )
         .await;
         if !scoped {
-            h.client.send_input(agent, b"finish\r".to_vec()).await;
+            h.client.send_keys(agent, b"finish\r".to_vec()).await;
             wait_for_exit(&h, &session.id).await;
             run_in_shell(
                 &h.client,

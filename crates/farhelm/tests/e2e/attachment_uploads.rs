@@ -842,9 +842,12 @@ async fn deleting_a_session_removes_its_attachments_directory() {
 /// A pane-owner refusal is a read-only Delete preflight. It must leave an
 /// upload usable because the session and its attachment state remain present
 /// for a later retry.
+///
+/// Old terminals: the refusal is tmux's pane ownership, made by renaming the
+/// session's tmux session underneath the supervisor.
 #[farhelm_testtrace::test]
 async fn a_refused_delete_preserves_an_in_flight_upload() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
     let mut peer = RawPeer::connect(&h.sup).await;
     let started = peer.begin(1, &session.id, 1, "kept.txt", 4).await;
@@ -1221,7 +1224,7 @@ async fn a_finished_upload_channel_can_be_attached_as_a_terminal() {
         terminal: TerminalSelector::default(),
         lease: "after-upload".to_string(),
         if_unowned: false,
-        grid: false,
+        grid: true,
     };
     peer.control(&attach).await;
     let refused = peer.next_outcome(20).await;
@@ -1303,10 +1306,7 @@ async fn a_finished_upload_channel_can_be_attached_as_a_terminal() {
 async fn startup_reconciliation_sweeps_staging_and_keeps_published_attachments() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let sup = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
-        .await
-        .expect("supervisor");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
+    let sup = supervisor_on(state.path()).await.expect("supervisor");
 
     // A session the supervisor knows nothing about: its whole directory
     // is debris a delete never finished removing, and reconciliation must
@@ -1449,10 +1449,9 @@ async fn a_relative_state_directory_still_reports_an_absolute_path() {
     // A relative path to the same directory, which is what
     // `--state-dir ./state` produces.
     let relative = pathdiff_to_current(state.path());
-    let sup = Supervisor::new_with_exe(&relative, farhelm_bin().into())
+    let sup = supervisor_on(&relative)
         .await
         .expect("supervisor on a relative state dir");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let client = connect_client(&sup).await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = client
@@ -1628,6 +1627,10 @@ async fn acks_are_cumulative_and_never_precede_the_write_they_claim() {
 /// headroom on it. The failure mode if it is ever exceeded is a clean,
 /// legible one — the ack simply reports as arriving at the end of the
 /// backlog — rather than a silent weakening.
+///
+/// Old terminals: the measurement is of a byte stream's queued backlog, gated
+/// by one raw input byte; on a grid stream the flood never reached the peer in
+/// this shape, and porting the measurement is a follow-up.
 #[farhelm_testtrace::test]
 async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
     // How long the reader stays silent while the supervisor produces each
@@ -1635,7 +1638,7 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
     // math: it covers a sub-millisecond local round trip.
     const SETTLE: Duration = Duration::from_secs(5);
 
-    let h = harness().await;
+    let h = harness_tmux().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
@@ -1654,8 +1657,7 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
     // source from which replay is later derived, so polling it avoids an
     // attachment's replay/live cutover rather than trying to reconstruct text
     // that cutover may split with mode sequences.
-    let tmux_sock = h.state.path().join("tmux.sock");
-    wait_for_agent_ready(&tmux_sock, &session.id).await;
+    wait_for_agent_ready(&h, &session.id).await;
 
     let mut peer = RawPeer::connect_with_buffer(&h.sup, 1024).await;
 
@@ -1672,11 +1674,12 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
         terminal: TerminalSelector::default(),
         lease: "flooding-lease".to_string(),
         if_unowned: false,
-        grid: false,
+        grid: true,
     })
     .await;
     let replay_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     let mut replay_complete = false;
+    let mut attached_grid = false;
     while !replay_complete {
         let remaining = replay_deadline.saturating_duration_since(tokio::time::Instant::now());
         let frame = tokio::time::timeout(remaining, peer.reader.read_frame())
@@ -1687,6 +1690,9 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
         match frame.kind {
             FrameKind::Data => {}
             FrameKind::Control => match parse_control(&frame).expect("parse control") {
+                ControlMsg::Attached { stream, .. } => {
+                    attached_grid = stream == farhelm_proto::StreamKind::Grid;
+                }
                 ControlMsg::ReplayComplete { channel: 1 } => replay_complete = true,
                 ControlMsg::Error { kind, message, .. } => {
                     panic!("measurement attach failed ({kind:?}): {message}")
@@ -1705,8 +1711,19 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
     // its readiness proof and this peer's ReplayComplete makes the following
     // marker proof about live output from this attachment, rather than about
     // the tail of create-time replay.
+    // On a grid stream the byte goes as a `text` input message; the
+    // fixture reads the same one byte either way.
+    let gate = if attached_grid {
+        farhelm_proto::grid::GridInput::Text {
+            data: "g".to_string(),
+        }
+        .encode()
+        .expect("a text input message encodes")
+    } else {
+        vec![b'g']
+    };
     peer.writer
-        .write_frame(&Frame::data(1, vec![b'g']))
+        .write_frame(&Frame::data(1, gate))
         .await
         .expect("open the flood gate");
     let flood_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
@@ -2745,7 +2762,7 @@ async fn a_non_utf8_state_directory_is_refused_before_a_supervisor_starts() {
         .create(&state)
         .expect("non-UTF-8 state dir");
 
-    let refused = match Supervisor::new_with_exe(&state, farhelm_bin().into()).await {
+    let refused = match supervisor_on(&state).await {
         Err(error) => format!("{error:#}"),
         Ok(_) => panic!("a non-UTF-8 state dir must refuse to start a supervisor"),
     };

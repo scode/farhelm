@@ -5,13 +5,12 @@
 //! is in `host_relaunches.rs`.
 //!
 //! Each test here wants a host child of its own choosing rather than an
-//! agent's launch chain, so it creates an ordinary session and moves its
-//! agent into a host it started itself
-//! (`Supervisor::install_host_agent_for_test`, which adopts the host,
-//! records the row as a host row and kills the created tmux session); a
-//! create that starts its agent in a host under the supervisor's internal
-//! switch is tested in `host_creates.rs`, which also uses the helpers
-//! shared from here. The
+//! agent's launch chain, so it creates an ordinary session (in a host, as
+//! every harness's sessions are) and gives its agent a host it started
+//! itself (`Supervisor::install_host_agent_for_test`, which adopts the
+//! host, records the row as a host row naming it and shuts the created
+//! host down); what a create puts in its host is tested in
+//! `host_creates.rs`, which also uses the helpers shared from here. The
 //! host is started from the real `farhelm` binary by the supervisor's own
 //! spawn (`farhelm_supervisor::hosts::spawn_host`), which runs the binary
 //! first, so the host's own fork never happens inside this test process. The
@@ -343,11 +342,10 @@ async fn stop_kills_a_host_agents_tree_and_leaves_the_host_showing_its_screen() 
 /// begins, whether the old processes still run. Spec: with the host's child
 /// and an unmarked grandchild that ignores SIGHUP running (checked first), a
 /// consented Restart (under a supervisor that starts hosts through a wrapper
-/// around the built `farhelm`, the row's kind deciding, not the create
-/// switch) succeeds; the wrapper recorded, when the new host's start began,
-/// both processes gone; the session's agent terminal is a new host at
-/// another socket showing the resumed agent's ready marker; the old host's
-/// process is gone; the row is running.
+/// around the built `farhelm`) succeeds; the wrapper recorded, when the new
+/// host's start began, both processes gone; the session's agent terminal is
+/// a new host at another socket showing the resumed agent's ready marker;
+/// the old host's process is gone; the row is running.
 #[farhelm_testtrace::test]
 async fn restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts() {
     let fixture = farhelm_teststate::tempdir().expect("fixture directory");
@@ -385,9 +383,12 @@ async fn restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts() {
         24,
     )
     .await;
-    wait_for_agent_ready(&h.state.path().join("tmux.sock"), &session.id).await;
+    wait_for_agent_ready(&h, &session.id).await;
     let installed = install_host(&h, &session.id, &hangup_immune_tree_script(work.path())).await;
     let tree = hangup_immune_tree(work.path()).await;
+    // The create's own host started through the same wrapper and recorded a
+    // line of its own; only the Restart's start is under test.
+    std::fs::remove_file(&at_start).expect("the create's host start recorded its line");
 
     h.client
         .restart_session(&session.id, true)
@@ -708,7 +709,7 @@ async fn delete_ends_a_stopped_host_agent_with_the_verified_signal() {
 /// not kill one still running there, which the recorded terminal's probe
 /// alone cannot see; and only the session's own records may lead Delete to
 /// a host, so another session's host in the same state directory is never
-/// touched. Spec: with the session's tmux agent stopped, a host tagged and
+/// touched. Spec: with the session's own agent stopped, a host tagged and
 /// recorded as the session's agent of generation 3 running a child and an
 /// unmarked grandchild that ignores SIGHUP (premises checked), and a host
 /// tagged and recorded as another session's agent: a delete guarded on the
@@ -776,7 +777,7 @@ async fn delete_ends_another_generations_recorded_host_and_no_other_sessions() {
 /// be told (a guarded Delete must not kill what nobody agreed to), and it is
 /// still the session's by its launch record, so an unconditional Delete
 /// must end it, by the process its connection named, or keep the session.
-/// Spec: with the session's tmux agent stopped and a host tagged and
+/// Spec: with the session's own agent stopped and a host tagged and
 /// recorded as the session's agent of generation 2, stopped with SIGSTOP
 /// (premise checked), a delete guarded on the agent having ended is refused
 /// because the recorded host cannot be read, and the host is still there,

@@ -1,6 +1,14 @@
 //! Terminal tabs: the launch contract, refusals, close's reap,
 //! rediscovery from a window marker, and the per-terminal properties
 //! that only become observable once a session has a second terminal.
+//!
+//! Most tests here run on new terminals, where a tab is a terminal host of
+//! its own. Those whose subject is a tab as a tmux window stay on old
+//! terminals and say so in their docs (`Old terminals:`): window markers
+//! and rediscovery, the tmux session sink and control clients, presizing a
+//! window, tmux output cleanup, byte-stream fidelity, and a few that read
+//! tmux windows and await a port. Host tabs' own mechanics are tested in
+//! `host_tabs.rs`.
 
 use crate::harness::*;
 
@@ -34,6 +42,18 @@ async fn harness_with_shell(shell: &str) -> Harness {
         SupervisorSeams {
             launch_shell: Some(shell.to_string()),
             ..SupervisorSeams::default()
+        },
+    )
+    .await
+}
+
+/// [`harness_with_shell`] for old terminals (see `harness_tmux`).
+async fn harness_with_shell_tmux(shell: &str) -> Harness {
+    harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            launch_shell: Some(shell.to_string()),
+            ..SupervisorSeams::tmux_terminals()
         },
     )
     .await
@@ -82,6 +102,9 @@ impl Drop for DeniedDirectory {
 /// tmux's HOME fallback must not turn an unusable session folder into a successful
 /// tab. Hold open's settle until the helper is dead, then require its directory
 /// error to reach the user and its unpublished tab to be cleaned up.
+///
+/// Old terminals: it holds the open at the tmux tab's settle seam; porting it
+/// to a host tab's open is a follow-up.
 #[farhelm_testtrace::test]
 async fn a_tab_refuses_a_directory_it_cannot_enter() {
     // SAFETY: geteuid has no arguments and cannot fail. Root bypasses this fixture.
@@ -98,7 +121,7 @@ async fn a_tab_refuses_a_directory_it_cannot_enter() {
                 tab_settle_gate: Some(settle_gate),
                 ..FaultHooks::default()
             },
-            ..SupervisorSeams::default()
+            ..SupervisorSeams::tmux_terminals()
         },
     )
     .await;
@@ -332,7 +355,7 @@ pub(crate) async fn wait_for_shell(
     let mut rounds = 0_u32;
     loop {
         client
-            .send_input(channel, command.clone().into_bytes())
+            .send_keys(channel, command.clone().into_bytes())
             .await;
         rounds += 1;
         let waited =
@@ -367,7 +390,7 @@ pub(crate) async fn run_in_shell(
     secs: u64,
 ) {
     client
-        .send_input(channel, format!("{command}\r").into_bytes())
+        .send_keys(channel, format!("{command}\r").into_bytes())
         .await;
     wait_for(rx, seen, marker, secs).await;
 }
@@ -401,6 +424,16 @@ pub(crate) async fn window_rows(h: &Harness) -> Vec<String> {
         .lines()
         .map(str::to_string)
         .collect()
+}
+
+/// The pid of the shell tab `tab_id` of session `session_id` runs, read
+/// without a listing: its terminal host's child for a tab in a host, its
+/// tmux pane's process for an old tab.
+pub(crate) async fn tab_shell_pid(h: &Harness, session_id: &str, tab_id: &str) -> u32 {
+    if let Some(host) = h.sup.tab_host_for_test(session_id, tab_id).await {
+        return host.status().child_pid;
+    }
+    pane_pid_of(h, &tab_pane(h, session_id, tab_id).await).await
 }
 
 /// The tmux pane id backing one tab, read from tmux's own window markers.
@@ -647,7 +680,7 @@ async fn opening_a_tab_after_the_working_directory_vanished_names_it() {
         "a refused open must leave no tab behind"
     );
     // The session itself is untouched: its agent is still answering.
-    h.client.send_input(_chan, b"still-here\r".to_vec()).await;
+    h.client.send_keys(_chan, b"still-here\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "still-here", 15).await;
 }
 
@@ -660,9 +693,11 @@ async fn opening_a_tab_after_the_working_directory_vanished_names_it() {
 /// SPEC.md already puts re-adding tabs after the user's own restart. The
 /// refusal has to SAY that, because "no such terminal" alone leaves the
 /// user with no next step.
+///
+/// Old terminals: a session whose tmux session is gone.
 #[farhelm_testtrace::test]
 async fn opening_a_tab_without_a_tmux_session_says_to_restart_first() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
@@ -719,6 +754,9 @@ async fn opening_a_tab_without_a_tmux_session_says_to_restart_first() {
 /// the settle allowed to look. The bounded settle's own timing is left
 /// entirely alone — widening it would have hidden the race rather than
 /// removed it, and is production behavior besides.
+///
+/// Old terminals: it reads the dead tab pane from tmux; host tabs are covered
+/// by host_tabs' tab shell dead at open.
 #[farhelm_testtrace::test]
 async fn a_tab_whose_shell_is_dead_by_reply_time_is_refused_with_its_last_words() {
     let dying = farhelm_teststate::tempdir().unwrap();
@@ -740,7 +778,7 @@ async fn a_tab_whose_shell_is_dead_by_reply_time_is_refused_with_its_last_words(
                 tab_settle_gate: Some(settle_gate),
                 ..FaultHooks::default()
             },
-            ..SupervisorSeams::default()
+            ..SupervisorSeams::tmux_terminals()
         },
     )
     .await;
@@ -835,7 +873,7 @@ async fn closing_a_tab_returns_well_inside_the_sigterm_grace() {
         .expect("attach the tab");
     let mut seen = initial_replay;
     wait_for_shell(&h.client, chan, &mut rx, &mut seen, "T").await;
-    let pane_pid = pane_pid_of(&h, &tab_pane(&h, &session.id, &tab.id).await).await;
+    let pane_pid = tab_shell_pid(&h, &session.id, &tab.id).await;
     let _pane_cleanup = PidKillGuard::arm(pane_pid);
 
     // The fixture premise, asserted where the kernel can be asked: the
@@ -960,7 +998,7 @@ async fn closing_a_tab_kills_its_shell_and_daemonized_child_and_nothing_else() {
     .await;
     let daemon_pid = wait_for_pid_file(&doomed_pid_file, 10).await;
     let _daemon_cleanup = PidKillGuard::arm(daemon_pid);
-    let doomed_pane_pid = pane_pid_of(&h, &tab_pane(&h, &session.id, &doomed.id).await).await;
+    let doomed_pane_pid = tab_shell_pid(&h, &session.id, &doomed.id).await;
 
     h.client
         .close_tab(&session.id, &doomed.id)
@@ -987,7 +1025,7 @@ async fn closing_a_tab_kills_its_shell_and_daemonized_child_and_nothing_else() {
     )
     .await;
     h.client
-        .send_input(agent_chan, b"agent-untouched\r".to_vec())
+        .send_keys(agent_chan, b"agent-untouched\r".to_vec())
         .await;
     wait_for(&mut agent_rx, &mut agent_seen, "agent-untouched", 15).await;
 }
@@ -999,6 +1037,8 @@ async fn closing_a_tab_kills_its_shell_and_daemonized_child_and_nothing_else() {
 /// tab is missing. The first request must therefore send `Detached` before it
 /// returns the pending-cleanup error, and the removed tab must stay absent
 /// while the runtime-owned barrier completes.
+///
+/// Old terminals: the tmux forwarder's pending output cleanup.
 #[farhelm_testtrace::test]
 async fn close_notifies_and_removes_a_tab_while_output_cleanup_is_pending() {
     let (cleanup_gate, cleanup_entered, cleanup_release) = notifying_gate();
@@ -1010,7 +1050,7 @@ async fn close_notifies_and_removes_a_tab_while_output_cleanup_is_pending() {
                 forwarder_cleanup_gate: Some(cleanup_gate),
                 ..FaultHooks::default()
             },
-            ..SupervisorSeams::default()
+            ..SupervisorSeams::tmux_terminals()
         },
     )
     .await;
@@ -1156,6 +1196,8 @@ async fn closing_a_tab_kills_an_environment_scrubbed_double_fork_through_its_sco
 /// `SessionInfo::tabs` promises beyond identity — and a rediscovery that
 /// rebuilt the list from a hash map would pass an identity-only assertion
 /// while shuffling the user's tab strip on every poll.
+///
+/// Old terminals: tabs found again from tmux window markers.
 #[farhelm_testtrace::test]
 async fn tabs_are_rediscovered_across_a_supervisor_restart_and_unmarked_windows_are_ignored() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
@@ -1163,9 +1205,7 @@ async fn tabs_are_rediscovered_across_a_supervisor_restart_and_unmarked_windows_
     let work = farhelm_teststate::tempdir().expect("workdir");
     let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
 
-    let sup = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
-        .await
-        .expect("supervisor");
+    let sup = tmux_supervisor_on(state.path()).await.expect("supervisor");
     let client = connect_client(&sup).await;
     let session = client
         .create_session(
@@ -1219,10 +1259,9 @@ async fn tabs_are_rediscovered_across_a_supervisor_restart_and_unmarked_windows_
     // This second supervisor is the one that attaches a rediscovered tab
     // below, so — unlike the first supervisor above, which only lists and
     // never attaches — it needs the suite's loaded-CI tmux floors.
-    let sup =
-        Supervisor::new_with_exe_and_timeouts(state.path(), farhelm_bin().into(), suite_timeouts())
-            .await
-            .expect("second supervisor");
+    let sup = suite_supervisor_with_timeouts(state.path(), suite_timeouts())
+        .await
+        .expect("second supervisor");
     let client = connect_client(&sup).await;
 
     assert_eq!(
@@ -1465,6 +1504,8 @@ async fn restarting_the_agent_leaves_a_tab_attached_running_and_unswept() {
 /// must take the normal rollback path: the viewer hears why it detached, the
 /// row returns with its stopped outcome, and it is not stranded as an unknown
 /// launch until the supervisor itself restarts.
+///
+/// Old terminals: the tmux forwarder's pending output cleanup.
 #[farhelm_testtrace::test]
 async fn restart_restores_and_notifies_while_output_cleanup_is_pending() {
     let (cleanup_gate, cleanup_entered, cleanup_release) = notifying_gate();
@@ -1475,7 +1516,7 @@ async fn restart_restores_and_notifies_while_output_cleanup_is_pending() {
                 forwarder_cleanup_gate: Some(cleanup_gate),
                 ..FaultHooks::default()
             },
-            ..SupervisorSeams::default()
+            ..SupervisorSeams::tmux_terminals()
         },
     )
     .await;
@@ -1550,7 +1591,7 @@ async fn deleting_a_session_takes_its_tabs_and_their_daemonized_descendants() {
     .await;
     let tab_daemon = wait_for_pid_file(&pid_file, 10).await;
     let _tab_daemon_cleanup = PidKillGuard::arm(tab_daemon);
-    let tab_pane_pid = pane_pid_of(&h, &tab_pane(&h, &session.id, &tab.id).await).await;
+    let tab_pane_pid = tab_shell_pid(&h, &session.id, &tab.id).await;
 
     h.client.delete_session(&session.id).await.expect("delete");
 
@@ -1610,7 +1651,10 @@ async fn window_geometry(h: &Harness, pane: &str) -> String {
 /// output distinguishes a dead server from a missing window and from a pane
 /// that exited while its window marker remained.
 async fn tmux_state_after_attach_failure(h: &Harness) -> String {
-    h._tmux.diagnostic_text()
+    h._tmux
+        .as_ref()
+        .expect("a tmux tab test runs on a harness of old terminals")
+        .diagnostic_text()
 }
 
 /// Every terminal-fidelity promise SPEC.md makes, asserted once for the
@@ -1636,9 +1680,11 @@ async fn tmux_state_after_attach_failure(h: &Harness) -> String {
 /// scoping are the two conformance properties that are only meaningful
 /// BETWEEN terminals rather than within one, and they have tests of their
 /// own for that reason.
+///
+/// Old terminals: byte-stream fidelity (invalid UTF-8 kept), which a grid stream has no bytes for.
 #[farhelm_testtrace::test]
 async fn terminal_conformance_holds_for_the_agent_and_for_a_tab() {
-    let h = harness_with_shell("/bin/sh").await;
+    let h = harness_with_shell_tmux("/bin/sh").await;
     let (session, _work) = shell_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
@@ -1702,7 +1748,7 @@ async fn terminal_conformance_holds_for_the_agent_and_for_a_tab() {
         // Bracketed paste, the audited silent-loss mode (SPEC_impl.md):
         // content replay alone passing this test would be the bug.
         h.client
-            .send_input(chan, b"printf '\\033[?2004h'\r".to_vec())
+            .send_keys(chan, b"printf '\\033[?2004h'\r".to_vec())
             .await;
         run_in_shell(
             &h.client,
@@ -1785,7 +1831,7 @@ async fn terminal_conformance_holds_for_the_agent_and_for_a_tab() {
             "{label}: alternate-screen replay must not mix in the normal screen's history"
         );
         h.client
-            .send_input(chan3, b"printf '\\033[?1049l'\r".to_vec())
+            .send_keys(chan3, b"printf '\\033[?1049l'\r".to_vec())
             .await;
         // Deliberately do not wait for the echo or mode change. A user may
         // close a terminal while output is queued, and tmux 3.7b used to abort
@@ -1814,9 +1860,12 @@ async fn terminal_conformance_holds_for_the_agent_and_for_a_tab() {
 /// one window and silently wrong with two. This is the test that would
 /// have caught that: it resizes each terminal in turn and requires the
 /// other's geometry to stay put.
+///
+/// Old terminals: it reads each terminal's size from its tmux window; porting
+/// it to host sizes is a follow-up.
 #[farhelm_testtrace::test]
 async fn a_resize_reflows_only_the_named_terminals_window() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
@@ -1922,7 +1971,7 @@ async fn input_reaches_only_the_terminal_it_was_sent_to() {
     wait_for_shell(&h.client, tab_chan, &mut tab_rx, &mut tab_seen, "READY").await;
 
     h.client
-        .send_input(agent_chan, b"for-the-agent-only\r".to_vec())
+        .send_keys(agent_chan, b"for-the-agent-only\r".to_vec())
         .await;
     wait_for(&mut agent_rx, &mut agent_seen, "for-the-agent-only", 15).await;
     run_in_shell(
@@ -1954,38 +2003,18 @@ async fn input_reaches_only_the_terminal_it_was_sent_to() {
 /// A stalled viewer on one TAB pauses only that tab's stream: the agent
 /// terminal keeps flowing throughout (PLAN_M4.md acceptance 5).
 ///
-/// This is the reason per-terminal control clients exist rather than one
-/// per session. tmux's `pause-after` flow control is a property of a
-/// CONTROL CLIENT, so a client shared across a session's terminals would
-/// let one wedged tab viewer pause the agent's stream — the terminal the
-/// user is actually looking at.
+/// On new terminals every terminal is its own host with its own stream, so
+/// the claim is that the supervisor's per-attachment flow control and stall
+/// handling stay per terminal: a wedged tab viewer must not hold up the
+/// agent's stream, the terminal the user is actually looking at. The agent
+/// is round-tripped repeatedly for longer than the stall window that could
+/// interfere, so a check that finished early cannot miss the interaction.
 ///
-/// The agent is round-tripped repeatedly for longer than
-/// `TMUX_PAUSE_AFTER_SECS`, deliberately: the interesting window is the
-/// one where tmux's own backstop fires on the stalled client, and a check
-/// that finished before that would miss the very interaction under test.
-///
-/// Honest scope, because a passing run here does not by itself cover both
-/// of tmux's answers to a lagging client. tmux either cuts the stalled
-/// client with `%pause` or stops reading the pane it is behind on, and it
-/// picks between them nondeterministically (see `TMUX_PAUSE_AFTER_SECS`);
-/// this test observes whichever branch tmux happened to take on this run,
-/// and cannot force the second one. Which branch occurs depends on how far
-/// tmux read ahead, and the audit that reproduced the throttle branch at
-/// all needed a 16 MB/s producer and still only hit it in four runs out of
-/// five (recorded on `SessionSink`); nothing in the control protocol lets
-/// a test choose.
-///
-/// What HAS changed is that the second branch is no longer a residual to
-/// warn about. It used to be one — a stalled tab could stop the AGENT's
-/// pane being read, blocking the agent's own writes for as long as the
-/// stall lasted — and this test's earlier form said so. The session sink
-/// closes it by guaranteeing tmux always has a client it can deliver every
-/// pane to, and the coverage for that guarantee is the mechanism tests
-/// (`only_the_sink_keeps_a_filtered_pane_readable` in `tmux/sink.rs`, and the
-/// `the_session_sink_*` lifecycle tests below), not this one. This test's
-/// own claim stays what it always was: the supervisor's per-terminal
-/// machinery keeps the agent flowing while a tab's viewer is wedged.
+/// On old terminals the same claim was why per-terminal tmux control
+/// clients exist (tmux's `pause-after` belongs to a control client); that
+/// mechanism, and the session sink that keeps every pane readable, are
+/// tested on old terminals by the `the_session_sink_*` tests below and in
+/// `tmux/sink.rs`, not by this one.
 #[farhelm_testtrace::test]
 async fn a_stalled_tab_viewer_does_not_pause_the_agents_stream() {
     let h = harness().await;
@@ -2019,7 +2048,7 @@ async fn a_stalled_tab_viewer_does_not_pause_the_agents_stream() {
     // is held — which is what lets the producer be started at all.
     h.client.pause_output(tab_chan).await;
     h.client
-        .send_input(
+        .send_keys(
             tab_chan,
             b"i=0; while [ $i -lt 200000 ]; do printf 'FLOOD-%s\\n' $i; i=$((i+1)); done\r"
                 .to_vec(),
@@ -2032,7 +2061,7 @@ async fn a_stalled_tab_viewer_does_not_pause_the_agents_stream() {
         round += 1;
         let marker = format!("agent-alive-{round}");
         h.client
-            .send_input(agent_chan, format!("{marker}\r").into_bytes())
+            .send_keys(agent_chan, format!("{marker}\r").into_bytes())
             .await;
         wait_for(&mut agent_rx, &mut agent_seen, &marker, 10).await;
         // sleep-ok: spread repeated input round-trips across the intentional stalled-tab window
@@ -2067,9 +2096,11 @@ async fn a_stalled_tab_viewer_does_not_pause_the_agents_stream() {
 /// and the replacement must wait until the old control client is confirmed
 /// gone. A registry that merely forgot the old handle would pass the lifetime
 /// assertions while still allowing two tmux clients to overlap.
+///
+/// Old terminals: the session sink is tmux's control-mode client.
 #[farhelm_testtrace::test]
 async fn the_session_sink_lives_exactly_as_long_as_the_sessions_attachments() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
     let tmux_name = format!("fh-{}", session.id);
@@ -2125,7 +2156,7 @@ async fn the_session_sink_lives_exactly_as_long_as_the_sessions_attachments() {
     // of it was processed.
     h.client.detach(tab_chan).await;
     h.client
-        .send_input(chan, b"after-the-tab-detached\r".to_vec())
+        .send_keys(chan, b"after-the-tab-detached\r".to_vec())
         .await;
     wait_for(&mut rx, &mut seen, "after-the-tab-detached", 20).await;
     assert_eq!(
@@ -2318,9 +2349,11 @@ async fn wait_for_pane_text(h: &Harness, pane: &str, needle: &str, timeout_secs:
 /// output forwarder. With output paused under a busy pane, that shortcut can
 /// hit tmux 3.7b's queued-pane teardown abort; the cooperative path must report
 /// the failure, keep the server alive, and let a fresh attachment work.
+///
+/// Old terminals: tmux's control-mode input client and output queue.
 #[farhelm_testtrace::test]
 async fn input_client_failure_safely_reaps_queued_output_before_reattach() {
-    let h = harness_with_shell("/bin/sh").await;
+    let h = harness_with_shell_tmux("/bin/sh").await;
     let (session, _work) = shell_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
     let (channel, initial_replay, mut rx) = h
@@ -2332,7 +2365,7 @@ async fn input_client_failure_safely_reaps_queued_output_before_reattach() {
     wait_for_shell(&h.client, channel, &mut rx, &mut seen, "INPUT-READY").await;
 
     h.client
-        .send_input(
+        .send_keys(
             channel,
             b"yes INPUT-FAIL-FLOOD | head -c 1048576; printf '\nINPUT-FLOOD-%s\n' DONE\r".to_vec(),
         )
@@ -2370,7 +2403,7 @@ async fn input_client_failure_safely_reaps_queued_output_before_reattach() {
     wait_until_pid_gone(input_pid, 20).await;
 
     h.client
-        .send_input(channel, b"trigger-input-failure\r".to_vec())
+        .send_keys(channel, b"trigger-input-failure\r".to_vec())
         .await;
     let reason = expect_detached(&mut rx, 20).await;
     assert!(
@@ -2419,9 +2452,11 @@ async fn input_client_failure_safely_reaps_queued_output_before_reattach() {
 /// 3.7b's queued-pane abort. The session sink may be handed directly to the
 /// replacement because it never carries output. A successful replacement
 /// reply is the observable boundary for every output-bearing client.
+///
+/// Old terminals: tmux's control-mode output queue.
 #[farhelm_testtrace::test]
 async fn connection_loss_safely_reaps_queued_output_before_reattach() {
-    let h = harness_with_shell("/bin/sh").await;
+    let h = harness_with_shell_tmux("/bin/sh").await;
     let (session, _work) = shell_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
     let owner = h.second_client().await;
@@ -2440,7 +2475,7 @@ async fn connection_loss_safely_reaps_queued_output_before_reattach() {
     .await;
 
     owner
-        .send_input(
+        .send_keys(
             channel,
             b"yes CONNECTION-FAIL-FLOOD | head -c 1048576; printf '\nCONNECTION-FLOOD-%s\n' DONE\r"
                 .to_vec(),
@@ -2522,6 +2557,8 @@ async fn connection_loss_safely_reaps_queued_output_before_reattach() {
 /// takeover removes its attachment. The later arbiter must identity-check the
 /// map instead of sending that stale verdict: the old client should receive
 /// only the takeover reason that actually ended its ownership.
+///
+/// Old terminals: the gated detach is the tmux session sink's.
 #[farhelm_testtrace::test]
 async fn takeover_reason_wins_over_a_gated_natural_detach() {
     let natural_entered = Arc::new(tokio::sync::Notify::new());
@@ -2543,7 +2580,7 @@ async fn takeover_reason_wins_over_a_gated_natural_detach() {
                 })),
                 ..FaultHooks::default()
             },
-            ..SupervisorSeams::default()
+            ..SupervisorSeams::tmux_terminals()
         },
     )
     .await;
@@ -2635,9 +2672,11 @@ async fn takeover_reason_wins_over_a_gated_natural_detach() {
 /// satisfy it, nor can the shell's echo of the command.
 /// Consume the flood while observing healing so this test's own viewer
 /// does not stall, then interrupt the producer to let the shell answer.
+///
+/// Old terminals: the session sink is tmux's control-mode client.
 #[farhelm_testtrace::test]
 async fn a_killed_session_sink_comes_back_while_its_terminals_stay_attached() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
     let tmux_name = format!("fh-{}", session.id);
@@ -2668,7 +2707,7 @@ async fn a_killed_session_sink_comes_back_while_its_terminals_stay_attached() {
     let mut tab_seen = initial_replay;
     wait_for_shell(&h.client, tab_chan, &mut tab_rx, &mut tab_seen, "READY").await;
     h.client
-        .send_input(
+        .send_keys(
             tab_chan,
             b"i=0; while [ $i -lt 200000 ]; do printf 'HEAL-FLOOD-%s\\n' $i; i=$((i+1)); done\r"
                 .to_vec(),
@@ -2695,7 +2734,7 @@ async fn a_killed_session_sink_comes_back_while_its_terminals_stay_attached() {
         // invisible infrastructure, and a self-heal that cost the user their
         // terminal would be no better than the failure.
         h.client
-            .send_input(chan, b"after-the-sink-died\r".to_vec())
+            .send_keys(chan, b"after-the-sink-died\r".to_vec())
             .await;
         wait_for(&mut rx, &mut seen, "after-the-sink-died", 20).await;
     };
@@ -2716,7 +2755,7 @@ async fn a_killed_session_sink_comes_back_while_its_terminals_stay_attached() {
     // new post-heal command proves the tab is still being read now.
     let before = tab_seen.len();
     tab_seen.clear();
-    h.client.send_input(tab_chan, vec![3]).await;
+    h.client.send_keys(tab_chan, vec![3]).await;
     wait_for_shell(
         &h.client,
         tab_chan,
@@ -2778,9 +2817,11 @@ async fn kill_verified_tmux_client(pid: u32, h: &Harness) {
 /// terminal the supervisor runs exactly two (output and input), plus one
 /// sink for the session — so the total is the arithmetic below, and an
 /// orphaned loser shows up as one more.
+///
+/// Old terminals: the session sink is tmux's control-mode client.
 #[farhelm_testtrace::test]
 async fn concurrent_first_attaches_share_one_sink_and_orphan_nothing() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
     let tmux_name = format!("fh-{}", session.id);
@@ -3846,9 +3887,11 @@ async fn the_client_roster_rejects_a_failed_query() {
 /// which — the report would silently regress to anonymous clients, and
 /// nobody would notice until the next CI failure arrived undecipherable.
 /// Also pins [`roster_pids`] against the roster's real output shape.
+///
+/// Old terminals: tmux's control clients.
 #[farhelm_testtrace::test]
 async fn the_client_roster_identifies_all_three_roles_by_flags() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
     let (chan, initial_replay, mut rx) = h
@@ -4079,9 +4122,12 @@ async fn an_rc_file_change_between_two_tab_opens_reaches_the_second_tab() {
 /// nothing — the tab would inherit it through the session default with no
 /// pre-sizing at all, which is exactly the vacuous first version of this
 /// test.
+///
+/// Old terminals: a tmux window presized to the agent's; host tabs are covered
+/// by host_tabs' tab opened at the agent's size.
 #[farhelm_testtrace::test]
 async fn a_new_tab_window_is_presized_to_the_agent_windows_geometry() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
@@ -4140,9 +4186,11 @@ async fn a_new_tab_window_is_presized_to_the_agent_windows_geometry() {
 /// no switch; an opened tab's reply and the listing carry `kind: tmux` for
 /// it; the listing carries `agent_terminal: tmux` and
 /// `supervisor_creates_host_terminals: false`.
+///
+/// Old terminals: the replies of a supervisor of old terminals.
 #[farhelm_testtrace::test]
 async fn replies_name_tmux_terminals_and_report_the_switch_off() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
     assert_eq!(

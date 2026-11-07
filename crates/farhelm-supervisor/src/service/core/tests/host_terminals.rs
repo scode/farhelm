@@ -892,7 +892,7 @@ async fn a_terminal_less_host_row_restarts_in_a_host_never_in_tmux() {
         SupervisorTimeouts::default(),
         SupervisorSeams {
             host_program: Some(PathBuf::from("/nonexistent/farhelm-host")),
-            ..SupervisorSeams::default()
+            ..SupervisorSeams::tmux_terminals()
         },
     )
     .await
@@ -4020,13 +4020,18 @@ async fn a_cancelled_seed_of_a_running_runtime_gives_the_emulator_back() {
 /// adopted with `options`, whose child has exited (so a Restart stops
 /// nothing and needs no consent). Returns the supervisor, the session's id,
 /// the stand-in's runtime and the stand-in, and the state directory.
+///
+/// The session is created in tmux (`SupervisorSeams::tmux_terminals`) and
+/// then given the stand-in: a unit test cannot start a real host for the
+/// create (`tmux_supervisor`), and a Restart of a host agent starts a host
+/// whichever kind new terminals are.
 async fn host_session_with(
     options: crate::hosts::HostTerminalOptions,
     window: Option<RestartWindowGate>,
 ) -> (Arc<Supervisor>, String, HostTerminal, TestHost, StateDir) {
     let mut seams = SupervisorSeams {
         host_program: Some(PathBuf::from("/nonexistent/farhelm-host")),
-        ..SupervisorSeams::default()
+        ..SupervisorSeams::tmux_terminals()
     };
     seams.faults.restart_window_gate = window;
     let state = StateDir::new();
@@ -4367,7 +4372,7 @@ async fn host_agent_with_an_earlier_start(
 #[farhelm_testtrace::test(flavor = "multi_thread")]
 async fn a_restart_without_consent_touches_no_program_of_a_working_host_agent() {
     let state = StateDir::new();
-    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+    let sup = tmux_supervisor(state.path(), dummy_exe())
         .await
         .expect("supervisor");
     let mut ended = std::process::Command::new("true")
@@ -4429,7 +4434,7 @@ async fn a_restart_asks_again_for_consent_after_settling_earlier_starts() {
     let first_stage = Arc::new(std::sync::Mutex::new(Some(first_stage)));
     let _first_stage_ends = EndsChildOnDrop(Arc::clone(&first_stage));
     let waited = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let mut seams = SupervisorSeams::default();
+    let mut seams = SupervisorSeams::tmux_terminals();
     seams.faults.launch_starter_waiting = Some(Arc::new({
         let entry = Arc::clone(&entry);
         let first_stage = Arc::clone(&first_stage);

@@ -4029,7 +4029,9 @@ const AGENT_HOST_NAME_CAP: usize = MAX_SESSION_ID_BYTES;
 mod tests {
     use super::super::capture::CaptureState;
     use super::super::connection::CONNECTION_WRITER_QUEUE;
-    use super::super::core::tests::{StateDir, declared_command, dummy_exe, entry_with};
+    use super::super::core::tests::{
+        StateDir, declared_command, dummy_exe, entry_with, tmux_supervisor,
+    };
     use super::super::core::{HANDLER_ADMISSION_PERMITS, LIST_ADMISSION_PERMITS};
     use super::super::core::{RunCells, SessionCells};
     use super::super::core::{SupervisorSeams, SupervisorTimeouts};
@@ -5359,7 +5361,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn ordinary_and_spawn_refusals_replay_until_their_window_expires() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = tmux_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         for marked in [false, true] {
@@ -5550,7 +5552,7 @@ mod tests {
                     create_directory_waiting: Some(Arc::new(move || signal.notify_one())),
                     ..crate::service::FaultHooks::default()
                 },
-                ..SupervisorSeams::default()
+                ..SupervisorSeams::tmux_terminals()
             },
         )
         .await
@@ -9201,7 +9203,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn every_helm_create_key_has_the_created_sessions_lifetime() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = tmux_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);

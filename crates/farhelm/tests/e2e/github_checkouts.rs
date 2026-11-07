@@ -92,11 +92,7 @@ async fn agent_create_checkout_replays_and_templates_use_fresh_admission() {
     let session = await_server_session(&stack, "Fix parser").await;
     assert_eq!(session.id, id);
     assert_eq!(session.cwd, root_a.join("bar-fix-parser").to_str().unwrap());
-    wait_for_agent_ready(
-        &stack.supervisor.state.path().join("tmux.sock"),
-        &bare_session_id(&id),
-    )
-    .await;
+    wait_for_agent_ready_at(stack.supervisor.state.path(), &bare_session_id(&id)).await;
     stack.git.assert_clone(&session.cwd);
     let retained = Path::new(&session.cwd).join("untracked-retry-proof");
     std::fs::write(&retained, "keep this work").unwrap();
@@ -175,8 +171,8 @@ async fn agent_create_checkout_replays_and_templates_use_fresh_admission() {
         String::from_utf8_lossy(&from_template.stderr)
     );
     let automatic = await_server_session(&stack, "bar-1").await;
-    wait_for_agent_ready(
-        &stack.supervisor.state.path().join("tmux.sock"),
+    wait_for_agent_ready_at(
+        stack.supervisor.state.path(),
         &bare_session_id(&automatic.id),
     )
     .await;
@@ -235,8 +231,8 @@ async fn agent_create_checkout_replays_and_templates_use_fresh_admission() {
         numbered.cwd,
         root_a.join("bar-fix-parser-2").to_str().unwrap()
     );
-    wait_for_agent_ready(
-        &stack.supervisor.state.path().join("tmux.sock"),
+    wait_for_agent_ready_at(
+        stack.supervisor.state.path(),
         &bare_session_id(&numbered.id),
     )
     .await;
@@ -484,7 +480,7 @@ impl CheckoutStack {
         let markers = farhelm_teststate::tempdir().expect("checkout markers");
         let inherited_git_environment = std::env::vars_os()
             .filter_map(|(key, _)| key.to_string_lossy().starts_with("GIT_").then_some(key));
-        let supervisor = supervisor_process_tmux_with_env_removed(
+        let supervisor = supervisor_process_with_env_removed(
             [
                 ("HOME", home.into_os_string()),
                 ("SHELL", fake.bash_shell()),
@@ -1055,11 +1051,7 @@ async fn await_prepared(
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     stack.git.assert_clone(&session.cwd);
-    wait_for_agent_ready(
-        &stack.supervisor.state.path().join("tmux.sock"),
-        &bare_session_id(&session.id),
-    )
-    .await;
+    wait_for_agent_ready_at(stack.supervisor.state.path(), &bare_session_id(&session.id)).await;
     observed_argv_in_state(
         stack.supervisor.state.path(),
         &bare_session_id(&session.id),
@@ -1140,25 +1132,11 @@ fn hook_count(path: &Path, cwd: &str) -> usize {
 
 /// Distinguish replay from a second launch by inspecting the session's own pane.
 async fn assert_one_agent_execution(stack: &CheckoutStack, case: &AcceptedCase) {
-    let output = tmux_query(
-        &stack.supervisor.state.path().join("tmux.sock"),
-        &[
-            "capture-pane",
-            "-p",
-            "-S",
-            "-",
-            "-t",
-            &format!("fh-{}", bare_session_id(&case.session.id)),
-        ],
+    let text = terminal_text_at(
+        stack.supervisor.state.path(),
+        &bare_session_id(&case.session.id),
     )
     .await;
-    assert!(
-        output.status.success(),
-        "capture {} terminal: {}",
-        case.label,
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let text = normalize_pane_text(&output.stdout);
     assert_eq!(
         text.matches("STRUCTURED-LAUNCH-GENERATION:").count(),
         1,
@@ -1612,20 +1590,9 @@ async fn default_spares_are_taken_replenished_and_frozen_across_replay() {
         spare_identity,
         "the second launch must move the ready spare"
     );
-    let terminal = tmux_query(
-        &stack.supervisor.state.path().join("tmux.sock"),
-        &[
-            "capture-pane",
-            "-p",
-            "-S",
-            "-",
-            "-t",
-            &format!("fh-{}", bare_session_id(&second.id)),
-        ],
-    )
-    .await;
-    assert!(terminal.status.success());
-    assert!(normalize_pane_text(&terminal.stdout).contains("updating a checkout prepared earlier"));
+    let terminal =
+        terminal_text_at(stack.supervisor.state.path(), &bare_session_id(&second.id)).await;
+    assert!(terminal.contains("updating a checkout prepared earlier"));
     let replacement_git = await_ready_spare(&stack, &slot, 2).await;
     let replacement_identity = (
         replacement_git.metadata().unwrap().dev(),

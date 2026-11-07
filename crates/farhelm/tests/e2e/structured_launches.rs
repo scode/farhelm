@@ -362,7 +362,9 @@ async fn wait_for_generation_argv(
         }
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         match tokio::time::timeout(remaining, stream.recv()).await {
-            Ok(Some(TermEvent::Data(bytes))) => observed.extend_from_slice(&bytes),
+            Ok(Some(TermEvent::Data(bytes))) => {
+                append_transcript(stream.is_grid(), observed, &bytes)
+            }
             Ok(Some(TermEvent::ReplayComplete)) => {}
             Ok(Some(TermEvent::Detached(reason))) => panic!(
                 "session {session}'s generation {generation} detached ({reason}) before its complete post-exec boundary; transcript:\n{}",
@@ -389,22 +391,20 @@ pub(crate) async fn observed_argv(h: &Harness, session: &str, generation: u32) -
         .expect("attach an owned post-replay observer");
     let mut observed = replay;
     let argv = wait_for_generation_argv(&mut stream, &mut observed, session, generation).await;
-    assert_live_exchange(&h.client, channel, &mut stream, h.state.path(), session).await;
+    assert_live_exchange(&h.client, channel, &mut stream, session).await;
     argv
 }
 
 /// Read an argv witness from either in-process or real-stack owned state.
 ///
-/// Both fixtures use the same private tmux protocol, so keeping the
-/// generation boundary here prevents their process evidence from drifting.
+/// Both fixtures read the session through the supervisor's own socket, so
+/// keeping the generation boundary here prevents their process evidence
+/// from drifting.
 pub(crate) async fn observed_argv_in_state(
     state: &std::path::Path,
     session: &str,
     generation: u32,
 ) -> String {
-    let socket = state.join("tmux.sock");
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    assert_live_pane_before(&socket, session, deadline, "before attaching the observer").await;
     let transport = farhelm_supervisor::service::connect(state)
         .await
         .expect("dial the real supervisor for the owned successor attachment");
@@ -412,13 +412,14 @@ pub(crate) async fn observed_argv_in_state(
     let client = SupervisorClient::start(reader, writer)
         .await
         .expect("handshake the owned successor attachment");
+    assert_live_before(&client, session, "before attaching the observer").await;
     let (channel, replay, mut stream) = client
         .attach_live(session, WIDE_COLS, ROWS)
         .await
         .expect("attach an owned post-replay successor observer");
     let mut observed = replay;
     let argv = wait_for_generation_argv(&mut stream, &mut observed, session, generation).await;
-    assert_live_exchange(&client, channel, &mut stream, state, session).await;
+    assert_live_exchange(&client, channel, &mut stream, session).await;
     argv
 }
 
@@ -431,26 +432,23 @@ pub(crate) async fn assert_live_exchange(
     client: &SupervisorClient,
     channel: u32,
     stream: &mut TermStream,
-    state: &std::path::Path,
     session: &str,
 ) {
-    let socket = state.join("tmux.sock");
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    assert_live_pane_before(&socket, session, deadline, "before the live exchange").await;
+    assert_live_before(client, session, "before the live exchange").await;
     static PROBE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let sequence = PROBE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let token = format!("live-{}-{sequence}", std::process::id());
     client
-        .send_input(channel, format!("{token}\r").into_bytes())
+        .send_keys(channel, format!("{token}\r").into_bytes())
         .await;
     let mut live_bytes = Vec::new();
-    let response = format!("echo:\x1b[36m{token}\x1b[0m");
+    let response = agent_echo(stream, &token);
     let observed = tokio::time::timeout(
         Duration::from_secs(20),
         wait_for(stream, &mut live_bytes, &response, 30),
     )
     .await;
-    assert_live_pane_before(&socket, session, deadline, "after the live exchange").await;
+    assert_live_before(client, session, "after the live exchange").await;
     assert!(
         observed.is_ok(),
         "session {session} did not answer its fresh live probe: {}",
@@ -458,25 +456,24 @@ pub(crate) async fn assert_live_exchange(
     );
 }
 
-/// Diagnose pane liveness without allowing an unbounded tmux child to hang a test.
-async fn assert_live_pane_before(
-    socket: &std::path::Path,
-    session: &str,
-    deadline: tokio::time::Instant,
-    phase: &str,
-) {
-    let target = format!("fh-{session}");
-    let output = tmux_query_before_deadline(
-        socket,
-        &["display-message", "-p", "-t", &target, "#{pane_dead}"],
-        deadline,
-    )
-    .await
-    .unwrap_or_else(|| panic!("tmux stopped answering {phase} for session {session}"));
+/// Fail unless the session's agent lists as live: the supervisor's own
+/// reading of its terminal, whichever kind it is, bounded by the listing
+/// request's own timeout.
+async fn assert_live_before(client: &SupervisorClient, session: &str, phase: &str) {
+    let listing = tokio::time::timeout(Duration::from_secs(30), client.list_sessions())
+        .await
+        .unwrap_or_else(|_| panic!("the listing {phase} for session {session} timed out"))
+        .unwrap_or_else(|error| {
+            panic!("the listing {phase} for session {session} failed: {error:#}")
+        });
+    let status = listing
+        .sessions
+        .iter()
+        .find(|info| info.id == session)
+        .map(|info| info.status.clone());
     assert!(
-        output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "0",
-        "session {session}'s peer was not live {phase}: {}",
-        String::from_utf8_lossy(&output.stderr)
+        status.as_ref().is_some_and(|status| status.is_live()),
+        "session {session}'s peer was not live {phase}: {status:?}"
     );
 }
 

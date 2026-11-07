@@ -1,5 +1,10 @@
 //! Pause/resume backpressure on the terminal path, both the shallow and
 //! deep recovery regimes.
+//!
+//! Old terminals only (`harness_tmux`): the subject is the byte stream's
+//! flow control and tmux's `%pause` catch-up. A grid stream's pause, stall
+//! and history bounds are pinned by the supervisor's `service::grid_stream`
+//! tests and the helm's terminal relay tests.
 
 use crate::harness::*;
 
@@ -187,7 +192,7 @@ async fn start_gated_flood_on_live_attachment(
     // Any single byte releases the gate; the raw-mode fixture echoes nothing,
     // so the byte cannot be mistaken for the FLOOD markers these tests use
     // as output boundaries.
-    h.client.send_input(channel, b"g".to_vec()).await;
+    h.client.send_keys(channel, b"g".to_vec()).await;
     wait_for_bytes(rx, seen, b"FLOOD-000000", 30).await;
 }
 
@@ -578,7 +583,7 @@ pub(crate) async fn force_tmux_pause(h: &Harness, pane: &str) {
 /// the reset, the replay, or the continue cutover fails every time.
 #[farhelm_testtrace::test]
 async fn a_forced_tmux_pause_is_recovered_through_the_real_attachment() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     // The counter fixture, not the flood: this test asserts that LIVE
     // output resumes after the replay, and a producer that can finish
     // makes that unfalsifiable — "no further records" would then be
@@ -657,7 +662,7 @@ async fn a_forced_tmux_pause_is_recovered_through_the_real_attachment() {
 /// regression in either shows up here and in no normal-screen test.
 #[farhelm_testtrace::test]
 async fn a_forced_tmux_pause_recovers_an_alternate_screen_pane() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
@@ -722,7 +727,7 @@ async fn a_forced_tmux_pause_recovers_an_alternate_screen_pane() {
 /// unnoticed by every content-only assertion.
 #[farhelm_testtrace::test]
 async fn a_forced_tmux_pause_restores_modes_and_cursor_state() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
     let pane = pane_id_of(
         &h.state.path().join("tmux.sock"),
@@ -806,7 +811,7 @@ async fn a_forced_tmux_pause_restores_modes_and_cursor_state() {
 #[farhelm_testtrace::test]
 async fn a_stall_teardown_racing_a_takeover_never_detaches_the_winner() {
     let stall = Duration::from_millis(800);
-    let h = harness_with_timeouts(SupervisorTimeouts {
+    let h = harness_tmux_with_timeouts(SupervisorTimeouts {
         stall_detach: stall,
         ..SupervisorTimeouts::default()
     })
@@ -911,7 +916,7 @@ async fn a_stall_teardown_racing_a_takeover_never_detaches_the_winner() {
 /// memory cannot be explained by a producer that finished during setup.
 #[farhelm_testtrace::test]
 async fn memory_stays_flat_while_a_viewer_is_stalled() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
@@ -943,7 +948,7 @@ async fn memory_stays_flat_while_a_viewer_is_stalled() {
         .await
         .expect("attach");
     wait_for_bytes(&mut rx, &mut seen, b"FAKE-AGENT READY", 30).await;
-    h.client.send_input(chan, vec![b'w']).await;
+    h.client.send_keys(chan, vec![b'w']).await;
     wait_for_flood_marker_with_progress(&mut rx, &mut seen, b"FLOOD-WARMED").await;
 
     h.client.pause_output(chan).await;
@@ -957,7 +962,7 @@ async fn memory_stays_flat_while_a_viewer_is_stalled() {
         Duration::from_secs(30),
     )
     .await;
-    h.client.send_input(chan, vec![b'm']).await;
+    h.client.send_keys(chan, vec![b'm']).await;
     let started = work.path().join("flood-memory-started");
     let progress = work.path().join("flood-memory-progress");
     wait_for_file(&started, 30).await;
@@ -1058,7 +1063,7 @@ async fn memory_stays_flat_while_a_viewer_is_stalled() {
     })
     .await
     .expect("no output resumed within five seconds of releasing the stalled viewer");
-    h.client.send_input(chan, vec![b'd']).await;
+    h.client.send_keys(chan, vec![b'd']).await;
     let stopped = work.path().join("flood-memory-stopped");
     wait_for_file(&stopped, 10).await;
     assert_eq!(
@@ -1083,7 +1088,7 @@ async fn memory_stays_flat_while_a_viewer_is_stalled() {
 /// finished, and the in-flight backlog to drain first is small.
 #[farhelm_testtrace::test]
 async fn a_paused_attachment_stops_receiving_until_it_resumes() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
@@ -1145,7 +1150,7 @@ async fn a_paused_attachment_stops_receiving_until_it_resumes() {
 /// they pin both halves of what "continuous" means.
 #[farhelm_testtrace::test]
 async fn repeated_short_pauses_never_accumulate_into_a_stall_detach() {
-    let h = harness_with_timeouts(SupervisorTimeouts {
+    let h = harness_tmux_with_timeouts(SupervisorTimeouts {
         stall_detach: Duration::from_secs(2),
         ..SupervisorTimeouts::default()
     })
@@ -1281,7 +1286,7 @@ async fn a_paused_flood_detaches_relative_to_the_first_pause_despite_pause_spam(
     let stall_detach = Duration::from_secs(3);
     let spam_period = Duration::from_millis(300);
 
-    let h = harness_with_timeouts(SupervisorTimeouts {
+    let h = harness_tmux_with_timeouts(SupervisorTimeouts {
         stall_detach,
         ..SupervisorTimeouts::default()
     })
@@ -1369,7 +1374,7 @@ async fn a_paused_flood_detaches_relative_to_the_first_pause_despite_pause_spam(
 /// survived.
 #[farhelm_testtrace::test]
 async fn a_stall_detaches_only_its_own_attachment_not_the_connections_others() {
-    let h = harness_with_timeouts(SupervisorTimeouts {
+    let h = harness_tmux_with_timeouts(SupervisorTimeouts {
         stall_detach: Duration::from_secs(2),
         ..SupervisorTimeouts::default()
     })
@@ -1425,7 +1430,7 @@ async fn a_stall_detaches_only_its_own_attachment_not_the_connections_others() {
         "a stall on one attachment detached another attachment on the same connection"
     );
     h.client
-        .send_input(live_chan, b"still-mine\r".to_vec())
+        .send_keys(live_chan, b"still-mine\r".to_vec())
         .await;
     wait_for(&mut live_rx, &mut live_seen, "still-mine", 15).await;
 }
@@ -1445,7 +1450,7 @@ async fn a_stall_detaches_only_its_own_attachment_not_the_connections_others() {
 /// otherwise make a wrongly paused attachment look alive.
 #[farhelm_testtrace::test]
 async fn a_pause_from_a_client_that_lost_a_takeover_cannot_silence_the_winner() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
 
     // The loser attaches first, on its own connection.
@@ -1481,7 +1486,7 @@ async fn a_pause_from_a_client_that_lost_a_takeover_cannot_silence_the_winner() 
         .await
         .expect("barrier after losing pause");
     winner
-        .send_input(winner_chan, b"AFTER-LOSER-PAUSE\r".to_vec())
+        .send_keys(winner_chan, b"AFTER-LOSER-PAUSE\r".to_vec())
         .await;
     wait_for_bytes(&mut winner_rx, &mut winner_seen, b"AFTER-LOSER-PAUSE", 15).await;
 }
@@ -1527,7 +1532,7 @@ async fn a_pause_from_a_client_that_lost_a_takeover_cannot_silence_the_winner() 
 /// boundary keeps either branch from passing on a completed retained tail.
 #[farhelm_testtrace::test]
 async fn a_deep_pause_ends_correctly_under_either_tmux_flow_control_behavior() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = gated_flood_session(&h, 80).await;
 
     let (chan, mut seen, mut rx) = h
@@ -1699,7 +1704,7 @@ async fn a_deep_pause_ends_correctly_under_either_tmux_flow_control_behavior() {
 /// boundary. A finished retained tail cannot satisfy either premise.
 #[farhelm_testtrace::test]
 async fn shallow_pause_resumes_without_reset_or_replay() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = gated_flood_session(&h, 80).await;
 
     let (chan, mut seen, mut rx) = h
@@ -1777,7 +1782,7 @@ async fn shallow_pause_resumes_without_reset_or_replay() {
 async fn a_pause_past_the_stall_timeout_detaches_and_leaves_the_session_healthy() {
     // Short enough to wait out, long enough that ordinary scheduling
     // jitter on a loaded CI runner cannot trip it early.
-    let h = harness_with_timeouts(SupervisorTimeouts {
+    let h = harness_tmux_with_timeouts(SupervisorTimeouts {
         stall_detach: Duration::from_secs(3),
         ..SupervisorTimeouts::default()
     })

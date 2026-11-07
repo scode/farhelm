@@ -173,7 +173,7 @@ fn the_marked_decoy_scrubs_inherited_kind_markers_from_its_child() {
 /// swapped it for a fresh window instead.
 #[farhelm_testtrace::test]
 async fn the_agent_window_keeps_its_marker_across_a_restart_in_place() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = resumable_basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 

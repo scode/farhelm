@@ -1,5 +1,10 @@
 //! Tab lifecycle edge cases: restart-gap conflicts and other boundary
 //! conditions a tab's open/close path must resolve consistently.
+//!
+//! Most tests here run on new terminals. The two that read a tab's tmux
+//! window (its marking step, its exited pane) stay on old terminals and say
+//! so in their docs, with the `host_tabs.rs` tests that cover the same on
+//! host tabs.
 
 use crate::harness::*;
 
@@ -80,11 +85,8 @@ async fn opening_a_tab_on_a_restart_gap_session_is_a_restart_first_conflict() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let guard = TmuxServerGuard::new(state.path().join("tmux.sock"));
 
-    let sup = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
-        .await
-        .expect("supervisor");
+    let sup = supervisor_on(state.path()).await.expect("supervisor");
     let client = connect_client(&sup).await;
     let session = client
         .create_session(
@@ -98,12 +100,12 @@ async fn opening_a_tab_on_a_restart_gap_session_is_a_restart_first_conflict() {
         .expect("create");
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
-    // Kill the tmux server and reload: the row comes back terminal-less,
+    // End every terminal and reload: the row comes back terminal-less,
     // which is the restart gap PLAN_M2.md names.
     drop(client);
     drop(sup);
-    kill_tmux_server_and_wait(&state.path().join("tmux.sock")).await;
-    let sup = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
+    end_all_terminals(state.path()).await;
+    let sup = supervisor_on(state.path())
         .await
         .expect("second supervisor");
     let client = connect_client(&sup).await;
@@ -128,7 +130,25 @@ async fn opening_a_tab_on_a_restart_gap_session_is_a_restart_first_conflict() {
             || !String::from_utf8_lossy(&sessions.stdout).contains(&format!("fh-{}", session.id)),
         "a refused open must not have built a tmux session as a side effect"
     );
-    drop(guard);
+    // Nor a tab host: no launch record for a tab of this session, and no
+    // live process serving a socket in the state directory.
+    let tab_records: Vec<_> = std::fs::read_dir(state.path().join("launch"))
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .filter(|name| name.starts_with(&format!("{}.tab-", session.id)))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        tab_records.is_empty(),
+        "a refused open must not have recorded a tab host: {tab_records:?}"
+    );
+    assert!(
+        crate::host_creates::host_processes_in(state.path()).is_empty(),
+        "a refused open must not have started a tab host"
+    );
     drop(slot);
 }
 
@@ -146,9 +166,12 @@ async fn opening_a_tab_on_a_restart_gap_session_is_a_restart_first_conflict() {
 /// agent terminal keeps its exited-with-scrollback behavior. The close
 /// half matters because the manual close and the ticker's reap are the
 /// same flow, and both must tolerate a pane that is already dead.
+///
+/// Old terminals: it reads the exited tab pane from tmux; host tabs are covered
+/// by host_tabs' exited tab hidden and reaped.
 #[farhelm_testtrace::test]
 async fn a_tab_whose_shell_exited_vanishes_from_listings_and_still_closes() {
-    let h = harness().await;
+    let h = harness_tmux().await;
     let (session, _work) = basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
@@ -171,7 +194,7 @@ async fn a_tab_whose_shell_exited_vanishes_from_listings_and_still_closes() {
         vec![tab.id.clone()],
         "a live tab lists normally"
     );
-    h.client.send_input(chan, b"exit\r".to_vec()).await;
+    h.client.send_keys(chan, b"exit\r".to_vec()).await;
 
     // The pane goes dead — and the tab is gone from listings the moment
     // any list looks, without waiting on the ticker's kill.
@@ -286,7 +309,7 @@ async fn closing_an_unknown_but_well_formed_tab_id_is_not_found_and_harms_nothin
         "a refused close must leave the session's real tabs alone"
     );
     h.client
-        .send_input(agent_chan, b"agent-unharmed\r".to_vec())
+        .send_keys(agent_chan, b"agent-unharmed\r".to_vec())
         .await;
     wait_for(&mut agent_rx, &mut agent_seen, "agent-unharmed", 15).await;
 }
@@ -339,6 +362,9 @@ async fn a_closed_tabs_channel_receives_its_detached_notice() {
 /// construction, not a tab), so the unwind is worth proving rather than
 /// reasoning about. The seam is the only way to reach that state: the
 /// tmux call before it either works or leaves nothing.
+///
+/// Old terminals: the tmux window's marking step; host tabs are covered by
+/// host_tabs' opens failed before publishing.
 #[farhelm_testtrace::test]
 async fn a_tab_open_that_cannot_mark_its_window_leaves_nothing_behind() {
     let h = harness_with_seams(
@@ -354,7 +380,7 @@ async fn a_tab_open_that_cannot_mark_its_window_leaves_nothing_behind() {
                 })),
                 ..FaultHooks::default()
             },
-            ..SupervisorSeams::default()
+            ..SupervisorSeams::tmux_terminals()
         },
     )
     .await;
@@ -478,7 +504,7 @@ async fn a_second_lease_takes_over_both_terminals_of_one_session_only() {
         "a takeover on one session must not detach the same client's terminals in another"
     );
     h.client
-        .send_input(bystander_chan, b"bystander-alive\r".to_vec())
+        .send_keys(bystander_chan, b"bystander-alive\r".to_vec())
         .await;
     wait_for(
         &mut bystander_rx,
@@ -504,7 +530,10 @@ async fn a_second_lease_takes_over_both_terminals_of_one_session_only() {
 /// point of the fixture.
 #[farhelm_testtrace::test]
 async fn deleting_a_session_detaches_every_channel_and_reaps_scrubbed_tab_daemons() {
-    let Some((h, _scopes)) = scope_gated_harness(
+    // Old terminals, for now: on new terminals Delete ends the agent's
+    // attachment with "session terminal ended" rather than a deletion
+    // notice, which is the supervisor's to fix, not this test's.
+    let Some((h, _scopes)) = scope_gated_harness_tmux(
         "deleting_a_session_detaches_every_channel_and_reaps_scrubbed_tab_daemons",
     )
     .await
@@ -585,13 +614,32 @@ async fn deleting_a_session_detaches_every_channel_and_reaps_scrubbed_tab_daemon
     }
 }
 
+/// The pid of the shell tab `tab_id` of session `session_id` runs, as
+/// `sup`'s runtime for the tab's terminal host reports it, waiting (bounded)
+/// for a supervisor that is still finding its tabs again to publish it.
+async fn tab_host_shell(sup: &Supervisor, session_id: &str, tab_id: &str) -> u32 {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        if let Some(host) = sup.tab_host_for_test(session_id, tab_id).await {
+            return host.status().child_pid;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "tab {tab_id} has no terminal host runtime"
+        );
+        // sleep-ok: a restarted supervisor publishes the tabs it found again on its own schedule; poll until this one is published.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 /// Tabs survive a supervisor restart as the SAME shells, with their
 /// scrollback (PLAN_M4.md acceptance 2).
 ///
 /// The sibling rediscovery test pins that the ids and the ordering come
 /// back. This pins the thing that actually matters to a user: the process
-/// never noticed. Comparing pane PIDs across the restart is what
-/// distinguishes "rediscovered the same shell" from "quietly started a
+/// never noticed. Comparing the tab shell's pid across the restart (the
+/// tab host's child, as each supervisor's runtime for it reports it) is
+/// what distinguishes "found the same shell again" from "quietly started a
 /// new one", and replaying content written before the restart is what
 /// distinguishes a live reattachment from a fresh, empty terminal.
 #[farhelm_testtrace::test]
@@ -599,15 +647,13 @@ async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
 
     // Both this supervisor and its restart below attach for real (a tab
     // before the restart, the rediscovered tab after), so both need the
-    // suite's loaded-CI tmux floors rather than production defaults.
-    let sup =
-        Supervisor::new_with_exe_and_timeouts(state.path(), farhelm_bin().into(), suite_timeouts())
-            .await
-            .expect("supervisor");
+    // suite's loaded-CI timeout floors rather than production defaults.
+    let sup = suite_supervisor_with_timeouts(state.path(), suite_timeouts())
+        .await
+        .expect("supervisor");
     let client = connect_client(&sup).await;
     let session = client
         .create_session(
@@ -645,24 +691,23 @@ async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
     )
     .await;
 
-    let sock = state.path().join("tmux.sock");
-    let pane_before =
-        tmux_query(&sock, &["list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"]).await;
-    let pids_before = String::from_utf8_lossy(&pane_before.stdout).into_owned();
+    let shell_before = tab_host_shell(&sup, &session.id, &tab.id).await;
+    assert!(
+        !process_is_gone(shell_before),
+        "premise: the tab's shell {shell_before} runs before the restart"
+    );
 
-    drop(client);
-    drop(sup);
-    let sup =
-        Supervisor::new_with_exe_and_timeouts(state.path(), farhelm_bin().into(), suite_timeouts())
-            .await
-            .expect("second supervisor");
+    client.detach(chan).await;
+    retire_supervisor(state.path(), sup, client).await;
+    let sup = suite_supervisor_with_timeouts(state.path(), suite_timeouts())
+        .await
+        .expect("second supervisor");
     let client = connect_client(&sup).await;
 
-    let pane_after = tmux_query(&sock, &["list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"]).await;
     assert_eq!(
-        String::from_utf8_lossy(&pane_after.stdout),
-        pids_before,
-        "a supervisor restart must rediscover the SAME shells, not start new ones"
+        tab_host_shell(&sup, &session.id, &tab.id).await,
+        shell_before,
+        "a supervisor restart must find the SAME shell again, not start a new one"
     );
 
     let (_chan2, initial_replay, mut rx2) = client
@@ -786,7 +831,7 @@ async fn a_stalled_tab_takes_the_stall_detach_alone_and_reattaches() {
     // read.
     h.client.pause_output(stalling_chan).await;
     h.client
-        .send_input(
+        .send_keys(
             stalling_chan,
             b"i=0; while [ $i -lt 500 ]; do printf 'FLOOD-%s\\n' $i; i=$((i+1)); done\r".to_vec(),
         )
@@ -800,7 +845,7 @@ async fn a_stalled_tab_takes_the_stall_detach_alone_and_reattaches() {
 
     // The agent and the sibling tab were never disturbed and still work.
     h.client
-        .send_input(agent_chan, b"agent-untouched\r".to_vec())
+        .send_keys(agent_chan, b"agent-untouched\r".to_vec())
         .await;
     wait_for(&mut agent_rx, &mut agent_seen, "agent-untouched", 20).await;
     run_in_shell(
