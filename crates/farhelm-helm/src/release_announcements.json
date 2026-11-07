@@ -1,1 +1,8 @@
-[]
+[
+  {
+    "version": "0.37.0",
+    "id": "0.37.0-old-terminal-support",
+    "title": "Restart old terminals before support ends",
+    "body": "In the near future Farhelm will drop support for old style terminals that used to be based on tmux.\n\nIf you have such terminals, you will receive a notification from the relevant sessions in the left-hand sidebar. You must\nrestart or replace those as instructed, or a future release will forcibly terminate them.\n\nIf you receive no such notifications in the left-hand sidebar, there is no action required.\n\nFor more information, see https://farhelm.io/docs/using/new-terminals/"
+  }
+]
