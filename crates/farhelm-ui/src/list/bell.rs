@@ -29,6 +29,17 @@
 //! The list is not a menu of commands, so the row menus' roving-focus
 //! machinery (`menu_panel::MenuOrder` and friends) does not apply; it shares
 //! their floating placement, surface and outside-click dismissal instead.
+//!
+//! ## Links in notification text
+//!
+//! A notification's text is written by the session's supervisor, so it is
+//! peer text and shown escaped and isolated like any other. The one
+//! exception is a link to a page of Farhelm's own docs
+//! ([`DOCS_LINK_PREFIX`]), which is shown as a clickable link
+//! ([`notification_runs`]): the old-terminal notification points at the page
+//! that explains what to do. Any other URL stays plain text, because a
+//! supervisor (possibly a compromised or foreign one) must not be able to
+//! put a link to anywhere it likes in front of the user.
 
 use std::rc::Rc;
 
@@ -332,10 +343,7 @@ fn NotificationList(
                                 }
                             }
                         }
-                        PeerLine {
-                            class: "session-bell-text".to_string(),
-                            parts: vec![DetailPart::peer(notification.text.clone())],
-                        }
+                        NotificationText { text: notification.text.clone() }
                     }
                 }
             }
@@ -346,6 +354,126 @@ fn NotificationList(
                     "data-tooltip": "Clear: remove these notifications for every window",
                     onclick: move |_| on_clear.call(()),
                     "Clear all"
+                }
+            }
+        }
+    }
+}
+
+// ===== Links in notification text ==========================================
+
+/// The only place notification text may link to: a page of Farhelm's own
+/// docs. A fixed scheme, host and path start, so nothing after it can point
+/// the link at another site (see [`notification_runs`] for what follows it).
+const DOCS_LINK_PREFIX: &str = "https://farhelm.io/docs/";
+
+/// One run of a notification's text, as [`notification_runs`] cuts it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TextRun<'a> {
+    /// Peer text, shown escaped like the rest of the notification.
+    Plain(&'a str),
+    /// A docs link, shown as a clickable link with the URL as its text.
+    DocsLink(&'a str),
+}
+
+/// Cut `text` into plain runs and docs links.
+///
+/// A docs link is a run of non-whitespace that starts with
+/// [`DOCS_LINK_PREFIX`], minus any trailing sentence punctuation (so "see
+/// <url>." links the URL, not the full stop), whose remainder after the
+/// prefix uses only ASCII letters and digits and `-._~/#?=&+`, and whose
+/// path has no `.` or `..` segment. Anything else stays plain text whole: a
+/// run with a quote, angle bracket, backslash, percent sign or invisible
+/// character in it, and one like `https://farhelm.io/docs/../api/` that a
+/// browser would resolve to a page outside the docs. Leaving out `%` is what
+/// makes the dot-segment check enough, since `%2e` is a dot to a browser.
+/// This is a narrow recogniser for links Farhelm itself writes, not a URL
+/// parser, and refusing the odd case costs only a link. Text with no docs
+/// link comes back as a single plain run, empty text included.
+fn notification_runs(text: &str) -> Vec<TextRun<'_>> {
+    let mut runs = Vec::new();
+    let mut plain_from = 0;
+    let mut search_from = 0;
+    while let Some(found) = text[search_from..].find(DOCS_LINK_PREFIX) {
+        let start = search_from + found;
+        let word_end = text[start..]
+            .find(char::is_whitespace)
+            .map_or(text.len(), |offset| start + offset);
+        // The prefix ends in '/', which is not trimmed, so the link always
+        // keeps at least the whole prefix.
+        let url = text[start..word_end].trim_end_matches(['.', ',', ';', ':', '!', '?', ')']);
+        if is_plain_docs_tail(&url[DOCS_LINK_PREFIX.len()..]) {
+            if plain_from < start {
+                runs.push(TextRun::Plain(&text[plain_from..start]));
+            }
+            runs.push(TextRun::DocsLink(url));
+            plain_from = start + url.len();
+        }
+        search_from = word_end;
+    }
+    if plain_from < text.len() || runs.is_empty() {
+        runs.push(TextRun::Plain(&text[plain_from..]));
+    }
+    runs
+}
+
+/// Whether `tail`, what follows [`DOCS_LINK_PREFIX`] in a candidate link, is
+/// one [`notification_runs`] may link: only the narrow character set, and no
+/// `.` or `..` segment in the path (the part before any `?` or `#`), so the
+/// link cannot leave the docs once a browser resolves it.
+fn is_plain_docs_tail(tail: &str) -> bool {
+    let allowed = tail
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || b"-._~/#?=&+".contains(&byte));
+    let path = tail.split(['?', '#']).next().unwrap_or("");
+    allowed
+        && !path
+            .split('/')
+            .any(|segment| segment == "." || segment == "..")
+}
+
+/// One notification's text, with docs links clickable ([`notification_runs`]).
+///
+/// Text without a docs link renders exactly as before links existed: one
+/// [`PeerLine`] run, with its empty and whitespace-only placeholders. Text
+/// with one is cut into isolated runs like [`PeerLine`]'s, but the plain
+/// runs use the placeholder-free spelling, since the space between a
+/// sentence and its link is not a blank value. A link opens the way the
+/// migration band's docs link does (`app_bar::open_external_page`), in the
+/// system browser from the desktop app and in a new tab elsewhere.
+#[component]
+fn NotificationText(text: PeerText) -> Element {
+    let runs = notification_runs(text.raw());
+    if !runs.iter().any(|run| matches!(run, TextRun::DocsLink(_))) {
+        return rsx! {
+            PeerLine { class: "session-bell-text".to_string(), parts: vec![DetailPart::peer(text)] }
+        };
+    }
+    rsx! {
+        div { class: "session-bell-text",
+            for (index , run) in runs.into_iter().enumerate() {
+                match run {
+                    TextRun::Plain(words) => rsx! {
+                        span { key: "{index}", class: "peer-value", dir: "ltr", "{PeerText::from(words).editable()}" }
+                    },
+                    TextRun::DocsLink(url) => {
+                        let url = url.to_string();
+                        rsx! {
+                            a {
+                                key: "{index}",
+                                class: "peer-value session-bell-link",
+                                dir: "ltr",
+                                href: "{url}",
+                                target: "_blank",
+                                rel: "noopener",
+                                onclick: move |event| {
+                                    event.prevent_default();
+                                    crate::app_bar::open_external_page(&url);
+                                },
+                                "{url}"
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -439,6 +567,90 @@ mod tests {
         assert_eq!(
             bell_label(&"plain".into(), 0),
             "Notifications for plain: none unread"
+        );
+    }
+
+    /// Spec (SPEC.md, "Status"): in notification text, a link to a page of
+    /// Farhelm's docs is cut out as a link, ending at whitespace and without
+    /// trailing sentence punctuation; the text around it stays plain.
+    ///
+    /// Why: the old-terminal notification ends with the docs page to read,
+    /// and a user who cannot click it has to copy a URL out of a small list.
+    #[farhelm_testtrace::test]
+    fn a_docs_link_in_notification_text_is_cut_out() {
+        use TextRun::{DocsLink, Plain};
+        assert_eq!(
+            notification_runs("See https://farhelm.io/docs/using/new-terminals/"),
+            vec![
+                Plain("See "),
+                DocsLink("https://farhelm.io/docs/using/new-terminals/")
+            ]
+        );
+        assert_eq!(
+            notification_runs(
+                "Read https://farhelm.io/docs/a/#b. Then https://farhelm.io/docs/c..d/?e=1&f=2), done"
+            ),
+            vec![
+                Plain("Read "),
+                DocsLink("https://farhelm.io/docs/a/#b"),
+                Plain(". Then "),
+                DocsLink("https://farhelm.io/docs/c..d/?e=1&f=2"),
+                Plain("), done"),
+            ]
+        );
+        assert_eq!(
+            notification_runs("https://farhelm.io/docs/"),
+            vec![DocsLink("https://farhelm.io/docs/")]
+        );
+    }
+
+    /// Spec (SPEC.md, "Status"): only links under the docs prefix become
+    /// links. Another site, another part of farhelm.io, plain http, a link
+    /// whose remainder holds a character outside the narrow set (a quote,
+    /// angle bracket, backslash, percent sign or invisible character), an `@`
+    /// that could read as a login, and a path with a `.` or `..` segment,
+    /// literal or percent-encoded, that a browser would resolve outside the
+    /// docs all stay plain text, whole; text without any link, empty text
+    /// included, is one plain run.
+    ///
+    /// Why: notification text is written by a host's supervisor, which the
+    /// UI does not trust; a clickable link must never be able to lead
+    /// anywhere but Farhelm's own docs, and an odd-looking one costs only its
+    /// clickability.
+    #[farhelm_testtrace::test]
+    fn nothing_but_a_plain_docs_link_is_ever_a_link() {
+        use TextRun::Plain;
+        for text in [
+            "Go to https://example.com/docs/x now",
+            "https://farhelm.io/blog/x",
+            "http://farhelm.io/docs/x",
+            "https://farhelm.io.example.com/docs/x",
+            "https://farhelm.io/docs/x\"y",
+            "https://farhelm.io/docs/<b>",
+            "https://farhelm.io/docs/x\\..\\y",
+            "https://farhelm.io/docs/x\u{202E}y",
+            "https://farhelm.io/docs/@evil.example",
+            "https://farhelm.io/docs/../api/feedback",
+            "https://farhelm.io/docs/a/./b",
+            "https://farhelm.io/docs/%2e%2e/api/feedback",
+            "https://farhelm.io/docs/.%2E/api/feedback",
+            "",
+        ] {
+            assert_eq!(notification_runs(text), vec![Plain(text)], "{text:?}");
+        }
+        // Trailing dots are sentence punctuation and are trimmed before the
+        // check, so a trailing `..` leaves a link that stays in the docs.
+        assert_eq!(
+            notification_runs("https://farhelm.io/docs/a/.."),
+            vec![TextRun::DocsLink("https://farhelm.io/docs/a/"), Plain(".."),]
+        );
+        // A refused candidate does not hide a good link after it.
+        assert_eq!(
+            notification_runs("https://farhelm.io/docs/<x> https://farhelm.io/docs/ok"),
+            vec![
+                Plain("https://farhelm.io/docs/<x> "),
+                TextRun::DocsLink("https://farhelm.io/docs/ok"),
+            ]
         );
     }
 }

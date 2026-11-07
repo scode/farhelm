@@ -447,6 +447,43 @@ test.describe("session notifications", () => {
     await expect(entry.locator(".session-bell-resolved")).toHaveCount(0);
   });
 
+  /** Notification text comes from a host's supervisor, so only a link to
+   * Farhelm's own docs may be clickable: the old-terminal warning ends with
+   * the page that says what to do. Assert both halves in the real list, with
+   * a foreign address beside the docs one, and that clicking opens exactly
+   * the docs URL through the app's external-link opener (observed, so the
+   * test neither navigates away nor reaches the live site). */
+  test("only a docs link in notification text is clickable", async ({ page, request }) => {
+    const session = await createSession(request, { title: `docs-link-${Date.now()}` });
+    created.push(session.id);
+    const docs = "https://farhelm.io/docs/using/new-terminals/";
+    const foreign = "https://example.com/docs/using/new-terminals/";
+    const stub = new NotificationStub([{ seq: 1, at: NOW, text: `Not ${foreign} but see ${docs}` }]);
+    await serveNotifications(page, session.id, stub);
+    await page.goto("/");
+    const bell = row(page, session.id).locator(".session-row-bell");
+    await expect(bell).toHaveClass(/\bloud\b/, { timeout: 20_000 });
+    await bell.click();
+    const text = page.locator(".session-bell-flyout .session-bell-entry .session-bell-text");
+    await expect(text).toHaveText(`Not ${foreign} but see ${docs}`);
+    const links = text.locator("a");
+    await expect(links).toHaveCount(1);
+    await expect(links).toHaveText(docs);
+    await expect(links).toHaveAttribute("href", docs);
+
+    // The opener is its own asset, loaded asynchronously; wait for it before
+    // replacing its entry point with a recorder.
+    await page.waitForFunction(() => "farhelmTerminalLinks" in window);
+    await page.evaluate(() => {
+      const root = window as unknown as { farhelmTerminalLinks: { openTerminalUrl(url: string): void }; openedDocs?: string[] };
+      root.openedDocs = [];
+      root.farhelmTerminalLinks.openTerminalUrl = (url) => { root.openedDocs!.push(url); };
+    });
+    await links.click();
+    await expect.poll(() => page.evaluate(() => (window as unknown as { openedDocs: string[] }).openedDocs)).toEqual([docs]);
+    expect(page.url()).not.toContain("farhelm.io");
+  });
+
   /**
    * The bell's whole visible contract on the row: only rows with
    * notifications have one, it is loud while any is unread and says how many
