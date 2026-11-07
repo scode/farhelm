@@ -666,6 +666,128 @@ setup, the agent reply or a different menu check.
         with self.assertRaisesRegex(Refused, 'active tester'):
             self.run.test('p0-fresh', source=self.source)
 
+    def readiness_failure(self, unsafe=False, stopped=True):
+        """Retain the observed legacy early-sample error on an owned, ready fixture.
+
+Scheduling is deliberately reduced to the one unfinished checkpoint here;
+the test concerns retry authority, not the already covered P0 fixture order.
+No native product action occurs unless the caller asks for the unsafe case.
+"""
+        self.prepare()
+        entry = self.run.selected('p0-fresh')
+        check = 'local-supervisor-agent'
+        entry['required'] = {check: {'gui': True, 'command': True, 'continuity': False, 'priority': 'P0'}}
+        envelope = task()
+        envelope.update(run_id=self.run.data['run_id'], pass_id='p0-fresh', check_id=check)
+        identity = {key: envelope[key] for key in ('run_id', 'pass_id', 'attempt', 'check_id')}
+        error = 'RuntimeError: sample the new session terminal hosts only after the new agent session exists'
+        call = {'id': 'sample', 'type': 'mcp_tool_call', 'server': 'cua_repl', 'tool': 'brick_action',
+                'arguments': {'operation': 'terminal_hosts'}, 'status': 'failed', 'error': None,
+                'result': {'content': [{'type': 'text', 'text': error}]}}
+        rows = [{'type': 'item.started', 'item': call}, {'type': 'item.completed', 'item': call},
+                {'type': 'turn.completed'}]
+        if unsafe:
+            click = dict(call, id='click', tool='brick_ui', arguments={'target': 'farhelm', 'method': 'click', 'args': [4]},
+                         result={'content': []})
+            rows.insert(0, {'type': 'item.completed', 'item': click})
+        summary = {'status': 'automation-failure', 'cleanup_error': None,
+                   'result': {'identity': identity, 'status': 'automation-failure', 'detail': error}}
+        archive_path = self.run.directory / 'p0-fresh' / ('tester-' + envelope['attempt'] + '.tar')
+        with tarfile.open(archive_path, 'w') as archive:
+            for name, data in {'task.json': envelope, 'execution.json': summary,
+                               'managed-failure.json': {'error': error}}.items():
+                raw = json.dumps(data).encode()
+                info = tarfile.TarInfo('./' + name)
+                info.size = len(raw)
+                archive.addfile(info, io.BytesIO(raw))
+            raw = '\n'.join(map(json.dumps, rows)).encode()
+            info = tarfile.TarInfo('./events.jsonl')
+            info.size = len(raw)
+            archive.addfile(info, io.BytesIO(raw))
+        entry['tester'] = dict(identity, phase='failed', termination_observed=stopped)
+        entry['automation_failure'] = {'check_id': check, 'kind': 'harness-failure',
+                                       'status': 'could-not-run', 'detail': error}
+        self.run.save()
+        return archive_path
+
+    def test_readiness_retry_preserves_failed_bytes_and_starts_a_fresh_checkpoint(self):
+        """A proven pre-action failure can recover without relabeling or replaying its attempt."""
+        path = self.readiness_failure()
+        original = path.read_bytes()
+        attempt = self.run.selected('p0-fresh')['tester']['attempt']
+        self.run.retry_readiness('p0-fresh')
+        entry = self.run.selected('p0-fresh')
+        self.assertNotIn('automation_failure', entry)
+        self.assertEqual(entry['readiness_retries'][0]['tester']['attempt'], attempt)
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(self.run.report()['automation']['verdict'], 'recovered readiness failure')
+        self.run.tester = self.execute_fixture
+        self.run.test('p0-fresh', source=self.source)
+        entry = self.run.selected('p0-fresh')
+        self.assertTrue(all(item['attempt'] != attempt for item in self.seen))
+        self.assertEqual(entry['results']['local-supervisor-agent']['status'], 'pass')
+        self.assertEqual(path.read_bytes(), original)
+        path.unlink()
+        self.assertEqual(self.run.verdict(entry), 'could not run', 'lost failure evidence must invalidate recovery')
+
+    def test_readiness_retry_refuses_actions_or_uncertain_termination(self):
+        """A click or missing stopped acknowledgement cannot be waved through as a harmless read."""
+        for unsafe, stopped in ((True, True), (False, False)):
+            with self.subTest(unsafe=unsafe, stopped=stopped):
+                case = NativeCoordinatorTests()
+                case.setUp()
+                try:
+                    case.readiness_failure(unsafe=unsafe, stopped=stopped)
+                    with self.assertRaises(Refused):
+                        case.run.retry_readiness('p0-fresh')
+                    self.assertIn('automation_failure', case.run.selected('p0-fresh'))
+                    self.assertNotIn('readiness_retries', case.run.selected('p0-fresh'))
+                finally:
+                    case.doCleanups()
+
+    def unavailable_app(self, status='could-not-run'):
+        """Finish earlier fixture checks, then retain one unavailable native checkpoint."""
+        self.prepare()
+        def execute(controller, envelope, files):
+            """The completed command/setup prefix is distinct from the unavailable app observation."""
+            self.seen.append(envelope)
+            return self.archive(controller, envelope, status if envelope['check_id'] == 'app-start' else 'pass')
+        self.run.tester = execute
+        with self.assertRaises(Refused):
+            self.run.test('p0-fresh', source=self.source)
+
+    def test_repaired_fixture_retry_preserves_observation_and_skips_accepted_checks(self):
+        """A diagnosed fixture gap can be retried without hiding it or rerunning accepted setup."""
+        self.unavailable_app()
+        original = self.run.selected('p0-fresh')['results']['app-start']
+        self.run.retry_unavailable('p0-fresh', 'Repaired the owned fixture; inspected events show no uncertain action.')
+        entry = self.run.selected('p0-fresh')
+        self.assertNotIn('app-start', entry['results'])
+        self.assertEqual(entry['checkpoint_retries'][0]['result'], original)
+        count = len(self.seen)
+        self.run.tester = self.execute_fixture
+        self.run.test('p0-fresh', source=self.source)
+        self.assertEqual([row['check_id'] for row in self.seen[count:]], ['app-start'])
+        entry = self.run.selected('p0-fresh')
+        self.assertEqual(self.run.verdict(entry), 'pass')
+        archive = original['native']['events'].split('::')[0]
+        (self.run.directory / archive).unlink()
+        self.assertEqual(self.run.verdict(entry), 'could not run')
+
+    def test_unavailable_retry_cannot_clear_product_failure_or_retry_feedback(self):
+        """Operator reasoning does not authorize suppressing a product fail or an external-send outcome."""
+        self.unavailable_app(status='fail')
+        with self.assertRaises(Refused):
+            self.run.retry_unavailable('p0-fresh', 'Inspected fixture and repaired a prerequisite before retrying.')
+        entry = self.run.selected('p0-fresh')
+        self.assertEqual(entry['results']['app-start']['status'], 'fail')
+        entry['results']['app-start']['status'] = 'could-not-run'
+        entry['required']['app-start']['priority'] = 'P1'
+        self.run.save()
+        with self.assertRaises(Refused):
+            self.run.retry_unavailable('p0-fresh', 'Inspected fixture and repaired a prerequisite before retrying.')
+        self.assertNotIn('checkpoint_retries', self.run.selected('p0-fresh'))
+
     def test_harness_failure_is_separate_from_product_failure(self):
         """Permission bugs block the gate without condemning the published release bytes."""
         self.prepare()

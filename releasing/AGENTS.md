@@ -328,5 +328,6 @@ Before editing anything under `releasing/mac-vm-test/`, read `releasing/mac-vm-t
 When asked for a brick test, read `releasing/mac-vm-test/BRICK-TEST.md` in full before inspecting Tart state, then the
 files `releasing/mac-vm-test/BRICK-TEST.md`, "Release brick tests", names.
 
-Fence: a test request never authorizes publication or release promotion; a permission block during a test is a harness
-bug: stop, and do not approve manually or rescue it through host UI.
+Fence: a test request never authorizes publication or release promotion. Repair safe harness/setup problems and continue
+under `releasing/mac-vm-test/BRICK-TEST.md`, "Repair and continue". A permission block ends that attempt; repair
+authorized setup separately, never approve manually or rescue the attempt through host UI.

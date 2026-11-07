@@ -5,6 +5,8 @@ The model chooses native UI actions and reports what it sees. This process owns
 the finite command vocabulary, durable receipts and native-tool forwarding. A
 failed operation closes the action gate before another tool call can execute;
 returning an error to the model alone would still let a batched click run.
+An explicitly identified read-only prerequisite can instead defer its sample:
+it produces no acceptance receipt, and the model can establish the prerequisite.
 """
 
 import argparse
@@ -28,6 +30,17 @@ from window_geometry import calibrate, select_frame
 
 
 LIMIT = 512 * 1024
+READINESS_DEFERRAL_LIMIT = 3
+
+
+class ObservationNotReady(RuntimeError):
+    """A read-only sample was requested before its prerequisite, without changing state.
+
+Only explicitly classified observation guards use this exception. Transport,
+command, native input and uncertain-action failures must keep the fatal gate.
+"""
+
+
 OPERATIONS = ('prerequisites', 'verify_candidate', 'verify_previous', 'fixture_clean', 'install_candidate',
               'install_previous', 'launch', 'launch_override', 'versions', 'remote_version',
               'remote_host_before', 'remote_host_after',
@@ -230,6 +243,7 @@ only receipt references and test observations, never authentication contents.
         self.latest_receipts = {}
         self.latest_images = {}
         self.failure = None
+        self.readiness_deferrals = []
 
     def command(self, argv, *, cwd=None, env=None, data=None, timeout=60, private_output=False):
         """Check each fixed command before its caller can perform a later action.
@@ -281,6 +295,7 @@ Such output is held in memory only, so it gets a larger bound than receipts.
         write_json(self.output / 'managed-operations.json', {
             'completed': sorted(self.completed), 'receipts': list(dict.fromkeys(selected)),
             'observations': self.observations,
+            'readiness_deferrals': self.readiness_deferrals,
             'continuity': self.state.get('continuity') if self.task['check_id'] in (
                 'continuity-before', 'remote-update', 'reopen') else None}, replace=True)
 
@@ -291,7 +306,12 @@ Such output is held in memory only, so it gets a larger bound than receipts.
             write_json(self.output / 'managed-failure.json', {'error': self.failure})
 
     def dispatch(self, operation):
-        """Refuse actions after failure, including otherwise harmless retries."""
+        """Keep real failures fatal while allowing bounded, receipt-free readiness deferrals.
+
+A premature read must not certify the wrong moment or count as completed.
+Its structured response lets the tester correct its order in the same turn;
+repeating the mistake past the bound stops an unproductive attempt.
+"""
         if self.failure is not None:
             raise RuntimeError('test action gate is closed: ' + self.failure)
         if operation not in OPERATIONS:
@@ -314,6 +334,15 @@ Such output is held in memory only, so it gets a larger bound than receipts.
             self.observations[operation] = value
             self.save_record()
             return {'operation': operation, 'receipt': name, 'observation': value}
+        except ObservationNotReady as error:
+            if len(self.readiness_deferrals) >= READINESS_DEFERRAL_LIMIT:
+                self.fail('read-only observation readiness deferral limit exceeded')
+                raise RuntimeError(self.failure) from error
+            response = {'operation': operation, 'status': 'not-ready', 'detail': str(error),
+                        'remaining_deferrals': READINESS_DEFERRAL_LIMIT - len(self.readiness_deferrals) - 1}
+            self.readiness_deferrals.append(response)
+            self.save_record()
+            return response
         except Exception as error:
             self.fail(f'{type(error).__name__}: {error}')
             raise
@@ -688,8 +717,8 @@ old-session check takes its own samples.
             return {'hosts': hosts, 'unparsed_lines': unparsed}
         rows = self.observations.get(names['state'], {}).get('supervisor.db', {}).get('sessions', [])
         if len(rows) != 1 or not rows[0].get('captured_conversation'):
-            raise RuntimeError('sample the old fixture terminal hosts only after this attempt observed '
-                               'its one captured session')
+            raise ObservationNotReady('Observe the one captured conversation with inspect_state or '
+                                      'remote_inspect_state first, then request the terminal-host sample.')
         hosts, unparsed = self.sample_hosts(side)
         if len(hosts) != 1 or len(hosts[0]['children']) != 1:
             raise RuntimeError('the old fixture needs exactly one terminal host, with one live child, '

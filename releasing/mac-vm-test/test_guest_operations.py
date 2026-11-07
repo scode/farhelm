@@ -22,7 +22,7 @@ import types
 import unittest
 from unittest import mock
 
-from guest_operations import (Operations, installer_environment, parse_mac_processes, remote_host_snapshot,
+from guest_operations import (ObservationNotReady, Operations, installer_environment, parse_mac_processes, remote_host_snapshot,
                               run_fixed, select_hosts, serve, write_json)
 from guest_tester import managed_result, native_args, prompt, TesterError
 from checkpoint_contract import (available_operations, require_old_session,
@@ -168,6 +168,33 @@ not-found/inactive properties make that an acceptable absence observation.
         self.assertIn('gate is closed', responses[1]['result']['content'][0]['text'])
         self.assertEqual(len(list((self.output / 'work').glob('managed-*-failed-command.json'))), 1)
         self.assertTrue((self.output / 'managed-failure.json').is_file())
+
+    def test_readiness_response_keeps_native_lane_open_without_acceptance_receipt(self):
+        """An early read-only sample can be corrected through UI in the same turn.
+
+The response is successful protocol data, so native-event validation does not
+mistake it for a provider error. It cannot mark the requested sample completed.
+"""
+        self.value.update(check_id='old-fixture', pass_id='p0-updater-upgrade')
+        operations = self.operations()
+        operations.perform = mock.Mock(side_effect=ObservationNotReady('observe the captured old session first'))
+        native = types.SimpleNamespace(stdin=io.StringIO(), stdout=io.StringIO(json.dumps({
+            'jsonrpc': '2.0', 'id': 2, 'result': {'content': [{'type': 'text', 'text': 'native state'}]}}) + '\n'))
+        messages = [
+            {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {
+                'name': 'brick_action', 'arguments': {'operation': 'terminal_hosts'}}},
+            {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {
+                'name': 'brick_ui', 'arguments': {'target': 'desktop', 'method': 'getState', 'args': []}}}]
+        responses = []
+        serve(self.value, self.output, native, map(json.dumps, messages), responses.append, operations)
+        response = json.loads(responses[0]['result']['content'][0]['text'])
+        self.assertEqual(response['status'], 'not-ready')
+        self.assertNotIn('isError', responses[0]['result'])
+        self.assertIn('native state', responses[1]['result']['content'][0]['text'])
+        self.assertIsNone(operations.failure)
+        self.assertNotIn('terminal_hosts', operations.completed)
+        self.assertFalse((self.output / 'managed-failure.json').exists())
+        self.assertEqual(json.loads((self.output / 'managed-operations.json').read_text())['receipts'], [])
 
     def test_native_error_closes_gate_before_following_fixed_operation(self):
         """A refused native action must prevent a later installer just as a failed command prevents a click."""
@@ -894,6 +921,35 @@ new host, or no new generation is refused.
                 with self.assertRaisesRegex(TesterError, refusal):
                     self.accept(value, output)
 
+    def test_early_baseline_sample_can_complete_after_observing_capture(self):
+        """A deferred baseline must use the observed captured session before issuing its receipt.
+
+The same attempt continues after the read-only prerequisite response. An
+empty early observation cannot count as a completed terminal-host sample.
+"""
+        self.sessions(generation=1, new=False)
+        self.table = mac_table(*self.host(200, 1, 201))
+        _, _, operations = self.attempt('old-fixture')
+        self.assertEqual(operations.dispatch('terminal_hosts')['status'], 'not-ready')
+        self.assertEqual(operations.completed, set())
+        self.assertEqual(operations.observations, {})
+        operations.dispatch('inspect_state')
+        sampled = operations.dispatch('terminal_hosts')
+        self.assertEqual(len(sampled['observation']['hosts']), 1)
+        self.assertIn('terminal_hosts', operations.completed)
+        self.assertEqual(len(operations.readiness_deferrals), 1)
+        self.assertIsNone(operations.failure)
+
+    def test_repeated_readiness_deferrals_are_bounded(self):
+        """Repeatedly skipping the captured-session observation must end an unproductive attempt."""
+        _, output, operations = self.attempt('old-fixture')
+        for remaining in (2, 1, 0):
+            self.assertEqual(operations.dispatch('terminal_hosts')['remaining_deferrals'], remaining)
+        with self.assertRaisesRegex(RuntimeError, 'deferral limit exceeded'):
+            operations.dispatch('terminal_hosts')
+        self.assertTrue((output / 'managed-failure.json').is_file())
+        self.assertNotIn('terminal_hosts', operations.completed)
+
     def test_decisions_do_not_depend_on_when_the_tester_sampled(self):
         """Out-of-order calls must end in a refusal or an unavailable check, never a pass.
 
@@ -908,8 +964,8 @@ before the Restart shows nothing moved.
         self.table = mac_table(*old)
         self.sessions(generation=1, new=False)
         _, _, operations = self.attempt('old-fixture')
-        with self.assertRaisesRegex(RuntimeError, 'only after this attempt observed'):
-            operations.dispatch('terminal_hosts')
+        self.assertEqual(operations.dispatch('terminal_hosts')['status'], 'not-ready')
+        self.assertNotIn('terminal_hosts', operations.completed)
         self.old_fixture(*old)
         _, _, operations = self.attempt('local-old-session')
         with self.assertRaisesRegex(RuntimeError, 'before observing the old session afterwards'):
