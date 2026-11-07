@@ -2749,10 +2749,15 @@ pub struct CheckoutTrashIssue {
 pub struct CheckoutTrashListing {
     pub checkouts: Vec<ArchivedCheckout>,
     pub issues: Vec<CheckoutTrashIssue>,
+    /// An actual background removal attempt is running in this supervisor.
+    /// Retained failures alone do not set it. Older peers omit the field.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub removing: bool,
 }
 
 /// The disposition of each selected archive. Removed records include absent
-/// or mismatched folders; only verified folders are recursively deleted.
+/// or mismatched folders and verified folders accepted for background removal.
+/// Acceptance does not imply that their disk space has already been freed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CheckoutTrashDeleted {
     pub removed: Vec<String>,
@@ -6210,7 +6215,10 @@ mod tests {
             },
             ControlMsg::CheckoutTrashListed {
                 req_id: 7,
-                listing: CheckoutTrashListing::default(),
+                listing: CheckoutTrashListing {
+                    removing: true,
+                    ..Default::default()
+                },
             },
             ControlMsg::DeleteCheckoutTrash {
                 req_id: 8,
@@ -6247,6 +6255,16 @@ mod tests {
                 message
             );
         }
+        let old: CheckoutTrashListing =
+            serde_json::from_value(serde_json::json!({"checkouts": [], "issues": []})).unwrap();
+        assert!(
+            !old.removing,
+            "old supervisors do not report live background work"
+        );
+        assert_eq!(
+            serde_json::to_value(old).unwrap(),
+            serde_json::json!({"checkouts": [], "issues": []})
+        );
         let message = ControlMsg::SessionDeleted {
             req_id: 9,
             notice: None,

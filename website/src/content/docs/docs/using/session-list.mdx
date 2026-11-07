@@ -71,8 +71,11 @@ asks you to confirm, and work in the trash that was never committed or pushed is
 pushed is lost. An unreachable host stays greyed out and is skipped by **Delete all**, which waits until every reachable
 host can be read. Sizes can be partial when some directories cannot be measured. If an archive directory was replaced or
 moved since Farhelm archived it, it stays untouched and the dialog explains what was left behind. Changing the files
-inside it does not protect it: copy anything you want to keep out of the archive first. Cleanup can partially remove a
-directory before failing; the dialog tells you when that happened.
+inside it does not protect it: copy anything you want to keep out of the archive first.
+
+An accepted deletion removes the checkout from the trash promptly; its host frees the disk space in the background,
+so the space comes back shortly after the trash empties. If the host cannot finish removing a directory, it keeps what
+remains and tries again when its supervisor next starts.
 
 While it deletes, the dialog stays open. Each host counts how many of its checkouts are deleted, the checkout being
 deleted shows how many seconds it has taken, and the rest say **Waiting**. The bottom of the dialog says how many

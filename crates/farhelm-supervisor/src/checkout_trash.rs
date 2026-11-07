@@ -1,16 +1,16 @@
 //! Permanent cleanup of recorded retired checkouts, separate from archiving.
 //!
 //! The registry supplies deletion authority; directory names supplied by a
-//! client never do. The supervisor holds directory admission through this
-//! deletion work, including after its caller stops waiting, so a new
-//! session cannot enter an archive between the live-directory check and removal.
+//! client never do. Directory admission protects checks and a journaled rename
+//! into the private removal namespace. One supervisor-owned worker then frees
+//! space without holding directory admission or a browse-worker permit.
 //! Spare recovery reuses only the confined opened-tree traversal below; its
 //! namespace ownership and trash rename remain in `spare_checkouts`.
 
 use std::collections::HashSet;
 use std::ffi::{CStr, CString};
 use std::fs;
-use std::os::fd::AsFd;
+use std::os::fd::{AsFd, AsRawFd};
 #[cfg(test)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
@@ -39,6 +39,43 @@ const REMOVAL_RESCANS: usize = 3;
 /// Refuse an oversized selection before allocating per-ID state. The control
 /// frame already bounds input bytes; this also bounds small-ID request work.
 pub(crate) const DELETE_ID_CAP: usize = 10_000;
+
+/// A colon cannot occur in generated checkout names. Four extra bytes leave
+/// even a 250-byte archive collision name below the portable 255-byte limit.
+/// Keeping the original name makes a pre-rename crash recoverable on this row.
+const REMOVING_PREFIX: &str = ".rm:";
+
+/// A reserved destination is durable deletion intent, not proof that its rename
+/// completed or that a remover is currently running.
+pub(crate) fn is_removing(row: &WorkingCopyRow) -> bool {
+    row.archive_destination
+        .as_deref()
+        .is_some_and(|name| name.starts_with(REMOVING_PREFIX))
+}
+
+/// Fence both sides of an accepted rename against new session admission. The
+/// legacy spelling stays protected too: migration preserves recorded cwds.
+/// These are recorded spellings; admission also derives their current canonical
+/// root spellings before comparing a canonical candidate under its guard.
+pub(crate) fn retirement_paths(row: &WorkingCopyRow) -> anyhow::Result<Vec<PathBuf>> {
+    if row.allocation_state != AllocationState::Retired || !is_removing(row) {
+        return Ok(Vec::new());
+    }
+    let hidden = archive_name(row)?;
+    let original = hidden
+        .strip_prefix(REMOVING_PREFIX)
+        .context("missing removal prefix")?;
+    let mut paths = Vec::with_capacity(4);
+    for namespace in [
+        working_copies::ARCHIVE_DIR_NAME,
+        working_copies::LEGACY_ARCHIVE_DIR_NAME,
+    ] {
+        let parent = Path::new(&row.canonical_root).join(namespace);
+        paths.push(parent.join(hidden));
+        paths.push(parent.join(original));
+    }
+    Ok(paths)
+}
 
 /// The only paths that may become trash entries are single-component recorded
 /// names beneath a root whose identity still matches allocation evidence.
@@ -347,6 +384,9 @@ pub(crate) fn list(db: &Db, measure_sizes: bool) -> anyhow::Result<CheckoutTrash
     for row in rows.into_iter().filter(|row| {
         row.allocation_state == AllocationState::Retired && row.archive_destination.is_some()
     }) {
+        if is_removing(&row) {
+            continue;
+        }
         if working_copies::member_count(&db.lock(), &row.id)? != 0 {
             listing.issues.push(CheckoutTrashIssue {
                 id: row.id.clone(),
@@ -357,7 +397,7 @@ pub(crate) fn list(db: &Db, measure_sizes: bool) -> anyhow::Result<CheckoutTrash
         }
         let opened = open_archive(db, &row, false);
         match opened {
-            Ok(None) => working_copies::forget_retired(&db.lock(), &row.id)?,
+            Ok(None) => working_copies::forget_retired_at(&db.lock(), &row)?,
             Ok(Some(archive)) => {
                 let path = archive.path.clone();
                 let bytes = measure_sizes
@@ -410,7 +450,7 @@ fn delete(
 }
 
 /// Request-wide measurements are repeated on every selected checkout's line.
-/// The GUI sends one checkout per request. Database timings include waiting for
+/// Database timings include waiting for
 /// the shared connection, and total time starts before directory admission.
 pub(crate) struct DeleteTiming {
     pub(crate) started: Instant,
@@ -471,14 +511,14 @@ fn log_deletion(
         working_copies_ms = timing.rows.as_millis() as u64,
         record_checks_ms = checks.as_millis() as u64,
         open_verify_ms = opening.as_millis() as u64,
-        removal_ms = removal.as_millis() as u64,
+        rename_ms = removal.as_millis() as u64,
         record_update_ms = update.as_millis() as u64,
         files_removed = counts.files, directories_removed = counts.directories,
         "permanent checkout trash deletion finished"
     );
 }
 
-/// Delete selected archives while preserving timings captured under admission.
+/// Retire selected archives while preserving timings captured under admission.
 /// Total time is measured from the request's start through each completion;
 /// later entries in a batch therefore include time spent on earlier entries.
 pub(crate) fn delete_timed(
@@ -486,8 +526,15 @@ pub(crate) fn delete_timed(
     ids: &[String],
     session_directories: &[PathBuf],
     timing: DeleteTiming,
-) -> anyhow::Result<CheckoutTrashDeleted> {
-    delete_with_timing(db, ids, session_directories, timing, &mut remove_archive)
+) -> anyhow::Result<RetiredBatch> {
+    delete_with_timing(db, ids, session_directories, timing)
+}
+
+/// Only successfully parked IDs enter this process's remover queue. The owned
+/// admission worker enqueues them before returning, even if its caller is gone.
+pub(crate) struct RetiredBatch {
+    pub(crate) reply: CheckoutTrashDeleted,
+    pub(crate) queued: Vec<String>,
 }
 
 /// Keep result bookkeeping on the real delete path while tests inject only
@@ -499,13 +546,20 @@ fn delete_with(
     session_directories: &[PathBuf],
     remove: &mut impl FnMut(&OpenArchive, &mut RemovalCounts) -> anyhow::Result<()>,
 ) -> anyhow::Result<CheckoutTrashDeleted> {
-    delete_with_timing(
-        db,
-        ids,
-        session_directories,
-        DeleteTiming::default(),
-        remove,
-    )
+    let mut batch = delete_timed(db, ids, session_directories, DeleteTiming::default())?;
+    // Legacy guard/traversal tests exercise both phases synchronously. Tests of
+    // prompt acceptance call delete_timed directly and hold the real worker.
+    for id in batch.queued {
+        if let Err(error) = remove_retired_with(db, &id, remove) {
+            batch.reply.removed.retain(|removed| removed != &id);
+            batch.reply.issues.push(CheckoutTrashIssue {
+                id,
+                path: String::new(),
+                message: format!("permanent deletion did not complete; some contents may already be gone: {error:#}"),
+            });
+        }
+    }
+    Ok(batch.reply)
 }
 
 /// Keep every early per-record exit inside the completion-log boundary.
@@ -516,8 +570,7 @@ fn delete_with_timing(
     ids: &[String],
     session_directories: &[PathBuf],
     mut timing: DeleteTiming,
-    remove: &mut impl FnMut(&OpenArchive, &mut RemovalCounts) -> anyhow::Result<()>,
-) -> anyhow::Result<CheckoutTrashDeleted> {
+) -> anyhow::Result<RetiredBatch> {
     let read = Instant::now();
     let rows = working_copies::all_working_copies(&db.lock());
     timing.rows = read.elapsed();
@@ -525,9 +578,10 @@ fn delete_with_timing(
     let rows: std::collections::HashMap<_, _> =
         rows.iter().map(|row| (row.id.as_str(), row)).collect();
     let mut reply = CheckoutTrashDeleted::default();
+    let mut queued = Vec::new();
     let mut seen = HashSet::new();
     for id in ids.iter().filter(|id| seen.insert(id.as_str())) {
-        let mut counts = RemovalCounts::default();
+        let counts = RemovalCounts::default();
         let mut checks = Duration::ZERO;
         let mut opening = Duration::ZERO;
         let mut removal = Duration::ZERO;
@@ -542,6 +596,7 @@ fn delete_with_timing(
             let Some(row) = rows.get(id.as_str()).copied().filter(|row| {
                 row.allocation_state == AllocationState::Retired
                     && row.archive_destination.is_some()
+                    && !is_removing(row)
             }) else {
                 reply.issues.push(CheckoutTrashIssue {
                     id: id.clone(),
@@ -584,26 +639,14 @@ fn delete_with_timing(
                     opening = opened_at.elapsed();
                     return Ok(());
                 };
-                let current_path = fs::canonicalize(&archive.path).ok();
-                let legacy_path = Path::new(&row.canonical_root)
-                    .join(working_copies::LEGACY_ARCHIVE_DIR_NAME)
-                    .join(archive_name(row)?);
-                // Migration moves the trash without rewriting sessions' recorded
-                // working directories. Their old spelling still protects this tree.
-                if session_directories.iter().any(|cwd| {
-                    cwd.starts_with(&archive.path)
-                        || cwd.starts_with(&legacy_path)
-                        || current_path
-                            .as_ref()
-                            .is_some_and(|current| cwd.starts_with(current))
-                }) {
-                    bail!("a session uses this archive or a folder inside it");
-                }
+                guard_session_paths(row, &archive, session_directories)?;
                 removal_started = true;
                 opening = opened_at.elapsed();
                 let removing = Instant::now();
-                let result = remove(&archive, &mut counts);
-                removal = removing.elapsed();
+                let mut journal = Duration::ZERO;
+                let result = retire_archive(db, row, &archive, &mut journal);
+                removal = removing.elapsed().saturating_sub(journal);
+                update = journal;
                 result
             });
             if !removal_started {
@@ -611,6 +654,12 @@ fn delete_with_timing(
             }
             match outcome {
                 Ok(()) => {
+                    if removal_started {
+                        status = "retired";
+                        queued.push(id.clone());
+                        reply.removed.push(id.clone());
+                        return;
+                    }
                     let updating = Instant::now();
                     let forgotten = working_copies::forget_retired(&db.lock(), id);
                     update = updating.elapsed();
@@ -628,7 +677,7 @@ fn delete_with_timing(
                 }
                 Err(error) => {
                     status = if removal_started { "failed" } else { "refused" };
-                    let forgotten = if should_forget(&error) {
+                    let forgotten = if !removal_started && should_forget(&error) {
                         let updating = Instant::now();
                         let result = working_copies::forget_retired(&db.lock(), id);
                         update = updating.elapsed();
@@ -652,7 +701,7 @@ fn delete_with_timing(
                     };
                     let message = if removal_started {
                         format!(
-                            "permanent deletion did not complete; some contents may already be gone; what remains is at {}: {error:#}",
+                            "could not move this archive aside for background removal; its record is retained at {}: {error:#}",
                             diagnostic_path(row)
                         )
                     } else if forgotten {
@@ -672,7 +721,173 @@ fn delete_with_timing(
             id, &path, status, &timing, checks, opening, removal, update, &counts,
         );
     }
-    Ok(reply)
+    Ok(RetiredBatch { reply, queued })
+}
+
+/// Retained stopped sessions protect their raw, canonical and pre-migration
+/// archive spellings. This runs under admission before the folder moves away.
+fn guard_session_paths(
+    row: &WorkingCopyRow,
+    archive: &OpenArchive,
+    session_directories: &[PathBuf],
+) -> anyhow::Result<()> {
+    let current_path = fs::canonicalize(&archive.path).ok();
+    let legacy_path = Path::new(&row.canonical_root)
+        .join(working_copies::LEGACY_ARCHIVE_DIR_NAME)
+        .join(archive.name.to_str()?);
+    if session_directories.iter().any(|cwd| {
+        cwd.starts_with(&archive.path)
+            || cwd.starts_with(&legacy_path)
+            || current_path
+                .as_ref()
+                .is_some_and(|current| cwd.starts_with(current))
+    }) {
+        bail!("a session uses this archive or a folder inside it");
+    }
+    Ok(())
+}
+
+/// Journal the original name before its no-replace move. Both names stay on the
+/// same verified parent descriptor. Recovery never scans or adopts neighbours.
+fn retire_archive(
+    db: &Db,
+    row: &WorkingCopyRow,
+    archive: &OpenArchive,
+    journal: &mut Duration,
+) -> anyhow::Result<()> {
+    let destination = format!("{REMOVING_PREFIX}{}", archive_name(row)?);
+    let started = Instant::now();
+    let persisted = working_copies::repoint_retired(&db.lock(), row, &destination);
+    *journal = started.elapsed();
+    persisted?;
+    let mut pending = row.clone();
+    pending.archive_destination = Some(destination);
+    finish_retirement(db, &pending, archive)
+}
+
+/// Finish only the journaled rename and verify its new name before granting
+/// recursive authority. A swap at the source can move a stranger, but cannot
+/// make that stranger eligible for removal.
+fn finish_retirement(db: &Db, row: &WorkingCopyRow, archive: &OpenArchive) -> anyhow::Result<()> {
+    let destination = CString::new(archive_name(row)?)?;
+    if let Err(error) = working_copies::rename_at_noreplace(
+        archive.parent.as_raw_fd(),
+        &archive.name,
+        archive.parent.as_raw_fd(),
+        &destination,
+    ) {
+        if error.kind() == std::io::ErrorKind::AlreadyExists
+            || working_copies::rename_refused_without_moving(&error)
+        {
+            // Only the rename's own definite refusal authorizes rollback. A
+            // later open/identity/fsync error may follow a completed move.
+            let original = archive_name(row)?
+                .strip_prefix(REMOVING_PREFIX)
+                .context("missing removal prefix")?;
+            working_copies::repoint_retired(&db.lock(), row, original)?;
+        }
+        return Err(error.into());
+    }
+    let moved = open_child_dir(&archive.parent, &destination, true)?;
+    working_copies::verify_archived_handle(row, &moved, &archive.path)?;
+    archive.parent.sync_all()?;
+    Ok(())
+}
+
+/// Settle interrupted retirements once before accepting new admissions. A
+/// journal written before a crash can still name an unmoved ordinary archive;
+/// recheck sessions before completing that rename. Failures wait for next boot.
+pub(crate) fn resume_retirements(db: &Db, session_directories: &[PathBuf]) -> Vec<String> {
+    let rows = match working_copies::all_working_copies(&db.lock()) {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(%error, "could not read background trash removal records at startup");
+            return Vec::new();
+        }
+    };
+    let mut queued = Vec::new();
+    for row in rows
+        .into_iter()
+        .filter(|row| row.allocation_state == AllocationState::Retired && is_removing(row))
+    {
+        let result = (|| {
+            if working_copies::member_count(&db.lock(), &row.id)? != 0 {
+                bail!("a session still references this retired checkout");
+            }
+            if let Some(archive) = open_archive(db, &row, true)? {
+                // A retained row may predate this build's admission fence.
+                // Startup must not erase a stopped session's working files.
+                guard_session_paths(&row, &archive, session_directories)?;
+                return Ok(true);
+            }
+            let mut original = row.clone();
+            original.archive_destination = Some(
+                archive_name(&row)?
+                    .strip_prefix(REMOVING_PREFIX)
+                    .context("missing removal prefix")?
+                    .to_string(),
+            );
+            let Some(archive) = open_archive(db, &original, true)? else {
+                working_copies::forget_retired(&db.lock(), &row.id)?;
+                return Ok(false);
+            };
+            guard_session_paths(&original, &archive, session_directories)?;
+            finish_retirement(db, &row, &archive)?;
+            Ok::<_, anyhow::Error>(true)
+        })();
+        match result {
+            Ok(true) => queued.push(row.id),
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(checkout_id = ?row.id, path = ?diagnostic_path(&row), error = %format!("{error:#}"), "background trash retirement could not resume; retained until next startup")
+            }
+        }
+    }
+    queued
+}
+
+/// Attempt a parked tree exactly once. All failures retain its hidden record;
+/// the next supervisor start is the only retry trigger. No admission is held.
+pub(crate) fn remove_retired(db: &Db, id: &str) -> anyhow::Result<()> {
+    remove_retired_with(db, id, &mut remove_archive)
+}
+
+/// Tests inject the actual removal boundary, keeping descriptor confinement,
+/// record checks and completion logging on the production path.
+fn remove_retired_with(
+    db: &Db,
+    id: &str,
+    remove: &mut impl FnMut(&OpenArchive, &mut RemovalCounts) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let started = Instant::now();
+    let mut counts = RemovalCounts::default();
+    let mut path = String::new();
+    let result = (|| {
+        let Some(row) = working_copies::get_working_copy(&db.lock(), id)? else {
+            return Ok(());
+        };
+        path = diagnostic_path(&row);
+        if row.allocation_state != AllocationState::Retired || !is_removing(&row) {
+            bail!("checkout has not been retired for background removal");
+        }
+        if working_copies::member_count(&db.lock(), id)? != 0 {
+            bail!("a session still references this retired checkout");
+        }
+        if let Some(archive) = open_archive(db, &row, true)? {
+            remove(&archive, &mut counts)?;
+            archive.parent.sync_all()?;
+        }
+        working_copies::forget_retired(&db.lock(), id).context(
+            "folder removed or already absent, but its trash record could not be dropped",
+        )?;
+        Ok::<_, anyhow::Error>(())
+    })();
+    tracing::info!(checkout_id = ?id, path = ?path,
+        outcome = if result.is_ok() { "removed" } else { "failed" },
+        removal_ms = started.elapsed().as_millis() as u64,
+        files_removed = counts.files, directories_removed = counts.directories,
+        "background checkout trash removal finished");
+    result
 }
 
 /// Convert the native stat block count without assuming its signedness.
@@ -846,6 +1061,14 @@ mod tests {
     }
 
     impl Fixture {
+        /// Retirement keeps this journal destination, so disappearance from the
+        /// visible trash can be distinguished from actual recursive removal.
+        fn parked(&self) -> PathBuf {
+            self.archive.with_file_name(format!(
+                "{REMOVING_PREFIX}{}",
+                self.archive.file_name().unwrap().to_str().unwrap()
+            ))
+        }
         /// Build a retired checkout containing an observable uncommitted file.
         /// The kept original inode makes replacement tests independent of inode
         /// reuse and of whether this filesystem supports birth timestamps.
@@ -933,7 +1156,7 @@ mod tests {
         assert!(!fixture.archive.exists());
         let lines = farhelm_testtrace::current_capture()
             .unwrap()
-            .matching("permanent checkout trash deletion finished")
+            .matching("background checkout trash removal finished")
             .unwrap();
         assert_eq!(lines.len(), 1);
         let fields = &lines[0].fields;
@@ -943,7 +1166,7 @@ mod tests {
         );
         assert_eq!(
             fields.get("path"),
-            Some(&format!("{:?}", fixture.archive.display().to_string()))
+            Some(&format!("{:?}", fixture.parked().display().to_string()))
         );
         assert_eq!(fields.get("outcome").map(String::as_str), Some("removed"));
         assert_eq!(fields.get("files_removed").map(String::as_str), Some("3"));
@@ -951,18 +1174,260 @@ mod tests {
             fields.get("directories_removed").map(String::as_str),
             Some("2")
         );
-        for field in [
-            "total_ms",
-            "admission_ms",
-            "session_paths_ms",
-            "working_copies_ms",
-            "record_checks_ms",
-            "open_verify_ms",
-            "removal_ms",
-            "record_update_ms",
-        ] {
-            assert!(fields.get(field).unwrap().parse::<u64>().is_ok(), "{field}");
+        assert!(fields.get("removal_ms").unwrap().parse::<u64>().is_ok());
+    }
+
+    /// Leaving visible trash is acceptance, not evidence of freed space. The
+    /// record and marker must survive until the separate remover finishes.
+    #[farhelm_testtrace::test]
+    async fn retirement_hides_the_tree_but_retains_its_recovery_record() {
+        let fixture = Fixture::new().await;
+        let old = working_copies::get_working_copy(&fixture.db.lock(), &fixture.id)
+            .unwrap()
+            .unwrap();
+        let batch = delete_timed(
+            &fixture.db,
+            std::slice::from_ref(&fixture.id),
+            &[],
+            DeleteTiming::default(),
+        )
+        .unwrap();
+        assert_eq!(batch.reply.removed, std::slice::from_ref(&fixture.id));
+        assert_eq!(batch.queued, std::slice::from_ref(&fixture.id));
+        assert!(batch.reply.issues.is_empty());
+        assert!(!fixture.archive.exists());
+        assert_eq!(
+            fs::read(fixture.parked().join("work")).unwrap(),
+            b"uncommitted work"
+        );
+        assert!(list(&fixture.db, true).unwrap().checkouts.is_empty());
+        // Reproduce the missing-path prune of a list whose snapshot predates
+        // retirement. Its old destination must not erase the new journal.
+        working_copies::forget_retired_at(&fixture.db.lock(), &old).unwrap();
+        let row = working_copies::get_working_copy(&fixture.db.lock(), &fixture.id)
+            .unwrap()
+            .unwrap();
+        assert!(is_removing(&row));
+        let duplicate = delete_timed(
+            &fixture.db,
+            std::slice::from_ref(&fixture.id),
+            &[],
+            DeleteTiming::default(),
+        )
+        .unwrap();
+        assert!(
+            duplicate.queued.is_empty(),
+            "a repeated request must not retry a failed remover"
+        );
+        remove_retired(&fixture.db, &fixture.id).unwrap();
+        assert!(!fixture.parked().exists());
+        assert!(
+            working_copies::get_working_copy(&fixture.db.lock(), &fixture.id)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// A process can stop on either side of the journaled rename. Recovery
+    /// derives both names from the same retained row, then removes only its tree.
+    #[farhelm_testtrace::test]
+    async fn startup_resumes_both_sides_of_the_retirement_rename() {
+        for renamed in [false, true] {
+            let fixture = Fixture::new().await;
+            let row = working_copies::get_working_copy(&fixture.db.lock(), &fixture.id)
+                .unwrap()
+                .unwrap();
+            let destination = format!("{REMOVING_PREFIX}{}", archive_name(&row).unwrap());
+            working_copies::repoint_retired(&fixture.db.lock(), &row, &destination).unwrap();
+            if renamed {
+                fs::rename(&fixture.archive, fixture.parked()).unwrap();
+            }
+            assert_eq!(
+                fs::read(
+                    if renamed {
+                        fixture.parked()
+                    } else {
+                        fixture.archive.clone()
+                    }
+                    .join("work")
+                )
+                .unwrap(),
+                b"uncommitted work"
+            );
+            assert_eq!(
+                resume_retirements(&fixture.db, &[]),
+                std::slice::from_ref(&fixture.id)
+            );
+            assert!(!fixture.archive.exists());
+            assert_eq!(
+                fs::read(fixture.parked().join("work")).unwrap(),
+                b"uncommitted work"
+            );
+            remove_retired(&fixture.db, &fixture.id).unwrap();
+            assert!(!fixture.parked().exists());
+            assert!(
+                working_copies::get_working_copy(&fixture.db.lock(), &fixture.id)
+                    .unwrap()
+                    .is_none()
+            );
         }
+    }
+
+    /// Startup's session snapshot protects even a hidden tree with no registry
+    /// membership, such as one entered before the admission fence existed.
+    #[farhelm_testtrace::test]
+    async fn startup_preserves_retained_session_paths_on_both_sides_of_retirement() {
+        for renamed in [false, true] {
+            let fixture = Fixture::new().await;
+            fs::create_dir(fixture.archive.join("retained")).unwrap();
+            let row = working_copies::get_working_copy(&fixture.db.lock(), &fixture.id)
+                .unwrap()
+                .unwrap();
+            let destination = format!("{REMOVING_PREFIX}{}", archive_name(&row).unwrap());
+            working_copies::repoint_retired(&fixture.db.lock(), &row, &destination).unwrap();
+            if renamed {
+                fs::rename(&fixture.archive, fixture.parked()).unwrap();
+            }
+            let current = if renamed {
+                fixture.parked()
+            } else {
+                fixture.archive.clone()
+            };
+            assert_eq!(
+                working_copies::member_count(&fixture.db.lock(), &fixture.id).unwrap(),
+                0
+            );
+            assert_eq!(fs::read(current.join("work")).unwrap(), b"uncommitted work");
+            assert!(resume_retirements(&fixture.db, &[current.join("retained")]).is_empty());
+            assert_eq!(fs::read(current.join("work")).unwrap(), b"uncommitted work");
+            assert!(
+                working_copies::get_working_copy(&fixture.db.lock(), &fixture.id)
+                    .unwrap()
+                    .is_some()
+            );
+        }
+    }
+
+    /// A reserved-name collision is foreign, even when empty. Refusal restores
+    /// the visible original record and never replaces or traverses the occupant.
+    #[farhelm_testtrace::test]
+    async fn retirement_collision_leaves_both_trees_and_restores_the_record() {
+        let fixture = Fixture::new().await;
+        fs::create_dir(fixture.parked()).unwrap();
+        fs::write(fixture.parked().join("foreign"), b"keep foreign").unwrap();
+        let batch = delete_timed(
+            &fixture.db,
+            std::slice::from_ref(&fixture.id),
+            &[],
+            DeleteTiming::default(),
+        )
+        .unwrap();
+        assert!(batch.reply.removed.is_empty() && batch.queued.is_empty());
+        assert_eq!(batch.reply.issues.len(), 1);
+        assert_eq!(
+            fs::read(fixture.archive.join("work")).unwrap(),
+            b"uncommitted work"
+        );
+        assert_eq!(
+            fs::read(fixture.parked().join("foreign")).unwrap(),
+            b"keep foreign"
+        );
+        assert_eq!(list(&fixture.db, false).unwrap().checkouts.len(), 1);
+    }
+
+    /// A name-based rename can race replacement after the source was verified.
+    /// Reopening the moved name must refuse that foreign tree before recursion.
+    #[farhelm_testtrace::test]
+    async fn retirement_rechecks_the_object_actually_moved() {
+        let fixture = Fixture::new().await;
+        let row = working_copies::get_working_copy(&fixture.db.lock(), &fixture.id)
+            .unwrap()
+            .unwrap();
+        let opened = open_archive(&fixture.db, &row, true).unwrap().unwrap();
+        let kept = fixture.archive.with_extension("kept");
+        fs::rename(&fixture.archive, &kept).unwrap();
+        fs::create_dir(&fixture.archive).unwrap();
+        fs::write(fixture.archive.join("foreign"), b"foreign work").unwrap();
+        assert_ne!(
+            opened.directory.metadata().unwrap().ino(),
+            fs::metadata(&fixture.archive).unwrap().ino()
+        );
+        let mut journal = Duration::ZERO;
+        assert!(retire_archive(&fixture.db, &row, &opened, &mut journal).is_err());
+        let pending = working_copies::get_working_copy(&fixture.db.lock(), &fixture.id)
+            .unwrap()
+            .unwrap();
+        assert!(is_removing(&pending));
+        assert!(remove_retired(&fixture.db, &fixture.id).is_err());
+        assert_eq!(
+            fs::read(fixture.parked().join("foreign")).unwrap(),
+            b"foreign work"
+        );
+        assert_eq!(fs::read(kept.join("work")).unwrap(), b"uncommitted work");
+    }
+
+    /// Prefix selection must handle a maximum-length collision name and must
+    /// not confuse an ordinary dot-prefixed repository with removal intent.
+    #[farhelm_testtrace::test]
+    async fn retirement_marker_is_disjoint_and_fits_the_longest_archive_component() {
+        for name in [
+            format!("{}-20260101T000000Z-{}", "x".repeat(200), "a".repeat(32)),
+            ".rm-project-20260101T000000Z".into(),
+        ] {
+            let fixture = Fixture::new().await;
+            let row = working_copies::get_working_copy(&fixture.db.lock(), &fixture.id)
+                .unwrap()
+                .unwrap();
+            let source = fixture.archive.with_file_name(&name);
+            fs::rename(&fixture.archive, &source).unwrap();
+            working_copies::repoint_retired(&fixture.db.lock(), &row, &name).unwrap();
+            assert_eq!(list(&fixture.db, false).unwrap().checkouts.len(), 1);
+            let batch = delete_timed(
+                &fixture.db,
+                std::slice::from_ref(&fixture.id),
+                &[],
+                DeleteTiming::default(),
+            )
+            .unwrap();
+            assert_eq!(batch.queued, std::slice::from_ref(&fixture.id));
+            let parked = source.with_file_name(format!("{REMOVING_PREFIX}{name}"));
+            assert!(parked.file_name().unwrap().len() <= 255);
+            assert_eq!(fs::read(parked.join("work")).unwrap(), b"uncommitted work");
+            remove_retired(&fixture.db, &fixture.id).unwrap();
+            assert!(!parked.exists());
+        }
+    }
+
+    /// A failed traversal is hidden but recoverable, not forgotten or retried by
+    /// listing. Startup is the explicit boundary that grants one more attempt.
+    #[farhelm_testtrace::test]
+    async fn failed_background_removal_retains_the_journal_until_next_startup() {
+        let fixture = Fixture::new().await;
+        let batch = delete_timed(
+            &fixture.db,
+            std::slice::from_ref(&fixture.id),
+            &[],
+            DeleteTiming::default(),
+        )
+        .unwrap();
+        assert_eq!(batch.queued, std::slice::from_ref(&fixture.id));
+        let error = remove_retired_with(&fixture.db, &fixture.id, &mut |archive, _| {
+            assert!(archive.path.join("work").is_file());
+            Err(std::io::Error::from_raw_os_error(libc::EACCES).into())
+        })
+        .unwrap_err();
+        assert!(error.downcast_ref::<std::io::Error>().is_some());
+        assert!(list(&fixture.db, false).unwrap().checkouts.is_empty());
+        assert_eq!(
+            fs::read(fixture.parked().join("work")).unwrap(),
+            b"uncommitted work"
+        );
+        assert_eq!(
+            resume_retirements(&fixture.db, &[]),
+            std::slice::from_ref(&fixture.id)
+        );
+        remove_retired(&fixture.db, &fixture.id).unwrap();
+        assert!(!fixture.parked().exists());
     }
 
     /// Refusals need the same completion trail as successful deletion, and
@@ -1319,7 +1784,7 @@ mod tests {
         );
         assert!(reply.issues[0].message.contains("mounted"));
         assert_eq!(
-            fs::read(mount.join("sentinel")).unwrap(),
+            fs::read(fixture.parked().join("mounted/sentinel")).unwrap(),
             b"external mounted work"
         );
         assert!(
@@ -1347,7 +1812,16 @@ mod tests {
         assert!(reply.removed.is_empty());
         assert_eq!(reply.issues.len(), 1);
         assert!(reply.issues[0].message.contains("nesting exceeds"));
-        assert_eq!(fs::read(deepest.join("sentinel")).unwrap(), b"deep work");
+        assert_eq!(
+            fs::read(
+                fixture
+                    .parked()
+                    .join(deepest.strip_prefix(&fixture.archive).unwrap())
+                    .join("sentinel")
+            )
+            .unwrap(),
+            b"deep work"
+        );
         assert!(
             working_copies::get_working_copy(&fixture.db.lock(), &fixture.id)
                 .unwrap()
@@ -1376,11 +1850,12 @@ mod tests {
         assert!(reply.removed.is_empty());
         assert_eq!(reply.issues.len(), 2);
         assert!(
-            reply.issues[0]
-                .message
-                .contains("record could not be dropped")
+            reply
+                .issues
+                .iter()
+                .any(|issue| issue.message.contains("record could not be dropped"))
         );
-        assert_eq!(reply.issues[1].id, "unknown-id");
+        assert!(reply.issues.iter().any(|issue| issue.id == "unknown-id"));
         assert!(
             working_copies::get_working_copy(&fixture.db.lock(), &fixture.id)
                 .unwrap()

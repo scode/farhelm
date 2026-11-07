@@ -4908,8 +4908,8 @@ pub(crate) fn notification_cell()
 ///   takes a lifecycle claim, so those edges only run one way.
 /// - `admission` before `directory_browse_workers`: a browse request's
 ///   blocking filesystem worker. Trash reads share those worker slots without
-///   taking directory admission; permanent deletion is separately serialized
-///   by `working_copy_operations` through its blocking filesystem work.
+///   taking directory admission. Trash retirement holds `working_copy_operations`
+///   only through checks and rename; its single remover takes neither lock.
 /// - `uploads`: may be taken under the whole mutation chain down to the
 ///   lifecycle claim (delete's teardown aborts the session's uploads), and
 ///   is never held alongside `attachments`, `sessions`, or `sinks`.
@@ -5519,8 +5519,8 @@ pub struct Supervisor {
     ///
     /// LOCK ORDER: taken AFTER a create's keyed intent guard and BEFORE
     /// any lifecycle claim (R1.1), by create, delete, and restart alike.
-    /// Permanent trash deletion holds it through its blocking filesystem
-    /// work, including after caller cancellation. Passive trash reads use
+    /// Trash retirement holds it through its checked rename, including after
+    /// caller cancellation; background removal never takes it. Passive reads use
     /// the browse-worker slots without taking this admission lock.
     /// How long create, delete, and restart hold it differs; the lock-order
     /// table in this struct's docs describes those lifetimes.
@@ -5528,6 +5528,9 @@ pub struct Supervisor {
     /// Fresh accepted creates owe coalesced spare work; only the serve-owned
     /// worker mutates records, independently of directory admission.
     pub(super) spare_builder: Arc<super::spare_builder::Builder>,
+    /// Serve owns one sequential remover; durable obligations stay on retired
+    /// working-copy records rather than a second persistent queue.
+    pub(super) trash_remover: Arc<super::trash_remover::Remover>,
     /// All discovery requests share this scanner's two-child budget. It is
     /// independent of directory admission: slow Git inspection must not hold
     /// up checkout allocation or last-reference deletion.
@@ -5970,17 +5973,20 @@ impl Supervisor {
         measure_sizes: bool,
     ) -> anyhow::Result<farhelm_proto::CheckoutTrashListing> {
         let db = self.store.conn.clone();
-        Self::run_directory_worker(Arc::clone(&self.directory_browse_workers), move || {
-            crate::checkout_trash::list(&db, measure_sizes)
-        })
-        .await
+        let mut listing =
+            Self::run_directory_worker(Arc::clone(&self.directory_browse_workers), move || {
+                crate::checkout_trash::list(&db, measure_sizes)
+            })
+            .await?;
+        listing.removing = self.trash_remover.removing();
+        Ok(listing)
     }
 
-    /// Hold directory admission through the actual OS mutation, even if the
+    /// Hold directory admission through the checked rename, even if the
     /// client disconnects or times out. A new session must not enter an archive
     /// after its live-session guard has been checked.
     /// Request timing begins before admission, so completion logs expose time
-    /// waiting behind other directory operations as well as filesystem removal.
+    /// waiting behind other directory operations. Recursive removal is separate.
     pub(crate) async fn delete_checkout_trash(
         &self,
         ids: Vec<String>,
@@ -5992,19 +5998,28 @@ impl Supervisor {
         let admission = Arc::clone(&self.working_copy_operations).lock_owned().await;
         timing.admission = timing.started.elapsed();
         let db = self.store.conn.clone();
+        let remover = self.trash_remover.clone();
         // Admission already serializes deletion. Waiting for browse slots here
         // would let two wedged passive reads freeze every session operation.
-        tokio::task::spawn_blocking(move || {
+        let (reply, started) = tokio::task::spawn_blocking(move || {
             let _admission = admission;
             let reading = std::time::Instant::now();
             let live = crate::store::session_directory_paths(&db.lock());
             timing.session_paths = reading.elapsed();
             let live = live
                 .inspect_err(|_| crate::checkout_trash::log_delete_read_failure(&ids, &timing))?;
-            crate::checkout_trash::delete_timed(&db, &ids, &live, timing)
+            let batch = crate::checkout_trash::delete_timed(&db, &ids, &live, timing)?;
+            let started = remover.enqueue(batch.queued)?;
+            Ok::<_, anyhow::Error>((batch.reply, started))
         })
         .await
-        .context("checkout trash worker panicked")?
+        .context("checkout trash worker panicked")??;
+        if let Some(started) = started {
+            started
+                .await
+                .context("background trash remover ended before starting")?;
+        }
+        Ok(reply)
     }
 
     /// Start one blocking directory operation under the pool that represents
@@ -6674,6 +6689,7 @@ impl Supervisor {
             agent_request_locks: Arc::new(KeyedLocks::default()),
             working_copy_operations: Arc::new(tokio::sync::Mutex::new(())),
             spare_builder: Arc::new(super::spare_builder::Builder::default()),
+            trash_remover: Arc::new(super::trash_remover::Remover::default()),
             repository_scanner: crate::repository_discovery::RepositoryScanner::new("git"),
             user_home,
             capture_locks: Arc::new(KeyedLocks::default()),
@@ -8586,6 +8602,13 @@ impl Supervisor {
         // it. See `ticker`'s module doc for the shutdown contract; here
         // the accept loop below never returns, so the ticker's lifetime is
         // this call's.
+        // An interrupted retirement may still owe a rename. Settle those short
+        // moves before accepting new session paths; only then start recursion.
+        let initial = super::trash_remover::recover(self)
+            .await
+            .context("trash retirement recovery worker panicked")??;
+        let _ = self.trash_remover.enqueue(initial)?;
+        let mut trash_remover = super::trash_remover::start(self);
         let mut ticker = start_ticker(self);
         let mut spare_builder = super::spare_builder::start(self, self.farhelm_exe.clone());
         // Beside the ticker and for the same lifetime: turns marks from any
@@ -8614,6 +8637,7 @@ impl Supervisor {
                 // and saying so.
                 () = ticker.watch() => continue,
                 () = spare_builder.watch() => continue,
+                () = trash_remover.watch() => continue,
                 accepted = listener.accept() => accepted,
             };
             match accepted {
@@ -9557,10 +9581,10 @@ impl Supervisor {
             })?;
             Some(canonical_cwd_text(&cwd, resolved)?)
         };
-        if !destination.is_fresh() {
-            self.refuse_pending_archive(&cwd, canonical_cwd.as_deref())
-                .await?;
-        }
+        // Fresh paths already use their canonical resolved root. A configured
+        // root inside accepted trash must not allocate into a running remover.
+        self.refuse_pending_archive(&cwd, canonical_cwd.as_deref())
+            .await?;
         Ok(LaunchRequest {
             prompt,
             named: named_start.is_some(),
@@ -9581,7 +9605,8 @@ impl Supervisor {
         })
     }
 
-    /// Refuse admissions under every unresolved archive, including aliases.
+    /// Refuse admissions under unresolved archives and accepted trash removals,
+    /// including aliases and fresh checkouts rooted inside those trees.
     ///
     /// Callers hold directory admission through this read and their session
     /// transaction. A still-present source is not evidence that it is safe to
@@ -9593,7 +9618,56 @@ impl Supervisor {
         canonical_cwd: Option<&str>,
     ) -> anyhow::Result<()> {
         let cwd = Path::new(canonical_cwd.unwrap_or(cwd));
+        let in_trash = cwd.components().any(|part| {
+            part.as_os_str() == crate::working_copies::ARCHIVE_DIR_NAME
+                || part.as_os_str() == crate::working_copies::LEGACY_ARCHIVE_DIR_NAME
+        });
+        // An ancestor may now be a symlink to the same moved root, whose
+        // ownership still verifies. Resolve each affected root once per call,
+        // rather than doing one filesystem request per archive in a bulk run.
+        let mut current_roots = HashMap::new();
         for row in self.store.working_copy_rows().await? {
+            if in_trash {
+                let paths = crate::checkout_trash::retirement_paths(&row)?;
+                let refuse = || {
+                    RequestError::new(
+                        ErrorKind::Conflict,
+                        "this working directory is being removed from the trash; choose another working directory",
+                    )
+                };
+                if paths.iter().any(|path| cwd.starts_with(path)) {
+                    return Err(refuse().into());
+                }
+                if !paths.is_empty() {
+                    if !current_roots.contains_key(&row.canonical_root) {
+                        let current = tokio::fs::canonicalize(&row.canonical_root).await.ok();
+                        current_roots.insert(row.canonical_root.clone(), current);
+                    }
+                    let relative = |path: &Path| {
+                        path.strip_prefix(&row.canonical_root)
+                            .expect("retirement paths are derived below their recorded root")
+                            .to_path_buf()
+                    };
+                    if let Some(root) = &current_roots[&row.canonical_root] {
+                        if paths
+                            .iter()
+                            .any(|path| cwd.starts_with(root.join(relative(path))))
+                        {
+                            return Err(refuse().into());
+                        }
+                    } else if cwd
+                        .ancestors()
+                        .any(|ancestor| paths.iter().any(|path| ancestor.ends_with(relative(path))))
+                    {
+                        // An unavailable unrelated volume must not block ordinary
+                        // launches. Only a candidate sharing a retirement's trash
+                        // name needs this unresolved root to establish safety.
+                        return Err(RequestError::new(ErrorKind::Conflict,
+                            "cannot verify this trash working directory while its checkout root is unavailable; choose another working directory"
+                        ).into());
+                    }
+                }
+            }
             if row.allocation_state != crate::working_copies::AllocationState::ArchivePending {
                 continue;
             }
