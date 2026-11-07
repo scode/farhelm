@@ -1526,7 +1526,7 @@ fn is_codex_status_continuation(line: &str) -> bool {
 }
 
 /// How many padding rows may separate the status widget from the composer's
-/// prompt row. The captured 0.159.0 working screens show two; one is the
+/// prompt row. The captured 0.159.0 and 0.166.0 working screens show two; one is the
 /// layout the synthetic tests below use. Each extra row widens the window in
 /// which a status line left in history above an idle composer's blank rows
 /// would count as current, so the cap is the smallest the captures need.
