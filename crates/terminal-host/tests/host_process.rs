@@ -32,79 +32,107 @@ fn read_to_exit(host: &Host) -> String {
     host.connect(false).output_to_exit().0
 }
 
-/// The pty's terminal settings are those tmux 3.7c gives a new pane:
-/// erase is DEL and IUTF8 is on, everything else the kernel's defaults.
+/// The pty's terminal settings are a new pty's defaults with exactly the two
+/// changes SPEC.md names: erase is DEL and IUTF8 is on.
 ///
-/// Why: programs moved from tmux panes to hosts must see the same
-/// terminal, or line editing and UTF-8 input change under them (SPEC.md,
-/// "The child"). Spec: `stty -g` in the host's child equals `stty -g` in a
-/// pane of a fresh tmux 3.7c server started with no client; independently,
-/// `stty -a` shows `erase = ^?` and `iutf8`. Without tmux 3.7c on PATH the
-/// comparison is skipped (said on stderr) and only the independent checks
-/// run.
+/// Why: line editing and UTF-8 input in every program a host runs depend on
+/// these settings, and running hosts outlive every release, so a change to
+/// them must be deliberate (SPEC.md, "The child", "Change policy"). Spec:
+/// `stty -a` in the host's child shows `erase = ^?` and `iutf8`, and
+/// `stty -g` there equals `stty -g` on a pty this test opens itself with only
+/// those two settings changed, which pins "everything else the kernel's
+/// defaults" without depending on another terminal program. The reference
+/// pty is opened after the host started, so the host cannot inherit it.
 #[test]
-fn the_terminal_settings_match_a_tmux_pane() {
+fn the_terminal_settings_are_a_new_ptys_with_erase_and_iutf8() {
     let ours = run_to_exit(&["/bin/sh", "-c", "stty -g; stty -a"]);
     assert!(ours.contains("erase = ^?"), "{ours}");
     assert!(ours.contains("iutf8") && !ours.contains("-iutf8"), "{ours}");
     let ours_g = ours.lines().next().unwrap().trim().to_string();
-
-    let version = std::process::Command::new("tmux").arg("-V").output();
-    let Ok(version) = version else {
-        eprintln!("SKIPPED tmux comparison: no tmux on PATH");
-        return;
-    };
-    if String::from_utf8_lossy(&version.stdout).trim() != "tmux 3.7c" {
-        eprintln!("SKIPPED tmux comparison: PATH's tmux is not 3.7c");
-        return;
-    }
-    // A short private socket path: socket paths are limited to ~104 bytes.
-    let dir = tempfile::Builder::new()
-        .prefix("th")
-        .tempdir_in("/tmp")
-        .unwrap();
-    let socket = dir.path().join("s");
-    let out = dir.path().join("g");
-    /// Ends the private tmux server however the comparison goes, so that a
-    /// failed wait cannot leave it running.
-    struct KillServer<'a>(&'a std::path::Path);
-    impl Drop for KillServer<'_> {
-        fn drop(&mut self) {
-            let _ = std::process::Command::new("tmux")
-                .arg("-S")
-                .arg(self.0)
-                .arg("kill-server")
-                .status();
-        }
-    }
-    let server = KillServer(&socket);
-    let status = std::process::Command::new("tmux")
-        .arg("-S")
-        .arg(&socket)
-        .args([
-            "-f",
-            "/dev/null",
-            "new-session",
-            "-d",
-            "-x",
-            "80",
-            "-y",
-            "24",
-        ])
-        .arg(format!("stty -g > {}", out.display()))
-        .status()
-        .unwrap();
-    assert!(status.success());
-    eventually("the tmux pane writes its settings", || {
-        std::fs::read_to_string(&out).is_ok_and(|text| text.ends_with('\n'))
-    });
-    drop(server);
-    let theirs = std::fs::read_to_string(&out).unwrap();
     assert_eq!(
         ours_g,
-        theirs.trim(),
-        "the host's pty settings differ from a tmux 3.7c pane's"
+        reference_settings(),
+        "the host's pty settings differ from a new pty's with erase and IUTF8 set"
     );
+}
+
+/// `stty -g` for a pty the test opens now, with `VERASE` set to DEL and
+/// `IUTF8` set, as SPEC.md says a host's pty starts.
+///
+/// Opened with `posix_openpt`, which is how the host opens its own on Linux;
+/// macOS's `openpty`, which the host uses there, opens the same device with
+/// the same defaults. Both ends are close-on-exec (the slave from its `open`,
+/// the master set after, since macOS's `posix_openpt` does not reliably take
+/// the flag), and the slave reaches `stty` only as its standard input.
+fn reference_settings() -> String {
+    use std::ffi::CStr;
+    use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd};
+
+    let last_error = || std::io::Error::last_os_error();
+    let set_cloexec = |fd: libc::c_int| {
+        // SAFETY: F_SETFD on a descriptor this function owns.
+        assert_eq!(
+            unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) },
+            0,
+            "{}",
+            last_error()
+        );
+    };
+    // SAFETY: posix_openpt with constant flags; the result is checked.
+    let master = unsafe { libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY) };
+    assert!(master >= 0, "posix_openpt: {}", last_error());
+    // SAFETY: a fresh descriptor this function now owns.
+    let master = unsafe { OwnedFd::from_raw_fd(master) };
+    set_cloexec(master.as_raw_fd());
+    // SAFETY: grantpt and unlockpt on the master just opened.
+    assert!(
+        unsafe { libc::grantpt(master.as_raw_fd()) } == 0
+            && unsafe { libc::unlockpt(master.as_raw_fd()) } == 0,
+        "unlocking the pty: {}",
+        last_error()
+    );
+    // SAFETY: ptsname returns a NUL-terminated name in static storage, or
+    // null; nextest runs this test alone in its process, so nothing else
+    // calls it meanwhile, and the name is copied at once.
+    let name = unsafe { libc::ptsname(master.as_raw_fd()) };
+    assert!(!name.is_null(), "ptsname: {}", last_error());
+    let name = unsafe { CStr::from_ptr(name) }.to_owned();
+    // SAFETY: open with a NUL-terminated path and constant flags.
+    let slave = unsafe {
+        libc::open(
+            name.as_ptr(),
+            libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC,
+        )
+    };
+    assert!(slave >= 0, "opening {name:?}: {}", last_error());
+    // SAFETY: a fresh descriptor this function now owns.
+    let slave = unsafe { OwnedFd::from_raw_fd(slave) };
+
+    // SAFETY: termios is plain data; tcgetattr fills it from a valid fd.
+    let mut termios: libc::termios = unsafe { std::mem::zeroed() };
+    assert_eq!(
+        unsafe { libc::tcgetattr(slave.as_raw_fd(), &mut termios) },
+        0,
+        "{}",
+        last_error()
+    );
+    termios.c_cc[libc::VERASE] = 0x7f;
+    termios.c_iflag |= libc::IUTF8;
+    // SAFETY: as above, with a termios this function filled.
+    assert_eq!(
+        unsafe { libc::tcsetattr(slave.as_raw_fd(), libc::TCSANOW, &termios) },
+        0,
+        "{}",
+        last_error()
+    );
+    let out = std::process::Command::new("stty")
+        .arg("-g")
+        .stdin(std::process::Stdio::from(slave))
+        .output()
+        .expect("running stty");
+    assert!(out.status.success(), "stty -g: {out:?}");
+    drop(master);
+    String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
 /// A starter that ignores SIGQUIT and blocks `blocked`, as a `pre_exec` of
