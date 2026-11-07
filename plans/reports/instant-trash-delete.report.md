@@ -104,3 +104,96 @@ correction and its real database-boundary regression passed the same host review
 already retained ownership through runtime shutdown. The UI reviewer found the uncertainty and removed-host notice
 issues described above; both were corrected and cleared on recheck. Each PR's final text passed a valid fresh cold read.
 A separate documentation pass covered every touched file.
+
+### Landing
+
+Landed with one guide-page sentence fixed. Deleting checkouts from the trash no longer waits for their files to be
+removed: the host accepts the deletion, the entry leaves the trash at once, and the space is freed in the background.
+Confirming **Delete all** closes the trash, and the trash icon shows while hosts are still freeing space; the trash no
+longer shows each checkout's progress while it deletes.
+
+- #3131: the host's background removal and the trash's immediate answer.
+- #3134: the bulk confirmation that closes the trash, and the trash icon's progress.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since this plan's base, main landed the session-row hover change (#3128) and moved checkout cache cleanup to the
+background (#3130). A fresh-context review read this plan against both and against the other plan in this round,
+stop-closes-tabs (Stop also closing a session's terminal tabs), which also changes the session list and how the
+supervisor handles requests. It found no conflict: both this plan and the cache-cleanup change remove checkout files the
+same way as before, and the stylesheet changes touch different rules. stop-closes-tabs was then sent back to its
+executor because tests failed with it (see the checks below), and this plan landed alone; nothing of stop-closes-tabs is
+in what landed.
+
+#### Fixes made at landing
+
+- The Session list guide page said a host retries removal "when its supervisor next starts" without saying what the
+  supervisor is, which the docs' own rules require on first mention. It now says the supervisor is the program that
+  keeps that host's sessions running and links to the page that explains it (in #3131).
+
+#### Things you should know
+
+- The scripts that capture the docs website's screenshots still stage the old trash: one expects the per-checkout
+  progress and the progress area at the bottom of the dialog that this plan removed. They only run when the docs
+  screenshots are captured, and that procedure starts by updating such scripts, so they are left to the next screenshot
+  refresh.
+- "host-settings scrollports stay reachable while saving" failed once on WebKit in this round's full browser run and
+  once in an earlier landing's on the same day, each time passing on re-run. The landing monitor records it as a latent
+  flake in a separate change right after this landing.
+
+#### Checks
+
+The round's checks first ran on this plan with stop-closes-tabs stacked on top, on main `ea1919b7`:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the lint of the UI's browser build,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the check that every
+  test delay states its reason (`python -B scripts/check-test-sleeps.py`), `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (no errors; three warnings about
+  older text), the docs website build (`bun run build` in `website/`), the workspace debug build and the UI's release
+  web build: all passed.
+- The UI's JavaScript tests (`node --test` in `crates/farhelm-ui/js-tests`), run `a9fa4b38-e87f-492e-a1cd-07ef03eae671`:
+  all 526 passed.
+- Every Rust test in the workspace, `cargo nextest run --workspace --exclude farhelm-desktop` (with rootless Podman and
+  its offline image present), run `1689f6c6-5913-4c2b-a109-28e876bc297c`: 5755 passed, 69 skipped by their own design, 3
+  failed: two session-list re-render tests that stop-closes-tabs breaks (they passed on this plan alone, run
+  `44345c89-c69e-4e73-8faa-582688471320`), and `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay`, a
+  recorded flake with the same signature.
+- The whole browser suite on Chromium and WebKit, on ten Tensorlake sandboxes at the maintainer's request (cloud virtual
+  machines; each ran its share of the suite's spec files through the test recorder,
+  `python3 scripts/record-test-run.py --kind development ...` running
+  `npx playwright test --project=<engine>-<spec> ... --retries=0`, built locally; the sandboxes run Node 24.16 rather
+  than the development machine's 24.20), runs `9b11d18b-32eb-456d-9a23-46309281453a`,
+  `0e536f3c-fa3d-4a52-8182-0596188a0e0e`, `d60b998e-a2fc-4e3f-89c1-757d55e7dcb3`,
+  `6c5af047-1e2b-412a-bec1-9032a84e62b8`, `a67f189f-118a-48cc-b55c-ebb4449ece6a`,
+  `db8e6273-26d9-4846-b576-6a2098bf8ac8`, `890c85a4-f445-43cf-84ba-5850e3f37994`,
+  `e310a7df-b710-453a-b8d0-0e9649dac412`, `0570d0ff-8e46-433d-b636-c5901060350e`,
+  `d653c87f-9fae-424e-84da-50fecea391cc`: 3028 passed, 14 skipped by the specs' own design, 12 failed. Three are
+  recorded flakes with the same signatures (a settings save that waits for the browser's request-finished event, an
+  update's progress label without a step name, and a quick-launch focus check); their spec files were not re-run. Eight
+  passed when their spec files were run on this plan alone (below), so they come from stop-closes-tabs: two sidebar menu
+  tests on both engines, a session-confirmations test whose Stop failed, and the three cleanups that session then broke
+  in the terminal reconnect spec and the tooltip coverage spec (that one on both engines). The last, "host-settings
+  scrollports stay reachable while saving" on WebKit, is in the modal layout spec and also passed in that run (see
+  "Things you should know"). Then the suite's old-terminal set (the tests that only apply to sessions still in old
+  terminals) on four sandboxes with the same build, runs `cdc1aa57-0488-4bc2-9279-8ec94051bc7b`,
+  `ac26821e-8bee-46ef-bfe4-095f0dd483c6`, `d71f4950-3843-48cf-8148-7264ec7913ef`,
+  `ae692651-eab1-4d16-b362-df250704a63c`: 107 passed, 1 skipped by its design.
+- On this plan alone on the same main, after the guide-page fix: `dprint check`, the changelog format check, the docs
+  website build, `cargo clippy --all-targets -- -D warnings`, the workspace debug build and the UI's release web build:
+  all passed. The desktop-build tests, `cargo nextest run -p farhelm-ui --features desktop`, run
+  `0a6430b2-898c-430f-a037-ee9e53d6e089`: all 1091 passed. On eight Tensorlake sandboxes with a new build, the spec
+  files for the sidebar, session confirmations, tooltip coverage, terminal reconnect, modal layout, the trash dialog,
+  GitHub checkouts and the header, on Chromium and WebKit, runs `f7c0535b-f6f4-4657-92b4-c8a80231558e`,
+  `0b4193c6-1fba-4396-9629-f1d37fe49c68`, `fd9017e0-8dc3-4326-87a9-d1dd0b402b4a`,
+  `19e2ca02-9411-472f-8c6c-7d3ed7fbc9fa`, `459cecaf-e520-4b98-bd9c-00773beb6b4b`,
+  `f20891c1-06ab-4540-b0c3-e046982ab376`, `80564c9a-3b61-4929-9cfc-89a28ab83935`,
+  `2c518375-6a3f-4bab-9321-28b492f1dc5d`: all 454 passed.
+- Reused for this plan alone, from the combined runs: the JavaScript tests, the rest of the workspace's Rust tests, and
+  the rest of the full browser suite and of the old-terminal set. stop-closes-tabs sat on top of this plan, so those
+  runs exercised all of this plan's code; every failure in them is accounted for above, and the specs where
+  stop-closes-tabs changed behavior were re-run without it.
+- Not run: the doctests (no doc examples changed), the grid terminal suite (no terminal code changed), the desktop smoke
+  tests and the installer tests (no desktop shell, packaging or installer code changed), the docs website preview (the
+  build above passed; no page was viewed), and the native Mac app (not runnable on Linux).
+
+Nothing in the executor's report became untrue at landing.
