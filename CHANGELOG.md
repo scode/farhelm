@@ -2,6 +2,48 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.36.0 - 2026-11-07
+
+**DRAFT release notes - not yet finalized**
+
+### 💥 Breaking
+
+- New terminals now tell programs they run in Farhelm's own terminal (`TERM_PROGRAM=farhelm`) instead of in tmux, so a login shell startup file that starts tmux whenever it is not already inside tmux now does so while the agent starts, and one that uses `exec tmux` keeps the agent from starting. Such a startup file can leave Farhelm's terminals alone by skipping tmux when `TERM_PROGRAM` is `farhelm`; agents and tabs started before the upgrade keep the old setting until they are restarted or closed. (#3087)
+
+### 🚀 Added
+
+- You can now add a Tensorlake sandbox as a host. Farhelm creates it from a recipe saved in Settings → Tensorlake (its size, Ubuntu packages or an existing image or snapshot, and optional Claude Code and Codex API endpoints) and shows its setup as progress in Hosts; [Tensorlake sandboxes](https://farhelm.io/docs/using/tensorlake-sandboxes/) explains how to set it up. (#2939, #2942, #2946, #2967, #2973, #3050, #3051, #3067)
+- A Tensorlake recipe that installs Ubuntu packages has **Build snapshot** in its row in Settings → Tensorlake, which builds a snapshot with those packages, Claude Code and Codex already installed for new hosts to start from; otherwise adding the first host builds it. **Rebuild snapshot** picks up newer packages and agents and replaces the old snapshot, while hosts already made from it keep running unchanged. (#2946)
+- Tensorlake support is experimental, rough in places and may change between releases, and Settings → Tensorlake opens with a red warning saying so. Sandboxes bill your Tensorlake account while they run, and you are responsible for not leaving them running; deleting a Tensorlake host deletes its sandbox and snapshots, but uninstalling Farhelm does not. (#2967, #3010)
+- Tensorlake hosts can be suspended and resumed without restarting their sessions, and launching a session on a suspended host resumes it and starts the session in the same press. A helm that goes quiet, such as a sleeping laptop, no longer keeps a sandbox awake: its connection closes after two minutes. (#2975, #3048, #3049, #3073)
+- A Tensorlake recipe can define tunnels that let anything in the sandbox reach a service on the helm's machine, such as an API proxy for the sandbox's agents, while the host is connected. Tunnels do not use a jump host from your ssh configuration. (#2976)
+- Settings → Tensorlake lists Farhelm sandboxes in your Tensorlake account that no host on this helm owns, such as ones left behind when a helm lost its state, and can delete them with their snapshots. Sandboxes created by another helm are marked, since they may still be in use there. (#2976)
+- New Tensorlake hosts start YOLO sessions without the usual confirmation. The Tensorlake API key and recipe endpoint tokens are stored unencrypted on the helm's machine, agents on a sandbox can sign in only through the recipe's API endpoints, since subscription logins are not supported yet, and private GitHub checkouts need Git credentials set up on the sandbox. (#2939, #2942, #2973)
+- You can now mark several sessions in the session list with Shift-click or Cmd-click (Ctrl-click outside a Mac), then stop, delete, pin, unpin, or mark them read or unread together. Only marked sessions the list currently shows are included, and a bulk Delete asks once, listing each session. (#3052, #3053)
+
+### 🔄 Changed
+
+- Hosts with a problem, an update, or setup still running now appear together above your sessions, with their progress and actions in one place. This replaces the separate update banner and card; optional update reminders can still be dismissed. (#3044)
+- Pinned sessions now keep a manual order, shared across your devices and kept whatever the sidebar's sort, with new pins at the bottom. You can drag them by their grips or use **Move up** and **Move down** in their menus; after the upgrade, existing pins start oldest session first. (#3041, #3046, #3047)
+- Choosing a host on the navigation rail now shows it beside the session list's status filters, with a button to show all hosts again. When no sessions match, the list names the filters in use and offers buttons to clear them. (#3054)
+- A host whose sessions all use new terminals no longer runs a tmux server, and the one holding old terminals now stops by itself once the last of them is closed or deleted; Farhelm still needs tmux installed. If tmux is missing or too old, old terminals show as not running, and Delete and Restart of their sessions are refused until tmux is fixed or their agents are stopped. (#3094)
+
+### 🩹 Misc fixes
+
+*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
+
+- New terminals now open directly in their own terminal view, without first setting up an old-style terminal. (#3083)
+- In a session whose agent runs in a new terminal but which still has old terminal tabs, losing the agent's terminal no longer hides those tabs, so Delete warns before closing their running work. (#3040)
+- If a terminal tab stops responding while Delete makes its final check, Delete now refuses instead of closing work that your confirmation said was no longer running. (#3024)
+- Delete no longer leaves a program running after Farhelm failed to reconnect to the session's agent or terminal tab, including on macOS. (#3032)
+- Turning off a host's command, YOLO or link permissions, or withdrawing tunnel consent, can no longer be undone by a sudden power loss after Farhelm confirmed it. (#3023)
+- A newly added host can no longer, in a rare case, finish a launch that another host had been approved for. Agent requests still waiting when you upgrade ask for approval again. (#3025)
+- When an agent asks to change a template, its approval card now shows changes to the container image, proxy port and GitHub token file, including removing the container setting. (#3035)
+- In a new terminal, clicking a printed web address that a program extended onto the next wrapped line now opens the whole address, instead of sometimes the old, shorter one. (#3018)
+- New terminals no longer drop standalone Kirat Rai vowel signs and other unattached vowel or trailing signs from displayed and copied text, which started with the emoji width change in v0.35.0. (#3045)
+- With attachment debug logging turned on, control characters in a host's tab names can no longer change how the log displays. (#3036)
+- The web UI and desktop app now include the license texts for xterm.js, its size-fitting add-on, and the Visual Studio Code code that xterm.js compiles in, and for the code Farhelm's own terminal took from xterm.js and Visual Studio Code. (#3079, #3095)
+
 ## v0.35.0 - 2026-11-04
 
 ### 🚀 Added
