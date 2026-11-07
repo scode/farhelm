@@ -533,41 +533,41 @@ are in use — the ground (the page), the chrome one step above it (sidebar, mai
 level one step above that (menus, dialogs, forms, bands that interrupt a pane). All three lean cool by the same small
 amount. In Steel, the ground is a near-black and not `#000`, because pure black would be the one untinted surface in a
 set meant to read as one material at three depths. The terminal's own `--terminal-bg` surface, Ghostty's default
-background for an out-of-the-box readable terminal, is not a rung on that ladder: it is the color xterm.js paints,
-mirrored so the pane's gutter and viewport agree. Which level an element sits on is recorded in the `:root` comments; a
-`--control-hover-bg` and a `--chip-bg` token fill a bordered control's hover state and a small chip respectively, named
-for that specific role rather than folded into the `--bg-*` surface family, so neither one reads as a fourth and fifth
-level to lay something out on. `--well` is a third fill of that kind: the inside of an input, select, or code box,
-darker than its raised panel so that a field reads as cut into it. In Steel it stays lighter than the ground so a field
-on a dialog does not read as a hole through to the page; Steel Light uses a pale recessed fill. The second is that there
-is ONE accent, and what it may be spent on is a closed list rather than a palette to decorate with: selection,
-`:focus-visible`, normal primary actions, any PRESSED disclosure control, and the wait after a confirmed delete (the
-spinner and words on the session's row and over its terminal, and the dot and words in its header). That last entry is
-the maintainer's choice (2026-09-30): the wait is the outcome the user just confirmed, so the danger red it used to be
-read as a failure; grey is what an earlier indicator used, and it went unnoticed; and `--info`, the blue for status,
-already means idle with unseen output. It is the one entry that does not mean "this is where you are" (see below), so it
-is kept narrow enough not to compete with selection: it colors only the spinner or dot, the words, and the terminal
-overlay card's edge, and the deleting row takes no tint or edge of its own, which would look exactly like the selection
-it usually already is. Action buttons use three deliberate tiers on the shared ghost `.btn` base: `.btn-primary` is the
-normal periwinkle affirmative, `.btn-neutral` is the quiet secondary treatment, and `.btn-danger` is reserved for
-destructive confirmations. A permanent answer uses the outlined form of its one-off tier: the YOLO confirmation's
-"Start, and don't ask again on this host" and host removal's "Remove, don't ask again" keep the danger color, while host
-setup's "Set up, don't ask again" keeps the primary color. Each leaves its one-off action as the filled choice. The
-maintainer chose (2026-09-30) not to make a permanent answer the filled one that draws the reflex click. The host row's
-inline update action is another deliberate outlined treatment: amber (`--warn`) for an optional update and red
-(`--danger-strong`) for a required one. Its outline signals urgency without presenting an update as a destructive
-confirmation. Being outlined, it preserves the sidebar's one-filled-control rule. Pressed disclosures use
-`--accent-fill-hover` so an open trigger is distinct from a resting primary. The normal-primary entry is scoped per
-SURFACE, not per screen: the sidebar's resting chrome carries exactly one filled control (`New session`), and each
-dialog or popup that floats over it may supply its own affirmative primary. The sidebar's secondary actions use the
-neutral tier; menu items, tabs, composer selections, relays, and other explicit exemptions retain their ghost or
-purpose-built styling. Destructive menu items remain red text, while their confirmation buttons use the danger tier.
-SPEC.md requires the sidebar to mark the selected session's row readably at a glance, so anything else joining that list
-has to be a place where the accent means "this is where you are" — the same thing every entry but the delete wait says —
-because an accent spread across ordinary decoration would leave nothing to make the selection readable. Both constraints
-have a contrast floor under them: the quiet foreground tokens are set so that metadata stays at WCAG AA against the
-brightest ordinary surface it lands on. Solid selected surfaces have separate inverse text roles, so their legibility
-does not depend on muted prose colors also surviving the selection fill.
+background for an out-of-the-box readable terminal, is not a rung on that ladder: it is the terminal theme's background
+(`assets/terminal-theme.js`), which the grid and xterm.js both paint, mirrored so the pane's gutter and viewport agree.
+Which level an element sits on is recorded in the `:root` comments; a `--control-hover-bg` and a `--chip-bg` token fill
+a bordered control's hover state and a small chip respectively, named for that specific role rather than folded into the
+`--bg-*` surface family, so neither one reads as a fourth and fifth level to lay something out on. `--well` is a third
+fill of that kind: the inside of an input, select, or code box, darker than its raised panel so that a field reads as
+cut into it. In Steel it stays lighter than the ground so a field on a dialog does not read as a hole through to the
+page; Steel Light uses a pale recessed fill. The second is that there is ONE accent, and what it may be spent on is a
+closed list rather than a palette to decorate with: selection, `:focus-visible`, normal primary actions, any PRESSED
+disclosure control, and the wait after a confirmed delete (the spinner and words on the session's row and over its
+terminal, and the dot and words in its header). That last entry is the maintainer's choice (2026-09-30): the wait is the
+outcome the user just confirmed, so the danger red it used to be read as a failure; grey is what an earlier indicator
+used, and it went unnoticed; and `--info`, the blue for status, already means idle with unseen output. It is the one
+entry that does not mean "this is where you are" (see below), so it is kept narrow enough not to compete with selection:
+it colors only the spinner or dot, the words, and the terminal overlay card's edge, and the deleting row takes no tint
+or edge of its own, which would look exactly like the selection it usually already is. Action buttons use three
+deliberate tiers on the shared ghost `.btn` base: `.btn-primary` is the normal periwinkle affirmative, `.btn-neutral` is
+the quiet secondary treatment, and `.btn-danger` is reserved for destructive confirmations. A permanent answer uses the
+outlined form of its one-off tier: the YOLO confirmation's "Start, and don't ask again on this host" and host removal's
+"Remove, don't ask again" keep the danger color, while host setup's "Set up, don't ask again" keeps the primary color.
+Each leaves its one-off action as the filled choice. The maintainer chose (2026-09-30) not to make a permanent answer
+the filled one that draws the reflex click. The host row's inline update action is another deliberate outlined
+treatment: amber (`--warn`) for an optional update and red (`--danger-strong`) for a required one. Its outline signals
+urgency without presenting an update as a destructive confirmation. Being outlined, it preserves the sidebar's
+one-filled-control rule. Pressed disclosures use `--accent-fill-hover` so an open trigger is distinct from a resting
+primary. The normal-primary entry is scoped per SURFACE, not per screen: the sidebar's resting chrome carries exactly
+one filled control (`New session`), and each dialog or popup that floats over it may supply its own affirmative primary.
+The sidebar's secondary actions use the neutral tier; menu items, tabs, composer selections, relays, and other explicit
+exemptions retain their ghost or purpose-built styling. Destructive menu items remain red text, while their confirmation
+buttons use the danger tier. SPEC.md requires the sidebar to mark the selected session's row readably at a glance, so
+anything else joining that list has to be a place where the accent means "this is where you are" — the same thing every
+entry but the delete wait says — because an accent spread across ordinary decoration would leave nothing to make the
+selection readable. Both constraints have a contrast floor under them: the quiet foreground tokens are set so that
+metadata stays at WCAG AA against the brightest ordinary surface it lands on. Solid selected surfaces have separate
+inverse text roles, so their legibility does not depend on muted prose colors also surviving the selection fill.
 
 Links use their own `--link` role (`#9cb7ff` in Steel), separate from the accent and from status colors. Every anchor
 and button styled as an inline link uses that color and stays underlined at rest, with no different visited or hover
@@ -742,19 +742,19 @@ cannot hide its explanation and the sidebar stays usable (a window too narrow fo
 lets the card take those 320px over the sidebar's edge).
 
 The session view remembers whether it has offered terminals. Staleness retains those islands and makes their panes and
-tab strip inert; a freshly opened stale view offers no terminals. The existing recovery snapshot's xterm element moves
-beside the replacement mount so hidden replay does not hide the old screen. It is disposed only at successful replay
-reveal, or restored into its mount for a final refusal. Pane visibility still hides background tabs. Availability in the
-synced terminal specs nudges waiting recovery controllers once when the host returns, through the existing automatic
-`if_unowned` path, without changing the retry ladder or disturbing attempts already in flight. Takeover tombstones and
-the build-mismatch capability veto remain authoritative. Interruption after a reboot still empties the desired set.
-Replay callbacks from a socket that died meanwhile cannot retire its new recovery. If replay reveals while the pane is
-still inert, the availability edge completes the focus handoff through the same guard used by reveal, preserving
-deliberate focus in fields, dialogs and other keyboard owners. Inline session questions share a keyboard-owner marker:
-header Restart, Replace and Delete, sidebar Delete and Replace, interrupted-card Replace and tab Close keep focus on
-their answers across replay reveal, availability recovery and automatic selected-tab fallback. The guard follows focus
-inside the question, so explicitly selecting a terminal still allows typing there. Header Escape cancellation keeps its
-existing post-unmount return to the selected terminal.
+tab strip inert; a freshly opened stale view offers no terminals. The existing recovery snapshot's element (the grid's,
+or xterm.js's for an old terminal) moves beside the replacement mount so hidden replay does not hide the old screen. It
+is disposed only at successful replay reveal, or restored into its mount for a final refusal. Pane visibility still
+hides background tabs. Availability in the synced terminal specs nudges waiting recovery controllers once when the host
+returns, through the existing automatic `if_unowned` path, without changing the retry ladder or disturbing attempts
+already in flight. Takeover tombstones and the build-mismatch capability veto remain authoritative. Interruption after a
+reboot still empties the desired set. Replay callbacks from a socket that died meanwhile cannot retire its new recovery.
+If replay reveals while the pane is still inert, the availability edge completes the focus handoff through the same
+guard used by reveal, preserving deliberate focus in fields, dialogs and other keyboard owners. Inline session questions
+share a keyboard-owner marker: header Restart, Replace and Delete, sidebar Delete and Replace, interrupted-card Replace
+and tab Close keep focus on their answers across replay reveal, availability recovery and automatic selected-tab
+fallback. The guard follows focus inside the question, so explicitly selecting a terminal still allows typing there.
+Header Escape cancellation keeps its existing post-unmount return to the selected terminal.
 
 Restart with is a mode of the shared session launcher. Its source seeds the same draft that New, Clone and Replace with
 use; the mode controls held-field applicability and submit routing. Templates, search and shortcut batches obey the same
@@ -1401,10 +1401,10 @@ byte-identical to upstream is what makes its provenance checkable and a future v
 2026-10-10: non-security bugs inside the bundle are fixed by upgrading it, not worked around in Farhelm, unless a
 workaround is already recorded here (the refresh above is one).
 
-JetBrains Mono Nerd Font is vendored alongside xterm.js for the same self-contained reason, and terminal.js sets it as
-xterm's `fontFamily`. The terminal and the interface's technical values share the same two cached `.woff2` files;
-ordinary interface text uses Inter. A terminal mounts only once both bundled mono weights have loaded, the same as its
-bundled scripts, with no fallback font. Inter is not a terminal-mount prerequisite.
+JetBrains Mono Nerd Font is vendored alongside xterm.js for the same self-contained reason, and terminal.js gives it to
+both kinds of terminal as their `fontFamily`. The terminal and the interface's technical values share the same two
+cached `.woff2` files; ordinary interface text uses Inter. A terminal mounts only once both bundled mono weights have
+loaded, the same as its bundled scripts, with no fallback font. Inter is not a terminal-mount prerequisite.
 
 Sidebar width lives in `sidebar-width.js`, shared by web and desktop. It reads localStorage once at script load
 (`farhelm.sidebar-width`): plain content-width digits only, clamped to 240–600px, with 340px for absent, malformed or
@@ -1449,22 +1449,23 @@ outside the sidebar's view.
 Terminal text size lives entirely in `terminal.js`. It reads the remembered size once, at script load, from the page's
 localStorage (`farhelm.terminal-font-size`; 9 to 28 in steps of 1, default 14; a missing or unreadable value, or
 anything but plain digits, means the default, and an out-of-range number is clamped) and constructs every terminal at
-it. `farhelmTerm.stepFontSize` clamps, stores, then sets `term.options.fontSize` on every mounted terminal and calls its
-fit: setting the option only makes xterm re-measure the font, and the fit is what recomputes rows and columns and sends
-the resize to the pty. Hidden tabs are mounted and sized like visible ones, so they take the change at once. A screen
-held aside during a reconnect or kept after a takeover keeps its old size: it is frozen, with no program to tell. The
-shortcut is one capture-phase `keydown` listener on `window`, matched on `event.code` (`Equal`, `Minus`, so the
-US-layout key positions) with Shift and Meta on macOS or Ctrl elsewhere, by a platform-string test that agrees with
-xterm.js's own Mac check; capture on `window` runs before xterm's handler, so its custom key handler is untouched, and
-preventDefault keeps the browser out. With no terminal mounted the listener lets the keys through. The top row's zoom
-buttons are stateless Rust buttons that call the same function, which hands focus back to the terminal the view last
-focused when the click left it on a button; nothing about the size flows back to Rust, so they have no disabled state at
-the ends of the range. The two magnifier buttons and a fixed-width, non-focusable point-size span share one border.
-`farhelmTerm.paintFontSize` paints every readout at script load and after each step. The Rust span has no text children,
-so Dioxus leaves its text to JS, and its mount asks for another paint: whichever side arrives second supplies the size,
-including after a session switch or a terminal surface returning. In the desktop app the size persists as far as the
-webview keeps its local storage across restarts; that was verified on Linux, not on macOS, where a webview that does not
-keep it would fall back to the default rather than earn a native state file.
+it. `farhelmTerm.stepFontSize` clamps, stores, then hands the size to every mounted terminal: a grid's `setFontSize`
+re-measures, redraws and refits it, and an old terminal gets `term.options.fontSize` and then its fit, since setting the
+option only makes xterm re-measure the font, and the fit is what recomputes rows and columns and sends the resize to the
+pty. Hidden tabs are mounted and sized like visible ones, so they take the change at once. A screen held aside during a
+reconnect or kept after a takeover keeps its old size: it is frozen, with no program to tell. The shortcut is one
+capture-phase `keydown` listener on `window`, matched on `event.code` (`Equal`, `Minus`, so the US-layout key positions)
+with Shift and Meta on macOS or Ctrl elsewhere, by a platform-string test that agrees with xterm.js's own Mac check;
+capture on `window` runs before the terminal's own key handling (the grid's, or xterm.js's custom key handler), which is
+left untouched, and preventDefault keeps the browser out. With no terminal mounted the listener lets the keys through.
+The top row's zoom buttons are stateless Rust buttons that call the same function, which hands focus back to the
+terminal the view last focused when the click left it on a button; nothing about the size flows back to Rust, so they
+have no disabled state at the ends of the range. The two magnifier buttons and a fixed-width, non-focusable point-size
+span share one border. `farhelmTerm.paintFontSize` paints every readout at script load and after each step. The Rust
+span has no text children, so Dioxus leaves its text to JS, and its mount asks for another paint: whichever side arrives
+second supplies the size, including after a session switch or a terminal surface returning. In the desktop app the size
+persists as far as the webview keeps its local storage across restarts; that was verified on Linux, not on macOS, where
+a webview that does not keep it would fall back to the default rather than earn a native state file.
 
 The quick switcher installs an idempotent capture-phase window keydown listener through inline `document::eval` in both
 renderers. It matches `KeyK` with Meta alone on macOS or Ctrl+Shift elsewhere, using terminal.js's platform test;
@@ -2931,11 +2932,13 @@ spawned. Any OTHER probe failure this preflight has no tailored wording for (a p
 unparseable `-V` output) falls through to the desktop's ordinary bootstrap-error path instead. Discovery runs FIRST
 specifically because an answering supervisor is an ownership boundary: it may be driving a perfectly good tmux selected
 by its own `--tmux`, its own `FARHELM_TMUX`, or a login-shell `PATH` this Finder-launched process never sees, and
-refusing startup over a dependency this process does not need would reject a supported setup. The supervisor still
-performs its OWN two floor checks after being handed a tmux this way (the client-executable probe and the adopted-server
-check described above) — the desktop's preflight is a user-experience improvement specific to the one path where this
-app starts the substrate itself, not a replacement for the supervisor's own checks, which remain the authority for the
-case this preflight cannot see: a private server already running on the socket from before an upgrade.
+refusing startup over a dependency this process does not need would reject a supported setup. The preflight is how the
+installation's tmux requirement holds on the Mac, although the supervisor it starts runs no tmux unless old terminals
+exist. The supervisor still performs its OWN two floor checks on a tmux handed to it this way, where it uses tmux at all
+(the client-executable probe and the adopted-server check described above) — the desktop's preflight is a
+user-experience improvement specific to the one path where this app starts the supervisor itself, not a replacement for
+the supervisor's own checks, which remain the authority for the case this preflight cannot see: a private server already
+running on the socket from before an upgrade.
 
 Every pre-window desktop refusal keeps that exact stderr message and exit status, and on macOS also sends it to Console
 and a critical native alert so a Finder or Spotlight launch has a visible diagnostic.
@@ -4398,19 +4401,21 @@ refusal. No global geometry cache or new asset file is introduced.
   accepted reports and decision-time Restart can change the row after the pane stops. An injected launch holding no
   identity warns once after 65 seconds from the first input frame delivered to the agent pane that holds an Enter
   (`capture::submits_a_line`): a carriage return that is not preceded by ESC (Farhelm's own Shift+Enter sends `ESC CR`
-  to insert a newline) and not inside a bracketed paste of the same frame (xterm.js turns pasted newlines into carriage
-  returns), in a frame whose every chunk tmux confirmed. The terminal's automatic replies to the agent TUI's own queries
-  (device attributes, cursor position, colour answers, focus reports) never carry a carriage return, so an agent the
-  user opened but has not typed into cannot trip it. An Enter while the latest screen reading before delivery is
-  `Waiting` answers a recognized dialog and does not start the clock. An outdated waiting reading can defer the clock to
-  the next Enter; no capture runs on the input path. With no reading yet, or no dedicated reader, the existing
-  submitted-line rule applies. A paste large enough to span frames still has its middle frames judged without their
-  markers. The spawn records whether its argv received the hook before tmux starts, fenced by launch generation. Reload
-  restores that flag; older rows default unhooked and stay unchecked. The anchor is an in-memory monotonic instant,
-  reset with the diagnostic latch on every relaunch and supervisor restart, so a picked-up launch starts its clock at
-  the next qualifying Enter after reload rather than recovering the time of an earlier Enter. A Resume carries its
-  identity and therefore stays silent even if its new hook never reports. The warning changes no offer or admission
-  rule.
+  to insert a newline) and not inside a bracketed paste of the same frame (a paste's newlines reach the agent as
+  carriage returns, converted by xterm.js for an old terminal and by the supervisor's grid input encoder for a new one),
+  in a frame whose every chunk tmux confirmed (an old terminal) or that the grid input path queued for the agent's
+  terminal host (a new one, where a bracketed paste is judged whole and never counts). The terminal's automatic replies
+  to the agent TUI's own queries (device attributes, cursor position, colour answers, focus reports) never carry a
+  carriage return, so an agent the user opened but has not typed into cannot trip it. An Enter while the latest screen
+  reading before delivery is `Waiting` answers a recognized dialog and does not start the clock. An outdated waiting
+  reading can defer the clock to the next Enter; no capture runs on the input path. With no reading yet, or no dedicated
+  reader, the existing submitted-line rule applies. An old terminal's paste large enough to span frames still has its
+  middle frames judged without their markers. The spawn records whether its argv received the hook before the agent's
+  terminal (its tmux session or its terminal host) starts, fenced by launch generation. Reload restores that flag; older
+  rows default unhooked and stay unchecked. The anchor is an in-memory monotonic instant, reset with the diagnostic
+  latch on every relaunch and supervisor restart, so a picked-up launch starts its clock at the next qualifying Enter
+  after reload rather than recovering the time of an earlier Enter. A Resume carries its identity and therefore stays
+  silent even if its new hook never reports. The warning changes no offer or admission rule.
 
   **Codex attribution and exact-record validation.** The hook records its own process ancestry when it makes a report,
   and the supervisor anchors that chain at the session's owned pane process (see the shared framework below). For a
@@ -8518,8 +8523,9 @@ reset. Picking the already committed host does not reset the draft. Template edi
 separate stale-only host read remains limited to outage details. The shared preferences signal controls whether a
 colored frame is drawn. The host color word becomes one CSS custom property on the terminal panes container, inherited
 by each terminal, using `--fg-0` for `default` and the matching `--host-icon-*` token otherwise. The current web and
-WebKit render has no distinct dark margin: pane, terminal and xterm viewport all paint `--terminal-bg`. With coloring
+WebKit render has no distinct dark margin: pane, terminal and the terminal's own surface (the grid, or xterm.js's
+viewport for an old terminal) all paint the terminal theme's background (`--terminal-bg`) by default. With coloring
 enabled, a 4px inset shadow fills the terminal element's existing padding. The shadow leaves the terminal background and
-xterm theme unchanged and adds no layout space; the setting-off render has no shadow. A host appearance refresh recolors
-an open session without fetching hosts from the session view, and a Settings write updates this client's preference
-signal immediately.
+the terminal theme unchanged and adds no layout space; the setting-off render has no shadow. A host appearance refresh
+recolors an open session without fetching hosts from the session view, and a Settings write updates this client's
+preference signal immediately.
