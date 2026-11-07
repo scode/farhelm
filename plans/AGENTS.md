@@ -76,10 +76,11 @@ The rules that follow from `plans/.agents/queue.md`, "States, and the script tha
 
 - Never hand-edit a state, a `## Blocked` section, a `## Decisions` entry, a report, or `REPORTS.md`, and never force
   push main.
-- Planning PRs are the only other writers of `plans/`. They may add plan files with new `[pending]` lines, reorder
-  lines, reword a summary, and revise the file of a plan that is `pending` or `blocked`; nothing else, and in particular
-  never `REPORTS.md`, a report, or a landed plan's file. `queue check --base main` enforces that before a planning PR
-  lands.
+- Planning PRs are the only other writers of `plans/`. They may add plan files with new `[pending]` or `[held]` lines,
+  reorder lines, reword a summary, and revise the file of a plan that is `pending`, `held` or `blocked`; nothing else,
+  and in particular never `REPORTS.md`, a report, or a landed plan's file. Holding or unholding a plan already on main
+  is a state change, made only by `queue hold` and `queue unhold`. `queue check --base main` enforces all of that before
+  a planning PR lands.
 - Code PRs never touch `plans/`.
 - `## Decisions` entries are part of the plan's goal: an entry wins over anything in the plan body it contradicts.
 
@@ -281,6 +282,15 @@ Before reading the monitor's status, read these in full:
 Fence: do its work in a checkout of its own, never in an executor's or the monitor's (any session may run it, the
 monitoring session included); an unselected report without a comment is left for later, never a follow-up or a
 rejection.
+
+### Hold or unhold a plan ("hold plan X", "unhold plan X", "put X on hold", "take X off hold")
+
+Before running `queue hold` or `queue unhold`, read these in full:
+
+- `plans/.agents/release-help.md`
+- `plans/.agents/queue.md`
+
+Fence: only on the maintainer's request; never an executor's or the monitor's decision.
 
 ### Release plan ("release plan X")
 

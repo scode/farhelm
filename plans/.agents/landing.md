@@ -166,7 +166,9 @@ Answer every other block:
 2. Write the decision per `plans/.agents/maintainer-writing.md`, "Writing for the maintainer", and `plans/AGENTS.md`,
    "Public-repo hygiene": say that the landing monitor answered it on the maintainer's behalf under this section, state
    each decision in product terms, and say that a later change of mind is a follow-up, not a reason to stop the plan.
-3. Run `queue answer <slug> --decision <file>`. Exit 10 means someone else answered or changed the plan first: leave it.
+3. Run `queue answer <slug> --decision <file>`, never with `--hold`, which is the maintainer's to ask for. A plan that
+   blocked while on hold goes back on hold by itself; it still needs the answer. Exit 10 means someone else answered or
+   changed the plan first: leave it.
 4. For every judgment call the answer makes (not for a plain instruction to fix failing tests), add a near-term TODO
    entry: one entry per call, in TODO.md's `## Near term` section, never another bucket, starting with a bold
    `**Revisit <the decision>.**` handle and saying what was decided on the maintainer's behalf, on which date, for which

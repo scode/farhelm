@@ -11,8 +11,8 @@
 #
 # Why plans/ alone is enough: everything that can give an idle executor new work arrives as a change under plans/ on
 # main, because the plans queue script (scripts/plans-queue.py) records every state change as a commit there. A new
-# plan adds a line to plans/queue/INDEX.md; a plan answered, sent back for a follow-up, or given back returns to
-# [pending]; a dependency becomes satisfied when its line is removed after landing; a finished plan becomes
+# plan adds a line to plans/queue/INDEX.md; a plan answered, sent back for a follow-up, given back, or taken off hold
+# returns to [pending]; a dependency becomes satisfied when its line is removed after landing; a finished plan becomes
 # [complete] for the monitor to land. Merging or closing plan PRs makes nothing eligible by itself.
 #
 # Not every change under plans/ is worth a wake-up, though. With several executors, claims are the most frequent

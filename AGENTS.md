@@ -313,9 +313,10 @@ Each entry: trigger phrases, the file to read in full before the first action, a
   the planning system to schedule these", "pick a plan to execute", "execute the next plan", "execute the next plan in
   order", "execute plan X", "drain the plans", "drain the plans and keep monitoring", "monitor for complete plans",
   "land the complete plans", "review the plans", "show blocked plans", "check for blocked plans", "release plan X",
-  "plan help"): `plans/AGENTS.md`. Fence: every planning flow starts on a clean working copy of the latest `main`, after
-  reconciling any recorded claim of its own (a dirty working copy belonging to that claim is resumed or reset, not
-  reported); any other dirty working copy aborts the flow with a report; see also "Unattended runs".
+  "hold plan X", "unhold plan X", "plan help"): `plans/AGENTS.md`. Fence: every planning flow starts on a clean working
+  copy of the latest `main`, after reconciling any recorded claim of its own (a dirty working copy belonging to that
+  claim is resumed or reset, not reported); any other dirty working copy aborts the flow with a report; see also
+  "Unattended runs".
 - **Review feedback** (recording it, commissioning a review that feeds the queue, "perform trailing code review",
   "triage review feedback", "execute triage outcomes"): `review_feedback_queue/AGENTS.md`. Fence: triage is persistent;
   "fix this", "yes", "agreed" during it are decisions to record, not permission to edit; execution needs a separate

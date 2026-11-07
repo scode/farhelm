@@ -43,9 +43,9 @@ maintainer's agreement. A merged plan references every entry it covers, and each
 
 Apply the clean-main boundary first, then work from the latest `main@origin`. An entry that already references a plan is
 skipped and reported, not planned again; a request to revise an existing plan updates that plan's file in place, which
-is allowed only while the plan is `pending` or `blocked`. Never reuse a slug that has ever existed under `plans/`:
-`queue check-slug <slug>` refuses one, because an old plan's working log may still sit beside the checkouts and a new
-plan with that name would resume from it.
+is allowed only while the plan is `pending`, `held` or `blocked`. Never reuse a slug that has ever existed under
+`plans/`: `queue check-slug <slug>` refuses one, because an old plan's working log may still sit beside the checkouts
+and a new plan with that name would resume from it.
 
 For each plan, run `scode-build-goal` with the entry's text (and whatever the maintainer said about it) as the goal,
 with these overrides on top of the skill's own rules:
@@ -89,7 +89,12 @@ with these overrides on top of the skill's own rules:
 - If the plan depends on another plan's work being on main first, the goal file says which, and so does its `INDEX.md`
   line.
 
-New plans go at the end of `INDEX.md` unless the maintainer places them elsewhere.
+New plans go at the end of `INDEX.md` unless the maintainer places them elsewhere. A new line is `[pending]` unless the
+maintainer asked for that plan to go on hold ("plan these but hold them", "plan X on hold", or a picker or
+questions-page instruction saying so), in which case it is `[held]`: fully planned, never picked, and scheduled later
+with "unhold plan X" (`plans/.agents/release-help.md`, "Holding: "hold plan X", "unhold plan X""). Say in the closing
+summary which plans went on hold. Planning onto hold does not change how a plan is written. A plan held for long was
+written against an older main; when what it relies on has changed, revise it in place, which a held plan allows.
 
 NOTE: Queue order is not execution order. Several executors drain the queue at once, so any eligible plan may run at the
 same time as any other, and a plan listed later can start, deliver and land before one listed earlier

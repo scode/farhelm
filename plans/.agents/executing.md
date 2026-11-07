@@ -11,10 +11,11 @@ step 10.
 
 Those requests, and "use the planning system and pick one item to execute", mean: pick one plan by the judgment in this
 section, then execute it. "Execute the next plan in order" takes the first eligible plan regardless of conflicts.
-"Execute plan X" takes X if it is eligible and otherwise says why (in flight, blocked, waiting on a dependency) and
-stops; it does not wait.
+"Execute plan X" takes X if it is eligible and otherwise says why (in flight, held, blocked, waiting on a dependency)
+and stops; it does not wait. A held plan stays held even when named: only the maintainer's "unhold plan X" schedules it.
 
-A plan is eligible when it is `pending` and every plan it runs after is gone from `INDEX.md`.
+A plan is eligible when it is `pending` and every plan it runs after is gone from `INDEX.md`. A `held` plan is never
+eligible, and neither is a plan that runs after one.
 
 Unlanded work is every listed plan that is in flight, or that has open `plan/<slug>/*` PRs whatever its state (including
 a pending plan that has PRs from an earlier round). When judging a candidate, its own PRs do not count.
