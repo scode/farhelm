@@ -237,44 +237,40 @@ test("the line source numbers history and screen and hides history on request", 
   assert.equal(alternate.line(100), null);
 });
 
-// ## Today's link helpers on the grid's lines (the xterm.js buffer adapter)
+// ## The link code on the grid's lines
 //
 // The hyperlink mismatch warning, printed-path detection and the file
 // hover's redraw check are terminal-links.js and terminal-files.js code
-// written against xterm.js's buffer API. These tests run that shipped code
-// on the adapter, so a grid terminal is held to the same answers.
+// written against link lines (terminal-links.js, "Link lines"), which the
+// grid offers directly (`linkLines`). These tests run that shipped code on
+// the grid's lines, so a grid terminal is held to the same answers as an old
+// terminal read through xterm.js's adapter.
 const links = require("../assets/terminal-links.js");
 const files = require("../assets/terminal-files.js");
 
-/** A terminal as the helpers see it, over a model's lines. */
-function termOver(model) {
-  return { buffer: { active: buffer.xtermBuffer(buffer.modelSource(model)) } };
+/** The link lines the grid gives the link code, over a model's lines. */
+function linesOver(model) {
+  return buffer.linkLines(buffer.modelSource(model));
 }
 
-test("the adapter reads cells, wraps and trimmed text as xterm.js's buffer does", () => {
+test("link lines read cells, wraps and trimmed text", () => {
   const model = build({ cols: 6, screen: [cells([[0, 1, "a"], [1, 2, "中"], [3, 1, "b"]], true), wire([[0, "cd"]])] });
-  const term = termOver(model);
+  const lines = linesOver(model);
   const base = model.screenBase;
-  const first = term.buffer.active.getLine(base);
+  const first = lines.line(base);
   assert.equal(first.length, 6);
-  assert.equal(first.isWrapped, false);
-  assert.equal(term.buffer.active.getLine(base + 1).isWrapped, true);
-  assert.deepEqual([0, 1, 2, 3, 4].map((x) => [first.getCell(x).getChars(), first.getCell(x).getWidth()]), [
-    ["a", 1], ["中", 2], ["", 0], ["b", 1], ["", 1],
+  assert.equal(first.wrapped, false);
+  assert.equal(lines.line(base + 1).wrapped, true);
+  assert.deepEqual([0, 1, 2, 3, 4].map((x) => [first.cell(x).chars, first.cell(x).width, first.cell(x).tag]), [
+    ["a", 1, 0], ["中", 2, 0], ["", 0, 0], ["b", 1, 0], ["", 1, 0],
   ]);
-  assert.equal(first.getCell(6), undefined);
+  assert.equal(first.cell(6), undefined);
   // Untouched cells read as spaces and trim away; a range starting on a
-  // wide character's second cell reads a space there, as xterm.js's does.
-  assert.equal(first.translateToString(false), "a中b  ");
-  assert.equal(first.translateToString(true), "a中b");
-  assert.equal(first.translateToString(false, 2, 4), " b");
-  assert.equal(term.buffer.active.getLine(base + 9), undefined);
-});
-
-test("the ranges xterm.js's helpers use convert to line ranges and back", () => {
-  const range = { start: { abs: 41, col: 3 }, end: { abs: 42, col: 7 } };
-  assert.deepEqual(buffer.toXtermRange(range), { start: { x: 4, y: 42 }, end: { x: 7, y: 43 } });
-  assert.deepEqual(buffer.fromXtermRange(buffer.toXtermRange(range)), range);
+  // wide character's second cell reads a space there.
+  assert.equal(first.text(0, 6, false), "a中b  ");
+  assert.equal(first.text(0, 6, true), "a中b");
+  assert.equal(first.text(2, 4, false), " b");
+  assert.equal(lines.line(base + 9), undefined);
 });
 
 test("an OSC 8 link's text is joined across its rows for the mismatch warning", () => {
@@ -287,9 +283,8 @@ test("an OSC 8 link's text is joined across its rows for the mismatch warning", 
   model.apply({ t: "rows", rows: [[0, wire([[0, "https://goo", 0]])]], links: [["x", target]] });
   model.apply({ t: "rows", rows: [[1, wire([[0, "d.example/", 0]])], [2, wire([[0, "plain"]])]], links: [["x", target]] });
   model.apply({ t: "frame", rev: 1, cols: 12, rows: 3, cursor: { x: 0, y: 0, visible: true, shape: "block", blink: true } });
-  const term = termOver(model);
-  const range = buffer.toXtermRange({ start: { abs: model.screenBase, col: 0 }, end: { abs: model.screenBase, col: 11 } });
-  const hover = links.linkHoverText(term, range, target);
+  const range = { start: { abs: model.screenBase, col: 0 }, end: { abs: model.screenBase, col: 11 } };
+  const hover = links.linkHoverText(linesOver(model), range, target);
   assert.deepEqual(hover, { kind: "whole", text: "https://good.example/" });
   assert.equal(links.linkTextMismatch(hover.text, target), true);
   // A link whose text is its target stays quiet.
@@ -300,7 +295,7 @@ test("an OSC 8 link's text is joined across its rows for the mismatch warning", 
   other.apply({ t: "rows", rows: [[0, wire([[0, "https://goo", 0]])]], links: [["x", target]] });
   other.apply({ t: "rows", rows: [[1, wire([[0, "d.example/", 0]])]], links: [["x", "https://good.example/"]] });
   other.apply({ t: "frame", rev: 1, cols: 12, rows: 2, cursor: { x: 0, y: 0, visible: true, shape: "block", blink: true } });
-  const alone = links.linkHoverText(termOver(other), range, target);
+  const alone = links.linkHoverText(linesOver(other), range, target);
   assert.deepEqual(alone, { kind: "whole", text: "https://goo" });
 });
 
@@ -314,10 +309,10 @@ test("restarted anonymous hyperlinks underline and compare their whole adjacent 
   const found = buffer.rowLinks(source, base);
   assert.equal(found.length, 1);
   assert.deepEqual(found[0].ranges, [{ start: at(base, 0), end: at(base, 20) }]);
-  const term = termOver(model);
-  const row = term.buffer.active.getLine(base);
-  assert.equal(row.getCell(0).extended.urlId, row.getCell(19).extended.urlId);
-  assert.deepEqual(links.linkHoverText(term, buffer.toXtermRange(found[0].ranges[0]), target), { kind: "whole", text: target });
+  const lines = linesOver(model);
+  const row = lines.line(base);
+  assert.equal(row.cell(0).tag, row.cell(19).tag);
+  assert.deepEqual(links.linkHoverText(lines, found[0].ranges[0], target), { kind: "whole", text: target });
 });
 
 test("anonymous links join through three soft-wrapped rows and retain redraw evidence", () => {
@@ -327,11 +322,11 @@ test("anonymous links join through three soft-wrapped rows and retain redraw evi
   const model = build({ cols: 8, screen: [wire([[0, "https://", 0]], true), wire([[0, "apnews.c", 1]], true), wire([[0, "om/x", 2]])], links: [["0_alacritty", target], ["1_alacritty", target], ["2_alacritty", target]] });
   const source = buffer.modelSource(model);
   const base = model.screenBase;
-  const term = termOver(model);
+  const lines = linesOver(model);
   for (let y = 0; y < 3; y++) {
     const found = buffer.linkAt(source, at(base + y, 1));
     assert.deepEqual(found.evidence, [base - 1, base, base + 1, base + 2, base + 3]);
-    assert.deepEqual(links.linkHoverText(term, buffer.toXtermRange(found.ranges[0]), target), { kind: "whole", text: target });
+    assert.deepEqual(links.linkHoverText(lines, found.ranges[0], target), { kind: "whole", text: target });
     assert.ok(buffer.answerLines(source, base + y).has(base + 2));
     assert.ok(buffer.answerLines(source, base + y).has(base));
   }
@@ -342,11 +337,11 @@ test("anonymous chains omit only the padding before a wrapped wide character", (
   // full width would split a chain exactly where a wide character wraps.
   const target = "https://example.com/";
   const model = build({ cols: 4, screen: [wire([[0, "abc", 0]], true), { w: false, r: [[0, 2, "中", PLAIN, 1]] }], links: [["0_alacritty", target], ["1_alacritty", target]] });
-  const term = termOver(model);
+  const lines = linesOver(model);
   const base = model.screenBase;
-  assert.equal(term.buffer.active.getLine(base).getCell(0).extended.urlId, term.buffer.active.getLine(base + 1).getCell(0).extended.urlId);
+  assert.equal(lines.line(base).cell(0).tag, lines.line(base + 1).cell(0).tag);
   const found = buffer.linkAt(buffer.modelSource(model), at(base + 1, 0));
-  assert.deepEqual(links.linkHoverText(term, buffer.toXtermRange(found.ranges[0]), target), { kind: "whole", text: "abc中" });
+  assert.deepEqual(links.linkHoverText(lines, found.ranges[0], target), { kind: "whole", text: "abc中" });
 });
 
 test("different targets, explicit ids and real gaps never become anonymous continuations", () => {
@@ -367,8 +362,8 @@ test("different targets, explicit ids and real gaps never become anonymous conti
     [wire([[0, "abcd", 0]], true), wire([[1, "e", 1]])],
   ]) {
     const model = build({ cols: 4, screen, links: [["0_alacritty", target], ["1_alacritty", target]] });
-    const adapter = termOver(model).buffer.active;
-    assert.notEqual(adapter.getLine(model.screenBase).getCell(0).extended.urlId, adapter.getLine(model.screenBase + 1).getCell(screen[1].r[0][0]).extended.urlId);
+    const lines = linesOver(model);
+    assert.notEqual(lines.line(model.screenBase).cell(0).tag, lines.line(model.screenBase + 1).cell(screen[1].r[0][0]).tag);
   }
 });
 
@@ -379,7 +374,7 @@ test("a chain's later piece does not join an unwrapped row through its old gener
   const model = build({ cols: 12, screen: [wire([[0, "https://apn", 0], [11, "e", 1]]), wire([[0, "ws.com/x", 1]])], links: [["0_alacritty", target], ["1_alacritty", target]] });
   const source = buffer.modelSource(model);
   const found = buffer.linkAt(source, at(model.screenBase + 1, 0));
-  assert.deepEqual(links.linkHoverText(termOver(model), buffer.toXtermRange(found.ranges[0]), target), { kind: "whole", text: "ws.com/x" });
+  assert.deepEqual(links.linkHoverText(linesOver(model), found.ranges[0], target), { kind: "whole", text: "ws.com/x" });
 });
 
 test("one-cell anonymous restarts resolve a long chain without repeated backward walks", () => {
@@ -400,48 +395,46 @@ test("one-cell anonymous restarts resolve a long chain without repeated backward
 
 test("today's printed-path detector finds paths in grid text, across soft wraps", () => {
   const model = build({ cols: 10, screen: [wire([[0, "see /usr/s"]], true), wire([[0, "hare/x.txt"]]), wire([[0, "v1.2.3 ok"]])] });
-  const term = termOver(model);
+  const lines = linesOver(model);
   const base = model.screenBase;
-  const found = files.bufferLinks(term, base + 2);
-  assert.deepEqual(found, [{ path: "/usr/share/x.txt", range: { start: { x: 5, y: base + 1 }, end: { x: 10, y: base + 2 } } }]);
-  assert.deepEqual(buffer.fromXtermRange(found[0].range), { start: { abs: base, col: 4 }, end: { abs: base + 1, col: 10 } });
+  const found = files.pathLinks(lines, base + 1);
+  assert.deepEqual(found, [{ path: "/usr/share/x.txt", range: { start: { abs: base, col: 4 }, end: { abs: base + 1, col: 10 } } }]);
   // A version number is not a path.
-  assert.deepEqual(files.bufferLinks(term, base + 3), []);
+  assert.deepEqual(files.pathLinks(lines, base + 2), []);
   // The file hover's redraw check reads the same cells back.
-  assert.equal(links.linkRangeText(term, found[0].range), "/usr/share/x.txt");
+  assert.equal(links.linkRangeText(lines, found[0].range), "/usr/share/x.txt");
 });
 
-test("hostile text stays data through the adapter", () => {
+test("hostile text stays data on the grid's lines", () => {
   // The scheme-bearing token is not a path, and markup-looking text is just
   // text: the grid's answer is the detector's own on the same characters.
   const text = "javascript:alert(document.domain) <b>a.md</b>";
   const model = build({ cols: 50, screen: [wire([[0, text]])] });
-  const found = files.bufferLinks(termOver(model), model.screenBase + 1).map((link) => link.path);
+  const found = files.pathLinks(linesOver(model), model.screenBase).map((link) => link.path);
   assert.deepEqual(found, files.pathTokens(text).map((token) => token.path));
   // Exactly these: `a.md` inside the markup, and `/b` from its closing tag
   // (the detector's own reading); nothing from the scheme-bearing token.
   assert.deepEqual(found, ["a.md", "/b"]);
 });
 
-test("the adapter presents history at its own width and wraps across the history/screen boundary", () => {
+test("link lines present history at its own width and wrap across the history/screen boundary", () => {
   // A history line written at another width keeps it (xterm.js reflows,
   // the grid does not), and the first screen row continues the last history
-  // line when that line wrapped: the helpers must see both as xterm.js's
-  // buffer would show them.
+  // line when that line wrapped: the link code must see both.
   const model = build({
     cols: 6,
     screen: [wire([[0, "tail"]]), wire([[0, "next"]])],
     history: [wire([[0, "a long line"]], true)],
     historyCols: 12,
   });
-  const term = termOver(model);
-  const history = term.buffer.active.getLine(100);
+  const lines = linesOver(model);
+  const history = lines.line(100);
   assert.equal(history.length, 12);
-  assert.equal(history.translateToString(false), "a long line ");
-  const first = term.buffer.active.getLine(model.screenBase);
+  assert.equal(history.text(0, 12, false), "a long line ");
+  const first = lines.line(model.screenBase);
   assert.equal(first.length, 6);
-  assert.equal(first.isWrapped, true);
-  assert.equal(term.buffer.active.getLine(model.screenBase + 1).isWrapped, false);
+  assert.equal(first.wrapped, true);
+  assert.equal(lines.line(model.screenBase + 1).wrapped, false);
 });
 
 test("a copy leaves out the padding before a wide character that wrapped", () => {

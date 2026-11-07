@@ -4,8 +4,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
-const { linkRangeText } = require('../assets/terminal-links.js');
-const { pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, markedCoverRects, LINK_COVER_SELECTOR, MAX_BYTES, FileLinksAddon } = require('../assets/terminal-files.js');
+const terminalLinks = require('../assets/terminal-links.js');
+const { linkRangeText, xtermLines, fromXtermRange } = terminalLinks;
+const { pathTokens, oscTarget, pathLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, markedCoverRects, LINK_COVER_SELECTOR, MAX_BYTES } = require('../assets/terminal-files.js');
 
 /** A noninteractive clipped or covered disclosure is not inspectable. Both
  * dimensions and live cover rectangles matter, including changes after lookup.
@@ -260,9 +261,28 @@ test('OSC allows web unchanged and decoded file paths only', () => {
     'file://host?next=/tmp/report.pdf', 'file://host#/tmp/report.pdf', 'file://?next=/tmp/report.pdf', 'file://#/tmp/report.pdf', 'file:///a?', 'file:///a#', 'file:///a%00b', 'file:///a?x', 'file:///a#x', 'file:///bad%']) assert.equal(oscTarget(uri), null, uri);
 });
 
-/** Public cell fixtures represent Unicode/wrapping contracts without private
- * xterm internals. Both recognition and text snapshots read these same cells,
- * so a partial repaint changes one shared buffer rather than two test doubles.
+/** Link lines (terminal-links.js, "Link lines") over the same cell fixtures:
+ * what both terminals' file links read. Recognition and text snapshots read
+ * these same cells, so a partial repaint changes one shared fixture.
+ */
+function lines(rows) {
+  return { line(abs) {
+    const row = rows[abs];
+    if (!row) return undefined;
+    return { wrapped: !!row.wrapped, length: row.cells.length,
+      text(from = 0, to = row.cells.length, trim = false) {
+        const text = row.cells.slice(from, to).map(([chars, width]) => width ? chars || ' ' : '').join('');
+        return trim ? text.trimEnd() : text;
+      },
+      cell(x) {
+        const cell = row.cells[x];
+        return cell && { chars: cell[0], width: cell[1], tag: 0 };
+      } };
+  } };
+}
+
+/** Public xterm.js cell fixtures for the old terminal's add-on, which reads
+ * them through terminal-links.js's `xtermLines`. The same rows as `lines`.
  */
 function terminal(rows) {
   return { buffer: { active: { getLine(y) {
@@ -279,16 +299,21 @@ function terminal(rows) {
   } } } };
 }
 
-/** UTF-16 offsets must not shift a link after wide or combined cells, including wraps. */
-test('buffer mapping handles wide, combining and wrapped path cells', () => {
+/** UTF-16 offsets must not shift a link after wide or combined cells, including wraps.
+ * Both terminals' lines give the same link: the grid's directly, an old
+ * terminal's through xterm.js's adapter.
+ */
+test('path mapping handles wide, combining and wrapped path cells', () => {
   const cells = s => Array.from(s, ch => [ch, 1]);
-  const term = terminal([
+  const rows = [
     { cells: [['界', 2], ['', 0], ['e\u0301', 1], [' ', 1], ...cells('src/mai')], wrapped: false },
     { cells: cells('n.rs:42!'), wrapped: true },
-  ]);
-  for (const row of [1, 2]) assert.deepEqual(bufferLinks(term, row), [{
-    path: 'src/main.rs', range: { start: { x: 5, y: 1 }, end: { x: 4, y: 2 } },
-  }]);
+  ];
+  const expected = [{ path: 'src/main.rs', range: { start: { abs: 0, col: 4 }, end: { abs: 1, col: 4 } } }];
+  for (const abs of [0, 1]) {
+    assert.deepEqual(pathLinks(lines(rows), abs), expected);
+    assert.deepEqual(pathLinks(xtermLines(terminal(rows)), abs), expected);
+  }
 });
 
 /** Model xterm's provider callback with real mutable buffer cells. Admission
@@ -301,7 +326,9 @@ function providerFixture(text, containerized = true) {
   const term = { ...terminal(rows), element: { querySelector: () => null, removeEventListener() {} },
     _core: { _linkProviderService: { linkProviders: [{ provideLinks(_row, callback) { callback([]); } }] } },
     registerLinkProvider(value) { provider = value; return { dispose() {} }; } };
-  const addon = new FileLinksAddon({ endpoint: '/files', secret: () => 'fixture', containerized });
+  const context = { window: { farhelmTerminalLinks: terminalLinks }, AbortController, URL, setTimeout, clearTimeout };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../assets/terminal-files.js'), 'utf8'), context);
+  const addon = new context.window.farhelmTerminalFiles.XtermFileLinksAddon({ endpoint: '/files', secret: () => 'fixture', containerized });
   const batches = [];
   const admit = addon.checkoutLinks.bind(addon);
   addon.checkoutLinks = (...args) => {
@@ -315,7 +342,9 @@ function providerFixture(text, containerized = true) {
   addon.activate(term);
   return { addon, requests, term,
     settled: () => Promise.all(batches),
-    provide: () => new Promise(resolve => provider.provideLinks(1, resolve)),
+    // The add-on runs in its own context, so its arrays are copied into
+    // this one before they are compared.
+    provide: () => new Promise(resolve => provider.provideLinks(1, links => resolve(Array.from(links)))),
     rewrite(text) { rows[0].cells = Array.from(text, ch => [ch, 1]); } };
 }
 
@@ -324,7 +353,7 @@ function providerFixture(text, containerized = true) {
  */
 test('container providers publish only host-admitted checkout paths', async () => {
   const fixture = providerFixture('/checkout/report.txt /host.txt /checkout/escape.txt');
-  assert.equal(bufferLinks(fixture.term, 1).length, 3, 'all three paths are recognized candidates');
+  assert.equal(pathLinks(xtermLines(fixture.term), 0).length, 3, 'all three paths are recognized candidates');
   let offered = false;
   const pending = fixture.provide().then(links => { offered = true; return links; });
   assert.equal(offered, false);
@@ -381,7 +410,7 @@ test('disposing a container terminal withdraws pending link admission', async ()
  */
 test('container link admission bounds pathological candidate batches', async () => {
   const fixture = providerFixture(Array.from({ length: 33 }, (_, n) => `/checkout/${n}.txt`).join(' '));
-  assert.equal(bufferLinks(fixture.term, 1).length, 33, 'fixture exceeds the request budget');
+  assert.equal(pathLinks(xtermLines(fixture.term), 0).length, 33, 'fixture exceeds the request budget');
   assert.deepEqual(await fixture.provide(), []);
   assert.equal(fixture.requests.length, 0);
   fixture.addon.dispose();
@@ -412,7 +441,7 @@ async function oscProviderFixture(t, output, containerized = true) {
   const context = { window: { farhelmTerminalLinks: require('../assets/terminal-links.js') },
     AbortController, URL, setTimeout, clearTimeout };
   vm.runInNewContext(fs.readFileSync(require.resolve('../assets/terminal-files.js'), 'utf8'), context);
-  const addon = new context.window.farhelmTerminalFiles.FileLinksAddon({
+  const addon = new context.window.farhelmTerminalFiles.XtermFileLinksAddon({
     endpoint: '/files', secret: () => 'fixture', containerized,
   });
   const requests = [];
@@ -451,7 +480,7 @@ test('real OSC checkout links retain arbitrary labels and spaces alongside web a
   const pending = fixture.provide().then(links => { published = true; return links; });
   const native = fixture.nativeReplies.at(-1);
   assert.equal(native.length, 4, 'the actual native provider recognized all OSC spans');
-  assert.equal(linkRangeText(fixture.term, native[0].range), 'download result');
+  assert.equal(linkRangeText(xtermLines(fixture.term), fromXtermRange(native[0].range)), 'download result');
   assert.equal(published, false, 'no unchecked OSC object is offered');
   const prose = fixture.prose();
   assert.deepEqual(fixture.requests.map(request => request.path), [
@@ -493,7 +522,7 @@ test('real OSC admission rejects label redraws and never publishes superseded or
   const after = changed.nativeReplies.at(-1)[0];
   assert.equal(after.text, before.text);
   assert.deepEqual(after.range, before.range, 'the label alone changed at the same target and range');
-  assert.equal(linkRangeText(changed.term, after.range), 'new label');
+  assert.equal(linkRangeText(xtermLines(changed.term), fromXtermRange(after.range)), 'new label');
 
   const replaced = await oscProviderFixture(t, osc('download'));
   let oldPublished = false;
@@ -561,17 +590,23 @@ function hoverFixture(native = false, isMac = false) {
     }),
   });
   vm.runInContext(fs.readFileSync(require.resolve('../assets/terminal-files.js'), 'utf8'), context);
-  const addon = new context.window.farhelmTerminalFiles.FileLinksAddon({ endpoint: '/files', secret: () => 'fixture', native, isMac, isClick: () => true, ...clock });
-  addon.activate({ element: { querySelector: selector => selector.endsWith('.terminal-file-target') ? display : null, removeEventListener() {} },
-    registerLinkProvider: () => ({ dispose() {} }), getSelection: () => '' });
-  addon.show = (_event, lines, checking = false) => { display.hidden = false; shown.push({ lines: [...lines], checking }); };
-  return { addon, requests, shown, display, tasks,
+  // The shared state machine, hosted the way the grid hosts it: a view with
+  // no readable lines, so no displayed text can establish identity.
+  const links = new context.window.farhelmTerminalFiles.FileLinks({ endpoint: '/files', secret: () => 'fixture', native, isMac, isClick: () => true, ...clock,
+    view: { element: { querySelector: selector => selector.endsWith('.terminal-file-target') ? display : null, removeEventListener() {} },
+      lines: () => ({ line: () => undefined }), hasSelection: () => false } });
+  links.show = (_event, lines, checking = false) => { display.hidden = false; shown.push({ lines: [...lines], checking }); };
+  // Returned as `addon`, the name the other fixtures' tests share.
+  return { addon: links, requests, shown, display, tasks,
     runTasks() { for (const [id, callback] of [...tasks]) { tasks.delete(id); callback(); } } };
 }
 
-/** Different objects with the same cell endpoints model xterm's re-linkification. */
+/** Different objects with the same cell endpoints model re-linkification
+ * after a redraw. Arguments are 1-based cells, the end cell included; the
+ * link carries the link-lines range of those cells.
+ */
 function hoverLink(startX = 2, startY = 3, endX = 11, endY = 3) {
-  return { range: { start: { x: startX, y: startY }, end: { x: endX, y: endY } }, decorations: { pointerCursor: false } };
+  return { range: { start: { abs: startY - 1, col: startX - 1 }, end: { abs: endY - 1, col: endX } }, decorations: { pointerCursor: false } };
 }
 
 /** A pending stat must survive every same-task redraw, and its answer must
@@ -797,7 +832,7 @@ function noticeFixture(native = true, opened = true, defaultTimers = false, isMa
     clearTimeout: id => timers.delete(id),
   };
   const context = vm.createContext({
-    window: { innerHeight: 100, innerWidth: 300, farhelmTerminalLinks: { visibleFormatCharacters: text => text, linkRangeText } },
+    window: { innerHeight: 100, innerWidth: 300, farhelmTerminalLinks: { ...terminalLinks, visibleFormatCharacters: text => text } },
     document: { createElement: element },
     AbortController, Blob,
     // A strict callable rejects an addon receiver just as browser timers do.
@@ -815,12 +850,12 @@ function noticeFixture(native = true, opened = true, defaultTimers = false, isMa
     URL: { createObjectURL: () => 'blob:owned', revokeObjectURL() {} },
   });
   vm.runInContext(fs.readFileSync(require.resolve('../assets/terminal-files.js'), 'utf8'), context);
-  const addon = new context.window.farhelmTerminalFiles.FileLinksAddon({ endpoint: '/files', secret: () => 'fixture', native, isMac, isClick: () => true, ...(defaultTimers ? {} : clock) });
+  const addon = new context.window.farhelmTerminalFiles.XtermFileLinksAddon({ endpoint: '/files', secret: () => 'fixture', native, isMac, isClick: () => true, ...(defaultTimers ? {} : clock) });
   const term = { element: opened ? root : undefined, registerLinkProvider: () => ({ dispose() {} }), getSelection: () => '',
     buffer: { active: { getLine: () => ({ length: 10, translateToString: () => 'report.pdf' }) } } };
   addon.activate(term);
   addon.hovered = { path: 'report.pdf', info: { status: 'ready', path: '/output/report.pdf', can_open: true }, controller: new AbortController(),
-    range: { start: { x: 1, y: 1 }, end: { x: 10, y: 1 } }, screenText: 'report.pdf' };
+    range: { start: { abs: 0, col: 0 }, end: { abs: 0, col: 10 } }, screenText: 'report.pdf' };
   return { addon, timers, listeners, disclosure, open: () => { term.element = root; }, notice: () => root.querySelector(':scope > .terminal-file-message') };
 }
 
@@ -906,7 +941,7 @@ test('partial wrapped redraw invalidates file transfer evidence', async () => {
       length: rows[y].length,
       translateToString: (_trim, start, end) => rows[y].slice(start, end),
     };
-    const range = { start: { x: 1, y: 1 }, end: { x: 4, y: 2 } };
+    const range = { start: { abs: 0, col: 0 }, end: { abs: 1, col: 4 } };
     fixture.addon.show = () => { fixture.disclosure.hidden = false; };
     const requests = [];
     fixture.addon.request = async (operation, _path, _signal, open) => {
@@ -943,9 +978,9 @@ test('a wrapped printed path cannot grow beyond its cached endpoint', async () =
       { cells: cells('t.txt     '), wrapped: true },
     ];
     fixture.addon.term.buffer = terminal(rows).buffer;
-    const [{ path, range }] = bufferLinks(fixture.addon.term, 1);
+    const [{ path, range }] = pathLinks(xtermLines(fixture.addon.term), 0);
     assert.equal(path, 'long/report.txt');
-    assert.deepEqual(range.end, { x: 5, y: 2 });
+    assert.deepEqual(range.end, { abs: 1, col: 5 });
     fixture.addon.show = () => { fixture.disclosure.hidden = false; };
     const requests = [];
     fixture.addon.request = async (operation, _path, _signal, open) => {
@@ -956,9 +991,9 @@ test('a wrapped printed path cannot grow beyond its cached endpoint', async () =
     await fixture.addon.hover({}, path, { range, decorations: {} }, range);
     assert.equal(fixture.addon.hovered.info.status, 'ready');
     rows[1].cells = cells('t.txt.bak ');
-    assert.equal(linkRangeText(fixture.addon.term, range), fixture.addon.hovered.screenText,
+    assert.equal(linkRangeText(xtermLines(fixture.addon.term), range), fixture.addon.hovered.screenText,
       'the old rectangle alone still matches after the extension');
-    assert.equal(bufferLinks(fixture.addon.term, 1)[0].path, 'long/report.txt.bak');
+    assert.equal(pathLinks(xtermLines(fixture.addon.term), 0)[0].path, 'long/report.txt.bak');
     await fixture.addon.download(path, { metaKey: true });
     assert.equal(requests.length, 1, 'the newly extended token must not reuse the previous target');
     rows[1].cells = cells('t.txt     ');

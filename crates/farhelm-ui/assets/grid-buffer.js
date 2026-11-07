@@ -98,7 +98,7 @@
    * is not printable ASCII and two cells wide: a printable ASCII run of two
    * cells is two characters). That cell
    * is not text: xterm.js leaves it out of copies (and terminal-files.js's
-   * `bufferLinks` out of paths), so the copy and the word and URL searches
+   * `pathLinks` out of paths), so the copy and the word and URL searches
    * here do too. A blank the program printed is covered by a run and stays.
    */
   function padsWideWrap(source, abs, line) {
@@ -572,32 +572,29 @@
     };
   }
 
-  // ## Today's link helpers, on the grid's lines
+  // ## The link code's lines
   //
-  // terminal-links.js and terminal-files.js read a terminal through
-  // xterm.js's public buffer API: `buffer.active.getLine(y)` with
-  // `isWrapped`, `length`, `getCell(x)` (`getWidth`, `getChars`, and the
-  // OSC 8 tag xterm.js keeps in `extended.urlId`) and `translateToString`.
-  // `xtermBuffer` is a read-only adapter of that shape over a line source,
-  // so those helpers (the hyperlink text a hover compares, the printed-path
-  // detector, the file hover's redraw check) run on a grid terminal
-  // unchanged rather than being written twice.
+  // terminal-links.js and terminal-files.js read a terminal as "link lines"
+  // (terminal-links.js's header, "Link lines"): `line(abs)` with `length`,
+  // `wrapped`, `cell(x)` (`chars`, `width`, `tag`) and `text`. `linkLines`
+  // is that over a line source, so the hyperlink text a hover compares, the
+  // printed-path detector and the file hover's redraw check run on the
+  // grid's own lines; an old terminal's xterm.js buffer gets an adapter to
+  // the same shape on its side (terminal-links.js's `xtermLines`).
   //
-  // Buffer row `y` is line number `y` (grid-buffer.js's numbering), so
-  // xterm.js's 1-based ranges carry `y = abs + 1`; `toXtermRange` and
-  // `fromXtermRange` convert. Cells follow xterm.js's conventions: a cell
-  // no run covers reads as empty chars with width 1, a wide character's
-  // second cell as empty chars with width 0, and only cells a run covers
-  // count toward the trimmed length. OSC 8 tags are small integers, equal
-  // for runs whose links resolve to the same id and target, including direct
-  // generated-id continuations (see SPEC_impl.md), assigned per adapter:
-  // callers ask a fresh adapter per
-  // question, so the table never outlives one hover.
+  // Line `abs` is grid-buffer.js's line number, and ranges are this file's
+  // `[start, end)` line ranges. A cell no run covers reads as empty chars
+  // with width 1, a wide character's second cell as empty chars with width
+  // 0, and only cells a run covers count toward the trimmed length. Hyperlink
+  // tags are small integers, equal for runs whose links resolve to the same
+  // id and target, including direct generated-id continuations (see
+  // SPEC_impl.md), and 0 for no link, assigned per `linkLines` call: callers
+  // ask for fresh lines per question, so the table never outlives one hover.
 
   /**
-   * Present one grid row through the existing link helpers' buffer API.
-   * `tagOf(index)` resolves the run at its row position: a generated id's
-   * tag may come from an earlier piece, rather than from the raw wire id.
+   * Present one grid row as a link line. `tagOf(index)` resolves the run at
+   * its row position: a generated id's tag may come from an earlier piece,
+   * rather than from the raw wire id.
    */
   function lineView(line, previous, tagOf) {
     const { row, width } = line;
@@ -617,15 +614,15 @@
     const at = (x) => cells[x] || blank;
     return {
       length: width,
-      isWrapped: !!(previous && previous.row.wrapped),
-      getCell(x) {
+      wrapped: !!(previous && previous.row.wrapped),
+      cell(x) {
         if (!Number.isInteger(x) || x < 0 || x >= width) return undefined;
         const cell = at(x);
-        return { getWidth: () => cell.width, getChars: () => cell.chars, extended: { urlId: cell.tag } };
+        return { chars: cell.chars, width: cell.width, tag: cell.tag };
       },
-      // xterm.js's `translateToString`: a cell's characters (a space for an
-      // empty one), stepping over a wide character's second cell.
-      translateToString(trimRight = false, startCol = 0, endCol = width) {
+      // A cell's characters (a space for an empty one), stepping over a wide
+      // character's second cell.
+      text(startCol = 0, endCol = width, trimRight = false) {
         const end = Math.min(width, trimRight ? Math.min(endCol, trimmed) : endCol);
         let out = "";
         for (let x = Math.max(0, startCol); x < end;) {
@@ -639,11 +636,10 @@
   }
 
   /**
-   * An adapter of xterm.js's `buffer.active` over `source` (see "Today's
-   * link helpers, on the grid's lines"): `getLine(abs)`, undefined for a
-   * line that is not there.
+   * The link lines over `source` (see "The link code's lines"): `line(abs)`,
+   * undefined for a line that is not there.
    */
-  function xtermBuffer(source) {
+  function linkLines(source) {
     const tags = new Map();
     const identities = linkIdentities(source);
     const tagOf = (link) => {
@@ -656,23 +652,13 @@
       return tag;
     };
     return {
-      getLine(y) {
-        if (!Number.isSafeInteger(y)) return undefined;
-        const line = source.line(y);
-        const keys = line && identities(y);
-        return line ? lineView(line, source.line(y - 1), (index) => tagOf(keys[index])) : undefined;
+      line(abs) {
+        if (!Number.isSafeInteger(abs)) return undefined;
+        const line = source.line(abs);
+        const keys = line && identities(abs);
+        return line ? lineView(line, source.line(abs - 1), (index) => tagOf(keys[index])) : undefined;
       },
     };
-  }
-
-  /** A `[start, end)` line range as an xterm.js range (1-based, end cell inclusive). */
-  function toXtermRange(range) {
-    return { start: { x: range.start.col + 1, y: range.start.abs + 1 }, end: { x: range.end.col, y: range.end.abs + 1 } };
-  }
-
-  /** The inverse of `toXtermRange`. */
-  function fromXtermRange(range) {
-    return { start: { abs: range.start.y - 1, col: range.start.x - 1 }, end: { abs: range.end.y - 1, col: range.end.x } };
   }
 
   const api = {
@@ -681,19 +667,17 @@
     answerLines,
     columnText,
     compare,
-    fromXtermRange,
     lineRange,
     linkAt,
     linkCovers,
+    linkLines,
     modelSource,
     ordered,
     rowLinks,
     rowText,
     selectionText,
     taggedLines,
-    toXtermRange,
     wordRange,
-    xtermBuffer,
     wrappedSpan,
   };
   root.farhelmGridBuffer = api;

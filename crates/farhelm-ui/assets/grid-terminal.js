@@ -1240,7 +1240,7 @@
     }
 
     /** The lines a link's hover reads: the lines it covers and its evidence lines. */
-    function linkLines(link) {
+    function hoverLineNumbers(link) {
       const lines = new Set(link.evidence || []);
       for (const range of link.ranges) {
         for (let abs = range.start.abs; abs <= range.end.abs; abs++) lines.add(abs);
@@ -1347,7 +1347,7 @@
       hoverRows = null;
       if (link) {
         hoverRows = new Map();
-        for (const abs of linkLines(link)) hoverRows.set(abs, rowAt(abs));
+        for (const abs of hoverLineNumbers(link)) hoverRows.set(abs, rowAt(abs));
         decorate(link);
       }
       element.classList.toggle("grid-terminal-link-hover", !!link && link.decorations.pointerCursor);
@@ -1646,7 +1646,10 @@
       }
       const rect = screen.getBoundingClientRect();
       const target = gridInput.mouseCell(ev.clientX - rect.left, ev.clientY - rect.top, cellWidth, cellHeight, model.cols, model.rows);
-      const lines = gridBuffer.xtermBuffer(gridBuffer.modelSource(model, false));
+      // The port reads the screen through the shape it was ported with
+      // (screen rows and their soft wraps, and their text), built here from
+      // the screen's link lines.
+      const lines = gridBuffer.linkLines(gridBuffer.modelSource(model, false));
       const base = model.screenBase;
       const bufferService = {
         cols: model.cols,
@@ -1655,10 +1658,16 @@
           x: model.cursor.x,
           y: model.cursor.y,
           hasScrollback: !model.state.altScreen,
-          lines: { length: model.rows, get: (row) => lines.getLine(base + row) },
+          lines: {
+            length: model.rows,
+            get: (row) => {
+              const line = lines.line(base + row);
+              return line ? { isWrapped: line.wrapped } : undefined;
+            },
+          },
           translateBufferLineToString(row, trimRight, startCol, endCol) {
-            const line = lines.getLine(base + row);
-            return line ? line.translateToString(trimRight, startCol, endCol) : "";
+            const line = lines.line(base + row);
+            return line ? line.text(startCol, endCol, trimRight) : "";
           },
         },
       };
@@ -1967,12 +1976,12 @@
       },
 
       /**
-       * A fresh read-only adapter of xterm.js's buffer API over what the
-       * terminal holds (grid-buffer.js's `xtermBuffer`), for today's link
-       * helpers. History is left out on the alternate screen.
+       * Fresh link lines over what the terminal holds (grid-buffer.js's
+       * `linkLines`), for the link code in terminal-links.js and
+       * terminal-files.js. History is left out on the alternate screen.
        */
-      xtermBuffer() {
-        return gridBuffer.xtermBuffer(source());
+      linkLines() {
+        return gridBuffer.linkLines(source());
       },
 
       /** The program's hyperlinks and printed URLs touching line `abs` (grid-buffer.js's `rowLinks`). */

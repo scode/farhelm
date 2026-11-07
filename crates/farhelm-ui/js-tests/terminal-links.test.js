@@ -36,8 +36,33 @@ const {
   linkRowText,
   linkHoverText,
   linkRangeText,
+  xtermLines,
+  fromXtermRange,
+  toXtermRange,
   visibleFormatCharacters,
 } = require("../assets/terminal-links.js");
+
+/**
+ * A link-lines range (terminal-links.js, "Link lines") over 1-based cells,
+ * the end cell included, which is how these specs name cells.
+ */
+function cells(x1, y1, x2, y2) {
+  return { start: { abs: y1 - 1, col: x1 - 1 }, end: { abs: y2 - 1, col: x2 } };
+}
+
+/** Link lines of plain text rows, one cell per character, untagged. */
+function textLines(rows) {
+  return { line(abs) {
+    const text = rows[abs];
+    if (text === undefined) return undefined;
+    return {
+      length: text.length,
+      wrapped: false,
+      cell: (x) => (x >= 0 && x < text.length ? { chars: text[x], width: 1, tag: 0 } : undefined),
+      text: (from = 0, to = text.length, trim = false) => (trim ? text.slice(from, to).trimEnd() : text.slice(from, to)),
+    };
+  } };
+}
 
 const SHIPPED_SOURCE = fs.readFileSync(
   path.join(__dirname, "..", "assets", "terminal-links.js"),
@@ -107,19 +132,16 @@ test("reset retires a held press and an admitted release in place", () => {
  */
 test("file link snapshots cover every row and refuse missing or excessive ranges", () => {
   const rows = ['prefix file ', 'name.txt end'];
-  const term = { buffer: { active: { getLine: y => rows[y] === undefined ? undefined : {
-    length: rows[y].length,
-    translateToString: (_trim, from, to) => rows[y].slice(from, to),
-  } } } };
-  const range = { start: { x: 8, y: 1 }, end: { x: 8, y: 2 } };
-  assert.equal(linkRangeText(term, range), 'file name.txt');
+  const lines = textLines(rows);
+  const range = cells(8, 1, 8, 2);
+  assert.equal(linkRangeText(lines, range), 'file name.txt');
   rows[1] = 'other.txt end';
-  assert.equal(linkRangeText(term, range), 'file other.tx');
-  assert.equal(linkRangeText(term, { ...range, end: { x: 1, y: 3 } }), null);
-  assert.equal(linkRangeText(term, { ...range, end: { x: 1, y: 130 } }), null);
-  assert.equal(linkRangeText(term, { ...range, start: { x: 0, y: 1 } }), null);
-  assert.equal(linkRangeText(term, { ...range, end: { x: 50, y: 2 } }), null);
-  assert.equal(linkRangeText(term, null), null);
+  assert.equal(linkRangeText(lines, range), 'file other.tx');
+  assert.equal(linkRangeText(lines, { ...range, end: { abs: 2, col: 1 } }), null);
+  assert.equal(linkRangeText(lines, { ...range, end: { abs: 129, col: 1 } }), null);
+  assert.equal(linkRangeText(lines, { ...range, start: { abs: 0, col: -1 } }), null);
+  assert.equal(linkRangeText(lines, { ...range, end: { abs: 1, col: 50 } }), null);
+  assert.equal(linkRangeText(lines, null), null);
 });
 
 /** Link ownership must never consume a file, forced selection or another
@@ -410,42 +432,49 @@ test("linkTextMismatch flags only URL-like text that names another place", () =>
 });
 
 // Why this matters: the comparison is only as good as the text it is given.
-// Spec: the hovered row's cells from the range's start to its end column
-// (1-based, inclusive) are returned; a range that runs past the row is cut at
-// the row's end (the provider builds one link per row); no range, or a row
-// that no longer exists, gives null so the caller keeps the quiet display.
+// Spec: the hovered row's cells from the range's start column to its end
+// column are returned; a range that runs past the row is cut at the row's
+// end (both providers build one link per row); no range, or a row that no
+// longer exists, gives null so the caller keeps the quiet display.
 test("linkRowText reads the underlined cells of the hovered row", () => {
-  const rows = ["0123 https://example.com/x tail"];
-  const term = {
-    buffer: {
-      active: {
-        getLine(y) {
-          const text = rows[y];
-          if (text === undefined) return undefined;
-          return {
-            length: text.length,
-            translateToString(_trimRight, start, end) {
-              return text.slice(start, end);
-            },
-          };
-        },
-      },
-    },
-  };
-  const range = { start: { x: 6, y: 1 }, end: { x: 26, y: 1 } };
-  assert.equal(linkRowText(term, range), "https://example.com/x");
-  // Guard only: the vendored provider never reports a range spanning rows.
-  assert.equal(linkRowText(term, { start: { x: 6, y: 1 }, end: { x: 3, y: 2 } }), "https://example.com/x tail");
-  assert.equal(linkRowText(term, undefined), null);
-  assert.equal(linkRowText(term, { start: { x: 1, y: 9 }, end: { x: 4, y: 9 } }), null);
+  const lines = textLines(["0123 https://example.com/x tail"]);
+  assert.equal(linkRowText(lines, cells(6, 1, 26, 1)), "https://example.com/x");
+  // Guard only: neither provider reports a range spanning rows.
+  assert.equal(linkRowText(lines, cells(6, 1, 3, 2)), "https://example.com/x tail");
+  assert.equal(linkRowText(lines, undefined), null);
+  assert.equal(linkRowText(lines, cells(1, 9, 4, 9)), null);
 });
 
-/** Fabricate the public buffer API while preserving the private tag's ownership.
+/** Link lines whose rows are runs of `[text, tag]`, one cell per character;
+ * with `missingTag`, cells carry no tag at all, as an old terminal's do when
+ * xterm.js no longer keeps it.
+ */
+function taggedTerminal(rows, missingTag = false) {
+  return { line(abs) {
+    const runs = rows[abs];
+    if (!runs) return undefined;
+    const text = runs.map(([text]) => text).join('');
+    const tags = runs.flatMap(([text, tag]) => Array(text.length).fill(tag));
+    return {
+      length: text.length,
+      wrapped: false,
+      cell: (x) => (x >= 0 && x < text.length ? { chars: text[x], width: 1, tag: missingTag ? undefined : tags[x] } : undefined),
+      text(from, to, trim) {
+        const result = text.slice(from, to);
+        return trim ? result.trimEnd() : result;
+      },
+    };
+  } };
+}
+
+/** xterm.js's public buffer API, preserving the private tag's ownership.
  * Frozen extended attributes catch accidental writes to buffer-owned objects.
  * As in xterm, loading an untagged cell leaves a reused object's extended
  * attributes untouched; indentation must not borrow the preceding link's tag.
+ * With `missingTag`, cells carry no `extended` at all, as when an xterm.js
+ * upgrade drops the private field.
  */
-function taggedTerminal(rows, missingTag = false) {
+function xtermTagged(rows, missingTag = false) {
   return { buffer: { active: { getLine(y) {
     const runs = rows[y];
     if (!runs) return undefined;
@@ -453,8 +482,10 @@ function taggedTerminal(rows, missingTag = false) {
     const tags = runs.flatMap(([text, tag]) => Array(text.length).fill(tag));
     return {
       length: text.length,
-      getCell(x, cell = { extended: Object.freeze(missingTag ? {} : { urlId: 0 }) }) {
-        if (!missingTag && tags[x]) cell.extended = Object.freeze({ urlId: tags[x] });
+      getCell(x, cell = missingTag ? {} : { extended: Object.freeze({ urlId: 0 }) }) {
+        if (tags[x] && !missingTag) cell.extended = Object.freeze({ urlId: tags[x] });
+        cell.getChars = () => text[x] ?? '';
+        cell.getWidth = () => 1;
         return cell;
       },
       translateToString(trim, from, to) {
@@ -465,16 +496,58 @@ function taggedTerminal(rows, missingTag = false) {
   } } } };
 }
 
-/** A cursor-moved continuation and a terminal wrap have the same tag contract.
- * Hovering either part must compare the complete address, including a short
- * first row; isWrapped and right-edge position are deliberately absent.
+/** An old terminal's lines come through the xterm.js adapter, which must not
+ * let a reused cell's tag leak into unlinked cells.
+ *
+ * Why: xterm.js replaces a cell's private `extended` only when the cell has
+ * extended attributes, so reading a row through one reused cell would give
+ * unlinked indentation the preceding link's tag and join text that is not
+ * part of the link.
+ * Spec: `xtermLines` gives each cell xterm.js's chars, width and urlId tag
+ * from a fresh cell (untagged indentation reads 0 while a reused cell would
+ * read 7), a row's text through `translateToString`, and xterm.js's 1-based
+ * ranges convert to link-lines ranges and back.
  */
-test('tagged link rows join from either hover, preserving edge spaces', () => {
-  const range = y => ({ start: { x: y === 1 ? 1 : 6, y }, end: { x: y === 1 ? 14 : 19, y } });
-  const term = taggedTerminal([[['https://examp', 7]], [['     ', 0], ['le.com/a', 7]]]);
+test('the xterm.js adapter reads fresh cells and converts ranges', () => {
+  const term = xtermTagged([[['https://examp', 7]], [['     ', 0], ['le.com/a', 7]]]);
   const reused = term.buffer.active.getLine(0).getCell(0);
   assert.equal(term.buffer.active.getLine(1).getCell(0, reused).extended.urlId, 7,
     'premise: a reused xterm cell retains its tag while loading unlinked indentation');
+  const lines = xtermLines(term);
+  assert.deepEqual(lines.line(1).cell(0), { chars: ' ', width: 1, tag: 0 });
+  assert.deepEqual(lines.line(1).cell(5), { chars: 'l', width: 1, tag: 7 });
+  assert.equal(lines.line(1).text(5, 13, false), 'le.com/a');
+  assert.equal(lines.line(2), undefined);
+  const xterm = { start: { x: 6, y: 2 }, end: { x: 13, y: 2 } };
+  assert.deepEqual(fromXtermRange(xterm), cells(6, 2, 13, 2));
+  assert.deepEqual(toXtermRange(fromXtermRange(xterm)), xterm);
+  const joined = linkHoverText(lines, fromXtermRange(xterm), 'https://example.com/a');
+  assert.deepEqual(joined, { kind: 'whole', text: 'https://example.com/a' });
+  assert.equal(fromXtermRange(undefined), undefined, 'a missing range stays missing');
+});
+
+/** Without xterm.js's private tag, the adapter reports no tag and the hover
+ * falls back to the hovered row alone.
+ *
+ * Why: the tag is an undocumented field that a manual xterm.js upgrade can
+ * remove; SPEC_impl.md promises that losing it restores the old row-only
+ * comparison rather than failing or joining by guesswork.
+ * Spec: through `xtermLines`, a cell with no `extended` has an undefined
+ * tag, and `linkHoverText` answers `unknown` with the hovered row's text.
+ */
+test('the xterm.js adapter falls back to the row when the tag is unavailable', () => {
+  const lines = xtermLines(xtermTagged([[['https://examp', 7]], [['le.com/a', 7]]], true));
+  assert.equal(lines.line(0).cell(0).tag, undefined);
+  assert.deepEqual(linkHoverText(lines, cells(1, 1, 13, 1), 'https://example.com/a'), { kind: 'unknown', text: 'https://examp' });
+});
+
+/** A cursor-moved continuation and a terminal wrap have the same tag contract.
+ * Hovering either part must compare the complete address, including a short
+ * first row; soft wraps and right-edge position are deliberately absent.
+ */
+test('tagged link rows join from either hover, preserving edge spaces', () => {
+  const range = y => (y === 1 ? cells(1, 1, 14, 1) : cells(6, y, 19, y));
+  const term = taggedTerminal([[['https://examp', 7]], [['     ', 0], ['le.com/a', 7]]]);
   for (const y of [1, 2]) {
     const result = linkHoverText(term, range(y));
     assert.deepEqual(result, { kind: 'whole', text: 'https://example.com/a' });
@@ -493,7 +566,7 @@ test('tagged link rows join from either hover, preserving edge spaces', () => {
 test('whole split lookalikes are compared from either row', () => {
   const rows = [[['https://git', 8]], [['hub.com/login', 8]]];
   for (const y of [1, 2]) {
-    const range = { start: { x: 1, y }, end: { x: rows[y - 1][0][0].length, y } };
+    const range = cells(1, y, rows[y - 1][0][0].length, y);
     const result = linkHoverText(taggedTerminal(rows), range, 'https://hub.com/login');
     assert.equal(result.kind, 'whole');
     assert.equal(linkTextMismatch(result.text, 'https://hub.com/login'), true);
@@ -503,7 +576,7 @@ test('whole split lookalikes are compared from either row', () => {
     assert.equal(linkTextMismatch(old.text, 'https://hub.com/login'), y === 1);
   }
   const decoy = taggedTerminal([[['https://good.example', 8]], [['.evil.test/', 8]]]);
-  const result = linkHoverText(decoy, { start: { x: 1, y: 1 }, end: { x: 20, y: 1 } });
+  const result = linkHoverText(decoy, cells(1, 1, 20, 1));
   assert.equal(linkTextMismatch(result.text, 'https://good.example.evil.test/'), false);
 });
 
@@ -515,7 +588,7 @@ test('repeated honest rows compare independently only when all match', () => {
   for (const labels of [[target, target], [target, 'example.com/'], [target, 'click here']]) {
     const term = taggedTerminal(labels.map(text => [[text, 8]]));
     for (const y of [1, 2]) {
-      const range = { start: { x: 1, y }, end: { x: labels[y - 1].length, y } };
+      const range = cells(1, y, labels[y - 1].length, y);
       const result = linkHoverText(term, range, target);
       const prose = labels[1] === 'click here';
       assert.deepEqual(result, { kind: 'whole', text: prose ? labels.join('') : labels[y - 1] });
@@ -532,7 +605,7 @@ test('untagged rows and inline prefixes stay outside the link', () => {
   const target = 'https://example.com/';
   const plain = [['$ prompt', 0]];
   const rows = [...Array.from({ length: 130 }, () => plain), [['see ', 0], [target, 8]]];
-  const range = { start: { x: 5, y: 131 }, end: { x: 4 + target.length, y: 131 } };
+  const range = cells(5, 131, 4 + target.length, 131);
   const result = linkHoverText(taggedTerminal(rows), range);
   assert.deepEqual(result, { kind: 'whole', text: target });
   assert.equal(linkTextMismatch(result.text, target), false);
@@ -544,7 +617,7 @@ test('untagged rows and inline prefixes stay outside the link', () => {
  * ambiguity on any joined row and either size bound must fail conservatively.
  */
 test('ambiguous and bounded continuations stay fragments', () => {
-  const range = { start: { x: 1, y: 1 }, end: { x: 20, y: 1 } };
+  const range = cells(1, 1, 20, 1);
   const duplicate = [['https://example.com/', 7], [' ', 0], ['https://example.com/', 7]];
   assert.equal(linkHoverText(taggedTerminal([duplicate]), range).kind, 'whole');
   for (const rows of [

@@ -1,6 +1,14 @@
-// Session-host file links: recognition is pure, while the addon owns fresh
+// Session-host file links: recognition is pure, while `FileLinks` owns fresh
 // hover evidence and explicit-click transfers for exactly one terminal.
 // Nothing here consults the shell's current directory or opens a file URI.
+//
+// Both kinds of terminal share this code: it reads a terminal through a
+// "view" (`element`, `lines()` giving terminal-links.js's link lines, and
+// `hasSelection()`) and speaks link-lines ranges. A new terminal's grid
+// hosts `FileLinks` directly (terminal.js's `createGridLinks`); an old
+// terminal's xterm.js loads `XtermFileLinksAddon`, the adapter that registers
+// an xterm.js link provider, converts its ranges, and wraps xterm.js's own
+// OSC 8 provider for containers.
 (function () {
   const MAX_BYTES = 100000000;
 
@@ -13,7 +21,7 @@
     if (!display || display.hidden || display.clientHeight <= 0 || display.clientWidth <= 0 ||
       display.scrollHeight > display.clientHeight || display.scrollWidth > display.clientWidth) return false;
     // A resize can move fixed-position details off-screen without changing
-    // xterm's integer grid or overflowing the disclosure's own content box.
+    // the terminal's cell grid or overflowing the disclosure's own content box.
     const rect = display.getBoundingClientRect();
     return rect.top >= 0 && rect.left >= 0 && rect.bottom <= viewport.innerHeight && rect.right <= viewport.innerWidth &&
       !coveringRects.some(cover => cover.right > cover.left && cover.bottom > cover.top &&
@@ -114,7 +122,8 @@
     return found;
   }
 
-  /** OSC 8 has its own explicit allowlist because xterm now passes all schemes.
+  /** OSC 8 has its own explicit allowlist because the terminal passes every scheme
+   * (xterm.js does with `allowNonHttpProtocols`; the grid passes the program's target).
    * The URI authority never selects a host: files belong to the session host.
    * File targets must be absolute, decode once, and carry no query or fragment.
    */
@@ -140,33 +149,34 @@
     }
   }
 
-  /** Map a logical wrapped line's UTF-16 offsets back to public xterm cells.
+  /** The printed paths touching line `abs` of `lines` (terminal-links.js's
+   * link lines), each `{path, range}` with a link-lines range.
+   * Map a logical wrapped line's UTF-16 offsets back to cells.
    * Wide cells have a zero-width continuation; combining characters share a
    * cell. Neither may be counted as one column per JS character. A wide glyph
    * wrapping from the last column leaves a padding cell, which is not text.
    * Work is bounded; an overlong logical line yields no links rather than a
    * truncated token whose apparent start changes the recognition policy.
    */
-  function bufferLinks(term, row) {
-    const buffer = term.buffer.active;
-    let first = row - 1;
-    while (first > 0 && buffer.getLine(first)?.isWrapped) {
-      if (row - first > 128) return [];
+  function pathLinks(lines, abs) {
+    let first = abs;
+    while (first > 0 && lines.line(first)?.wrapped) {
+      if (abs - first > 128) return [];
       first--;
     }
     let text = '';
     const cells = [];
     for (let y = first; ; y++) {
-      const line = buffer.getLine(y);
-      if (!line || (y > first && !line.isWrapped)) break;
+      const line = lines.line(y);
+      if (!line || (y > first && !line.wrapped)) break;
       if (y - first > 128 || text.length > 8192) return [];
       for (let x = 0; x < line.length; x++) {
-        const cell = line.getCell(x);
-        if (!cell || !cell.getWidth()) continue;
-        const chars = cell.getChars();
-        if (!chars && x === line.length - 1 && buffer.getLine(y + 1)?.isWrapped && buffer.getLine(y + 1).getCell(0)?.getWidth() === 2) continue;
+        const cell = line.cell(x);
+        if (!cell || !cell.width) continue;
+        const chars = cell.chars;
+        if (!chars && x === line.length - 1 && lines.line(y + 1)?.wrapped && lines.line(y + 1).cell(0)?.width === 2) continue;
         const value = chars || ' ';
-        for (let i = 0; i < value.length; i++) cells.push({ x: x + 1, y: y + 1, endX: x + cell.getWidth() });
+        for (let i = 0; i < value.length; i++) cells.push({ col: x, abs: y, end: x + cell.width });
         text += value;
       }
     }
@@ -174,8 +184,18 @@
     return pathTokens(text).map((token) => {
       const start = cells[token.start];
       const end = cells[token.end - 1];
-      return { path: token.path, range: { start: { x: start.x, y: start.y }, end: { x: end.endX, y: end.y } } };
-    }).filter((link) => link.range.start.y <= row && link.range.end.y >= row);
+      return { path: token.path, range: { start: { abs: start.abs, col: start.col }, end: { abs: end.abs, col: end.end } } };
+    }).filter((link) => link.range.start.abs <= abs && link.range.end.abs >= abs);
+  }
+
+  /** Whether two link-lines ranges name the same cells (both present). */
+  function sameRange(a, b) {
+    const fields = range => [range?.start?.abs, range?.start?.col, range?.end?.abs, range?.end?.col];
+    // A range that is not a link-lines one (an xterm.js range, a missing
+    // one) fails closed rather than comparing equal on undefined fields.
+    if (![...fields(a), ...fields(b)].every(Number.isInteger)) return false;
+    return a.start.abs === b.start.abs && a.start.col === b.start.col &&
+      a.end.abs === b.end.abs && a.end.col === b.end.col;
   }
 
   /** Buffer only complete, bounded responses. A body error or growth past the
@@ -199,16 +219,21 @@
     }
   }
 
-  /** This addon has the terminal's lifetime, including retained reconnects.
+  /** File links for one terminal, read through its `view` (see this file's
+   * header), which the host sets before any link is asked for: the grid
+   * passes it at construction, and the old terminal's add-on sets it on
+   * activation (see this file's header).
+   * This has the terminal's lifetime, including retained reconnects.
    * Lookup evidence belongs to a single hover, never to a path cache. A click
    * reopens the disclosed canonical path; that still is not a file snapshot.
    */
-  class FileLinksAddon {
-    constructor({ endpoint, secret, native, isMac = false, containerized = false, isClick = () => false, coveringRects = () => [],
+  class FileLinks {
+    constructor({ endpoint, secret, native, isMac = false, containerized = false, isClick = () => false, coveringRects = () => [], view = null,
       // Browser timers require their global receiver. Wrappers keep the
-      // defaults out of the addon's method-call context while allowing clocks.
+      // defaults out of this object's method-call context while allowing clocks.
       setTimeout: schedule = (callback, delay) => setTimeout(callback, delay),
       clearTimeout: cancel = id => clearTimeout(id) }) {
+      this.view = view;
       this.endpoint = endpoint;
       this.secret = secret;
       this.native = native;
@@ -217,10 +242,10 @@
       this.linkLookups = { prose: null, osc: null };
       this.disposed = false;
       // The terminal owns primary-gesture admission across all link providers.
-      // A standalone addon without that evidence cannot authorize a transfer.
+      // A `FileLinks` without that evidence cannot authorize a transfer.
       this.isClick = isClick;
       // The shell supplies its marked covers' rectangles at activation time
-      // (`markedCoverRects`); this addon knows rectangles, not the shell's DOM
+      // (`markedCoverRects`); this knows rectangles, not the shell's DOM
       // or cached geometry.
       this.coveringRects = coveringRects;
       this.hovered = null;
@@ -234,87 +259,43 @@
       };
     }
 
-    /** Register below OSC 8 and web links, preserving their existing precedence. */
-    activate(term) {
-      this.term = term;
-      if (this.containerized) this.admitOscLinks();
-      this.provider = term.registerLinkProvider({
-        provideLinks: (row, callback) => {
-          if (this.containerized) {
-            const current = () => this.proseCandidates(row);
-            void this.checkoutLinks('prose', this.proseCandidates(row), current, callback);
-          }
-          else callback(bufferLinks(term, row).map(candidate => this.fileLink(candidate)));
-        },
-      });
-    }
-
-    /** Keep the usual fresh-hover and click checks after provider admission. */
-    fileLink({ path, range }) {
-      const link = {
-        text: path,
-        range,
-        decorations: { underline: true, pointerCursor: false },
-        hover: event => this.hover(event, path, link, range),
-        leave: () => this.leave(),
-        activate: event => this.download(path, event),
-      };
-      return link;
-    }
-
-    /** Pin one narrow seam in the shipped xterm 6.0.0 bundle. The native OSC
-     * provider already knows targets, arbitrary labels, ranges and precedence;
-     * wrapping its callback avoids another parser or delaying terminal writes.
-     * The real-bundle test must be revisited when replacing the vendor asset.
-     */
-    admitOscLinks() {
-      const provider = this.term._core?._linkProviderService?.linkProviders?.[0];
-      if (typeof provider?.provideLinks !== 'function') {
-        throw new Error('Container file-link admission requires the pinned xterm OSC provider');
-      }
-      this.oscProvider = provider;
-      this.oscProvideLinks = provider.provideLinks;
-      this.oscWrappedProvideLinks = (row, callback) => {
-        this.oscProvideLinks.call(provider, row, links => {
-          const current = () => new Promise(resolve => {
-            this.oscProvideLinks.call(provider, row, latest => resolve(this.oscCandidates(latest)));
-          });
-          void this.checkoutLinks('osc', this.oscCandidates(links), current, callback);
-        });
-      };
-      provider.provideLinks = this.oscWrappedProvideLinks;
-    }
-
     /** Keep original OSC link objects, whose callbacks support arbitrary labels
-     * and filenames with spaces. URI, range and displayed text all participate
-     * in admission identity; any one can change during a host lookup.
+     * and filenames with spaces. Each item is `{uri, range, link}`: the
+     * program's target, its link-lines range, and the surface's own link
+     * object, which is what an admitted candidate offers. URI, range and
+     * displayed text all participate in admission identity; any one can
+     * change during a host lookup.
      */
-    oscCandidates(links) {
-      return (links || []).flatMap(link => {
-        const target = oscTarget(link.text);
+    oscCandidates(items) {
+      return (items || []).flatMap(({ uri, range, link }) => {
+        const target = oscTarget(uri);
         if (!target) return [];
         return [{
           path: target.kind === 'file' ? target.path : null,
-          signature: JSON.stringify([link.text, link.range,
-            window.farhelmTerminalLinks.linkRangeText(this.term, link.range)]),
+          signature: JSON.stringify([uri, range,
+            window.farhelmTerminalLinks.linkRangeText(this.view.lines(), range)]),
           link,
         }];
       });
     }
 
-    /** Re-recognition supplies live cell identity without a path cache. */
-    proseCandidates(row) {
-      return bufferLinks(this.term, row).map(candidate => ({
+    /** Re-recognition supplies live cell identity without a path cache.
+     * `makeLink(candidate)` turns a `{path, range}` into the surface's own
+     * link object.
+     */
+    proseCandidates(abs, makeLink) {
+      return pathLinks(this.view.lines(), abs).map(candidate => ({
         path: candidate.path,
         signature: JSON.stringify(candidate),
-        link: this.fileLink(candidate),
+        link: makeLink(candidate),
       }));
     }
 
     /** Container output names its own filesystem. Ask the host to admit each
      * target before offering a link, including symlink resolution; a hover-time
      * refusal would already have offered a misleading host path. Each provider
-     * owns one bounded batch: xterm asks OSC and prose independently, so sharing
+     * owns one bounded batch: the terminal asks for OSC and prose links
+     * independently, so sharing
      * cancellation would make valid providers cancel each other's answers.
      */
     async checkoutLinks(slot, candidates, current, callback) {
@@ -339,7 +320,7 @@
           }
         }));
         // Even an empty late callback could replace a newer reply for this same
-        // row in xterm. A superseded or disposed request publishes nothing.
+        // row in the terminal. A superseded or disposed request publishes nothing.
         if (controller.signal.aborted || this.disposed) return;
         // A slow response cannot publish a link for cells replaced meanwhile.
         // Hover and download still make their own independent fresh checks.
@@ -358,13 +339,13 @@
      * become markup or reorder hidden format characters in the HTML tooltip.
      */
     show(event, lines, checking = false, tier = 'neutral') {
-      let display = this.term.element.querySelector(':scope > .terminal-file-target');
+      let display = this.view.element.querySelector(':scope > .terminal-file-target');
       if (!display) {
         display = document.createElement('div');
         display.className = 'terminal-link-target terminal-file-target';
         display.setAttribute('role', 'tooltip');
         display.dir = 'ltr';
-        this.term.element.appendChild(display);
+        this.view.element.appendChild(display);
       }
       display.hidden = false;
       display.dataset.tier = tier;
@@ -399,24 +380,27 @@
       display.style.top = `${Math.max(4, event.clientY + 16 + box.height > window.innerHeight ? event.clientY - box.height - 8 : event.clientY + 16)}px`;
     }
 
-    /** Redraws synchronously leave and re-hover the same cells in xterm.
-     * Reclaim that one hover without restarting its lookup or disclosure.
-     * Changed displayed text, path/range or a completed departure checks
-     * afresh; no evidence survives across hovers. Unknown text/ranges cannot
-     * establish identity, including OSC labels independent of their target.
+    /** Redraws synchronously leave and re-hover the same cells, in both
+     * terminals. Reclaim that one hover without restarting its lookup or
+     * disclosure. Changed displayed text, path/range or a completed departure
+     * checks afresh; no evidence survives across hovers. Unknown text/ranges
+     * cannot establish identity, including OSC labels independent of their
+     * target. `range` is a link-lines range, by default the link's own;
+     * a range that is not one (missing or malformed fields) never matches,
+     * so it cannot reclaim a hover. `link`, when given, is the surface's
+     * link object, whose `decorations.pointerCursor` this sets.
      */
     async hover(event, path, link = null, range = link?.range, text = path) {
       const previous = this.hovered;
-      if (previous?.leaving && previous.path === path && text !== null && previous.text === text && range && previous.range &&
-          previous.range.start.x === range.start.x && previous.range.start.y === range.start.y &&
-          previous.range.end.x === range.end.x && previous.range.end.y === range.end.y) {
+      if (previous?.leaving && previous.path === path && text !== null && previous.text === text && sameRange(range, previous.range)) {
         this.cancel(previous.leaveTimer);
         previous.leaveTimer = null;
         previous.leaving = false;
         previous.link = link;
         if (link) {
-          // xterm snapshots decorations before hover(), then replaces them
-          // with cursor setters after it returns. Wait for that installation;
+          // The terminal snapshots decorations before hover(), then replaces
+          // them with cursor setters after it returns (xterm.js does; the
+          // grid's link decorations imitate it). Wait for that installation;
           // a retired link's setter would target whatever link is current.
           await Promise.resolve();
           if (this.hovered === previous && !previous.leaving && previous.link === link) {
@@ -428,7 +412,7 @@
       this.clearHover();
       const state = {
         path, text, link, range: range ? { start: { ...range.start }, end: { ...range.end } } : null,
-        screenText: window.farhelmTerminalLinks.linkRangeText(this.term, range),
+        screenText: window.farhelmTerminalLinks.linkRangeText(this.view.lines(), range),
         controller: new AbortController(), info: null, leaving: false, leaveTimer: null,
       };
       this.hovered = state;
@@ -465,9 +449,10 @@
       }
     }
 
-    /** Withdraw click/cursor admission now, but allow xterm's synchronous
-     * redraw re-hover to reclaim the lookup before the next task tears it down.
-     * Cursor setters must run here: xterm redirects them to its current link,
+    /** Withdraw click/cursor admission now, but allow the terminal's
+     * synchronous redraw re-hover (xterm.js's, which the grid imitates) to
+     * reclaim the lookup before the next task tears it down. Cursor setters
+     * must run here: the terminal redirects them to its current link,
      * so a deferred write could switch off an unrelated link's hand cursor.
      */
     leave() {
@@ -490,7 +475,7 @@
         state.controller.abort();
       }
       this.hovered = null;
-      const display = this.term?.element?.querySelector(':scope > .terminal-file-target');
+      const display = this.view?.element?.querySelector(':scope > .terminal-file-target');
       if (display) display.hidden = true;
       this.lowerRefusal();
     }
@@ -500,7 +485,7 @@
      */
     lowerRefusal() {
       this.refusalRaised = false;
-      const message = this.term?.element?.querySelector(':scope > .terminal-file-message');
+      const message = this.view?.element?.querySelector(':scope > .terminal-file-message');
       if (message?.dataset.outcome === 'disclosure-refusal') message.dataset.outcome = 'failure';
     }
 
@@ -553,7 +538,7 @@
       this.messageTimer = null;
       this.failureMessage = false;
       this.refusalRaised = false;
-      const message = this.term?.element?.querySelector(':scope > .terminal-file-message');
+      const message = this.view?.element?.querySelector(':scope > .terminal-file-message');
       if (message) {
         message.classList.remove('showing');
         message.textContent = '';
@@ -568,15 +553,16 @@
      */
     message(text, outcome = 'progress') {
       this.hideMessage();
-      let message = this.term.element.querySelector(':scope > .terminal-file-message');
+      let message = this.view.element.querySelector(':scope > .terminal-file-message');
       if (!message) {
         message = document.createElement('div');
         message.className = 'terminal-file-message peer-value';
         message.setAttribute('role', 'status');
-        this.term.element.appendChild(message);
-        // xterm activates addons before open() creates its DOM. The first
+        this.view.element.appendChild(message);
+        // A terminal can hand over its view before its DOM exists (xterm.js
+        // activates add-ons before open() creates it). The first
         // notice is necessarily later, so listener ownership starts here.
-        this.term.element.addEventListener('click', this.dismissFailure);
+        this.view.element.addEventListener('click', this.dismissFailure);
       }
       message.textContent = window.farhelmTerminalLinks.visibleFormatCharacters(text);
       message.dataset.outcome = outcome;
@@ -594,22 +580,22 @@
     }
 
     /** Only a successful hover over unchanged text can start a transfer.
-     * xterm may retain a link after a partial redraw; its cached target must
+     * A terminal may retain a link after a partial redraw; its cached target must
      * not outlive the cells that established this hover. Native opening also
      * requires that hover's opening offer. Native failure never falls back to
      * a webview Blob save.
      */
     async download(path, event = {}) {
       const state = this.hovered;
-      if (!this.isClick(event) || !state || state.leaving || state.path !== path || state.info?.status !== 'ready' || this.term.getSelection()) return;
-      if (state.screenText === null || state.screenText !== window.farhelmTerminalLinks.linkRangeText(this.term, state.range)) return;
+      if (!this.isClick(event) || !state || state.leaving || state.path !== path || state.info?.status !== 'ready' || this.view.hasSelection()) return;
+      const lines = this.view.lines();
+      if (state.screenText === null || state.screenText !== window.farhelmTerminalLinks.linkRangeText(lines, state.range)) return;
       // A printed token can grow beyond its cached endpoint without changing
       // any old cell. Reuse recognition so suffixes, prefixes and diagnostic
       // punctuation obey the same boundaries as the original link provider.
-      if (state.link && !bufferLinks(this.term, state.range.start.y).some(current =>
-        current.path === path && current.range.start.x === state.range.start.x && current.range.start.y === state.range.start.y &&
-        current.range.end.x === state.range.end.x && current.range.end.y === state.range.end.y)) return;
-      if (!this.admitDisclosure(this.term.element.querySelector(':scope > .terminal-file-target'))) return;
+      if (state.link && !pathLinks(lines, state.range.start.abs).some(current =>
+        current.path === path && sameRange(current.range, state.range))) return;
+      if (!this.admitDisclosure(this.view.element.querySelector(':scope > .terminal-file-target'))) return;
       const controller = new AbortController();
       this.transfers.add(controller);
       this.message('Downloading…');
@@ -633,7 +619,7 @@
           const anchor = document.createElement('a');
           anchor.href = url;
           anchor.download = state.info.path.split('/').pop();
-          this.term.element.appendChild(anchor);
+          this.view.element.appendChild(anchor);
           anchor.click();
           anchor.remove();
           // Retain until the browser has consumed the click. Disposal releases
@@ -657,22 +643,102 @@
     dispose() {
       this.disposed = true;
       for (const controller of Object.values(this.linkLookups)) controller?.abort();
-      if (this.oscProvider && this.oscProvider.provideLinks === this.oscWrappedProvideLinks) {
-        this.oscProvider.provideLinks = this.oscProvideLinks;
-      }
       this.leave();
       this.clearHover();
       this.hideMessage();
-      this.term?.element?.removeEventListener('click', this.dismissFailure);
-      this.provider?.dispose();
+      this.view?.element?.removeEventListener('click', this.dismissFailure);
       for (const controller of this.transfers) controller.abort();
       for (const url of this.urls || []) URL.revokeObjectURL(url);
     }
   }
 
+  // ------------------------------------------------------------------
+  // Old terminals: the xterm.js add-on
+  // ------------------------------------------------------------------
+
+  /** `FileLinks` as an xterm.js add-on, for old terminals only: activation
+   * reads the terminal through terminal-links.js's `xtermLines` and registers
+   * a link provider below OSC 8 and web links, preserving their existing
+   * precedence, with xterm.js's 1-based ranges converted at this boundary.
+   * In a container it also wraps xterm.js's own OSC 8 provider so file
+   * targets pass the host's admission before xterm.js offers them.
+   */
+  class XtermFileLinksAddon extends FileLinks {
+    activate(term) {
+      this.term = term;
+      this.view = {
+        get element() {
+          return term.element;
+        },
+        lines: () => window.farhelmTerminalLinks.xtermLines(term),
+        hasSelection: () => !!term.getSelection(),
+      };
+      if (this.containerized) this.admitOscLinks();
+      this.provider = term.registerLinkProvider({
+        provideLinks: (row, callback) => {
+          const abs = row - 1;
+          if (this.containerized) {
+            const current = () => this.proseCandidates(abs, candidate => this.fileLink(candidate));
+            void this.checkoutLinks('prose', current(), current, callback);
+          }
+          else callback(pathLinks(this.view.lines(), abs).map(candidate => this.fileLink(candidate)));
+        },
+      });
+    }
+
+    /** An xterm.js link for a printed path: xterm.js's range, with the usual
+     * fresh-hover and click checks after provider admission.
+     */
+    fileLink({ path, range }) {
+      const link = {
+        text: path,
+        range: window.farhelmTerminalLinks.toXtermRange(range),
+        decorations: { underline: true, pointerCursor: false },
+        hover: event => this.hover(event, path, link, range),
+        leave: () => this.leave(),
+        activate: event => this.download(path, event),
+      };
+      return link;
+    }
+
+    /** Pin one narrow seam in the shipped xterm 6.0.0 bundle. The native OSC
+     * provider already knows targets, arbitrary labels, ranges and precedence;
+     * wrapping its callback avoids another parser or delaying terminal writes.
+     * The real-bundle test must be revisited when replacing the vendor asset.
+     */
+    admitOscLinks() {
+      const provider = this.term._core?._linkProviderService?.linkProviders?.[0];
+      if (typeof provider?.provideLinks !== 'function') {
+        throw new Error('Container file-link admission requires the pinned xterm OSC provider');
+      }
+      const items = links => (links || []).map(link => ({
+        uri: link.text, range: window.farhelmTerminalLinks.fromXtermRange(link.range), link,
+      }));
+      this.oscProvider = provider;
+      this.oscProvideLinks = provider.provideLinks;
+      this.oscWrappedProvideLinks = (row, callback) => {
+        this.oscProvideLinks.call(provider, row, links => {
+          const current = () => new Promise(resolve => {
+            this.oscProvideLinks.call(provider, row, latest => resolve(this.oscCandidates(items(latest))));
+          });
+          void this.checkoutLinks('osc', this.oscCandidates(items(links)), current, callback);
+        });
+      };
+      provider.provideLinks = this.oscWrappedProvideLinks;
+    }
+
+    dispose() {
+      if (this.oscProvider && this.oscProvider.provideLinks === this.oscWrappedProvideLinks) {
+        this.oscProvider.provideLinks = this.oscProvideLinks;
+      }
+      super.dispose();
+      this.provider?.dispose();
+    }
+  }
+
   const api = {
-    pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, markedCoverRects,
-    LINK_COVER_SELECTOR, FileLinksAddon, MAX_BYTES, NUMERIC_VERSION,
+    pathTokens, oscTarget, pathLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, markedCoverRects,
+    LINK_COVER_SELECTOR, FileLinks, XtermFileLinksAddon, MAX_BYTES, NUMERIC_VERSION,
   };
   if (typeof window !== 'undefined') window.farhelmTerminalFiles = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

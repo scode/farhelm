@@ -1,5 +1,7 @@
-// The terminal's link opening and plain-text URL policy, shared by its two
-// link adapters: xterm's built-in OSC 8 provider (a program emitting a real
+// The terminal's link opening and plain-text URL policy, and the hover
+// checks that read a terminal's cells, shared by every link source: on a new
+// terminal the grid component's links (terminal.js's `createGridLinks`), on
+// an old one xterm.js's built-in OSC 8 provider (a program emitting a real
 // hyperlink escape) and the vendored WebLinks addon (a bare http(s) URL
 // printed as plain text). Split out on its own for the same reason
 // copy-on-select.js is — `node --test` runs the EXACT functions
@@ -31,6 +33,32 @@
 // `isPlainWebUrl` is the second boundary at activation time, rejecting
 // anything that is not an absolute http(s) URL with a host even if
 // detection ever handed it over.
+//
+// ## Link lines: how the link code reads a terminal
+//
+// The hover and click checks here and in terminal-files.js read what a
+// terminal shows through one small interface, the one the grid component
+// offers (grid-buffer.js's `linkLines`), so new and old terminals share
+// one implementation:
+//
+// - `lines.line(abs)`: the line numbered `abs` (0-based), or undefined
+//   when there is none.
+// - A line: `length` in columns; `wrapped`, true when it continues the
+//   previous line (a soft wrap); `cell(x)` for `0 <= x < length`, giving
+//   `{chars, width, tag}`, where an empty cell is `""` of width 1, a wide
+//   character's second cell is `""` of width 0, and `tag` is a positive
+//   integer shared by the cells of one hyperlink (0 for none; undefined
+//   where the terminal cannot tell); and `text(from, to, trimRight)`, the
+//   cells' characters from column `from` to `to` (exclusive), a space for an
+//   empty cell, stepping over a wide character's second cell, stopping at
+//   the last written cell when `trimRight`.
+// - A range: `{start: {abs, col}, end: {abs, col}}`, the end column
+//   exclusive.
+//
+// An old terminal's xterm.js buffer is read through an adapter to this
+// shape (`xtermLines`, with `fromXtermRange` and `toXtermRange` for
+// xterm.js's 1-based ranges), which only the xterm.js path in terminal.js
+// and terminal-files.js's xterm.js add-on use.
 (function () {
   /**
    * Open a terminal link target in the page's system browser.
@@ -423,33 +451,33 @@
   /**
    * The text an OSC 8 link underlines on the hovered row.
    *
-   * `range` is what xterm's OSC 8 link provider passes as the third hover
-   * argument: 1-based cell coordinates of the link on one buffer row (the
-   * provider builds one link per row). File hover uses this only as an identity
-   * snapshot; web hover uses linkHoverText to join tagged rows. Returns null
-   * when there is no range or the row is gone, so the caller falls back to the
-   * quiet display.
+   * `range` is the hovered link's cells on one row of `lines` (see "Link
+   * lines"); both terminals' OSC 8 links are one per row. File hover uses
+   * this only as an identity snapshot; web hover uses linkHoverText to join
+   * tagged rows. Returns null when there is no range or the row is gone, so
+   * the caller falls back to the quiet display.
    *
-   * @param {{buffer: {active: {getLine(y: number): any}}}} term
-   * @param {{start: {x: number, y: number}, end: {x: number, y: number}} | undefined} range
+   * @param {{line(abs: number): any}} lines
+   * @param {{start: {abs: number, col: number}, end: {abs: number, col: number}} | undefined} range
    * @returns {string | null}
    */
-  function linkRowText(term, range) {
+  function linkRowText(lines, range) {
     if (!range || !range.start || !range.end) return null;
-    const line = term.buffer.active.getLine(range.start.y - 1);
+    const line = lines.line(range.start.abs);
     if (!line) return null;
-    // The vendored provider always reports one row; a range that ends on a
-    // later row is cut at this row's end, a guard against a future
-    // provider that spans rows rather than something seen today.
-    const end = range.end.y === range.start.y ? range.end.x : line.length;
-    return line.translateToString(true, range.start.x - 1, end);
+    // Both providers always report one row; a range that ends on a later
+    // row is cut at this row's end, a guard against a future provider that
+    // spans rows rather than something seen today.
+    const end = range.end.abs === range.start.abs ? range.end.col : line.length;
+    return line.text(range.start.col, end, true);
   }
 
   /** Join consecutive rows carrying this OSC 8 tag, including agent-drawn wraps.
-   * Agents often move the cursor instead of letting xterm wrap, so isWrapped
-   * cannot establish the link's extent. The public getCell returns an internal
-   * cell whose undocumented extended.urlId is read-only here. A real-bundle
-   * browser test pins it; losing the field restores the old row comparison.
+   * Agents often move the cursor instead of letting the terminal wrap, so a
+   * soft wrap cannot establish the link's extent; the cells' hyperlink tag
+   * does. On an old terminal the tag is xterm.js's undocumented
+   * `extended.urlId` (`xtermLines`), which a real-bundle browser test pins;
+   * losing that field restores the old row comparison.
    *
    * Only one run per row may join. Bounds or ambiguous runs produce a fragment
    * only when an adjacent row carries the tag: repeated links on a single row
@@ -459,37 +487,30 @@
    * No text outside the tagged cells is evidence for a match.
    * Adjacent complete addresses may reuse an id. Compare the hovered run alone
    * only when every run independently names the target within the same bounds.
-   * @param {{buffer: {active: {getLine(y: number): any}}}} term
-   * @param {{start: {x: number, y: number}, end: {x: number, y: number}} | undefined} range
+   * @param {{line(abs: number): any}} lines
+   * @param {{start: {abs: number, col: number}, end: {abs: number, col: number}} | undefined} range
    * @param {string | undefined} uri Target for independent-row comparison.
    * @returns {{kind: 'whole' | 'fragment' | 'unknown', text: string | null}}
    */
-  function linkHoverText(term, range, uri) {
-    const fragment = linkRowText(term, range);
+  function linkHoverText(lines, range, uri) {
+    const fragment = linkRowText(lines, range);
     const unknown = { kind: 'unknown', text: fragment };
     if (fragment === null) return unknown;
-    const buffer = term.buffer.active;
-    const y = range.start.y - 1;
-    const line = buffer.getLine(y);
-    const cell = line?.getCell?.(range.start.x - 1);
-    const tag = cell?.extended?.urlId;
+    const y = range.start.abs;
+    const tag = lines.line(y)?.cell(range.start.col)?.tag;
     if (!Number.isInteger(tag) || tag <= 0) return unknown;
 
-    // xterm only replaces extended when a cell has extended attributes. Reusing
-    // a cell would carry the preceding link's tag into unlinked indentation.
-    // Fresh snapshots avoid that stale private value without writing attributes
-    // that may be owned by the buffer itself.
     // A repeated id within one row is legal OSC 8 output, but cannot establish
     // which run continues. Count all runs before extracting any joined text.
     const readRow = (row) => {
-      const source = buffer.getLine(row);
+      const source = lines.line(row);
       if (!source) return { runs: 0, text: '' };
       let runs = 0;
       let from = -1;
       let to = 0;
       let inside = false;
       for (let x = 0; x < source.length; x++) {
-        const tagged = source.getCell(x)?.extended?.urlId === tag;
+        const tagged = source.cell(x)?.tag === tag;
         if (tagged && !inside) {
           runs++;
           if (from < 0) from = x;
@@ -498,12 +519,12 @@
         inside = tagged;
       }
       // A wide character that cannot fit at the edge moves to a wrapped row.
-      // xterm tags its empty padding cell too. Drop only that synthetic pad;
-      // an actual printed space has getChars() === ' ' and must survive.
-      const next = buffer.getLine(row + 1);
-      if (runs === 1 && to === source.length && next?.isWrapped &&
-          source.getCell(to - 1)?.getChars?.() === '' && next.getCell(0)?.getWidth?.() === 2) to--;
-      return { runs, text: runs === 1 ? source.translateToString(false, from, to) : '' };
+      // Its empty padding cell is tagged too. Drop only that synthetic pad;
+      // an actual printed space has chars ' ' and must survive.
+      const next = lines.line(row + 1);
+      if (runs === 1 && to === source.length && next?.wrapped &&
+          source.cell(to - 1)?.chars === '' && next.cell(0)?.width === 2) to--;
+      return { runs, text: runs === 1 ? source.text(from, to, false) : '' };
     };
     const above = readRow(y - 1);
     const below = readRow(y + 1);
@@ -531,28 +552,78 @@
   }
 
   /** Snapshot every cell of a file link, including its wrapped continuation.
-   * A partial repaint can leave xterm's cached link active. Reading through
-   * the public buffer API at hover and click makes that cache insufficient
-   * authority for a transfer. Keep whitespace and cell boundaries intact;
-   * missing or overlong ranges cannot establish that the text is unchanged.
-   * Bounds match the printed-path reader's 128-row span and 8192 characters.
+   * A partial repaint can leave a terminal's cached link active. Reading the
+   * lines afresh at hover and click makes that cache insufficient authority
+   * for a transfer. Keep whitespace and cell boundaries intact; missing or
+   * overlong ranges cannot establish that the text is unchanged. Bounds
+   * match the printed-path reader's 128-row span and 8192 characters.
    */
-  function linkRangeText(term, range) {
+  function linkRangeText(lines, range) {
     if (!range?.start || !range?.end) return null;
     const { start, end } = range;
-    if (![start.x, start.y, end.x, end.y].every(Number.isInteger) ||
-        start.x < 1 || start.y < 1 || end.x < 1 || end.y < start.y || end.y - start.y > 128) return null;
+    if (![start.col, start.abs, end.col, end.abs].every(Number.isInteger) ||
+        start.col < 0 || start.abs < 0 || end.col < 1 || end.abs < start.abs || end.abs - start.abs > 128) return null;
     let text = '';
-    for (let y = start.y; y <= end.y; y++) {
-      const line = term.buffer?.active?.getLine(y - 1);
+    for (let y = start.abs; y <= end.abs; y++) {
+      const line = lines?.line(y);
       if (!line) return null;
-      const from = y === start.y ? start.x - 1 : 0;
-      const to = y === end.y ? end.x : line.length;
+      const from = y === start.abs ? start.col : 0;
+      const to = y === end.abs ? end.col : line.length;
       if (to > line.length || to <= from) return null;
-      text += line.translateToString(false, from, to);
+      text += line.text(from, to, false);
       if (text.length > 8192) return null;
     }
     return text;
+  }
+
+  // ------------------------------------------------------------------
+  // Old terminals: the xterm.js adapter (see "Link lines")
+  // ------------------------------------------------------------------
+
+  /**
+   * Link lines over an xterm.js terminal's active buffer, for old terminals
+   * only: line `abs` is buffer row `abs`, and a cell's tag is the
+   * undocumented `extended.urlId` xterm.js keeps on the cell its public
+   * `getCell` returns.
+   *
+   * Each `cell(x)` asks xterm.js for a fresh cell. xterm.js replaces a
+   * cell's `extended` only when the cell has extended attributes, so a
+   * reused cell would carry the preceding link's tag into unlinked
+   * indentation; a fresh one never does, and nothing is written to objects
+   * the buffer may own.
+   *
+   * @param {{buffer: {active: {getLine(y: number): any}}}} term
+   */
+  function xtermLines(term) {
+    const buffer = term.buffer.active;
+    return {
+      line(abs) {
+        const line = buffer.getLine(abs);
+        if (!line) return undefined;
+        return {
+          length: line.length,
+          wrapped: !!line.isWrapped,
+          cell(x) {
+            const cell = line.getCell?.(x);
+            return cell ? { chars: cell.getChars?.(), width: cell.getWidth?.(), tag: cell.extended?.urlId } : undefined;
+          },
+          text: (from, to, trimRight) => line.translateToString(!!trimRight, from, to),
+        };
+      },
+    };
+  }
+
+  /** An xterm.js range (1-based, end cell inclusive) as a link-lines range;
+   * undefined for a missing one, so the link-lines readers' own "no range"
+   * answer (null) still applies. */
+  function fromXtermRange(range) {
+    if (!range?.start || !range?.end) return undefined;
+    return { start: { abs: range.start.y - 1, col: range.start.x - 1 }, end: { abs: range.end.y - 1, col: range.end.x } };
+  }
+
+  /** The inverse of `fromXtermRange`. */
+  function toXtermRange(range) {
+    return { start: { x: range.start.col + 1, y: range.start.abs + 1 }, end: { x: range.end.col, y: range.end.abs + 1 } };
   }
 
   /**
@@ -671,6 +742,9 @@
     linkRowText,
     linkHoverText,
     linkRangeText,
+    xtermLines,
+    fromXtermRange,
+    toXtermRange,
     visibleFormatCharacters,
     shortenedTarget,
     displayedTarget,
