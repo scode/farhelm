@@ -160,16 +160,16 @@ than trusting a `systemd-run` on `PATH` — the launch also runs inside a per-la
 rather than a level of the tree (`systemd-run --scope` execs in place too). Each launch records what it selected, so a
 session can outlive the manager that scoped it.
 
-Stopping a session and restarting it reap the agent's tree and leave the session's terminal tabs running; deleting it
-takes the tabs too. What a stop claims is the descendants of that login shell plus every process carrying the session's
+Stopping or restarting a session reaps the agent's tree. Stop also closes its terminal tabs; Restart leaves them
+running. What the agent reap claims is the descendants of that login shell plus every process carrying the session's
 `FARHELM_AGENT_ID` — the value is the session's own id, set on every agent launch, so the marker says "an agent of this
 session" rather than "this generation of it" — and, for sessions launched by builds predating that marker, anything
 wearing the session marker with no other claim on it. All of those additionally require the session's
 `FARHELM_SESSION_ID`: one session's stop can never reach another's processes however their other markers read. A tab's
-shell wears its own tab marker, which is what keeps it out — and, when a tab or a whole session is torn down, what earns
-it a SIGHUP alongside the SIGTERM: an interactive shell ignores SIGTERM and exits on the hangup its terminal closing
-would have sent, so a tab close ends inside the grace instead of waiting for the SIGKILL. Agents never carry a tab
-marker and are never hung up.
+shell wears its own tab marker, which keeps it out of the agent reap — and, when a tab is closed, including by Stop or
+Delete, earns it a SIGHUP alongside the SIGTERM: an interactive shell ignores SIGTERM and exits on the hangup its
+terminal closing would have sent, so a tab close ends inside the grace instead of waiting for the SIGKILL. Agents never
+carry a tab marker and are never hung up.
 
 Where this launch recorded a cgroup scope, the manager is still there, and that unit still exists, the scope is killed
 first: SIGTERM to everything in it, up to five seconds for the unit to retire on its own (the wait ends the moment it

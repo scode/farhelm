@@ -73,26 +73,30 @@ launches; [Confirm a YOLO launch](/docs/using/start-a-session/#confirm-a-yolo-la
   alt="A session's menu with stop and delete explained."
 />
 
-Both are in a session's menu in the [session list](/docs/using/session-list/), and delete is also the red button at the
-right of the row above the terminal, beside its tabs. Delete asks you to confirm, with one exception: from the session
+Both are in a session's menu in the [session list](/docs/using/session-list/) and at the right of the row above the
+terminal, beside its tabs. Delete asks you to confirm, with one exception: from the session
 list, a session that has already ended and has no shell tabs open is deleted at once.
 When a confirmation opens, Enter confirms it; **Cancel** backs out. The YOLO question still starts on **Cancel**.
 
+**Stop** ends the agent and closes all of the session's shell tabs, including what they started. With tabs open, it
+asks you to confirm closing them. A tab Farhelm cannot close is named in a notice; the other tabs still close.
+**Restart** leaves shell tabs running, as does an agent exiting on its own. You can open another tab after Stop.
+
 To act on several sessions, [mark them in the session list](/docs/using/session-list/#mark-several-sessions) and use
 **Stop** or **Delete** in the bar above it. Only the marked sessions currently shown are included. If any needs a
-Delete confirmation, one question lists every included session with its status, host and what will happen; **Skip
+Stop or Delete confirmation, one question lists every included session with its status, host and what will happen; **Skip
 session confirmations** applies here too. Each host works through its sessions in turn, while other hosts can keep
 going. A failure stays on that session's row, and the marks clear when the run finishes.
 
 **Cmd+W** in the Mac app, or **Ctrl+Shift+Backspace** in a browser, deletes the open session the same way as its Delete
 button, including the confirmation setting below. Session shortcuts act only on the session you have open, even when
-others are marked. Escape cancels the Restart, Replace or Delete question under those
+others are marked. Escape cancels the Stop, Restart, Replace or Delete question under those
 buttons and returns you to the terminal.
 
 [Keyboard shortcuts](/docs/using/keyboard-shortcuts/#sessions) lists the other session actions you can reach from the
 keyboard, including Rename and the quick switcher.
 
-To delete, replace, restart and close shell tabs on the first click, turn on **Skip session confirmations** in
+To stop, delete, replace, restart and close shell tabs on the first click, turn on **Skip session confirmations** in
 the **Sessions** section of **Settings**, behind the gear at the foot of the [navigation rail](/docs/using/manage-hosts/), the column of icons down the left edge
 of the sidebar. It starts off and applies to your
 helm; other open windows pick it up when they reload. YOLO, host and trash questions keep their own rules, and **Restart with** still opens the
