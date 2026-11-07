@@ -2,5 +2,5 @@
 kind: changed
 ---
 
-Deleting checkouts from the trash now finishes promptly while their host frees disk space in the background. The space
-comes back shortly after the trash empties, and large cleanups no longer hold up starting, restarting or deleting sessions.
+Emptying the trash closes its dialog immediately and shows progress on the trash icon while hosts free disk space.
+Space returns shortly after the trash empties, and cleanup no longer holds up starting, restarting or deleting sessions.
