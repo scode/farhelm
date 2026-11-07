@@ -5773,35 +5773,41 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   Claude, Codex or Muse process pin corrected after a recorded ancestor replaces a child-first conversation (verified
   against the exact record for Codex). These are separate `ClaudePinCorrected`, `CodexPinCorrected` and
   `MusePinCorrected` kinds. Each correction records the consequence for Restart before adoption and remains unresolved,
-  giving one notification per launch. The first two say Restart cannot resume, so they are refused whenever the launch's
-  row holds a captured conversation, checked in the same statement as the insert, which is also what closes the race
-  between a report's commit and the tripwire. The listing carries the last 10 on `SessionInfo::notifications` as
-  sequence number, time, text and an additive `resolved` bool (false omitted and the decode default): the kind and
-  generation stay private to the store and supervisor's in-memory notification snapshot, because an enum on
-  `SessionInfo` that a newer supervisor extended would make the whole record fail to decode in an older helm, which
-  drops a session it cannot decode. The field is additive with a decode default, so an older helm shows no bell and an
-  older supervisor sends none, and needed no protocol bump. Replies are built from immutable entries, so the list lives
-  in a session-scoped cell beside the activity time, seeded from the store when an entry is built from a row and
-  replaced after each recording or resolution, which then sends the `SessionsChanged` hint. Each capture pass resolves
-  the silent-hook and resume-withdrawn kinds only when the generic restart offer is Resume, rather than merely when a
-  captured conversation exists. This includes reports admitted before startup publishes the entry. An unresolved
-  non-resolving kind or an earlier launch's warning remains history; clearing in the helm does not remove it from the
-  store. The in-memory snapshot retains kind and generation beside the wire fields, so a pass with no unresolved,
-  resolving kind for the current launch skips the store call entirely. An eligible pass uses two indexed updates in one
-  transaction. The resolve SQL compares the exact captured conversation and generation on the session row, so an earlier
-  Resume observation cannot erase a later withdrawal. Notification reloads order snapshots by newest sequence and then
-  resolved count: with the newest sequence fixed, only resolution changes, and it only grows; reopening raises the
-  sequence. Schema 28 adds `resolved_at` on the forward ladder, preserving old unresolved history; older supervisors
-  refuse the upgraded database on downgrade, as accepted for this change. The helm keeps read and cleared state as two
-  per-session sequence marks ("read through N", "cleared through N") in a `session_notification_marks` table beside
-  `session_seen`, keyed and cleaned up the same way, set by the two endpoints
-  `PUT /api/sessions/{id}/notifications/read` and `PUT /api/sessions/{id}/notifications/cleared`, each taking
-  `{"through": N}`. A mark never moves backwards and is clamped to the newest sequence number the helm's cached row
-  holds, so a mark can never cover an entry that arrives later; the fleet-events revision is bumped only when a mark
-  moved. Building rows for the UI, the helm keeps at most the 10 newest entries whatever a supervisor sent, drops
-  cleared ones, and reports the read mark so the UI can tell unread from read. Clearing deletes nothing in the
-  supervisor; the cap ages records out there. The UI renders each text as peer text, marks resolved entries grey with a
-  "Resolved" word, and excludes them from unread counts and "new" styling without moving the helm's read mark.
+  giving one notification per launch. The old-terminal kind (`old_terminal`, `NotificationKind::OldTerminal`) is the one
+  about the session rather than a launch. The ticker's sample pass checks it, because old tabs have no in-memory record
+  and that pass already holds the tick's tmux pane-state snapshot: it records the kind at the current generation only
+  while the in-memory snapshot holds no unresolved row of it in any generation, and resolves every unresolved row of it
+  with one update fenced by neither generation nor conversation (`SessionStore::resolve_session_notifications_of_kind`).
+  It runs only on a supervisor with `NewTerminals::Host`, and not on a pass whose pane-state probe failed; the capture
+  pass never touches it. The first two say Restart cannot resume, so they are refused whenever the launch's row holds a
+  captured conversation, checked in the same statement as the insert, which is also what closes the race between a
+  report's commit and the tripwire. The listing carries the last 10 on `SessionInfo::notifications` as sequence number,
+  time, text and an additive `resolved` bool (false omitted and the decode default): the kind and generation stay
+  private to the store and supervisor's in-memory notification snapshot, because an enum on `SessionInfo` that a newer
+  supervisor extended would make the whole record fail to decode in an older helm, which drops a session it cannot
+  decode. The field is additive with a decode default, so an older helm shows no bell and an older supervisor sends
+  none, and needed no protocol bump. Replies are built from immutable entries, so the list lives in a session-scoped
+  cell beside the activity time, seeded from the store when an entry is built from a row and replaced after each
+  recording or resolution, which then sends the `SessionsChanged` hint. Each capture pass resolves the silent-hook and
+  resume-withdrawn kinds only when the generic restart offer is Resume, rather than merely when a captured conversation
+  exists. This includes reports admitted before startup publishes the entry. An unresolved non-resolving kind or an
+  earlier launch's warning remains history; clearing in the helm does not remove it from the store. The in-memory
+  snapshot retains kind and generation beside the wire fields, so a pass with no unresolved, resolving kind for the
+  current launch skips the store call entirely. An eligible pass uses two indexed updates in one transaction. The
+  resolve SQL compares the exact captured conversation and generation on the session row, so an earlier Resume
+  observation cannot erase a later withdrawal. Notification reloads order snapshots by newest sequence and then resolved
+  count: with the newest sequence fixed, only resolution changes, and it only grows; reopening raises the sequence.
+  Schema 28 adds `resolved_at` on the forward ladder, preserving old unresolved history; older supervisors refuse the
+  upgraded database on downgrade, as accepted for this change. The helm keeps read and cleared state as two per-session
+  sequence marks ("read through N", "cleared through N") in a `session_notification_marks` table beside `session_seen`,
+  keyed and cleaned up the same way, set by the two endpoints `PUT /api/sessions/{id}/notifications/read` and
+  `PUT /api/sessions/{id}/notifications/cleared`, each taking `{"through": N}`. A mark never moves backwards and is
+  clamped to the newest sequence number the helm's cached row holds, so a mark can never cover an entry that arrives
+  later; the fleet-events revision is bumped only when a mark moved. Building rows for the UI, the helm keeps at most
+  the 10 newest entries whatever a supervisor sent, drops cleared ones, and reports the read mark so the UI can tell
+  unread from read. Clearing deletes nothing in the supervisor; the cap ages records out there. The UI renders each text
+  as peer text, marks resolved entries grey with a "Resolved" word, and excludes them from unread counts and "new"
+  styling without moving the helm's read mark.
 - Per-session "seen" state (the idle dot's grey/blue split and the read/unread toggle; SPEC.md, Status) lives in its own
   `session_seen` table keyed by `(host_id, session_id)`, not as a `session_cache` column: that cache is replaced
   WHOLESALE by each host's refresh, so a column there would need every refresh to carry forward a viewer fact the

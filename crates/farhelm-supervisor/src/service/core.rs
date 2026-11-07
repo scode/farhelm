@@ -18251,6 +18251,20 @@ impl Supervisor {
         self.capture_pass(true).await;
     }
 
+    /// Record or resolve old-terminal notifications as the ticker's next
+    /// sample pass would, without sampling anything else.
+    ///
+    /// In-process tests do not start the ticker, and the e2e test of a
+    /// Restart that moves an old session's agent into a terminal host (whose
+    /// tmux tabs stay) needs to say "and now the supervisor has looked" at
+    /// fixed points, before and after the Restart and after a tab closes,
+    /// rather than wait for ticks. Compiled only for tests and the
+    /// `test-seams` feature (which the e2e tests enable).
+    #[cfg(any(test, feature = "test-seams"))]
+    pub async fn old_terminal_check_for_test(&self) {
+        super::ticker::old_terminal_check_for_test(self).await;
+    }
+
     /// Commit `conversation` as this session's reported identity, durably and
     /// in its live entry, exactly as an accepted report would — without a
     /// hook process to attribute it to.

@@ -229,10 +229,13 @@ carries its pin and position over. The [quick switcher](#jump-with-the-keyboard)
 ## When a row shows a bell
 
 A bell appears on a row, just left of its age, when Farhelm has noticed something about that session that you can act
-on. For now these are all about following the agent's conversation, which is what lets **Restart** pick that
-conversation up again later. For example, the agent has been working for a while and never told Farhelm which
-conversation it is in, so **Restart** cannot pick it up. Each notification says what happened and what you can do about
-it, such as starting the session over with **Replace with**, or, when nothing can be done, what you lose.
+on. Most are about following the agent's conversation, which is what lets **Restart** pick that conversation up again
+later. For example, the agent has been working for a while and never told Farhelm which conversation it is in, so
+**Restart** cannot pick it up. Each notification says what happened and what you can do about it, such as starting the
+session over with **Replace with**, or, when nothing can be done, what you lose. The other kind tells you that something
+in the session still runs in an old terminal, which an upcoming release will forcibly terminate
+([Move sessions to new terminals](/docs/using/new-terminals/) explains). A link to a Farhelm docs page in a
+notification opens that page when you click it.
 
 A red, filled bell means at least one notification is new. Click it to list them, newest first, with the ones you have
 not seen before marked **New**. Clicking the bell does not open the session. Closing the list, by clicking elsewhere,

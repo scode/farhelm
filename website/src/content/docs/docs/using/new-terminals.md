@@ -19,7 +19,7 @@ have for now - inside of tmux, and with xterm.js on the client.
 An upcoming Farhelm release will stop supporting old terminals and will forcibly terminate anything still running in
 one. Restart, replace, stop or delete each session that still runs in an old terminal, and close and reopen any of its
 shell tabs that are still old terminals, as soon as possible (restarting a session restarts only its agent, not its
-tabs). Each such session shows a loud note at the top.
+tabs). Each such session shows a loud note at the top and a notification in the session list.
 
 ## Why terminals are leaving tmux
 
@@ -55,6 +55,12 @@ terminate whatever still runs in an old terminal:
 
 A session whose agent has stopped, and that has no old tabs, shows no note even if the agent's terminal is old: nothing
 is running in it any more, and restarting the session later gives the agent a new terminal.
+
+So that you hear about sessions you never open, each such session also gets a notification: a red bell on its row in the
+session list ([Read the session list](/docs/using/session-list/#when-a-row-shows-a-bell) says how the bell works). It
+says what the note says, in one message for the agent and the tabs, and ends with a link to this page. A session gets
+only one such notification, even when restarting it leaves old tabs open. Once nothing in the session runs in an old
+terminal any more, the notification is greyed and marked **Resolved**.
 
 **What's changing** opens this page. The **×** hides the note until you next open the session.
 

@@ -595,6 +595,15 @@ async fn the_tmux_process_fixture_still_creates_tmux_terminals() {
 /// confirmed host row listed with `agent_terminal: host`. The old session's
 /// terminal is attached through the bare supervisor by a viewer that can draw
 /// grids and still answers with a byte stream: served from tmux.
+///
+/// The same session carries the old-terminal notification (SPEC.md,
+/// "Status"), recorded by the bare supervisor's own ticker with nobody
+/// looking at the session: exactly one, unresolved, with the docs link, and
+/// none on the new session. Closing the session's old tab and stopping its
+/// agent leaves nothing old running, and the ticker resolves that same
+/// notification. (A Restart with an old tab open needs a resumable agent;
+/// `host_migrations::a_restart_with_an_old_tab_open_keeps_one_old_terminal_warning`
+/// covers it.)
 #[farhelm_testtrace::test]
 async fn an_old_session_after_the_switch_to_hosts_is_reported_as_one_to_move() {
     let mut stack = HostStack::new().await;
@@ -608,6 +617,12 @@ async fn an_old_session_after_the_switch_to_hosts_is_reported_as_one_to_move() {
     );
     let tmux_socket = stack.state.join("tmux.sock");
     wait_for_tmux_agent_ready(&tmux_socket, &old.id).await;
+    let old_tab = client.open_tab(&old.id).await.expect("open an old tab");
+    assert_eq!(
+        old_tab.kind,
+        Some(farhelm_proto::TerminalKind::Tmux),
+        "premise: the first supervisor opens tabs in tmux"
+    );
     drop(client);
     let status = stack.stop(libc::SIGTERM).await;
     assert!(
@@ -664,8 +679,70 @@ async fn an_old_session_after_the_switch_to_hosts_is_reported_as_one_to_move() {
         Some(farhelm_proto::TerminalKind::Host),
         "a session created now runs in a host"
     );
+
+    // The old-terminal notification, from the ticker alone.
+    let warning = wait_for_old_terminal_notification(&client, &old.id, false).await;
+    assert!(
+        warning
+            .text
+            .starts_with("This session must be restarted, replaced, stopped or deleted")
+            && warning
+                .text
+                .ends_with("See https://farhelm.io/docs/using/new-terminals/"),
+        "{warning:?}"
+    );
+    assert!(
+        listed(&listing, &new.id).notifications.is_empty(),
+        "a new session has none"
+    );
+    // Closing the old tab leaves the agent, still in tmux, so the warning
+    // stays; stopping the agent (its pane stays, dead) leaves nothing old
+    // running, and the ticker resolves it.
+    client
+        .close_tab(&old.id, &old_tab.id)
+        .await
+        .expect("close the old tab");
+    client
+        .stop_session(&old.id)
+        .await
+        .expect("stop the old agent");
+    let resolved = wait_for_old_terminal_notification(&client, &old.id, true).await;
+    assert_eq!(resolved.seq, warning.seq, "the same warning, resolved");
     drop(client);
     stack.finish().await;
+}
+
+/// Wait until session `id` lists exactly one notification and it is
+/// `resolved` or not as asked, and return it; fails with the last listing
+/// after [`WAIT`]. The ticker records and resolves the old-terminal warning
+/// on its own schedule, so there is no event to wait for but the listing.
+async fn wait_for_old_terminal_notification(
+    client: &SupervisorClient,
+    id: &str,
+    resolved: bool,
+) -> farhelm_proto::SessionNotification {
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let listing = client.list_sessions().await.expect("list sessions");
+        let notifications = listing
+            .sessions
+            .iter()
+            .find(|session| session.id == id)
+            .map(|session| session.notifications.clone())
+            .unwrap_or_default();
+        if let [only] = &notifications[..]
+            && only.resolved == resolved
+        {
+            return only.clone();
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "session {id} never listed exactly one notification with resolved={resolved}: \
+             {notifications:?}"
+        );
+        // sleep-ok: polls the listing for the ticker's next pass (every two seconds).
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
 }
 
 // ---- The private tmux server only while it holds old terminals -------------------------

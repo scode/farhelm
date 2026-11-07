@@ -5641,6 +5641,40 @@ impl SessionStore {
             .await
     }
 
+    /// Resolve every unresolved notification of `kind` for session `id`,
+    /// whichever launch recorded it. Returns whether any row changed, for
+    /// cell reload and hinting.
+    ///
+    /// Only for a kind that describes the session rather than one launch
+    /// (`NotificationKind::OldTerminal`): it is recorded once per session
+    /// and must resolve after a Restart has opened a new launch. Every
+    /// launch-scoped kind resolves through
+    /// [`Self::resolve_session_notifications_if_current`], whose generation
+    /// fence this deliberately lacks.
+    pub async fn resolve_session_notifications_of_kind(
+        &self,
+        id: &str,
+        kind: &str,
+    ) -> anyhow::Result<bool> {
+        let id = id.to_owned();
+        let kind = kind.to_owned();
+        self.conn
+            .call(
+                "session notification resolve task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let changed = conn
+                        .execute(
+                            "UPDATE session_notifications SET resolved_at = ?3 \
+                             WHERE session_id = ?1 AND kind = ?2 AND resolved_at IS NULL",
+                            rusqlite::params![id, kind, now_unix()],
+                        )
+                        .context("resolving a session's notifications of one kind")?;
+                    Ok(changed > 0)
+                },
+            )
+            .await
+    }
+
     /// Whether launch `generation` of session `id` already has a
     /// notification of `kind`.
     pub async fn has_session_notification(
