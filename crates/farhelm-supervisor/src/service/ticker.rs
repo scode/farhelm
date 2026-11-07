@@ -1476,6 +1476,24 @@ pub(super) async fn observe_entries(
     }
 }
 
+/// Run the sample pass's old-terminal notification check once, for tests
+/// that do not start `serve`, from the same pane-state query the pass makes
+/// (`pane_states_if_needed`); nothing is sampled or observed. A failed query
+/// checks nothing, as in the pass.
+#[cfg(any(test, feature = "test-seams"))]
+pub(super) async fn old_terminal_check_for_test(sup: &Supervisor) {
+    let entries: Vec<Arc<SessionEntry>> = sup.sessions.lock().await.values().cloned().collect();
+    match pane_states_if_needed(sup, &entries).await {
+        Ok(states) => {
+            sup.reconcile_old_terminal_notifications(&entries, &states)
+                .await
+        }
+        Err(error) => {
+            error!(error = %format!("{error:#}"), "could not ask tmux for the old-terminal check");
+        }
+    }
+}
+
 /// Run the observation half of a pass for tests that do not start `serve`.
 ///
 /// Lists will no longer advance durable state. This seam deliberately
@@ -1656,6 +1674,13 @@ async fn sample_pass(
                 .collect();
             observe_entries(sup, &hosts, &std::collections::HashMap::new(), &known).await;
         }
+    }
+    // The old-terminal notification reads this pass's pane map, before the
+    // live-agent filter below: a session whose agent stopped can still run
+    // old tabs. Not on a failed probe, which says nothing about what runs.
+    if let Some(states) = &states {
+        sup.reconcile_old_terminal_notifications(&entries, states)
+            .await;
     }
     // The live set keeps each `Terminal` whole: the budget, the screen
     // readers and the work-start persistence below apply to every kind of
@@ -2266,7 +2291,7 @@ mod tests {
     use super::super::connection::{CONNECTION_WRITER_QUEUE, ConnectionCtx};
     use super::super::core::RunCells;
     use super::super::core::tests::{StateDir, a_terminal, agent_tmux, dummy_exe, entry_with};
-    use super::super::core::{SupervisorSeams, SupervisorTimeouts};
+    use super::super::core::{NewTerminals, SupervisorSeams, SupervisorTimeouts};
     use super::super::handlers::handle_control;
     use super::super::status::live_status;
     use super::super::status::session_status;
@@ -7053,6 +7078,329 @@ mod tests {
                 .pending_work_started_at,
             None,
             "the immediate durable write leaves no retry behind"
+        );
+    }
+
+    // ---- The old-terminal notification ---------------------------------------------
+
+    /// The stored old-terminal notifications of session `id`, oldest first,
+    /// as `(generation, resolved)`, read from the store rather than the cell
+    /// so an assertion sees what survives a restart.
+    async fn old_terminal_rows(sup: &Arc<Supervisor>, id: &str) -> Vec<(i64, bool)> {
+        let mut rows: Vec<_> = sup
+            .store
+            .session_notification_records(id)
+            .await
+            .expect("read the session's notifications")
+            .into_iter()
+            .filter(|stored| stored.kind == "old_terminal")
+            .collect();
+        rows.sort_by_key(|stored| stored.notification.seq);
+        rows.into_iter()
+            .map(|stored| (stored.generation, stored.notification.resolved))
+            .collect()
+    }
+
+    /// An agent pane in its own tmux session that stays alive until `gate`
+    /// exists, so a test can end it at a moment of its choosing (the
+    /// supervisor's tmux keeps the dead pane, as Stop leaves one).
+    async fn gated_agent(sup: &Arc<Supervisor>, tmux_name: &str, gate: &std::path::Path) -> String {
+        let gate = shell_words::quote(&gate.to_string_lossy()).into_owned();
+        spawn_pane(
+            sup,
+            tmux_name,
+            &format!("while [ ! -e {gate} ]; do sleep 0.05; done"),
+        )
+        .await
+    }
+
+    /// A live, marked tab window running `sleep 600` in tmux session
+    /// `tmux_name`, returning its pane.
+    async fn live_tab_in(sup: &Arc<Supervisor>, tmux_name: &str) -> String {
+        let (_window, pane) = sup
+            .tmux
+            .new_window(
+                tmux_name,
+                "/tmp",
+                &[],
+                &["sleep".to_string(), "600".to_string()],
+            )
+            .await
+            .expect("create the tab window");
+        sup.tmux
+            .mark_window(
+                tmux_name,
+                &pane,
+                crate::tmux::TAB_WINDOW_OPTION,
+                &uuid::Uuid::new_v4().to_string(),
+            )
+            .await
+            .expect("mark the tab window");
+        pane
+    }
+
+    /// Spec (SPEC.md, "Status"): on a supervisor that creates new terminals,
+    /// a session whose agent runs in an old terminal gets one old-terminal
+    /// notification, with the maintainer's text, from the ticker alone (no
+    /// client asks); later passes add no second one; it stays unresolved
+    /// while an old tab is still open after the agent stopped; and it is
+    /// resolved once nothing old runs, the agent's dead pane included.
+    ///
+    /// Why: this is how a user hears about a session they never open, and
+    /// the notification must not nag about a stopped session that only
+    /// shows its last screen, nor go quiet while an old tab still runs.
+    #[farhelm_testtrace::test]
+    async fn an_old_terminal_notification_lasts_while_anything_old_runs() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        let gate = state.path().join("agent-gate");
+        let pane = gated_agent(&sup, "fh-old-run", &gate).await;
+        install_durable_running_entry(
+            &sup,
+            "old-run",
+            Terminal::tmux("fh-old-run".into(), pane.clone()),
+        )
+        .await;
+        assert_eq!(
+            sup.new_terminals(),
+            NewTerminals::Host,
+            "premise: the switch is on"
+        );
+        let mut cursor = None;
+        let (_stop_tx, mut stop) = oneshot::channel();
+
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        assert_eq!(old_terminal_rows(&sup, "old-run").await, vec![(0, false)]);
+        let stored = sup
+            .store
+            .session_notification_records("old-run")
+            .await
+            .expect("read");
+        assert_eq!(
+            stored[0].notification.text,
+            crate::service::notifications::OLD_TERMINAL_TEXT
+        );
+        let seq = stored[0].notification.seq;
+        assert_eq!(
+            sup.published_notifications("old-run").await.len(),
+            1,
+            "the reply-facing cell carries it too"
+        );
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        let stored = sup
+            .store
+            .session_notification_records("old-run")
+            .await
+            .expect("read");
+        assert_eq!(
+            (stored.len(), stored[0].notification.seq),
+            (1, seq),
+            "a later pass neither adds nor reopens it"
+        );
+
+        // The agent ends (its pane stays, dead) while an old tab runs.
+        let tab = live_tab_in(&sup, "fh-old-run").await;
+        std::fs::write(&gate, "").expect("open the agent's gate");
+        wait_for_dead_pane(&sup, &pane).await;
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        assert_eq!(
+            old_terminal_rows(&sup, "old-run").await,
+            vec![(0, false)],
+            "an open old tab keeps it unresolved"
+        );
+
+        sup.tmux
+            .kill_window("fh-old-run", &tab)
+            .await
+            .expect("close the tab");
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        assert_eq!(
+            old_terminal_rows(&sup, "old-run").await,
+            vec![(0, true)],
+            "a dead agent pane alone is nothing old running"
+        );
+        assert!(
+            sup.published_notifications("old-run").await[0].resolved,
+            "the cell shows the resolution"
+        );
+    }
+
+    /// Spec (SPEC.md, "Status"): the old-terminal notification is one per
+    /// session, not per launch. With an unresolved one recorded at launch 0
+    /// and the session moved on to launch 1 (a Restart that put the agent
+    /// in a terminal host) while an old tab stays open, a pass records no
+    /// second one; closing the tab then resolves the launch-0 row.
+    ///
+    /// Why: every other kind is keyed by launch, so the store would happily
+    /// add a second row at the new launch; only the per-session precheck
+    /// and the resolver across launches give the user one warning that
+    /// ends when the tab does.
+    #[farhelm_testtrace::test]
+    async fn a_relaunch_with_an_old_tab_open_keeps_the_one_notification() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        let pane = spawn_pane(&sup, "fh-relaunch", "sleep 600").await;
+        let first = install_durable_running_entry(
+            &sup,
+            "relaunch",
+            Terminal::tmux("fh-relaunch".into(), pane.clone()),
+        )
+        .await;
+        let tab = live_tab_in(&sup, "fh-relaunch").await;
+        let mut cursor = None;
+        let (_stop_tx, mut stop) = oneshot::channel();
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        assert_eq!(
+            old_terminal_rows(&sup, "relaunch").await,
+            vec![(0, false)],
+            "premise"
+        );
+
+        // Launch 1: the row moves on, and a new entry with no terminal of
+        // its own (a host this unit test cannot start) shares the session's
+        // cells, as a relaunch's does; the old agent pane is gone.
+        let claim = sup
+            .store
+            .begin_relaunch(
+                "relaunch",
+                crate::store::OfferBasis {
+                    captured_conversation: None,
+                    capture_ownership_version: 0,
+                },
+                false,
+            )
+            .await
+            .expect("open launch 1");
+        assert!(
+            matches!(claim, crate::store::RelaunchDecision::Claimed(_)),
+            "premise: {claim:?}"
+        );
+        let second = Arc::new(SessionEntry {
+            info: first.info.clone(),
+            terminal: None,
+            // A relaunch starts its run cells afresh.
+            run: entry_with(None, LastOutcome::Running).run,
+            session: first.session.clone(),
+            snapshot: first.snapshot.clone(),
+            canonical_cwd: first.canonical_cwd.clone(),
+            generation: 1,
+            scope: first.scope.clone(),
+        });
+        sup.sessions
+            .lock()
+            .await
+            .insert("relaunch".to_string(), second);
+        sup.tmux
+            .kill_window("fh-relaunch", &pane)
+            .await
+            .expect("end the old agent window");
+        assert!(
+            sup.tmux
+                .pane_states()
+                .await
+                .expect("probe")
+                .contains_key(&tab),
+            "premise: the old tab still runs"
+        );
+
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        assert_eq!(
+            old_terminal_rows(&sup, "relaunch").await,
+            vec![(0, false)],
+            "no second notification at launch 1"
+        );
+        sup.tmux
+            .kill_window("fh-relaunch", &tab)
+            .await
+            .expect("close the tab");
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        assert_eq!(
+            old_terminal_rows(&sup, "relaunch").await,
+            vec![(0, true)],
+            "resolved across launches"
+        );
+    }
+
+    /// Spec (SPEC.md, "Status"): no old-terminal notification is recorded or
+    /// resolved when the pass could not ask tmux, and none is recorded on a
+    /// supervisor that still creates old terminals.
+    ///
+    /// Why: a failed probe says nothing about what runs, so it must neither
+    /// invent a warning nor clear a real one; and a supervisor that still
+    /// creates old terminals has nothing to move a session to (the band
+    /// reads the same switch), which also keeps the tests built on old
+    /// terminals free of a notification they never asked about.
+    #[farhelm_testtrace::test]
+    async fn no_old_terminal_notification_without_an_answer_or_the_switch() {
+        let state = StateDir::new();
+        let failing: Arc<AtomicBool> = Arc::default();
+        let sup = {
+            let failing = Arc::clone(&failing);
+            supervisor_with(
+                &state,
+                SupervisorSeams {
+                    faults: crate::service::FaultHooks {
+                        sample_fault: Some(Arc::new(move |asked| {
+                            (matches!(asked, SampleRead::PaneStates)
+                                && failing.load(Ordering::SeqCst))
+                            .then(|| "injected probe failure".to_string())
+                        })),
+                        ..crate::service::FaultHooks::default()
+                    },
+                    ..SupervisorSeams::default()
+                },
+            )
+            .await
+        };
+        let pane = spawn_pane(&sup, "fh-probe", "sleep 600").await;
+        install_durable_running_entry(
+            &sup,
+            "probe",
+            Terminal::tmux("fh-probe".into(), pane.clone()),
+        )
+        .await;
+        let mut cursor = None;
+        let (_stop_tx, mut stop) = oneshot::channel();
+        failing.store(true, Ordering::SeqCst);
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        assert_eq!(
+            old_terminal_rows(&sup, "probe").await,
+            vec![],
+            "nothing recorded blind"
+        );
+        failing.store(false, Ordering::SeqCst);
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        assert_eq!(
+            old_terminal_rows(&sup, "probe").await,
+            vec![(0, false)],
+            "premise: recorded"
+        );
+        sup.tmux
+            .kill_window("fh-probe", &pane)
+            .await
+            .expect("end the agent");
+        failing.store(true, Ordering::SeqCst);
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        assert_eq!(
+            old_terminal_rows(&sup, "probe").await,
+            vec![(0, false)],
+            "nothing resolved blind"
+        );
+
+        let old_state = StateDir::new();
+        let old_sup = supervisor_with(&old_state, SupervisorSeams::tmux_terminals()).await;
+        let pane = spawn_pane(&old_sup, "fh-switch-off", "sleep 600").await;
+        install_durable_running_entry(
+            &old_sup,
+            "switch-off",
+            Terminal::tmux("fh-switch-off".into(), pane),
+        )
+        .await;
+        sample_pass(&old_sup, &mut None, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        assert_eq!(
+            old_terminal_rows(&old_sup, "switch-off").await,
+            vec![],
+            "a supervisor on old terminals records none"
         );
     }
 }

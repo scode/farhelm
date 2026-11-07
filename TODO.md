@@ -402,7 +402,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     from before the removal.
   - Supervisor: the `terminal_kind` column, the per-session tmux presence tracking (`tmux/presence.rs`), the refusals of
     Delete and Restart while an unusable private tmux server runs, `--new-terminals` and
-    `SupervisorSeams::tmux_terminals()`.
+    `SupervisorSeams::tmux_terminals()`, and the old-terminal session notification (`NotificationKind::OldTerminal`, its
+    text and the ticker's sample-pass check that records and resolves it, in `service/notifications.rs`). Rows of that
+    kind already stored can stay as history: the helm and UI show a notification's text without knowing its kind.
   - Tests: the browser suite's old-terminal set (`FARHELM_E2E_SUITE_TERMINALS=tmux`, `e2e/suite-terminals.ts`, the
     `@old-terminal` tag) and the Rust tests that ask for old terminals by name (`harness_tmux`,
     `supervisor_process_tmux`, `tests::tmux_supervisor`).

@@ -458,6 +458,83 @@ async fn an_old_session_restarts_into_a_host_with_its_history_and_tabs() {
     retire(stack.state.path(), sup, client).await;
 }
 
+/// The old-terminal notification of an old session is one per session: a
+/// Restart that moves its agent into a terminal host while a tmux tab stays
+/// open keeps the one warning unresolved, and closing that tab resolves it.
+///
+/// Why: the warning tells the user to close and reopen old tabs as well as
+/// restart, and the usual follow-up is exactly this Restart. A per-launch
+/// rule (every other notification's) would add a second warning for the new
+/// launch, and a check that only looked at the agent would resolve the
+/// first while the old tab still runs. Only a real Restart into a host
+/// shows both, which a unit test cannot start. Spec: an old session with a
+/// tmux tab, on the next supervisor with the switch on, lists exactly one
+/// unresolved notification with the old-terminal text after the check runs
+/// ([`Supervisor::old_terminal_check_for_test`], the ticker's own check);
+/// after a Restart into a host and another check, still exactly that one
+/// (same sequence), unresolved; after the tab closes and another check,
+/// that one resolved.
+#[farhelm_testtrace::test]
+async fn a_restart_with_an_old_tab_open_keeps_one_old_terminal_warning() {
+    let stack = Stack::new().await;
+    let home = farhelm_teststate::tempdir().expect("home");
+    let (sup, client) = stack.supervisor(old_seams(home.path())).await;
+    let old = old_session(&stack, &sup, &client).await;
+    let id = old.session.id.clone();
+    let tmux_tab = client.open_tab(&id).await.expect("a tmux tab");
+    retire(stack.state.path(), sup, client).await;
+
+    let (sup, client) = stack.supervisor(new_seams(home.path())).await;
+    let only = |info: &farhelm_proto::SessionInfo| match &info.notifications[..] {
+        [only] => only.clone(),
+        other => panic!("exactly one notification: {other:?}"),
+    };
+    sup.old_terminal_check_for_test().await;
+    let warning = only(&listed(&client, &id).await);
+    assert!(
+        !warning.resolved
+            && warning
+                .text
+                .starts_with("This session must be restarted, replaced, stopped or deleted"),
+        "{warning:?}"
+    );
+
+    client
+        .restart_session(&id, true)
+        .await
+        .expect("the restart moves the session into a host");
+    let host = agent_host(&sup, &id).await;
+    assert!(
+        listed_tabs(&client, &id).await.contains(&tmux_tab.id),
+        "premise: the tmux tab stays"
+    );
+    sup.old_terminal_check_for_test().await;
+    let after_restart = only(&listed(&client, &id).await);
+    assert_eq!(
+        (after_restart.seq, after_restart.resolved),
+        (warning.seq, false),
+        "the same warning, still unresolved, and no second one"
+    );
+
+    client
+        .close_tab(&id, &tmux_tab.id)
+        .await
+        .expect("close the tmux tab");
+    sup.old_terminal_check_for_test().await;
+    let resolved = only(&listed(&client, &id).await);
+    assert_eq!(
+        (resolved.seq, resolved.resolved),
+        (warning.seq, true),
+        "the same warning, resolved once nothing old runs"
+    );
+
+    let pid = host_process(host.socket()).expect("the agent's host runs");
+    client.delete_session(&id).await.expect("delete");
+    assert_host_ended(pid, host.socket()).await;
+    drop(host);
+    retire(stack.state.path(), sup, client).await;
+}
+
 /// With the switch off, a Restart of an old session stays in tmux.
 ///
 /// Why: the switch is what moves sessions; until it is on, tmux is exactly

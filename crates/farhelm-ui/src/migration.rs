@@ -12,8 +12,11 @@
 //! told that, and what to call each terminal.
 //!
 //! The band shows while something still runs in an old terminal, meaning
-//! the agent is running in one or an old tab is open. A stopped agent's old
-//! terminal alone does not count. Stop leaves the pane
+//! the agent is running in one or an old tab is open. The supervisor's
+//! old-terminal notification in the session list (SPEC.md, "Status") uses
+//! the same condition, so the two never disagree about whether a session
+//! still needs attention. A stopped agent's old terminal alone does not
+//! count. Stop leaves the pane
 //! only so its screen stays readable, there is nothing in it left to
 //! terminate, and the session's next run gets a new terminal anyway.
 //!
@@ -147,8 +150,10 @@ pub(crate) struct BandText {
 /// Every message asks the user to act as soon as possible and says why: an
 /// upcoming release will forcibly terminate whatever still runs in an old
 /// terminal. No date is named, since none is set. The wording is the
-/// maintainer's (2026-11-07); it replaced an earlier "okay for now, when
-/// convenient" version once old terminals' removal was imminent.
+/// maintainer's (2026-11-07), and matches the old-terminal notification in
+/// the session list (`OLD_TERMINAL_TEXT` in the supervisor); it replaced an
+/// earlier "okay for now, when convenient" version once old terminals'
+/// removal was imminent.
 pub(crate) fn band_text(case: &MigrationCase) -> BandText {
     const LEAD: &str = "Farhelm is moving to a new way of running terminals (no longer using \
                         tmux or xterm.js internally).";
