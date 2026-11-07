@@ -1465,6 +1465,83 @@ test("a container session offers only the paths its host admits", async ({ page 
   await expect(page.locator("#term .grid-terminal-link-underline > div")).toHaveCount(0);
 });
 
+/** Unrelated output must not restart host admission for an already disclosed
+ * container path. A hard cut reads neighboring rows too, but a status beyond
+ * a blank separator cannot change either the target or its cell range.
+ */
+for (const cut of [false, true]) {
+  test(`a container file hover survives unrelated neighboring output (${cut ? "cut" : "single row"})`, async ({ page }) => {
+    await mountTerminal(page, undefined, { spec: { containerized: true } });
+    await page.evaluate(() => {
+      const w = window as any;
+      w.fileStats = 0;
+      const fetch = window.fetch;
+      window.fetch = (input, init) => {
+        if (typeof input === "string" && input.endsWith("/files/stat")) w.fileStats++;
+        return fetch.call(window, input, init);
+      };
+    });
+    await routeFiles(page, {
+      stat: (body) => ({ json: { status: "ready", path: body.path, host: "h", size: 10, can_open: false } }),
+      download: () => ({ body: "x" }),
+    });
+    await attachGrid(page);
+    const cols = cut ? 16 : 40;
+    const statusRow = cut ? 3 : 2;
+    await showScreen(page, cut ? ["/work/real-", "  file.txt", "", "status"] : ["/work/real.txt", "", "status"], { cols });
+    const at = await gridCell(page, 3, 0, cols);
+    await page.mouse.move(at.x, at.y);
+    const display = page.locator("#term .terminal-file-target");
+    await expect(display).toContainText("10 B");
+    expect(await page.evaluate(() => (window as any).fileStats)).toBe(2);
+    // Send only the separated status row, then flush the paint that rechecks
+    // hover dependencies. The fetch ledger records calls synchronously, so a
+    // fresh admission cannot hide behind an unanswered network request.
+    await page.evaluate(({ row, width }) => {
+      const ws = (window as any).FakeSocket.all[0];
+      ws.binary(JSON.stringify({ t: "rows", rows: [[row, { w: false, r: [[0, 6, "update", [0, -1, -1]]] }]] }));
+      ws.binary(JSON.stringify({ t: "frame", rev: 3, cols: width, rows: 4, cursor: { x: 0, y: 3, visible: false, shape: "block", blink: true } }));
+      (window as any).__farhelmGrid.flush();
+    }, { row: statusRow, width: cols });
+    expect(await page.evaluate(() => (window as any).fileStats)).toBe(2);
+    await expect(display).toContainText("10 B");
+    await expect(page.locator("#term .grid-terminal")).toHaveClass(/grid-terminal-link-hover/);
+    await page.mouse.click(at.x, at.y);
+    await expect(page.locator("#term .terminal-file-message")).toHaveText(`Downloaded ${cut ? "real-file.txt" : "real.txt"}`);
+  });
+}
+
+/** Neighbor evidence still matters when new output actually creates a cut.
+ * The unchanged first row must lose its old permission before the invented
+ * continuation has been admitted, even though its old cells remain intact.
+ */
+test("a new neighboring continuation withdraws a container path's old hover", async ({ page }) => {
+  await mountTerminal(page, undefined, { spec: { containerized: true } });
+  const requests = await routeFiles(page, {
+    stat: (body) => ({ json: { status: body.path === "/work/real.txt" ? "ready" : "not_found", path: body.path, host: "h", size: 10, can_open: false } }),
+    download: () => ({ body: "x" }),
+  });
+  await attachGrid(page);
+  await showScreen(page, ["/work/real.txt", "", "", ""], { cols: 16 });
+  const at = await gridCell(page, 3, 0, 16);
+  await page.mouse.move(at.x, at.y);
+  const display = page.locator("#term .terminal-file-target");
+  await expect(display).toContainText("10 B");
+  expect(requests.filter(r => r.op === "stat").map(r => r.body.path)).toEqual(["/work/real.txt", "/work/real.txt"]);
+  await page.evaluate(() => {
+    const ws = (window as any).FakeSocket.all[0];
+    ws.binary(JSON.stringify({ t: "rows", rows: [[1, { w: false, r: [[0, 11, "  suffix.md", [0, -1, -1]]] }]] }));
+    ws.binary(JSON.stringify({ t: "frame", rev: 3, cols: 16, rows: 4, cursor: { x: 0, y: 3, visible: false, shape: "block", blink: true } }));
+    (window as any).__farhelmGrid.flush();
+  });
+  await expect.poll(() => requests.filter(r => r.op === "stat").map(r => r.body.path)).toEqual([
+    "/work/real.txt", "/work/real.txt", "/work/real.txtsuffix.md",
+  ]);
+  await expect(display).toBeHidden();
+  await page.mouse.click(at.x, at.y);
+  expect(requests.filter(r => r.op === "download")).toHaveLength(0);
+});
+
 test("in the desktop app, Cmd-click on a remote session's loopback link opens it through a tunnel", async ({ page }) => {
   // The hover names the remote host and port and says a plain click opens
   // on this Mac; the tunnel goes through the app's bridge with the
