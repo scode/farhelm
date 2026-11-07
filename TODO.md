@@ -24,6 +24,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Give every session-list hover card the beside-the-bar placement, with a pointer to what it describes.** Only the
+  row's own summary card opens to the right of the sidebar today (`crates/farhelm-ui/assets/tooltip.js`,
+  `placeSessionCard`, opted into by the row's `data-tooltip-anchor="session-card"`); every other hover in a session row
+  — status, agent mark, activity stamp, stale badge, pin, actions — still uses the ordinary above/below tooltip. Make
+  them all open beside the bar like that one, and add a second cue beyond position that ties the card to its target: a
+  tasteful arrow or pointer of some kind. Exact visuals and mockups are for planning.
+
 - **Fix click-to-download when a printed absolute path is split by a line wrap.** On 2026-11-07 a macOS brick-test run
   printed `Before screenshot (/tmp/farhelm-tmp/8B3AAC70-9A39-4B45-8A69-0842AC8C77F4/before-reopen.jpg)`,
   `Failure screenshot (/tmp/farhelm-tmp/8B3AAC70-9A39-4B45-8A69-0842AC8C77F4/failure.jpg)` and
