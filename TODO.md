@@ -369,6 +369,30 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   sessions and ordinary SSH hosts can use the same named credentials, for example a GitHub token in place of the
   containerized sessions' token file.
 
+- **After tmux and xterm.js are dropped entirely: simplify terminal kind tracking.** While old terminals (tmux, drawn by
+  xterm.js) and new terminals (terminal hosts, drawn by the grid) coexist, every layer tracks which kind each terminal
+  is, and several pieces exist only so that a new terminal never touches xterm.js or tmux. Once a release stops
+  supporting old terminals, every terminal is a host, and this tracking should collapse rather than linger as dead
+  branches. The maintainer wants it removed then, not now. The pieces, as of the new-terminals cutover stack:
+  - Page (`crates/farhelm-ui`): each terminal spec carries a kind (`host`, `tmux`, unknown, or `pending`), worked out in
+    `session_view.rs` (`agent_spec_kind`) from the listing, the Restart reply's kind and whether a Restart is in flight.
+    `pending` exists only so that the reconnect after a Restart that moves an old agent into a host never builds
+    xterm.js; the reconnect controller in `assets/terminal.js` takes the latest synced spec for the same reason.
+    `terminal.js` also keeps the xterm-first path for old and unknown kinds (`buildXtermSurface`, then `adoptGrid`
+    swapping in the grid when the helm's stream notice says grid), the stream-kind chooser (`noteStreamKind`), and the
+    old-terminal link adapter (`xtermLines`, `XtermFileLinksAddon` in `terminal-links.js` and `terminal-files.js`). With
+    only hosts, the page can mount the grid unconditionally and drop the kind field, `pending`, the swap, and the
+    xterm.js scripts themselves.
+  - Protocol and helm: `TerminalKind`, `SessionInfo.agent_terminal`, `TabInfo.kind`, `StreamKind`, `Attach.grid` and the
+    helm's `?grid=1` and stream notice. Keep a cached `"tmux"` kind decodable for as long as `helm.db` can hold rows
+    from before the removal.
+  - Supervisor: the `terminal_kind` column, the per-session tmux presence tracking (`tmux/presence.rs`), the refusals of
+    Delete and Restart while an unusable private tmux server runs, `--new-terminals` and
+    `SupervisorSeams::tmux_terminals()`.
+  - Tests: the browser suite's old-terminal set (`FARHELM_E2E_SUITE_TERMINALS=tmux`, `e2e/suite-terminals.ts`, the
+    `@old-terminal` tag) and the Rust tests that ask for old terminals by name (`harness_tmux`,
+    `supervisor_process_tmux`, `tests::tmux_supervisor`).
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
