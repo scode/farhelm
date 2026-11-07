@@ -11107,6 +11107,7 @@ async fn checkout_trash_routes_pass_host_results_and_fence_stale_deletion() {
                         bytes: Some(4096),
                     }],
                     issues: vec![],
+                    removing: true,
                 },
             })
             .await
@@ -11174,6 +11175,7 @@ async fn checkout_trash_routes_pass_host_results_and_fence_stale_deletion() {
             if endpoint == "list" {
                 assert_eq!(value["checkouts"][0]["bytes"], 4096);
                 assert_eq!(value["checkouts"][0]["repository"], "acme/project");
+                assert_eq!(value["removing"], true);
             } else {
                 assert_eq!(value["removed"], serde_json::json!(["recorded"]));
             }

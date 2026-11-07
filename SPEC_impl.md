@@ -4170,32 +4170,52 @@ same-filesystem bind mounts); macOS uses no-follow `openat` and device checks. L
 identities, but sizes are unknown and permanent deletion refuses. An encountered mount remains untouched; removal may
 already have deleted other confirmed archive contents, so failures name that partial outcome. POSIX final `rmdir` is
 name-based and can remove only an empty directory; an opened subtree moved during cleanup remains the object being
-traversed. Directory admission stays held through the blocking operation and its live-session directory guard, including
-after caller cancellation; large deletes can therefore delay launches, restarts and session Deletes on that host.
-Stopped session rows also protect their folders because they can restart there. The guard compares raw and
-admission-time canonical session paths against the archive's recorded and current canonical path; it does not resolve
-unrelated session cwds under admission.
+traversed. Directory admission stays held through the live-session directory guard and the retirement rename, including
+after caller cancellation. Recursive removal never takes that admission, so it cannot delay launches, restarts or
+session Deletes on that host. Stopped session rows also protect their folders because they can restart there. The guard
+compares raw and admission-time canonical session paths against the archive's recorded and current canonical path; it
+does not resolve unrelated session cwds under admission.
 
-Each selected trash deletion emits one info completion event with its checkout id, archive path, outcome, total and
-per-step times in milliseconds, and counts of files and directories actually removed, including partial counts on
-failure. Steps separate directory admission, the session-path and working-copy database reads, record checks, opening
-and verification, removal and record update. Request-wide admission and read times repeat on each checkout's event; an
-archive path unavailable because the shared reads failed is empty.
+Retirement journals `.rm:<original archive name>` on the existing retired working-copy row before a descriptor-relative
+no-replace rename in the same trash directory. The colon cannot occur in generated archive names, and its four bytes
+leave even a collision-suffixed archive component below 255 bytes. The moved name is reopened and identity-verified
+before removal is authorized. Known no-move rename refusals restore the ordinary destination; uncertain outcomes retain
+the journal. Listings skip reserved destinations, and a stale passive missing-folder prune compares its observed
+destination before forgetting a record. At startup, before accepting new session admissions, reserved records either
+verify at their hidden name or retry the journaled rename from the original name with the retained-session guard. Both
+branches apply that guard; uncertain recovery keeps the record and warns. The existing create-admission fence also
+rejects canonical descendants of both journaled names under the recorded and currently resolved root, including a fresh
+checkout's resolved root. Roots are resolved once per admission call, never cached across requests. Retained failed
+removals remain fenced, so a later startup cannot reclaim newly admitted working files without holding admission during
+the traversal itself.
+
+Each selected retirement emits an info event with its checkout id, archive path, outcome, total and per-step times in
+milliseconds, separating journal update and rename from checks and opening. Request-wide admission and read times repeat
+on each checkout's event; an archive path unavailable because the shared reads failed is empty. A separate background
+completion records actual recursive-removal time and counts of files and directories removed, including partial counts
+on failure. Retirement is not logged as reclaimed space.
 
 Passive lists share the two-slot browse worker pool, including a syscall that outlives the caller's reply wait, and
-never hold directory admission. Permanent deletion runs on a separate blocking worker serialized by directory admission,
-so wedged browse slots cannot block session lifecycle through an empty request. Listing without sizes does not walk
-checkout trees. Requested disk usage sums allocated 512-byte blocks from no-follow descriptor-relative metadata,
-deduplicating hardlinks within each checkout. A mount boundary has unknown size rather than counting its external data.
-Traversal holds at most 32 directory levels per operation, leaving process-wide descriptor headroom for the two reads
-and one delete that can run together. Deeper trees have unknown sizes and report a retained partial-delete refusal.
-Removal retries a nonempty directory through its same opened handle at most three times, accommodating entries skipped
-by a directory iterator during unlinking without chasing a concurrent writer forever. Per-record bookkeeping failures
-stay in the batch's issues instead of hiding earlier results. One two-second deadline and 100,000-entry budget cover all
-sizes on a host; an incomplete measurement is unknown, never a partial checkout total. Archive time is parsed from the
-recorded destination after its separately recorded original basename, accepting the archive move's optional 32-hex
-collision suffix. Invalid historical dates have no time; directory modification times do not substitute for the rename's
-timestamp.
+never hold directory admission. Retirement uses a separate blocking worker, so wedged browse slots cannot block session
+lifecycle through an empty request. A single serve-owned remover drains newly accepted IDs and the startup recovery set
+sequentially, outside directory admission and the browse pool. IDs rather than opened trees wait in its queue,
+preserving the descriptor budget for large selections. Failed attempts warn and retain their hidden records; they are
+never requeued until the next startup. Successful removal forgets the record only after the traversal finishes. Enqueue
+happens inside owned retirement work, so caller cancellation cannot lose its wake. An idle-worker pickup receipt bridges
+reply and listing without waiting for recursion; a busy remover accepts more IDs immediately. The optional,
+default-false `removing` listing field describes the worker's active sequential run, including transitions between its
+folders, and clears when that run drains. It never follows the mere existence of retained records. Listing without sizes
+does not walk checkout trees. Requested disk usage sums allocated 512-byte blocks from no-follow descriptor-relative
+metadata, deduplicating hardlinks within each checkout. A mount boundary has unknown size rather than counting its
+external data. Traversal holds at most 32 directory levels per operation, leaving process-wide descriptor headroom for
+the two reads and one delete that can run together. Deeper trees have unknown sizes and report a retained partial-delete
+refusal. Removal retries a nonempty directory through its same opened handle at most three times, accommodating entries
+skipped by a directory iterator during unlinking without chasing a concurrent writer forever. Per-record bookkeeping
+failures stay in the batch's issues instead of hiding earlier results. One two-second deadline and 100,000-entry budget
+cover all sizes on a host; an incomplete measurement is unknown, never a partial checkout total. Archive time is parsed
+from the recorded destination after its separately recorded original basename, accepting the archive move's optional
+32-hex collision suffix. Invalid historical dates have no time; directory modification times do not substitute for the
+rename's timestamp.
 
 The UI reads each connected host independently, without sizes for the sidebar count and with sizes for the open dialog.
 Load, connection changes, its own affirmative archive Delete, a managed row disappearing between complete fleet

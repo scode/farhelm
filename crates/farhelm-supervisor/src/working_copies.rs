@@ -1960,7 +1960,7 @@ fn unjournal(conn: &Connection, id: &str, expected_destination: &str) -> Result<
 /// reserved room for the archive suffix). Anything else, an I/O error or a
 /// timeout above all, is kept as "may have moved", because on a network
 /// filesystem the server can complete a rename whose reply is lost.
-fn rename_refused_without_moving(error: &std::io::Error) -> bool {
+pub(crate) fn rename_refused_without_moving(error: &std::io::Error) -> bool {
     // A list rather than a pattern: `ENOTSUP` and `EOPNOTSUPP` are the same
     // number on Linux and different ones on macOS.
     const REFUSALS: [i32; 9] = [
@@ -2359,6 +2359,39 @@ pub(crate) fn forget_retired(conn: &Connection, id: &str) -> Result<()> {
     if get_working_copy(conn, id)?.is_some() {
         return Err(WorkingCopyError::WrongState(id.to_string()));
     }
+    Ok(())
+}
+
+/// Move a retired record's archive journal without transferring another
+/// attempt's authority. Trash retirement persists its private destination
+/// before rename; a stale list or request must not replace that journal.
+pub(crate) fn repoint_retired(
+    conn: &Connection,
+    row: &WorkingCopyRow,
+    destination: &str,
+) -> Result<()> {
+    let changed = conn.execute(
+        "UPDATE working_copies SET archive_destination = ?2 \
+         WHERE id = ?1 AND allocation_state = 'retired' AND archive_destination = ?3 \
+         AND NOT EXISTS (SELECT 1 FROM working_copy_members WHERE working_copy_id = ?1)",
+        rusqlite::params![row.id, destination, row.archive_destination],
+    )?;
+    if changed != 1 {
+        return Err(WorkingCopyError::WrongState(row.id.clone()));
+    }
+    Ok(())
+}
+
+/// Prune only the location a passive read actually observed missing. A list
+/// may have opened its snapshot before Delete journaled a background removal;
+/// forgetting by ID alone would then lose the only map to the parked folder.
+pub(crate) fn forget_retired_at(conn: &Connection, row: &WorkingCopyRow) -> Result<()> {
+    conn.execute(
+        "DELETE FROM working_copies WHERE id = ?1 AND allocation_state = 'retired' \
+         AND archive_destination = ?2 \
+         AND NOT EXISTS (SELECT 1 FROM working_copy_members WHERE working_copy_id = ?1)",
+        rusqlite::params![row.id, row.archive_destination],
+    )?;
     Ok(())
 }
 
