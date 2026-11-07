@@ -38512,6 +38512,65 @@ exit 0
         assert_eq!(sup.spare_builder.policy(&checkout.repo), expected);
     }
 
+    /// Disabled spares still owe cache cleanup, so the production scheduler must
+    /// retain their registration until the exact accepted clone has finished.
+    /// Durable states distinguish this gate from an incidental cache-lock wait.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn spare_builder_disabled_spares_wait_for_clone_before_cleanup() {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir(&root).unwrap();
+        let checkout = checkout_fixture(&root);
+        assert!(!checkout.keep_spare, "premise: spares are disabled");
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            scopeless_seams(),
+        )
+        .await
+        .unwrap();
+        let created = fresh_create(&sup, &checkout, None).await.unwrap();
+        let origin = sup
+            .store
+            .origin_working_copy(&created.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let path = crate::launch::preparation_state_path(state.path(), &origin.id);
+        for state in [
+            crate::launch::PreparationState::NotStarted,
+            crate::launch::PreparationState::CloneStarted,
+        ] {
+            crate::launch::write_preparation_state(
+                &path,
+                &origin.id,
+                &state,
+                &crate::files::RealFs,
+            )
+            .unwrap();
+            assert!(
+                super::super::spare_builder::next(&sup).await.is_none(),
+                "live clone must withhold cleanup: {state:?}"
+            );
+            assert!(
+                sup.spare_builder.policy(&checkout.repo).is_some(),
+                "pending cleanup must remain owed"
+            );
+        }
+        crate::launch::write_preparation_state(
+            &path,
+            &origin.id,
+            &crate::launch::PreparationState::HookStarted,
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        assert!(
+            super::super::spare_builder::next(&sup).await.is_some(),
+            "cleanup can run while the later hook is active"
+        );
+    }
+
     /// Missing/corrupt evidence or a newer Restart generation refuses the old
     /// trigger once, without permanently coalescing later valid creates into it.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
@@ -38738,7 +38797,8 @@ exit 0
         off.keep_spare = false;
         off.preview.basename = "bar-2".into();
         off.preview.cwd = first_root.join("bar-2").to_string_lossy().into_owned();
-        fresh_create(&sup, &off, None).await.unwrap();
+        let off_session = fresh_create(&sup, &off, None).await.unwrap();
+        refuse_spare_fixture_before_clone(&sup, &off_session.id).await;
         spare_worker_until("second child after first cancellation", || {
             std::fs::read_to_string(&starts).is_ok_and(|text| text.lines().count() == 2)
         })
@@ -38756,9 +38816,11 @@ exit 0
         second_off.keep_spare = false;
         second_off.preview.basename = "bar-2".into();
         second_off.preview.cwd = next_root.join("bar-2").to_string_lossy().into_owned();
-        fresh_create(&sup, &second_off, None).await.unwrap();
-        // Off entries disappear only after their attempts finish reap/cleanup.
-        // Settle those owned resources before the temporary state is removed.
+        let off_session = fresh_create(&sup, &second_off, None).await.unwrap();
+        refuse_spare_fixture_before_clone(&sup, &off_session.id).await;
+        // The off creates invalidate running builds; their terminal pre-clone
+        // refusal consumes the new gates without starting another held helper.
+        // Settle canceled resources before removing the temporary state.
         spare_worker_until("both canceled builds finish cleanup", || {
             sup.spare_builder.policy(&first_checkout.repo).is_none()
                 && sup.spare_builder.policy(&second_checkout.repo).is_none()
@@ -38766,6 +38828,29 @@ exit 0
         .await;
         assert_eq!(std::fs::read_to_string(&starts).unwrap().lines().count(), 2);
         drop(worker);
+    }
+
+    /// Terminate a scheduling-only create before Git can start. The serialization
+    /// test's fake executable never runs a real preparation shim; explicit durable
+    /// refusal lets the worker consume its off-policy gate without a cleanup job.
+    async fn refuse_spare_fixture_before_clone(sup: &Supervisor, session: &str) {
+        let origin = sup
+            .store
+            .origin_working_copy(session)
+            .await
+            .unwrap()
+            .unwrap();
+        crate::launch::write_preparation_state(
+            &crate::launch::preparation_state_path(&sup.state_dir, &origin.id),
+            &origin.id,
+            &crate::launch::PreparationState::Failed {
+                stage: "validate".into(),
+                detail: "scheduling fixture".into(),
+            },
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        sup.spare_builder.wake.notify_one();
     }
 
     /// How many checkout directories the root now holds (any `bar*`

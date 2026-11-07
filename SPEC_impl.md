@@ -3943,22 +3943,21 @@ same launch markers, environment scrubbing and `GIT_TERMINAL_PROMPT=1` as the cl
 
 ```text
 git init --bare -q <cache>
-git -c gc.autoDetach=false -c maintenance.autoDetach=false -c gc.autoPackLimit=10 --git-dir <cache> fetch --prune <https url> '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
-git -c core.commitGraph=false clone --reference <cache> --dissociate -- <https url> <cwd>
+git -c gc.auto=0 -c maintenance.auto=false --git-dir <cache> fetch --prune <https url> '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
+git -c core.commitGraph=false -c gc.auto=0 -c maintenance.auto=false clone --reference <cache> --dissociate -- <https url> <cwd>
 ```
 
 The fetch names the bare cache explicitly so Git's `safe.bareRepository=explicit` policy remains in force. Bare init is
 idempotent, including after an interrupted initial fetch. Command-line refspecs keep the cache to branches and tags
-without writing a remote configuration. Git's automatic gc remains enabled, with `gc.autoPackLimit=10` so accumulated
-fetch packs consolidate sooner instead of making each dissociating clone repeat their delta search. It runs in the
-foreground so it cannot outlive the lock; an occasional launch is slower while the cache consolidates. Plain
-`--reference`, rather than `--reference-if-able`, makes an unavailable cache fail the clone stage; `--dissociate` copies
-the borrowed objects so the checkout has no alternates and keeps its GitHub origin. The clone alone disables
-commit-graph reads to avoid Git before 2.55.0 losing a cached commit's tree during dissociation; this command-local
-workaround can go once Git 2.55 is the minimum (upstream fix `3d8e4004c6`). The lock stays held through dissociation,
-then its modification time records successful use. There is no timeout or fallback. Cache errors name the path and use
-the existing `Failed{stage: clone}` state; `CloneStarted` covers the whole sequence, including restart refusal after
-interruption.
+without writing a remote configuration. Automatic gc and maintenance are disabled for the visible refresh and clone; the
+existing background worker consolidates after the clone stage instead. A later launch can still wait while that worker
+holds the cache lock. Plain `--reference`, rather than `--reference-if-able`, makes an unavailable cache fail the clone
+stage; `--dissociate` copies the borrowed objects so the checkout has no alternates and keeps its GitHub origin. The
+clone alone disables commit-graph reads to avoid Git before 2.55.0 losing a cached commit's tree during dissociation;
+this command-local workaround can go once Git 2.55 is the minimum (upstream fix `3d8e4004c6`). The lock stays held
+through dissociation, then its modification time records successful use. There is no timeout or fallback. Cache errors
+name the path and use the existing `Failed{stage: clone}` state; `CloneStarted` covers the whole sequence, including
+restart refusal after interruption.
 
 Supervisor startup sweeps `repo-cache/` on a blocking worker. It enumerates the permanent locks and tries each without
 waiting, skipping a cache still in use by a shim that survived supervisor restart. Under the lock it removes leftover
@@ -4032,26 +4031,27 @@ metadata the shim rewrites. Ordinary hooks and filters remain configured; a dirt
 dirty.
 
 A usable claim prints `Farhelm: updating a checkout prepared earlier from GitHub.` and runs
-`git -c remote.<remote>.followRemoteHEAD=always fetch --prune --prune-tags <remote>`. That key is unconditional on every
-take-capable Git. The saved tracking branch must survive pruning and match the remote HEAD symref afterwards, and the
-spare's `HEAD` must be an ancestor of it (`git merge-base --is-ancestor`, any other answer or a timeout refusing), so a
-take whose upstream branch was rewound or diverged is refused, rather than keeping removed commits through a no-op
-fast-forward or failing after the move. Git 2.48+ refreshes that symref; older Git intentionally keeps its clone-time
-default-branch observation. Structural refusal before moving content leaves the claim for supervisor cleanup and uses
-ordinary clone into the still-empty allocation. A failed fetch instead fails the clone stage, with no second clone or
-credential prompt. A successful take makes one fetch; a successful fetch followed by structural refusal may subsequently
-use the explicitly required normal clone.
+`git -c gc.auto=0 -c maintenance.auto=false -c remote.<remote>.followRemoteHEAD=always fetch --prune --prune-tags <remote>`.
+The remote HEAD key is unconditional on every take-capable Git. The saved tracking branch must survive pruning and match
+the remote HEAD symref afterwards, and the spare's `HEAD` must be an ancestor of it (`git merge-base --is-ancestor`, any
+other answer or a timeout refusing), so a take whose upstream branch was rewound or diverged is refused, rather than
+keeping removed commits through a no-op fast-forward or failing after the move. Git 2.48+ refreshes that symref; older
+Git intentionally keeps its clone-time default-branch observation. Structural refusal before moving content leaves the
+claim for supervisor cleanup and uses ordinary clone into the still-empty allocation. A failed fetch instead fails the
+clone stage, with no second clone or credential prompt. A successful take makes one fetch; a successful fetch followed
+by structural refusal may subsequently use the explicitly required normal clone.
 
 Before moving, the shim rechecks destination identity and emptiness and preflights all raw top-level entries for mount
 or filesystem crossings. It moves `.git` first and then each remaining entry with fd-relative no-replace renames,
 preserving the allocated folder itself. A failed first move permits clone only if the destination is still known empty;
 every failure after any entry moved retains the partial checkout and fails preparation without rollback. The shim
-removes only the emptied claim directory. It then runs `git merge --ff-only <full tracking ref>` in the final allocated
-folder, so changed-file filters and `post-merge` see that path. The existing post-clone command, Ready publication and
-trust steps follow unchanged. Interrupted or failed preparations remain non-restartable under the existing state rule.
+removes only the emptied claim directory. It then runs
+`git -c gc.auto=0 -c maintenance.auto=false merge --ff-only <full tracking ref>` in the final allocated folder, so
+changed-file filters and `post-merge` see that path. The existing post-clone command, Ready publication and trust steps
+follow unchanged. Interrupted or failed preparations remain non-restartable under the existing state rule.
 
-Each physically accepted fresh managed-checkout launch registers one background spare attempt with its frozen root,
-shell and switch. A pending recovery that actually creates a terminal registers too; reconciliation of an already
+Each physically accepted fresh managed-checkout launch registers one background cache/spare attempt with its frozen
+root, shell and switch. A pending recovery that actually creates a terminal registers too; reconciliation of an already
 existing terminal, accepted-key replay and Restart do not. Registration order governs only this supervisor lifetime;
 there is no persisted scheduling history, automatic retry or startup rebuild of old Ready creates. One entry per
 repository coalesces pending work: a later same-policy create replaces the pending clone gate/token. Once running,
@@ -4059,18 +4059,19 @@ same-policy triggers coalesce without cancellation or a trailing attempt. Off/ro
 Successful publication retires its entry under the final rename gate. A physical create arriving while old publication
 fsync/cleanup finishes can therefore register the next owed attempt; old cleanup preserves a new same-policy entry and
 its ready slot. This is replenishment after a new create, not a retry after failure. One serve-owned worker runs host
-builds serially. The ticker only wakes it; clone, cache waits and record fsync are not on the ticker or create admission
-path. Runtime cache admission opens the existing permanent lock and uses nonblocking flock probes with stop/policy
-cancellation and the same ten-minute attempt deadline as login/Git. It never leaves a blocking flock waiter holding
-supervisor ownership. Post-attempt cleanup tries that lock once; a busy cache retains/logs ownership evidence for
-startup rather than adding another owed attempt.
+cache/spare attempts serially. The ticker only wakes it; clone, cache waits and record fsync are not on the ticker or
+create admission path. Runtime cache admission opens the existing permanent lock and uses nonblocking flock probes with
+stop/policy cancellation and the same ten-minute attempt deadline as login/Git. It never leaves a blocking flock waiter
+holding supervisor ownership. Post-attempt cleanup tries that lock once; a busy cache retains/logs ownership evidence
+for startup rather than adding another owed attempt.
 
 The gate reads exact accepted origin/session/generation and the durable preparation state. NotStarted and CloneStarted
 wait; missing, corrupt, stale or terminal pre-clone refusal consumes that attempt without poisoning a later create.
 HookStarted, Ready, post-clone failure and Failed at clone authorize one attempt: the visible clone command has already
-returned and released its cache lock. Off cleanup does not wait for clone. Runtime discard protects every claimed name
-and retains old locations containing claims; only startup performs exact claim-liveness cleanup. It removes verified
-ready/building/trash objects before building at a new root, through the same confined remover and namespace barrier.
+returned and released its cache lock. Off cleanup waits for the same clone evidence before taking the cache lock.
+Runtime discard protects every claimed name and retains old locations containing claims; only startup performs exact
+claim-liveness cleanup. It removes verified ready/building/trash objects before building at a new root, through the same
+confined remover and namespace barrier.
 
 The worker persists namespace identity before creating a strict private building folder. It starts its exact binary's
 `internal build-spare-guard` in a new session with a retained stdin owner pipe and nice 10, before login initialization.
@@ -4082,22 +4083,27 @@ credential helpers and URL rewrites. It forces `GIT_TERMINAL_PROMPT=0`, `/bin/fa
 `SSH_ASKPASS_REQUIRE=never` after rc files. No Farhelm post-clone command, trust operation or agent runs in a spare;
 ordinary Git hooks and checkout filters remain the user's Git policy.
 
-The shared synchronous cache core uses the exact init/fetch/dissociating-clone commands above and marks successful use.
-The clone core acquires its cache flock inside the helper, after login startup. The supervisor's separate
-preparation/cleanup critical sections never hold it around the login shell. Immediately after the helper's flock and
-before any Git it verifies the expected building identity without recreating a missing target. Startup removal under
-that same lock therefore cannot be undone by a delayed orphan whose rc files finished later. A build starts only with an
-empty ready slot.
+The shared synchronous cache core takes an explicit cleanup policy. Visible launches use the commands above; background
+spare builds retain `gc.autoDetach=false`, `maintenance.autoDetach=false` and `gc.autoPackLimit=10` on their cache
+fetch, so Git consolidates accumulated packs sooner and finishes cleanup before releasing the cache lock. The clone
+always disables automatic cleanup. A background attempt with spares off or an already-ready spare instead runs
+`git -c gc.autoDetach=false -c maintenance.autoDetach=false -c gc.autoPackLimit=10 --git-dir <cache> gc --auto`, without
+fetching or cloning. These modes are mutually exclusive for one coalesced attempt. Cache-only work never marks the cache
+as used by a checkout or changes the eviction policy. Both modes acquire the cache flock inside the same helper, after
+login startup. The supervisor's separate preparation/cleanup critical sections never hold it around the login shell. For
+a clone, immediately after the helper's flock and before any Git it verifies the expected building identity without
+recreating a missing target. Startup removal under that same lock therefore cannot be undone by a delayed clone helper
+whose rc files finished later. A build starts only with an empty ready slot.
 
-After clone success the helper publishes a fresh private 0600 bool receipt. Only a successful direct shell exit permits
-the guard to promote that receipt by collision-refusing hard link to the final completion name; rc exit zero before
-executing the helper cannot produce completion. The guard then SIGKILLs its own retained group on every outcome, as it
-also does on owner EOF/read error or deadline. The parent retains the pipe writer outside Tokio Child.stdin, whose wait
-would otherwise close it. Parent output is limited to one MiB per stream and the whole run to ten minutes. Only an
-ordinary bounded Exited(SIGKILL) plus the fresh promoted true receipt authorizes publication; timeout, overflow and I/O
-refusal remain failures. Direct child reaping precedes private spec/receipt/result cleanup. Startup discards strict
-leftover private artifacts without adopting a job. Failures log bounded diagnostics and leave ordinary visible clone
-available.
+After successful clone or cache-only consolidation the helper publishes a fresh private 0600 bool receipt. Only a
+successful direct shell exit permits the guard to promote that receipt by collision-refusing hard link to the final
+completion name; rc exit zero before executing the helper cannot produce completion. The guard then SIGKILLs its own
+retained group on every outcome, as it also does on owner EOF/read error or deadline. The parent retains the pipe writer
+outside Tokio Child.stdin, whose wait would otherwise close it. Parent output is limited to one MiB per stream and the
+whole run to ten minutes. Only an ordinary bounded Exited(SIGKILL) plus the fresh promoted true receipt authorizes
+publication; timeout, overflow and I/O refusal remain failures. Direct child reaping precedes private
+spec/receipt/result cleanup. Startup discards strict leftover private artifacts without adopting a job. Failures log
+bounded diagnostics and leave ordinary visible clone available.
 
 Before publication the worker durably records intended ready identity and prepares opened handles outside the short
 policy gate. Only the final current-token check and identity-checked no-replace rename serialize with registration;
