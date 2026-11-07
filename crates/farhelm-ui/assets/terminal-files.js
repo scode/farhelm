@@ -149,6 +149,71 @@
     }
   }
 
+  /** Recognize one program-inserted break, never a chain or a terminal wrap.
+   * This is a deliberate exception to ordinary whitespace boundaries: a TUI
+   * can break a path while leaving spare columns for its right margin. Keep
+   * cell coordinates separate from UTF-16 offsets for wide/combined glyphs.
+   */
+  function cutPathLink(lines, abs) {
+    const head = lines.line(abs);
+    const tail = lines.line(abs + 1);
+    if (!head || !tail || head.wrapped || tail.wrapped || lines.line(abs + 2)?.wrapped) return null;
+    /** Preserve each UTF-16 unit's owning cell, with the same text cap as
+     * ordinary recognition; padding still counts against the work bound.
+     */
+    const read = (line, row) => {
+      let text = '';
+      const cells = [];
+      for (let col = 0; col < line.length; col++) {
+        const cell = line.cell(col);
+        if (!cell?.width) continue;
+        const chars = cell.chars || ' ';
+        if (text.length + chars.length > 8192) return null;
+        for (let i = 0; i < chars.length; i++) cells.push({ abs: row, col, end: col + cell.width });
+        text += chars;
+      }
+      return { text, cells };
+    };
+    const a = read(head, abs);
+    const b = read(tail, abs + 1);
+    if (!a || !b) return null;
+    const end = a.text.replace(/ +$/u, '').length;
+    const runs = Array.from(a.text.slice(0, end).matchAll(/[^\s"'`<>(){}\[\]]+/gu));
+    const last = runs.at(-1);
+    const next = /^ *([^\s"'`<>(){}\[\]]+)/u.exec(b.text);
+    if (!last || last.index + last[0].length !== end || !next || /^[,;!?:]/u.test(next[1])) return null;
+    const indent = next[0].length - next[1].length;
+    const tailEnd = indent + next[1].length;
+    const remaining = head.length - a.cells[end - 1].end;
+    const tailColumns = b.cells[tailEnd - 1].end - b.cells[indent].col;
+    if (remaining - 4 >= tailColumns) return null;
+    const text = a.text.slice(0, end) + b.text.slice(indent);
+    if (text.length > 8192) return null;
+    // Tokenize the whole joined line so a scheme-bearing chunk still cannot
+    // donate a filename-looking suffix. Delimiters and diagnostic suffixes
+    // remain the ordinary tokenizer's, rather than a second path grammar.
+    const token = pathTokens(text).find(token => token.start === last.index && token.end > end);
+    if (!token) return null;
+    const start = a.cells[token.start];
+    const finish = b.cells[indent + token.end - end - 1];
+    return { path: token.path, range: { start: { abs, col: start.col }, end: { abs: abs + 1, col: finish.end } } };
+  }
+
+  /** Offer a cut path from either half, replacing its two misleading fragments.
+   * Consecutive possible cuts are ambiguous and stay under the ordinary
+   * rules; the exception must never grow into a three-row reconstruction.
+   */
+  function pathLinks(lines, abs) {
+    const cuts = new Map();
+    for (let y = Math.max(0, abs - 2); y <= abs + 1; y++) cuts.set(y, cutPathLink(lines, y));
+    const joined = [abs - 1, abs].filter(y => cuts.get(y) && !cuts.get(y - 1) && !cuts.get(y + 1))
+      .map(y => cuts.get(y));
+    const compare = (a, b) => a.abs - b.abs || a.col - b.col;
+    return softPathLinks(lines, abs).filter(link => !joined.some(cut =>
+      compare(link.range.start, cut.range.end) < 0 && compare(cut.range.start, link.range.end) < 0))
+      .concat(joined);
+  }
+
   /** The printed paths touching line `abs` of `lines` (terminal-links.js's
    * link lines), each `{path, range}` with a link-lines range.
    * Map a logical wrapped line's UTF-16 offsets back to cells.
@@ -158,7 +223,7 @@
    * Work is bounded; an overlong logical line yields no links rather than a
    * truncated token whose apparent start changes the recognition policy.
    */
-  function pathLinks(lines, abs) {
+  function softPathLinks(lines, abs) {
     let first = abs;
     while (first > 0 && lines.line(first)?.wrapped) {
       if (abs - first > 128) return [];

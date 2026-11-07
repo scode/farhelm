@@ -316,6 +316,66 @@ test('path mapping handles wide, combining and wrapped path cells', () => {
   }
 });
 
+/** The same text must link through a terminal wrap and a program's own newline.
+ * TUIs often pad the head and indent the tail, neither of which belongs in
+ * the destination. Both adapters must return the same cells and whole path.
+ */
+test('paths cut near the right edge join through soft wraps and program breaks', () => {
+  const head = 'Failure screenshot (/tmp/farhelm-';
+  const tail = 'tmp/run-id/failure.jpg)';
+  for (const wrapped of [true, false]) {
+    const padding = wrapped ? '' : '   ';
+    const indentation = wrapped ? '' : '  ';
+    const rows = [
+      { cells: Array.from(head + padding, ch => [ch, 1]), wrapped: false },
+      { cells: Array.from(indentation + tail, ch => [ch, 1]), wrapped },
+    ];
+    const expected = [{ path: '/tmp/farhelm-tmp/run-id/failure.jpg', range: {
+      start: { abs: 0, col: head.indexOf('/') }, end: { abs: 1, col: indentation.length + tail.length - 1 },
+    } }];
+    for (const view of [lines(rows), xtermLines(terminal(rows))]) {
+      for (const abs of [0, 1]) assert.deepEqual(pathLinks(view, abs), expected, `wrapped=${wrapped}, row=${abs}`);
+    }
+  }
+});
+
+/** The exception must not join unrelated lines, URI fragments or a chain of
+ * three hard-broken rows. Its fit check uses terminal columns, not UTF-16.
+ */
+test('cut paths keep delimiters, column limits and the two-row boundary', () => {
+  const row = (text, width = text.length) => ({ cells: Array.from(text.padEnd(width), ch => [ch, 1]), wrapped: false });
+  for (const rows of [
+    [row('/tmp/head-', 80), row('tail/file.txt')],
+    [row('"/tmp/head-"'), row('tail/file.txt')],
+    [row('(/tmp/head-)'), row('tail/file.txt')],
+    [row('/tmp/head-'), row('"tail/file.txt"')],
+    [row('https://example.test/'), row('tail/file.txt')],
+    [row('file:///tmp/head-'), row('tail/file.txt')],
+    [row('/tmp/head-'), row('tail/'), row('file.txt')],
+  ]) {
+    for (const view of [lines(rows), xtermLines(terminal(rows))]) {
+      for (let abs = 0; abs < rows.length; abs++) {
+        assert.ok(pathLinks(view, abs).every(link => link.range.start.abs === link.range.end.abs), JSON.stringify(rows));
+      }
+    }
+  }
+  // Exactly four columns may be a TUI margin, but an exactly fitting tail
+  // would not have been moved by the wrapper. One more column must join it.
+  for (const [space, joins] of [[7, true], [8, false]]) {
+    const rows = [row('/tmp/head-', 10 + space), row('x.rs')];
+    assert.equal(pathLinks(lines(rows), 0).some(link => link.path === '/tmp/head-x.rs'), joins);
+  }
+  const wide = [
+    { cells: [['界', 2], ['', 0], [' ', 1], ...Array.from('/tmp/head-', ch => [ch, 1]), ...Array.from('    ', ch => [ch, 1])], wrapped: false },
+    { cells: [[' ', 1], ['e\u0301', 1], ['界', 2], ['', 0], ...Array.from('.txt:12!', ch => [ch, 1])], wrapped: false },
+  ];
+  for (const view of [lines(wide), xtermLines(terminal(wide))]) {
+    assert.deepEqual(pathLinks(view, 1), [{ path: '/tmp/head-e\u0301界.txt', range: {
+      start: { abs: 0, col: 3 }, end: { abs: 1, col: 8 },
+    } }]);
+  }
+});
+
 /** Model xterm's provider callback with real mutable buffer cells. Admission
  * responses stay under test control so no delay stands in for a pending lookup.
  */
@@ -969,13 +1029,13 @@ test('partial wrapped redraw invalidates file transfer evidence', async () => {
  * Recognition must still identify the complete printed token and its endpoints;
  * comparing the old rectangle alone would download/open the previous filename.
  */
-test('a wrapped printed path cannot grow beyond its cached endpoint', async () => {
-  for (const native of [false, true]) {
+test('a wrapped or program-broken printed path cannot grow beyond its cached endpoint', async () => {
+  for (const [native, wrapped] of [[false, false], [false, true], [true, false], [true, true]]) {
     const fixture = noticeFixture(native, true, false, true);
     const cells = text => Array.from(text, ch => [ch, 1]);
     const rows = [
       { cells: cells('long/repor'), wrapped: false },
-      { cells: cells('t.txt     '), wrapped: true },
+      { cells: cells('t.txt     '), wrapped },
     ];
     fixture.addon.term.buffer = terminal(rows).buffer;
     const [{ path, range }] = pathLinks(xtermLines(fixture.addon.term), 0);

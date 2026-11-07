@@ -408,6 +408,58 @@ for (const kind of ['local', 'ssh']) {
   });
 }
 
+/** A program's explicit newline has no terminal wrap flag. Both visible
+ * halves must disclose and download the same file, excluding TUI padding.
+ * The shell waits until after attachment so the proof uses live output.
+ */
+test('both halves of a program-broken path disclose and download the whole file', async ({ page, request }) => {
+  const directory = stackScratchDir('file-cut-');
+  const filename = path.join(directory, 'broken-file.txt');
+  const content = 'bytes from the whole cut path';
+  fs.writeFileSync(filename, content);
+  expect(fs.readFileSync(filename, 'utf8')).toBe(content);
+  const head = filename.slice(0, -'file.txt'.length);
+  const tail = 'file.txt';
+  const session = await createSession(request, { title: `file-cut-${Date.now()}`, cwd: directory,
+    invocation: `sh -c 'stty -echo; read _gate; set -- $(stty size); n=$(($2 - ${head.length} - 2)); [ "$n" -ge 0 ] || exit 1; printf "%*s%s\\n  %s\\n" "$n" "" "${head}" "${tail}"; read _done'` });
+  let bodyFailed = false;
+  try {
+    await page.goto('/');
+    await attachSession(page, session.id);
+    const peer = (await listSessions(request)).sessions.find(row => row.id === session.id);
+    expect(peer?.status?.state, 'the gated shell must still be alive before releasing its output').toMatch(/running|idle/);
+    await page.keyboard.press('Enter');
+    await waitForTermText(page, tail);
+    const view = (await terminalViewport(page))!;
+    const headRow = view.lines.findIndex(line => line.includes(head));
+    expect(headRow).toBeGreaterThanOrEqual(0);
+    expect(view.lines[headRow].trimEnd().endsWith(head)).toBe(true);
+    expect(view.lines[headRow + 1].startsWith(`  ${tail}`)).toBe(true);
+    expect(view.cols - view.lines[headRow].trimEnd().length).toBeLessThanOrEqual(4);
+    const tooltip = page.locator('#terminal .terminal-file-target');
+    for (const half of [head, tail]) {
+      const point = await hoverPath(page, half);
+      await expect(tooltip.locator('.terminal-file-name')).toContainText('broken-file.txt');
+      await expect(tooltip.locator('.terminal-file-directory')).toHaveText(`this machine:${directory}/`);
+      await expect(tooltip).toContainText('click to download');
+      const saved = page.waitForEvent('download');
+      await page.mouse.click(point.x, point.y);
+      const download = await saved;
+      expect(download.suggestedFilename()).toBe('broken-file.txt');
+      expect(await download.failure()).toBeNull();
+      expect(fs.readFileSync((await download.path())!, 'utf8')).toBe(content);
+    }
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [["session and working directory", async () => {
+      await cleanupSession(request, session.id);
+      fs.rmSync(directory, { recursive: true, force: true });
+    }]]);
+  }
+});
+
 /** Missing, directory, permission and cap refusals must remain non-clickable,
  * while OSC files share admission and forbidden OSC schemes never execute.
  */

@@ -1338,6 +1338,10 @@
         web: false,
         range,
         ranges: [range],
+        // A hard-cut path also reads neighboring rows to rule out a chain.
+        // Repaint of that evidence must retire its hover even when neither
+        // linked half changed. Missing rows count too: history may arrive.
+        evidence: Array.from({ length: range.end.abs - range.start.abs + 5 }, (_, i) => range.start.abs - 2 + i),
         decorations: { underline: true, pointerCursor: false },
       };
       link.hover = (event) => fileLinks.hover(event, path, link, range);
