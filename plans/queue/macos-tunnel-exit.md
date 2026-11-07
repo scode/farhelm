@@ -426,55 +426,231 @@ open), block again with that evidence: the measured times, the `-v` output's rea
 the local process table. Do not add a watcher or any other mechanism; the maintainer wants to discuss it with that
 evidence in hand.
 
-## Blocked
+### 2026-11-07: answer to a blocked question
 
-Blocked on 2026-11-06 (claim a3e09b).
+The question, as the executor put it:
 
-### Keep-alives do not finish the tunnel after its sandbox session ends
+> Blocked on 2026-11-06 (claim a3e09b).
+>
+> ### Keep-alives do not finish the tunnel after its sandbox session ends
+>
+> A force quit or crash of the desktop app can leave its recipe-tunnel SSH process and sandbox listeners running. The
+> chosen fix was a helm-owned stdin pipe, a heartbeat every 30 seconds and a 120-second remote silence limit. The full
+> requirement includes ending the local SSH process and its held connection to the local service. Your latest decision
+> required a real-gateway check lasting at least three minutes, using production arguments and a control with
+> keep-alives disabled, then another block if normal keep-alives did not finish that cleanup.
+>
+> That check now fails the required local teardown. Both runs established a held reverse connection with a unique
+> roundtrip before closing stdin, and observed it for 185 seconds after the write end closed:
+>
+> | Observation                                                            | Normal keep-alive, 30 seconds / 3 misses | Control, keep-alive disabled |
+> | ---------------------------------------------------------------------- | ---------------------------------------- | ---------------------------- |
+> | Sandbox peer observed EOF/reset                                        | 94 ms                                    | 85 ms                        |
+> | Original remote command and SSH session process gone; listener refused | By 377 ms                                | By 371 ms                    |
+> | Local SSH process after 185 seconds                                    | Still present                            | Still present                |
+> | Owning process's wait after 185 seconds                                | Unresolved                               | Unresolved                   |
+> | Local service's held connection after 185 seconds                      | Still open                               | Still open                   |
+> | Verbose SSH exit or keep-alive timeout reason                          | None                                     | None                         |
+>
+> The treatment used the actual production argument builder and unchanged remote command, including
+> `ServerAliveInterval=30` and `ServerAliveCountMax=3`. The control changed only the interval to zero. Direct
+> process-table observations before and after the window identified the same local SSH processes; the owning native
+> child waits were separate from output draining. Both verbose streams showed the session channel being freed while the
+> forwarded channel remained. Why the gateway/client combination leaves that channel open is an inference, not
+> established by these diagnostics.
+>
+> The retained recorder runs are `6c056f69-f776-46c5-8b18-57c7d26a268c` (normal keep-alive) and
+> `cd0092d4-81b4-4624-8b34-98c054b394c5` (control). Both measurement commands completed with complete, untruncated
+> evidence; their zero command exits mean the observations completed, not that tunnel acceptance passed. This used Linux
+> OpenSSH 9.6p1 and closed the pipe in-process, isolating the pipe from Linux's existing kernel parent-death cleanup. An
+> independent observer connection deliberately kept the sandbox awake during each window, so these runs make no
+> idle-suspension claim or native macOS claim.
+>
+> One additional small sandbox was used, bringing the plan total to 3 of its authorized 20. It is terminated, its
+> snapshot sweep found nothing to remove, and the test SSH key is deregistered. No owned cloud resources remain.
+>
+> [Draft #3072](https://github.com/scode/farhelm/pull/3072/changes) still contains only the previously successful macOS
+> test-server prerequisite. No product fix or alternative lifetime mechanism has been pushed. The remaining silence,
+> lease-kill, idle-suspension and final macOS regression checks were not run because this required gateway check failed.
+>
+> Should the full local teardown requirement remain while a separate local lifetime mechanism, such as a watcher, is
+> investigated, or should the requirement be narrowed to ending the sandbox session and listeners while allowing local
+> connections to linger? Retaining full teardown requires agreeing on a new local cleanup design, then implementing and
+> validating it. A watcher would be a separate local process that notices the helm's exit and stops its tunnel; no such
+> design is validated or authorized. Narrowing the requirement accepts a local SSH process and held service connection
+> that these measurements did not show closing within 185 seconds. I recommend retaining full teardown and discussing
+> the revised design before authorizing its implementation.
 
-A force quit or crash of the desktop app can leave its recipe-tunnel SSH process and sandbox listeners running. The
-chosen fix was a helm-owned stdin pipe, a heartbeat every 30 seconds and a 120-second remote silence limit. The full
-requirement includes ending the local SSH process and its held connection to the local service. Your latest decision
-required a real-gateway check lasting at least three minutes, using production arguments and a control with keep-alives
-disabled, then another block if normal keep-alives did not finish that cleanup.
+The maintainer's answer:
 
-That check now fails the required local teardown. Both runs established a held reverse connection with a unique
-roundtrip before closing stdin, and observed it for 185 seconds after the write end closed:
+The maintainer decided on 2026-11-07, in conversation with the landing monitor, after the keep-alive measurement in the
+block above: recipe tunnels move off their separate ssh connection and onto the helm's existing connection to the
+supervisor. In the maintainer's words: "Yes, let's do the supervisor relay. I like this for other reasons as well
+because it disconnects it from SSH. [...] you get the one SSH connection, and once you're there, everything else works
+the exact same. It limits our exposure to all of these types of issues. We solve it exactly once for the one SSH, and
+everything else just floats on top. In the future, if we have other ways of connecting to something that isn't SSH at
+all to begin with, all the other stuff on top keeps working, so I vastly prefer this." The design below was worked out
+with the maintainer in the same conversation and checked by a fresh-context planning review against the code.
 
-| Observation                                                            | Normal keep-alive, 30 seconds / 3 misses | Control, keep-alive disabled |
-| ---------------------------------------------------------------------- | ---------------------------------------- | ---------------------------- |
-| Sandbox peer observed EOF/reset                                        | 94 ms                                    | 85 ms                        |
-| Original remote command and SSH session process gone; listener refused | By 377 ms                                | By 371 ms                    |
-| Local SSH process after 185 seconds                                    | Still present                            | Still present                |
-| Owning process's wait after 185 seconds                                | Unresolved                               | Unresolved                   |
-| Local service's held connection after 185 seconds                      | Still open                               | Still open                   |
-| Verbose SSH exit or keep-alive timeout reason                          | None                                     | None                         |
+### What this replaces
 
-The treatment used the actual production argument builder and unchanged remote command, including
-`ServerAliveInterval=30` and `ServerAliveCountMax=3`. The control changed only the interval to zero. Direct
-process-table observations before and after the window identified the same local SSH processes; the owning native child
-waits were separate from output draining. Both verbose streams showed the session channel being freed while the
-forwarded channel remained. Why the gateway/client combination leaves that channel open is an inference, not established
-by these diagnostics.
+This decision replaces the plan's goal mechanism (the stdin pipe, the heartbeat, the remote command), its acceptance
+criteria, its outline, its fallbacks, its done criterion, and its earlier decisions about the pipe, keep-alive and the
+macOS proof. The plan's "How to run" sections still apply (working log, resume protocol, no-workhorse mode, resource
+watchdog, PR discipline, scope reassessment, decision logging, unattended fallback), with two changes: the PR-discipline
+bullet about dispatching GitHub's macOS CI no longer applies, since GitHub CI is not used for this plan, and the code
+review gate is replaced below. The real-sandbox authorization still applies: at most 20 sandboxes over the whole plan, 3
+already used, under the same rules.
 
-The retained recorder runs are `6c056f69-f776-46c5-8b18-57c7d26a268c` (normal keep-alive) and
-`cd0092d4-81b4-4624-8b34-98c054b394c5` (control). Both measurement commands completed with complete, untruncated
-evidence; their zero command exits mean the observations completed, not that tunnel acceptance passed. This used Linux
-OpenSSH 9.6p1 and closed the pipe in-process, isolating the pipe from Linux's existing kernel parent-death cleanup. An
-independent observer connection deliberately kept the sandbox awake during each window, so these runs make no
-idle-suspension claim or native macOS claim.
+Why the pipe cannot work: through Tensorlake's ssh gateway, an ssh client holding a remote-forwarded connection never
+learns that the sandbox end is gone (`lore/2026-11-07-tensorlake-gateway-forwarded-channels.md`). The supervisor
+connection carries no forwarded ssh channel. When the helm dies, the end of its input closes that connection through the
+gateway; when the helm's machine goes silent, the sandbox side's 120-second stdin watchdog ends the proxy process, which
+closes its socket to the supervisor (`SPEC_impl.md`, the Tensorlake connection section). When a connection ends, the
+supervisor drops that connection's relays at once, before its other teardown waits. Tunnels built on that connection
+inherit both guarantees on every platform, with no child process left to outlive the helm.
 
-One additional small sandbox was used, bringing the plan total to 3 of its authorized 20. It is terminated, its snapshot
-sweep found nothing to remove, and the test SSH key is deregistered. No owned cloud resources remain.
+### The design
 
-[Draft #3072](https://github.com/scode/farhelm/pull/3072/changes) still contains only the previously successful macOS
-test-server prerequisite. No product fix or alternative lifetime mechanism has been pushed. The remaining silence,
-lease-kill, idle-suspension and final macOS regression checks were not run because this required gateway check failed.
+Settled with the maintainer:
 
-Should the full local teardown requirement remain while a separate local lifetime mechanism, such as a watcher, is
-investigated, or should the requirement be narrowed to ending the sandbox session and listeners while allowing local
-connections to linger? Retaining full teardown requires agreeing on a new local cleanup design, then implementing and
-validating it. A watcher would be a separate local process that notices the helm's exit and stops its tunnel; no such
-design is validated or authorized. Narrowing the requirement accepts a local SSH process and held service connection
-that these measurements did not show closing within 185 seconds. I recommend retaining full teardown and discussing the
-revised design before authorizing its implementation.
+- **The supervisor accepts tunnel connections.** Programs in the sandbox keep connecting to `127.0.0.1:<sandbox port>`
+  as today; the supervisor, rather than sshd, listens there. In the maintainer's words: "the spec should allow the
+  supervisor to bind to local ports on tensorlake sandboxes for the purpose of forwarding when the user has configured
+  such forwards". So SPEC.md's "Supervisors listen on no network port" (it appears twice, in the hosts overview and in
+  Security; amend both) gains a narrow exception: IPv4 loopback listeners on a Tensorlake sandbox, on the ports the user
+  configured as the host's recipe tunnels, open only while the connection that claimed them lasts. The helm is what
+  limits claims to Tensorlake hosts; say so, since the supervisor side does not know its host kind.
+- **One transport underneath, everything on top.** The protocol messages and the supervisor's listener handling know
+  nothing about Tensorlake or ssh, so they work over any transport the helm uses to reach a supervisor. Only Tensorlake
+  recipes configure tunnels for now; no other host kind gets a UI for them.
+- **Half-close.** Tunneled connections support half-close, as ssh forwards do today: one side may finish sending while
+  still receiving. The existing relays say outright that no half-close exists, so this needs a per-direction
+  end-of-input message on the wire and a rule that a relay ends when both directions have ended or on failure. It is
+  shared relay code, so the Mac app's localhost tunnels gain it too; keep one relay pump per side rather than a copy.
+- **Scheduling stays as it is.** Relay traffic keeps the existing queueing (on the supervisor, bulk traffic drains after
+  terminal and control traffic). The near-term TODO entry "Review how the helm-to-supervisor connection multiplexes its
+  streams" covers revisiting that; this plan does not change it.
+- **At most 64 tunneled connections at once per host**, counting connections waiting for the helm's answer. The
+  supervisor closes a connection accepted beyond that at once and logs the reason, and the helm also refuses beyond 64:
+  it does not trust the supervisor about how many connections reach the user's own services.
+- **No ssh tunnel remains.** Close draft #3072 (the macOS ssh-server CI prerequisite) without merging; the maintainer
+  agreed, so this closure is not a rejection of the plan. Nothing depends on ssh forwarding any more.
+
+Planner proposals, from the conversation, the repository research and the planning review (change them if the code says
+otherwise, logged as a DECISION):
+
+- **The helm decides where a connection goes.** The supervisor reports only that a claimed port accepted a connection;
+  the helm dials the destination from its own snapshot of the recipe, taken when the host connects. Nothing the sandbox
+  sends can choose a destination. Only a connection with full helm authority can claim ports; a session-authenticated
+  peer (an agent) cannot, as for today's relays.
+- **The helm keeps picking every channel id.** On an accepted connection the supervisor sends an event naming the port
+  and an accepted-connection id it chose. The helm dials the destination with its own bounded timeout first, then opens
+  a relay channel it picked for that accepted connection, or refuses it, and the supervisor closes a refused one. This
+  keeps the protocol's rule that the requester picks channels.
+- **One claim per connection, all or nothing.** After connecting, the helm claims the recipe's ports once. If any port
+  cannot be bound (in use in the sandbox, say), the claim fails as a whole with the reason, as `ExitOnForwardFailure`
+  does today, and the helm retries with the existing backoff while the host stays connected. There is no release
+  message: the listeners close when the claiming connection ends. A reconnect that finds a port still held by the
+  previous connection fails the same way and comes back by retry once that connection's teardown finishes; there is no
+  takeover of another connection's listeners.
+- **Status stays as users see it today:** Tunnels connecting, up, failed, or retrying with backoff in the host details,
+  the amber dot and the attention row. A destination the helm cannot reach fails only that tunneled connection, as with
+  ssh today.
+- **Recipe rules:** keep the 32-tunnel cap and the port-22 refusal (sshd still owns 22). The destination keeps today's
+  rule: any host and port as reached from the helm's machine; strip a bracketed IPv6 literal's brackets before dialing.
+  Recipe edits still take effect on the next connection. The hook that starts tunnels on connect has no access to the
+  connection today; change its shape as needed.
+- **A protocol bump**, as the repository requires for new messages: hosts show Needs update until updated, as with any
+  bump.
+
+### Acceptance criteria
+
+- A program in the sandbox reaches the configured destination through `127.0.0.1:<sandbox port>`, both directions,
+  including several connections at once, half-close, and transfers larger than one relay window.
+- When the helm process dies (SIGKILL), within a few seconds: the sandbox listener refuses connections, a tunneled
+  connection held open sees end-of-file or a reset on both ends (the program in the sandbox and the destination
+  service), and nothing tunnel-related is left running on the helm's machine.
+- When the helm's machine goes silent without the helm dying (SIGSTOP), the sandbox listener goes away within about two
+  to three minutes, and nothing tunnel-related is left in the sandbox.
+- Orderly paths are unchanged for users: tunnels start when the host connects, stop when it disconnects, is suspended or
+  is removed, retry with backoff while it stays connected, and report status and failures as today. After a reconnect,
+  tunnels come back by retry.
+- A session-authenticated peer cannot claim ports or open tunnel relays, and nothing the supervisor sends can change a
+  destination or exceed the 64-connection limit at the helm.
+- SPEC.md: the listener exception in both places, and the Security text rewritten so that recipe tunnels are relays over
+  Farhelm's own connection rather than an ssh forwarding exception. Keep the existing accepted case that a shared ssh
+  connection left by the previous version right after an upgrade can carry the user's own configured forwards. Recipe
+  tunnels stop within seconds when the helm dies and within about two minutes when its machine goes silent, as measured.
+  Keep "A tunnel alone does not prevent Tensorlake's idle suspension" only if it still holds. SPEC_impl.md's
+  recipe-tunnel section is rewritten to the new design and its reasons, and the relay section updated for half-close and
+  supervisor-accepted connections. The website pages that say tunnels need direct gateway access and cannot use
+  ProxyJump are corrected, following `website/AGENTS.md`.
+- A changelog fragment for users (tunnels now end when the desktop app is force-quit or crashes, and work wherever the
+  host itself is reachable), and removal of the TODO.md entry "Tunnels outliving a killed desktop helm on macOS".
+
+### Outline
+
+1. `feat:` relays the supervisor accepts: the claim, the accepted-connection event and the helm's answer, per-connection
+   listeners and teardown, half-close for all relays, the 64-connection cap on both sides, the protocol bump, SPEC.md's
+   listener exception and SPEC_impl.md's relay text, with protocol, supervisor and helm-client tests.
+2. `fix:` recipe tunnels over the supervisor connection: the helm's claim on connect, dialing from its recipe snapshot,
+   status and retry, removal of the tunnel ssh (its arguments, monitor, Linux parent-death code and process tests), the
+   Security text, SPEC_impl.md's recipe-tunnel section, the website pages, the changelog fragment and the TODO.md
+   removal.
+3. Verification on real sandboxes and on the test Mac, recorded in the report (and in a lore entry if the numbers are
+   worth keeping).
+
+Split further if review size demands, without churn.
+
+### Validation
+
+Choose checks per root `AGENTS.md`, "Tests and validation", and `.agents/validation.md`, and report checks run, reused
+and skipped. Expect cargo fmt and clippy, the proto, supervisor and helm tests for what changed through the test
+recorder, the browser specs that cover recipe tunnels and Tensorlake host status on Chromium and WebKit,
+`python -B scripts/check-test-sleeps.py`, `dprint check`, the changelog check and the docs website build.
+
+- **Process death, locally:** a test that runs a child process using the helm's production client and tunnel code
+  against a real supervisor over the local socket, makes the claim, holds a tunneled connection open, kills the child
+  (SIGKILL), and checks that the listener closes and both ends of the held connection see end-of-file or a reset. A real
+  helm never claims ports over the local socket (it claims only for Tensorlake hosts), which is why the child runs the
+  client and tunnel code directly; no ssh is involved.
+- **The maintainer's test Mac, not GitHub CI.** The maintainer provided a dedicated Mac for this plan: "a mac box that
+  it can go nuts on and use to test. dont use github ci. its free to brew install or whatever things it needs. go nuts.
+  its a sandbox for it to playw ith". Its ssh target is the single line in `~/.farhelm-test-mac` on the machine the
+  agents run on. Read it there and never write the target into anything public (reports, PRs, commits, Blocked text).
+  Install what you need and change what you like on it; nothing on it needs preserving. Run the local process-death test
+  there, and run the real-sandbox SIGKILL check below from the Mac as well, since the one macOS-specific link left is
+  macOS's own ssh passing a dead helm's end-of-input on to the sandbox. Create sandboxes from the agents' machine as
+  usual; for the Mac, generate a throwaway ssh key on it, register it from the agents' machine, and remove it when done.
+  Never copy the Tensorlake API key or any other credential to the Mac. Record the macOS version and the recorder ids in
+  the report.
+- **Real sandboxes**, within the remaining budget: a tunnel works end to end through the real gateway; a SIGKILL of a
+  test helm with a tunneled connection held open closes the sandbox listener and both ends within seconds (from the
+  agents' machine and from the test Mac); a frozen helm (SIGSTOP) loses its sandbox listener within about two to three
+  minutes; and the sandbox still idle-suspends once the host is disconnected (use a short idle timeout for that sandbox
+  if the API allows one, otherwise state how long you waited). Use a test helm with its own temporary state, never the
+  maintainer's live install.
+
+### Code review gate
+
+Before finishing each PR, two independent fresh-context reviewers review its changes with the plan's existing charter:
+one on opus at high effort and one on gpt-6.1-sol at high effort. The maintainer demands exactly these two; no
+substitutes and no review swarm. Address both reviewers' findings before moving on. If either cannot be reached after a
+reasonable retry, block as the plan already says.
+
+### Fallbacks
+
+Departures that need the scope reassessment: any new process in the sandbox or on the helm's machine; any change to how
+tunnels are configured or shown to users; changing the multiplexer's scheduling; letting the supervisor choose a
+destination; listener takeover between connections. Block if the supervisor connection's own teardown does not end
+tunnels on the real gateway as the acceptance criteria require, if the test Mac cannot be reached, or if verification
+would need more than the remaining sandbox budget.
+
+### Done
+
+The plan is complete when a linear stack of draft PRs meets the acceptance criteria above, each PR passed both
+reviewers, the test Mac and real-sandbox verification are recorded, #3072 is closed, and the stack removes the TODO.md
+entry. Then deliver and close per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12).
+
+A later change of mind by the maintainer is a follow-up, not a reason to stop the plan.
