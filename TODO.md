@@ -756,6 +756,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `b9bc59c5-c98f-4e0d-92fc-6735b2c9fc50`); host-terminal re-runs `cb57caa4-7c10-4a8b-9a8f-157331af8daa` passed.
   Hypothesis: the WebKit behavior #3061 fixed in two sibling tests with a drained route (FLAKES.md, 2026-11-06).
 
+- **A held host-settings save leaves the dialog body without a keyboard stop on WebKit.**
+  `host-settings scrollports stay reachable while saving` (`e2e/tests/modal-layout.spec.ts`) failed once on WebKit in
+  two full browser runs on 2026-11-07 (runs `627f4a69-8586-40fa-93f6-395295f760d5`,
+  `0e536f3c-fa3d-4a52-8182-0596188a0e0e`) and passed every re-run (`2144e44a-3ab6-436b-886e-9360ea84bd6b`,
+  `2c518375-6a3f-4bab-9321-28b492f1dc5d`). Hypothesis: the scan runs before the body's region attributes follow the
+  viewport shrink (FLAKES.md, 2026-11-07).
+
 ### Difficult deflake
 
 - Restore the release integration gate after the remaining Rust flake reports are resolved. The binary-output loss and
