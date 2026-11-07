@@ -622,14 +622,14 @@ header Close.
 Templates keeps its existing root scroll owner and selected editor's local footer, using the same shared heading and
 action presentation. The leave question reads Keep editing, Discard, Save but still focuses Save when it opens. Its
 single header Close continues through the draft-departure guard. Trash uses the shared header without an icon tile: the
-title retains its can, the total is its summary, and header close shares footer Close's live dismissal guard and
-disabled-hover explanation. Its archive ScrollRegion sits above a pinned footer containing the always-mounted progress
-status and Close, then Delete all. Global confirmation uses a conditional, bounded ScrollRegion immediately above that
-footer; per-host bands remain in the archive body. Both regions retain native keyboard entry and recover toward footer
-controls. Initial focus stays on footer Close; sequential Tab follows header close, body, confirmation when present,
-then footer actions. Phone widths use the shared full-width action stack. At ordinary heights the global question keeps
-its bounded natural height before the archive list gets the remaining space. Short windows compact only Trash's header
-vertical spacing; the archive body and global confirmation retain enough height for keyboard entry and the answers.
+title retains its static can, the total is its summary, and header close shares footer Close's confirmation-aware
+dismissal. Both remain available during cleanup requests. Its archive ScrollRegion sits above a pinned footer containing
+Close, then Delete all. Global confirmation uses a conditional, bounded ScrollRegion immediately above that footer;
+per-host bands remain in the archive body. Both regions retain native keyboard entry and recover toward footer controls.
+Initial focus stays on footer Close; sequential Tab follows header close, body, confirmation when present, then footer
+actions. Phone widths use the shared full-width action stack. At ordinary heights the global question keeps its bounded
+natural height before the archive list gets the remaining space. Short windows compact only Trash's header vertical
+spacing; the archive body and global confirmation retain enough height for keyboard entry and the answers.
 
 Nothing on screen may redraw on its own more than 10 times per second. "On its own" means an indicator or decoration
 that moves, fades, spins, or blinks while nothing about the state it shows has changed; drawing new content because new
@@ -1082,7 +1082,7 @@ survives the panel, the row, and listing failures.
 defines counts and drawn targets; only the same authoritative absence boundary that prunes questions prunes marks.
 Neither filters nor the toolbar own a second copy. The marked toolbar can unmount during an accepted operation, so the
 batch futures and combined confirmation belong to the persistent list owner. Ordinary header owners also stay mounted:
-only their triggers are hidden, preserving Trash's active dialog, queues and operation guard.
+only their triggers are hidden, preserving Trash's active dialog, requests and removal polling.
 
 Single and bulk Stop/Delete share synchronous admission and an owned, initially unpolled completion future. Admission
 does not spawn its request. A batch admits every eligible row before driving any host queue, then awaits one future at a
@@ -4219,30 +4219,41 @@ rename's timestamp.
 
 The UI reads each connected host independently, without sizes for the sidebar count and with sizes for the open dialog.
 Load, connection changes, its own affirmative archive Delete, a managed row disappearing between complete fleet
-listings, dialog open and cleanup completion trigger reads; no new poll runs. A same-connection count remains visible
-during measurement, but an old read generation cannot overwrite this client's deletion result. Other clients' cleanup
-can leave the count stale until the dialog opens. Host-list refresh failures are disclosed rather than treated as proof
-of current reachability. Unknown host counts stay unknown; the global cleanup requires successful, settled listings from
-every reachable host, and refuses a host above the protocol's 10,000-ID batch limit rather than silently omitting it.
+listings, dialog open and cleanup completion trigger reads. A host whose last successful same-incarnation listing says
+`removing` is re-read every three seconds until a successful listing says otherwise. Only that host is polled, with
+sizes while the dialog is open; an unavailable read retains its last removal report. Each host has one owner-scoped poll
+task, which waits for its own read and skips reads during this page's delete requests or another read of that host. A
+same-connection count remains visible during measurement, but an old read generation cannot overwrite this client's
+deletion result. Host-local request ordering also prevents an older poll from replacing a newer measurement or completed
+removal, without invalidating unrelated hosts' reads. Other clients' cleanup can leave the count stale until the dialog
+opens. Host-list refresh failures are disclosed rather than treated as proof of current reachability. Unknown host
+counts stay unknown; the global cleanup requires successful, settled listings from every reachable host, and refuses a
+host above the protocol's 10,000-ID batch limit rather than silently omitting it.
 
 Confirmations freeze deduplicated IDs and observed host incarnations. Diagnostic IDs are selectable for explicit
 forgetting, while every diagnostic remains visible, including several for one ID. Before dispatch the UI rechecks
-connection identity and takes the existing shared operation guard. An immediate single-entry delete freezes only that
-checkout's ID and its host incarnation at click time, requires the full host listing to be eligible, and uses the same
-dispatch and completion path without a confirmation. Each host's frozen IDs are sent one at a time, with host queues
-running concurrently. Connection identity is rechecked before each dispatch, and only trash deletion uses a
-fifteen-minute request deadline; the ordinary mutation deadline stays sixty seconds. The guard lasts until every queue
-finishes. Confirmed removals immediately leave the listing and its count and size totals. Run state retains each host's
-frozen denominator, confirmed removal count, queue position and current request's monotonic start time. The current
-checkout shows the shared reduced-motion-aware spinner and a once-per-second elapsed display; queued checkouts say
-"Waiting". Both trash icons turn upside down and bob with stepped timing within the looping-indicator cap, use the
-universal inactive-window pause, and stay upside down without animation under Reduce Motion. The mounted status region
-counts remaining checkouts, separately naming unchecked records. Per-record issues accumulate across replies. A lost
-cleanup reply stops that host's remaining queue and warns that some contents may already be deleted; it never claims
-that a folder is intact. Other hosts continue, and the UI refetches only after the whole run finishes. Close and Escape
-remain blocked, with Close's tooltip explaining when it becomes available. The archive cue stores row geometry on the
-persistent trash button, consumes it on the local Delete reply, and uses finite Web Animations with reduced-motion
-refusal. No global geometry cache or new asset file is introduced.
+connection identity and checks the existing shared operation guard, without claiming it. Trash's own pending-host state
+rejects overlapping cleanup requests synchronously. An immediate single-entry delete freezes only that checkout's ID and
+its host incarnation at click time, requires the full host listing to be eligible, and uses the same dispatch and
+completion path without a confirmation. Each host receives one frozen batch, with independent host tasks. Confirmed bulk
+submission closes the modal before starting those requests; the persistent `TrashControl` owns their lifetime. An entry
+Delete leaves it open, and closing it does not cancel the accepted request. Connection identity is rechecked before
+dispatch. The fifteen-minute trash deadline remains for older supervisors that still remove inside the request; the
+ordinary mutation deadline stays sixty seconds. Confirmed removals immediately leave the listing and its count and size
+totals. Only the persistent trash icon turns upside down and bobs while requests are pending or a connected host's last
+listing reports removal, with stepped timing within the looping-indicator cap, the universal inactive-window pause, and
+no animation under Reduce Motion. Its tooltip names hosts freeing space and independently discloses retained cleanup
+issues. Opening the dialog does not clear issues. Later successful removals clear only their IDs' old issues; new per-ID
+diagnostics replace older diagnostics for those same IDs. Host-level uncertain outcomes retain their frozen unresolved
+IDs privately. A later reply resolves only selected IDs it confirms removed or answers with a per-ID diagnostic;
+unrelated successes leave uncertainty intact. A newer uncertain result replaces only its overlap with an earlier
+uncertain selection, preserving unrelated IDs and ID-specific refusals. A healthy host registry prunes notices only for
+hosts it omits, including while deletes are pending; disconnected hosts and uncertain registry reads retain them. A
+pending request remembers an observed removal until it finishes, so a late reply cannot recreate those notices even if a
+subsequent registry refresh fails. That fence ends with the request. A lost reply warns that some folders may already be
+deleted; other hosts continue, and the UI refetches after all requests settle. Close and Escape stay available. The
+archive cue stores row geometry on the persistent trash button, consumes it on the local Delete reply, and uses finite
+Web Animations with reduced-motion refusal. No global geometry cache or new asset file is introduced.
 
 ### Runtime state
 

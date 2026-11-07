@@ -4061,8 +4061,9 @@ pub(crate) async fn fetch_checkout_trash(
     resp.json().await.map_err(|e| e.to_string())
 }
 
-/// Delete frozen archive IDs on their original host connection, allowing fifteen
-/// minutes for recursive removal. The UI sends one ID at a time for progress.
+/// Delete one host's frozen archive batch on its original connection. Keep the
+/// fifteen-minute deadline for older supervisors that remove within the request;
+/// newer ones answer after parking folders for background removal.
 /// A transport error can follow completed deletion, so callers always refetch
 /// and describe the outcome as uncertain instead of inventing per-item failures.
 pub(crate) async fn empty_checkout_trash(

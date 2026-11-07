@@ -417,7 +417,7 @@ test("the shipped --font-ui leads with vendored Inter", () => {
 test("technical values and the bell's hidden age copy retain the mono role", () => {
   const stripped = stripComments(fs.readFileSync(APP_CSS_PATH, "utf8"));
   const rules = [...stripped.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
-  for (const selector of ["code", "pre", "kbd", "samp", ".session-pin", ".status-time", ".session-bell-time-spacer", ".trash-entry-elapsed", ".host-update-elapsed"]) {
+  for (const selector of ["code", "pre", "kbd", "samp", ".session-pin", ".status-time", ".session-bell-time-spacer", ".host-update-elapsed"]) {
     assert.ok(rules.some(([, header, body]) => header.split(",").map((part) => part.trim()).includes(selector)
       && /font-family:\s*var\(--font-mono\)\s*;/.test(body)), `${selector} must explicitly use mono`);
   }

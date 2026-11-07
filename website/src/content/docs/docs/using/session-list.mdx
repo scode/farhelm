@@ -78,9 +78,9 @@ so the space comes back shortly after the trash empties. If the host cannot fini
 remains and tries again the next time its supervisor starts (the program that keeps that host's sessions
 running; see [The pieces](/docs/how-it-works/the-pieces/)).
 
-While it deletes, the dialog stays open. Each host counts how many of its checkouts are deleted, the checkout being
-deleted shows how many seconds it has taken, and the rest say **Waiting**. The bottom of the dialog says how many
-checkouts are left.
+Confirming **Delete all** closes the dialog immediately. The trash can turns upside down and bobs while cleanup is
+running; hover it to see which hosts are freeing space. An individual **Delete** keeps the dialog open. Errors remain
+available in the trash, and the trash button tells you to open it for details.
 
 Nothing empties the trash automatically. A deletion in another window updates the count when its managed session
 disappears; emptying the trash in another window can leave this count high until you open the dialog.
