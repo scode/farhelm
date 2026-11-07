@@ -17,6 +17,7 @@ planning and triage scheduling flows, executors, drainers, the landing monitor, 
 | State               | Meaning                                                                       | Held by               |
 | ------------------- | ----------------------------------------------------------------------------- | --------------------- |
 | `pending`           | waiting for an executor: new, answered, or sent back for a follow-up          | nobody                |
+| `held`              | planned, but the maintainer does not want it built yet; never picked          | nobody                |
 | `in-flight <claim>` | an executor is working on it                                                  | that claim's executor |
 | `blocked`           | waiting on the maintainer; the plan file has a `## Blocked` section           | nobody                |
 | `complete`          | every PR built and gated; `reports/<slug>.report.md` delivered; ready to land | nobody                |
@@ -30,6 +31,11 @@ A plan that has landed is not in `INDEX.md` at all. Landing moves its line to `R
 
 It stays there until the maintainer approves it, which ends its tracking, or asks for a follow-up, which puts it back at
 the top of `INDEX.md` as `[pending]`.
+
+A held plan is planned work parked until the maintainer wants it built. Holding decouples planning from scheduling: the
+maintainer can plan whenever they have the time, and decide later when the work runs. No executor picks it, a plan that
+runs after it waits as long as it stays held (its work is not on main), and only the maintainer moves it back to
+`pending`.
 
 `(after x.md)` means the plan may only start once `x.md`'s work is on main. That is the case once `x.md` is no longer
 listed in `INDEX.md`: only landing (`landed`) and abandoning take a line out, and abandoning settles its dependents
@@ -53,20 +59,28 @@ with your own claim id where the state has one; `queue history <slug>` lists the
 each carried), the verb landed. If it still shows the starting state, run the verb again. Anything else is someone
 else's change: handle it as exit 10.
 
-| Verb                                                      | From → to                               | Used by                                    |
-| --------------------------------------------------------- | --------------------------------------- | ------------------------------------------ |
-| `claim <slug> --claim ID`                                 | pending → in-flight                     | an executor that picked the plan           |
-| `unclaim <slug> --claim ID`                               | in-flight → pending                     | the claim holder, giving the plan back     |
-| `block <slug> --claim ID --question FILE`                 | in-flight or landing → blocked          | the claim holder                           |
-| `deliver <slug> --claim ID --report FILE`                 | in-flight → complete                    | the claim holder                           |
-| `start-landing <slug> --claim ID`                         | complete → landing                      | the monitor                                |
-| `stop-landing <slug> --claim ID`                          | landing → complete                      | the claim holder, giving the landing back  |
-| `landed <slug> --claim ID --merged N[,N...] --notes FILE` | landing → `REPORTS.md`                  | the claim holder, once every PR merged     |
-| `release <slug>`                                          | in-flight → pending, landing → complete | only when the maintainer asks              |
-| `answer <slug> --decision FILE`                           | blocked → pending                       | a review session, or the landing monitor   |
-| `follow-up <slug> --decision FILE`                        | `REPORTS.md` → pending, first in line   | a review session                           |
-| `approve <slug>`                                          | `REPORTS.md` → gone                     | a review session                           |
-| `abandon <slug> [--dependents block\|drop-dep]`           | pending, blocked or complete → gone     | a review session, on the maintainer's word |
+| Verb                                                      | From → to                                                    | Used by                                    |
+| --------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------ |
+| `claim <slug> --claim ID`                                 | pending → in-flight                                          | an executor that picked the plan           |
+| `unclaim <slug> --claim ID`                               | in-flight → pending                                          | the claim holder, giving the plan back     |
+| `block <slug> --claim ID --question FILE`                 | in-flight or landing → blocked                               | the claim holder                           |
+| `deliver <slug> --claim ID --report FILE`                 | in-flight → complete                                         | the claim holder                           |
+| `start-landing <slug> --claim ID`                         | complete → landing                                           | the monitor                                |
+| `stop-landing <slug> --claim ID`                          | landing → complete                                           | the claim holder, giving the landing back  |
+| `landed <slug> --claim ID --merged N[,N...] --notes FILE` | landing → `REPORTS.md`                                       | the claim holder, once every PR merged     |
+| `release <slug> [--hold]`                                 | in-flight → pending (held with `--hold`), landing → complete | only when the maintainer asks              |
+| `hold <slug>`                                             | pending → held                                               | only when the maintainer asks              |
+| `unhold <slug>`                                           | held → pending                                               | only when the maintainer asks              |
+| `answer <slug> --decision FILE [--hold]`                  | blocked → pending, or held (see below)                       | a review session, or the landing monitor   |
+| `follow-up <slug> --decision FILE [--hold]`               | `REPORTS.md` → pending (held with `--hold`), first in line   | a review session                           |
+| `approve <slug>`                                          | `REPORTS.md` → gone                                          | a review session                           |
+| `abandon <slug> [--dependents block\|drop-dep]`           | pending, held, blocked or complete → gone                    | a review session, on the maintainer's word |
+
+`--hold` on `release`, `answer` or `follow-up` puts the plan on hold in the same commit. Doing the verb first and
+holding after would publish the plan as `[pending]` in between, and an idle executor could claim it before the hold
+landed. A plan that blocked while on hold (a held plan whose prerequisite was abandoned with `--dependents block`; its
+Blocked section opens "Blocked while on hold") goes back to `[held]` when answered, with or without `--hold`, so an
+answer the landing monitor gives on the maintainer's behalf never schedules work the maintainer parked.
 
 The read-only verbs: `status` (the queue with claims, claim times, open PRs, waiting dependencies, and flags for what a
 person or the monitor should look at, then the landed plans awaiting review; it prints main's commit id first), `check`

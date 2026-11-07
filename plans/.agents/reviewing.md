@@ -70,7 +70,8 @@ what landed, the things they should know, the open questions and possible follow
   maintainer's words verbatim (plus any agreed restatement) to a file and run `queue follow-up --decision <file>`, which
   puts the plan back at the top of `INDEX.md` as `[pending]` with the follow-up in its Decisions. Its report stays, for
   the next round's "since the last review" section. Plans that ran after it no longer wait on it
-  (`plans/.agents/queue.md`, "States, and the script that moves them").
+  (`plans/.agents/queue.md`, "States, and the script that moves them"). When the maintainer wants the follow-up planned
+  but not built yet, add `--hold`.
 - something that deserves its own plan or a TODO.md entry: that is a separate request handled the usual way (planning,
   or a TODO edit as `AGENTS.md`, "TODO.md and FLAKES.md", describes), after which this plan can be approved.
 - leave it for later, which changes nothing.
@@ -78,7 +79,9 @@ what landed, the things they should know, the open questions and possible follow
 For each blocked plan, start with the same context, then present the Blocked question, and ask for a decision:
 
 - answer: the maintainer's words verbatim (plus any agreed restatement) to `queue answer --decision <file>`, which moves
-  the question and the answer into Decisions and puts the plan back to `[pending]`;
+  the question and the answer into Decisions and puts the plan back to `[pending]`. When the maintainer also wants it
+  parked, add `--hold`, which puts it on hold in the same commit. A plan whose question opens "Blocked while on hold"
+  goes back on hold either way; say so, and that "unhold plan X" schedules it;
 - abandon (the abandoning paragraph at the end of this section);
 - leave it for later.
 
@@ -88,10 +91,11 @@ sends it back to an executor, which builds on what landed.
 Record each decision as it is made, so executors can pick up answered and followed-up plans while the review goes on.
 End by summarizing what was approved, sent back and answered.
 
-Abandoning a plan: only a plan still in `INDEX.md` can be abandoned (pending, blocked, or complete; a claimed one is
-released first). Close its open PRs, then run `queue abandon`. If other plans run after it, ask the maintainer whether
-they block (`--dependents block`, which gives each one a Blocked question about it) or drop the dependency
-(`--dependents drop-dep`). Ask what happens to the plan's source (the TODO entry goes back to unplanned, or the triage
-outcome's Execution back to `pending`, or something else), and land that as its own PR per `jjstack`. Abandoning leaves
-whatever already reached main in place, so for a plan with merged PRs, ask whether a revert is wanted. A landed plan
-cannot be abandoned: its work is on main, and undoing it is a follow-up.
+Abandoning a plan: only a plan still in `INDEX.md` can be abandoned (pending, held, blocked, or complete; a claimed one
+is released first). Close its open PRs, then run `queue abandon`. If other plans run after it, ask the maintainer
+whether they block (`--dependents block`, which gives each one a Blocked question about it; a held one stays on hold
+through the question and its answer) or drop the dependency (`--dependents drop-dep`). Ask what happens to the plan's
+source (the TODO entry goes back to unplanned, or the triage outcome's Execution back to `pending`, or something else),
+and land that as its own PR per `jjstack`. Abandoning leaves whatever already reached main in place, so for a plan with
+merged PRs, ask whether a revert is wanted. A landed plan cannot be abandoned: its work is on main, and undoing it is a
+follow-up.

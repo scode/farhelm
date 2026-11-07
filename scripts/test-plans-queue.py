@@ -309,6 +309,7 @@ class GrammarTest(QueueTestCase):
             line("blocked", "c", "has (parentheses) inside", deps=("a", "b")),
             line("complete", "d"),
             line("landing 3d4e5f", "e"),
+            line("held", "f", deps=("a",)),
         )
         parsed, problems = pq.parse_index(text)
         self.assertEqual(problems, [])
@@ -317,6 +318,7 @@ class GrammarTest(QueueTestCase):
         self.assertEqual((parsed.find("e").state, parsed.find("e").claim), ("landing", "3d4e5f"))
         self.assertEqual(parsed.find("c").deps, ["a", "b"])
         self.assertEqual(parsed.find("c").summary, "has (parentheses) inside")
+        self.assertEqual((parsed.find("f").state, parsed.find("f").claim), ("held", None))
 
     def test_malformed_lines_are_reported_not_carried(self):
         """A stray line, an unknown state, or a bad claim id is a grammar problem `check` reports."""
@@ -486,6 +488,30 @@ class InvariantTest(QueueTestCase):
         ):
             self.assertIn(expected, found)
 
+    def test_base_rules_keep_holds_with_the_script(self):
+        """A planning PR may put a new plan on hold, but holding or unholding a plan already on main is the script's.
+
+        Planning a plan as held is the point of the held state: the maintainer plans now and decides later when it
+        runs. Flipping an existing line in a PR is refused because a conflict resolved by taking the PR's stale side
+        would silently undo a hold or an unhold that landed on main in the meantime.
+        """
+        base = {
+            pq.INDEX_PATH: index(line("pending", "a"), line("held", "b")),
+            pq.plan_path("a"): plan(),
+            pq.plan_path("b"): plan(),
+        }
+        flipped = dict(base)
+        flipped[pq.INDEX_PATH] = index(line("held", "a"), line("pending", "b"))
+        found = "\n".join(pq.base_violations(snapshot(base), snapshot(flipped)))
+        self.assertIn("a: state changed from [pending]", found)
+        self.assertIn("b: state changed from [held]", found)
+
+        good = dict(base)
+        good[pq.INDEX_PATH] = index(line("pending", "a"), line("held", "b", "reworded"), line("held", "new"))
+        good[pq.plan_path("b")] = plan("Revised while held")
+        good[pq.plan_path("new")] = plan()
+        self.assertEqual(pq.base_violations(snapshot(base), snapshot(good)), [])
+
     def test_base_rules_allow_ordinary_planning(self):
         """New pending plans, reordering, summary edits and revising a pending plan are what planning PRs do."""
         base = {
@@ -586,6 +612,122 @@ class TransitionTest(QueueTestCase):
         self.assertNotIn(pq.plan_path("a"), files)
         self.assertNotIn(pq.report_path("a"), files)
         self.assertEqual(files[pq.REPORTS_PATH], reports())
+
+    def test_a_held_plan_is_never_claimed_until_unheld(self):
+        """Holding is how the maintainer plans work without scheduling it: no executor may claim a held plan, and the
+        plans that run after it keep waiting, because its work is not on main. Unholding makes it an ordinary pending
+        plan again, in the same place in the queue, and `history` lists both commits so a review can see who held it
+        when."""
+        h = self.harness(
+            index(line("pending", "a"), line("pending", "b", deps=("a",)), line("pending", "c")),
+            a=plan(),
+            b=plan(),
+            c=plan(),
+        )
+        self.assertEqual(h.run("hold", "a")[0], 0)
+        self.assertEqual(h.state("a"), "held")
+        self.assertEqual(h.fake.commits[h.fake.refs["main"]]["message"], "chore(plans): hold a\n")
+        self.assertEqual(h.run("claim", "a", "--claim", "0a1b2c")[0], pq.EXIT_PRECONDITION)
+        self.assertEqual(h.run("claim", "b", "--claim", "0a1b2c")[0], pq.EXIT_PRECONDITION)
+        self.assertEqual(h.run("hold", "a")[0], pq.EXIT_PRECONDITION)
+
+        self.assertEqual(h.run("unhold", "a")[0], 0)
+        self.assertEqual(h.fake.commits[h.fake.refs["main"]]["message"], "chore(plans): unhold a\n")
+        parsed, _ = pq.parse_index(h.fake.files()[pq.INDEX_PATH])
+        states = [(e.slug, e.state) for e in parsed.entries]
+        self.assertEqual(states, [("a", "pending"), ("b", "pending"), ("c", "pending")])
+        self.assertEqual(h.run("unhold", "a")[0], pq.EXIT_PRECONDITION)
+        self.assertEqual(h.run("claim", "a", "--claim", "0a1b2c")[0], 0)
+
+    def test_only_a_pending_plan_can_be_held(self):
+        """A claimed plan has a holder still building it, a blocked one waits on the maintainer's answer, and a
+        complete one is finished work; holding any of them would strand that work or its holder."""
+        h = self.harness(
+            index(
+                line("in-flight 0a1b2c", "f"),
+                line("blocked", "b"),
+                line("complete", "c"),
+                line("landing 3d4e5f", "l"),
+            ),
+            f=plan(),
+            b=plan() + "\n## Blocked\n\nWhy?\n",
+            c=plan(),
+            l=plan(),
+        )
+        h.fake.land("main", {pq.report_path("c"): "# C\n", pq.report_path("l"): "# L\n"})
+        for slug in ("f", "b", "c", "l", "nope"):
+            with self.subTest(slug=slug):
+                self.assertEqual(h.run("hold", slug)[0], pq.EXIT_PRECONDITION)
+                self.assertEqual(h.run("unhold", slug)[0], pq.EXIT_PRECONDITION)
+
+    def test_release_and_answer_can_put_a_plan_straight_on_hold(self):
+        """Releasing or answering and then holding would publish the plan as pending in between, and an idle executor
+        could claim it before the hold landed. `--hold` makes it one commit. A landing cannot be put on hold: its work
+        is finished, and only the monitor lands it."""
+        h = self.harness(
+            index(line("in-flight 0a1b2c", "f"), line("blocked", "b"), line("landing 3d4e5f", "l")),
+            f=plan(),
+            b=plan() + "\n## Blocked\n\nBlocked on 2026-11-01 (claim 0a1b2c).\n\nWhich way?\n",
+            l=plan(),
+        )
+        h.fake.land("main", {pq.report_path("l"): "# L\n"})
+        self.assertEqual(h.run("release", "f", "--hold")[0], 0)
+        self.assertEqual(h.state("f"), "held")
+        self.assertIn("put the plan on hold", h.fake.commits[h.fake.refs["main"]]["message"])
+        self.assertEqual(h.run("release", "l", "--hold")[0], pq.EXIT_PRECONDITION)
+        self.assertEqual(h.state("l"), "landing 3d4e5f")
+
+        decision = h.text_file("d.md", "Go left, but not yet.\n")
+        self.assertEqual(h.run("answer", "b", "--decision", decision, "--hold")[0], 0)
+        self.assertEqual(h.state("b"), "held")
+        text = h.fake.files()[pq.plan_path("b")]
+        self.assertEqual(pq.blocked_sections(text), [])
+        self.assertIn("Go left, but not yet.", text)
+
+    def test_a_follow_up_can_go_straight_on_hold(self):
+        """A follow-up the maintainer wants parked must not be pending even for a moment, or an idle executor could
+        claim it before a separate `hold` landed. Found in review. It still goes to the top of the queue, so that
+        unholding it later gives it the precedence a follow-up has."""
+        h = self.harness(index(line("pending", "b")), a=plan(), b=plan())
+        h.fake.land("main", {pq.report_path("a"): "# R\n", pq.REPORTS_PATH: reports(landed("a"))})
+        self.assertEqual(h.run("follow-up", "a", "--decision", h.text_file("d.md", "More.\n"), "--hold")[0], 0)
+        parsed, _ = pq.parse_index(h.fake.files()[pq.INDEX_PATH])
+        self.assertEqual([(e.slug, e.state) for e in parsed.entries], [("a", "held"), ("b", "pending")])
+        self.assertEqual(h.run("claim", "a", "--claim", "0a1b2c")[0], pq.EXIT_PRECONDITION)
+
+    def test_a_held_plan_can_be_abandoned(self):
+        """A plan put on hold may turn out not to be wanted at all; abandoning it must not require scheduling it first.
+        Its dependents are settled the same way as for any abandoned plan."""
+        h = self.harness(index(line("held", "a"), line("pending", "b", deps=("a",))), a=plan(), b=plan())
+        self.assertEqual(h.run("abandon", "a", "--dependents", "drop-dep")[0], 0)
+        self.assertEqual(h.state("a"), "gone")
+        self.assertEqual(pq.parse_index(h.fake.files()[pq.INDEX_PATH])[0].find("b").deps, [])
+
+    def test_a_held_dependent_of_an_abandoned_plan_keeps_its_hold(self):
+        """A held plan that ran after an abandoned one must face the question of what to do without that work, and
+        must not lose its hold over it. Found in review: the first version refused `--dependents block` outright, so
+        the maintainer could only drop the dependency or unhold the plan. The landing monitor answers most blocks on
+        the maintainer's behalf, so the answer itself must send the plan back on hold rather than to an executor;
+        `drop-dep` keeps it held as it was."""
+        h = self.harness(
+            index(line("pending", "a"), line("held", "b", deps=("a",)), line("pending", "c", deps=("a",))),
+            a=plan(),
+            b=plan(),
+            c=plan(),
+        )
+        self.assertEqual(h.run("abandon", "a", "--dependents", "block")[0], 0)
+        self.assertEqual((h.state("b"), h.state("c")), ("blocked", "blocked"))
+        self.assertIn(pq.HELD_BLOCK_PREFIX, h.fake.files()[pq.plan_path("b")])
+        self.assertNotIn(pq.HELD_BLOCK_PREFIX, h.fake.files()[pq.plan_path("c")])
+        decision = h.text_file("d.md", "Proceed without it.\n")
+        self.assertEqual(h.run("answer", "b", "--decision", decision)[0], 0)
+        self.assertEqual(h.run("answer", "c", "--decision", decision)[0], 0)
+        self.assertEqual((h.state("b"), h.state("c")), ("held", "pending"))
+
+        h = self.harness(index(line("pending", "a"), line("held", "b", deps=("a",))), a=plan(), b=plan())
+        self.assertEqual(h.run("abandon", "a", "--dependents", "drop-dep")[0], 0)
+        self.assertEqual(h.state("b"), "held")
+        self.assertEqual(pq.parse_index(h.fake.files()[pq.INDEX_PATH])[0].find("b").deps, [])
 
     def test_commit_messages_are_the_fixed_templates(self):
         """Bookkeeping commits skip PR review and the commit-message review, so their wording is pinned here."""
@@ -1197,6 +1339,38 @@ class WakeCheckTest(QueueTestCase):
         self.fake.land("main", {pq.plan_path("a"): plan("Revised")})
         self.assertTrue(self.wakes())
 
+    def test_holding_and_unholding_both_wake(self):
+        """Holding a pending plan can free a newer one: picking never lets a newer plan overtake an older one it
+        skipped for conflicting with unlanded work, so once the older one is held the newer one may be picked. Found in
+        review: the first version ignored holds of pending plans, and the newer plan slept until something unrelated
+        changed. Taking a plan off hold makes it eligible, which must wake an executor too. A hold already in place at
+        the baseline does not wake again."""
+        self.fake.land(
+            "main",
+            {
+                pq.INDEX_PATH: index(line("pending", "a"), line("in-flight 0a1b2c", "b"), line("pending", "c")),
+                pq.plan_path("c"): plan(),
+            },
+        )
+        self.baseline = self.fake.refs["main"]
+        self.set_index(line("held", "a"), line("in-flight 0a1b2c", "b"), line("pending", "c"))
+        self.assertTrue(self.wakes())
+        self.baseline = self.fake.refs["main"]
+        self.set_index(line("held", "a"), line("in-flight 1a2b3c", "b"), line("pending", "c"))
+        self.assertFalse(self.wakes(), "a hold already at the baseline is not new")
+        self.set_index(line("pending", "a"), line("in-flight 1a2b3c", "b"), line("pending", "c"))
+        self.assertTrue(self.wakes())
+
+    def test_a_release_onto_hold_wakes(self):
+        """An idle executor may have skipped a pending plan for conflicting with an in-flight one. Releasing that plan
+        onto hold ends the conflict when it had no PRs, exactly as a block does, so it must wake executors; otherwise
+        the skipped plan waits for some unrelated change. Found in review. The transition is the real `release --hold`,
+        not a hand-written index."""
+        h = Harness(self.fake, self.scratch)
+        self.assertEqual(h.run("release", "b", "--hold")[0], 0)
+        self.assertEqual(h.state("b"), "held")
+        self.assertTrue(self.wakes())
+
     def test_review_bookkeeping_is_ignored(self):
         """Approving a landed plan touches only REPORTS.md and its own files, none of which give an executor work."""
         self.fake.land("main", {pq.REPORTS_PATH: reports(), "plans/AGENTS.md": "new rules\n"})
@@ -1275,8 +1449,8 @@ class StatusTest(QueueTestCase):
     def test_flags(self):
         """status names the situations someone must act on: a landing that stopped before `landed` (with the merged
         PRs to pass it), a landing whose PRs closed without merging, a complete plan with nothing left to land,
-        unlanded work from an earlier round, and a pending plan's unmet dependency. Landed plans awaiting review are
-        listed after the queue."""
+        unlanded work from an earlier round (on a pending or a held plan), and a pending plan's unmet dependency.
+        Landed plans awaiting review are listed after the queue."""
         fake = FakeGitHub(
             base_files(
                 index(
@@ -1285,12 +1459,14 @@ class StatusTest(QueueTestCase):
                     line("complete", "e"),
                     line("pending", "b"),
                     line("pending", "c", deps=("a",)),
+                    line("held", "h"),
                 ),
                 a=plan(),
                 b=plan(),
                 c=plan(),
                 d=plan(),
                 e=plan(),
+                h=plan(),
                 r=plan(),
             )
         )
@@ -1304,7 +1480,7 @@ class StatusTest(QueueTestCase):
                 pq.REPORTS_PATH: reports(landed("r", (2, 3))),
             },
         )
-        fake.pulls = [{"number": 3, "ref": "plan/b/01-x"}]
+        fake.pulls = [{"number": 3, "ref": "plan/b/01-x"}, {"number": 7, "ref": "plan/h/01-x"}]
         fake.closed = {4: {"ref": "plan/a/01-x", "merged": True}, 5: {"ref": "plan/d/01-x", "merged": False}}
         data = pq.status(fake, "main", self.scratch, datetime.datetime(2026, 10, 3, tzinfo=datetime.timezone.utc))
         by_slug = {p["slug"]: p for p in data["plans"]}
@@ -1312,10 +1488,12 @@ class StatusTest(QueueTestCase):
         self.assertTrue(any("ask the maintainer" in f for f in by_slug["d"]["flags"]))
         self.assertTrue(any("none found merged" in f and "ask the maintainer" in f for f in by_slug["e"]["flags"]))
         self.assertIn("unlanded work from an earlier round", by_slug["b"]["flags"])
+        self.assertIn("unlanded work from an earlier round", by_slug["h"]["flags"])
         self.assertEqual(by_slug["c"]["deps_waiting"], ["a"])
         self.assertEqual(data["landed"], [{"slug": "r", "landed": "2026-10-04", "prs": [2, 3]}])
         rendered = pq.render_status(data)
         self.assertIn("[landing 3d4e5f] a", rendered)
+        self.assertIn("[held] h | PRs #7", rendered)
         self.assertIn("[landed 2026-10-04] r | PRs #2, #3 | report awaiting review", rendered)
 
     def test_a_released_landing_whose_prs_all_merged_can_be_finished(self):

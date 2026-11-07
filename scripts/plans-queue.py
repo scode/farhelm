@@ -85,7 +85,16 @@ DEP_ITEM_RE = re.compile(r"`([^`]+)\.md`")
 
 # `in-flight` is an executor's claim on a plan it builds; `landing` is the monitor's claim on a complete plan it merges.
 # Both carry the claim id of whoever holds them, and only that holder may move the plan on.
-SIMPLE_STATES = ("pending", "blocked", "complete")
+#
+# `held` is a plan that is fully planned but that the maintainer does not want built yet. It exists so planning can
+# happen whenever the maintainer has the time for it, decoupled from when the work should run: no executor ever picks a
+# held plan, and only the maintainer's `unhold` makes it pending again.
+SIMPLE_STATES = ("pending", "held", "blocked", "complete")
+
+# How the script opens a Blocked section it writes for a held plan. `answer` reads it to send such a plan back on hold
+# rather than to an executor: the landing monitor answers most blocks on the maintainer's behalf, and an answer that
+# made a held plan pending would schedule work the maintainer had parked.
+HELD_BLOCK_PREFIX = "Blocked while on hold"
 CLAIM_STATES = ("in-flight", "landing")
 
 # A landed plan's line in REPORTS.md. The link makes the file browsable on GitHub; it must name the plan's own report.
@@ -586,11 +595,15 @@ def new_violations(before: Snapshot, after: Snapshot, touched: set[str]) -> tupl
 def base_violations(base: Snapshot, tree: Snapshot) -> list[str]:
     """What a planning PR must not do to the queue that `base` (main) already holds.
 
-    A planning PR may add plan files with new `[pending]` lines, reorder lines, reword a summary, and revise the plan
-    file of a plan that is pending or blocked on main. It must not change any line's state or dependencies, drop a
-    line, add a line in any other state, or touch a report, REPORTS.md, or the file of a plan in any other state
-    (including a landed one). Without this a planning agent resolving a textual conflict by taking its own side could
-    turn a claim back into `[pending]`, and a second executor would build the same plan.
+    A planning PR may add plan files with new `[pending]` or `[held]` lines, reorder lines, reword a summary, and
+    revise the plan file of a plan that is pending, held or blocked on main. It must not change any line's state or
+    dependencies, drop a line, add a line in any other state, or touch a report, REPORTS.md, or the file of a plan in
+    any other state (including a landed one). Without this a planning agent resolving a textual conflict by taking its
+    own side could turn a claim back into `[pending]`, and a second executor would build the same plan.
+
+    Holding or unholding a plan that is already on main is a state change like any other, so it goes through the
+    script's `hold` and `unhold` verbs, never a planning PR: a stale side of a conflict could otherwise silently undo
+    the maintainer's latest hold or unhold.
     """
     # A base without a queue (before the queue existed) constrains nothing.
     base_index, _ = parse_index(base.read(INDEX_PATH)) if INDEX_PATH in base.files else (Index("", []), [])
@@ -605,14 +618,14 @@ def base_violations(base: Snapshot, tree: Snapshot) -> list[str]:
             found.append(f"{old.slug}: state changed from [{old.state_text()}] (only the queue script moves states)")
         if new.deps != old.deps:
             found.append(f"{old.slug}: dependencies changed")
-        if old.state not in ("pending", "blocked") and tree.files.get(plan_path(old.slug)) != base.files.get(
+        if old.state not in ("pending", "held", "blocked") and tree.files.get(plan_path(old.slug)) != base.files.get(
             plan_path(old.slug)
         ):
             if tree.read(plan_path(old.slug)) != base.read(plan_path(old.slug)):
                 found.append(f"{old.slug}: plan file changed while [{old.state}] on main")
     for new in tree_index.entries:
-        if base_index.find(new.slug) is None and new.state != "pending":
-            found.append(f"{new.slug}: new line must be [pending]")
+        if base_index.find(new.slug) is None and new.state not in ("pending", "held"):
+            found.append(f"{new.slug}: new line must be [pending] or [held]")
     base_landed, _ = read_reports(base)
     for old in base_landed.entries:
         path = plan_path(old.slug)
@@ -874,6 +887,7 @@ class Request:
     text: str | None = None
     dependents: str | None = None
     merged: list[int] = dataclasses.field(default_factory=list)
+    hold: bool = False
     today: str = ""
 
 
@@ -959,7 +973,9 @@ def plan_transition(req: Request, snap: Snapshot, gh: GitHub) -> Change:
             decision = f"### {req.today}: follow-up after review\n\n{req.text.strip()}"
             writes[plan] = append_decision(snap.read(plan), decision)
             # A follow-up asks for more on work already on main, so it goes ahead of everything waiting to be picked.
-            index.items.insert(0, Entry(state="pending", slug=req.slug, summary=landed.summary, deps=[]))
+            # With `--hold` it goes there parked, in the same commit, for the same reason as `release --hold`.
+            state = "held" if req.hold else "pending"
+            index.items.insert(0, Entry(state=state, slug=req.slug, summary=landed.summary, deps=[]))
             # Plans that run after this one waited for its work to be on main, and it is. Putting the line back must not
             # hold them up again until the follow-up lands: by the maintainer's choice, changes keep flowing, and a
             # follow-up that would break a dependent is theirs to handle by hand.
@@ -984,11 +1000,31 @@ def plan_transition(req: Request, snap: Snapshot, gh: GitHub) -> Change:
         _require(entry, ("in-flight",), req.claim)
         entry.state, entry.claim = "pending", None
         message = f"chore(plans): give back {req.slug}\n\nClaim {req.claim}.\n"
+    elif req.verb == "hold":
+        # Only a pending plan: a claimed one has a holder who would keep building it, a blocked one already waits on
+        # the maintainer (and its answer is what moves it on), and a complete one is finished work the monitor lands.
+        _require(entry, ("pending",))
+        entry.state = "held"
+        message = f"chore(plans): hold {req.slug}\n"
+    elif req.verb == "unhold":
+        _require(entry, ("held",))
+        entry.state = "pending"
+        message = f"chore(plans): unhold {req.slug}\n"
     elif req.verb == "release":
-        _require(entry, CLAIM_STATES)
-        message = f"chore(plans): release {req.slug}\n\nThe maintainer released claim {entry.claim}.\n"
-        # A released landing goes back to waiting for a lander, not for an executor: the plan's work is finished.
-        entry.state, entry.claim = ("pending" if entry.state == "in-flight" else "complete"), None
+        if req.hold:
+            # Releasing straight onto hold is one commit on purpose. A release followed by `hold` would publish the
+            # plan as pending in between, and an idle executor woken by that could claim it before the hold landed.
+            _require(entry, ("in-flight",))
+            message = (
+                f"chore(plans): release {req.slug}\n\n"
+                f"The maintainer released claim {entry.claim} and put the plan on hold.\n"
+            )
+            entry.state, entry.claim = "held", None
+        else:
+            _require(entry, CLAIM_STATES)
+            message = f"chore(plans): release {req.slug}\n\nThe maintainer released claim {entry.claim}.\n"
+            # A released landing goes back to waiting for a lander, not for an executor: the plan's work is finished.
+            entry.state, entry.claim = ("pending" if entry.state == "in-flight" else "complete"), None
     elif req.verb == "block":
         _require(entry, CLAIM_STATES, req.claim)
         assert req.text is not None
@@ -1031,11 +1067,13 @@ def plan_transition(req: Request, snap: Snapshot, gh: GitHub) -> Change:
             f"{quote(question)}\n\nThe maintainer's answer:\n\n{req.text.strip()}"
         )
         writes[plan] = append_decision(remaining, decision)
-        entry.state = "pending"
+        # `--hold` answers and parks the plan in one commit, for the same reason as `release --hold`. A plan that was
+        # blocked while on hold goes back on hold whoever answers, so the monitor's answer cannot schedule it.
+        entry.state = "held" if req.hold or question.startswith(HELD_BLOCK_PREFIX) else "pending"
         message = f"chore(plans): answer {req.slug}\n"
     elif req.verb == "abandon":
         # A claimed plan has a holder who would keep working on it; that claim is released first, on purpose.
-        _require(entry, ("pending", "blocked", "complete"))
+        _require(entry, ("pending", "held", "blocked", "complete"))
         open_prs = plan_pulls(gh.open_pulls(), req.slug)
         if open_prs:
             numbers = ", ".join(f"#{p['number']}" for p in open_prs)
@@ -1060,7 +1098,9 @@ def _settle_dependents(req: Request, snap: Snapshot, dependents: list[Entry], wr
 
     Removing the line would silently satisfy their `(after ...)` clause, and they would be built against a main that
     lacks the work they were written on top of. So abandoning refuses until the maintainer says which: `block` puts
-    each dependent in front of them with a generated question, `drop-dep` keeps them pending without the dependency.
+    each dependent in front of them with a generated question, `drop-dep` keeps them pending (or held) without the
+    dependency. A held dependent that is blocked keeps its hold through the block: its question opens with
+    HELD_BLOCK_PREFIX, and answering it puts the plan back on hold.
     """
     names = ", ".join(e.slug for e in dependents)
     if req.dependents is None:
@@ -1071,15 +1111,18 @@ def _settle_dependents(req: Request, snap: Snapshot, dependents: list[Entry], wr
         if req.dependents == "drop-dep":
             dep.deps = [d for d in dep.deps if d != req.slug]
             continue
-        if dep.state != "pending":
+        if dep.state not in ("pending", "held"):
             raise Precondition(
                 f"{dep.slug} depends on {req.slug} but is [{dep.state}]; settle it first or use drop-dep"
             )
+        opening = f"{HELD_BLOCK_PREFIX} on {req.today}" if dep.state == "held" else f"Blocked on {req.today}"
         question = (
-            f"Blocked on {req.today} because the plan it runs after, `{req.slug}.md`, was abandoned before landing. "
+            f"{opening} because the plan it runs after, `{req.slug}.md`, was abandoned before landing. "
             f"This plan was written assuming that work would be on main. Decide whether it should proceed without it, "
             f"be revised, or be abandoned too."
         )
+        if dep.state == "held":
+            question += " Answering this puts the plan back on hold; it is scheduled only once it is unheld."
         writes[plan_path(dep.slug)] = append_section(snap.read(plan_path(dep.slug)), "Blocked", question)
         dep.state = "blocked"
         dep.deps = [d for d in dep.deps if d != req.slug]
@@ -1211,13 +1254,16 @@ def wake_check(gh: GitHub, baseline: str, ref: str, role: str = "executor") -> b
     the baseline commit rather than digesting one commit, because a claim and the release of a claim look the same to
     any function of a single state.
 
-    An executor wakes when a plan becomes eligible that was not (new, answered, followed up, given back, a dependency
-    dropped), when an eligible plan is revised or the eligible plans are reordered, when a plan leaves INDEX.md (it
-    landed or was abandoned, which can satisfy a dependency or end a conflict that made an executor skip a plan), or
-    when an in-flight plan blocks. That last one is conservative: a plan that blocks before opening any PR stops being
-    unlanded work, so a plan skipped for conflicting with it may now be picked; the filter cannot see PRs and wakes for
-    every block, which are rare. Plans merely leaving eligibility, which is what a claim does, never wake it, and
-    neither do deliveries, landing claims, or anything that only touches REPORTS.md or the reports.
+    An executor wakes when a plan becomes eligible that was not (new, answered, followed up, given back, taken off
+    hold, a dependency dropped), when an eligible plan is revised or the eligible plans are reordered, when a plan
+    leaves INDEX.md (it landed or was abandoned, which can satisfy a dependency or end a conflict that made an executor
+    skip a plan), when an in-flight plan blocks, or when any plan goes on hold. The block case is conservative: a
+    plan that blocks before opening any PR stops being unlanded work, so a plan skipped for conflicting with it may now
+    be picked; the filter cannot see PRs and wakes for every block, which are rare. A hold wakes for the same reason
+    when it comes from a release, and also when it parks a pending plan: picking never lets a newer plan overtake an
+    older one it skipped for conflicts, so holding the older one can free the newer one. Holds are the maintainer's
+    own actions and rare, so waking for every one costs little. Plans leaving eligibility by being claimed never wake
+    it, and neither do deliveries, landing claims, or anything that only touches REPORTS.md or the reports.
 
     A lander wakes when a plan is complete now with a report it was not complete with at the baseline. Comparing the
     report, not just the state, matters when the baseline is older than the last delivery: a plan that was complete at
@@ -1254,6 +1300,9 @@ def wake_check(gh: GitHub, baseline: str, ref: str, role: str = "executor") -> b
         return True
     was_in_flight = {e.slug for e in old.entries if e.state == "in-flight"}
     if any(e.state == "blocked" and e.slug in was_in_flight for e in new.entries):
+        return True
+    was_held = {e.slug for e in old.entries if e.state == "held"}
+    if any(e.state == "held" and e.slug not in was_held for e in new.entries):
         return True
     return not _is_subsequence(_eligible(after, new), _eligible(before, old))
 
@@ -1303,9 +1352,9 @@ def status(gh: GitHub, branch: str, logs_dir: pathlib.Path, now: datetime.dateti
     an executor or a monitor that died; a landing claim is judged by the monitor's log, an executor's by the plan's
     working log), a landing plan with no open PRs (a landing that stopped before `landed`), a complete plan with no
     open PRs (merged ones mean a landing that was released after its last merge and only needs `landed`; none merged
-    means its PRs were closed and the maintainer must decide), and a pending plan that still has open PRs (unlanded
-    work from an earlier round, which conflict judgments must count). Landed plans awaiting review are listed after
-    the queue.
+    means its PRs were closed and the maintainer must decide), and a pending or held plan that still has open PRs
+    (unlanded work from an earlier round, which conflict judgments must count). Landed plans awaiting review are
+    listed after the queue.
     """
     head = gh.head(branch)
     snap, _ = remote_snapshot(gh, head, {})
@@ -1367,7 +1416,7 @@ def status(gh: GitHub, branch: str, logs_dir: pathlib.Path, now: datetime.dateti
                 item["flags"].append(
                     "complete, but no open PRs and none found merged (search can lag a minute): ask the maintainer"
                 )
-        if entry.state == "pending" and prs:
+        if entry.state in ("pending", "held") and prs:
             item["flags"].append("unlanded work from an earlier round")
         plans.append(item)
     landed = [{"slug": r.slug, "landed": r.date, "prs": r.prs} for r in reports.entries]
@@ -1457,6 +1506,8 @@ def build_parser() -> argparse.ArgumentParser:
         ("stop-landing", True, None),
         ("landed", True, "--notes"),
         ("release", False, None),
+        ("hold", False, None),
+        ("unhold", False, None),
         ("answer", False, "--decision"),
         ("follow-up", False, "--decision"),
         ("approve", False, None),
@@ -1472,6 +1523,12 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument(text_flag, dest="text_file", required=True, metavar="FILE")
         if verb == "abandon":
             p.add_argument("--dependents", choices=("block", "drop-dep"))
+        if verb in ("release", "answer", "follow-up"):
+            p.add_argument(
+                "--hold",
+                action="store_true",
+                help="put the plan on hold in the same commit (release: in-flight only)",
+            )
         if verb == "landed":
             p.add_argument(
                 "--merged",
@@ -1571,6 +1628,7 @@ def main(
             text=text,
             dependents=getattr(args, "dependents", None),
             merged=_parse_numbers(getattr(args, "merged", None)),
+            hold=getattr(args, "hold", False),
             today=datetime.datetime.now(datetime.timezone.utc).date().isoformat(),
         )
         commit = apply(gh, req, args.branch, formatter, sleep=sleep)
