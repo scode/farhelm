@@ -134,3 +134,112 @@ Each PR passed the required single fresh-context gpt-6.1-sol reviewer at high ef
 received a fresh review after its rebase. The Claude reviewer found that a setup test's generic upload marker did not
 prove credential delivery before startup; the marker was made specific, the same reviewer accepted the correction, and
 the narrowed runtime check passed. No actionable finding remains. Commit and PR wording passed separate cold reads.
+
+### Landing
+
+Landed with fixes to seven existing tests that the plan's changes broke, and to some wording. Settings now has a
+Credentials section with named GitHub tokens, agent subscription logins and API endpoint tokens. Tensorlake recipes
+select them by name, and Farhelm delivers the selected values to those hosts.
+
+- #3074: the credential store and the Settings section.
+- #3077: recipes select endpoint tokens by name, with the migration that drops saved recipe tokens.
+- #3081: delivery when a host is set up or connects, and when a saved value is replaced.
+- #3082: GitHub tokens for agents, terminal tabs and private checkouts on Tensorlake hosts.
+- #3086: Codex subscription logins.
+- #3126: Claude subscription logins.
+
+#### What landed since the stack was based, and whether it interacted
+
+Nothing but plan bookkeeping and documentation landed on main since the plan's base, and nothing else landed in this
+round. So the landing's fresh-context review read the stack against the work that landed in the days before it and
+changes the same code, where a conflict would not show up as a rebase conflict: the move of agents, terminal tabs and
+Restart into new terminals, one-press launch on a suspended Tensorlake host (#3073) and the hosts-needing-attention list
+(#3044). None of it conflicts: every new agent start, terminal tab and Restart receives the GitHub token, a
+containerized session never receives the host's token, and the helm database's new schema versions do not collide with
+main's.
+
+#### Fixes made at landing
+
+- Five existing tests of database upgrades rebuild an older database by removing every later table and column, then
+  compare it with the old shape. They did not remove the plan's new credentials table or the new per-host record of
+  credential delivery, so they failed at the stack's top. The landing adds both to those rebuilds (in #3074 and #3081).
+- The plan renamed an error message from "removing temporary file" to "removing owned file", and an existing install
+  test still expected the old wording (fixed in #3082).
+- The Add host test of an inline new recipe, in both palettes, expected the Claude and Codex endpoint fields to show by
+  default. Each agent's authentication choice in a recipe now starts at None, which hides those fields, and recipes
+  gained a GitHub section. The test now samples the GitHub token field instead and expects the extra section (in #3126).
+- The Start a session guide page still said Farhelm does not supply `GH_TOKEN` on Tensorlake sandboxes, which this plan
+  made untrue. It now says a private repository needs a GitHub token selected in the host's recipe (in #3126).
+- Wording, in #3126: "old tmux terminals" in SPEC.md and on the Tensorlake sandboxes guide page now reads "old
+  terminals", the term the rest of the documentation uses; SPEC.md's Security bullet said selected values go only to
+  those hosts' usual configuration, but the GitHub token goes to Farhelm's own state on the host, so it now says the
+  values go only to those hosts; and SPEC.md's Credentials paragraph no longer says twice that recipes select
+  credentials by name.
+
+#### Things you should know
+
+- Endpoint tokens already saved in recipes are dropped when the helm upgrades, as the plan's breaking changelog entry
+  says. Anyone using recipe endpoints re-enters their tokens in **Settings → Credentials** and selects them in the
+  recipe.
+- Per the executor's report, a Claude login has been tried only with a fake token: Claude started and named the token as
+  its authentication source. Signing in with a real login was not tested, because no test login was supplied.
+- When a Tensorlake host connects, the same step now starts its tunnels and delivers its credentials. The
+  macos-tunnel-exit plan, which moves tunnels onto the supervisor connection, has to build on that changed step.
+
+#### Checks
+
+This round landed only this plan, rebased onto main `4326cd71`. Before the fixes:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the check that every
+  test delay states its reason (`python -B scripts/check-test-sleeps.py`, 420 delays, none without a reason),
+  `dprint check`, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (no errors; three
+  warnings about older text), the docs website build (`bun run build` in `website/`), the workspace debug build and the
+  UI's release web build: all passed.
+- The UI's JavaScript tests (`node --test` in `crates/farhelm-ui/js-tests`), run `b66f77c7-a90c-4288-9803-b961b3c2ea16`:
+  all 524 passed. The desktop-build tests, `cargo nextest run -p farhelm-ui --features desktop`, run
+  `2a27b6ba-c2fc-47d3-91d4-240549a33f27`: all 1089 passed.
+- Every Rust test in the workspace, `cargo nextest run --workspace --exclude farhelm-desktop` (with rootless Podman and
+  its offline image present, so the containerized tests ran), run `5e2ee8e4-2a37-496a-a10e-c241b70a74db`: 5722 passed,
+  69 skipped by their own design, 6 failed, all in the helm crate and all fixed at landing: the five database-upgrade
+  tests and the install test described above.
+- The whole browser suite on Chromium and WebKit, on ten Tensorlake sandboxes at the maintainer's request (cloud virtual
+  machines; each ran its share of the suite's spec files through the test recorder,
+  `python3 scripts/record-test-run.py --kind development ...` running
+  `npx playwright test --project=<engine>-<spec> ... --retries=0`, with the binaries and web bundle built locally from
+  this stack; the sandboxes run Node 24.16 rather than the development machine's 24.20), runs
+  `a2b1177e-e137-4292-b989-4817e47b9b6d`, `627f4a69-8586-40fa-93f6-395295f760d5`,
+  `cb8823f0-6b27-4a82-ad4c-6dc1db4a9d87`, `72b875e3-4efa-4005-a79d-eac2baf40719`,
+  `002010e0-6d8e-4592-84ba-131c065ccf31`, `f09f0f74-b1fa-4c59-8e35-4ed721240648`,
+  `073e6664-8eea-4f1c-a1fc-98b8564dc4be`, `0571b1fb-89fb-4341-9c86-9558ffc22f4c`,
+  `ad9d874e-f09d-4007-bd54-013a5f82ca48`, `95e81060-2a47-464c-ac80-9a26e54c90e1`: 3009 passed, 14 skipped by the specs'
+  own design, 7 failed:
+  - "Add host pins inline recipe answers and focuses Name", both engines in both palettes (runs `ad9d874e` and
+    `95e81060`): the test fixed at landing, described above.
+  - "host-settings scrollports stay reachable while saving" (WebKit, run `627f4a69`), which edits an ssh host's
+    destination, something this plan does not touch, and "settings saves and clears the all-hosts checkout folder"
+    (WebKit, run `002010e0`), which timed out before its cleanup. Each passed three re-runs below. With one failure each
+    under a loaded full-suite shard, neither is recorded as a flake.
+  - "create-intent-key-rebinds-on-retarget: a moved host is a new intent" (WebKit, run `72b875e3`), a recorded flake
+    with the same signature; it also passed three re-runs below.
+- After the fixes: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, the docs website build, the workspace debug build and the UI's release
+  web build: all passed. The helm crate's unit tests, `cargo nextest run -p farhelm-helm --lib`, run
+  `e4a78ca8-95b6-4d87-9658-55ac84ecabd0`: all 1552 passed, the six fixed Rust tests among them. On Tensorlake sandboxes,
+  with a new build from the fixed stack: the whole Tensorlake hosts spec file, which holds the fixed Add host test in
+  both palettes, on Chromium and WebKit, runs `e73a8806-f5b1-479e-95cc-e09f8fc65a03` and
+  `b933df18-7386-4d38-9557-25142f1ebf0c`: 11 passed on each engine; and three repeats each of the three WebKit failures
+  above (`--repeat 3 --grep ...`), runs `2144e44a-3ab6-436b-886e-9360ea84bd6b`, `d1b99a0b-4db5-4c79-9fd2-e50de2c60877`
+  and `c2e23fdd-9233-4189-ba8c-169d52af1917`: all passed.
+- Reused for the fixed stack, from the runs before the fixes: the web-target UI lint, the binary lint, the desktop
+  compile check, the JavaScript and desktop-build tests, the rest of the workspace's Rust tests and the rest of the
+  browser suite. The fixes change only tests, comments, documentation and the order of two module declarations, none of
+  which those runs depend on.
+- Not run: the doctests (no doc examples changed), the old-terminal browser set (nothing in this plan depends on the
+  terminal kind), the grid component's browser suite (no grid code changed), the desktop smoke tests and the installer
+  tests (no desktop shell, packaging or installer code changed), the docs website preview (the build above passed; no
+  page was viewed), delivery to a real Tensorlake host with real credentials (the sandboxes above only ran the tests;
+  the hosts under test were simulated) and the native Mac app (not runnable on Linux).
+
+The executor's report lists only focused test selections. The full runs here found the seven failing tests above, which
+those selections did not include; nothing else in the report became untrue.
