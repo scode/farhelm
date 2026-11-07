@@ -3962,12 +3962,14 @@ Further requirements:
   within a minute of the previous version stopping (the desktop app reopened, or a helm run by hand) can attach to a
   shared ssh connection the previous version left open, and port forwards that connection set up last until it closes.
 
-  Tensorlake recipe tunnels are an explicit exception for local ports: while a Tensorlake host is connected, a separate
-  SSH connection forwards only the configured sandbox loopback ports to the configured host and port as reached from the
-  helm's machine. Anything in the sandbox, agents included, can use them. They stop when the host disconnects, is
-  suspended or is removed, and retry with backoff while it stays connected. The host details show their status and each
-  mapping; a failure makes the host's dot amber and shows the reason. Recipe edits take effect on the next connection. A
-  tunnel alone does not prevent Tensorlake's idle suspension.
+  Tensorlake recipe tunnels are raw-TCP relays over the host's existing supervisor connection, in the other direction:
+  the supervisor listens on the configured sandbox IPv4 loopback ports, and the helm connects only to destinations in
+  its own recipe snapshot, as reached from the helm's machine. Anything in the sandbox, agents included, can use them.
+  They stop when the host disconnects, is suspended or is removed, and retry with backoff while it stays connected. The
+  host details show their status and each mapping; a failure makes the host's dot amber and shows the reason. Recipe
+  edits take effect on the next connection. If the helm process dies, listeners and held connections close within
+  seconds; if its machine goes silent, the supervisor connection's existing stdin watchdog closes them within about two
+  minutes. Disconnecting leaves no separate tunnel connection that could keep the sandbox awake.
 - Agent credentials normally live on the host running the agent, in the agent's own standard configuration. The Settings
   credential catalog is an explicit exception: the helm stores logins and tokens the user enters there, unencrypted, and
   never returns their saved values. For Tensorlake recipes it sends selected values only to those hosts, into their

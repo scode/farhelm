@@ -6393,35 +6393,37 @@ their child, without changing the test process's environment.
 
 ## Tensorlake recipe tunnels and unowned sandboxes
 
-The connection actor acquires a `TunnelLease` from its Tensorlake status source around its connected phase. Leaving that
-phase, entering a hold, removing the row or aborting the actor drops the lease, which marks its runtime stopped, kills
-the isolated SSH process group synchronously, and aborts the retry task. Spawning and stopping share one mutex, so a
-retry cannot install a child after teardown. The actor also races lease acquisition against its nudge, so a hold cancels
-a recipe read still waiting on storage instead of allowing it to start forwards after masters have been closed. Tokio's
-kill-on-drop child handling reaps the direct process. Tunnel health is read through the Tensorlake host view and
-invalidates the fleet feed independently of supervisor health.
+The connection actor gives its Tensorlake connected-resource hook the actual `SupervisorClient`. The hook snapshots the
+recipe once and acquires a `TunnelLease` that owns a claim worker on that connection. Leaving the connected phase,
+entering a hold, removing the row or aborting the actor drops the lease: it aborts the worker, retires the claiming
+connection and withdraws the tunnel view. There is no release message or separate SSH process. The actor also races hook
+acquisition against its nudge, so a hold cancels a recipe read still waiting on storage instead of starting listeners
+after teardown. Tunnel health invalidates the fleet feed independently of supervisor health.
+
+The worker claims all configured ports and publishes Up only after the correlated successful reply. A failed bind
+retries after 1, 2, 4 seconds, capped at 30, while the same host connection remains live. An unanswered claim times out
+after 30 seconds and retires the connection, because cancellation cannot establish whether the supervisor installed
+listeners. A successful claim remains owned by that connection until it ends; recipe edits apply on the next connection,
+never midway through a retry.
+
+For each accepted event, the worker resolves the reported port against its own snapshot. An unknown port is refused
+without dialing; otherwise the helm dials that configured host and port with a ten-second bound, removing IPv6 display
+brackets before resolution. An unreachable destination fails only that accepted connection. The shared relay pump
+provides credit, directional EOF and cancellation; the worker's owned task set keeps pending dials and relays within the
+client's ingress bound and aborts them together when the lease ends.
+
+These relays inherit the supervisor connection's transport and teardown. They therefore use the host's ordinary SSH
+configuration, including ProxyJump, without interpreting any SSH forwarding directive or adding another connection.
+Through Tensorlake's gateway, a dead helm's stdin EOF ends its stdio session and the supervisor drops the connection's
+listeners and sockets before unrelated teardown waits. A silent helm is handled by the existing 120-second stdio stdin
+watchdog, not a tunnel-specific heartbeat or watcher. Disconnecting leaves no independent tunnel session to keep the
+sandbox awake. The prior separate-forward design could leave a local SSH forwarded channel open after the gateway's
+sandbox session ended; carrying bytes inside the existing supervisor protocol avoids that extra channel lifetime.
 
 Standalone SIGINT/SIGTERM enter the same serving teardown as an embedded owner's shutdown receiver. Teardown withdraws
 clients, cancels connection actors and joins their supervisors, which await the actors, before returning; connection
-leases therefore drop while the runtime still exists. Sessions continue on their supervisors. Linux additionally arms
-`PR_SET_PDEATHSIG=SIGKILL` in the tunnel child's `pre_exec`, with a parent-PID check for death before the signal is
-armed. Linux ties that signal to the spawning thread: each tunnel attempt forks from a dedicated thread held alive by
-the monitor until the attempt ends, rather than from a Tokio worker that can retire. Spawning still shares the lease's
-stop mutex and the child remains in its own process group. macOS has no parent-death signal; the embedded desktop helm
-relies on its orderly shutdown receiver and actor drain. An uncatchable kill of the desktop process can still leave its
-tunnel SSH alive until that SSH connection ends. No watcher process is added for that case.
-
-Each lease snapshots the recipe's tunnels once. One `ssh -N -R 127.0.0.1:<sandbox port>:<host>:<port>` connection
-carries all mappings, with Farhelm's shared Tensorlake key/known-hosts/keepalive option set, `ControlMaster=no`,
-`ControlPath=none` and `ExitOnForwardFailure=yes`. It has no remote command or session channel; the measured gateway
-keeps an exec session that carried forwarded traffic alive, and a channel-less connection does not prevent idle
-suspension. Unlike supervisor/provisioning connections, this dedicated connection uses `-F /dev/null`: inherited forward
-directives would grant listeners outside the recipe, and `ClearAllForwardings` would also clear the recipe's own
-forwards. It therefore needs direct gateway reachability rather than a user's SSH proxy configuration. Readiness is
-OpenSSH's all-forwards-confirmed diagnostic (both its older `forwarding_success` summary and newer wording), not process
-survival or authentication; stderr is drained with an 8 KiB tail, presentation text is sanitized and debug chatter
-omitted. A missing confirmation times out after 30 seconds. Failed connections retry after 1, 2, 4 seconds, capped at
-30, until the lease ends.
+leases therefore drop while the runtime still exists. Sessions continue on their supervisors. No tunnel child,
+parent-death signal or platform-specific lifetime helper remains.
 
 Protected `/api/tensorlake/orphans` lists reserved-name sandboxes not named by a host row or a deterministic builder
 name of any saved recipe. `/api/tensorlake/orphans/{id}` DELETE rechecks both the prefix and local ownership, terminates

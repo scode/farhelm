@@ -73,6 +73,7 @@ impl SandboxStatusSource for FakeApi {
     async fn connected(
         &self,
         row: &HostRow,
+        client: Arc<crate::client::SupervisorClient>,
         events: Arc<crate::feed::FleetEvents>,
     ) -> crate::manager::ConnectedResources {
         let (service, gate) = {
@@ -86,7 +87,7 @@ impl SandboxStatusSource for FakeApi {
             gate.entered.notify_one();
             gate.release.notified().await;
         }
-        SandboxStatusSource::connected(&service, row, events).await
+        SandboxStatusSource::connected(&service, row, client, events).await
     }
 
     async fn check(&self, sandbox: &str) -> SandboxCheck {
@@ -1728,8 +1729,8 @@ async fn lifecycle_failures_and_timeouts_release_each_direction() {
 /// Suspend and Delete must drop actual actor-owned tunnel leases before
 /// reaching their vendor calls. Resume acquires a new lease from the edited
 /// recipe. A stalled acquisition must be cancelled by a hold too: otherwise
-/// it can start forwards after the lifecycle operation has closed masters.
-/// The marked fake replaces SSH execution only; REST admission, manager
+/// it can start forwards after the lifecycle operation retired its connection.
+/// The marked fake replaces listener execution only; REST admission, manager
 /// parking, lease ownership and recipe loading are production paths.
 #[farhelm_testtrace::test]
 async fn lifecycle_holds_end_tunnels_and_resume_reads_the_recipe_again() {

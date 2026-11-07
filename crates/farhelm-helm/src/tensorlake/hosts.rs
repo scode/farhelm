@@ -82,6 +82,7 @@ impl SandboxStatusSource for Tensorlake {
     async fn connected(
         &self,
         row: &HostRow,
+        client: std::sync::Arc<crate::client::SupervisorClient>,
         events: std::sync::Arc<crate::feed::FleetEvents>,
     ) -> crate::manager::ConnectedResources {
         if row.tensorlake.is_none() {
@@ -92,7 +93,7 @@ impl SandboxStatusSource for Tensorlake {
         let lease = self.0.delivery.enter(row);
         self.0.delivery.connect(row, &events).await;
         crate::manager::ConnectedResources {
-            _tunnels: self.start_tunnels(row, events).await,
+            _tunnels: self.start_tunnels(row, client, events).await,
             _credentials: Some(lease),
         }
     }

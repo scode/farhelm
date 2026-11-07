@@ -3329,14 +3329,24 @@ pub(crate) trait SandboxStatusSource: Send + Sync {
 
     /// Acquire resources that must end with this connected phase. Scripted
     /// status sources need none; production delivers credentials and starts
-    /// recipe forwards before the supervisor becomes routable.
-    async fn connected(&self, _row: &HostRow, _events: Arc<FleetEvents>) -> ConnectedResources {
+    /// recipe relays before the supervisor becomes routable. The supplied
+    /// client is the connection those resources belong to. Dropping them may
+    /// retire it: a listener claim has no separate release operation, so
+    /// retaining another Arc cannot preserve a claim past lease teardown.
+    async fn connected(
+        &self,
+        _row: &HostRow,
+        _client: Arc<SupervisorClient>,
+        _events: Arc<FleetEvents>,
+    ) -> ConnectedResources {
         ConnectedResources::default()
     }
 }
 
 /// Keep all resources alive across the hook-to-Connected publication gap and
 /// until serving ends. Dropping acquisition on a hold cancels them together.
+/// A recipe lease also retires its claiming client on Drop, before the hold
+/// acknowledges; this ends its listeners even if another owner retains an Arc.
 #[derive(Default)]
 pub(crate) struct ConnectedResources {
     pub(crate) _tunnels: Option<crate::tensorlake::tunnels::TunnelLease>,
@@ -3729,14 +3739,14 @@ impl HostActor {
                     // Drop the forwards before acknowledging a suspend or
                     // removal hold, including cancellation of this task.
                     // Recipe loading can wait on storage. A hold must cancel
-                    // that acquisition too, or a late read could start SSH
-                    // after Suspend has already closed the shared masters.
+                    // that acquisition too, or a late read could claim ports
+                    // after Suspend has already retired the connection.
                     let _connected_resources = tokio::select! {
                         request = next_nudge(&mut nudge) => {
                             active |= request.fresh_window;
                             continue;
                         }
-                        tunnels = self.sandboxes.connected(&row, Arc::clone(&self.events)) => tunnels,
+                        resources = self.sandboxes.connected(&row, Arc::clone(&client), Arc::clone(&self.events)) => resources,
                     };
                     self.serve(
                         client,

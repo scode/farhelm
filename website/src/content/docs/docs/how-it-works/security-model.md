@@ -48,5 +48,5 @@ writes in the checkout can later run with your full access outside the container
 It will also cover Tensorlake's API, which the helm calls over HTTPS with your saved API key, Farhelm's own SSH key for
 those sandboxes, and the API key and agent endpoint tokens stored unencrypted on the helm's machine. A recipe's
 [tunnels to your side](/docs/using/tensorlake-sandboxes/#tunnels-to-your-side) let anything in the sandbox reach the
-configured services through the helm's machine. These tunnels need direct access to Tensorlake's SSH gateway and do not
-use ProxyJump.
+configured services through the helm's machine. These tunnels use the host's existing connection, including your SSH
+configuration and **ProxyJump**.

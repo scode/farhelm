@@ -458,13 +458,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   smallest set of non-secret first-run settings Claude needs, found by an isolated probe, keeping the user's other
   settings and the normal agent home, and check it with a valid subscription login.
 
-- **Tunnels outliving a killed desktop helm on macOS.** Each recipe tunnel is an `ssh -N -R` child of the helm. An
-  orderly quit stops them, and on Linux the kernel kills them when the helm dies (`PR_SET_PDEATHSIG`), but macOS has no
-  parent-death signal: after a force quit, SIGKILL or crash of the desktop app, the tunnel ssh keeps running until its
-  connection ends on its own, leaving the recipe's listeners open on the sandbox and possibly keeping the sandbox from
-  idle-suspending. Make the tunnels die with the helm on macOS too, for example with a small watcher that notices the
-  helm's exit (kqueue `NOTE_EXIT`) and ends them. Plan: `plans/queue/macos-tunnel-exit.md`.
-
 - **Live resize of Tensorlake hosts.** A host is created at its recipe's size, and a recipe's size change affects only
   hosts created afterwards. Tensorlake can resize a running sandbox in place (CAS image format only): it takes one to
   two seconds and keeps processes running; CPUs go up and down, but memory never shrinks below what the sandbox booted

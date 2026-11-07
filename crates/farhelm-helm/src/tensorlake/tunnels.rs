@@ -1,39 +1,43 @@
-//! Recipe forwards belong to one connected host, never to an ssh master.
+//! Recipe tunnels share the supervisor connection's lifetime and transport.
 //!
-//! The actor keeps a lease only during its connected phase. Dropping that
-//! lease synchronously stops the process group before a suspend/removal hold
-//! can acknowledge parking. The retry task cannot spawn after that point.
+//! Only this Tensorlake hook asks for listeners. The supervisor reports a
+//! claimed port, never a destination: every dial uses the recipe snapshot
+//! retained here, so a sandbox cannot redirect the helm to another service.
 
-use super::{Tensorlake, ssh::TensorlakeSshAccess};
+use super::Tensorlake;
 use crate::{
+    client::{SupervisorClient, SupervisorTransportError},
     feed::FleetEvents,
     store::{HostId, HostRow},
 };
 use farhelm_proto::tensorlake::{TunnelState, TunnelView, recipes::Tunnel};
 use std::{
     collections::HashMap,
-    process::Stdio,
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tokio::{io::AsyncReadExt, process::Child, sync::watch};
+use tokio::{net::TcpStream, sync::watch, task::JoinSet};
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 #[path = "tunnel_process_tests.rs"]
 mod process_tests;
 
+#[cfg(test)]
+#[path = "tunnel_relay_tests.rs"]
+mod relay_tests;
+
 type Views = Arc<Mutex<HashMap<HostId, watch::Receiver<TunnelView>>>>;
 
-/// The service's read side. A missing lease means the host has no active
-/// forwards; definitions are read anew at its next connection.
+/// Observe connected leases without retaining their listeners or connection.
+/// A recipe edit is picked up by the next lease, never by a retry on this one.
 #[derive(Default)]
 pub(crate) struct Tunnels {
     views: Views,
 }
 
 impl Tunnels {
-    /// Observe one lease's readiness and eventual worker exit in lifecycle
-    /// tests without polling or keeping that lease alive.
+    /// Lifecycle tests observe readiness and worker termination directly,
+    /// without a poll that could outlive the resource being measured.
     #[cfg(test)]
     pub(super) fn subscribe(&self, host: HostId) -> Option<watch::Receiver<TunnelView>> {
         self.views
@@ -43,8 +47,7 @@ impl Tunnels {
             .cloned()
     }
 
-    /// Read the current lease's last publication without prolonging its
-    /// lifetime. Removing the lease withdraws the view immediately.
+    /// Read the current lease's last publication without prolonging its life.
     pub(crate) fn view(&self, host: HostId) -> Option<TunnelView> {
         self.views
             .lock()
@@ -54,35 +57,11 @@ impl Tunnels {
     }
 }
 
-/// Spawn and teardown share this lock. In particular cancellation cannot
-/// race a retry that is about to install its next child.
-#[derive(Default)]
-struct Runtime {
-    stopped: bool,
-    child: Option<Child>,
-}
-
-impl Runtime {
-    /// End the group while its direct child is still owned, then let Tokio
-    /// reap the killed child. No unbounded pipe drain delays a host hold.
-    fn stop_child(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            #[cfg(unix)]
-            if let Some(pid) = child.id() {
-                // SAFETY: this child was spawned in its own process group.
-                unsafe {
-                    libc::kill(-(pid as i32), libc::SIGKILL);
-                }
-            }
-            let _ = child.start_kill();
-        }
-    }
-}
-
-/// The connected phase's cancellation guard. It owns the worker and all
-/// its local children, including during retry backoff and failed startup.
+/// The connected phase owns both the worker and the connection that claimed
+/// its ports. There is deliberately no wire release: ending that connection
+/// closes every listener, pending acceptance and active relay together.
 pub(crate) struct TunnelLease {
-    runtime: Arc<Mutex<Runtime>>,
+    client: Arc<SupervisorClient>,
     task: tokio::task::AbortHandle,
     views: Views,
     host: HostId,
@@ -91,10 +70,8 @@ pub(crate) struct TunnelLease {
 
 impl Drop for TunnelLease {
     fn drop(&mut self) {
-        let mut runtime = self.runtime.lock().expect("tunnel runtime poisoned");
-        runtime.stopped = true;
-        runtime.stop_child();
         self.task.abort();
+        self.client.retire();
         self.views
             .lock()
             .expect("tunnel views poisoned")
@@ -104,12 +81,13 @@ impl Drop for TunnelLease {
 }
 
 impl Tensorlake {
-    /// Snapshot the recipe once per connection. Recipe edits intentionally
-    /// wait for reconnect, so a retry never changes the reach granted to an
-    /// already connected sandbox.
+    /// Snapshot the recipe once per connection. The actor calls this only
+    /// for a Tensorlake row, after connecting and before publishing Connected.
+    /// Retry may recover a refused bind, but cannot widen the granted recipe.
     pub(crate) async fn start_tunnels(
         &self,
         row: &HostRow,
+        client: Arc<SupervisorClient>,
         events: Arc<FleetEvents>,
     ) -> Option<TunnelLease> {
         let binding = row.tensorlake.as_ref()?;
@@ -141,15 +119,8 @@ impl Tensorlake {
             .lock()
             .expect("tunnel views poisoned")
             .insert(row.id, rx);
-        let runtime = Arc::new(Mutex::new(Runtime::default()));
-        let worker_runtime = runtime.clone();
         let worker_events = events.clone();
-        let access = self.0.ssh_keys.as_ref().map(|keys| {
-            TensorlakeSshAccess::new(
-                keys.tensorlake_dir(),
-                super::ssh_key::private_key_path(keys.tensorlake_dir()),
-            )
-        });
+        let worker_client = client.clone();
         let sandbox = binding.sandbox.clone();
         let fake = self.0.tunnel_fake.clone();
         let task = tokio::spawn(async move {
@@ -163,38 +134,33 @@ impl Tensorlake {
             }
             let mut delay = 1;
             loop {
-                let result = if let Some(fake) = &fake {
-                    fake.run_tunnels(&sandbox, &tx, &worker_events).await
-                } else if let Some(access) = &access {
-                    run_ssh(
-                        access,
-                        &sandbox,
-                        &definitions,
-                        &worker_runtime,
-                        &tx,
-                        &worker_events,
-                    )
-                    .await
-                } else {
-                    Err("This helm has no Tensorlake SSH key".to_string())
+                let result = tokio::select! {
+                    biased;
+                    () = worker_client.closed() => return,
+                    result = async {
+                        if let Some(fake) = &fake {
+                            fake.run_tunnels(&sandbox, &tx, &worker_events).await
+                        } else {
+                            run_relays(worker_client.clone(), &definitions, &tx, &worker_events).await
+                        }
+                    } => result,
                 };
-                worker_runtime
-                    .lock()
-                    .expect("tunnel runtime poisoned")
-                    .stop_child();
-                let reason = result
-                    .err()
-                    .unwrap_or_else(|| "SSH closed the tunnels".to_string());
+                let Err(reason) = result else {
+                    return;
+                };
                 publish(TunnelState::Retrying {
                     reason: Some(reason),
                     delay_secs: delay,
                 });
-                tokio::time::sleep(Duration::from_secs(delay)).await;
+                tokio::select! {
+                    () = worker_client.closed() => return,
+                    () = tokio::time::sleep(Duration::from_secs(delay)) => {},
+                }
                 delay = (delay * 2).min(30);
             }
         });
         Some(TunnelLease {
-            runtime,
+            client,
             task: task.abort_handle(),
             views: self.0.tunnels.views.clone(),
             host: row.id,
@@ -203,405 +169,191 @@ impl Tensorlake {
     }
 }
 
-/// Own all forwards in one non-multiplexed, sessionless ssh connection.
-/// OpenSSH's forwarding-confirmation diagnostic, rather than process
-/// survival or authentication alone, is the readiness boundary.
-fn argv(
-    access: &TensorlakeSshAccess,
-    sandbox: &str,
-    tunnels: &[Tunnel],
-) -> Result<Vec<String>, String> {
-    // A tunnel grants exactly the recipe's listeners. Reading user config
-    // would also enable its LocalForward/RemoteForward directives; ssh has
-    // no option to clear those while keeping command-line forwards.
-    let mut args: Vec<String> = ["-F", "/dev/null", "-v", "-N", "-T"]
-        .into_iter()
-        .map(str::to_string)
+/// Claim the whole snapshot, then serve bounded accepted connections through
+/// the shared relay pump. A failed destination affects that connection alone.
+/// Dropping this future aborts its owned dials and relays, including writes
+/// parked behind a slow service; no task survives independently of the lease.
+/// Returns normally once the connection ends, including retirement after an
+/// unanswered or wrong claim reply. A failure on a still-live connection is
+/// returned for retry. The failure drain can end this stream before `closed()`
+/// fires; reporting that as a tunnel failure would briefly mislabel a lost host.
+pub(super) async fn run_relays(
+    client: Arc<SupervisorClient>,
+    definitions: &[Tunnel],
+    tx: &watch::Sender<TunnelView>,
+    events: &FleetEvents,
+) -> Result<(), String> {
+    let ports = definitions
+        .iter()
+        .map(|tunnel| tunnel.sandbox_port)
         .collect();
-    for option in [
-        "BatchMode=yes",
-        "ControlMaster=no",
-        "ControlPath=none",
-        "ExitOnForwardFailure=yes",
-        "ForwardAgent=no",
-        "ForwardX11=no",
-        "RemoteCommand=none",
-        "RequestTTY=no",
-        "PermitLocalCommand=no",
-    ] {
-        args.extend(["-o".to_string(), option.to_string()]);
-    }
-    for option in access.options()? {
-        args.extend(["-o".to_string(), option]);
-    }
-    for tunnel in tunnels {
-        args.extend([
-            "-R".to_string(),
-            format!(
-                "127.0.0.1:{}:{}:{}",
-                tunnel.sandbox_port, tunnel.host, tunnel.port
-            ),
-        ]);
-    }
-    args.extend(["--".to_string(), super::ssh::destination(sandbox)]);
-    Ok(args)
-}
-
-/// Drain both pipes incrementally and retain only a bounded diagnostic
-/// tail. The child is polled under the same lock teardown uses, so the
-/// lease can kill it synchronously even while a read is waiting.
-async fn run_ssh(
-    access: &TensorlakeSshAccess,
-    sandbox: &str,
-    tunnels: &[Tunnel],
-    runtime: &Arc<Mutex<Runtime>>,
-    tx: &watch::Sender<TunnelView>,
-    events: &FleetEvents,
-) -> Result<(), String> {
-    let mut command = tokio::process::Command::new("ssh");
-    command
-        .args(argv(access, sandbox, tunnels)?)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    crate::provisioning::isolate_process_group(&mut command);
-    monitor(command, runtime, tx, events).await
-}
-
-/// Monitor a prepared, isolated command. Keeping command construction at
-/// the boundary lets tests exercise real pipes and cancellation without
-/// changing PATH or ever dialing a vendor.
-async fn monitor(
-    command: tokio::process::Command,
-    runtime: &Arc<Mutex<Runtime>>,
-    tx: &watch::Sender<TunnelView>,
-    events: &FleetEvents,
-) -> Result<(), String> {
-    let (_spawn_thread, (mut stdout, mut stderr)) = spawn_owned(command, runtime.clone()).await?;
-    let mut out = [0; 128];
-    let mut err = [0; 1024];
-    let mut tail = Vec::new();
-    let mut ready = false;
-    let mut out_open = true;
-    let mut err_open = true;
-    let mut ended = None;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    let mut poll = tokio::time::interval(Duration::from_millis(100));
-    loop {
-        tokio::select! {
-            read = stdout.read(&mut out), if out_open => {
-                let count = read.map_err(|error| error.to_string())?;
-                out_open = count != 0;
-            },
-            read = stderr.read(&mut err), if err_open => {
-                let count = read.map_err(|error| error.to_string())?;
-                err_open = count != 0;
-                tail.extend_from_slice(&err[..count]);
-                if tail.len() > 8192 { tail.drain(..tail.len()-8192); }
-                if !ready && forwarding_confirmed(&tail) {
-                    ready = true;
-                    tx.send_modify(|view| view.state = TunnelState::Up);
-                    events.bump();
+    let claim = tokio::time::timeout(
+        Duration::from_secs(30),
+        client.claim_tcp_tunnel_ports(ports),
+    )
+    .await;
+    let mut accepted = match claim {
+        Ok(Ok(accepted)) => accepted,
+        Ok(Err(error)) => {
+            if matches!(
+                error.downcast_ref::<SupervisorTransportError>(),
+                Some(
+                    SupervisorTransportError::NotSent
+                        | SupervisorTransportError::SentUnanswered
+                        | SupervisorTransportError::SentWrongReply { .. }
+                )
+            ) {
+                // Wrong replies retire the connection in the claim wrapper;
+                // the other two variants already establish transport loss.
+                if matches!(
+                    error.downcast_ref::<SupervisorTransportError>(),
+                    Some(SupervisorTransportError::SentWrongReply { .. })
+                ) {
+                    tracing::warn!(%error, "recipe tunnel claim received a wrong reply; retiring the supervisor connection");
                 }
-            },
-            _ = poll.tick() => {
-                if ended.is_none() {
-                    let exited = runtime.lock().expect("tunnel runtime poisoned").child.as_mut().and_then(|child| child.try_wait().transpose());
-                    if let Some(status) = exited { ended = Some((status.map_err(|error| error.to_string())?, tokio::time::Instant::now())); }
-                }
-                // Exit and pipe readiness are scheduled independently. Give
-                // the final SSH refusal a bounded drain before rendering it.
-                if let Some((status, at)) = ended
-                    && (!err_open || at.elapsed() >= Duration::from_secs(1)) {
-                    return Err(format!("SSH tunnels closed ({status}){}", diagnostic(&tail)));
-                }
-                if !ready && tokio::time::Instant::now() >= deadline { return Err(format!("SSH did not confirm the tunnels within 30 seconds{}", diagnostic(&tail))); }
-            },
-        }
-    }
-}
-
-/// Linux's parent-death signal belongs to the thread that forks, not merely
-/// its process. A Tokio worker can retire after handing off its work, so a
-/// dedicated thread spawns this child and stays parked until its monitor
-/// ends. The sender returned here keeps that thread alive across every await.
-/// No watcher process or polling is involved. macOS uses lease teardown and
-/// the helm's orderly shutdown; it has no equivalent parent-death primitive.
-async fn spawn_owned(
-    mut command: tokio::process::Command,
-    runtime: Arc<Mutex<Runtime>>,
-) -> Result<
-    (
-        std::sync::mpsc::Sender<()>,
-        (tokio::process::ChildStdout, tokio::process::ChildStderr),
-    ),
-    String,
-> {
-    #[cfg(target_os = "linux")]
-    {
-        let parent = std::process::id() as libc::pid_t;
-        // SAFETY: pre_exec calls only async-signal-safe syscalls. The parent
-        // check closes the race where the helm dies before prctl is armed.
-        unsafe {
-            command.pre_exec(move || {
-                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                if libc::getppid() != parent {
-                    return Err(std::io::Error::from_raw_os_error(libc::ESRCH));
-                }
-                Ok(())
-            });
-        }
-    }
-    let handle = tokio::runtime::Handle::current();
-    let (keep_alive, lifetime) = std::sync::mpsc::channel();
-    let (sent, received) = tokio::sync::oneshot::channel();
-    std::thread::Builder::new()
-        .name("tensorlake-tunnel-spawn".into())
-        .spawn(move || {
-            let _entered = handle.enter();
-            let result = (|| {
-                let mut runtime = runtime.lock().expect("tunnel runtime poisoned");
-                if runtime.stopped {
-                    return Err("Host disconnected".to_string());
-                }
-                let mut child = command
-                    .spawn()
-                    .map_err(|error| format!("Could not start SSH tunnels: {error}"))?;
-                let pipes = (
-                    child.stdout.take().expect("stdout piped"),
-                    child.stderr.take().expect("stderr piped"),
-                );
-                runtime.child = Some(child);
-                Ok(pipes)
-            })();
-            if sent.send(result).is_err() {
-                runtime
-                    .lock()
-                    .expect("tunnel runtime poisoned")
-                    .stop_child();
+                client.closed().await;
+                return Ok(());
             }
-            // Command::spawn waits for pre_exec/exec to finish before returning,
-            // so this thread cannot exit before the child's tether is installed.
-            let _ = lifetime.recv();
-        })
-        .map_err(|error| format!("Could not start the SSH owner thread: {error}"))?;
-    let pipes = received
-        .await
-        .map_err(|_| "The SSH owner thread stopped before spawning".to_string())??;
-    Ok((keep_alive, pipes))
-}
-
-/// OpenSSH changed the summary's wording between releases. Both are sent
-/// only after every requested remote listener has answered successfully;
-/// authentication and the individual request-sent messages prove less.
-fn forwarding_confirmed(tail: &[u8]) -> bool {
-    String::from_utf8_lossy(tail).lines().any(|line| {
-        matches!(
-            line.trim_end(),
-            "debug1: All remote forwarding requests processed"
-                | "debug1: forwarding_success: all expected forwarding replies received"
-        )
-    })
-}
-
-/// SSH output is bounded and sanitized before entering any host view.
-fn diagnostic(tail: &[u8]) -> String {
-    let clean = String::from_utf8_lossy(tail)
-        .lines()
-        .filter(|line| !line.starts_with("debug1:"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let text = super::shell::shown(&clean);
-    if text.is_empty() {
-        String::new()
-    } else {
-        format!(": {text}")
+            return Err(super::shell::shown(&format!("{error:#}")));
+        }
+        Err(_) => {
+            // An unanswered claim is ambiguous: only ending the connection
+            // can release ports the peer may already have bound. Explicit
+            // retirement also covers a future that never received its first poll.
+            tracing::warn!(
+                "recipe tunnel claim was not confirmed within 30 seconds; retiring the supervisor connection"
+            );
+            client.retire();
+            client.closed().await;
+            return Ok(());
+        }
+    };
+    tx.send_modify(|view| view.state = TunnelState::Up);
+    events.bump();
+    let mut connections = JoinSet::new();
+    loop {
+        let event = tokio::select! {
+            biased;
+            () = client.closed() => return Ok(()),
+            result = connections.join_next(), if !connections.is_empty() => {
+                if let Some(Err(error)) = result {
+                    tracing::warn!(%error, "recipe tunnel task ended unexpectedly");
+                }
+                continue;
+            },
+            event = accepted.recv() => match event {
+                Some(event) => event,
+                None => {
+                    client.closed().await;
+                    return Ok(());
+                }
+            },
+        };
+        let Some(destination) = definitions
+            .iter()
+            .find(|tunnel| tunnel.sandbox_port == event.port())
+        else {
+            // Even a full-authority remote peer supplies no reach beyond the
+            // helm's snapshot. Refuse unknown ports without making any dial.
+            // Drop owns one bounded refusal and keeps admission until it is
+            // queued. An explicit refusal here would leave that fallback
+            // armed and send twice, while also parking the accept loop.
+            drop(event);
+            continue;
+        };
+        let destination = destination.clone();
+        let client = client.clone();
+        connections.spawn(async move {
+            let work = async {
+                let socket = tokio::time::timeout(
+                    Duration::from_secs(10),
+                    TcpStream::connect((destination_host(&destination.host), destination.port)),
+                )
+                .await;
+                match socket {
+                    Ok(Ok(socket)) => client.relay_accepted_tcp(event, socket).await,
+                    // An unused event drops into its single refusal path.
+                    // Keep destination failures readable without logging a
+                    // nested Result or introducing another cleanup task.
+                    Ok(Err(error)) => Err(anyhow::anyhow!(
+                        "recipe tunnel destination {}:{} could not be reached: {error}",
+                        destination.host,
+                        destination.port,
+                    )),
+                    Err(_) => Err(anyhow::anyhow!(
+                        "recipe tunnel destination {}:{} timed out after 10 seconds",
+                        destination.host,
+                        destination.port,
+                    )),
+                }
+            };
+            let result = tokio::select! {
+                () = client.closed() => return,
+                result = work => result,
+            };
+            if let Err(error) = result {
+                tracing::debug!(%error, "recipe tunnel connection ended");
+            }
+        });
     }
+}
+
+/// Recipe syntax keeps IPv6 brackets for display; socket address resolution
+/// takes the literal itself. Host names and ordinary IPv4 pass through intact.
+fn destination_host(host: &str) -> &str {
+    host.strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The installed SSH and newer OpenSSH use different completion
-    /// summaries. Both must count; request-sent and per-listener successes
-    /// alone must not report the complete recipe as ready.
+    /// Dial syntax must not turn a bracketed IPv6 recipe into a DNS name,
+    /// while retaining the configured host for every other destination.
     #[test]
-    fn confirmation_accepts_both_openssh_summaries_only() {
-        for line in [
-            "debug1: All remote forwarding requests processed\r\n",
-            "debug1: forwarding_success: all expected forwarding replies received\r\n",
-        ] {
-            assert!(forwarding_confirmed(line.as_bytes()));
+    fn destination_uses_the_recipe_host_without_ipv6_display_brackets() {
+        assert_eq!(destination_host("[::1]"), "::1");
+        assert_eq!(destination_host("127.0.0.1"), "127.0.0.1");
+        assert_eq!(destination_host("inference.example"), "inference.example");
+    }
+
+    /// Keep the scripted connection alive independently of the fake tunnel
+    /// worker, so a status assertion cannot pass because transport died.
+    struct PeerTask(tokio::task::JoinHandle<()>);
+    impl Drop for PeerTask {
+        fn drop(&mut self) {
+            self.0.abort();
         }
-        for line in [
-            "debug1: ssh_init_forwarding: expecting replies for 1 forwards\r\n",
-            "debug1: remote forward success for: listen 127.0.0.1:8080, connect 127.0.0.1:8080\r\n",
-        ] {
-            assert!(!forwarding_confirmed(line.as_bytes()));
-        }
     }
 
-    /// Forwards must carry only recipe listeners on a separate connection.
-    /// Sharing a supervisor master silently clears them; reading ssh config
-    /// could grant listeners the user never put in the recipe.
-    #[test]
-    fn argv_is_sessionless_unshared_and_recipe_scoped() {
-        let access = TensorlakeSshAccess::new(
-            std::path::Path::new("/state/tensorlake"),
-            "/state/key".into(),
-        );
-        let args = argv(
-            &access,
-            "farhelm-host-k7q2-dev-abcd",
-            &[Tunnel {
-                sandbox_port: 8080,
-                host: "[::1]".into(),
-                port: 9090,
-            }],
-        )
-        .unwrap();
-        for option in [
-            "ControlMaster=no",
-            "ControlPath=none",
-            "ExitOnForwardFailure=yes",
-            "ServerAliveInterval=30",
-            "HostKeyAlias=sandbox.tensorlake.ai",
-            "PermitLocalCommand=no",
-        ] {
-            assert!(
-                args.windows(2).any(|pair| pair == ["-o", option]),
-                "{option}"
-            );
-        }
-        assert_eq!(&args[..2], ["-F", "/dev/null"]);
-        assert!(args.iter().any(|arg| arg == "-N"));
-        assert!(!args.iter().any(|arg| arg == "ClearAllForwardings=yes"));
-        assert!(
-            args.windows(2)
-                .any(|pair| pair == ["-R", "127.0.0.1:8080:[::1]:9090"])
-        );
-        assert_eq!(
-            &args[args.len() - 2..],
-            [
-                "--",
-                "farhelm-host-k7q2-dev-abcd@farhelm-host-k7q2-dev-abcd.sandbox.tensorlake.ai"
-            ]
-        );
+    /// The marked vendor fake owns retry outcomes; this peer supplies only
+    /// the actor's real client lifetime and performs no network operation.
+    async fn connected_client() -> (Arc<SupervisorClient>, PeerTask) {
+        let (client, peer) = tokio::io::duplex(64 * 1024);
+        let peer = PeerTask(tokio::spawn(async move {
+            let (read, write) = tokio::io::split(peer);
+            let mut reader = farhelm_proto::io::FrameReader::new(read);
+            let mut writer = farhelm_proto::io::FrameWriter::new(write);
+            farhelm_proto::io::handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            std::future::pending::<()>().await;
+        }));
+        let (read, write) = tokio::io::split(client);
+        let client =
+            tokio::time::timeout(Duration::from_secs(5), SupervisorClient::start(read, write))
+                .await
+                .unwrap()
+                .unwrap();
+        (client, peer)
     }
 
-    /// An owned stand-in models SSH's actual pipe lifetime without changing
-    /// the test process's environment or ever reaching a network.
-    fn command(script: &str) -> tokio::process::Command {
-        let mut command = tokio::process::Command::new("/bin/sh");
-        command
-            .args(["-c", script])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        crate::provisioning::isolate_process_group(&mut command);
-        command
-    }
-
-    /// Authentication/process survival cannot prove forwards accepted. The
-    /// explicit confirmation moves health to Up; dropping the lease kills
-    /// the owned process and publishes no remaining tunnel view.
-    #[farhelm_testtrace::test]
-    async fn confirmed_forward_is_up_and_lease_drop_ends_the_child() {
-        let runtime = Arc::new(Mutex::new(Runtime::default()));
-        let events = Arc::new(FleetEvents::new());
-        let (tx, mut rx) = watch::channel(TunnelView {
-            tunnels: vec![],
-            state: TunnelState::Retrying {
-                reason: None,
-                delay_secs: 0,
-            },
-        });
-        let worker_runtime = runtime.clone();
-        let worker_events = events.clone();
-        let task = tokio::spawn(async move {
-            monitor(command("printf 'debug1: forwarding_success: all expected forwarding replies received\\n' >&2; exec /usr/bin/sleep 600"), &worker_runtime, &tx, &worker_events).await
-        });
-        // Own teardown before any readiness wait or assertion can fail;
-        // a detached monitor otherwise keeps its isolated child alive.
-        let views: Views = Arc::default();
-        views.lock().unwrap().insert(1, rx.clone());
-        let lease = TunnelLease {
-            runtime: runtime.clone(),
-            task: task.abort_handle(),
-            views: views.clone(),
-            host: 1,
-            events,
-        };
-        tokio::time::timeout(
-            Duration::from_secs(5),
-            rx.wait_for(|view| view.state == TunnelState::Up),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        let (pid, alive) = {
-            let mut runtime = runtime.lock().unwrap();
-            let child = runtime.child.as_mut().expect("live child before drop");
-            (child.id().unwrap(), child.try_wait())
-        };
-        assert!(alive.unwrap().is_none(), "fixture must still run");
-        // SAFETY: observe only the child whose live handle is held here.
-        assert_eq!(
-            unsafe { libc::getpgid(pid as i32) },
-            pid as i32,
-            "fixture owns a separate process group"
-        );
-        drop(lease);
-        assert!(runtime.lock().unwrap().stopped);
-        assert!(runtime.lock().unwrap().child.is_none());
-        assert!(views.lock().unwrap().is_empty());
-        match task.await {
-            Err(error) if error.is_cancelled() => {}
-            Ok(Err(_)) => {} // The killed child may settle before abort is polled.
-            other => panic!("unexpected monitor completion: {other:?}"),
-        }
-        // Tokio owns reaping after kill-on-drop; process disappearance is
-        // the observable, not the cancellation flag alone.
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                // SAFETY: signal zero observes only this test-owned PID.
-                if unsafe { libc::kill(pid as i32, 0) } != 0 {
-                    break;
-                }
-                // sleep-ok: bounded polling for Tokio's child reaper after the lease killed it.
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("tunnel child reaped");
-    }
-
-    /// A refusal must carry the SSH reason rather than show Up, even when
-    /// the process starts successfully and exits before the first poll.
-    #[farhelm_testtrace::test]
-    async fn rejected_forward_keeps_failure_reason_and_never_reports_up() {
-        let runtime = Arc::new(Mutex::new(Runtime::default()));
-        let (tx, rx) = watch::channel(TunnelView {
-            tunnels: vec![],
-            state: TunnelState::Retrying {
-                reason: None,
-                delay_secs: 0,
-            },
-        });
-        let result = monitor(command("printf 'Error: remote port forwarding failed for listen port 8080\\n' >&2; exit 255"), &runtime, &tx, &FleetEvents::new()).await.unwrap_err();
-        runtime.lock().unwrap().stop_child();
-        assert!(result.contains("remote port forwarding failed"), "{result}");
-        assert!(!matches!(rx.borrow().state, TunnelState::Up));
-    }
-
-    /// Retry must recover without reconnecting the supervisor, but must not
-    /// apply a recipe edit midway through an existing connection. A new
-    /// lease reads the edited mappings, and dropping either withdraws it.
+    /// The marked fake pins retry status, the view's connection snapshot and
+    /// next-lease recipe reads. The real-worker tests separately observe
+    /// claimed ports and destination dials across an edit during a retry;
+    /// unchanged view metadata alone cannot establish that wire behavior.
     #[farhelm_testtrace::test]
     async fn retries_recover_with_the_original_recipe_until_the_next_connection() {
         use crate::tensorlake::e2e::E2eTensorlake;
@@ -668,7 +420,11 @@ mod tests {
             crate::provisioning::credential_delivery::CredentialDelivery::detached(store.clone()),
         )));
         let events = Arc::new(FleetEvents::new());
-        let lease = service.start_tunnels(&row, events.clone()).await.unwrap();
+        let (client, _peer) = connected_client().await;
+        let lease = service
+            .start_tunnels(&row, client, events.clone())
+            .await
+            .unwrap();
         let mut view = service.0.tunnels.views.lock().unwrap()[&host].clone();
         tokio::time::timeout(Duration::from_secs(5), view.wait_for(|view| matches!(&view.state, TunnelState::Retrying { reason: Some(reason), .. } if reason == "listener refused"))).await.unwrap().unwrap();
         recipe.tunnels[0].port = 9090;
@@ -692,7 +448,8 @@ mod tests {
         );
         drop(lease);
         assert!(service.tunnel_view(host).is_none());
-        let next = service.start_tunnels(&row, events).await.unwrap();
+        let (client, _peer_next) = connected_client().await;
+        let next = service.start_tunnels(&row, client, events).await.unwrap();
         assert_eq!(
             service.tunnel_view(host).unwrap().tunnels[0].port,
             9090,
