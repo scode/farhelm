@@ -72,15 +72,17 @@ terminal, then makes an independent clone with the ordinary GitHub origin. Git u
 commands; a private repository without a credential helper can ask for credentials twice. A cache error stops the clone
 stage and names the cache path, rather than falling back to downloading the whole repository again.
 
-Git consolidates accumulated packs sooner so later clones spend less time repacking cached objects. The cache fetch
-runs:
+Git commands that a launch waits on disable automatic cleanup. After the clone stage ends, Farhelm consolidates
+accumulated cache packs in the background, whether prepared checkouts are enabled or not. When no spare needs building,
+that step runs:
 
 ```text
-git -c gc.autoDetach=false -c maintenance.autoDetach=false -c gc.autoPackLimit=10 --git-dir <cache> fetch --prune <url> '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
+git -c gc.autoDetach=false -c maintenance.autoDetach=false -c gc.autoPackLimit=10 --git-dir <cache> gc --auto
 ```
 
-This work stays under the cache lock: an occasional launch is slower while the cache consolidates, and another checkout
-of the same repository waits for it.
+When a spare does need building, its background cache refresh performs the same consolidation instead of running it
+twice. This work stays under the cache lock and uses your login shell without credential prompts. A later launch of the
+same repository can still wait for that lock while background cleanup finishes.
 
 The cache is `<supervisor-state-dir>/repo-cache/<owner>/<name>.git`, outside the working-copy root. It takes roughly the
 disk space of one extra repository copy per host. When the supervisor starts, it removes caches unused for more than 30

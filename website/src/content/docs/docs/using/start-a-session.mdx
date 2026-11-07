@@ -257,8 +257,9 @@ checkout directory. Farhelm removes caches unused for more than 30 days when the
 keeps its sessions running, starts (see [The pieces](/docs/how-it-works/the-pieces/)). You can delete a cache directory
 by hand at any time; existing checkouts stay independent, and the next managed checkout downloads it again. Avoid doing
 that while a checkout is being prepared, since it can make that launch fail, and leave the sibling `.lock` files in
-place so concurrent checkouts still take turns. An occasional launch takes longer while Git consolidates the cache for
-later clones. A cache failure names its path in the terminal and stops the clone.
+place so concurrent checkouts still take turns. Git tidies the cache in the background after a launch rather than in
+its terminal; another launch of the same repository may wait while that finishes. A cache failure names its path in
+the terminal and stops the clone.
 
 An agent in one of your sessions can also start a session in a new managed checkout when you ask it to, with your
 approval ([Approve what agents do](/docs/using/approve-agent-requests/)).

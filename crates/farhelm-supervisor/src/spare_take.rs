@@ -5,8 +5,8 @@
 //! fail preparation. The supervisor alone removes abandoned claimed trees.
 
 use super::{
-    CheckoutPreparation, LaunchSpec, git_preparation_command, parse_launch_file_name,
-    run_preparation_child_process,
+    CheckoutPreparation, LaunchSpec, NO_AUTO_GIT_CLEANUP, git_preparation_command,
+    parse_launch_file_name, run_preparation_child_process,
 };
 use crate::bounded_command::{Ended, GroupChild, OutputCaps};
 use crate::checkout_trash::{entry_metadata, open_child_dir};
@@ -88,14 +88,19 @@ pub(super) fn take_with_rename(
 
     println!("Farhelm: updating a checkout prepared earlier from GitHub.");
     let mut fetch = git_preparation_command(spec);
-    fetch.current_dir(&candidate.path).args([
-        "-c",
-        &format!("remote.{remote}.followRemoteHEAD=always"),
-        "fetch",
-        "--prune",
-        "--prune-tags",
-        &remote,
-    ]);
+    // Both update commands run while the user waits. Cache consolidation is
+    // the later background attempt's job; taking a spare must not start it.
+    fetch
+        .current_dir(&candidate.path)
+        .args(NO_AUTO_GIT_CLEANUP)
+        .args([
+            "-c",
+            &format!("remote.{remote}.followRemoteHEAD=always"),
+            "fetch",
+            "--prune",
+            "--prune-tags",
+            &remote,
+        ]);
     run_preparation_child_process(&mut fetch, "spare fetch")?;
 
     // A pruned source branch is caught even when old Git leaves HEAD dangling.
@@ -177,6 +182,7 @@ pub(super) fn take_with_rename(
     let mut merge = git_preparation_command(spec);
     merge
         .current_dir(&preparation.cwd)
+        .args(NO_AUTO_GIT_CLEANUP)
         .args(["merge", "--ff-only", &tracking]);
     run_preparation_child_process(&mut merge, "spare fast-forward")?;
     Ok(true)

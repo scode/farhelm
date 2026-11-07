@@ -2099,8 +2099,9 @@ fn scrub_git_repository_environment(command: &mut std::process::Command) {
 }
 
 /// Refresh the cache under its existing lock and produce an independent clone.
-/// The working-copy lock is held first; the cache lock spans dissociation and
-/// foreground gc. Errors abort visibly, with no timeout or plain-clone retry.
+/// The working-copy lock is held first; the cache lock spans dissociation.
+/// Cleanup belongs to the background attempt after this stage, because the
+/// user is waiting here. Errors abort visibly, with no plain-clone retry.
 /// A take never enters this fallback after a fetch failure or any moved entry.
 fn clone_with_repo_cache(
     spec: &LaunchSpec,
@@ -2110,25 +2111,51 @@ fn clone_with_repo_cache(
         &preparation.repo_cache_path,
         &preparation.clone_url,
         Path::new(&preparation.cwd),
+        CacheCleanup::Defer,
         || git_preparation_command(spec),
         || Ok(()),
     )
 }
 
-/// Run the one cache/clone sequence for visible launches and background builds.
+/// Choose whether a cache refresh may consolidate while its caller waits.
+/// Visible launches defer cleanup to the existing background attempt. A spare
+/// build already runs there and consolidates during its own refresh instead.
+#[derive(Clone, Copy)]
+pub(crate) enum CacheCleanup {
+    Defer,
+    Run,
+}
+
+/// Command-local overrides keep native launch Git from starting cleanup. They
+/// do not change the user's repository configuration or post-clone commands.
+const NO_AUTO_GIT_CLEANUP: [&str; 4] = ["-c", "gc.auto=0", "-c", "maintenance.auto=false"];
+
+/// Cleanup must finish before the cache flock is released. The lower pack
+/// threshold avoids repeating delta search on every dissociating clone.
+const CACHE_CLEANUP_CONFIG: [&str; 6] = [
+    "-c",
+    "gc.autoDetach=false",
+    "-c",
+    "maintenance.autoDetach=false",
+    "-c",
+    "gc.autoPackLimit=10",
+];
+
+/// Run the shared cache/clone sequence with cleanup explicit at the call site.
 /// A delayed builder verifies its still-owned target only after the existing
 /// flock, before *any* Git child; it must never recreate startup-removed content.
+/// The flock spans fetch, optional cleanup and dissociation. Clone itself never
+/// starts automatic cleanup, even when its cache refresh is a background build.
 pub(crate) fn clone_from_repo_cache(
     cache: &Path,
     clone_url: &str,
     target: &Path,
+    cleanup: CacheCleanup,
     mut make_git: impl FnMut() -> std::process::Command,
     verify_target_after_lock: impl FnOnce() -> Result<(), String>,
 ) -> Result<(), String> {
-    let result = (|| {
-        if !cache.is_absolute() {
-            return Err("repository cache path must be absolute; this launch spec may predate repository caching".to_string());
-        }
+    let result: Result<(), String> = (|| {
+        validate_repo_cache_path(cache)?;
         let lock =
             crate::repo_cache::acquire(cache).map_err(|e| format!("could not lock cache: {e}"))?;
         verify_target_after_lock()?;
@@ -2141,28 +2168,20 @@ pub(crate) fn clone_from_repo_cache(
 
         let mut fetch = make_git();
         // This is our own bare cache, named explicitly so Git's
-        // safe.bareRepository=explicit policy need not be relaxed. Consolidate
-        // accumulated fetch packs sooner: dissociation otherwise repeats the
-        // expensive delta search on every clone. Foreground gc keeps that work
-        // under the cache lock, at the cost of an occasional slower launch.
-        fetch
-            .args([
-                "-c",
-                "gc.autoDetach=false",
-                "-c",
-                "maintenance.autoDetach=false",
-                "-c",
-                "gc.autoPackLimit=10",
-                "--git-dir",
-            ])
-            .arg(cache)
-            .args([
-                "fetch",
-                "--prune",
-                clone_url,
-                "+refs/heads/*:refs/heads/*",
-                "+refs/tags/*:refs/tags/*",
-            ]);
+        // safe.bareRepository=explicit policy need not be relaxed. Only the
+        // background caller may pay the consolidation cost during this fetch;
+        // keeping it foreground there makes the same flock cover all cleanup.
+        match cleanup {
+            CacheCleanup::Defer => fetch.args(NO_AUTO_GIT_CLEANUP),
+            CacheCleanup::Run => fetch.args(CACHE_CLEANUP_CONFIG),
+        };
+        fetch.arg("--git-dir").arg(cache).args([
+            "fetch",
+            "--prune",
+            clone_url,
+            "+refs/heads/*:refs/heads/*",
+            "+refs/tags/*:refs/tags/*",
+        ]);
         run_preparation_child_process(&mut fetch, "cache fetch")?;
 
         // Git before 2.55.0 can lose a cached commit's tree during dissociation
@@ -2171,7 +2190,9 @@ pub(crate) fn clone_from_repo_cache(
         // Git 2.55 is Farhelm's minimum. Neither repository's config is changed.
         let mut clone = make_git();
         clone
-            .args(["-c", "core.commitGraph=false", "clone", "--reference"])
+            .args(["-c", "core.commitGraph=false"])
+            .args(NO_AUTO_GIT_CLEANUP)
+            .args(["clone", "--reference"])
             .arg(cache)
             .args(["--dissociate", "--", clone_url])
             .arg(target);
@@ -2183,11 +2204,42 @@ pub(crate) fn clone_from_repo_cache(
     result.map_err(|detail| format!("repository cache {}: {detail}", cache.display()))
 }
 
-/// Run one preparation child process (cache init/fetch, clone, or hook) with the
-/// terminal's own stdin/stdout/stderr inherited, and classify its
-/// outcome. There is deliberately NO timeout: credential prompts and
-/// slow networks are ordinary terminal work, and Stop/Delete own the
-/// process tree.
+/// Consolidate an existing cache when the background attempt has no spare to build.
+/// Use the same permanent lock and pack threshold as a background refresh. Both
+/// detachment settings keep cleanup inside this guard's lifetime; this does not
+/// create a cache or count maintenance as a successful checkout for eviction.
+pub(crate) fn consolidate_repo_cache(
+    cache: &Path,
+    mut make_git: impl FnMut() -> std::process::Command,
+) -> Result<(), String> {
+    let result = (|| {
+        validate_repo_cache_path(cache)?;
+        let _lock =
+            crate::repo_cache::acquire(cache).map_err(|e| format!("could not lock cache: {e}"))?;
+        let mut gc = make_git();
+        gc.args(CACHE_CLEANUP_CONFIG)
+            .arg("--git-dir")
+            .arg(cache)
+            .args(["gc", "--auto"]);
+        run_preparation_child_process(&mut gc, "cache cleanup")
+    })();
+    result.map_err(|detail| format!("repository cache {}: {detail}", cache.display()))
+}
+
+/// Refuse old launch specs rather than letting Git choose a relative cache or
+/// silently bypassing it. Clone and cleanup share this path contract.
+fn validate_repo_cache_path(cache: &Path) -> Result<(), String> {
+    if !cache.is_absolute() {
+        return Err("repository cache path must be absolute; this launch spec may predate repository caching".to_string());
+    }
+    Ok(())
+}
+
+/// Run one preparation Git or hook child with the caller's I/O configuration.
+/// This synchronous boundary has no timeout: visible preparation permits
+/// credential prompts and slow networks, with Stop/Delete owning the process
+/// tree. Background callers instead run inside the spare guard's deadline and
+/// owner tether, with terminal prompts disabled by their command factory.
 ///
 /// The returned detail names the stage's failure reason only — exit
 /// status or spawn error — never the command text itself (the hook is
@@ -2445,6 +2497,7 @@ mod tests {
             &cache,
             "https://github.com/acme/repo.git",
             &target,
+            CacheCleanup::Run,
             || {
                 std::fs::write(&git_marker, "factory invoked").unwrap();
                 std::process::Command::new("false")
@@ -2474,6 +2527,58 @@ mod tests {
         );
         assert!(!target.exists());
         assert!(!cache.exists());
+    }
+
+    /// A cleanup-only attempt must use the cache's existing lock and foreground
+    /// settings, without extending its checkout-use age. Contend through another
+    /// open description at the Git factory boundary, then inspect the actual argv
+    /// passed to the child and prove the guard was released after it returned.
+    #[farhelm_testtrace::test]
+    fn consolidation_core_locks_cache_and_preserves_checkout_use() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = directory.path().join("state/acme/repo.git");
+        let lock = crate::repo_cache::acquire(&cache).unwrap();
+        let modified = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        std::fs::File::open(cache.with_extension("lock"))
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        let recorded_modified = lock.modified().unwrap();
+        drop(lock);
+        let other = crate::repo_cache::open_lock(&cache).unwrap();
+        assert!(other.try_acquire().unwrap(), "premise: cache lock is free");
+        drop(other);
+        let argv = directory.path().join("cleanup-argv");
+        consolidate_repo_cache(&cache, || {
+            let other = crate::repo_cache::open_lock(&cache).unwrap();
+            assert!(
+                !other.try_acquire().unwrap(),
+                "cleanup must hold the cache flock before Git"
+            );
+            let mut command = std::process::Command::new("/bin/sh");
+            command
+                .args(["-c", "printf '%s\\n' \"$@\" > \"$0\""])
+                .arg(&argv);
+            command
+        })
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(argv).unwrap(),
+            format!(
+                "-c\ngc.autoDetach=false\n-c\nmaintenance.autoDetach=false\n-c\ngc.autoPackLimit=10\n--git-dir\n{}\ngc\n--auto\n",
+                cache.display()
+            )
+        );
+        let other = crate::repo_cache::open_lock(&cache).unwrap();
+        assert!(
+            other.try_acquire().unwrap(),
+            "cleanup must release the cache flock"
+        );
+        assert_eq!(other.modified().unwrap(), recorded_modified);
+        assert!(
+            !cache.exists(),
+            "cleanup must not initialize an absent cache"
+        );
     }
 
     /// Store the failed exec's error for the parent, then leave immediately.
@@ -4207,12 +4312,13 @@ exec sleep 60
     /// a stage-specific `.fail` file asks init or fetch to refuse. Fetch and clone
     /// both begin with `-c`, so their configuration keys distinguish the stages;
     /// the exact-argv test separately holds the whole command shape to account.
+    /// Clone's target is the final recorded argument, independent of overrides.
     fn fake_git_script(argv_record: &str, marker: &str) -> String {
         format!(
             r#"#!/bin/sh
 case "$1:$2" in
     init:--bare) stage=init; record="{argv_record}.init" ;;
-    -c:gc.autoDetach=false) stage=fetch; record="{argv_record}.fetch" ;;
+    -c:gc.auto=0) stage=fetch; record="{argv_record}.fetch" ;;
     -c:core.commitGraph=false) stage=clone; record="{argv_record}" ;;
     *) echo "unexpected Git stage" >&2; exit 98 ;;
 esac
@@ -4246,7 +4352,7 @@ if [ -f "$record.fail" ]; then exit 44; fi
 if [ "$stage" = clone ]; then
     : > "{marker}.git-ran"
     if [ -f "{argv_record}.git-fail" ]; then
-        printf 'partial\n' > "$9/.git-partial" || exit 94
+        printf 'partial\n' > "$a/.git-partial" || exit 94
         exit 1
     fi
     : > "{marker}"
@@ -4587,11 +4693,9 @@ printf 'AGENT-RAN\n'
             fetch,
             [
                 "-c",
-                "gc.autoDetach=false",
+                "gc.auto=0",
                 "-c",
-                "maintenance.autoDetach=false",
-                "-c",
-                "gc.autoPackLimit=10",
+                "maintenance.auto=false",
                 "--git-dir",
                 cache,
                 "fetch",
@@ -4607,6 +4711,10 @@ printf 'AGENT-RAN\n'
             [
                 "-c",
                 "core.commitGraph=false",
+                "-c",
+                "gc.auto=0",
+                "-c",
+                "maintenance.auto=false",
                 "clone",
                 "--reference",
                 cache,
@@ -5258,8 +5366,9 @@ printf 'AGENT-RAN\n'
         }
     }
 
-    /// An unchanged spare still avoids the cache lock, while preserving the
-    /// allocated inode and timestamps rather than replacing the whole folder.
+    /// An unchanged spare still avoids the cache lock and automatic cleanup,
+    /// while preserving the allocated inode and timestamps. Fetch and merge
+    /// must both override Git cleanup because the user waits on each command.
     #[farhelm_testtrace::test]
     fn spare_take_unchanged_avoids_cache_and_preserves_identity() {
         let fixture = SpareFixture::new();
@@ -5319,6 +5428,14 @@ printf 'AGENT-RAN\n'
                 .count(),
             1,
             "{calls}"
+        );
+        assert!(
+            calls.lines().any(|line| line == "-c gc.auto=0 -c maintenance.auto=false -c remote.upstream.followRemoteHEAD=always fetch --prune --prune-tags upstream"),
+            "spare fetch must disable automatic cleanup: {calls}"
+        );
+        assert!(
+            calls.lines().any(|line| line == "-c gc.auto=0 -c maintenance.auto=false merge --ff-only refs/remotes/upstream/trunk"),
+            "spare fast-forward must disable automatic cleanup: {calls}"
         );
         assert!(
             !calls
@@ -5437,7 +5554,7 @@ printf 'AGENT-RAN\n'
     #[farhelm_testtrace::test]
     fn spare_take_fetch_failure_never_clones_or_runs_later_steps() {
         let fixture = SpareFixture::new();
-        fixture.install_wrapper("if [ \"$3\" = fetch ]; then exit 23; fi");
+        fixture.install_wrapper("if [ \"$7\" = fetch ]; then exit 23; fi");
         let (report, terminal, _) = fixture.prep.run_shim_in_child();
         assert!(
             report.contains("spare fetch exited with status 23"),
@@ -6295,12 +6412,12 @@ printf 'AGENT-RAN\n'
         );
     }
 
-    /// A normal launch must consolidate a cache with more than ten fetch packs.
+    /// A launch must leave accumulated packs for the background cleanup step.
     ///
     /// Small fetches otherwise leave separate packs whose delta search is paid
     /// again on every dissociating clone. Force that actual on-disk premise,
-    /// then let the production shim fetch trigger foreground maintenance. No
-    /// explicit test-side gc may stand in for the behavior under test.
+    /// then run the production shim with cleanup deferred. The shared background
+    /// entry point must consolidate afterwards; no test-side gc stands in for it.
     #[farhelm_testtrace::test]
     fn d2_real_git_consolidates_accumulated_cache_packs() {
         let setup = tempfile::tempdir().unwrap();
@@ -6360,6 +6477,8 @@ printf 'AGENT-RAN\n'
                 "-c",
                 "gc.auto=0",
                 "-c",
+                "maintenance.auto=false",
+                "-c",
                 "fetch.unpackLimit=1",
                 "--git-dir",
                 cache.to_str().unwrap(),
@@ -6395,7 +6514,7 @@ printf 'AGENT-RAN\n'
             ])
             .stdout,
             upstream_head.stdout,
-            "premise: maintenance must run even when the launch fetch has no new objects"
+            "premise: launch and cleanup must see a cache already at the upstream commit"
         );
 
         let child_path = format!(
@@ -6424,10 +6543,29 @@ printf 'AGENT-RAN\n'
             "preparation: status={status:?} report={report} terminal={terminal}"
         );
         let after = pack_count();
-        assert!(
-            after > 0 && after <= 10 && after < before,
-            "the production fetch must consolidate cache packs before returning: \
+        assert_eq!(
+            after, before,
+            "the launch must leave cache cleanup to its background attempt: \
              before={before} after={after} terminal={terminal}"
+        );
+        // The production cleanup helper uses the same isolated real Git as
+        // setup, after the shim has returned and released its cache flock.
+        consolidate_repo_cache(cache, || {
+            let mut command = std::process::Command::new("git");
+            command
+                .env_clear()
+                .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_CONFIG_COUNT", "0");
+            command
+        })
+        .unwrap();
+        let consolidated = pack_count();
+        assert!(
+            consolidated > 0 && consolidated <= 10 && consolidated < after,
+            "the background step must consolidate cache packs before returning: \
+             before={after} after={consolidated}"
         );
         assert_eq!(fixture.state().unwrap(), PreparationState::Ready);
         let checkout = Path::new(&fixture.preparation.cwd);
