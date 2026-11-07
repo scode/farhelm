@@ -334,35 +334,67 @@ section exists, its latest entry must also be satisfied. Then close the plan per
 "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write a closing entry in its log,
 and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked while landing on 2026-11-07 (claim 9db5eb).
+### 2026-11-07: answer to a blocked question
 
-### Stop closing terminal tabs breaks session-list and confirmation tests
+The question, as the executor put it:
 
-This plan makes Stop also close a session's terminal tabs, asking first when tabs are showing; its report says the row
-above the terminal also gained a Stop button. Its drafts, [#3132](https://github.com/scode/farhelm/pull/3132/changes)
-and [#3133](https://github.com/scode/farhelm/pull/3133/changes), have not merged. It was checked together with the other
-plan in this landing, instant-trash-delete, which then passed the same tests without this plan and is landing alone.
+> Blocked while landing on 2026-11-07 (claim 9db5eb).
+>
+> ### Stop closing terminal tabs breaks session-list and confirmation tests
+>
+> This plan makes Stop also close a session's terminal tabs, asking first when tabs are showing; its report says the row
+> above the terminal also gained a Stop button. Its drafts, [#3132](https://github.com/scode/farhelm/pull/3132/changes)
+> and [#3133](https://github.com/scode/farhelm/pull/3133/changes), have not merged. It was checked together with the
+> other plan in this landing, instant-trash-delete, which then passed the same tests without this plan and is landing
+> alone.
+>
+> With this plan on top:
+>
+> - Two Rust tests that guard the session list's rendering failed (run `1689f6c6-5913-4c2b-a109-28e876bc297c`): an
+>   unchanged row re-rendered 65 times across a test's repeated refreshes of the host list, where it should render once,
+>   and switching the selected row re-rendered one row more than the two that changed. Both passed without this plan
+>   (run `44345c89-c69e-4e73-8faa-582688471320`). Why this plan affects row rendering is not established.
+> - Two sidebar tests of where a bottom row's actions menu opens failed on both engines (WebKit run
+>   `9b11d18b-32eb-456d-9a23-46309281453a`, Chromium run `0e536f3c-fa3d-4a52-8182-0596188a0e0e`): the menu no longer
+>   reaches the position the tests set up. The same tests passed on both engines without this plan, in the runs listed
+>   in instant-trash-delete's landing notes.
+> - "Skip session confirmations walks row header interrupted card and tab actions" failed on Chromium (run
+>   `6c5af047-1e2b-412a-bec1-9032a84e62b8`): one Stop returned a server error because the session's processes could not
+>   be cleaned up in time, and the session it left behind made two later tests in that run fail their cleanup. It passed
+>   without this plan too, but that is one failure, possibly from load; whether this plan's tab closing causes it is not
+>   established.
+>
+> Should the plan go back to its executor to fix these? That delays Stop's tab closing by an executor round and its
+> review. The landing cannot fix them itself: the re-render cause is unknown, and whether the menu tests need the code
+> or the tests changed depends on whether the menu's new size is intended. Landing it as it is would ship the re-render
+> regression and leave these tests failing on main. I recommend sending it back, with the third failure reproduced in a
+> narrow run before it is treated as the plan's.
 
-With this plan on top:
+The maintainer's answer:
 
-- Two Rust tests that guard the session list's rendering failed (run `1689f6c6-5913-4c2b-a109-28e876bc297c`): an
-  unchanged row re-rendered 65 times across a test's repeated refreshes of the host list, where it should render once,
-  and switching the selected row re-rendered one row more than the two that changed. Both passed without this plan (run
-  `44345c89-c69e-4e73-8faa-582688471320`). Why this plan affects row rendering is not established.
-- Two sidebar tests of where a bottom row's actions menu opens failed on both engines (WebKit run
-  `9b11d18b-32eb-456d-9a23-46309281453a`, Chromium run `0e536f3c-fa3d-4a52-8182-0596188a0e0e`): the menu no longer
-  reaches the position the tests set up. The same tests passed on both engines without this plan, in the runs listed in
-  instant-trash-delete's landing notes.
-- "Skip session confirmations walks row header interrupted card and tab actions" failed on Chromium (run
-  `6c5af047-1e2b-412a-bec1-9032a84e62b8`): one Stop returned a server error because the session's processes could not be
-  cleaned up in time, and the session it left behind made two later tests in that run fail their cleanup. It passed
-  without this plan too, but that is one failure, possibly from load; whether this plan's tab closing causes it is not
-  established.
+The landing monitor answered this on the maintainer's behalf (`plans/.agents/landing.md`, "Answering blocks"): the
+landing failed mainly on tests the plan made fail, so the plan goes back to be fixed.
 
-Should the plan go back to its executor to fix these? That delays Stop's tab closing by an executor round and its
-review. The landing cannot fix them itself: the re-render cause is unknown, and whether the menu tests need the code or
-the tests changed depends on whether the menu's new size is intended. Landing it as it is would ship the re-render
-regression and leave these tests failing on main. I recommend sending it back, with the third failure reproduced in a
-narrow run before it is treated as the plan's.
+- Fix the session-row re-render regression so that
+  `list::row::tests::repeated_parent_refreshes_do_not_rerender_an_unchanged_row` and
+  `list::row::tests::a_selection_change_rerenders_only_the_affected_rows` (`crates/farhelm-ui/src/list/row.rs`) pass
+  unchanged. They guard real behavior; do not loosen them.
+- Make the two sidebar tests of a bottom row's actions menu pass on both engines ("opening the last visible row's menu
+  in a scrolled list stays inside the viewport" and "a retained refusal stays inside a bottom-row menu's scrolling
+  panel", `e2e/tests/sidebar.spec.ts`). If the menu legitimately grew, adjust the tests' fixture so it still exercises
+  the clamp they check, rather than dropping the check.
+- Run "skip session confirmations walks row header interrupted card and tab actions"
+  (`e2e/tests/session-confirmations.spec.ts`) repeatedly on both engines. If its Stop fails because the session's
+  process scope cannot be torn down, find whether closing tabs during Stop causes it, and fix it if so.
+- Also, in `crates/farhelm-proto/src/lib.rs`, remove the two lines this plan added to the protocol version's comment
+  about why it bumped; that comment's own rule keeps the reasons in the commit and SPEC_impl.md, which already has it.
+
+Run the whole UI crate's tests and the sidebar, session-confirmations and header browser specs on both engines before
+delivering again, and rebase onto main first: instant-trash-delete is landing meanwhile. Two docs-screenshot specs
+(`e2e/docs-shots/visual-review.spec.ts`, which counts the header's buttons, and
+`e2e/docs-shots/stop-restart-resume.spec.ts`, whose callout says a stopped session's terminal stays) also describe the
+old behavior; leave them to the next docs screenshot refresh, whose procedure updates shot specs first.
+
+A later change of mind by the maintainer is a follow-up, not a reason to stop the plan.
