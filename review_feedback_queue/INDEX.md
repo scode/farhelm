@@ -62,6 +62,39 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   wrapping disabled, zero-width terminal output at the right edge can attach to the preceding cell and change retained
   text order.
 
+- [`launcher-live-draft-submission-source-gap.md`](launcher-live-draft-submission-source-gap.md) — While a resumed
+  host's checkout preview loads, editing Custom permission words can automatically launch the edited agent without a new
+  Launch press. Supported edits can change guarded vendor settings into permission bypass. This specific
+  source-confirmed route makes the item highest priority; the older generic target/container concerns below remain
+  unverified after investigation.
+
+- [`startup-probe-false-tmux-absence.md`](startup-probe-false-tmux-absence.md) — A temporary resource/connection failure
+  at startup can make a live old session appear ended; its normal guarded Delete can then stop that live work without
+  authorizing it. This is a source-established conditional failure, not a measured incident.
+
+- [`unusable-tmux-delete-consent.md`](unusable-tmux-delete-consent.md) — When tmux cannot be used, a Delete presented as
+  stopping nothing alive can still kill either an old agent or live old-tab work beside a migrated, exited host agent.
+  The old-agent variant later refuses; the migrated-host variant can complete.
+
+- [`tmux-client-loss-latches-absence.md`](tmux-client-loss-latches-absence.md) — A temporary allocation failure in one
+  tmux query process can make Farhelm treat a still-running old server as empty. During startup it can then destroy that
+  server's terminal sessions without a Delete request. During later listings it can hide live work and let guarded
+  Delete kill the live agent without its required warning. These are source-confirmed conditional routes, with no
+  measured allocation failure or incident.
+
+- [`dead-host-report-anchor-identity-gap.md`](dead-host-report-anchor-identity-gap.md) — A report whose recorded
+  ancestry happens to contain the reused process number of a host's already-dead child may be accepted as belonging to
+  the current run. If it selects another run's conversation, a later Restart could resume and append user work there.
+  This original potential-highest route is unverified after source investigation; the prior complete exclusion was
+  ambiguous and is not retained.
+
+- [`invalid-capture-run-recursive-removal.md`](invalid-capture-run-recursive-removal.md) — A mistaken directory supplied
+  to the screen-capture stop command can cause silent recursive deletion of unrelated user work.
+
+- [`fixture-url-userinfo-credentials.md`](fixture-url-userinfo-credentials.md) — The capture tool can accept and write a
+  screen containing proxy credentials in a configured local URL. Those bytes can reach the fixture tree intended for
+  public commits. This review has not observed an actual credential-bearing capture or public credential leak.
+
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
@@ -764,10 +797,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`short-launcher-notice-reachability.md`](short-launcher-notice-reachability.md) — An extremely short window can
   exhaust the launcher's notice-height budget; supported native sizing, actual reachability and recovery remain
   unverified after investigation.
-
-- [`launcher-live-draft-submission-source-gap.md`](launcher-live-draft-submission-source-gap.md) — Submission reads
-  current launcher choices, but a shipped sequence accepting a harmful action different from the one shown remains
-  unverified after investigation. Fresh choice-and-Enter behavior is explicitly supported.
 
 - [`folder-refusal-fixture-enters-version-skew.md`](folder-refusal-fixture-enters-version-skew.md) — A folder-dropdown
   test's refusal mock omits the build stamp, so later recovery checks run with a version-mismatch notice and live
@@ -1963,3 +1992,215 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`bulk-screenshot-test-expects-wrong-local-alias.md`](bulk-screenshot-test-expects-wrong-local-alias.md) — The
   bulk-action screenshot regression expects a local-host alias that its own fixture does not provide.
+
+- [`no-tmux-lifecycle-witness.md`](no-tmux-lifecycle-witness.md) — The desktop smoke can pass if creating or restarting
+  a new terminal unnecessarily starts tmux. Its new no-tmux check has already finished before it exercises any sessions.
+  This weakens evidence for the requirement that a host with only new terminals never runs tmux.
+
+- [`pending-test-host-start-cleanup.md`](pending-test-host-start-cleanup.md) — After a supervisor crashes during a
+  terminal launch, browser-test cleanup can report success and delete its state while a terminal host finishes starting.
+  That leaves an owned test process running without its socket or retained run directory. This concerns maintainer
+  tooling, not an established loss of user sessions.
+
+- [`stty-tool-format-mismatch.md`](stty-tool-format-mismatch.md) — The terminal-settings test can fail on a Mac with GNU
+  command-line tools first on PATH even when the host's terminal settings are correct. Its reference and host samples
+  use different stty implementations, whose saved-settings strings cannot match.
+
+- [`closed-stdin-epipe-witness.md`](closed-stdin-epipe-witness.md) — The test for keeping SSH input open after the
+  remote stops accepting it can pass without ever reaching the failure-handling boundary it claims to check. A refactor
+  that buffers input without forwarding it can leave that boundary untested while the test stays green. This is a
+  regression-test sensitivity defect, not evidence that current forwarding is wrong.
+
+- [`catalog-unencoded-file-url.md`](catalog-unencoded-file-url.md) — The Tensorlake test runner cannot load its terminal
+  catalog from a tested checkout whose directory name contains # or certain literal percent escapes. It builds a URL
+  from an unencoded filesystem path.
+
+- [`resume-preview-readiness-witness.md`](resume-preview-readiness-witness.md) — The regression test never forces a
+  ready checkout preview while the form still displays Connecting. A regression at that boundary can consume the single
+  accepted launch press without eventually starting a session.
+
+- [`suspended-launch-missing-identity.md`](suspended-launch-missing-identity.md) — After interrupted initial sandbox
+  setup, a suspended host can appear as an available fresh-checkout target, yet Launch does nothing and shows no
+  refusal. The new pre-resume identity requirement returns before even resuming the sandbox.
+
+- [`version-agreement-lifetime-doc.md`](version-agreement-lifetime-doc.md) — The newly documented agreement between a
+  program's terminal-version environment and a terminal query needs a lifetime qualification. A surviving program keeps
+  its launch environment after a Farhelm update, while a new query after adoption receives the current emulator's
+  version. The established consequence is documentation ambiguity only; no application failure is assumed.
+
+- [`host-tab-management-tmux-dependency.md`](host-tab-management-tmux-dependency.md) — Keeping one old session on a host
+  can make Restart or Delete of a completely new session fail when the old terminal server cannot answer, even though
+  the new session has no old tabs.
+
+- [`capture-failed-stop-erases-recovery.md`](capture-failed-stop-erases-recovery.md) — When the real-agent
+  inspection/capture tool cannot confirm its terminal host stopped, it hides that failure and still removes the run
+  directory needed to retry the supported stop command. Continued agent execution after the deletion has not been
+  demonstrated.
+
+- [`selection-cleanup-after-grid-adoption.md`](selection-cleanup-after-grid-adoption.md) — A queued selection-cleanup
+  callback can throw if the compatibility terminal switches to the grid before that callback runs. Actual occurrence in
+  a supported browser has not been observed. No lasting input failure, lost work or wider disruption is established.
+
+- [`asset-wait-bypasses-pending-kind.md`](asset-wait-bypasses-pending-kind.md) — A terminal still waiting for
+  fonts/helpers can construct the old component and open a socket while Restart tells it to wait. The established l1
+  consequence remains unnecessary component/socket work; successful grid adoption leaves no established lasting defect.
+  A separate known pre-notice input-format hazard must not be treated as safe by this limited conclusion.
+
+- [`pending-kind-font-premise.md`](pending-kind-font-premise.md) — The test intended to prove that an unresolved
+  terminal kind blocks mounting can pass because its fonts are still loading instead. A pass does not establish the
+  stated reason that no socket opened during the measured interval.
+
+- [`direct-grid-test-bootstrap-order.md`](direct-grid-test-bootstrap-order.md) — A healthy grid terminal can fail its
+  integration test when the unrelated xterm asset loads slowly, because the test asserts the asset is loaded before
+  establishing that premise.
+
+- [`stopped-reader-output-witness.md`](stopped-reader-output-witness.md) — The browser flood test checks retained output
+  precisely, but a pass does not establish that the flood ran while the page stopped consuming frames. It can therefore
+  leave the intended slow-viewer case unproved while appearing to cover it.
+
+- [`container-redraw-discards-hover.md`](container-redraw-discards-hover.md) — A container terminal can lose a completed
+  file hover when other cells on that row redraw. One redraw can cause temporary rechecking. Another relevant row change
+  during replacement admission can leave the link absent while the pointer stays at rest; movement or completion of a
+  later gesture can retry. A first click started without a hovered link does not activate the file.
+
+- [`osc-admission-repeats-row-work.md`](osc-admission-repeats-row-work.md) — Unverified after investigation: admitting a
+  dense row of program hyperlinks in a container terminal repeats whole-row construction for each candidate, potentially
+  delaying pointer or UI work. The repeated work is source-confirmed; material latency has not been measured. This is
+  separate from asynchronous redraw losing a hover.
+
+- [`delete-reader-notice-bypass.md`](delete-reader-notice-bypass.md) — Input arriving while a session is being deleted
+  can make its terminal detach with an input-failure notice instead of the Delete's notice or its cleanup-failure
+  explanation. The landed notice fix misses the reader's direct failure path.
+
+- [`version-probe-latches-gone-unusable.md`](version-probe-latches-gone-unusable.md) — If the old terminal server
+  disappears after the supervisor's initial socket check but before its server-version query, Farhelm can refuse Restart
+  and Delete of its old sessions for the rest of that supervisor run. The error says a running unusable server holds
+  them even though tmux already reported that no server exists. Restarting the supervisor is needed to clear this false
+  refusal.
+
+- [`tmux-negative-result-observation.md`](tmux-negative-result-observation.md) — After the old terminal server
+  disappears, some capture and cleanup paths continue issuing tmux commands despite receiving a definitive absence
+  reply. The extra work is finite; no indefinite churn or loss of user work is established. The sixteen-sample bound
+  applies to the sampler alone, not every cleanup roster.
+
+- [`tmux-refusal-broken-rustdoc-link.md`](tmux-refusal-broken-rustdoc-link.md) — An internal rustdoc link names a method
+  the driver does not have. The refusal behavior and surrounding explanation remain accurate; no product consequence is
+  established.
+
+- [`tmux-exit-empty-spec-citation.md`](tmux-exit-empty-spec-citation.md) — The new configuration explanation directs
+  maintainers to a specification section in the wrong document. Its description of when the private server ends is
+  accurate; the error is its source citation.
+
+- [`agent-screen-refusal-missing-path.md`](agent-screen-refusal-missing-path.md) — If a capture working directory
+  contains bytes that are not UTF-8, the new backend refuses it without displaying the path it refused.
+
+- [`old-terminal-query-answer-doc.md`](old-terminal-query-answer-doc.md) — A new maintenance comment attributes all
+  automatic old-terminal replies to the browser, although ordinary device and cursor queries are answered inside tmux
+  and removed before reaching it. This misstates the warning's input path; no changed execution or user-visible
+  malfunction is claimed.
+
+- [`attach-autostarts-empty-tmux.md`](attach-autostarts-empty-tmux.md) — After upgrading a host with old terminals, an
+  attachment that races the old terminal server going away can start a new empty tmux server. Farhelm then stops
+  querying it but leaves that unnecessary process running, contrary to the promise that tmux ends with the last old
+  terminal. No agent or user-work loss is claimed.
+
+- [`tmux-empty-error-doc.md`](tmux-empty-error-doc.md) — No current user-visible failure is established. The code's
+  explanation of how stopped old terminals are detected contradicts its new behavior, making future lifecycle changes
+  easier to get wrong.
+
+- [`tmux-no-spawn-test-retired-query-doc.md`](tmux-no-spawn-test-retired-query-doc.md) — The no-spawn test says it
+  checks a version-query refusal, but that operation was already removed when the test was added. Correct the
+  description so readers can tell what the test actually covers. No product behavior or safety defect is attributed to
+  this wording.
+
+- [`tmux-presence-false-doc.md`](tmux-presence-false-doc.md) — The new internal API documentation says a false
+  query-gate answer proves an old session does not exist. It also returns false when a server is unusable and its agents
+  may still run. Future maintainers are given an incorrect contract; no additional shipped process-loss route is
+  attributed to the prose.
+
+- [`notification-cleanup-row-premise.md`](notification-cleanup-row-premise.md) — The new upgrade test's cleanup
+  assertion does not prove that deleting a session removes its retained notification. Another test independently checks
+  notification preservation through all later migrations, so this is a narrow missing premise in the migrated-trigger
+  check, not absence of all notification-upgrade coverage.
+
+- [`transition-accessor-comment.md`](transition-accessor-comment.md) — A maintainer following the test's explanation
+  encounters an accessor name that no longer exists. No product behavior or lifecycle guarantee is shown to be wrong.
+
+- [`tmux-test-probe-deadlines.md`](tmux-test-probe-deadlines.md) — The new server-exit test does not enforce its stated
+  one-minute wait while a tmux probe is in flight. Its companion test's one-shot server-alive assertion also has no
+  probe deadline. These are source-established local timeout gaps in maintainer validation; no dependency hang or
+  product failure was observed.
+
+- [`successor-exit-processing-witness.md`](successor-exit-processing-witness.md) — The retained-exit-code regression
+  test relies on recovery replay finishing in the background before it checks the code. A slow replay can make a correct
+  restart fail this test; the failing schedule is unverified after investigation.
+
+- [`grid-row-is-not-program-line.md`](grid-row-is-not-program-line.md) — The new terminal transcript can make a
+  partially rendered program line appear complete to a test. Agent checks can then reject correct behavior; one
+  direct-signal caller could instead use a process-number prefix and terminate unrelated work. The exact short-line
+  split, unrelated signal target and regression attribution remain unverified after investigation.
+
+- [`grid-text-omits-blank-columns.md`](grid-text-omits-blank-columns.md) — The new test helper can turn visibly
+  separated terminal text into a different string. A test searching that transcript for the displayed text may then time
+  out or match text that was never contiguous on screen. No currently failing assertion was identified.
+
+- [`hook-waiter-missing-invocation-binding.md`](hook-waiter-missing-invocation-binding.md) — A repeated hook callback
+  can be credited with an earlier callback's terminal result. Report-write counts prove that reports ran and were
+  accepted, but do not prove the second callback exited successfully and stayed silent. The exact false-pass scheduling
+  remains unverified after investigation.
+
+- [`mixed-stack-missing-tmux-cleanup.md`](mixed-stack-missing-tmux-cleanup.md) — An old-terminal migration test that
+  fails can leave its private server and agent running after its state directory is removed. The shared test fixture
+  lost the guard that owned those processes. This is a conditional tooling cleanup defect; no actual leftover was
+  observed.
+
+- [`reboot-concurrency-early-release.md`](reboot-concurrency-early-release.md) — The reboot tests do not keep their
+  integration permit through successor retirement and terminal cleanup. Under the explicit in-process/libtest use of
+  that permit, another fixture can be admitted during the preceding fixture's teardown. No permanent process leakage is
+  established.
+
+- [`stop-annotation-exit-witness.md`](stop-annotation-exit-witness.md) — The test can reject a successful Stop if its
+  immediate listing runs before the host runtime processes the exit record. This is a conditional source-confirmed race,
+  not an observed flake or frequency claim.
+
+- [`kicked-input-test-local-filter.md`](kicked-input-test-local-filter.md) — A takeover regression assertion lets the
+  client discard the displaced viewer's attempted keystrokes before the supervisor sees them. Passing therefore does not
+  establish the supervisor's input ownership enforcement.
+
+- [`channel-zero-missing-capability.md`](channel-zero-missing-capability.md) — The reserved-channel regression assertion
+  can pass for a separate missing-capability refusal, even with a valid real session.
+
+- [`argv-grid-wrap-witness.md`](argv-grid-wrap-witness.md) — The structured-launch test can decode arguments the fake
+  process never received if attachment catches a wrapped hex witness partway through a continuation row. That can reject
+  a correct launch. The event-shape defect is supported by source; the exact scheduling cut remains unverified after
+  investigation.
+
+- [`final-stack-drop-claim-window.md`](final-stack-drop-claim-window.md) — A very narrow setup race can make the
+  converted restart-gap tab test fail even when tab opening behaves correctly. Ordinary overlap between the test's
+  supervisors is not this race: both share the same process's live ownership claim. The possible consequence is a
+  maintainer-test false failure only.
+
+- [`tab-survival-missing-live-exchange.md`](tab-survival-missing-live-exchange.md) — The converted tab-survival test can
+  potentially pass after a handoff has incorrectly ended the shell. Its successor checks the host's remembered child
+  number and old terminal text, rather than asking the shell to do anything. This is a test-coverage concern, not a
+  claim that shipped handoff kills shells. Exact false-pass scheduling remains unverified after investigation.
+
+- [`host-flood-stall-window-claim.md`](host-flood-stall-window-claim.md) — A migrated test now claims to cross the new
+  terminal's stall timeout, but observes only eight of its configured sixty seconds. Its inherited flood witness also
+  does not establish output pressure. This is a new coverage-description error, with no observed product stall.
+
+- [`sink-churn-without-sinks.md`](sink-churn-without-sinks.md) — The test intended to catch memory growth from retired
+  old-terminal clients now passes without creating any of those clients. A regression that stops pruning the registry
+  would escape this assertion. No actual memory leak in shipped code is claimed.
+
+- [`fixture-private-ipv6-url-guard.md`](fixture-private-ipv6-url-guard.md) — The fixture checks can approve a screen
+  containing a private IPv6 proxy URL. This is a guard omission for valid URL/configuration text, not evidence that a
+  private address or credential was published.
+
+- [`capture-startup-metadata-cleanup.md`](capture-startup-metadata-cleanup.md) — A screen-capture run can fail after
+  launching its agent but before returning the run handle, leaving the detached capture process and its terminal host
+  running without the caller cleaning them up.
+
+- [`capture-local-program-path.md`](capture-local-program-path.md) — Naming a Farhelm binary in the current directory
+  with --farhelm ./farhelm can fail to launch it or silently run another Farhelm found on PATH, so screen inspection can
+  use a different build than requested.
