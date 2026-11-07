@@ -246,8 +246,8 @@ The CI workflow runs ONLY on demand: it has no push or pull-request trigger (rem
 ci.yml), so CI green does not include browser coverage. PRs are still opened as drafts and marked ready when the user
 asks to publish them, or as part of landing them, never on the agent's own initiative. Landing is authorized where a
 flow's own file says so: plan landing, approved planning PRs, abandoned-plan source updates, release fix forward, the
-stable release's changelog and finalization PRs, a stable re-cut's changelog PR, an RC's announcements PR, run-all-tests
-fixes, the todo flow.
+stable release's changelog and finalization PRs, its screenshot PR after the maintainer confirms the release is good and
+going out, a stable re-cut's changelog PR, an RC's announcements PR, run-all-tests fixes, the todo flow.
 
 - Before choosing validation, running any runtime test (Rust, browser, JS, installer, provisioning), creating or
   updating a PR, merging one, or reporting a change to the repository's files as done, read `.agents/validation.md` and

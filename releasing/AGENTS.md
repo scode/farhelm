@@ -67,16 +67,20 @@ These are the only merges a release request authorizes. Each is spelled out, wit
 
 - The stable release's changelog PR, and its finalization PR: `releasing/.agents/stable.md`, "Cutting a stable release",
   steps 3 and 4.
+- Its prepared screenshot PR, once the maintainer confirms the release is good and going out:
+  `releasing/.agents/stable.md`, "Cutting a stable release", step 8. Preparation starts at notes approval, not at that
+  confirmation.
 - An RC's small announcements PR, before the tag, when the maintainer selected additions or changes:
   `releasing/.agents/rc.md`, "Cutting an RC release". It changes the announcement table on main, never the version.
 - A stable re-cut's changelog PR: `releasing/.agents/stable.md`, "Re-cutting a stable release".
 - A fix forward's PR, marked ready and merged when the fix is straightforward and unambiguous:
   `releasing/.agents/fixing-forward.md`, "Fixing forward".
 
-Nothing else merges for a release's sake. The release screenshot PR stays a draft until the maintainer asks for it to
-land, an RC or dev bump PR is closed without merging, and a stable release commit never reaches main. The temporary
-announcements PR beneath a stack-based RC's bump is closed without merging too; the announcement text has already landed
-through the separate PR on main.
+Nothing else merges for a release's sake. The release screenshot PR stays a draft until the maintainer confirms the
+release is good and going out; that confirmation authorizes the release agent to land it without a separate merge ask.
+The screenshot subagent never merges it. An RC or dev bump PR is closed without merging, and a stable release commit
+never reaches main. The temporary announcements PR beneath a stack-based RC's bump is closed without merging too; the
+announcement text has already landed through the separate PR on main.
 
 ## In-app announcements
 
@@ -256,8 +260,10 @@ when the subagent runs outside a checkout or starts without it:
 - `.agents/docs-media.md`
 - `.agents/validation.md` (the website build)
 
-Fence: work in a new jj workspace under the scratch directory, never the release checkout; no `cargo clean`, tags,
-release branch or get.farhelm.io; the PR stays a draft and is never merged; no preview server.
+Fence: work in a new independent colocated jj checkout (its default workspace) under the scratch directory, never the
+release checkout; no `cargo clean`, tags, release branch or get.farhelm.io; the subagent keeps the PR draft and never
+merges it; no preview server. The release agent lands it only after the maintainer confirms the release is good and
+going out.
 
 ### Risk-report researchers (fixed prompt)
 
