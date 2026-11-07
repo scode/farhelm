@@ -529,6 +529,23 @@ pub(crate) async fn term_ws_if_unowned(
     serve_term_upgrade(state, auth, id, q, upgrade, true)
 }
 
+/// The largest WebSocket message, and frame, a terminal socket accepts from
+/// the browser: 8 MiB, the protocol's frame cap
+/// ([`farhelm_proto::MAX_FRAME_LEN`]).
+///
+/// The size is for byte streams: an old terminal's xterm.js hands a whole
+/// paste to the socket as ONE message, which the helm then cuts into input
+/// chunks, so a tighter cap would turn a large clipboard paste into a
+/// dropped connection — the very failure chunking exists to prevent. A
+/// grid stream never needs it: each of its browser messages is at most
+/// `GRID_MAX_INPUT_MESSAGE` (64 KiB), and one over that ends the
+/// attachment when it arrives, so for a grid socket this only bounds what
+/// the socket layer reads before that check. One cap serves both because
+/// the limits are fixed at the upgrade, before the supervisor's answer says
+/// which kind of stream the socket carries (a browser that asks for grids
+/// still gets bytes for an old terminal).
+const TERM_WS_MAX_MESSAGE: usize = farhelm_proto::MAX_FRAME_LEN as usize;
+
 /// The upgrade both terminal routes share; `if_unowned` is the one thing
 /// they differ in.
 fn serve_term_upgrade(
@@ -539,10 +556,6 @@ fn serve_term_upgrade(
     upgrade: WebSocketUpgrade,
     if_unowned: bool,
 ) -> axum::response::Response {
-    // Sized to what the client can chunk onward (MAX_FRAME_LEN), not
-    // smaller: xterm.js hands a bracketed paste to us as ONE message, so
-    // a tighter cap would turn a large clipboard paste into a dropped
-    // connection — the very failure chunking exists to prevent.
     // Kept for the log line below, which runs after `id` has moved into
     // the handler.
     let id_for_log = id.clone();
@@ -553,8 +566,8 @@ fn serve_term_upgrade(
         // and only one of those is what `max_message_size` alone stops. The
         // tungstenite 0.29 default frame bound is 16 MiB, and its frame
         // reader reserves the declared length before any payload arrives.
-        .max_frame_size(farhelm_proto::MAX_FRAME_LEN as usize)
-        .max_message_size(farhelm_proto::MAX_FRAME_LEN as usize)
+        .max_frame_size(TERM_WS_MAX_MESSAGE)
+        .max_message_size(TERM_WS_MAX_MESSAGE)
         .on_upgrade(move |socket| async move {
             if let Err(e) = serve_term(state, auth, id, q, socket, if_unowned).await {
                 // A refused non-displacing attach is an ORDINARY outcome,
@@ -1606,10 +1619,10 @@ mod tests {
         // left for the socket to deliver.
         expect_stream_notice(&mut ws, "bytes").await;
 
-        // The header declares more than MAX_FRAME_LEN, but no payload bytes
-        // are sent. Only the frame bound can reject this declaration before
-        // the reader waits for or reserves the missing payload.
-        ws.send_frame_header(2, farhelm_proto::MAX_FRAME_LEN as usize + 1)
+        // The header declares more than the socket's cap, but no payload
+        // bytes are sent. Only the frame bound can reject this declaration
+        // before the reader waits for or reserves the missing payload.
+        ws.send_frame_header(2, super::TERM_WS_MAX_MESSAGE + 1)
             .await;
         let result = tokio::time::timeout(super::WS_TEARDOWN_GRACE, ws.recv())
             .await

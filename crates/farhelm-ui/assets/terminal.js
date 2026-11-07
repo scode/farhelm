@@ -619,8 +619,8 @@
   // 5's first graceful-degradation bound).
   //
   // The number is the helm's own worst-case-replay arithmetic, not a round
-  // guess (`TERM_EVENT_QUEUE` in farhelm-helm/src/client.rs, which sizes
-  // its queue from the same two constants): tmux retains at most
+  // guess (`BYTE_STREAM_EVENT_QUEUE` in farhelm-helm/src/client.rs, which
+  // sizes its queue from the same two constants): tmux retains at most
   // `HISTORY_LIMIT` = 12,000 lines, and a captured line is a terminal row
   // plus its `capture-pane -e` escapes, generously bounded at 256 bytes —
   // 12,000 × 256 B ≈ 3 MiB. A legitimately wide or heavily styled history
