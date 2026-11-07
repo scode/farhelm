@@ -784,7 +784,7 @@ mod tests {
             "farhelm agent rename <TITLE> --session <SESSION> --expected-title <EXPECTED_TITLE>  \
              Rename an explicitly named session if its title is unchanged",
             "farhelm agent stop --session <SESSION>          \
-             Stop an explicitly named session's agent process tree",
+             Stop a named session's agent and close its terminal tabs",
         ] {
             assert!(
                 lines.iter().any(|line| line == expected),

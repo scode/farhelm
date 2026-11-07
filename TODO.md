@@ -251,10 +251,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   a containerized launch directly; today only the launcher, templates and launches copied from another session carry the
   settings.
 
-- **Consider closing tabs on stop for ordinary sessions too.** Stopping a containerized session stops its whole
-  container, terminal tabs included, while stopping an ordinary session ends only the agent and leaves its tabs running.
-  Consider making ordinary sessions match. Plan: `plans/queue/stop-closes-tabs.md`.
-
 - **Stop containers an agent started through podman before killing processes.** Today Stop, tab close and Delete end a
   podman container that an agent or tab started (`podman run -d`, say) only by killing its processes, because the
   container's host-side helpers (podman's conmon and its network helper, pasta) stay in the scope of whatever started
