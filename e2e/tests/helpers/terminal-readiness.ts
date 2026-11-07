@@ -258,10 +258,10 @@ async function waitForSession(
 }
 
 /**
- * On the browser suite's host-terminal run, a revealed or ready attachment
- * that did not come back as a grid must belong to the stack's "remote"
- * supervisor (host-premise.ts's `oldTerminalProblem`): an early, located
- * failure for the premise that the automatic per-test check in evidence.ts
+ * On the browser suite's new-terminal run, a revealed or ready attachment
+ * that did not come back as a grid is a failure unless its session was
+ * declared fabricated (host-premise.ts's `oldTerminalProblem`): an early,
+ * located failure for the premise that the automatic per-test check in evidence.ts
  * enforces for every terminal socket opened in a browser context the test
  * observes (the default one, `newObservedContext`, `observeContext`, or one
  * registered with `watchHostPremise`), tabs and remounts included.
@@ -274,7 +274,7 @@ async function expectHostTerminalKind(page: Page, terminal: SessionTerminal): Pr
   const grid = await page.evaluate((el) => !!(window as any).__farhelmIslands?.[el]?.grid, elementId);
   if (grid) return;
   const problem = await oldTerminalProblem(page.request, terminal, watch.options);
-  expect(problem, "the host-terminal run's premise").toBeNull();
+  expect(problem, "the new-terminal run's premise").toBeNull();
 }
 
 /** Compare the fixed readiness snapshot without serializing browser-derived data for diagnostics. */

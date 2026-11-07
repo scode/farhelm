@@ -13,35 +13,35 @@
 // agent's terminal, as `window.__farhelmTerm` or `window.__farhelmGrid`. The readers here
 // dispatch on what the island actually holds, never on what a spec expects,
 // so a product-level assertion (text arrived, the terminal has the keyboard)
-// runs unchanged against either kind. The xterm.js path is the one these
-// helpers always had and stays exactly as it was for the whole transition
-// to terminal hosts; the grid path reads the component's own test surface
-// (its `model`, `snapshot()`, `viewport()` and `size()`), not an imitation of
-// xterm.js's buffer API. Where a spec needs a fact only one kind has, it
-// asks `terminalKind` and says why in place.
+// runs unchanged against either kind. The grid path reads the component's
+// own test surface (its `model`, `snapshot()`, `viewport()` and `size()`), not
+// an imitation of xterm.js's buffer API; the xterm.js path is the one these
+// helpers always had, kept for the old-terminal set. Where a spec needs a
+// fact only one kind has, it asks `terminalKind` and says why in place.
 //
-// Which kind a run's stacks create is the run's choice, not a spec's:
-// `playwright.config.ts` reads `SUITE_TERMINALS_ENV` (e2e/host-terminal-specs.ts;
-// unset: the supervisor's default, tmux). Specs that assert something only
-// the old kind has skip themselves on host terminals with `onHostTerminals()`.
+// Which kind a run's stacks create is the run's choice, not a spec's
+// (e2e/suite-terminals.ts). The default is the grid: the ordinary run's
+// supervisors create every terminal in a terminal host, so the terminals a
+// spec creates or opens there are new ones (only a reply a test seeds or
+// fabricates can make the page mount xterm.js). The old-terminal set runs
+// against tmux stacks and holds the tests about old terminals alone, each
+// tagged `OLD_TERMINAL_TAG` or in a whole file `OLD_TERMINAL_FILES` lists.
 
 import { expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
-import { SUITE_TERMINALS_ENV } from "../../host-terminal-specs";
+import { SUITE_TERMINALS_ENV, type SuiteTerminals, suiteTerminalsFrom } from "../../suite-terminals";
 export { type InputFrame, programInput, recordInput } from "./program-input";
 import { waitForSessionReady } from "./terminal-readiness";
 import { recordPage } from "./timeline";
 
 /**
- * Whether this run's stacks create terminals in terminal hosts.
- *
- * For `test.skip(onHostTerminals(), reason)` on a test whose assertion is
- * about the old terminal's implementation (xterm.js's DOM, its write
- * callbacks, tmux's own behavior):
- * such a test stays in the suite and runs on every ordinary run, and the
- * reason says why it has no grid counterpart or where that counterpart lives.
+ * The kind of terminal this run's stacks create: `host` on the ordinary
+ * run, `tmux` on the old-terminal set's (e2e/suite-terminals.ts). Read from
+ * the environment the worker inherited from the runner, so it answers for
+ * the run, not for any one session; a test that needs a terminal's actual
+ * component asks `terminalKind`.
  */
-export function onHostTerminals(): boolean {
-  return process.env[SUITE_TERMINALS_ENV] === "host";
+export function suiteTerminals(): SuiteTerminals {
+  return suiteTerminalsFrom(process.env[SUITE_TERMINALS_ENV]);
 }
 
 /**

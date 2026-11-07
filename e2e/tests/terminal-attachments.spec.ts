@@ -44,7 +44,7 @@ import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import fs from "node:fs";
-import { cleanupSession, waitForTermText, terminalFit, terminalKind } from "./helpers/term";
+import { cleanupSession, waitForTermText, terminalFit } from "./helpers/term";
 import { supervisorSessionId } from "./helpers/fleet";
 import {
   addTab,
@@ -729,10 +729,6 @@ test("pasted and dropped text cannot close bracketed paste early", async ({ page
     const session = await openAttachmentSession(page, request, `attach-frame-${stamp}`);
     id = session.id;
     await latchBracketedPaste(page, "terminal");
-    const grid = (await terminalKind(page)) === "grid";
-    if (!grid) {
-      expect(await page.evaluate(() => (window as any).__farhelmIslands.terminal.term.modes.bracketedPasteMode)).toBe(true);
-    }
     // Both gestures must sanitize embedded framing before the terminal's
     // own paste path adds its bracketed-paste markers.
     for (const kind of ["paste", "drop"] as const) {
@@ -1127,10 +1123,9 @@ test("clipboard facts survive a failed File projection without intercepting past
       }],
     });
     // Whether the event ends prevented is the component's own business at
-    // its target: xterm.js leaves an unsupported paste alone, the grid's
-    // input field prevents every paste it receives and pastes the text it
-    // finds (none here). Farhelm's observer must only let it get there.
-    if ((await terminalKind(page)) !== "grid") expect(dispatched.event.defaultPrevented).toBe(false);
+    // its target: the grid's input field prevents every paste it receives
+    // and pastes the text it finds (none here). Farhelm's observer must only
+    // let it get there.
     expect(
       dispatched.event.reachedTarget,
       "the diagnostic observer must not stop the unsupported paste before xterm sees it",

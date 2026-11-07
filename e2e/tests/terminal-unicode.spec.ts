@@ -5,7 +5,8 @@
 
 import { type APIRequestContext, type Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
-import { attachSession, cleanupSession, onHostTerminals, sendTerminalInput, terminalKind, terminalSize, waitForTermText } from "./helpers/term";
+import { attachSession, cleanupSession, sendTerminalInput, terminalKind, terminalSize, waitForTermText } from "./helpers/term";
+import { OLD_TERMINAL_TAG } from "../suite-terminals";
 import { installTerminalSuiteHooks, reconnectTimingsFromNextLoad } from "./helpers/terminal-suite";
 import { waitForReplayReveal, waitForSessionRevealed } from "./helpers/terminal-readiness";
 
@@ -119,13 +120,12 @@ async function expectRows(page: Page, expected: string[]): Promise<void> {
  * A wide cell owns its continuation column; inspecting both it and the next
  * printable cell catches tables that draw the glyph but still advance by one.
  */
-test("emoji and VS16 sequences occupy two cells before the following character", async ({ page, request }) => {
+test("emoji and VS16 sequences occupy two cells before the following character", { tag: OLD_TERMINAL_TAG }, async ({ page, request }) => {
   // Writes straight into xterm.js's parser and reads its buffer and DOM
   // renderer. A grid terminal has no parser in the page: the supervisor's
-  // emulator owns cell widths (its own tests, and the tmux parity suite),
+  // emulator owns cell widths (its own tests pin them),
   // and the grid's wide boxes and columns are pinned against recorded
   // streams in e2e/grid-client/grid-terminal.spec.ts.
-  test.skip(onHostTerminals(), "direct writes into xterm.js's parser; the grid's wide cells are pinned in e2e/grid-client");
   const id = await openUnicodeTerminal(page, request);
   try {
     await writeTerminal(page, CLEAR + EMOJI.map((emoji) => `${emoji}X`).join("\r\n"));
@@ -155,9 +155,8 @@ test("emoji and VS16 sequences occupy two cells before the following character",
  * line. More output must preserve those edits in both parsed and painted rows;
  * a full repaint that happens to repair an earlier overlap is insufficient.
  */
-test("cursor-addressed status redraws stay aligned as more output arrives", async ({ page, request }) => {
+test("cursor-addressed status redraws stay aligned as more output arrives", { tag: OLD_TERMINAL_TAG }, async ({ page, request }) => {
   // As above: direct writes into xterm.js.
-  test.skip(onHostTerminals(), "direct writes into xterm.js's parser; the grid's wide cells are pinned in e2e/grid-client");
   const id = await openUnicodeTerminal(page, request);
   try {
     await writeTerminal(page, CLEAR + EMOJI.map((emoji) => `${emoji} 0`).join(" "));
@@ -179,9 +178,8 @@ test("cursor-addressed status redraws stay aligned as more output arrives", asyn
  * box. Box widths and adjacency test that mechanism without depending on which
  * fallback font supplies the glyph, or comparing rendered pixels.
  */
-test("a coloured neighbouring cell starts after the emoji's full two-cell box", async ({ page, request }) => {
+test("a coloured neighbouring cell starts after the emoji's full two-cell box", { tag: OLD_TERMINAL_TAG }, async ({ page, request }) => {
   // As above: direct writes into xterm.js and its DOM renderer.
-  test.skip(onHostTerminals(), "direct writes into xterm.js's parser; the grid's wide cells are pinned in e2e/grid-client");
   const id = await openUnicodeTerminal(page, request);
   try {
     await writeTerminal(page, CLEAR + EMOJI.map((emoji) => `${emoji}\x1b[41mX\x1b[0m`).join("\r\n"));
@@ -222,7 +220,6 @@ test("a coloured neighbouring cell starts after the emoji's full two-cell box", 
  * glyph is wide, or the coloured next cell covers part of the glyph's box.
  */
 test("a narrowed text-presentation glyph owns one grid cell", async ({ page, request }) => {
-  test.skip(!onHostTerminals(), "new terminal width policy; the old path retains tmux's rules");
   const id = await openUnicodeTerminal(page, request);
   try {
     await sendCommand(page, id, "narrow");
@@ -257,10 +254,12 @@ test("a narrowed text-presentation glyph owns one grid cell", async ({ page, req
 });
 
 /**
- * Reconnect reconstructs rows from tmux rather than replaying the live byte
- * stream. A new socket, a marker-completed replay, and a subsequent command
- * reply establish that both tmux's VS16 widths and the restored cursor agree
- * with the newly mounted terminal.
+ * Reconnect reconstructs rows from the supervisor's own copy of the screen
+ * rather than replaying the live output. A new socket, a marker-completed
+ * replay, and a subsequent command reply establish that both the replayed
+ * VS16 widths and the restored cursor agree with the newly mounted terminal.
+ * (The title still says tmux, from when it ran on old terminals; reports
+ * cite it by that title, so it is kept.)
  */
 test("tmux reconnect replay restores emoji rows and the cursor column", async ({ page, request }) => {
   await reconnectTimingsFromNextLoad(page, { delaysMs: [50, 100, 200, 400, 800, 1600] });
@@ -281,42 +280,26 @@ test("tmux reconnect replay restores emoji rows and the cursor column", async ({
     }), { timeout: 20_000, message: "reconnect must replace the original terminal attachment" }).toBe(true);
     await waitForSessionRevealed(page, id);
     const replay = await waitForReplayReveal(page, "terminal");
-    const grid = (await terminalKind(page)) === "grid";
-    // Both kinds' catch-up ends at the replay's end marker. xterm.js's also
-    // reveals inside the write callback of the bytes before it; a grid
-    // replay is frames the component applies as they arrive, with no write
-    // callbacks to wait on.
+    // Premise: the reattached terminal is the grid this run creates.
+    expect(await terminalKind(page)).toBe("grid");
+    // The catch-up ends at the replay's end marker; a grid replay is frames
+    // the component applies as they arrive.
     expect(replay.revealReason).toBe("marker");
-    if (!grid) expect(replay.revealedInWriteCallback).toBe(true);
     await expectRows(page, [REPLAY_ROW, `${CURSOR_PREFIX}⚠️`]);
-    const cursor = await page.evaluate(() => {
-      const island = (window as any).__farhelmIslands.terminal;
-      if (island.grid) return island.grid.snapshot().cursor as { x: number; y: number };
-      const buffer = island.term.buffer.active;
-      return { x: buffer.cursorX as number, y: buffer.cursorY as number };
+    const cursor = await page.evaluate(
+      () => (window as any).__farhelmIslands.terminal.grid.snapshot().cursor as { x: number; y: number },
+    );
+    // The restored grid must keep the selector's two-cell layout, so live
+    // output below continues at the same column as uninterrupted output.
+    expect(cursor, "replayed VS16 emoji must leave the restored cursor two cells later").toMatchObject({
+      x: CURSOR_PREFIX.length + 2,
+      y: 1,
     });
-    if (grid) {
-      // The restored grid must keep the selector's two-cell layout, so live
-      // output below continues at the same column as uninterrupted output.
-      expect(cursor, "replayed VS16 emoji must leave the restored cursor two cells later").toMatchObject({
-        x: CURSOR_PREFIX.length + 2,
-        y: 1,
-      });
-    } else {
-      expect(cursor, "replayed VS16 emoji must leave the restored cursor two cells later").toEqual({
-        x: CURSOR_PREFIX.length + 2,
-        y: 1,
-      });
-    }
     await sendCommand(page, id, "continue");
     await waitForTermText(page, "REPLAY-LIVE");
     await expectRows(page, [REPLAY_ROW, `${CURSOR_PREFIX}⚠️X`, "REPLAY-LIVE"]);
-    // The cell itself, from xterm.js's buffer; the grid's rows above already
-    // place X right after the emoji, its cells having no separate reader.
-    if (!grid) expect(await page.evaluate((column) => {
-      const buffer = (window as any).__farhelmIslands.terminal.term.buffer.active;
-      return buffer.getLine(buffer.baseY + 1).getCell(column).getChars();
-    }, CURSOR_PREFIX.length + 2)).toBe("X");
+    // The grid's rows above place X right after the emoji; its cells have
+    // no separate reader.
   } finally {
     await cleanupSession(request, id);
   }

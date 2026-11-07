@@ -1021,6 +1021,59 @@ test("a paste goes to the program as paste messages and brings the view back", a
   expect((await viewport(page)).following).toBe(true);
 });
 
+/**
+ * Typing and pasting each clear the grid's selection, and leave no document
+ * selection behind.
+ *
+ * Why: input is the user moving on from what they selected, so the
+ * highlight must go (as it does in every terminal people use), and a
+ * document selection left behind would be what the next copy or the
+ * browser's own selection handling acts on. Both paths reach the program
+ * through the grid's user-input path; this pins that it clears the
+ * selection on each, which the old-terminal set's "input dismisses both the
+ * xterm and native selections" pins for xterm.js.
+ * Spec: with mouse reporting off, a plain drag across the screen's first row
+ * selects it (premise: `hasSelection()` is true); a key typed into the
+ * focused grid clears it, and the document selection is empty. A second
+ * drag selects again (premise again), and a paste clears it the same way.
+ * Both inputs reach the program.
+ */
+test("typing and pasting clear the selection and leave no document selection", async ({ page }) => {
+  await openGrid(page);
+  await feed(page, attachWithHistory(20, 3, 10));
+  await settled(page);
+  const select = async () => {
+    const from = await cellAt(page, 0, 0, 0.2);
+    const to = await cellAt(page, 4, 0, 0.8);
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 3 });
+    await page.mouse.up();
+    expect(await page.evaluate(() => (window as any).harness.grid.hasSelection()), "premise: a selection").toBe(true);
+  };
+  const selections = () =>
+    page.evaluate(() => ({
+      grid: (window as any).harness.grid.hasSelection() as boolean,
+      document: String(window.getSelection() ?? ""),
+    }));
+
+  await select();
+  await page.evaluate(() => (window as any).harness.grid.focus());
+  expect((await selections()).grid, "premise: focusing keeps the selection").toBe(true);
+  await page.keyboard.press("a");
+  await expect.poll(selections).toEqual({ grid: false, document: "" });
+
+  await select();
+  await page.evaluate(() => {
+    const input = document.querySelector(".grid-terminal-input")!;
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: { getData: (type: string) => (type === "text/plain" ? "pasted" : "") } });
+    input.dispatchEvent(event);
+  });
+  await expect.poll(selections).toEqual({ grid: false, document: "" });
+  expect((await sent(page)).map((m: any) => m.t)).toEqual(["key", "paste"]);
+});
+
 test("the context menu finds the input under the pointer, holding the selection", async ({ page }) => {
   // The input moves under the pointer, so the browser's own menu then
   // offers Paste into the terminal and Copy of the selection.

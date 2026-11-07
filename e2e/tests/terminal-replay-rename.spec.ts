@@ -17,7 +17,8 @@ import { expect, newObservedContext, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { type Page } from "@playwright/test";
 import { createSession, openRowMenu, SESSION_LISTING, stubFeed } from "./helpers/fleet";
-import { attachSession, cleanupSession, termText, waitForTermText, terminalInput, programInput, onHostTerminals, type InputFrame, recordInput, terminalKind } from "./helpers/term";
+import { attachSession, cleanupSession, termText, waitForTermText, terminalInput, programInput, type InputFrame, recordInput } from "./helpers/term";
+import { OLD_TERMINAL_TAG } from "../suite-terminals";
 import {
   addTab,
   armTerminalFocusSpy,
@@ -26,7 +27,6 @@ import {
   disableReconnectFromNextLoad,
   FAKE_AGENT_INVOCATION,
   fulfillAsHelm,
-  islandText,
   installTerminalFocusSpy,
   replayRecord,
   runInShell,
@@ -474,33 +474,14 @@ test("reattach-lands-at-tail (agent terminal): hidden through catch-up, one writ
     // against the island's own bookkeeping.
     await expect(page.locator("#terminal")).toBeHidden();
     await expect(page.locator("#term-connecting")).toBeVisible();
-    // How xterm.js's catch-up holds the replay: buffered, unwritten. A grid
-    // applies the replay's frames as they arrive, to a terminal that stays
-    // hidden until the marker, so only the hiding holds for both.
-    const grid = (await terminalKind(page)) === "grid";
-    if (!grid) {
-      const held = await replayRecord(page, "terminal");
-      expect(held.bufferedBytes, "the replay has arrived and is being held").toBeGreaterThan(0);
-      expect(held.writesWhileHidden, "nothing reaches xterm.js during the catch-up").toBe(0);
-      expect(
-        await termText(page),
-        "not one line of the replay may be painted before it is complete",
-      ).not.toContain("spam-line-");
-    }
+    // A grid applies the replay's frames as they arrive, to a terminal that
+    // stays hidden until the marker, so the hiding is what holds the replay
+    // back from view. (xterm.js's own buffering of it is the old-terminal
+    // set's replay-degrades tests.)
 
     await releaseCatchUp(page, "terminal");
     const replay = await waitForReplayReveal(page, "terminal");
     expect(replay.revealReason, "the marker is what ended the catch-up").toBe("marker");
-    if (!grid) {
-      expect(
-        replay.writesWhileHidden,
-        "the whole replay must reach xterm.js as one write, never chunk by chunk",
-      ).toBe(1);
-      expect(
-        replay.revealedInWriteCallback,
-        "the reveal must wait for xterm.js to have consumed the replay",
-      ).toBe(true);
-    }
     expect(
       replay.viewportAtTailOnReveal,
       "the first visible frame is at the tail",
@@ -604,26 +585,12 @@ test("reattach-lands-at-tail (tab): hidden through catch-up, one write, viewport
     await selectTerminal(page, tabId);
     await expect(page.locator(`[id="${element}"]`)).toBeHidden();
     await expect(page.locator(`[id="term-connecting-${tabId}"]`)).toBeVisible();
-    // xterm.js holds the replay unwritten; a grid applies it to the hidden
-    // terminal as it arrives (see the agent terminal's test above).
-    const grid = (await terminalKind(page, element)) === "grid";
-    if (!grid) {
-      expect(
-        await islandText(page, element),
-        "a tab's replay is held back exactly like the agent terminal's",
-      ).not.toContain("TABSPAM-");
-    }
+    // A grid applies the replay to the hidden terminal as it arrives (see
+    // the agent terminal's test above).
 
     await releaseCatchUp(page, element);
     const replay = await waitForReplayReveal(page, element);
     expect(replay.revealReason).toBe("marker");
-    if (!grid) {
-      expect(
-        replay.writesWhileHidden,
-        "a tab's replay is batched exactly like the agent terminal's",
-      ).toBe(1);
-      expect(replay.revealedInWriteCallback).toBe(true);
-    }
     expect(replay.viewportAtTailOnReveal).toBe(true);
 
     await waitForIslandText(page, element, "TABSPAM-200", 30_000);
@@ -661,7 +628,7 @@ test("reattach-lands-at-tail (tab): hidden through catch-up, one write, viewport
 // as ONE write with nothing lost, and bytes after the flush go straight to
 // the screen — degraded to a batched-but-visible catch-up, never to data
 // loss.
-test("replay-degrades-on-size: crossing the byte bound flushes once, keeps every byte, then goes live", async ({
+test("replay-degrades-on-size: crossing the byte bound flushes once, keeps every byte, then goes live", { tag: OLD_TERMINAL_TAG }, async ({
   page,
   request,
 }) => {
@@ -670,7 +637,6 @@ test("replay-degrades-on-size: crossing the byte bound flushes once, keeps every
   // A grid replay is frames the component applies as they arrive, with
   // nothing to buffer; its reattach and recovery are pinned in
   // e2e/grid-client/grid-attach.spec.ts.
-  test.skip(onHostTerminals(), "xterm.js's catch-up buffering; a grid replay applies frames as they arrive");
   test.setTimeout(120_000);
   const title = `replay-size-${Date.now()}`;
   let id: string | undefined;
@@ -746,7 +712,7 @@ test("replay-degrades-on-size: crossing the byte bound flushes once, keeps every
 // on principle. Here the elapsed time IS the behavior under test, and the
 // frames are scheduled inside the page (see `injectReplayFrames`) so the
 // intervals are the browser's own rather than a round trip's.
-test("replay-degrades-on-idle: a progressing replay keeps buffering; a quiet one flushes once", async ({
+test("replay-degrades-on-idle: a progressing replay keeps buffering; a quiet one flushes once", { tag: OLD_TERMINAL_TAG }, async ({
   page,
   request,
 }) => {
@@ -755,7 +721,6 @@ test("replay-degrades-on-idle: a progressing replay keeps buffering; a quiet one
   // A grid replay is frames the component applies as they arrive, with
   // nothing to buffer; its reattach and recovery are pinned in
   // e2e/grid-client/grid-attach.spec.ts.
-  test.skip(onHostTerminals(), "xterm.js's catch-up buffering; a grid replay applies frames as they arrive");
   test.setTimeout(120_000);
   const title = `replay-idle-${Date.now()}`;
   const idleMs = 1_500;
@@ -821,7 +786,7 @@ test("replay-degrades-on-idle: a progressing replay keeps buffering; a quiet one
 // Provoked by a real takeover — a second view of the same session — rather
 // than by a synthetic notice, so what ends the phase is the same
 // `Detached` the supervisor really sends.
-test("replay-degrades-on-detach: a takeover mid-catch-up shows what arrived, under the banner", async ({
+test("replay-degrades-on-detach: a takeover mid-catch-up shows what arrived, under the banner", { tag: OLD_TERMINAL_TAG }, async ({
   browser,
   timeline,
   page,
@@ -830,9 +795,9 @@ test("replay-degrades-on-detach: a takeover mid-catch-up shows what arrived, und
   // xterm.js's catch-up: the replay's bytes buffered while hidden and
   // handed over in one write, and its byte, frame, idle and ending bounds.
   // A grid replay is frames the component applies as they arrive, with
-  // nothing to buffer; its reattach and recovery are pinned in
-  // e2e/grid-client/grid-attach.spec.ts.
-  test.skip(onHostTerminals(), "xterm.js's catch-up buffering; a grid replay applies frames as they arrive");
+  // nothing to buffer; a takeover ending its catch-up is pinned in
+  // e2e/grid-client/grid-attach.spec.ts ("a takeover during a grid
+  // terminal's catch-up reveals what arrived, under the banner").
   test.setTimeout(120_000);
   const title = `replay-detach-${Date.now()}`;
   let id: string | undefined;
@@ -882,16 +847,16 @@ test("replay-degrades-on-detach: a takeover mid-catch-up shows what arrived, und
 // paths the close IS the signal that no more bytes are coming — a
 // presentation that ignored it would leave the terminal hidden with a
 // "connecting…" line over it forever.
-test("replay-degrades-on-close: a socket closing mid-catch-up flushes, reveals, and banners", async ({
+test("replay-degrades-on-close: a socket closing mid-catch-up flushes, reveals, and banners", { tag: OLD_TERMINAL_TAG }, async ({
   page,
   request,
 }) => {
   // xterm.js's catch-up: the replay's bytes buffered while hidden and
   // handed over in one write, and its byte, frame, idle and ending bounds.
   // A grid replay is frames the component applies as they arrive, with
-  // nothing to buffer; its reattach and recovery are pinned in
-  // e2e/grid-client/grid-attach.spec.ts.
-  test.skip(onHostTerminals(), "xterm.js's catch-up buffering; a grid replay applies frames as they arrive");
+  // nothing to buffer; a close ending its catch-up is pinned in
+  // e2e/grid-client/grid-attach.spec.ts ("a socket closing during a grid
+  // terminal's catch-up reveals what arrived, under the banner").
   test.setTimeout(120_000);
   const title = `replay-close-${Date.now()}`;
   let id: string | undefined;
@@ -1349,7 +1314,7 @@ test("rename-refused-pasted-newline: a multi-line title reaches the supervisor i
 // bytes against a multi-megabyte byte bound — so an implementation that
 // counted only bytes would buffer them forever and fail this test on the
 // reveal that never comes.
-test("replay-degrades-on-chunks: crossing the frame bound flushes once, keeping every frame", async ({
+test("replay-degrades-on-chunks: crossing the frame bound flushes once, keeping every frame", { tag: OLD_TERMINAL_TAG }, async ({
   page,
   request,
 }) => {
@@ -1358,7 +1323,6 @@ test("replay-degrades-on-chunks: crossing the frame bound flushes once, keeping 
   // A grid replay is frames the component applies as they arrive, with
   // nothing to buffer; its reattach and recovery are pinned in
   // e2e/grid-client/grid-attach.spec.ts.
-  test.skip(onHostTerminals(), "xterm.js's catch-up buffering; a grid replay applies frames as they arrive");
   test.setTimeout(120_000);
   const title = `replay-chunks-${Date.now()}`;
   let id: string | undefined;
@@ -1425,7 +1389,7 @@ test("replay-degrades-on-chunks: crossing the frame bound flushes once, keeping 
 // re-armed on them would reveal only after traffic stopped. This test
 // requires the reveal while traffic remains active and observes another
 // delivered empty frame afterward, then stops the bounded injector.
-test("replay-idle-ignores-empty-frames: a stream of empty frames still counts as silence", async ({
+test("replay-idle-ignores-empty-frames: a stream of empty frames still counts as silence", { tag: OLD_TERMINAL_TAG }, async ({
   page,
   request,
 }) => {
@@ -1434,7 +1398,6 @@ test("replay-idle-ignores-empty-frames: a stream of empty frames still counts as
   // A grid replay is frames the component applies as they arrive, with
   // nothing to buffer; its reattach and recovery are pinned in
   // e2e/grid-client/grid-attach.spec.ts.
-  test.skip(onHostTerminals(), "xterm.js's catch-up buffering; a grid replay applies frames as they arrive");
   test.setTimeout(120_000);
   const title = `replay-empty-${Date.now()}`;
   const idleMs = 1_200;

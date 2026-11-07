@@ -1,34 +1,36 @@
-// The host-terminal run's premise, checked rather than assumed: on that run
-// (e2e/host-terminal-specs.ts) every terminal of a session on the stack's
-// local supervisor is a terminal in a terminal host and attaches as a grid
-// stream. Only the stack's "remote" supervisor keeps old terminals, on
-// purpose, and its sessions are recognized by their host, never inferred
-// from a lookup that failed.
+// The new-terminal run's premise, checked rather than assumed: on the main
+// suite's ordinary run (e2e/suite-terminals.ts) both of every stack's
+// supervisors create terminals in terminal hosts, so every terminal socket
+// for a real session attaches as a grid stream. A byte stream (an old
+// terminal, drawn by xterm.js) is a failure, whichever host the session is on.
 //
-// Why: every spec helper reads whichever component an attachment holds, so a
-// create, tab or remount path that fell back to tmux would pass its specs on
-// xterm.js and the run would claim parity it never exercised. Global setup
-// checks each stack once; this module checks every terminal socket opened in
-// a browser context the test observes (the default context, every context
-// `observeContext` observes, `newObservedContext`'s among them, and any a
-// test registers with `watchHostPremise`), from the stream notice the helm
-// sends on it (the one fact that decides the component), through an
-// automatic fixture in evidence.ts, with the readiness waits in
-// terminal-readiness.ts as an earlier signal.
+// Why: every spec helper reads whichever component an attachment holds, so
+// a create, tab or remount path that fell back to tmux would pass its specs on
+// xterm.js and the run would claim coverage of new terminals it never
+// exercised. Global setup checks each stack once; this module checks every
+// terminal socket opened in a browser context the test observes (the default
+// context, every context `observeContext` observes, `newObservedContext`'s
+// among them, and any a test registers with `watchHostPremise`), from the
+// stream notice the helm sends on it (the one fact that decides the
+// component), through an automatic fixture in evidence.ts, with the readiness
+// waits in terminal-readiness.ts as an earlier signal. The old-terminal run has no
+// per-socket check: its tests read xterm.js directly and fail on a grid.
 
 import type { APIRequestContext, BrowserContext, Page, TestInfo, WebSocket } from "@playwright/test";
-import { SUITE_TERMINALS_METADATA } from "../../host-terminal-specs";
+import { SUITE_TERMINALS_METADATA, type SuiteTerminals } from "../../suite-terminals";
 
 /** How long one premise lookup may take: a stalled helm fails the check rather than the test's timing. */
 const LOOKUP_TIMEOUT_MS = 5_000;
 
 /**
- * Whether `config` is the main suite's host-terminal run: its config says so
- * in its metadata (playwright.config.ts), so a capture or other config whose
- * runner merely inherited an exported variable is never held to this premise.
+ * The main suite's run kind as its config's metadata names it
+ * (playwright.config.ts), or null for any other config: a capture config
+ * whose runner merely inherited an exported variable is never held to a
+ * premise.
  */
-export function hostPremiseActive(config: { metadata?: Record<string, unknown> }): boolean {
-  return config.metadata?.[SUITE_TERMINALS_METADATA] === "host";
+export function suiteTerminalsOf(config: { metadata?: Record<string, unknown> }): SuiteTerminals | null {
+  const kind = config.metadata?.[SUITE_TERMINALS_METADATA];
+  return kind === "host" || kind === "tmux" ? kind : null;
 }
 
 /** The session and tab a terminal socket's URL names, or null for any other socket. */
@@ -64,13 +66,13 @@ export interface PremiseOptions {
 }
 
 /**
- * Why an old terminal (a byte stream, xterm.js) is not allowed for session
- * `id` on a host-terminal run, or null when it is: only for a session whose
- * row names a host that the helm lists as other than the local one (the
- * stack's "remote" supervisor). Both lookups must succeed and be well
- * formed; an answer that cannot establish the session's host is itself the
- * failure, with its diagnostics, never an exemption. A caller that declared
- * a fabricated session (`options.fabricated`) is allowed its absence.
+ * Why session `id`'s old terminal (a byte stream, xterm.js) breaks the
+ * new-terminal run's premise, or null when it does not: only a session the
+ * caller declared fabricated (`options.fabricated`), which the helm then does
+ * not list, is allowed one. Every real session is on a supervisor that
+ * creates terminals in hosts, so the answer is otherwise always a problem;
+ * the session's row is read only to say what it reported, and a row that
+ * cannot be read is reported as such, never taken as an exemption.
  */
 export async function oldTerminalProblem(
   request: APIRequestContext,
@@ -89,23 +91,10 @@ export async function oldTerminalProblem(
   } catch (error) {
     return `${what}, and its row could not be read: ${error}`;
   }
-  if (!row || row.id !== target.id || typeof row.host !== "number") return `${what}, and its row is malformed`;
-  let hosts: any[];
-  try {
-    const listed = await request.get("/api/hosts", { timeout: LOOKUP_TIMEOUT_MS });
-    if (!listed.ok()) return `${what}, and the host listing answered ${listed.status()}`;
-    const body = await listed.json();
-    if (!body || !Array.isArray(body.hosts)) return `${what}, and the host listing is malformed`;
-    hosts = body.hosts;
-  } catch (error) {
-    return `${what}, and the host listing failed: ${error}`;
-  }
-  const host = hosts.find((candidate) => candidate?.id === row.host);
-  if (!host || typeof host.kind !== "string") return `${what}, and its host ${row.host} is not in the host listing`;
-  if (host.kind !== "local") return null;
-  return `${what} on the local host, whose supervisor creates terminals in terminal hosts on this run ` +
-    `(its row: agent_terminal ${JSON.stringify(row.agent_terminal)}, supervisor_creates_host_terminals ` +
-    `${JSON.stringify(row.supervisor_creates_host_terminals)})`;
+  if (!row || row.id !== target.id) return `${what}, and its row is malformed`;
+  return `${what} on a run whose supervisors create terminals in terminal hosts ` +
+    `(its row: host ${JSON.stringify(row.host)}, agent_terminal ${JSON.stringify(row.agent_terminal)}, ` +
+    `supervisor_creates_host_terminals ${JSON.stringify(row.supervisor_creates_host_terminals)})`;
 }
 
 /**
@@ -120,8 +109,21 @@ export class HostPremiseWatch {
   private readonly pending: Promise<string | null>[] = [];
   private readonly pages = new WeakSet<Page>();
   private readonly contexts = new WeakSet<BrowserContext>();
+  /** Made at the first byte-stream notice: an ordinary test never needs it. */
+  private request: Promise<APIRequestContext> | null = null;
 
-  constructor(private readonly request: APIRequestContext, readonly options: PremiseOptions) {}
+  /**
+   * `newRequest` makes the authorized request context lookups use. It is
+   * called at most once, and only when a byte-stream notice arrives, so the
+   * watch costs nothing beyond its listeners on a test whose terminals are
+   * all new; `finish` disposes what it made.
+   */
+  constructor(private readonly newRequest: () => Promise<APIRequestContext>, readonly options: PremiseOptions) {}
+
+  private lookup(): Promise<APIRequestContext> {
+    this.request ??= this.newRequest();
+    return this.request;
+  }
 
   /** Watch every page this context has or opens. */
   watchContext(context: BrowserContext): void {
@@ -150,16 +152,28 @@ export class HostPremiseWatch {
         if (message.kind === "grid") return;
         this.pending.push(
           message.kind === "bytes"
-            ? oldTerminalProblem(this.request, target, this.options)
+            ? this.lookup().then((request) => oldTerminalProblem(request, target, this.options))
             : Promise.resolve(`session ${target.id} sent a stream notice of an unknown kind`),
         );
       });
     });
   }
 
-  /** Every problem found, after every pending lookup has answered. */
+  /**
+   * Every problem found, after every pending lookup has answered, with the
+   * lookups' request context disposed. A context that could not be made is
+   * itself a problem: the premise could not be judged.
+   */
   async finish(testInfo: TestInfo): Promise<string[]> {
-    const problems = (await Promise.all(this.pending)).filter((problem): problem is string => problem !== null);
+    const settled = await Promise.allSettled(this.pending);
+    const problems = settled.flatMap((result) =>
+      result.status === "rejected"
+        ? [`a premise lookup failed: ${result.reason}`]
+        : result.value === null
+        ? []
+        : [result.value]
+    );
+    if (this.request) await this.request.then((request) => request.dispose(), () => undefined);
     for (const problem of problems) testInfo.annotations.push({ type: "host premise", description: problem });
     return problems;
   }
@@ -173,13 +187,13 @@ export function setActiveHostPremiseWatch(watch: HostPremiseWatch | null): void 
   activeWatch = watch;
 }
 
-/** The running test's watch, if this is a host-terminal run. */
+/** The running test's watch, if this is the new-terminal run. */
 export function activeHostPremiseWatch(): HostPremiseWatch | null {
   return activeWatch;
 }
 
 /**
- * Put `context` under the running test's watch, if this is a host-terminal
+ * Put `context` under the running test's watch, if this is the new-terminal
  * run: for a context a test makes itself without `observeContext`, before it
  * opens any page there. Idempotent.
  */

@@ -635,49 +635,32 @@ that its required systemd or SSH substrate ran.
   `terminal.js`'s plumbing for grid streams against a fake socket (a new terminal's grid mounted with no xterm.js built
   or waited for, a byte stream on its attachment refused, a pending kind held until named, the swap from xterm.js for an
   old or unknown kind, attach, paste and drop interception, link opening, the hyperlink mismatch warning, file-path
-  hovers and downloads, tunnels, reconnect and takeover snapshots), in Chromium and WebKit. No stack and no build: the
-  page and the shipped assets are served through request routing. Needs `npm install` and the browsers from the browser
-  suite's setup below; a few minutes. Not in CI. Run it when the grid assets, `terminal.js`'s grid handling or the
-  fixtures under `crates/farhelm-ui/js-tests/fixtures/grid/` change.
-- `cd e2e && npx playwright test --config host-terminals/playwright.config.ts` — the browser specs of terminals in
-  terminal hosts (`e2e/host-terminals/`), against a real stack of their own: the config boots one `e2e/start-stack.sh`
-  with `FARHELM_E2E_NEW_TERMINALS=host`, which starts the stack's local supervisor with `--new-terminals host`, so the
-  startup session runs in a host; the main suite's ordinary stacks leave it empty, which the script turns into
-  `--new-terminals tmux`, and every stack's remote supervisor gets `tmux`. In Chromium and WebKit, one worker: the
-  session's terminal mounts as the grid component with no xterm.js terminal constructed while xterm.js's scripts load,
-  draws the fake agent's ready line, and draws the agent's echo of a line typed into it (`grid-terminal.spec.ts`); the
-  helm lists the session's agent and a tab opened beside it as new terminals with the switch reported on, and the
-  session details name them so with no migration band (`migration.spec.ts`); after a flood that the page stops reading
-  during, the grid's history is full to its announced capacity, all of it records, consecutive through the screen to the
-  last (`grid-flood.spec.ts`). Needs what the browser suite needs (`cargo build`, the web build, `npm install` and the
-  browsers, the pinned tmux first on `PATH`), and runs through the recorder's generic mode, since its Playwright mode
-  pins the main config; a minute or two. Not in CI, and not part of the full browser suite. Run it when the grid
-  client's handling of a live stack, the helm's grid relay, the supervisor's grid streams or the stack script's
-  supervisor arguments change.
-- `cd e2e && FARHELM_E2E_SUITE_TERMINALS=host python3 ../scripts/record-test-run.py --kind development --tmux required --keep-farhelm-env FARHELM_E2E_SUITE_TERMINALS --selection 'host terminals: <projects>' --concurrency '3 browser workers, one stack each; retries 0' -- npx playwright test --project=<project> ... --retries=0`
-  — the browser suite's host-terminal run, which is how the new terminal's parity with today's is shown, with the pinned
-  tmux first on `PATH` as for the browser suite. The `--keep-farhelm-env` is required: the recorder scrubs the variable
-  otherwise, and the run is then the ordinary one under a host label (global setup prints `suite terminals: host`, the
-  config's metadata says `suiteTerminals`, and every test of a host run carries a `suite terminals` annotation, so a
-  report shows which run it was). With no `--project`, every project of the listed files runs. Every stack's local
-  supervisor starts with `--new-terminals host` (the stacks' own `FARHELM_E2E_NEW_TERMINALS`), so every session and tab
-  the specs create there is a terminal in a terminal host drawn by the grid component, and only the spec files
-  `e2e/host-terminal-specs.ts` lists run; the config refuses the run when that list is not a complete account of the
-  specs using the terminal helpers. The helpers in `e2e/tests/helpers/` (`term.ts`, `terminal-readiness.ts`,
-  `terminal-suite.ts`, `real-agent.ts`) read whichever component an attachment holds, and a test about the old terminal
-  alone skips itself there with `onHostTerminals()`, saying why and where the grid's counterpart is pinned; the ordinary
-  run (the variable unset) is unchanged. The run checks its own premise: global setup refuses a stack whose startup
-  session is not a host terminal, and an automatic per-test check (`e2e/tests/helpers/host-premise.ts`, through
-  `helpers/evidence.ts`) fails a test any of whose terminal sockets, tabs and remounts included, in a browser context
-  the test observes (the default one, every context `observeContext` observes, and any registered with
-  `watchHostPremise`; every spec's contexts are one of these), got a byte-stream notice for a session of the local host;
-  an old terminal is allowed only for a session whose host the helm lists as not local (the stack's "remote" supervisor,
-  which keeps tmux), and a lookup that cannot establish that fails the test. The readiness waits run the same check
-  early. `bulk-session-actions.spec.ts` includes terminal Escape ownership while sessions are marked, on both terminal
-  kinds. On Tensorlake, `sandbox-tests.ts run --suite-terminals host` (`.agents/tensorlake.md`). Needs what the browser
-  suite needs. Not in CI and not part of the full browser suite. Run a changed spec's projects of it when that spec
-  changes, the helpers' when they change, and wider when the grid client, the helm's grid relay or the supervisor's grid
-  streams change in a way the host-terminal config's few specs and the static grid specs do not reach.
+  hovers and downloads, tunnels, reconnect and takeover snapshots, a catch-up ended by a takeover or a close before its
+  marker, a stalled detach that does not reconnect, and typing and pasting clearing the selection), in Chromium and
+  WebKit. No stack and no build: the page and the shipped assets are served through request routing. Needs `npm install`
+  and the browsers from the browser suite's setup below; a few minutes. Not in CI. Run it when the grid assets,
+  `terminal.js`'s grid handling or the fixtures under `crates/farhelm-ui/js-tests/fixtures/grid/` change.
+- `cd e2e && FARHELM_E2E_SUITE_TERMINALS=tmux python3 ../scripts/record-test-run.py --runner playwright --kind development --tmux required --keep-farhelm-env FARHELM_E2E_SUITE_TERMINALS --selection 'old-terminal set, both engines' --concurrency '3 browser workers, one stack each; retries 0' -- npx playwright test`
+  — the browser suite's old-terminal set: the tests whose subject exists only for old terminals (tmux, drawn by
+  xterm.js), against stacks whose two supervisors start with `--new-terminals tmux`, with the pinned tmux first on
+  `PATH` as for the browser suite. The ordinary run (the variable unset) creates every terminal in a terminal host and
+  leaves these tests out; this run has nothing else. The set (`e2e/suite-terminals.ts`) is the whole spec files
+  `OLD_TERMINAL_FILES` lists (xterm.js's link-gesture bookkeeping and its stale-row painting while scrolled back) and
+  the tests tagged `@old-terminal` (`OLD_TERMINAL_TAG`) in the files `OLD_TERMINAL_TAGGED` lists: xterm.js's catch-up
+  buffering, write-callback flow control and stall, its byte-stream input bound, its own query answers, selection,
+  parser and DOM renderer, its OSC 52 read answer, and a supervisor still on old terminals showing no migration band.
+  Each tagged test says in place where new terminals' counterpart is pinned. The `--keep-farhelm-env` is required: the
+  recorder scrubs the variable otherwise, and the run is then the ordinary one under this label (global setup prints
+  `suite terminals: tmux`, the config's metadata says `suiteTerminals`, and every test carries a `suite terminals`
+  annotation, so a report shows which run it was). Global setup refuses a stack whose startup session is not a tmux
+  terminal on a supervisor with the switch off. The config refuses either run when the set's account is incomplete (a
+  listed file missing, a file listed as both whole and tagged, a spec using the tag unlisted or a listed one using it
+  nowhere). A selection of its projects uses the recorder's generic mode (`--kind development` without
+  `--runner playwright`, then `npx playwright test --project=<project> ... --retries=0`), since the Playwright mode
+  refuses `--project`. On Tensorlake, `sandbox-tests.ts run --suite-terminals tmux` (`.agents/tensorlake.md`). Needs
+  what the browser suite needs; about a hundred tests over twelve spec files. Not in CI and not part of the deflake
+  sweep. Run a changed tagged test's or whole file's projects when it changes, and the set when terminal.js's xterm.js
+  path, the helm's byte-stream relay or the supervisor's tmux path change in a way the Rust tests do not reach.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'helm terminal relay' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-helm --lib -E 'test(/^terminal::tests::/) | test(/^client::tests::/)'`
   — the helm's terminal WebSocket (`crates/farhelm-helm/src/terminal.rs`) and its supervisor client
   (`crates/farhelm-helm/src/client.rs`), in-process against stand-in supervisors: attach, takeover, refusals, the stream
@@ -844,9 +827,10 @@ that its required systemd or SSH substrate ran.
   same file, when the script changes; seconds. Needs Deno, and fetches `jsr:@std/http` the first time.
 - `deno test -A scripts/tensorlake/sandbox-tests.ts` and
   `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-shard.sh` — the Tensorlake browser-test harness's
-  own checks: how projects are balanced into shards, how the snapshot listing is read, and how a host-terminal run's
-  shard summary is checked. Run them, with `deno check`, when the harness changes; seconds, no sandbox. Using the
-  harness itself is described in `.agents/tensorlake.md`.
+  own checks: how projects are balanced into shards, how the snapshot listing is read, which projects each run of the
+  suite has (the ordinary one, or the old-terminal set's), loading the set's account from the tested checkout, and how
+  an old-terminal run's shard summary is checked. Run them, with `deno check`, when the harness changes; seconds, no
+  sandbox. Using the harness itself is described in `.agents/tensorlake.md`.
 - `python3 scripts/record-test-run.py --kind development --selection 'portable brick-test harness' --concurrency 'one unittest process' --tmux none -- python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v`
   — validates owned Tart lifecycle, signed-input planning, guest execution, fixed command operations, durable handoffs,
   compiled checkpoint contracts, fresh-versus-update installer entrypoints, fixed command-only execution and provenance,
@@ -898,7 +882,14 @@ no browser tests, and a minor rebase does not discard existing browser evidence.
 When browser validation is warranted, run the selected specs through the recorder on Chromium and WebKit (WebKit stands
 in for the desktop app's engine family). Every run, full or selected, boots three stacks and spreads its (engine, spec
 file) projects over three workers, one stack each (`e2e/stack-slots.ts`), so a selection of a few spec files already
-runs in parallel. The full-suite child command is `cd e2e && npx playwright test`. It needs `cargo build` and
+runs in parallel. Every stack's two supervisors create new terminals (terminal hosts, drawn by the grid component), and
+an automatic per-test check (`e2e/tests/helpers/host-premise.ts`, through `helpers/evidence.ts`) fails a test any of
+whose terminal sockets, in a browser context the test observes (the default one, every context `observeContext`
+observes, and any registered with `watchHostPremise`; tabs and remounts included), got a byte-stream notice for a real
+session; a test that serves a session the helm does not list declares it with `fabricatedTerminals`. Global setup
+refuses a stack whose startup session is not a terminal host, and the readiness waits run the per-socket check early.
+Tests about old terminals alone are the old-terminal set above, which this run leaves out. The full-suite child command
+is `cd e2e && npx playwright test`. It needs `cargo build` and
 `cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release` first, because it drives the built web
 UI against a real helm and supervisor, plus a one-time
 `cd e2e && npm install && npx playwright install chromium webkit`. Reuse matching builds and successful test results

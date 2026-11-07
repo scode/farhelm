@@ -43,8 +43,8 @@
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
 import { cleanupSession, createSession } from "./helpers/fleet";
-import { attachSession, waitForTermText, terminalInput, onHostTerminals, terminalKind, terminalLinkPointer, terminalScreen, terminalSize, terminalViewport } from "./helpers/term";
-import { replayRecord } from "./helpers/terminal-readiness";
+import { attachSession, waitForTermText, terminalInput, terminalLinkPointer, terminalScreen, terminalSize, terminalViewport } from "./helpers/term";
+import { OLD_TERMINAL_TAG } from "../suite-terminals";
 import fs from "node:fs";
 import path from "node:path";
 import { stackScratchDir } from "./helpers/scratch";
@@ -595,16 +595,29 @@ test("a URL beginning above the viewport activates from its visible continuation
   }
 });
 
+/**
+ * A URL wrapped across rows still opens, whole, from its last row after a
+ * resize reflows it.
+ *
+ * Why: narrowing the terminal rewraps the URL over more rows, and a link
+ * built from the rows as they were before (or from only the rows still on
+ * screen) would open a truncated target or nothing. Spec: a URL of more than
+ * 250 characters printed at the suite's width wraps with its tail below its head; once
+ * the viewport shrinks and the terminal refits to fewer columns, its tail is
+ * still on a row below its head, on screen and away from the last cell, and
+ * a click on it opens the full URL in a new tab with no confirm dialog.
+ *
+ * The URL's head need not stay on screen. The emulator behind a new terminal
+ * reflows as alacritty does, keeping the cursor's row and pushing the lines
+ * above it into history (seen here: the head left the screen with twenty
+ * blank rows below the cursor), where tmux kept them on screen. So the wrap is
+ * judged over every line the view can scroll to, and the click on the visible
+ * tail is what must reach the head, wherever it now is.
+ */
 test("a wrapped URL still activates after a resize reflows it", async ({
   page,
   request,
 }) => {
-  // Not a grid gap but an emulator one, reported rather than worked around:
-  // narrowing a terminal in a terminal host reflows its screen as alacritty
-  // does, keeping the cursor's row and pushing the lines above it into
-  // history, where tmux keeps them on screen (seen here: the URL's head left
-  // the screen with twenty blank rows below the cursor).
-  test.skip(onHostTerminals(), "the emulator's resize reflow pushes the URL's head into history where tmux keeps it on screen");
   const openedLinks = await recordWindowOpen(page);
   const dialogs = recordDialogs(page);
 
@@ -628,29 +641,46 @@ test("a wrapped URL still activates after a resize reflows it", async ({
     await page.locator("#terminal").click();
     await page.keyboard.press("Enter");
     await waitForTermText(page, tail);
-    /** A complete tail below the URL head proves wrapping while keeping
-     * the actual click away from the cell used to clear hover decoration. */
+    /** A complete tail on screen, on a line below the URL head (which may
+     * be in history), proves wrapping while keeping the actual click away
+     * from the cell used to clear hover decoration. Judged on one read of
+     * the view per poll, so head and tail come from the same frame while a
+     * reflow may still be landing; returns the columns of that frame. */
     const wrappedTail = async () => {
-      const headRow = await findViewportRow(page, head);
-      const tailRow = await findViewportRow(page, tail);
-      expect(tailRow.rowIndex, "the URL tail must wrap below its head").toBeGreaterThan(headRow.rowIndex);
-      expect(
-        tailRow.rowText.indexOf(tail) + tail.length,
-        "the target stays away from the last cell",
-      ).toBeLessThan(tailRow.cols);
-      return tailRow.cols;
+      let cols = 0;
+      const shape = async () => {
+        const view = (await terminalViewport(page))!;
+        cols = view.cols;
+        const headLine = view.all.findIndex((text) => text.includes(head));
+        const tailRow = view.lines.findIndex((text) => text.includes(tail));
+        const rowText = tailRow < 0 ? "" : view.lines[tailRow];
+        return {
+          headFound: headLine >= 0,
+          tailOnScreen: tailRow >= 0,
+          tailBelowHead: tailRow >= 0 && headLine >= 0 && view.top + tailRow > headLine,
+          clearOfLastCell: tailRow >= 0 && rowText.indexOf(tail) + tail.length < view.cols,
+        };
+      };
+      await expect
+        .poll(shape, {
+          timeout: 10_000,
+          message: "the URL must wrap, its tail on screen below its head and clear of the last cell",
+        })
+        .toMatchObject({ headFound: true, tailOnScreen: true, tailBelowHead: true, clearOfLastCell: true });
+      // The frame the last poll judged.
+      return cols;
     };
     const colsBefore = await wrappedTail();
 
-    // Shrink hard: the terminal must refit to FEWER columns, so tmux
-    // reflows the pane and the URL's row split changes under it. The
+    // Shrink hard: the terminal must refit to FEWER columns, so the
+    // terminal reflows and the URL's row split changes under it. The
     // cols change is the barrier — without it this test would be
     // clicking a URL that never reflowed.
     await page.setViewportSize({ width: 800, height: 600 });
     await expect
       .poll(async () => (await terminalSize(page))!.cols, {
         timeout: 15_000,
-        message: "waiting for xterm to refit after the viewport shrank",
+        message: "waiting for the terminal to refit after the viewport shrank",
       })
       .toBeLessThan(colsBefore);
 
@@ -660,7 +690,7 @@ test("a wrapped URL still activates after a resize reflows it", async ({
       contentType: "application/json",
     });
 
-    // Rows may still be shifting while tmux's reflow lands, so the hover
+    // Rows may still be shifting while the reflow lands, so the hover
     // re-derives its coordinates and retries rather than aiming once at
     // a row that is still moving.
     await clickLink(page, tail, tail, 5);
@@ -701,29 +731,17 @@ test("a replayed plain-text URL activates after a reload with no second gate", a
     // nothing below can be a live re-emission.
     await waitForTermText(page, marker);
 
-    // A reload is the harshest detach/reattach: a brand-new xterm with an
-    // empty buffer, so everything below came from this attach's own
+    // A reload is the harshest detach/reattach: a brand-new terminal with an
+    // empty screen, so everything below came from this attach's own
     // replay. No Enter is pressed afterwards — there is no second gate
     // to release.
     await page.reload();
     await attachSession(page, session.id);
     await assertLinkWiring(page);
-    // The replay boundary, two ways: the marker is back without any new
-    // producer output, and the catch-up record proves the replay carried
-    // bytes into xterm while hidden (not an empty catch-up that merely
-    // revealed). `writesWhileHidden`, not `bufferedBytes`: the latter is
-    // current holdings, reset to zero at reveal by design.
+    // The replay boundary: the marker is back without any new producer
+    // output. A grid replay is frames the component applies as they arrive,
+    // so the marker in the reattached terminal is the whole boundary.
     await waitForTermText(page, marker);
-    // xterm.js's catch-up counts its writes; a grid replay is frames the
-    // component applies as they arrive, so the marker back in the
-    // reattached terminal is the whole boundary there.
-    if ((await terminalKind(page)) !== "grid") {
-      const replay = await replayRecord(page, "terminal");
-      expect(
-        replay.writesWhileHidden,
-        "the replay must have written the pane's bytes while hidden",
-      ).toBeGreaterThanOrEqual(1);
-    }
 
     await clickLink(page, marker, url);
 
@@ -1062,13 +1080,12 @@ test("an OSC 8 link whose text matches its target, or is not a URL, hovers quiet
  * complete comparison and the fragment-to-warning mapping.
  */
 for (const layout of ["claude", "codex", "terminal", "wide-wrap", "split-host", "ambiguous", "repeated"] as const) {
-  test(`OSC 8 tagged rows compare the complete ${layout} link`, async ({ page, request }) => {
+  test(`OSC 8 tagged rows compare the complete ${layout} link`, { tag: OLD_TERMINAL_TAG }, async ({ page, request }) => {
     // Writes straight into xterm.js and reads its cells' link tags. A grid
     // terminal's links come from the supervisor, and judging a link's text
     // across its rows is pinned against recorded streams in
     // e2e/grid-client/grid-attach.spec.ts ("an OSC 8 link whose text is
     // another address warns, judging the text across the link's rows").
-    test.skip(onHostTerminals(), "direct writes into xterm.js's cells; the grid's cross-row judgment is pinned in e2e/grid-client");
     let owned: string | undefined;
     try {
       const session = await createSession(request, {

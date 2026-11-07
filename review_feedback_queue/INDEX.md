@@ -1296,17 +1296,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`process-presence-fixture-leaves-sleep-descendant.md`](process-presence-fixture-leaves-sleep-descendant.md) — Running
   the process-presence unit test can leave its sleeping helper behind even when the test passes.
 
-- [`host-browser-setup-precedes-startup-session-create.md`](host-browser-setup-precedes-startup-session-create.md) — A
-  healthy host-terminal browser-validation run can fail before its startup session exists.
-
-- [`repeated-typing-test-can-credit-old-echo.md`](repeated-typing-test-can-credit-old-echo.md) — Repeating the dedicated
-  host-terminal typing test can report success from an earlier test's screen without proving that this invocation
-  delivered its typing.
-
-- [`copied-sandbox-runner-relative-import-fails.md`](copied-sandbox-runner-relative-import-fails.md) — A maintainer
-  using the runner's existing alternate-repository option from a copied script can no longer start it, including its
-  cleanup-only sweep command, unless the copy also has a checkout-shaped e2e directory beside it.
-
 - [`desktop-smoke-misparses-space-bearing-run-path.md`](desktop-smoke-misparses-space-bearing-run-path.md) — Choosing a
   short fresh DESKTOP_SMOKE_DIR containing a space makes the gate report that a healthy created session has no live
   terminal.

@@ -15,7 +15,8 @@ import {
   AUTH_STORAGE_STATE_PATH,
   DEVICE_SECRET_KEY,
 } from "./tests/helpers/device-auth";
-import { hostPremiseActive } from "./tests/helpers/host-premise";
+import { type SuiteTerminals } from "./suite-terminals";
+import { suiteTerminalsOf } from "./tests/helpers/host-premise";
 
 const run = promisify(execFile);
 
@@ -54,12 +55,13 @@ interface StackTarget {
  */
 export default async function globalSetup(config: FullConfig) {
   const slots = (config.metadata as { stackSlots?: StackTarget[] }).stackSlots;
-  // Only the main config's host-terminal run says so in its metadata; a
-  // capture config's runner that merely inherited the variable is not one.
-  const hostTerminals = hostPremiseActive(config);
-  if (hostTerminals) console.log("suite terminals: host");
+  // Only the main config names its run's terminals in its metadata; a
+  // capture config's runner that merely inherited the variable has none, and
+  // its stacks are not checked.
+  const terminals = suiteTerminalsOf(config);
+  if (terminals) console.log(`suite terminals: ${terminals}`);
   if (slots) {
-    for (const slot of slots) await authenticateStack(slot, hostTerminals);
+    for (const slot of slots) await authenticateStack(slot, terminals);
     return;
   }
   const baseURL = config.projects[0]?.use.baseURL as string | undefined;
@@ -72,7 +74,10 @@ export default async function globalSetup(config: FullConfig) {
 }
 
 /** Exchange one stack's harness token for a device secret and persist it for its workers. */
-async function authenticateStack({ baseURL, stackInfoPath, authStatePath }: StackTarget, hostTerminals = false) {
+async function authenticateStack(
+  { baseURL, stackInfoPath, authStatePath }: StackTarget,
+  terminals: SuiteTerminals | null = null,
+) {
   const info = JSON.parse(await readFile(stackInfoPath, "utf8")) as StackInfo;
   const { stdout } = await run(info.farhelm, [
     "helm",
@@ -97,7 +102,7 @@ async function authenticateStack({ baseURL, stackInfoPath, authStatePath }: Stac
     data: { welcome_seen: true },
   });
   expect(seen, "the welcome must be marked seen before harness pages open").toBeOK();
-  if (hostTerminals) await expectHostTerminals(client, body.device_secret, baseURL);
+  if (terminals) await expectStackTerminals(client, body.device_secret, baseURL, terminals);
 
   const directory = path.dirname(authStatePath);
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -113,17 +118,24 @@ async function authenticateStack({ baseURL, stackInfoPath, authStatePath }: Stac
 }
 
 /**
- * The browser suite's host-terminal run (host-terminal-specs.ts): this stack
- * really creates terminals in terminal hosts, checked once per stack from the
- * helm's listing of its startup session before any spec runs.
+ * The main browser suite's stack really creates the run's kind of terminal
+ * (suite-terminals.ts), checked once per stack from the helm's listing of its
+ * startup session before any spec runs: a terminal host with the switch on
+ * for the ordinary run, tmux with the switch off for the old-terminal set.
  *
  * Why here: every spec helper reads whichever component a terminal holds, so
  * a stack that silently kept tmux (a dropped `--new-terminals host`, a broken
- * stack-script branch) would pass the whole run on xterm.js. The specs' own
- * attachments are checked too (tests/helpers/host-premise.ts); this stops a wrong
- * stack before any of them starts.
+ * stack-script branch) would pass the ordinary run on xterm.js, and one that
+ * silently made hosts would fail the old-terminal set in confusing ways. The
+ * ordinary run's attachments are checked too (tests/helpers/host-premise.ts);
+ * this stops a wrong stack before any of them starts.
  */
-async function expectHostTerminals(client: APIRequestContext, secret: string, baseURL: string) {
+async function expectStackTerminals(
+  client: APIRequestContext,
+  secret: string,
+  baseURL: string,
+  terminals: SuiteTerminals,
+) {
   // Playwright's webServer probe sees the helm before start-stack.sh finishes
   // creating its startup session. Wait for that creation, then judge its kind:
   // an existing session of the wrong kind remains an immediate setup failure.
@@ -135,8 +147,13 @@ async function expectHostTerminals(client: APIRequestContext, secret: string, ba
     startup = sessions.find((session) => session.title === "e2e-session");
     return startup !== undefined;
   }, { timeout: 30_000, message: `the stack at ${baseURL} must list its startup session` }).toBe(true);
+  // An old row may omit the switch rather than report it off.
   expect(
-    { agent_terminal: startup!.agent_terminal, supervisor_creates_host_terminals: startup!.supervisor_creates_host_terminals },
-    `the host-terminal run's stack at ${baseURL} must create terminals in terminal hosts`,
-  ).toEqual({ agent_terminal: "host", supervisor_creates_host_terminals: true });
+    {
+      agent_terminal: startup!.agent_terminal,
+      supervisor_creates_host_terminals: startup!.supervisor_creates_host_terminals ?? false,
+    },
+    `the ${terminals === "host" ? "new" : "old"}-terminal run's stack at ${baseURL} must create ` +
+      `${terminals === "host" ? "terminals in terminal hosts" : "tmux terminals"}`,
+  ).toEqual({ agent_terminal: terminals, supervisor_creates_host_terminals: terminals === "host" });
 }

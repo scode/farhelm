@@ -57,7 +57,8 @@ import {
   agentLaunchRow,
   commandLaunchRow,
 } from "./helpers/fleet";
-import { attachSession, cleanupSession, fillCreateForm, termText, terminalScreen, terminalSize, waitForTermText, onHostTerminals, terminalFit } from "./helpers/term";
+import { attachSession, cleanupSession, fillCreateForm, termText, terminalScreen, terminalSize, waitForTermText, terminalFit } from "./helpers/term";
+import { OLD_TERMINAL_TAG } from "../suite-terminals";
 import { waitForIslandMounted, waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 import {
   FAKE_AGENT_INVOCATION,
@@ -845,9 +846,10 @@ test("a failed mount rolls back cleanly; the same session can be mounted again",
   await expect(page.locator("#term-banner")).toContainText(
     "Failed to start terminal",
   );
-  // The failed attempt must not have left anything looking mounted.
+  // The failed attempt must not have left anything looking mounted, with
+  // either component's handle.
   expect(
-    await page.evaluate(() => (window as any).__farhelmTerm === undefined),
+    await page.evaluate(() => (window as any).__farhelmTerm === undefined && (window as any).__farhelmGrid === undefined),
   ).toBe(true);
 
   await page.evaluate(() => {
@@ -974,7 +976,7 @@ test("session readiness rejects a reused primary island until the requested sess
 // fake agent's `basic` script only ever echoes typed lines back as text
 // (fake_agent.rs) — it never executes anything, so it could never emit
 // the raw escape bytes this test needs on the wire in the first place.
-test("DECRPM auto-replies to a mode query are dropped, not forwarded as pane input", async ({
+test("DECRPM auto-replies to a mode query are dropped, not forwarded as pane input", { tag: OLD_TERMINAL_TAG }, async ({
   page,
   request,
 }) => {
@@ -982,7 +984,6 @@ test("DECRPM auto-replies to a mode query are dropped, not forwarded as pane inp
   // have: in a terminal host the supervisor's emulator answers a program's
   // queries and the browser never does (the emulator's query-answer table
   // and the host runtime's replay tests pin that).
-  test.skip(onHostTerminals(), "xterm.js's own query answers; a grid terminal sends none");
   // Patch only `send` on the WebSocket PROTOTYPE, before any navigation.
   // Replacing the `WebSocket` constructor outright (as the mount-rollback
   // test above does deliberately, to make it throw) would break RECEIVING
@@ -1111,12 +1112,11 @@ test("DECRPM auto-replies to a mode query are dropped, not forwarded as pane inp
 // DSR-6 as the positive control proving xterm's auto-replies were live on
 // this exact path, and a pasted probe line so the escape bytes arrive
 // intact or not at all.
-test("DECRQSS auto-replies to a status query are dropped, not forwarded as pane input", async ({
+test("DECRQSS auto-replies to a status query are dropped, not forwarded as pane input", { tag: OLD_TERMINAL_TAG }, async ({
   page,
   request,
 }) => {
   // As the DECRPM test above: xterm.js's own query answers.
-  test.skip(onHostTerminals(), "xterm.js's own query answers; a grid terminal sends none");
   await page.addInitScript(() => {
     const realSend = WebSocket.prototype.send;
     (window as any).__sentInput = [];
@@ -1267,15 +1267,14 @@ test("DECRQSS auto-replies to a status query are dropped, not forwarded as pane 
 // synchronously and once on a `setTimeout(0)`, and traces show either
 // sweep landing the actual `removeAllRanges()` depending on where the
 // engine had the document selection at that instant.
-test("input dismisses both the xterm and native selections", async ({
+test("input dismisses both the xterm and native selections", { tag: OLD_TERMINAL_TAG }, async ({
   page,
 }) => {
   // About xterm.js's selection and the document selection its helper
-  // elements leave behind. The grid keeps its own selection, which input
-  // clears (e2e/grid-client/grid-terminal.spec.ts, "a mouse report brings
-  // a scrolled-back view to the bottom and clears the selection, as input
-  // does"), and leaves no document selection.
-  test.skip(onHostTerminals(), "xterm.js's selection and its helpers' document selection; the grid's is pinned in e2e/grid-client");
+  // elements leave behind. The grid keeps its own selection, which typing
+  // and pasting clear, leaving no document selection
+  // (e2e/grid-client/grid-terminal.spec.ts, "typing and pasting clear the
+  // selection and leave no document selection").
   await openTerminal(page);
   await page.locator("#terminal").click();
 

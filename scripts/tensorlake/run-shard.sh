@@ -13,9 +13,9 @@
 #
 # Usage: run-shard.sh <label> <playwright project>... [-- <extra playwright arguments>]
 # Projects are named as in playwright.config.ts (e.g. webkit-settings); extra arguments such as
-# `-g <title> --repeat-each=3` narrow a rerun. FARHELM_E2E_SUITE_TERMINALS in this script's environment (`host`) is
-# kept for the run, which the recorder would otherwise scrub: it turns the stacks to terminal hosts
-# (e2e/host-terminal-specs.ts). Writes /home/tl-user/out/<label>/summary.txt and console.log; the recorder's run
+# `-g <title> --repeat-each=3` narrow a rerun. FARHELM_E2E_SUITE_TERMINALS in this script's environment (`tmux`) is
+# kept for the run, which the recorder would otherwise scrub: it turns the stacks to tmux and the run to the suite's
+# old-terminal set (e2e/suite-terminals.ts). Writes /home/tl-user/out/<label>/summary.txt and console.log; the recorder's run
 # directory under /tmp/farhelm-tmp/test-runs keeps the rest.
 set -u
 label=$1; shift

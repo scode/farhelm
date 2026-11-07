@@ -14,15 +14,15 @@ import {
   BrowserTimeline,
   registerObservedPage,
 } from "./timeline";
-import { HostPremiseWatch, hostPremiseActive, setActiveHostPremiseWatch, watchHostPremise } from "./host-premise";
+import { HostPremiseWatch, setActiveHostPremiseWatch, suiteTerminalsOf, watchHostPremise } from "./host-premise";
 
 export { expect };
 
 type EvidenceFixtures = {
   timeline: BrowserTimeline;
   /**
-   * On the host-terminal run, the watch that fails a test any of whose
-   * attachments of a local session came back as an old terminal
+   * On the main suite's new-terminal run, the watch that fails a test any of
+   * whose attachments of a real session came back as an old terminal
    * (host-premise.ts); null on every other run.
    */
   hostPremise: HostPremiseWatch | null;
@@ -75,17 +75,21 @@ export const test = base.extend<EvidenceFixtures>({
   }, { auto: true }],
   fabricatedTerminals: [false, { option: true }],
   hostPremise: [async ({ playwright, baseURL, extraHTTPHeaders, fabricatedTerminals }, use, testInfo) => {
-    if (!hostPremiseActive(testInfo.config)) {
+    const terminals = suiteTerminalsOf(testInfo.config);
+    // The run's kind, on every test of the main suite, so a report shows
+    // which kind of terminal a result is about.
+    if (terminals) testInfo.annotations.push({ type: "suite terminals", description: terminals });
+    if (terminals !== "host") {
       await use(null);
       return;
     }
-    // The suite mode, on every test of the run, so a report shows which kind
-    // of terminal a result is about.
-    testInfo.annotations.push({ type: "suite terminals", description: "host" });
-    // A request context of its own, made only on this run, so the ordinary
-    // run's tests keep their resource profile; authorized as the test's is.
-    const request = await playwright.request.newContext({ baseURL, extraHTTPHeaders });
-    const watch = new HostPremiseWatch(request, { fabricated: fabricatedTerminals });
+    // Lookups get a request context of their own, authorized as the test's
+    // is, made only if a byte stream ever shows up (HostPremiseWatch), so a
+    // test whose terminals are all new keeps its resource profile.
+    const watch = new HostPremiseWatch(
+      () => playwright.request.newContext({ baseURL, extraHTTPHeaders }),
+      { fabricated: fabricatedTerminals },
+    );
     setActiveHostPremiseWatch(watch);
     let problems: string[];
     try {
@@ -93,10 +97,9 @@ export const test = base.extend<EvidenceFixtures>({
     } finally {
       setActiveHostPremiseWatch(null);
       problems = await watch.finish(testInfo);
-      await request.dispose();
     }
     if (problems.length) {
-      throw new Error(`the host-terminal run's premise failed:\n${problems.join("\n")}`);
+      throw new Error(`the new-terminal run's premise failed:\n${problems.join("\n")}`);
     }
   }, { auto: true }],
   // Depends on `hostPremise` so the running test's watch is in place when
@@ -129,7 +132,7 @@ export async function observeContext(
   context: BrowserContext,
   timeline: BrowserTimeline,
 ): Promise<void> {
-  // Every observed context is also under the host-terminal run's premise
+  // Every observed context is also under the new-terminal run's premise
   // watch (host-premise.ts), before any listener group of its own.
   watchHostPremise(context);
   let initReady = false;

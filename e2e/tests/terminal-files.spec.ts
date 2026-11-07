@@ -9,7 +9,8 @@ import { type Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createSession, cleanupSession, listSessions } from './helpers/fleet';
-import { attachSession, onHostTerminals, terminalLinkPointer, terminalScreen, terminalViewport, waitForTermText } from './helpers/term';
+import { attachSession, terminalLinkPointer, terminalScreen, terminalViewport, waitForTermText } from './helpers/term';
+import { OLD_TERMINAL_TAG } from '../suite-terminals';
 import { stackScratchDir } from './helpers/scratch';
 import { routeGate } from './helpers/route-gate';
 
@@ -100,13 +101,12 @@ for (const linkKind of ['plain', 'OSC']) {
      * its answer. Departure and return must still withdraw and refresh it.
      * Both link providers and both stat outcomes exercise the same contract.
      */
-    test(`resting ${linkKind} ${targetKind} hover survives live redraws`, async ({ page, request }, testInfo) => {
+    test(`resting ${linkKind} ${targetKind} hover survives live redraws`, { tag: OLD_TERMINAL_TAG }, async ({ page, request }, testInfo) => {
       // Counts xterm.js's own renders of the path row (`onRender`). The
       // grid's counterpart, a redraw withdrawing a changed hover and keeping
       // an unchanged one, is pinned in e2e/grid-client/grid-attach.spec.ts
       // ("a redraw that changes the hovered path withdraws its click; the
       // same text redrawn keeps it").
-      test.skip(onHostTerminals(), "counts xterm.js's renders; the grid's redraw handling is pinned in e2e/grid-client");
       const directory = stackScratchDir('file-redraw-');
       const basename = targetKind === 'folder' ? 'redraw.dir' : 'redraw.txt';
       const filename = path.join(directory, basename);

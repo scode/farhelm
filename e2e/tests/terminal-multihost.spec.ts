@@ -139,6 +139,13 @@ type StackInfo = {
    */
   remote_supervisor_log: string;
   remote_supervisor_rust_log: string;
+  /**
+   * The `--new-terminals` value both of the stack's supervisors run with
+   * (`host`, or `tmux` on the old-terminal set's run). A replacement remote
+   * passes the same, so the host keeps creating the kind of terminal the
+   * run is about.
+   */
+  new_terminals: "host" | "tmux";
 };
 
 /**
@@ -737,9 +744,9 @@ async function restoreRemoteSupervisor(request: APIRequestContext) {
   // The same test-only boot-id seam start-stack.sh launched it with: a
   // respawn that dropped the option would read the machine's real boot id,
   // and every session of the harness's "boot-1" would come back interrupted
-  // on a host that never rebooted. And the same `--new-terminals tmux`, last
-  // as there: without it the replacement would create terminal hosts, the
-  // bare command's default, where this suite was written against tmux.
+  // on a host that never rebooted. And the same `--new-terminals`, last as
+  // there, so a replacement creates the same kind of terminal as the
+  // supervisor it replaces.
   //
   // Detached and recorded in the stack's pidfile rather than held as a child
   // handle: the replacement is the stack's remote from now on, for every
@@ -759,7 +766,7 @@ async function restoreRemoteSupervisor(request: APIRequestContext) {
         "--boot-id-file",
         info.remote_boot_id_file,
         "--new-terminals",
-        "tmux",
+        info.new_terminals,
       ],
       {
         stdio: ["ignore", log, log],
@@ -2973,7 +2980,9 @@ test.describe("multi-host", () => {
       await waitForTermText(page, "FAKE-AGENT READY");
       await page.evaluate(() => {
         const win = window as any;
-        win.__outageOriginal = win.__farhelmTerm;
+        // The terminal component on screen: the grid for a new terminal (what
+        // this stack's remote creates), xterm.js for an old one.
+        win.__outageOriginal = win.__farhelmGrid ?? win.__farhelmTerm;
         const banners: string[] = [];
         const observer = new MutationObserver(() => {
           for (const node of document.querySelectorAll(".terminal-pane > .banner")) {
@@ -2992,7 +3001,8 @@ test.describe("multi-host", () => {
       await expect(page.locator(".tab-strip")).toHaveJSProperty("inert", true);
       await expect(page.locator(".terminal-pane.selected")).toHaveJSProperty("inert", true);
       // Establish the slow-probe premise before restoration. A retained DOM
-      // node alone would also accept an invisible/disposed xterm instance.
+      // node alone would also accept an invisible or disposed terminal
+      // component.
       await expect(page.locator("#term-connecting")).toHaveAttribute("data-reconnect-phase", "probing");
       await expect(page.locator(".terminal-snapshot")).toBeVisible();
       expect(await page.evaluate(() => (window as any).__outageOriginal.element.isConnected)).toBe(true);
@@ -3408,12 +3418,13 @@ test.describe("multi-host", () => {
   });
 
   // A REBOOT of the remote host, simulated the way the Rust suite's reboot
-  // tests define one: the supervisor and its tmux server go away, the boot
-  // id the supervisor reads changes (start-stack.sh's `--boot-id-file`
-  // seam, rewritten between the kill and the respawn), and the supervisor
-  // comes back on the same state directory. A changed boot id alone is not
-  // a reboot — reload keeps any pane it still finds — which is why the tmux
-  // server is killed too. What the helm then shows for sessions that were
+  // tests define one: the supervisor and every terminal it had go away (its
+  // terminal hosts, and its tmux server if it has one), the boot id the
+  // supervisor reads changes (start-stack.sh's `--boot-id-file` seam,
+  // rewritten between the kill and the respawn), and the supervisor comes
+  // back on the same state directory. A changed boot id alone is not a
+  // reboot — a terminal that survived would still be running its agent —
+  // which is why the terminals are ended too. What the helm then shows for sessions that were
   // live is SPEC.md's interrupted contract, end to end against real
   // binaries rather than an injected listing row: no terminal is mounted or
   // retried, the surface says why, declining changes nothing, and only the
@@ -3456,41 +3467,53 @@ test.describe("multi-host", () => {
 
     /**
      * Reboot the remote host, as far as a test can: supervisor down, its
-     * tmux server down, a boot id the supervisor has never recorded,
+     * terminals ended, a boot id the supervisor has never recorded,
      * supervisor back on the same state directory and reconnected.
      *
      * The boot id must be one the supervisor has NEVER stored, not merely
      * "different from the harness's initial one": the supervisor persists
      * the id it adopts, and a rewrite to a value it already holds is the
-     * same-boot path, under which a live row whose pane is gone becomes
+     * same-boot path, under which a live row whose terminal is gone becomes
      * `exited`, never `interrupted`. The second engine's pass through this
      * file, `--retries`, and `--repeat-each` all reboot again from
      * whatever the previous reboot left, so a fixed literal would make
      * every reboot after the first a silent no-op.
      *
-     * The tmux kill is checked both ways — the command ran, and the server
-     * is gone afterwards — because the classification does not depend on
-     * it: with the boot id changed, every live row converts to interrupted
-     * whether or not its pane survived, and a test that let the server
-     * live would pass while the agents kept running in it.
+     * The terminals are ended with the command an uninstall uses,
+     * `farhelm internal stop-terminal-hosts` (as start-stack.sh's cleanup
+     * does), and its exit status is checked, because it succeeds only once
+     * every host in the state directory is confirmed gone; a supervisor on
+     * old terminals also has its tmux server killed, checked both ways (the
+     * command ran, and the server is gone afterwards). The classification
+     * does not depend on either: with the boot id changed, every live row
+     * converts to interrupted whether or not its terminal survived, and a
+     * test that let the terminals live would pass while the agents kept
+     * running in them.
      */
     async function rebootRemoteHost(request: APIRequestContext) {
       const info = stackInfo();
-      const sock = path.join(info.remote_state, "tmux.sock");
-      // The same tmux the supervisor drives: it honors `FARHELM_TMUX` ahead
-      // of PATH, and a client from a different build fails the socket
-      // handshake with a protocol-version mismatch rather than killing
-      // anything.
-      const tmux = process.env.FARHELM_TMUX || "tmux";
       await killRemoteSupervisor();
-      const killed = spawnSync(tmux, ["-S", sock, "kill-server"], { encoding: "utf8" });
-      expect(killed.error, "tmux must be runnable from the test process").toBeUndefined();
-      expect(
-        killed.status === 0 || /no server running|No such file/.test(killed.stderr),
-        `kill-server on the remote's tmux: ${killed.stderr}`,
-      ).toBe(true);
-      const probe = spawnSync(tmux, ["-S", sock, "list-sessions"], { encoding: "utf8" });
-      expect(probe.status, `the remote's tmux server must be gone: ${probe.stdout}${probe.stderr}`).not.toBe(0);
+      const stopped = spawnSync(info.farhelm, ["internal", "stop-terminal-hosts", "--state-dir", info.remote_state], {
+        encoding: "utf8",
+      });
+      expect(stopped.error, "farhelm must be runnable from the test process").toBeUndefined();
+      expect(stopped.status, `stopping the remote's terminal hosts: ${stopped.stdout}${stopped.stderr}`).toBe(0);
+      const sock = path.join(info.remote_state, "tmux.sock");
+      if (fs.existsSync(sock)) {
+        // The same tmux the supervisor drives: it honors `FARHELM_TMUX` ahead
+        // of PATH, and a client from a different build fails the socket
+        // handshake with a protocol-version mismatch rather than killing
+        // anything.
+        const tmux = process.env.FARHELM_TMUX || "tmux";
+        const killed = spawnSync(tmux, ["-S", sock, "kill-server"], { encoding: "utf8" });
+        expect(killed.error, "tmux must be runnable from the test process").toBeUndefined();
+        expect(
+          killed.status === 0 || /no server running|No such file/.test(killed.stderr),
+          `kill-server on the remote's tmux: ${killed.stderr}`,
+        ).toBe(true);
+        const probe = spawnSync(tmux, ["-S", sock, "list-sessions"], { encoding: "utf8" });
+        expect(probe.status, `the remote's tmux server must be gone: ${probe.stdout}${probe.stderr}`).not.toBe(0);
+      }
       fs.writeFileSync(info.remote_boot_id_file, `reboot-${process.pid}-${Date.now()}\n`);
       await restoreRemoteSupervisor(request);
     }
