@@ -2617,20 +2617,23 @@ whatever the agent renders is what you see. There is no composer, no message abs
   server and uses no tmux, the server ends with the host's last old terminal (left to end as the user's sessions and
   reboots retire them), and old terminals whose server is not running, or that the host's tmux cannot serve (missing, or
   below the supported version), are reported as not running. Installing Farhelm still requires a supported tmux. While
-  the session's host creates new terminals, a session that still has an old terminal shows a loud band at the top of the
-  session view, below the top row, linking to the docs page that explains the move. Every message says that old
-  terminals are fine for now but that a future release will stop supporting them, without naming a date. When the
-  agent's terminal is old, it asks the user to restart (keeping the conversation), replace or delete the session when
-  convenient, or, when Restart is unavailable for the session, to replace or delete it, with a note that the session
-  cannot be restarted because Farhelm does not yet know the agent's conversation or because the session has no way to
-  resume one. When the agent's terminal is new but some tabs are old, it names those tabs as the tab strip labels them
-  and asks the user to close them and open new ones when convenient, since restarting the agent does not move tabs. Its
-  × hides that message until the session is next opened, never on a timer (a different message the session comes to need
-  meanwhile still shows), and the dismissal is that view's alone: nothing is stored or shared. No band shows for a
-  session shown from a disconnected host's last known state, or whose agent has no terminal. The bottom bar names the
-  session's terminal kinds (old, new, or both, with each terminal listed in its tooltip and accessible text) while its
-  host creates new terminals or any of its terminals is new; a host that only creates old terminals shows neither the
-  band nor the kinds, so its sessions look as they always have.
+  the session's host creates new terminals, a session in which something still runs in an old terminal (its agent
+  running in one, or an open old tab) shows a loud band at the top of the session view, below the top row, linking to
+  the docs page that explains the move. Every message asks the user to act as soon as possible, because an upcoming
+  release will forcibly terminate whatever still runs in an old terminal as part of moving away from tmux, without
+  naming a date. When the agent is running in an old terminal, it asks the user to restart (keeping the conversation),
+  replace, stop or delete the session, or, when Restart is unavailable for the session, to replace, stop or delete it,
+  with a note that the session cannot be restarted because Farhelm does not yet know the agent's conversation or because
+  the session has no way to resume one. Otherwise, when some tabs are old, it names those tabs as the tab strip labels
+  them and asks the user to close them and open new ones, since restarting a session restarts only its agent, not its
+  tabs. Its × hides that message until the session is next opened, never on a timer (a different message the session
+  comes to need meanwhile still shows), and the dismissal is that view's alone: nothing is stored or shared. No band
+  shows for a session shown from a disconnected host's last known state, or for one with no old tab whose agent is not
+  running in an old terminal: an agent that stopped or ended in an old terminal leaves it only so its last screen stays
+  readable, and the session's next run gets a new terminal. The bottom bar names the session's terminal kinds (old, new,
+  or both, with each terminal listed in its tooltip and accessible text) while its host creates new terminals or any of
+  its terminals is new; a host that only creates old terminals shows neither the band nor the kinds, so its sessions
+  look as they always have.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, down to a floor below which it is detached as stalled. No viewer can stop a

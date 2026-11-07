@@ -16,10 +16,10 @@ upgrades.
 Sessions you already have running when you upgrade to 0.34.0 keep their old terminals and keep working as they always
 have for now - inside of tmux, and with xterm.js on the client.
 
-However, a future Farhelm release will stop supporting old terminals entirely. Starting with 0.34.0 you will be strongly
-nudged (with a loud bar at the top of terminals, that you can dismiss) to restart/replace terminals at your earliest
-convenience. This is intended to allow you to pick a good time to "migrate" your terminals over, while allowing Farhelm
-to drop tmux/xterm.js support within a tractable time frame.
+An upcoming Farhelm release will stop supporting old terminals and will forcibly terminate anything still running in
+one. Restart, replace, stop or delete each session that still runs in an old terminal, and close and reopen any of its
+shell tabs that are still old terminals, as soon as possible (restarting a session restarts only its agent, not its
+tabs). Each such session shows a loud note at the top.
 
 ## Why terminals are leaving tmux
 
@@ -41,16 +41,20 @@ tmux version a host has.
 
 ## What an old session shows
 
-When a session on a host that makes new terminals still has an old terminal, an amber note appears at the top of the
-session:
+When something in a session on a host that makes new terminals still runs in an old terminal, an amber note appears at
+the top of the session. It asks you to act as soon as possible, because an upcoming Farhelm release will forcibly
+terminate whatever still runs in an old terminal:
 
-- It says that old terminals are fine for now, but that a future Farhelm release will stop supporting them.
-- If the agent's terminal is old, it asks you to restart, replace or delete the session when convenient. For a session
-  that cannot be restarted, it asks you to replace or delete it instead, and says why it cannot be restarted: either
-  Farhelm does not know the agent's conversation yet (most agents report it after your first prompt), or the session has
-  no way to resume one.
-- If the agent already runs in a new terminal but some shell tabs are old, it names those tabs and suggests closing them
-  and opening new ones.
+- If the agent is running in an old terminal, it asks you to restart (the conversation resumes), replace, stop or delete
+  the session. For a session that cannot be restarted, it asks you to replace, stop or delete it instead, and says why
+  it cannot be restarted: either Farhelm does not know the agent's conversation yet (most agents report it after your
+  first prompt), or the session has no way to resume one.
+- Otherwise, if some shell tabs are old, it names those tabs and asks you to close them and open new ones. Restarting
+  the session would not help with these, since it restarts only the agent, not the tabs. This is the note you see right
+  after restarting a session that had old tabs.
+
+A session whose agent has stopped, and that has no old tabs, shows no note even if the agent's terminal is old: nothing
+is running in it any more, and restarting the session later gives the agent a new terminal.
 
 **What's changing** opens this page. The **×** hides the note until you next open the session.
 

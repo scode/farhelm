@@ -3535,8 +3535,9 @@ a:any-link,
 
 /* The move to new terminals (`migration.rs`): a flow row above the terminal
    like the trust hint, but loud, in the filled amber the other "act on this"
-   bands use, because it is the only reminder an old session gets. Amber, not
-   red: nothing is broken, and the band says to move "when convenient". */
+   bands use, because it is the only reminder an old session gets inside the
+   session view. Amber, not red: nothing is broken yet, and the band asks the
+   user to act, not to recover from a failure. */
 .migration-band {
   flex: 0 0 auto;
   display: flex;

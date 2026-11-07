@@ -6,8 +6,16 @@
 //! server) or new (a terminal host of its own), and never changes kind while
 //! it lives. A session moves to new terminals only by getting new ones:
 //! Restart, Clone or Replace for its agent, closing and reopening for a tab.
-//! This module decides, from the session the helm reported, whether the
-//! user should be told that, and what to call each terminal.
+//! An upcoming release will forcibly terminate whatever still runs in an old
+//! terminal, so the band asks for that move as soon as possible. This module
+//! decides, from the session the helm reported, whether the user should be
+//! told that, and what to call each terminal.
+//!
+//! The band shows while something still runs in an old terminal, meaning
+//! the agent is running in one or an old tab is open. A stopped agent's old
+//! terminal alone does not count. Stop leaves the pane
+//! only so its screen stays readable, there is nothing in it left to
+//! terminate, and the session's next run gets a new terminal anyway.
 //!
 //! Both surfaces stay silent until the session's supervisor creates new
 //! terminals (`Session::supervisor_creates_host_terminals`): before that
@@ -42,12 +50,14 @@ pub(crate) const DOCS_URL: &str = "https://farhelm.io/docs/using/new-terminals/"
 /// Which of the band's two messages a session needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum MigrationCase {
-    /// The agent's terminal is old. `restart_available` is whether this
-    /// session can be restarted at all (SPEC.md, "Lifecycle operations"):
-    /// when it cannot, the band asks only for Replace or Delete, and says
-    /// why Restart is missing.
+    /// The agent is running in an old terminal. `restart_available` is
+    /// whether this session can be restarted at all (SPEC.md, "Lifecycle
+    /// operations"): when it cannot, the band asks only for Replace, Stop or
+    /// Delete, and says why Restart is missing. Old tabs the session also has
+    /// are not named yet; their message follows once the agent has moved.
     OldAgent { restart_available: bool },
-    /// The agent's terminal is new, and these tabs (by their labels, in the
+    /// The agent is not running in an old terminal (its terminal is new, it
+    /// has stopped, or it has none), and these tabs (by their labels, in the
     /// tab strip's order) are old. Restarting the agent would not move them;
     /// only closing them and opening new ones does.
     OldTabs { labels: Vec<String> },
@@ -63,13 +73,26 @@ pub(crate) enum MigrationCase {
 /// "Terminal 1" after the strip has renumbered would point the user at the
 /// wrong shell.
 ///
-/// No band while the session's supervisor does not create new terminals, for
-/// a session shown from a disconnected host's last known state (its notice
+/// A band shows only while something still runs in an old terminal (see the
+/// module docs): the agent running in one ([`MigrationCase::OldAgent`]), or
+/// else an open old tab ([`MigrationCase::OldTabs`]). "Running" means not
+/// known to have ended ([`crate::SessionStatus::has_ended`]), so an agent
+/// that stopped, exited, failed or was interrupted by a reboot leaves only
+/// its tabs to talk about. `Unknown` counts as running on purpose: for an
+/// old terminal it mostly means a live pane the supervisor has not
+/// classified since it restarted (`live_status` in the supervisor), which is
+/// exactly what a user sees right after upgrading, and a band that
+/// vanished then would hide the one thing the release is about to
+/// terminate.
+///
+/// No band while the session's supervisor does not create new terminals
+/// (there is nothing to move a session to, and the screenshot harnesses'
+/// stacks kept on old terminals must look as they always have), or for a
+/// session shown from a disconnected host's last known state (its notice
 /// already says what is shown may be out of date, and nothing can be moved
-/// until it is back), or for a session whose agent has no terminal (a
-/// terminal a reboot took has nothing left to move). `restart_available`
-/// is the session view's own reading of whether Restart can run, so the
-/// band never offers an action the header has greyed out.
+/// until it is back). `restart_available` is the session view's own reading
+/// of whether Restart can run, so the band never offers an action the header
+/// has greyed out.
 pub(crate) fn migration_case(
     session: &Session,
     tabs: &VisibleTabs,
@@ -78,19 +101,17 @@ pub(crate) fn migration_case(
     if !session.supervisor_creates_host_terminals || session.stale {
         return None;
     }
-    match session.agent_terminal? {
-        TerminalKind::Tmux => Some(MigrationCase::OldAgent { restart_available }),
-        TerminalKind::Host => {
-            let labels: Vec<String> = tabs
-                .as_slice()
-                .iter()
-                .enumerate()
-                .filter(|(_, tab)| tab.kind == Some(TerminalKind::Tmux))
-                .map(|(index, _)| crate::tabs::tab_label(index))
-                .collect();
-            (!labels.is_empty()).then_some(MigrationCase::OldTabs { labels })
-        }
+    if session.agent_terminal == Some(TerminalKind::Tmux) && !session.status.has_ended() {
+        return Some(MigrationCase::OldAgent { restart_available });
     }
+    let labels: Vec<String> = tabs
+        .as_slice()
+        .iter()
+        .enumerate()
+        .filter(|(_, tab)| tab.kind == Some(TerminalKind::Tmux))
+        .map(|(index, _)| crate::tabs::tab_label(index))
+        .collect();
+    (!labels.is_empty()).then_some(MigrationCase::OldTabs { labels })
 }
 
 impl MigrationCase {
@@ -123,17 +144,16 @@ pub(crate) struct BandText {
 
 /// Word the band for `case`.
 ///
-/// Every message says old terminals are fine for now and that a future
-/// release will stop supporting them, and asks the user to move "when
-/// convenient": nothing is broken, and moving costs the user a restart or a
-/// fresh conversation, so the band must not read as an error or name a
-/// deadline. It announces the end of support without a date (wording chosen
-/// by the maintainer, 2026-11-03).
+/// Every message asks the user to act as soon as possible and says why: an
+/// upcoming release will forcibly terminate whatever still runs in an old
+/// terminal. No date is named, since none is set. The wording is the
+/// maintainer's (2026-11-07); it replaced an earlier "okay for now, when
+/// convenient" version once old terminals' removal was imminent.
 pub(crate) fn band_text(case: &MigrationCase) -> BandText {
     const LEAD: &str = "Farhelm is moving to a new way of running terminals (no longer using \
                         tmux or xterm.js internally).";
-    const FOR_NOW: &str = "This is okay for now, but a future Farhelm release will stop \
-                           supporting old terminals.";
+    const OTHERWISE: &str = "Otherwise an upcoming Farhelm release will forcibly terminate";
+    const WHY: &str = "as part of transitioning away from using tmux to manage sessions.";
     match case {
         MigrationCase::OldAgent {
             restart_available: true,
@@ -141,8 +161,8 @@ pub(crate) fn band_text(case: &MigrationCase) -> BandText {
             lead: LEAD,
             headline: "This session still runs in an old terminal.".into(),
             body: format!(
-                "{FOR_NOW} Please restart (the conversation will resume), replace or delete \
-                 this session when convenient."
+                "Please restart (the conversation will resume), replace, stop or delete it as \
+                 soon as possible. {OTHERWISE} it {WHY}"
             ),
             note: None,
         },
@@ -156,7 +176,9 @@ pub(crate) fn band_text(case: &MigrationCase) -> BandText {
         } => BandText {
             lead: LEAD,
             headline: "This session still runs in an old terminal.".into(),
-            body: format!("{FOR_NOW} Please replace or delete this session when convenient."),
+            body: format!(
+                "Please replace, stop or delete it as soon as possible. {OTHERWISE} it {WHY}"
+            ),
             note: Some(
                 "(This session cannot be restarted, either because Farhelm does not yet know \
                  the agent's conversation, which most agents report after your first prompt, \
@@ -165,27 +187,34 @@ pub(crate) fn band_text(case: &MigrationCase) -> BandText {
             ),
         },
         MigrationCase::OldTabs { labels } => {
-            let (headline, them, new_tabs) = match labels.as_slice() {
+            // One tab is named again in the request ("close Terminal 2"), so
+            // the sentence stands on its own; several are "them".
+            let (headline, close, new_tabs, them) = match labels.as_slice() {
                 [only] => (
                     format!("{only} is still an old terminal."),
-                    "it",
+                    only.clone(),
                     "a new tab",
+                    "it",
                 ),
                 _ => (
                     format!("{} are still old terminals.", join_labels(labels)),
-                    "them",
+                    "them".to_string(),
                     "new tabs",
+                    "them",
                 ),
             };
             BandText {
                 lead: LEAD,
                 headline,
-                // The tabs hint stays because this message usually appears
-                // right after the user restarted the agent and expected
-                // the tabs to move with it.
+                // The first clause is there because this message usually
+                // appears right after the user restarted the agent and
+                // expected the tabs to move with it. Never phrase it as
+                // "moving" tabs: the maintainer ruled that meaningless to
+                // users.
                 body: format!(
-                    "{FOR_NOW} Restarting the session does not move tabs, so when convenient, \
-                     close {them} and open {new_tabs}."
+                    "Restarting the session restarts only its agent, not its tabs, so please \
+                     close {close} and open {new_tabs} as soon as possible. {OTHERWISE} {them} \
+                     {WHY}"
                 ),
                 note: None,
             }
@@ -409,15 +438,16 @@ mod tests {
         crate::tabs::visible_tab_infos(&tabs, &[], &HashMap::new(), &HashSet::new())
     }
 
-    /// Spec (goal s7, first case): an old agent terminal gets the band that
-    /// says a future release will stop supporting old terminals and asks
-    /// for a restart, replace or delete when convenient. It names Restart
-    /// only while the session can be restarted; otherwise it asks for
-    /// Replace or Delete and adds a note saying why Restart is missing.
-    /// Matters because the band must never point at an action the header
-    /// greys out.
+    /// Spec (SPEC.md, "Terminal experience"): an agent running in an old
+    /// terminal gets the band that asks for a restart, replace, stop or
+    /// delete as soon as possible, because an upcoming release will
+    /// forcibly terminate it. It names Restart only while the session can be
+    /// restarted; otherwise it asks for Replace, Stop or Delete and adds a
+    /// note saying why Restart is missing. Matters because the band must
+    /// never point at an action the header greys out, and because its
+    /// wording is the maintainer's own.
     #[farhelm_testtrace::test]
-    fn an_old_agent_is_told_to_restart_or_else_to_replace_or_delete() {
+    fn an_old_agent_is_told_to_restart_or_else_to_replace_stop_or_delete() {
         let old = session("s");
         let case =
             migration_case(&old, &strip(Vec::new()), true).expect("an old agent gets the band");
@@ -430,36 +460,32 @@ mod tests {
         let text = band_text(&case);
         assert!(text.lead.contains("no longer using tmux"), "{text:?}");
         assert_eq!(text.headline, "This session still runs in an old terminal.");
-        assert!(
-            text.body
-                .contains("a future Farhelm release will stop supporting old terminals"),
-            "{text:?}"
+        assert_eq!(
+            text.body,
+            "Please restart (the conversation will resume), replace, stop or delete it as soon \
+             as possible. Otherwise an upcoming Farhelm release will forcibly terminate it as \
+             part of transitioning away from using tmux to manage sessions."
         );
-        assert!(
-            text.body
-                .contains("Please restart (the conversation will resume), replace or delete"),
-            "{text:?}"
-        );
-        assert!(text.body.ends_with("when convenient."), "{text:?}");
         assert_eq!(text.note, None);
 
         let case =
             migration_case(&old, &strip(Vec::new()), false).expect("still banded without Restart");
         let text = band_text(&case);
-        assert!(!text.body.contains("restart"), "{text:?}");
-        assert!(
-            text.body
-                .ends_with("Please replace or delete this session when convenient."),
-            "{text:?}"
+        assert_eq!(
+            text.body,
+            "Please replace, stop or delete it as soon as possible. Otherwise an upcoming \
+             Farhelm release will forcibly terminate it as part of transitioning away from \
+             using tmux to manage sessions."
         );
         let note = text.note.as_deref().expect("says why Restart is missing");
         assert!(note.contains("cannot be restarted"), "{text:?}");
         assert!(note.contains("after your first prompt"), "{text:?}");
     }
 
-    /// Spec (goal s7, second case): a new agent with old tabs gets the band
-    /// that names those tabs, by their strip labels, and says restarting the
-    /// agent would not move them. New tabs and tabs whose kind was not
+    /// Spec (SPEC.md, "Terminal experience"): a new agent with old tabs gets
+    /// the band that names those tabs, by their strip labels, says
+    /// restarting restarts only the agent, and asks for them to be closed
+    /// and reopened as soon as possible. New tabs and tabs whose kind was not
     /// reported are not named.
     #[farhelm_testtrace::test]
     fn a_new_agent_with_old_tabs_is_told_to_reopen_them() {
@@ -484,14 +510,12 @@ mod tests {
             text.headline,
             "Terminal 1 and Terminal 3 are still old terminals."
         );
-        assert!(
-            text.body
-                .contains("Restarting the session does not move tabs"),
-            "{text:?}"
-        );
-        assert!(
-            text.body.ends_with("close them and open new tabs."),
-            "{text:?}"
+        assert_eq!(
+            text.body,
+            "Restarting the session restarts only its agent, not its tabs, so please close them \
+             and open new tabs as soon as possible. Otherwise an upcoming Farhelm release will \
+             forcibly terminate them as part of transitioning away from using tmux to manage \
+             sessions."
         );
         assert_eq!(text.note, None);
 
@@ -499,9 +523,78 @@ mod tests {
         let text =
             band_text(&migration_case(&mixed, &strip(tabs.clone()), true).expect("one old tab"));
         assert_eq!(text.headline, "Terminal 1 is still an old terminal.");
-        assert!(
-            text.body.ends_with("close it and open a new tab."),
-            "{text:?}"
+        assert_eq!(
+            text.body,
+            "Restarting the session restarts only its agent, not its tabs, so please close \
+             Terminal 1 and open a new tab as soon as possible. Otherwise an upcoming Farhelm \
+             release will forcibly terminate it as part of transitioning away from using tmux \
+             to manage sessions."
+        );
+    }
+
+    /// Spec (SPEC.md, "Terminal experience"): the band counts only what
+    /// still runs in an old terminal. An old agent that is not running
+    /// (stopped, exited, interrupted by a reboot) gets no band of its own;
+    /// its old tabs, if any, get the tabs message, and with none there is no
+    /// band. A running old agent's message wins over its old tabs, whose
+    /// message follows once the agent has moved; a not yet classified
+    /// (`Unknown`) agent counts as running.
+    ///
+    /// Why: a stopped session must not be nagged about a terminal that holds
+    /// only its last screen, while a session whose agent stopped with an old
+    /// shell tab still open must still be told about that tab.
+    #[farhelm_testtrace::test]
+    fn only_what_still_runs_in_an_old_terminal_gets_the_band() {
+        let old_tab = || strip(vec![tab("a", Some(TerminalKind::Tmux))]);
+        for ended in [
+            SessionStatus::Exited { exit_code: Some(0) },
+            SessionStatus::Interrupted,
+            SessionStatus::Error {
+                detail: "gone".into(),
+            },
+        ] {
+            let mut stopped = session("s");
+            stopped.status = ended.clone();
+            assert_eq!(
+                migration_case(&stopped, &strip(Vec::new()), true),
+                None,
+                "{ended:?}: a stopped old agent alone"
+            );
+            assert_eq!(
+                migration_case(&stopped, &old_tab(), true),
+                Some(MigrationCase::OldTabs {
+                    labels: vec!["Terminal 1".into()]
+                }),
+                "{ended:?}: a stopped old agent's old tab"
+            );
+        }
+
+        // Unknown included: an old pane after a supervisor restart reports it
+        // until its first fresh screen sample.
+        for live in [
+            SessionStatus::Waiting,
+            SessionStatus::Idle,
+            SessionStatus::Unknown,
+        ] {
+            let mut running = session("s");
+            running.status = live.clone();
+            assert_eq!(
+                migration_case(&running, &old_tab(), false),
+                Some(MigrationCase::OldAgent {
+                    restart_available: false
+                }),
+                "{live:?}: the agent's message comes first"
+            );
+        }
+
+        let mut no_terminal = session("s");
+        no_terminal.agent_terminal = None;
+        assert_eq!(
+            migration_case(&no_terminal, &old_tab(), true),
+            Some(MigrationCase::OldTabs {
+                labels: vec!["Terminal 1".into()]
+            }),
+            "an agent with no terminal still has its old tab named"
         );
     }
 
@@ -561,7 +654,7 @@ mod tests {
     /// Spec: no band when there is nothing to move, nothing to move it to, or
     /// nothing to act on: every terminal new, the supervisor not creating new
     /// terminals (the media harnesses' stacks, goal s4), a disconnected
-    /// host's last known state, and an agent with no terminal.
+    /// host's last known state, and an agent with no terminal and no tabs.
     #[farhelm_testtrace::test]
     fn no_band_without_an_old_terminal_or_a_switch_that_is_on() {
         let mut all_new = session("s");
