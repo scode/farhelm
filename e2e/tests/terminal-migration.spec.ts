@@ -172,9 +172,10 @@ test("a session on new terminals names their kind and shows no band", async ({ p
   }
 });
 
-/** The band's first case: an old agent terminal on a host that creates new
- * ones is told to restart, replace or delete it when convenient, or, when
- * Restart is unavailable, to replace or delete it, with a note on why; the
+/** The band's first case: an agent running in an old terminal on a host that
+ * creates new ones is told to restart, replace, stop or delete it as soon as
+ * possible, or, when Restart is unavailable, to replace, stop or delete it,
+ * with a note on why; the
  * details name the kind; × hides the band for the
  * rest of the visit, a refresh included, and the next visit brings it back.
  * Why: the band is the only reminder an old session gets, so it must be
@@ -196,9 +197,12 @@ test("an old session's band hides until the next visit and offers only what the 
     await expect(band(page)).toHaveAttribute("role", "status");
     await expect(band(page)).toHaveAttribute("data-migration", "agent");
     await expect(band(page)).toContainText("This session still runs in an old terminal.");
-    await expect(band(page)).toContainText("a future Farhelm release will stop supporting old terminals");
-    await expect(band(page)).toContainText("Please restart (the conversation will resume), replace or delete");
-    await expect(band(page)).toContainText("when convenient");
+    await expect(band(page)).toContainText(
+      "Please restart (the conversation will resume), replace, stop or delete it as soon as possible.",
+    );
+    await expect(band(page)).toContainText(
+      "Otherwise an upcoming Farhelm release will forcibly terminate it as part of transitioning away from using tmux to manage sessions.",
+    );
     // The session's own sentence is the bold one, not the shared lead.
     await expect(band(page).locator("strong")).toHaveText("This session still runs in an old terminal.");
     const link = band(page).getByRole("link", { name: "What's changing ↗" });
@@ -220,14 +224,14 @@ test("an old session's band hides until the next visit and offers only what the 
     await expect(kinds(page)).toHaveText(/Old terminal/);
 
     // Restart becomes unavailable meanwhile; the next visit shows the band
-    // again, asking for Replace or Delete only and saying why.
+    // again, asking for Replace, Stop or Delete only and saying why.
     seed = { ...seed, restart_offer: "no_conversation_reporting" };
     await attachSession(page, neighbor.id);
     await expect(band(page)).toHaveCount(0);
     await attachSession(page, session.id);
     await expect(band(page)).toBeVisible();
     await expect(band(page)).not.toContainText("Please restart");
-    await expect(band(page)).toContainText("Please replace or delete this session when convenient.");
+    await expect(band(page)).toContainText("Please replace, stop or delete it as soon as possible.");
     await expect(band(page).locator(".migration-band-note")).toContainText("This session cannot be restarted");
     await expect(page.locator(".restart-primary")).toHaveAttribute("aria-disabled", "true");
 
@@ -244,8 +248,8 @@ test("an old session's band hides until the next visit and offers only what the 
 });
 
 /** The band's second case: the agent already runs in a new terminal but a
- * tab is old, so the band names that tab and says restarting the agent will
- * not move it; the details say the session has both kinds. Why: Restart is
+ * tab is old, so the band names that tab and says restarting restarts only
+ * the agent; the details say the session has both kinds. Why: Restart is
  * the obvious move and here it does nothing for the tabs, so the band must
  * say what does. */
 test("a new agent with an old tab is told to reopen that tab", async ({ page, request }) => {
@@ -268,8 +272,8 @@ test("a new agent with an old tab is told to reopen that tab", async ({ page, re
     await expect(band(page)).toBeVisible();
     await expect(band(page)).toHaveAttribute("data-migration", "tabs");
     await expect(band(page)).toContainText("Terminal 2 is still an old terminal.");
-    await expect(band(page)).toContainText("Restarting the session does not move tabs");
-    await expect(band(page)).toContainText("close it and open a new tab.");
+    await expect(band(page)).toContainText("Restarting the session restarts only its agent, not its tabs");
+    await expect(band(page)).toContainText("please close Terminal 2 and open a new tab as soon as possible.");
     await expect(kinds(page)).toHaveText(/Old and new terminals/);
     await expect(kinds(page)).toHaveAttribute(
       "data-tooltip",

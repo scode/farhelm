@@ -2661,24 +2661,25 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   attachment sends.
 - **Terminal kinds on replies** (the migration band and the session details' kinds, SPEC.md "Terminal experience").
   `SessionInfo` carries `agent_terminal` (`tmux` or `host`), taken in `status::entry_info` from the `Terminal` variant
-  the entry holds, not from the row's stored `terminal_kind`, so a session with no terminal reports none and is never
-  asked to move; each `TabInfo` carries `kind` from where the tab was found (every tab rediscovered from the session's
-  tmux session is `tmux`, every tab in a terminal host `host`), built only through `Terminal::tab_info` and its
-  shorthands (`TmuxTerminal::tab_info` and `DiscoveredTab::tab_info` for tmux tabs, `HostTab::tab_info` for host tabs),
-  so no site spells a kind out. A replayed keyed create reports the live entry's kind, as the first reply did.
-  `supervisor_creates_host_terminals` is the switch (`SupervisorSeams::new_terminals`), added at the two boundaries
-  every `SessionInfo` leaves through (`listing::list_all` and `Supervisor::with_checkout_metadata`, which every
-  single-session reply passes) rather than stored on entries, since it belongs to the supervisor process, not to the
-  entry. A supervisor kept on old terminals reports false, so the media harnesses' stacks show neither the band nor the
-  kinds. The three fields joined protocol 68 without a bump: each is optional with a decode default, and a peer that
-  ignores or lacks them only shows no migration guidance, which is what a supervisor without hosts would have it show.
-  They decode through `farhelm_proto::lenient_terminal_kind`, so a kind a build does not know reads as unreported
-  instead of failing the session, which matters because the UI decodes these types directly. The UI's decisions
-  (`crates/farhelm-ui/src/migration.rs`) are pure functions of the session and of the tabs the strip shows
-  (`tabs::visible_tab_infos`: the strip's own list, with kinds by tab id and an optimistic open's kind from its open
-  reply), so a tab is named by the label on screen even before the next detail read; that list is a type of its own
-  (`tabs::VisibleTabs`), so neither surface can be handed the server's list. The band's dismissal is the band
-  component's own state, kept per message, and the session view is keyed by session, so the next visit mounts it afresh.
+  the entry holds, not from the row's stored `terminal_kind`, so a session with no terminal reports none and its agent
+  is never asked to move (its old tabs still are); each `TabInfo` carries `kind` from where the tab was found (every tab
+  rediscovered from the session's tmux session is `tmux`, every tab in a terminal host `host`), built only through
+  `Terminal::tab_info` and its shorthands (`TmuxTerminal::tab_info` and `DiscoveredTab::tab_info` for tmux tabs,
+  `HostTab::tab_info` for host tabs), so no site spells a kind out. A replayed keyed create reports the live entry's
+  kind, as the first reply did. `supervisor_creates_host_terminals` is the switch (`SupervisorSeams::new_terminals`),
+  added at the two boundaries every `SessionInfo` leaves through (`listing::list_all` and
+  `Supervisor::with_checkout_metadata`, which every single-session reply passes) rather than stored on entries, since it
+  belongs to the supervisor process, not to the entry. A supervisor kept on old terminals reports false, so the media
+  harnesses' stacks show neither the band nor the kinds. The three fields joined protocol 68 without a bump: each is
+  optional with a decode default, and a peer that ignores or lacks them only shows no migration guidance, which is what
+  a supervisor without hosts would have it show. They decode through `farhelm_proto::lenient_terminal_kind`, so a kind a
+  build does not know reads as unreported instead of failing the session, which matters because the UI decodes these
+  types directly. The UI's decisions (`crates/farhelm-ui/src/migration.rs`) are pure functions of the session and of the
+  tabs the strip shows (`tabs::visible_tab_infos`: the strip's own list, with kinds by tab id and an optimistic open's
+  kind from its open reply), so a tab is named by the label on screen even before the next detail read; that list is a
+  type of its own (`tabs::VisibleTabs`), so neither surface can be handed the server's list. The band's dismissal is the
+  band component's own state, kept per message, and the session view is keyed by session, so the next visit mounts it
+  afresh.
 
 Test harnesses end the hosts they leave behind: `farhelm-teststate` ends every host whose socket is in a `hosts`
 directory within an owned run directory (its dead-run sweep, and every `TestDir` drop) through a small blocking client
