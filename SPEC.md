@@ -1493,18 +1493,24 @@ work is permanently lost. The global action skips unreachable hosts and waits un
 There is no restore action or automatic cleanup. Each checkout also has a delete button that removes it immediately,
 without confirmation or a warning about uncommitted or unpushed work; it is unavailable under the same host-listing and
 operation guards as bulk cleanup. The pinned header keeps the title, total and a close control visible while the archive
-list scrolls. The pinned footer holds the deletion progress and Close, then Delete all; phone widths stack these actions
-as full-width rows. Global confirmation appears in its own bounded, keyboard-scrollable region directly above the
-footer; its actions are brought into view and focused when it opens, and cancelling returns focus to Delete all.
-Per-host confirmations stay inside their host sections. Initial focus stays on footer Close; sequential Tab follows
-header close, archive body, then footer actions. Deletion sends one checkout at a time on each host, with hosts
-progressing in parallel and up to fifteen minutes to confirm each request. While a run is active, the header and trash
-button show an upside-down, bobbing can (static but still upside down under Reduce Motion). Their checkout counts and
-the header's size total fall as confirmed deletions remove entries. Each current checkout shows a spinner and elapsed
-seconds; queued checkouts say "Waiting". Host headers show "N of M deleted", and the footer announces how many checkouts
-remain to process. Per-record issues accumulate while that host continues; an unconfirmed reply stops only that host's
-queue and warns that some folders may already be deleted. The listing is rechecked once the whole run finishes. Close,
-header close and Escape stay unavailable until then, and both close controls explain the wait on hover.
+list scrolls. The pinned footer holds Close, then Delete all; phone widths stack these actions as full-width rows.
+Global confirmation appears in its own bounded, keyboard-scrollable region directly above the footer; its actions are
+brought into view and focused when it opens, and cancelling returns focus to Delete all. Per-host confirmations stay
+inside their host sections. Initial focus stays on footer Close; sequential Tab follows header close, archive body, then
+footer actions. Confirming a bulk delete closes the dialog immediately and sends one request per host with its frozen
+IDs; the hosts progress independently. An entry's own Delete keeps the dialog open, and its row leaves when the host
+confirms it. Close, header close and Escape remain available during that request. Trash requests keep their
+fifteen-minute deadline for older hosts that still remove files before answering. They do not block other page actions,
+while the trash control prevents overlapping requests of its own. The listing is rechecked after the requests settle.
+Refusals and uncertain replies remain visible on the next dialog opening; an uncertain reply warns that some folders may
+already be deleted. The trash button's tooltip tells the user to open the trash to see why. Deleting unrelated checkouts
+does not clear an uncertain outcome. Notices for a host disappear when a successful host registry refresh confirms that
+the host has been removed; disconnection or a failed refresh does not acknowledge them.
+
+While this page has a delete request in flight or a host reports that it is freeing space, only the trash button's can
+turns upside down and bobs (static but still upside down under Reduce Motion). Its tooltip names the hosts freeing
+space. The page rechecks only hosts that last reported active removal, every few seconds until they report completion;
+no poll runs for idle hosts. A failed read retains the last removal report rather than implying that removal finished.
 
 Only the client that issued a session Delete plays an archive cue, and only when the host confirms that a checkout
 moved: the row's dashed outline flies into the trash, which then wiggles briefly. Reduced motion skips both parts.

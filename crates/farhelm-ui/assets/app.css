@@ -9347,20 +9347,7 @@ a:any-link,
   gap: 10px;
 }
 
-/* The shared header and footer keep their height while archives scroll.
-   Both native close buttons hand disabled hover to their own wrapper. */
-.trash-close-help { display: inline-flex; }
-.trash-close-help > .trash-close { width: 100%; }
-.trash-header-close-help { display: inline-flex; flex-shrink: 0; align-self: flex-start; }
-.trash-close:disabled,
-.trash-header-close:disabled { pointer-events: none; }
-/* Foreground roles alone are too similar to signal unavailability. Match the
-   neutral footer Close without dimming the wrapper's busy explanation. */
-.trash-header-close:disabled { opacity: 0.5; }
-/* Idle, the status region stays in the accessibility tree but takes no row
-   in the footer; `display: none` would remove it from that tree. */
-.checkout-trash-progress.idle { position: absolute; }
-/* Both persistent and dialog cans show the same run. Two keyframe intervals
+/* The persistent can shows requests and host removal. Two keyframe intervals
    with four steps each make eight changes per second; the universal inactive
    window rule pauses this animation along with every other indicator. */
 .trash-delete-icon { display: inline-flex; flex-shrink: 0; }
@@ -9473,9 +9460,6 @@ a:any-link,
 .checkout-trash-entry-heading { flex-wrap: wrap; }
 .checkout-trash-entry-heading > strong { flex: 1 1 10em; }
 .trash-entry-delete { flex-shrink: 0; }
-.trash-entry-progress { display: inline-flex; align-items: center; gap: 6px; }
-.trash-entry-elapsed { font-variant-numeric: tabular-nums; }
-.trash-entry-waiting { color: var(--fg-1); }
 
 .checkout-trash-entry-meta {
   display: flex;
@@ -10016,7 +10000,6 @@ a:any-link,
 .terminal-file-directory,
 .terminal-link-target-text,
 .host-update-elapsed,
-.trash-entry-elapsed,
 .checkout-trash-path > .peer-value {
   font-family: var(--font-mono);
 }
