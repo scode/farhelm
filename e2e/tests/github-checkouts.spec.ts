@@ -1556,9 +1556,10 @@ test("trash count and cue follow the final reference, including another client",
     await band.locator(".trash-host-delete").click();
     await page.screenshot({path: info.outputPath("trash-confirmation.png")});
     await band.locator(".trash-confirm-submit").click();
-    await expect(band).toHaveCount(0);
-    expect(await fs.readdir(path.join(fixture.root, ".farhelm-trash"))).toEqual([]);
-    await dialog.locator(".trash-close").click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator(".checkout-trash-button")).toHaveAttribute("data-count", "0");
+    await expect.poll(() => fs.readdir(path.join(fixture.root, ".farhelm-trash")),
+      {message: "the accepted archive is removed in the background"}).toEqual([]);
     await expect(page.locator(".checkout-trash-button")).toBeFocused();
   } finally {
     await observer?.close();
@@ -1605,6 +1606,9 @@ test("trash global confirmation freezes archives and reports preserved recovery 
     await dialog.locator(".trash-delete-all").click();
     await expect(dialog.locator(".checkout-trash-confirm")).toContainText("Delete 1 archived checkout");
     await dialog.locator(".trash-confirm-submit").click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator(".checkout-trash-button")).toHaveAttribute("data-tooltip", /Some checkouts could not be deleted/);
+    await page.locator(".checkout-trash-button").click();
     await expect(dialog.locator(".checkout-trash-issue").filter({hasText: recovered}).first()).toContainText("a session uses this archive");
     await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(1);
     expect(await fs.readFile(path.join(recovered, "checkout-sentinel"), "utf8")).toBe(`${fixture.repo}\n`);
@@ -1630,9 +1634,8 @@ test("trash global confirmation freezes archives and reports preserved recovery 
     expect(selectedIds).toHaveLength(2);
     const later = await contextlessTrashSession(request, fixture, ids, "later");
     await expect.poll(async () => (await fs.readdir(archive)).length).toBe(4); // two confirmed, later, neighbour
-    // The later archive was not in the confirmation. Observe every singleton
-    // request until the whole run settles, so a correct first request cannot
-    // hide a later deletion of work that was never selected.
+    // The later archive was not in the confirmation. The one host batch must
+    // retain exactly the original frozen IDs while background removal finishes.
     const deletions: {host: number; ids: string[]}[] = [];
     const observeDeletion = (outgoing: Request) => {
       if (new URL(outgoing.url()).pathname === "/api/checkout-trash/delete") deletions.push(outgoing.postDataJSON());
@@ -1640,22 +1643,22 @@ test("trash global confirmation freezes archives and reports preserved recovery 
     page.on("request", observeDeletion);
     try {
       await dialog.locator(".trash-confirm-submit").click();
-      await expect.poll(() => deletions.length, {message: "both frozen checkout IDs are dispatched separately"}).toBe(2);
-      await expect(dialog.locator(".checkout-trash-progress")).toHaveText("");
-      await expect(dialog.locator(".trash-close")).toBeEnabled();
+      await expect(dialog).toHaveCount(0);
+      await expect.poll(() => deletions.length, {message: "the frozen checkout IDs share one host batch"}).toBe(1);
+      await expect(page.locator(".checkout-trash-button")).toHaveAttribute("data-count", "1");
     } finally {
       page.off("request", observeDeletion);
     }
-    expect(deletions).toHaveLength(2);
-    for (const deletion of deletions) {
-      expect(deletion.ids).toHaveLength(1);
-      expect(deletion.host).toBe(host);
-    }
+    expect(deletions).toHaveLength(1);
+    expect(deletions[0].host).toBe(host);
     expect(deletions.flatMap((deletion) => deletion.ids).sort()).toEqual(selectedIds.sort());
+    await page.locator(".checkout-trash-button").click();
     await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(1);
     await expect(dialog.locator(".checkout-trash-entry")).toContainText("later");
     expect(await fs.readFile(path.join(later, "checkout-sentinel"), "utf8")).toBe(`${fixture.repo}\n`);
     expect(await fs.readFile(path.join(neighbour, "keep"), "utf8")).toBe("unrecorded neighbour\n");
+    await expect.poll(() => fs.readdir(archive).then(names => names.sort()),
+      {message: "background cleanup frees only the frozen archives"}).toEqual([path.basename(later), "unrecorded"].sort());
     await page.screenshot({path: info.outputPath("trash-preserved.png")});
     await dialog.locator(".trash-close").click();
   } finally {
@@ -1711,6 +1714,8 @@ test("single trash delete removes one real archive and preserves its neighbour",
     await expect(band.locator(".checkout-trash-entry")).toHaveCount(1);
     await expect(dialog.locator(".trash-close")).toBeFocused();
     await expect.poll(() => fs.stat(first).then(() => "present", (error: NodeJS.ErrnoException) => error.code)).toBe("ENOENT");
+    await expect.poll(() => fs.readdir(path.join(fixture.root, ".farhelm-trash")),
+      {message: "background removal finishes before the fixture releases its root"}).toEqual([path.basename(neighbour)]);
     expect(await contents(neighbour)).toEqual(before);
     expect(await fs.readFile(path.join(neighbour, "uncommitted-work"), "utf8")).toBe("retain this work\n");
   } catch (error) {

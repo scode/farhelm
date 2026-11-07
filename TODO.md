@@ -95,10 +95,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Restore deleted sessions.** Support undeleting a session that is in the trash. Consider supporting undelete for
   sessions without a managed checkout too, by retaining their metadata.
 
-- **Deleting checkouts from the trash is far too slow.** Each delete costs a multi-second round trip and blocks its
-  caller. Speed it up by doing the deletes concurrently, move them into the background so the UI is not blocked, or
-  both. Plan: `plans/queue/instant-trash-delete.md`.
-
 - **Show the user when the trash cannot finish freeing space.** With `instant-trash-delete`, a deleted checkout leaves
   the trash at once and the host removes its files in the background, retrying after restarts when it cannot (files
   owned by a container's root user, say). Decided on 2026-11-07 while planning it: for now such a folder only gets a
