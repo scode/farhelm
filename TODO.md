@@ -83,6 +83,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Restore deleted sessions.** Support undeleting a session that is in the trash. Consider supporting undelete for
   sessions without a managed checkout too, by retaining their metadata.
 
+- **Deleting checkouts from the trash is far too slow.** Each delete costs a multi-second round trip and blocks its
+  caller. Speed it up by doing the deletes concurrently, move them into the background so the UI is not blocked, or
+  both.
+
 - **Upgrade epochs.** Give every release an upgrade epoch, and only promise clean upgrades across one epoch: an
   installation on epoch N updates normally while the latest release is on N+1, and one whose latest release is N+2 is
   told to uninstall and reinstall. A change that needs new logic in the upgrade path itself ships that logic in a
