@@ -22,7 +22,7 @@ use super::connection::{
 };
 use super::core::{
     CreateInputs, RequestError, SessionEntry, Supervisor, create_fingerprint,
-    ensure_title_printable, error_kind, truncate_for_error,
+    ensure_title_printable, error_kind, terminal_less_launch_may_be_live, truncate_for_error,
 };
 use super::launch_artifacts::{
     append_launch_excerpt, cleanup_error_once, read_launch_sentinel, sentinel_could_still_apply,
@@ -765,6 +765,8 @@ async fn handle_stop_session(
     tasks: &mut tokio::task::JoinSet<()>,
     req_id: u64,
     session_id: String,
+    refuse_if_tabs_open: bool,
+    refuse_if_agent_running: bool,
 ) {
     // Refused rather than waited for when every management slot is taken:
     // this runs in the connection's read loop, which must keep delivering
@@ -789,7 +791,7 @@ async fn handle_stop_session(
         // the agent IT just launched: the sweep is keyed on the
         // session's environment marker, which the new run carries
         // too. See `Supervisor::lifecycle_locks`.
-        let _lifecycle = sup.lifecycle_locks.claim(&session_id).await;
+        let lifecycle = sup.lifecycle_locks.claim(&session_id).await;
         let entry = sup.sessions.lock().await.get(&session_id).cloned();
         let Some(entry) = entry else {
             reply_error(
@@ -801,6 +803,38 @@ async fn handle_stop_session(
             .await;
             return;
         };
+        // A display with an ended agent authorizes no new agent's death.
+        // An interrupted, unconfirmed launch may have started a program
+        // even though there is no terminal to probe. Treat that uncertainty
+        // as alive, without Delete's unrelated recorded-host settlement.
+        if refuse_if_agent_running && terminal_less_launch_may_be_live(&entry) {
+            let message = "this session's launch was never confirmed and its agent may \
+                    still be running; nothing was stopped. Check the session and try again";
+            reply_error(&tx, req_id, ErrorKind::Conflict, message.to_string()).await;
+            return;
+        }
+        // A no-tabs click authorizes stopping the agent only. Check before
+        // recording intent or signalling anything, under the same claim
+        // that every tab open takes; no new tab can slip past this boundary.
+        if refuse_if_tabs_open {
+            let refusal = match sup.has_open_tabs_for_stop(&entry).await {
+                Ok(false) => None,
+                Ok(true) => Some(
+                    "this session has terminal tabs open; Stop was requested from a display \
+                     with no tabs, so nothing was stopped. Check the session or reload this \
+                     window and try again"
+                        .to_string(),
+                ),
+                Err(error) => Some(format!(
+                    "could not confirm that this session has no terminal tabs, so nothing \
+                     was stopped: {error:#}"
+                )),
+            };
+            if let Some(message) = refusal {
+                reply_error(&tx, req_id, ErrorKind::Conflict, message).await;
+                return;
+            }
+        }
         // A dead or absent pane, or a terminal-less (restart-gap)
         // entry, all mean there is no live pid worth walking
         // ancestry from — but the environment-marker sweep still
@@ -862,6 +896,16 @@ async fn handle_stop_session(
         // stale pid a dead pane still reports is deliberately never
         // read; it may already be recycled.
         let alive_pane = pane_state.filter(|pane| !pane.dead);
+        // The authoritative probe above already refuses unreadable or
+        // unrecognized terminals. Reuse that same liveness boundary for
+        // ended-agent consent before intent, classification, or signals.
+        if refuse_if_agent_running && alive_pane.is_some() {
+            let message = "this session's agent is running again; Stop was requested from \
+                    a display with an ended agent, so nothing was stopped. Check the session \
+                    and try again";
+            reply_error(&tx, req_id, ErrorKind::Conflict, message.to_string()).await;
+            return;
+        }
         // Bind the identity at the same liveness boundary as the stop
         // decision. The stop intent and sweep may wait on durable I/O; a
         // bare pid carried through that work could name a replacement.
@@ -1098,9 +1142,8 @@ async fn handle_stop_session(
             // outlives the agent for exactly as long as something
             // it spawned does, which is the case at hand.
             //
-            // `AgentOnly` like the live-agent path above: this is
-            // still a stop, and stop leaves tabs running whether
-            // or not the agent was alive to begin with.
+            // Agent cleanup stays separate from tab closes below. The live
+            // agent helper is shared with Restart, which must keep tabs.
             if let Err(e) = reap_process_tree(
                 &sup.seams.scopes,
                 ScopeUnits::recorded(entry.scope.clone()),
@@ -1133,16 +1176,17 @@ async fn handle_stop_session(
         };
 
         // Deliberately untouched: the DB row, the sessions map, and
-        // any live attachment. The pane survives (remain-on-exit),
+        // the agent's live attachment. The pane survives (remain-on-exit),
         // so an attached client's stream simply goes quiet after the
         // agent's death output — there is nothing here for it to be
         // notified of, unlike delete below.
         match stop_error {
             Some(message) => reply_error(&tx, req_id, ErrorKind::Internal, message).await,
             None => {
+                let notice = sup.close_tabs_for_stop(&lifecycle, &entry).await;
                 // The agent's status changes; see `hints`.
                 sup.hint_sessions_changed();
-                send_reply(&tx, &ControlMsg::SessionStopped { req_id }).await
+                send_reply(&tx, &ControlMsg::SessionStopped { req_id, notice }).await
             }
         }
     });
@@ -3053,8 +3097,22 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             })
             .await;
         }
-        ControlMsg::StopSession { req_id, session_id } => {
-            handle_stop_session(sup, ctx.tx, ctx.tasks, req_id, session_id).await
+        ControlMsg::StopSession {
+            req_id,
+            session_id,
+            refuse_if_tabs_open,
+            refuse_if_agent_running,
+        } => {
+            handle_stop_session(
+                sup,
+                ctx.tx,
+                ctx.tasks,
+                req_id,
+                session_id,
+                refuse_if_tabs_open,
+                refuse_if_agent_running,
+            )
+            .await
         }
         ControlMsg::DeleteSession {
             req_id,
@@ -4172,6 +4230,52 @@ mod tests {
         );
     }
 
+    /// An ended-agent Stop display cannot authorize cleanup of an
+    /// unconfirmed terminal-less launch. The guard must refuse before
+    /// classification: no durable row is seeded, so falling through would
+    /// return a recording failure rather than this consent refusal.
+    #[farhelm_testtrace::test]
+    async fn ended_agent_stop_consent_refuses_an_unconfirmed_terminal_less_launch() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let entry = fake_entry(&session_id, 1_700_000_000);
+        assert!(
+            entry.terminal.is_none(),
+            "premise: there is no terminal to probe"
+        );
+        *entry.run.outcome.lock().unwrap() = LastOutcome::Launching;
+        sup.sessions
+            .lock()
+            .await
+            .insert(session_id.clone(), Arc::clone(&entry));
+        let (mut tasks, mut rx) = dispatch_for_test(
+            &sup,
+            ControlMsg::StopSession {
+                req_id: 73,
+                session_id,
+                refuse_if_tabs_open: false,
+                refuse_if_agent_running: true,
+            },
+        )
+        .await;
+        while tasks.join_next().await.is_some() {}
+        let frame = rx.recv().await.expect("guard refusal");
+        let ControlMsg::Error { kind, message, .. } =
+            parse_control(&frame).expect("decode refusal")
+        else {
+            panic!("an unconfirmed launch must not be classified or stopped");
+        };
+        assert_eq!(kind, ErrorKind::Conflict);
+        assert!(message.contains("agent may still be running"), "{message}");
+        assert!(matches!(
+            *entry.run.outcome.lock().unwrap(),
+            LastOutcome::Launching
+        ));
+    }
+
     /// A panicking Stop mutation must settle the real dispatched request with
     /// an internal error. The test-only lifecycle seam supplies a deterministic
     /// panic in the supervisor-owned mutation, before it can reply. Without
@@ -4201,6 +4305,8 @@ mod tests {
             ControlMsg::StopSession {
                 req_id: 71,
                 session_id: "panic-stop".to_string(),
+                refuse_if_tabs_open: false,
+                refuse_if_agent_running: false,
             },
         )
         .await;
@@ -4732,6 +4838,8 @@ mod tests {
             ControlMsg::StopSession {
                 req_id: 52,
                 session_id: session_id.to_string(),
+                refuse_if_tabs_open: false,
+                refuse_if_agent_running: false,
             },
             ConnectionCtx {
                 panics: &mpsc::channel(1).0,
@@ -4821,6 +4929,8 @@ mod tests {
             ControlMsg::StopSession {
                 req_id: 51,
                 session_id: session_id.to_string(),
+                refuse_if_tabs_open: false,
+                refuse_if_agent_running: false,
             },
             ConnectionCtx {
                 panics: &mpsc::channel(1).0,
@@ -10627,6 +10737,8 @@ mod tests {
                 self.send(ControlMsg::StopSession {
                     req_id,
                     session_id: BUSY_STOP_TARGET.into(),
+                    refuse_if_tabs_open: false,
+                    refuse_if_agent_running: false,
                 })
                 .await;
             }
@@ -11402,6 +11514,8 @@ mod tests {
         host.send(ControlMsg::StopSession {
             req_id: 2,
             session_id: "another-session".to_string(),
+            refuse_if_tabs_open: false,
+            refuse_if_agent_running: false,
         })
         .await;
         host.type_and_see_echo("typed-after-the-stop").await;

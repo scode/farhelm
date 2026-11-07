@@ -312,7 +312,8 @@ pub(super) fn MarkedBar(
             span { class: "marked-count", tabindex: "-1", "{targets.len()} marked" }
             button {
                 r#type: "button", class: "btn btn-neutral marked-stop", disabled,
-                "data-tooltip": "Stop the agents in the marked sessions currently shown",
+                "data-tooltip": "Stop the agents and close terminal tabs in the marked sessions currently shown",
+                aria_haspopup: "dialog",
                 onclick: { let drawn = targets.clone(); move |_| {
                     on_lifecycle.call((LifecycleAction::Stop, drawn.clone()));
                 } },

@@ -1,5 +1,5 @@
 //! What a session's status SAYS: the badge every surface renders it as, and
-//! the consequence sentence a delete confirmation opens with.
+//! the consequence sentences lifecycle confirmations open with.
 //!
 //! ## The badge is a dot for some statuses and a word for others
 //!
@@ -451,11 +451,35 @@ pub(crate) fn delete_progress_label(status: &SessionStatus, tabs: usize) -> &'st
 /// there are any.
 ///
 /// SPEC.md's Delete rule asks for a confirmation "that says so when anything
-/// is still alive", and a tab is: Stop and an agent's own exit both leave
-/// tabs running, so a stopped session's prompt that spoke only about its
-/// agent would undersell what the click destroys.
+/// is still alive", and a tab is: an agent's own exit leaves
+/// tabs running, and new tabs can be opened after Stop. A prompt that spoke
+/// only about its agent would undersell what the click destroys.
 pub(crate) fn confirm_consequence(status: &SessionStatus, tabs: usize) -> String {
     with_tabs("deleting", tabs, confirm_consequence_for_agent(status))
+}
+
+/// Stop asks only about tabs the user can see, without claiming an ended
+/// agent is still running. A prompt that loses its last tab remains answerable
+/// with the stricter tabless precondition from that same render. Ended-agent
+/// wording also requires the independent agent-ended precondition, so a
+/// tabs-only answer cannot stop an agent another client restarted meanwhile.
+pub(crate) fn stop_consequence(status: &SessionStatus, tabs: usize) -> String {
+    let noun = if tabs == 1 {
+        "terminal tab"
+    } else {
+        "terminal tabs"
+    };
+    if tabs == 0 {
+        if status.has_ended() {
+            "Stop this session?".into()
+        } else {
+            "Stop the agent?".into()
+        }
+    } else if status.has_ended() {
+        format!("Close {tabs} {noun}?")
+    } else {
+        format!("Stop the agent and close {tabs} {noun}?")
+    }
 }
 
 /// [`confirm_consequence`]'s counterpart for Replace, which deletes the
@@ -624,6 +648,27 @@ pub(crate) fn restart_prompt_stops_agent(status: &SessionStatus) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Stop must name the tabs it destroys without describing an ended
+    /// agent as alive; a drift to no tabs removes that authorization.
+    #[farhelm_testtrace::test]
+    fn stop_questions_distinguish_live_agents_from_tabs_only() {
+        let ended = SessionStatus::Exited { exit_code: Some(0) };
+        assert_eq!(
+            stop_consequence(&SessionStatus::Running, 2),
+            "Stop the agent and close 2 terminal tabs?"
+        );
+        assert_eq!(
+            stop_consequence(&SessionStatus::Unknown, 1),
+            "Stop the agent and close 1 terminal tab?"
+        );
+        assert_eq!(stop_consequence(&ended, 1), "Close 1 terminal tab?");
+        assert_eq!(stop_consequence(&ended, 0), "Stop this session?");
+        assert_eq!(
+            stop_consequence(&SessionStatus::Running, 0),
+            "Stop the agent?"
+        );
+    }
 
     /// The three properties of a badge, spelled out at each call site so the
     /// assertions below read as the specification they are rather than as

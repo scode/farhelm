@@ -1558,8 +1558,12 @@ unchanged Enter, Escape and Cancel all return to the new session's terminal. Ord
 submission and focus-return behavior.
 
 - **Stop** terminates the agent and its entire process tree — MCP servers, dev servers, and other descendants included.
-  Ordinary sessions keep their terminal tabs running. A containerized session stops its whole container, tabs included.
-  The session remains with its terminal still viewable.
+  It then closes the session's terminal tabs and their processes, under the same lifecycle claim. A containerized
+  session also stops its whole container. The session remains with its agent terminal still viewable. With tabs open,
+  Stop asks "Stop the agent and close N terminal tabs?", or asks about the tabs alone when the agent has already ended,
+  unless session confirmations are skipped (below). A tab that cannot be closed does not prevent the other tabs from
+  closing; the reply names the failed tabs and the client shows that notice. Restart and an agent exiting on its own
+  leave tabs running. Tabs can be opened after Stop; another Stop closes them too.
 - **Restart** relaunches the agent in the same working directory and resumes the session's own conversation (see
   Durability for the exact promise). Confirmed 2026-10-03: Restart always means the conversation is preserved. It is
   offered only when Farhelm knows the session's agent type, has captured its conversation, and can resume it: an agent
@@ -1683,30 +1687,31 @@ submission and focus-return behavior.
   again. The terminal's own "Detached" notice, which the delete itself causes, is held back meanwhile; if the delete
   fails, the row and header come back with the refusal shown, and a held notice appears.
 
-The off-by-default **Skip session confirmations** switch in Settings skips session row and bulk Delete, row Replace,
-header Restart, Replace and Delete, interrupted-card Replace, and terminal-tab Close. Each runs on the first click
-through the ordinary action path, with consent from the state shown by that render. It does not skip YOLO, host or trash
-questions, nor the Restart with or Replace with launcher. Host setup and removal retain their separate choices.
+The off-by-default **Skip session confirmations** switch in Settings skips session row, header and bulk Stop, session
+row and bulk Delete, row Replace, header Restart, Replace and Delete, interrupted-card Replace, and terminal-tab Close.
+Each runs on the first click through the ordinary action path, with consent from the state shown by that render. It does
+not skip YOLO, host or trash questions, nor the Restart with or Replace with launcher. Host setup and removal retain
+their separate choices.
 
 After a user explicitly opens a confirmation, keyboard focus starts on its enabled confirming button, so a new Enter
-goes ahead; if that button is disabled, focus starts on Cancel instead. This covers session Delete, Replace, Restart and
-tab close, host setup, removal and uninstall, and permanent trash deletion. Repeated or composing Enter cannot answer
-the new question. Escape cancels the header's Restart, Replace or Delete question and returns focus to the terminal. The
-YOLO confirmation and Restart with launcher still start on Cancel.
+goes ahead; if that button is disabled, focus starts on Cancel instead. This covers session Stop, Delete, Replace,
+Restart and tab close, host setup, removal and uninstall, and permanent trash deletion. Repeated or composing Enter
+cannot answer the new question. Escape cancels the header's Stop, Restart, Replace or Delete question and returns focus
+to the terminal. The YOLO confirmation and Restart with launcher still start on Cancel.
 
 Every modal dialog keeps Tab and Shift+Tab within its visible, enabled controls and keyboard scroll regions. The page
 behind it cannot receive focus or clicks, while independent agent approval cards remain usable. Hidden quick-launch
 preparation blocks page input without focusing its hidden fields; revealing the launcher supplies its normal focus.
 
 A primary click on empty space keeps focus on the control in use in the session launcher, Restart with, the dialogs that
-share the host and Settings installer, and the session row and header Restart, Replace and Delete questions; text can
-still be selected. Rename, tab close, the interrupted card's Replace question and the host update confirmation do not
-have this rule yet. If a dialog container itself has focus, Enter presses its enabled main action, including a
+share the host and Settings installer, and the session row and header Stop, Restart, Replace and Delete questions; text
+can still be selected. Rename, tab close, the interrupted card's Replace question and the host update confirmation do
+not have this rule yet. If a dialog container itself has focus, Enter presses its enabled main action, including a
 destructive confirmation. A dialog without one main action does nothing on container Enter. Held or composing Enter
 cannot confirm.
 
 Confirmed 2026-10-01: a destructive confirmation authorizes only what the prompt the user answered said would happen.
-This covers every destructive confirmation (Delete, Restart, Restart with, Replace and Replace with, and permanent
+This covers every destructive confirmation (Stop, Delete, Restart, Restart with, Replace and Replace with, and permanent
 deletion in the archived-checkout trash, whose answer applies only to the hosts and checkouts it was asked about),
 including a prompt that rewords itself while it is open because the session changed underneath it: the answer applies to
 the wording on screen at the click, never to a state the user was not shown. When the session setting skips a prompt,
@@ -1714,13 +1719,15 @@ the click authorizes only the state the screen showed, under the same guards. Th
 precondition, and the supervisor refuses, at the moment it acts, when the session has more alive than that: a Delete or
 Replace whose prompt said nothing was alive (or that asked nothing, because the session showed nothing alive) is refused
 if the agent or any terminal tab is running; one whose prompt warned only about open terminal tabs is refused if the
-agent is running again; a Restart whose prompt did not say it stops a running agent is refused if the agent is working
-(as for a Restart with no prompt, an idle, waiting or unknown agent is still stopped unasked). A refusal deletes,
-replaces or stops nothing (a Replace has already created its new session, and reports both, as above), and the next
-attempt asks again from the current state, skipping its question again if the setting remains on. No refusal opens a
-confirmation by itself. These races are reachable in ordinary use because the command line and agents act on sessions
-while a GUI is open (see One GUI at a time). Accepted: a terminal tab opened between a tabs-only prompt and the click is
-closed with the others; the prompt need not name the exact tabs it showed.
+agent is running again; a Stop whose click showed no tabs is refused if any tab is open, and a Stop whose click showed
+an ended agent is refused if the agent is alive again or cannot be confirmed ended, before stopping anything; a Restart
+whose prompt did not say it stops a running agent is refused if the agent is working (as for a Restart with no prompt,
+an idle, waiting or unknown agent is still stopped unasked). A refusal deletes, replaces or stops nothing (a Replace has
+already created its new session, and reports both, as above), and the next attempt asks again from the current state,
+skipping its question again if the setting remains on. No refusal opens a confirmation by itself. These races are
+reachable in ordinary use because the command line and agents act on sessions while a GUI is open (see One GUI at a
+time). Accepted: a terminal tab opened between a tabs-only prompt and the click is closed with the others; the prompt
+need not name the exact tabs it showed.
 
 Process-tree ownership is session-wide. Restart reaps any leftover descendants of the prior run before relaunching —
 never alongside them. Stop and delete reap everything the agent started. An agent exiting on its own does not trigger a
@@ -1789,7 +1796,7 @@ reboot, tabs are gone and the user re-adds them; nothing recreates them automati
 which kills that shell and its processes — that is the whole per-tab operation set in v1. A tab's processes include
 whatever its shell's startup files start: containment begins before those files run, so a shared service (an
 `ssh-agent`, an editor daemon, a detached personal tmux server) that a tab's startup files are the first to start
-belongs to that tab and dies when the tab is closed, reaped, or deleted with its session (within the cleanup guarantee's
+belongs to that tab and dies when the tab is closed, reaped, or ended by Stop or Delete (within the cleanup guarantee's
 limits on hosts without a usable systemd user manager; see above). This is deliberately unlike the agent launch, which
 leaves detached services started by shell initialization before the agent outside its cleanup guarantee (see above),
 though cleanup may still reach one that stays in the agent's process tree. The agent's launch has normally already run
@@ -1861,16 +1868,17 @@ when every completion has finished, including when some rows failed or were refu
 bar actions obey the same live navigation lock. Automatic selection after Delete waits until the accepted batch has
 settled and cannot open a session still being deleted by that batch, including on another host.
 
-Bulk Delete asks once when any target would need its ordinary confirmation, unless **Skip session confirmations** is on.
-Its structured modal lists one row per target: status, name, full host and what Delete will do, with the same
-conditional managed-checkout consequence as a single Delete. The answer authorizes only those listed identities and
-drawn consequences. An accepted changed target rewords the question and replaces its opening; authoritative
-disappearance can remove it, while a filtered, partial, failed or non-authoritative omission cannot. An old answer
-cannot authorize a replacement question, and answer-time admission may only remove targets no longer displayed or
-marked. Changed facts or confirmation preferences never dispatch a destructive action by themselves. Cancel, Close and
-Escape dismiss their current question without clearing marks. After confirmation closes the question, keyboard focus
-returns to the marked count, which remains programmatically focusable while the action buttons are locked. Completion
-and failures use the ordinary rows and open-session surfaces.
+Bulk Stop and Delete ask once when any target would need its ordinary confirmation, unless **Skip session
+confirmations** is on. Their structured modal lists one row per target: status, name, full host and what the action will
+do, with the same conditional managed-checkout consequence for Delete. Stop names the agent and terminal tabs it ends,
+with a separate no-tabs precondition for every target whose displayed state showed no tabs. The answer authorizes only
+those listed identities and drawn consequences. An accepted changed target rewords the question and replaces its
+opening; authoritative disappearance can remove it, while a filtered, partial, failed or non-authoritative omission
+cannot. An old answer cannot authorize a replacement question, and answer-time admission may only remove targets no
+longer displayed or marked. Changed facts or confirmation preferences never dispatch a destructive action by themselves.
+Cancel, Close and Escape dismiss their current question without clearing marks. After confirmation closes the question,
+keyboard focus returns to the marked count, which remains programmatically focusable while the action buttons are
+locked. Completion and failures use the ordinary rows and open-session surfaces.
 
 Escape clears marks only from the session list, without preventing default handling, and yields to a menu, dialog or
 terminal that owns the key. Quick switching and shortcuts keep their existing meaning: session shortcuts act only on the
@@ -2548,34 +2556,34 @@ whatever the agent renders is what you see. There is no composer, no message abs
   the selected session leaves no row to mark — the bottom bar's session name remains the identifier in that state, and
   the main pane deliberately stays put (filtering the list is not deselecting).
 - The typical session view has one top row, with terminal tabs and the desktop tunnel pill on the left and text size
-  (zoom out, size in points, zoom in), Restart ▾, Replace ▾, Clone and Delete on the right, followed by the terminal and
-  a slim details bar below it. Restart and Replace are split buttons: the main part performs the ordinary action,
-  including its existing confirmation; the caret opens a menu offering that action and Restart with… or Replace with….
-  The icon-and-label controls keep their compact height. Text size, both parts of each split button, Clone, Delete and
-  the tunnel pill remain fully visible and keyboard reachable from a 650px main pane; only the tab strip takes the
-  remaining width and scrolls horizontally when needed. Narrower panes may clip the row, which never wraps. The bottom
-  bar is about one tab-strip row high and shows, in order, status, session name, host, age, the managed-checkout branch
-  mark when present, the session's terminal kinds when shown (below), directory, and command line. The host's icon
-  follows the session list's rules; its name is the full display name, prominent beside the session name. A missing host
-  name omits the host rather than inventing one. Directory display still abbreviates the home directory to `~`. Keyboard
-  order follows the top row, terminal, then bottom bar. The terminal loses no height in the steady state. Conditional
-  notices stay between the top row and terminal; a stale session's status appears only in its stale notice, not again in
-  the bottom bar. Restart and its menu's matching entries are greyed out when the session cannot resume its conversation
-  (see Lifecycle operations); their tooltips and accessible descriptions explain the specific reason, such as an agent
-  type without conversation reporting, a command launch that declared no agent type or did not opt into Resume, or a
-  conversation not captured yet. For an agent that reports conversations, a running session's explanation says, naming
-  the agent, when Restart normally becomes available for it (Codex, for instance, once the first prompt is submitted),
-  and an ended session's says its conversation was never captured; both invite the user to send feedback if that is not
-  what happened, since Farhelm cannot tell a report still to come from one that never will. The supervisor's refusal of
-  such a restart and the agent instructions state the same timing, without the invitation. Directory and command line
-  are muted click-to-copy buttons that take the width their values need and ellipsize before the session name or host
-  when the bar runs out of room; a click confirms locally for about 1.5 seconds. A hidden-characters copy warning opens
-  upward from the bar and stays within the window. Clipboard writes use the native bridge first and
-  `navigator.clipboard` second, with JSON serialization and silent failures. Replace has its own anchored danger
-  confirmation and neutral cancellation. Delete is styled as the danger action and asks first in the same anchored way,
-  even for a session that has ended, with the same consequence text the row's delete prompt shows. Restart's
-  confirmation is likewise anchored under its top-row button; Escape cancels these questions and returns focus to the
-  terminal. The session-confirmation setting skips the top row's Delete, Replace and Restart questions, the
+  (zoom out, size in points, zoom in), Stop, Restart ▾, Replace ▾, Clone and Delete on the right, followed by the
+  terminal and a slim details bar below it. Restart and Replace are split buttons: the main part performs the ordinary
+  action, including its existing confirmation; the caret opens a menu offering that action and Restart with… or Replace
+  with…. The icon-and-label controls keep their compact height. Text size, Stop, both parts of each split button, Clone,
+  Delete and the tunnel pill remain fully visible and keyboard reachable from a 650px main pane; only the tab strip
+  takes the remaining width and scrolls horizontally when needed. Narrower panes may clip the row, which never wraps.
+  The bottom bar is about one tab-strip row high and shows, in order, status, session name, host, age, the
+  managed-checkout branch mark when present, the session's terminal kinds when shown (below), directory, and command
+  line. The host's icon follows the session list's rules; its name is the full display name, prominent beside the
+  session name. A missing host name omits the host rather than inventing one. Directory display still abbreviates the
+  home directory to `~`. Keyboard order follows the top row, terminal, then bottom bar. The terminal loses no height in
+  the steady state. Conditional notices stay between the top row and terminal; a stale session's status appears only in
+  its stale notice, not again in the bottom bar. Restart and its menu's matching entries are greyed out when the session
+  cannot resume its conversation (see Lifecycle operations); their tooltips and accessible descriptions explain the
+  specific reason, such as an agent type without conversation reporting, a command launch that declared no agent type or
+  did not opt into Resume, or a conversation not captured yet. For an agent that reports conversations, a running
+  session's explanation says, naming the agent, when Restart normally becomes available for it (Codex, for instance,
+  once the first prompt is submitted), and an ended session's says its conversation was never captured; both invite the
+  user to send feedback if that is not what happened, since Farhelm cannot tell a report still to come from one that
+  never will. The supervisor's refusal of such a restart and the agent instructions state the same timing, without the
+  invitation. Directory and command line are muted click-to-copy buttons that take the width their values need and
+  ellipsize before the session name or host when the bar runs out of room; a click confirms locally for about 1.5
+  seconds. A hidden-characters copy warning opens upward from the bar and stays within the window. Clipboard writes use
+  the native bridge first and `navigator.clipboard` second, with JSON serialization and silent failures. Replace has its
+  own anchored danger confirmation and neutral cancellation. Delete is styled as the danger action and asks first in the
+  same anchored way, even for a session that has ended, with the same consequence text the row's delete prompt shows.
+  Restart's confirmation is likewise anchored under its top-row button; Escape cancels these questions and returns focus
+  to the terminal. The session-confirmation setting skips the top row's Delete, Replace and Restart questions, the
   interrupted-card Replace question, and tab Close, using the screen's consent and existing guards. Split menus follow
   the app's shared keyboard rules: mouse or pen movement focuses the hovered choice without scrolling, arrows and
   Home/End move between choices, and only the focused enabled choice has the highlight fill. Leaving the menu keeps that
@@ -3311,6 +3319,9 @@ delete itself: its relay holds its own request fence until the reply, while dele
 revoking its credential. Self-stop remains available. A delete also refuses a target with an agent command still in
 flight rather than waiting, so two sessions deleting each other cannot stall on each other's fences. A lost reply means
 outcome unknown; it never claims that the session survived.
+
+An approved `farhelm agent stop --session <id>` closes the session's terminal tabs as well as stopping its agent. Its
+approval card says so; this path needs no no-tabs precondition because the approval authorizes closing all tabs.
 
 NOTE: `farhelm agent prompt` is turned off in this version. The helm refuses every such request, as a deliberate refusal
 that a retry or approval does not change, before it reads the target, shows a card or contacts any supervisor. The CLI
@@ -4490,7 +4501,7 @@ manager, are detached descendants whose environment cannot be read or has been o
 Confirmed 2026-10-22: a per-user shared program, such as the user's own tmux server or an ssh ControlMaster, belongs to
 whichever started it first. Agents and tabs run without `TMUX` (above), so a plain `tmux` there reaches the user's own
 server, or starts it when none runs. One the agent started first ends with the agent's processes (Stop, Restart,
-Replace, Delete); one a terminal tab started first ends with that tab (closing it, or Delete), as
+Replace, Delete); one a terminal tab started first ends with that tab (closing it, Stop, or Delete), as
 [Session view](#session-view) describes. Either way it ends along with everything later run in it or through it,
 including windows and work the user started in it from outside Farhelm, for example over an SSH login, within the
 cleanup guarantee's limits on hosts without a usable systemd user manager. Farhelm cannot tell its own sessions' work in

@@ -1058,7 +1058,7 @@ pub(crate) fn ListView(
     // only through `begin_row_op` and left only through `end_row_op`; see
     // `admit_row_op` for why it is held apart from the questions below.
     let row_pending = use_signal(HashSet::<String>::new);
-    // Each row's open inline question (Delete or Replace), one lane per row,
+    // Each row's open inline question (Stop, Delete or Replace), one lane per row,
     // so several rows can hold a question at once and each answer is bound
     // to the opening its render drew. Opening identity is all this holds:
     // whether the row may start an operation is `row_pending`'s job.
@@ -1077,6 +1077,7 @@ pub(crate) fn ListView(
     // This opening belongs to the list, not the conditional marked toolbar:
     // accepted listings can conceal every effective mark while it is open.
     let mut bulk_delete_question = use_confirm_slot::<Vec<DeleteSnapshot>, ()>();
+    let mut bulk_stop_question = use_confirm_slot::<Vec<DeleteSnapshot>, ()>();
     // `row_pending`'s entry and exit, with the cross-pane bookkeeping attached:
     // every row operation must (a) refuse to start while the SHARED token
     // is held — the session view or a page operation is mid-write, and a
@@ -1671,6 +1672,26 @@ pub(crate) fn ListView(
                         .close(lifecycle::CANCEL_FOCUS);
                 } else if reconciled != drawn {
                     bulk_delete_question.open(reconciled, ());
+                }
+            }
+            if let Some(drawn) = bulk_stop_question.peek_key() {
+                let local = host_options(hosts.peek().hosts().unwrap_or_default())
+                    .into_iter()
+                    .find(|host| host.local)
+                    .map(|host| host.id);
+                let shown = apply_optimistic_renames(&listing.sessions, &renamed.peek());
+                let reconciled = lifecycle::reconcile(
+                    &drawn,
+                    &shown,
+                    authoritative && absence_is_evidence(listing),
+                    local,
+                );
+                if reconciled.is_empty() {
+                    bulk_stop_question.clear();
+                    crate::modal_dialog::DialogHandle::new(lifecycle::DIALOG)
+                        .close(lifecycle::CANCEL_FOCUS);
+                } else if reconciled != drawn {
+                    bulk_stop_question.open(reconciled, ());
                 }
             }
             // An open actions menu closes the moment its row leaves the
@@ -2296,12 +2317,13 @@ pub(crate) fn ListView(
     // The surface reader, for the one path that reads outside it: a stop's
     // own refetch fails on its own and has nobody to retry it (see below).
     let stop_recovery = request_listing.clone();
-    // Takes the id directly, not the whole `Session`: nothing past the
-    // insert-into-`pending` check below reads any other field, so a
-    // `Session` clone (and a second, redundant id clone off of it) would
-    // only be dead weight — see `SessionRow`'s call site for the mirrored
-    // simplification on the caller's side.
-    let mut admit_stop = move |id: String| -> Option<RowWork> {
+    // Admission receives only the target and its rendered agent/tab consent. Bulk
+    // work may wait in a host queue, so it must not consult a newer listing
+    // when the request is finally polled.
+    let mut admit_stop = move |id: String,
+                               refuse_if_tabs_open: bool,
+                               refuse_if_agent_running: bool|
+          -> Option<RowWork> {
         // Cross-guard against an open row question, not just
         // `row_pending`: the stop/delete buttons are only ABSENT from the
         // DOM once a rerender following the question's opening has landed
@@ -2356,14 +2378,22 @@ pub(crate) fn ListView(
             // badge only ever reflects what the NEXT poll observes, so a
             // stop that silently failed can never leave the UI claiming a
             // session is exited when tmux still disagrees.
-            let outcome = stop_session(&base, &id).await;
-            match outcome.err() {
-                Some(e) => {
+            let outcome =
+                stop_session(&base, &id, refuse_if_tabs_open, refuse_if_agent_running).await;
+            match outcome {
+                Err(e) => {
                     errors.write().insert(id.clone(), format!("Stop: {e}"));
+                    // Refusal can mean the displayed tab count was stale.
+                    // Refresh without opening an unrequested question.
+                    stop_recovery(Trigger::Explicit);
                     end_row_op(&id);
                 }
-                None => {
-                    errors.write().remove(&id);
+                Ok(outcome) => {
+                    if let Some(notice) = outcome.notice {
+                        errors.write().insert(id.clone(), format!("Stop: {notice}"));
+                    } else {
+                        errors.write().remove(&id);
+                    }
                     // `pending` stays set across this extra fetch — not
                     // released until it completes: `on_delete`'s confirm
                     // wording is decided from the `status` the LATEST
@@ -2433,9 +2463,47 @@ pub(crate) fn ListView(
         }))
     };
     let mut bulk_admit_stop = admit_stop.clone();
-    let on_stop = move |id: String| {
-        if let Some(work) = admit_stop(id) {
+    let mut stop_confirmed = admit_stop.clone();
+    // Capture consent from the clicked render, never a fresh listing. The
+    // question keeps the menu open so its ordinary prompt layout owns focus.
+    let on_stop = move |target: DeleteTarget| {
+        if ops.busy_now()
+            || row_pending.peek().contains(&target.id)
+            || row_questions.peek_key(&target.id).is_some()
+            || rename_editor
+                .peek()
+                .as_ref()
+                .is_some_and(|editor| editor.id == target.id)
+        {
+            return;
+        }
+        if target.tabs > 0 && !skip_session_confirmations {
+            row_questions.open(target.id, RowQuestion::Stop, ());
+        } else if let Some(work) =
+            admit_stop(target.id, target.tabs == 0, target.status.has_ended())
+        {
             spawn(work);
+        }
+    };
+    let confirm_stop = move |(id, token, refuse_if_tabs_open, refuse_if_agent_running): (
+        String,
+        ConfirmToken<RowQuestion>,
+        bool,
+        bool,
+    )| {
+        if ops.busy_now()
+            || *token.key() != RowQuestion::Stop
+            || row_questions.take(&id, &token).is_none()
+        {
+            return;
+        }
+        if let Some(work) = stop_confirmed(id, refuse_if_tabs_open, refuse_if_agent_running) {
+            spawn(work);
+        }
+    };
+    let cancel_stop = move |(id, token): (String, ConfirmToken<RowQuestion>)| {
+        if *token.key() == RowQuestion::Stop {
+            row_questions.cancel_for(&id, &token);
         }
     };
 
@@ -2592,7 +2660,9 @@ pub(crate) fn ListView(
     let mut do_delete_on_confirm = do_delete.clone();
     let on_delete = move |target: DeleteTarget| {
         if row_pending.read().contains(&target.id)
-            || row_questions.peek_key(&target.id) == Some(RowQuestion::Replace)
+            || row_questions
+                .peek_key(&target.id)
+                .is_some_and(|question| question != RowQuestion::Delete)
             || rename_editor
                 .read()
                 .as_ref()
@@ -3737,8 +3807,10 @@ pub(crate) fn ListView(
             }
             let work = lifecycle::admit_batch(
                 targets,
-                |id, guard| match action {
-                    LifecycleAction::Stop => bulk_admit_stop(id),
+                |id, guard, refuse_if_tabs_open, refuse_if_agent_running| match action {
+                    LifecycleAction::Stop => {
+                        bulk_admit_stop(id, refuse_if_tabs_open, refuse_if_agent_running)
+                    }
                     LifecycleAction::Delete => bulk_admit_delete(id, guard),
                 },
                 |id| {
@@ -3774,7 +3846,7 @@ pub(crate) fn ListView(
         if targets.is_empty() {
             return;
         }
-        if bulk_delete_question.peek_key().is_some() {
+        if bulk_delete_question.peek_key().is_some() || bulk_stop_question.peek_key().is_some() {
             // A second click queued before modal isolation cannot replace the
             // opening or start another lifecycle action behind the question.
             return;
@@ -3783,10 +3855,15 @@ pub(crate) fn ListView(
             bulk_run.call((action, targets));
             return;
         }
-        if action == LifecycleAction::Delete
-            && lifecycle::needs_confirmation(&targets, skip_session_confirmations)
-        {
-            bulk_delete_question.open(targets, ());
+        if action.needs_confirmation(&targets, skip_session_confirmations) {
+            match action {
+                LifecycleAction::Delete => {
+                    bulk_delete_question.open(targets, ());
+                }
+                LifecycleAction::Stop => {
+                    bulk_stop_question.open(targets, ());
+                }
+            }
         } else {
             bulk_run.call((action, targets));
         }
@@ -3808,6 +3885,25 @@ pub(crate) fn ListView(
     });
     let bulk_cancel = use_callback(move |shown: ConfirmToken<Vec<DeleteSnapshot>>| {
         if bulk_delete_question.take(&shown).is_some() {
+            crate::modal_dialog::DialogHandle::new(lifecycle::DIALOG)
+                .close(lifecycle::CANCEL_FOCUS);
+        }
+    });
+    // Stop shares Delete's target retirement and focus handoff, while keeping
+    // separate openings so a queued answer cannot change lifecycle verbs.
+    let bulk_confirm_stop = use_callback(move |shown: ConfirmToken<Vec<DeleteSnapshot>>| {
+        if ops.busy_now()
+            || !row_pending.peek().is_empty()
+            || hosts_panel_open()
+            || bulk_stop_question.take(&shown).is_none()
+        {
+            return;
+        }
+        bulk_run.call((LifecycleAction::Stop, shown.key().clone()));
+        crate::modal_dialog::DialogHandle::new(lifecycle::DIALOG).close(lifecycle::ACCEPTED_FOCUS);
+    });
+    let bulk_cancel_stop = use_callback(move |shown: ConfirmToken<Vec<DeleteSnapshot>>| {
+        if bulk_stop_question.take(&shown).is_some() {
             crate::modal_dialog::DialogHandle::new(lifecycle::DIALOG)
                 .close(lifecycle::CANCEL_FOCUS);
         }
@@ -5286,6 +5382,8 @@ pub(crate) fn ListView(
                                 on_confirm_replace: confirm_replace,
                                 on_cancel_replace: cancel_replace,
                                 on_stop,
+                                on_confirm_stop: confirm_stop.clone(),
+                                on_cancel_stop: cancel_stop,
                                 on_delete,
                                 on_confirm_delete: confirm_delete,
                                 on_cancel_delete: cancel_delete,
@@ -5303,7 +5401,14 @@ pub(crate) fn ListView(
         }
         if let Some(shown) = bulk_delete_question.current() {
             lifecycle::DeleteDialog {
+                action: LifecycleAction::Delete,
                 shown, disabled: nav_locked, on_confirm: bulk_confirm, on_cancel: bulk_cancel,
+            }
+        }
+        if let Some(shown) = bulk_stop_question.current() {
+            lifecycle::DeleteDialog {
+                action: LifecycleAction::Stop,
+                shown, disabled: nav_locked, on_confirm: bulk_confirm_stop, on_cancel: bulk_cancel_stop,
             }
         }
         if let Some(editor) = rename_editor() {

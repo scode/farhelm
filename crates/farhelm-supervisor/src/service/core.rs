@@ -5599,7 +5599,8 @@ pub(crate) fn unknown_pane_owner_refusal(pane: &str, owner: &str, expected: &str
 /// is chiefly an ambiguous create: tmux reported an error, but the session (and
 /// the agent in it) may exist anyway, and nothing recorded a pane to probe.
 /// Deleting that row unasked could kill the agent and its unsaved work, so
-/// delete treats it as alive. Restart used to demand consent for it too; it
+/// delete treats it as alive, as does a Stop whose display said the agent
+/// had ended. Restart used to demand consent for it too; it
 /// no longer does, because the row reads unknown and an unknown-status agent
 /// restarts without asking (SPEC.md, Lifecycle operations).
 ///
@@ -5607,7 +5608,7 @@ pub(crate) fn unknown_pane_owner_refusal(pane: &str, owner: &str, expected: &str
 /// lose a terminal is a reboot or a tmux server that died under a restarted
 /// supervisor: reload publishes those rows as `Interrupted` or `Exited` with no
 /// terminal. Surviving tabs are independent; Delete must still discover them.
-fn terminal_less_launch_may_be_live(entry: &SessionEntry) -> bool {
+pub(crate) fn terminal_less_launch_may_be_live(entry: &SessionEntry) -> bool {
     entry.terminal.is_none()
         && matches!(
             *entry.run.outcome.lock().expect("outcome mutex poisoned"),
@@ -14945,6 +14946,21 @@ impl Supervisor {
         Ok(tabs)
     }
 
+    /// Recheck no-tabs consent from authoritative markers, including a
+    /// sole tmux window after the agent's window vanished. Unreadable host
+    /// tabs count as open; uncertainty cannot authorize their cleanup.
+    pub(crate) async fn has_open_tabs_for_stop(
+        &self,
+        entry: &SessionEntry,
+    ) -> anyhow::Result<bool> {
+        Ok(self
+            .tmux_tabs_for_stop(entry)
+            .await?
+            .into_iter()
+            .any(|tab| !tab.dead)
+            || !host_tabs::listed_host_tabs(&entry.session.host_tabs, false).is_empty())
+    }
+
     /// Rediscover tabs after adding a replacement agent window.
     ///
     /// This read is deliberately narrower than the ordinary tab resolver:
@@ -15018,6 +15034,70 @@ impl Supervisor {
         };
         tabs.extend(host_tabs::listed_host_tabs(&entry.session.host_tabs, true));
         Ok(tabs)
+    }
+
+    /// Stop must find old tmux tabs even without an agent terminal or with
+    /// only one surviving window. Once the existing tmux admission says
+    /// old tabs may remain, read markers unconditionally rather than relying
+    /// on the presentation query's marker-read optimization. Host-only
+    /// sessions still require no tmux executable or server.
+    async fn tmux_tabs_for_stop(&self, entry: &SessionEntry) -> anyhow::Result<Vec<DiscoveredTab>> {
+        if !super::terminals::may_have_tmux_terminals(
+            &self.tmux,
+            &entry.info.id,
+            entry.terminal.as_ref(),
+        ) {
+            return Ok(Vec::new());
+        }
+        let (tmux_name, agent_pane) = match entry.terminal.as_ref() {
+            Some(terminal) => tmux_tab_home(&entry.info.id, terminal),
+            None => (session_tmux_name(&entry.info.id).into(), None),
+        };
+        let states = self.tmux.pane_states_with_markers().await?;
+        Ok(tabs_from_pane_states(
+            states.values(),
+            &tmux_name,
+            agent_pane,
+        ))
+    }
+
+    /// Finish Stop's tab cleanup without yielding its lifecycle claim.
+    /// Discovery and individual closes can fail independently: a failed
+    /// tmux read must not leave known host tabs running, and an unreadable
+    /// host must not prevent closing its siblings. Dead tabs are included
+    /// because their scopes and marked descendants may still need reaping.
+    pub(crate) async fn close_tabs_for_stop(
+        self: &Arc<Self>,
+        lifecycle: &KeyedGuard,
+        entry: &SessionEntry,
+    ) -> Option<String> {
+        let mut failures = Vec::new();
+        let mut tabs: Vec<TabInfo> = match self.tmux_tabs_for_stop(entry).await {
+            Ok(tabs) => tabs.into_iter().map(DiscoveredTab::tab_info).collect(),
+            Err(error) => {
+                failures.push(format!("could not list terminal tabs: {error:#}"));
+                Vec::new()
+            }
+        };
+        tabs.extend(host_tabs::listed_host_tabs(&entry.session.host_tabs, true));
+        for tab in tabs {
+            if let Err(error) = self
+                .close_tab_under_claim(lifecycle, &entry.info.id, &tab.id, false)
+                .await
+            {
+                failures.push(format!(
+                    "terminal tab {}: {}",
+                    truncate_for_error(&tab.id),
+                    error.message
+                ));
+            }
+        }
+        (!failures.is_empty()).then(|| {
+            format!(
+                "The agent stopped, but some terminal tabs could not be closed: {}",
+                failures.join("; ")
+            )
+        })
     }
 
     /// Find a pane through which the dead agent window can be removed after
@@ -15974,6 +16054,36 @@ impl Supervisor {
         tab_id: &str,
         only_if_dead: bool,
     ) -> Result<(), RequestError> {
+        // Explicit and automatic closes own their mutation independently of
+        // the connection/ticker waiting for it. Stop already has such an
+        // owner, and calls the borrowing half below without taking a second
+        // lifecycle claim or releasing its claim between tabs.
+        let sup = Arc::clone(self);
+        let session_id = session_id.to_string();
+        let tab_id = tab_id.to_string();
+        let task = tokio::spawn(async move {
+            sup.close_tab_under_claim(&lifecycle, &session_id, &tab_id, only_if_dead)
+                .await
+        });
+        match task.await {
+            Ok(result) => result,
+            Err(join) => Err(RequestError::new(
+                ErrorKind::Internal,
+                format!("the terminal-tab close task failed: {join}"),
+            )),
+        }
+    }
+
+    /// Close one tab without releasing the caller's session lifecycle claim.
+    /// The caller must keep this future on a supervisor-owned mutation, so
+    /// disconnecting a requester cannot cancel a half-finished process sweep.
+    pub(crate) async fn close_tab_under_claim(
+        self: &Arc<Self>,
+        lifecycle: &KeyedGuard,
+        session_id: &str,
+        tab_id: &str,
+        only_if_dead: bool,
+    ) -> Result<(), RequestError> {
         let entry = self.sessions.lock().await.get(session_id).cloned();
         let Some(entry) = entry else {
             return Err(RequestError::new(
@@ -15985,8 +16095,36 @@ impl Supervisor {
         // what this path (the user's close, and the ticker's reap through
         // it) must still be able to find and destroy, while attach and
         // resize already treat it as gone.
-        let terminal =
-            resolve_terminal_for_close(self, &entry, &TerminalId::Tab(tab_id.to_string())).await?;
+        let terminal = if entry.terminal.is_none()
+            && find_host_tab(&entry.session.host_tabs, tab_id).is_none()
+        {
+            // Losing the agent's terminal does not erase surviving tmux
+            // tabs. The interactive resolver requires an agent terminal;
+            // a close instead rediscovers the marked tab under this claim.
+            let tab = self
+                .tmux_tabs_for_stop(&entry)
+                .await
+                .map_err(|error| {
+                    RequestError::new(
+                        ErrorKind::Internal,
+                        format!("could not rediscover terminal tab: {error:#}"),
+                    )
+                })?
+                .into_iter()
+                .find(|tab| tab.id == tab_id)
+                .ok_or_else(|| {
+                    RequestError::new(
+                        ErrorKind::NotFound,
+                        format!("no such terminal tab: {}", truncate_for_error(tab_id)),
+                    )
+                })?;
+            Terminal::Tmux(TmuxTerminal {
+                tmux_name: session_tmux_name(session_id),
+                pane: tab.pane,
+            })
+        } else {
+            resolve_terminal_for_close(self, &entry, &TerminalId::Tab(tab_id.to_string())).await?
+        };
         // Closing a tmux tab reaps its shell and kills its window, below; a
         // tab in a terminal host has no window, and is closed by ending its
         // host (`host_tabs`).
@@ -15994,7 +16132,7 @@ impl Supervisor {
             Terminal::Tmux(terminal) => terminal,
             Terminal::Host(host) => {
                 return self
-                    .close_host_tab_claimed(lifecycle, &entry, tab_id, host, only_if_dead)
+                    .close_host_tab_under_claim(lifecycle, &entry, tab_id, host, only_if_dead)
                     .await;
             }
         };
@@ -16006,36 +16144,19 @@ impl Supervisor {
             .as_ref()
             .and_then(|agent| tmux_tab_home(session_id, agent).1.map(str::to_owned));
 
-        // Supervisor-owned, like the open: a client disconnecting between
-        // the first sweep and the window kill must not leave a half-reaped
-        // tab with no owner to finish it.
-        let sup = Arc::clone(self);
-        let session_id = session_id.to_string();
-        let tab_id = tab_id.to_string();
-        let task = tokio::spawn(async move {
-            let _lifecycle = lifecycle;
-            let closed = sup
-                .close_tab_window(
-                    &session_id,
-                    &terminal,
-                    &tab_id,
-                    recorded_agent_pane.as_deref(),
-                    only_if_dead,
-                )
-                .await;
-            // On the owned task for the same reason as `open_tab`'s hint.
-            if closed.is_ok() {
-                sup.hint_sessions_changed();
-            }
-            closed
-        });
-        match task.await {
-            Ok(result) => result,
-            Err(join) => Err(RequestError::new(
-                ErrorKind::Internal,
-                format!("the terminal-tab close task failed: {join}"),
-            )),
+        let closed = self
+            .close_tab_window(
+                session_id,
+                &terminal,
+                tab_id,
+                recorded_agent_pane.as_deref(),
+                only_if_dead,
+            )
+            .await;
+        if closed.is_ok() {
+            self.hint_sessions_changed();
         }
+        closed
     }
 
     /// [`Self::close_tab`]'s side-effecting half, split out so the whole
@@ -23810,6 +23931,74 @@ pub(crate) mod tests {
         assert_eq!(after_pid, tab_pid, "restart must not replace the tab shell");
     }
 
+    /// Stop's tab phase still sees and closes a lone tmux tab after losing
+    /// the agent terminal. Reusing the interactive resolver here would
+    /// refuse the close solely because the unrelated agent handle is gone.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn stop_closes_a_lone_tmux_tab_without_an_agent_terminal() {
+        let state = StateDir::new();
+        let sup = tmux_supervisor(state.path(), tab_capable_dummy_exe(&state))
+            .await
+            .expect("supervisor");
+        let created = sup
+            .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
+            .await
+            .expect("session");
+        let tab = sup.open_tab(&created.id).await.expect("terminal tab");
+        let old_entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(&created.id)
+            .cloned()
+            .expect("entry");
+        let agent = agent_tmux(&old_entry);
+        let tmux_name = agent.tmux_name.clone();
+        sup.tmux
+            .kill_pane_for_test(&agent.pane)
+            .await
+            .expect("remove agent pane");
+        assert!(
+            sup.tmux
+                .has_session(&tmux_name)
+                .await
+                .expect("tmux liveness"),
+            "premise: the tab keeps its tmux session alive"
+        );
+        sup.forget_agent_terminal_for_test(&created.id)
+            .await
+            .expect("lose the agent terminal");
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(&created.id)
+            .cloned()
+            .expect("entry without agent");
+        assert!(entry.terminal.is_none());
+        assert!(sup.has_open_tabs_for_stop(&entry).await.expect("tab guard"));
+        let lifecycle = sup.lifecycle_locks.claim(&created.id).await;
+        assert_eq!(sup.close_tabs_for_stop(&lifecycle, &entry).await, None);
+        assert!(
+            !sup.tmux
+                .has_session(&tmux_name)
+                .await
+                .expect("tmux liveness"),
+            "closing the only tab ends its tmux session"
+        );
+        assert!(
+            !sup.has_open_tabs_for_stop(&entry)
+                .await
+                .expect("empty tab guard")
+        );
+        assert!(
+            sup.close_tab_under_claim(&lifecycle, &created.id, &tab.id, false)
+                .await
+                .is_err(),
+            "the tab really was removed"
+        );
+    }
+
     /// A same-account pane can remove the agent marker and forge a tab marker
     /// on the live agent window. Listing and explicit close must still use
     /// the durable pane identity, while an unrelated genuine tab keeps its
@@ -29379,6 +29568,8 @@ exit 0
             ControlMsg::StopSession {
                 req_id: 4,
                 session_id: "s1".to_string(),
+                refuse_if_tabs_open: false,
+                refuse_if_agent_running: false,
             },
             ConnectionCtx {
                 panics: &mpsc::channel(1).0,
@@ -29501,6 +29692,8 @@ exit 0
             ControlMsg::StopSession {
                 req_id: 4,
                 session_id: "s1".into(),
+                refuse_if_tabs_open: false,
+                refuse_if_agent_running: false,
             },
             ConnectionCtx {
                 panics: &mpsc::channel(1).0,
@@ -39615,6 +39808,8 @@ exit 0
             ControlMsg::StopSession {
                 req_id: 42,
                 session_id: session_id.to_string(),
+                refuse_if_tabs_open: false,
+                refuse_if_agent_running: false,
             },
             ConnectionCtx {
                 panics: &mpsc::channel(1).0,
@@ -39631,7 +39826,13 @@ exit 0
             .expect("Stop reply channel");
         let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
         assert!(
-            matches!(decoded, ControlMsg::SessionStopped { req_id: 42 }),
+            matches!(
+                decoded,
+                ControlMsg::SessionStopped {
+                    req_id: 42,
+                    notice: None
+                }
+            ),
             "{decoded:?}"
         );
         tokio::time::timeout(Duration::from_secs(5), async {

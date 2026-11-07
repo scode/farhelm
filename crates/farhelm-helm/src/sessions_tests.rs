@@ -1010,12 +1010,81 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
     peer.await.unwrap();
 }
 
-/// `POST /api/sessions/{id}/stop` end to end: a scripted peer replies
-/// `SessionStopped`, and the route must answer 200 with an empty JSON
-/// object — the uniform success body `stop`/`delete` share so a caller
-/// does not need to special-case "no content".
+/// Bodyless and empty-object HTTP Stop requests retain agent-stop authority
+/// but cannot authorize the new tab closure. Pin both defaults at the wire
+/// boundary, including an empty JSON-content-type body; a completed Stop
+/// still returns an empty object when there is no cleanup notice.
 #[farhelm_testtrace::test]
 async fn stop_session_happy_path_returns_200_with_empty_object_body() {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use tower::ServiceExt;
+
+    for request_body in ["", "{}"] {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::StopSession {
+                req_id,
+                session_id,
+                refuse_if_tabs_open,
+                refuse_if_agent_running,
+            } = request
+            else {
+                panic!("expected StopSession, got {request:?}");
+            };
+            assert_eq!(session_id, "sess-1");
+            assert!(
+                refuse_if_tabs_open,
+                "omitted tab consent must not authorize closing tabs"
+            );
+            assert!(
+                !refuse_if_agent_running,
+                "older Stop callers authorized stopping the agent"
+            );
+            writer
+                .write_control(&ControlMsg::SessionStopped {
+                    req_id,
+                    notice: None,
+                })
+                .await
+                .unwrap();
+        });
+
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
+
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri(harness.local_session_uri("/api/sessions/sess-1/stop"))
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(request_body))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value, serde_json::json!({}));
+
+        peer.await.unwrap();
+    }
+}
+
+/// The HTTP edge must preserve both consent dimensions and partial cleanup
+/// notices. Explicit tab consent permits closing tabs, while the separate
+/// ended-agent guard must still reach the supervisor unchanged.
+#[farhelm_testtrace::test]
+async fn stop_session_forwards_tab_guard_and_cleanup_notice() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use tower::ServiceExt;
@@ -1029,34 +1098,47 @@ async fn stop_session_happy_path_returns_200_with_empty_object_body() {
             .await
             .unwrap();
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::StopSession { req_id, session_id } = request else {
+        let ControlMsg::StopSession {
+            req_id,
+            session_id,
+            refuse_if_tabs_open,
+            refuse_if_agent_running,
+        } = request
+        else {
             panic!("expected StopSession, got {request:?}");
         };
         assert_eq!(session_id, "sess-1");
+        assert!(!refuse_if_tabs_open, "explicit tab consent is forwarded");
+        assert!(refuse_if_agent_running, "ended-agent consent is forwarded");
         writer
-            .write_control(&ControlMsg::SessionStopped { req_id })
+            .write_control(&ControlMsg::SessionStopped {
+                req_id,
+                notice: Some("terminal tab t1 could not be closed".into()),
+            })
             .await
             .unwrap();
     });
-
     let harness = rest_harness::spliced_helm(client_side).await;
     let app = harness.router();
-
     let request = axum::http::Request::builder()
         .method("POST")
         .uri(harness.local_session_uri("/api/sessions/sess-1/stop"))
         .header("host", "127.0.0.1:7433")
-        .body(axum::body::Body::empty())
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(
+            r#"{"refuse_if_tabs_open":false,"refuse_if_agent_running":true}"#,
+        ))
         .unwrap();
-
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), axum::http::StatusCode::OK);
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(value, serde_json::json!({}));
-
+    let outcome: farhelm_proto::SessionStopOutcome = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        outcome.notice.as_deref(),
+        Some("terminal tab t1 could not be closed")
+    );
     peer.await.unwrap();
 }
 
@@ -6744,12 +6826,18 @@ async fn a_session_operation_routes_to_the_host_that_owns_it() {
             .await
             .unwrap();
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::StopSession { req_id, session_id } = request else {
+        let ControlMsg::StopSession {
+            req_id, session_id, ..
+        } = request
+        else {
             panic!("expected StopSession, got {request:?}");
         };
         assert_eq!(session_id, "beta-1");
         writer
-            .write_control(&ControlMsg::SessionStopped { req_id })
+            .write_control(&ControlMsg::SessionStopped {
+                req_id,
+                notice: None,
+            })
             .await
             .unwrap();
     });
@@ -7432,10 +7520,15 @@ async fn a_session_created_here_is_routable_before_any_refresh() {
                     })
                     .await
                     .unwrap(),
-                Ok(ControlMsg::StopSession { req_id, session_id }) => {
+                Ok(ControlMsg::StopSession {
+                    req_id, session_id, ..
+                }) => {
                     assert_eq!(session_id, "brand-new");
                     writer
-                        .write_control(&ControlMsg::SessionStopped { req_id })
+                        .write_control(&ControlMsg::SessionStopped {
+                            req_id,
+                            notice: None,
+                        })
                         .await
                         .unwrap();
                 }
@@ -7526,12 +7619,18 @@ async fn an_identity_less_hosts_sessions_serve_while_connected_and_vanish_after(
             .await
             .unwrap();
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::StopSession { req_id, session_id } = request else {
+        let ControlMsg::StopSession {
+            req_id, session_id, ..
+        } = request
+        else {
             panic!("expected StopSession, got {request:?}");
         };
         assert_eq!(session_id, "unbound-1");
         writer
-            .write_control(&ControlMsg::SessionStopped { req_id })
+            .write_control(&ControlMsg::SessionStopped {
+                req_id,
+                notice: None,
+            })
             .await
             .unwrap();
     });
@@ -8201,10 +8300,15 @@ async fn a_session_created_on_an_identity_less_host_is_routable_at_once() {
                     })
                     .await
                     .unwrap(),
-                Ok(ControlMsg::StopSession { req_id, session_id }) => {
+                Ok(ControlMsg::StopSession {
+                    req_id, session_id, ..
+                }) => {
                     assert_eq!(session_id, "unbound-new");
                     writer
-                        .write_control(&ControlMsg::SessionStopped { req_id })
+                        .write_control(&ControlMsg::SessionStopped {
+                            req_id,
+                            notice: None,
+                        })
                         .await
                         .unwrap();
                 }
@@ -8292,10 +8396,15 @@ async fn a_session_created_before_an_identity_less_hosts_first_refresh_is_routab
                     })
                     .await
                     .unwrap(),
-                Ok(ControlMsg::StopSession { req_id, session_id }) => {
+                Ok(ControlMsg::StopSession {
+                    req_id, session_id, ..
+                }) => {
                     assert_eq!(session_id, "early-new");
                     writer
-                        .write_control(&ControlMsg::SessionStopped { req_id })
+                        .write_control(&ControlMsg::SessionStopped {
+                            req_id,
+                            notice: None,
+                        })
                         .await
                         .unwrap();
                 }
@@ -11442,11 +11551,18 @@ async fn removed_entry_reference_never_dispatches_to_its_replacement() {
             permit = permit_live_request => permit.expect("the stale request must finish first"),
         }
         let request = peer.recv().await;
-        let ControlMsg::StopSession { req_id, session_id } = request else {
+        let ControlMsg::StopSession {
+            req_id, session_id, ..
+        } = request
+        else {
             panic!("expected StopSession, got {request:?}");
         };
         assert_eq!(session_id, "same-suffix");
-        peer.send(&ControlMsg::SessionStopped { req_id }).await;
+        peer.send(&ControlMsg::SessionStopped {
+            req_id,
+            notice: None,
+        })
+        .await;
     });
     harness.fleet.edit(new, |script| {
         script.identity = Some("new-install".to_string());
