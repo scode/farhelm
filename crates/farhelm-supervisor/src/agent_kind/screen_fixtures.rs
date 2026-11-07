@@ -2,10 +2,15 @@
 //! manual procedure in `.agents/real-agent-tui.md`, and the
 //! tests that hold them to their contract.
 //!
-//! Each fixture is one visible tmux grid (`capture-pane -p`, the command the
-//! sampler runs) that the capture tool saw while it had DRIVEN the agent into
-//! a known state, stored as `<harness>/<version>/<expected>-<scenario>.txt`
-//! with the pane title beside it in a `.title` file. The expected state in the
+//! Each fixture is one visible screen as text, in the form the sampler reads
+//! it, that the capture tool saw while it had DRIVEN the agent into a known
+//! state, stored as `<harness>/<version>/<expected>-<scenario>.txt` with the
+//! terminal's title beside it in a `.title` file. The tool captures in a real
+//! terminal host with the environment a supervisor gives an agent (the
+//! emulator's `screen_text`); versions captured before November 2026 are a
+//! tmux pane's `capture-pane -p`, the old terminals' form, and stay because
+//! old terminals, and agents started before their new terminal's
+//! environment changed, still draw those screens. The expected state in the
 //! name is the tool's ground truth, never a reader's verdict, which is what
 //! lets these screens act as an oracle for the per-harness screen readers:
 //! after a vendor upgrade, re-running the tool and then these tests shows which
@@ -180,6 +185,37 @@ pub(super) fn contains_email(text: &str) -> bool {
     })
 }
 
+/// Whether `text` holds a URL whose host is this machine or a private
+/// network: a loopback or unspecified address, `localhost`, an RFC 1918
+/// address, or the capture tool's `host` placeholder for the host name.
+///
+/// An agent shows such a URL when the capture host's configuration routes it
+/// through a local proxy (Codex warns that its base URL is overridden), which
+/// describes the capture machine's setup. Hand-rolled for the same reason as
+/// [`contains_email`].
+pub(super) fn contains_local_url(text: &str) -> bool {
+    text.match_indices("://").any(|(at, _)| {
+        let rest = &text[at + 3..];
+        let host = match rest.strip_prefix('[') {
+            Some(bracketed) => bracketed.split(']').next().unwrap_or(""),
+            None => rest
+                .split(|c: char| c == ':' || c == '/' || c.is_whitespace() || ",;)".contains(c))
+                .next()
+                .unwrap_or("")
+                .trim_end_matches('.'),
+        };
+        let host = host.to_ascii_lowercase();
+        let octets: Option<Vec<u8>> = host.split('.').map(|part| part.parse().ok()).collect();
+        let private_ip = match octets.as_deref() {
+            Some([127, ..] | [10, ..] | [0, 0, 0, 0]) => true,
+            Some([192, 168, _, _]) => true,
+            Some([172, second, _, _]) => (16..=31).contains(second),
+            _ => false,
+        };
+        private_ip || ["localhost", "host", "::1"].contains(&host.as_str())
+    })
+}
+
 /// The placeholder the capture tool writes for every address it scrubs.
 const SCRUBBED_EMAIL: &str = "user@example.com";
 
@@ -226,7 +262,8 @@ fn screen_fixtures_are_well_formed_and_cover_every_live_state() {
     }
 }
 
-/// No committed screen carries an email address or an absolute home path.
+/// No committed screen carries an email address, an absolute home path, or
+/// a URL into the capture machine or its private network.
 ///
 /// Why it matters: the repository is public, and agent screens routinely
 /// print account emails, home directories, and custom status lines. The
@@ -242,6 +279,11 @@ fn screen_fixtures_carry_no_personal_data() {
                 "fixture {} contains an email address",
                 fixture.path.display()
             );
+            assert!(
+                !contains_local_url(text),
+                "fixture {} contains a URL into the capture machine or its network",
+                fixture.path.display()
+            );
             for prefix in ["/home/", "/Users/", "/root/"] {
                 assert!(
                     !text.contains(prefix),
@@ -250,6 +292,36 @@ fn screen_fixtures_carry_no_personal_data() {
                 );
             }
         }
+    }
+}
+
+/// The local-URL detector flags URLs into this machine or a private network
+/// and leaves public URLs alone.
+///
+/// Why it matters: a detector that never fires would make the personal-data
+/// test pass vacuously, and one that fired on every URL would refuse
+/// ordinary agent screens (links to documentation).
+#[test]
+fn screen_fixtures_local_url_detector_matches_local_hosts_only() {
+    for local in [
+        "base URL is overridden to http://127.0.0.1:8080/backend-api/codex.",
+        "http://localhost:3000",
+        "ws://[::1]:9/x",
+        "https://192.168.1.4/",
+        "http://10.0.0.2:80",
+        "http://172.20.1.1/",
+        "http://host:8080/",
+    ] {
+        assert!(contains_local_url(local), "{local}");
+    }
+    for public in [
+        "https://docs.example.com/x",
+        "http://172.32.0.1/",
+        "https://hostname.example/",
+        "http://proxy.invalid/backend-api/codex",
+        "no url at all",
+    ] {
+        assert!(!contains_local_url(public), "{public}");
     }
 }
 

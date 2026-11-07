@@ -4229,9 +4229,12 @@ refusal. No global geometry cache or new asset file is introduced.
   anchors falls back to the generic reader for that sample, and after a few such samples in a row (so a half-drawn
   startup frame does not count) the supervisor logs that once per run, without screen content, as likely rule drift. The
   rules are tested against real captures under `crates/farhelm-supervisor/tests/fixtures/screens/`, which
-  `scripts/capture-agent-screens.py` re-captures from the installed agents (`docs/agent-screen-fixtures.md`). The
-  earlier Codex-only masking of its composer out of change comparison is gone: whenever it applied, the Codex reader now
-  recognizes the composer and answers from content, so the comparison no longer decides anything there.
+  `scripts/capture-agent-screens.py` re-captures from the installed agents, each run in a real terminal host with the
+  environment a supervisor gives an agent and the supervisor's emulator answering its queries (the hidden
+  `farhelm internal agent-screen`, `docs/agent-screen-fixtures.md`); versions captured before November 2026 come from a
+  tmux pane, and stay because old terminals still draw them. The earlier Codex-only masking of its composer out of
+  change comparison is gone: whenever it applied, the Codex reader now recognizes the composer and answers from content,
+  so the comparison no longer decides anything there.
 
   Muse also has a dedicated reader, based on manually captured 1.4.14 screens. A ruled `❯` composer followed by its
   model/workspace footer anchors idle; an adjacent `Working (… · esc to interrupt)` or `Thinking (… · esc to interrupt)`

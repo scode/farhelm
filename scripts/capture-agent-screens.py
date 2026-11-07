@@ -3,14 +3,18 @@
 
 The supervisor decides whether a Claude or Codex session is working, waiting on the user, or idle by recognizing what
 the agent draws, so its rules go stale whenever a vendor changes its TUI. This tool is the single thing to run after
-upgrading either agent on a development host: it launches the INSTALLED `claude` and `codex` in a private tmux server
-sized like a production pane, drives each through the states the readers must tell apart, and writes every screen it
-saw under `crates/farhelm-supervisor/tests/fixtures/screens/<harness>/<version>/`, then runs the fixture tests over
-them. New fixtures that the tests reject are exactly the screens whose rules need a shipped update.
+upgrading either agent on a development host: it launches the INSTALLED `claude` and `codex` in a real Farhelm terminal
+host sized like a production terminal, as a supervisor starts an agent in a new terminal (the supervisor's emulator
+answering the agent's startup queries, the environment a supervisor gives an agent), drives each through the states
+the readers must tell apart, and writes every screen it saw under
+`crates/farhelm-supervisor/tests/fixtures/screens/<harness>/<version>/`, then runs the fixture tests over them. New
+fixtures that the tests reject are exactly the screens whose rules need a shipped update.
 
-Each fixture is the raw `capture-pane -p` visible grid (the command the supervisor's sampler runs) in
-`<expected>-<scenario>.txt`, with the pane title beside it in `<expected>-<scenario>.title`. The expected state is the
-one this tool drove the agent into, never what a reader concluded, which is what makes the fixtures a test oracle.
+Each fixture is the visible screen as text, as the emulator gives it to the supervisor's status sampler
+(`Emulator::screen_text`), in `<expected>-<scenario>.txt`, with the terminal's title beside it in
+`<expected>-<scenario>.title`. The expected state is the one this tool drove the agent into, never what a reader
+concluded, which is what makes the fixtures a test oracle. Versions captured before 2026-11 were captured in a private
+tmux pane with `capture-pane -p` instead, which is what old terminals show; they stay, since old sessions remain.
 
 What a run costs and touches:
 
@@ -18,8 +22,8 @@ What a run costs and touches:
 - Claude runs in its default permission mode and Codex in a read-only sandbox asking on request, so real approval
   prompts appear. Both answer their folder-trust dialogs for a fresh scratch directory, which the vendors record in
   their own configuration (the same accepted side effect as the `#[ignore]`d real-agent tests).
-- Nothing of Farhelm's: the tmux server is private, on a random socket directly under `/tmp`, and uses the pinned
-  `.ci-tmux/tmux`, never a live supervisor's.
+- Nothing of a live Farhelm's: the terminal host is started from the built `farhelm` into a random directory directly
+  under `/tmp` (`scripts/agent_screen_host.py`), never a live supervisor's.
 
 Every scenario is best effort under its own deadline. A state the agent cannot be driven into on this host (Codex's
 question tool reports itself unavailable in its default mode) is reported as not captured instead of aborting the run.
@@ -45,31 +49,17 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from agent_screen_host import HostRun, default_farhelm
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # Fixed rather than configurable: the fixture tests read exactly this tree, and a capture written anywhere else would
 # never be validated.
 FIXTURES_ROOT = REPO_ROOT / "crates/farhelm-supervisor/tests/fixtures/screens"
-DEFAULT_TMUX = REPO_ROOT / ".ci-tmux/tmux"
 
-# The production supervisor's pane geometry is chosen by its clients; this is the size observed on the development
-# fleet. One size is enough because the readers anchor on short prefixes that survive a narrower pane's truncation.
-PANE_COLUMNS = 133
-PANE_ROWS = 42
-
-# Mirrors the supervisor's generated tmux config (`TmuxDriver::config_body` plus the `focus-events` it sets on start),
-# so vendors render exactly as they do under Farhelm. `focus-events on` matters beyond fidelity: Claude prints a
-# one-line nag on its idle screen when it reads the option off.
-TMUX_CONFIG = """\
-set -s exit-empty off
-set -s escape-time 0
-set -s default-terminal 'xterm-256color'
-set -as terminal-features ',xterm-256color:RGB'
-set -s focus-events on
-set -g status off
-set -g prefix None
-set -g history-limit 12000
-setw -g remain-on-exit on
-"""
+# The production terminal's geometry is chosen by its clients; this is the size observed on the development fleet.
+# One size is enough because the readers anchor on short prefixes that survive a narrower terminal's truncation.
+TERMINAL_COLUMNS = 133
+TERMINAL_ROWS = 42
 
 POLL_SECONDS = 0.5
 EXPECTED_STATES = ("working", "waiting", "idle", "unknown")
@@ -101,6 +91,16 @@ class Scrubber:
     forbidden: list[str] = field(default_factory=list)
 
     EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+    # A URL that points into this machine or its private network: an agent shows one when its configuration sends it
+    # through a local proxy (Codex warns that its base URL is overridden). It says how the capture host is set up, so
+    # its scheme, host and port become a neutral placeholder. `host` is the scrubbed host name, so a URL to this
+    # machine by name is caught after the word replacements too.
+    LOCAL_URL = re.compile(
+        r"\b[a-z][a-z0-9+.-]*://(?:localhost|host|\[::1\]|0\.0\.0\.0|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}"
+        r"|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})(?::\d+)?(?=[/\s.,;)]|$)",
+        re.IGNORECASE,
+    )
+    LOCAL_URL_PLACEHOLDER = "http://proxy.invalid"
     # The fixture tests exempt exactly this address too, so a scrubbed screen passes both checks.
     EMAIL_PLACEHOLDER = "user@example.com"
 
@@ -145,7 +145,7 @@ class Scrubber:
         text = self.EMAIL.sub(self.EMAIL_PLACEHOLDER, text)
         for value, placeholder in self.words:
             text = re.sub(rf"(?i)\b{re.escape(value)}\b", placeholder, text)
-        return text
+        return self.LOCAL_URL.sub(self.LOCAL_URL_PLACEHOLDER, text)
 
     def check(self, text: str) -> str | None:
         """Name the first identifying value still present in `text`, or None when it is clean."""
@@ -156,70 +156,61 @@ class Scrubber:
                 return value
         if self.EMAIL.search(text.replace(self.EMAIL_PLACEHOLDER, "")):
             return "an email address"
+        if self.LOCAL_URL.search(text):
+            return "a URL into this machine or its network"
         return None
 
 
 # --------------------------------------------------------------------------------------------------------------------
-# The private tmux pane
+# The agent's terminal
 # --------------------------------------------------------------------------------------------------------------------
 
 
-class Pane:
-    """One agent running in its own private tmux server.
+class Terminal:
+    """One agent running in a terminal host of its own (`scripts/agent_screen_host.py`).
 
-    The server lives on a socket in a fresh random directory directly under `/tmp`: unix socket paths are limited to
-    about 108 bytes, and concurrent runs on a shared machine must never meet on a fixed name.
+    The drivers below only read its screen and title and type at it, so nothing in them depends on the kind of
+    terminal.
     """
 
-    def __init__(self, tmux: pathlib.Path, work_root: pathlib.Path, env: dict[str, str]) -> None:
-        self.socket_dir = pathlib.Path(tempfile.mkdtemp(prefix="fhcap-", dir="/tmp"))
-        config = work_root / "tmux.conf"
-        config.write_text(TMUX_CONFIG)
-        # `-u`: without a UTF-8 locale tmux would print a title's spinner (and any non-ASCII character) as `_`.
-        self.base = [str(tmux), "-u", "-S", str(self.socket_dir / "s"), "-f", str(config)]
-        self.env = env
-        self.target = "agent"
+    def __init__(self, farhelm: pathlib.Path) -> None:
+        self.farhelm = farhelm
+        self.run: HostRun | None = None
 
-    def tmux(self, *args: str, check: bool = True) -> str:
-        """Run one tmux command against the private server and return its stdout."""
+    def start(self, cwd: pathlib.Path, argv: list[str]) -> None:
+        """Start the agent in a terminal of the production size."""
 
-        done = subprocess.run(
-            [*self.base, *args], env=self.env, capture_output=True, text=True, timeout=30, check=False
-        )
-        if check and done.returncode != 0:
-            raise RuntimeError(f"tmux {' '.join(args)} failed: {done.stderr.strip()}")
-        return done.stdout
+        self.run = HostRun.start(self.farhelm, cwd, TERMINAL_COLUMNS, TERMINAL_ROWS, argv)
 
-    def start(self, cwd: pathlib.Path, command: str) -> None:
-        """Start the agent in a pane of the production size."""
+    def _run(self) -> HostRun:
+        assert self.run is not None, "the agent was not started"
+        return self.run
 
-        self.tmux(
-            "new-session", "-d", "-s", self.target, "-x", str(PANE_COLUMNS), "-y", str(PANE_ROWS),
-            "-c", str(cwd), command,
-        )
+    def state(self) -> tuple[str, str, bool]:
+        """The visible screen as the supervisor's sampler reads it, the title, and whether the agent exited."""
+
+        return self._run().state()
 
     def screen(self) -> str:
-        """The visible grid exactly as the supervisor's sampler captures it (`capture-pane -p`, no scrollback)."""
-
-        return self.tmux("capture-pane", "-p", "-t", self.target)
+        return self.state()[0]
 
     def title(self) -> str:
-        """The pane title the agent last set through OSC 0/2."""
+        """The title the agent last set through OSC 0/2."""
 
-        return self.tmux("display-message", "-p", "-t", self.target, "#{pane_title}").rstrip("\n")
+        return self.state()[1]
 
     def dead(self) -> bool:
-        return self.tmux("display-message", "-p", "-t", self.target, "#{pane_dead}").strip() == "1"
+        return self.state()[2]
 
     def keys(self, *keys: str) -> None:
         """Send named keys (`Enter`, `Escape`, `Down`, `C-u`)."""
 
-        self.tmux("send-keys", "-t", self.target, *keys)
+        self._run().keys(*keys)
 
     def text(self, text: str) -> None:
         """Type literal text without submitting it."""
 
-        self.tmux("send-keys", "-t", self.target, "-l", text)
+        self._run().type(text)
 
     def wait_for(
         self, what: str, predicate: Callable[[str, str], bool], timeout: float, poll_seconds: float = POLL_SECONDS
@@ -234,10 +225,10 @@ class Pane:
         deadline = time.monotonic() + timeout
         screen = title = ""
         while True:
-            screen, title = self.screen(), self.title()
+            screen, title, dead = self.state()
             if predicate(screen, title):
                 return screen, title
-            if self.dead():
+            if dead:
                 raise ScenarioTimeout(f"the agent exited while waiting for {what}:\n{screen}")
             if time.monotonic() >= deadline:
                 raise ScenarioTimeout(f"timed out waiting for {what}; last screen:\n{screen}")
@@ -259,8 +250,8 @@ class Pane:
             time.sleep(1.5)
 
     def close(self) -> None:
-        self.tmux("kill-server", check=False)
-        shutil.rmtree(self.socket_dir, ignore_errors=True)
+        if self.run is not None:
+            self.run.stop()
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -356,7 +347,7 @@ def claude_compaction_spinner(screen: str) -> bool:
     return False
 
 
-def drive_claude(pane: Pane, rec: Recorder, work: pathlib.Path) -> None:
+def drive_claude(term: Terminal, rec: Recorder, work: pathlib.Path) -> None:
     """Capture trust, menus, idle, work, permission and question dialogs, the `/clear` hint, then compaction.
 
     Compaction comes last because the earlier turns supply the context it compacts.
@@ -364,79 +355,83 @@ def drive_claude(pane: Pane, rec: Recorder, work: pathlib.Path) -> None:
 
     # The idle hint normally needs 75 idle minutes and 100k tokens of context; both thresholds are Claude's own
     # environment variables, so the tool lowers them rather than waiting.
-    pane.start(
+    term.start(
         work,
-        "env CLAUDE_CODE_IDLE_THRESHOLD_MINUTES=1 CLAUDE_CODE_IDLE_TOKEN_THRESHOLD=0 "
-        "claude --permission-mode default --model sonnet",
+        [
+            "env", "CLAUDE_CODE_IDLE_THRESHOLD_MINUTES=1", "CLAUDE_CODE_IDLE_TOKEN_THRESHOLD=0",
+            "claude", "--permission-mode", "default", "--model", "sonnet",
+        ],
     )
 
     def answer_trust(screen: str) -> None:
         # The menu can default to "No, exit"; move only when the selection proves Enter would refuse.
         if "❯ No, exit" in screen:
-            pane.keys("Down")
+            term.keys("Down")
             time.sleep(0.5)
-        pane.keys("Enter")
+        term.keys("Enter")
 
     if not rec.attempt(
         "fresh prompt",
-        lambda: reach_prompt(pane, rec, lambda s: "Yes, I trust this folder" in s, answer_trust, claude_prompt_box),
+        lambda: reach_prompt(
+            term, rec, lambda s: "Yes, I trust this folder" in s, answer_trust, lambda s, _t: claude_prompt_box(s)
+        ),
     ):
         return
 
     # Screens that carry no state (the reader must answer "can't tell"), reachable without a model turn.
     def model_picker() -> None:
-        pane.submit("/model", lambda s: (claude_input(s) or "").startswith("/model"))
-        screen, title = pane.wait_for("the model picker", lambda s, _t: "Enter to set as default" in s, 30)
+        term.submit("/model", lambda s: (claude_input(s) or "").startswith("/model"))
+        screen, title = term.wait_for("the model picker", lambda s, _t: "Enter to set as default" in s, 30)
         rec.save("unknown", "model-picker", screen, title)
-        pane.keys("Escape")
-        pane.wait_for("the prompt box", lambda s, _t: claude_prompt_box(s), 30)
+        term.keys("Escape")
+        term.wait_for("the prompt box", lambda s, _t: claude_prompt_box(s), 30)
 
     rec.attempt("model picker", model_picker)
 
     def transcript() -> None:
-        pane.keys("C-o")
-        screen, title = pane.wait_for(
+        term.keys("C-o")
+        screen, title = term.wait_for(
             "the transcript view", lambda s, _t: "Showing detailed transcript" in s, 30
         )
         rec.save("unknown", "transcript", screen, title)
-        pane.keys("C-o")
-        pane.wait_for("the prompt box", lambda s, _t: claude_prompt_box(s), 30)
+        term.keys("C-o")
+        term.wait_for("the prompt box", lambda s, _t: claude_prompt_box(s), 30)
 
     rec.attempt("transcript view", transcript)
     if rec.ui_only:
         return
 
     def thinking_then_permission() -> None:
-        pane.submit(
+        term.submit(
             "Use your Bash tool to run exactly this command: sleep 20 && echo capture-done > marker.txt",
             lambda s: "run exactly this command" in (claude_input(s) or ""),
         )
-        screen, title = pane.wait_for(
+        screen, title = term.wait_for(
             "the spinner or the permission prompt",
             lambda s, _t: claude_spinner(s) or "Do you want to proceed?" in s,
             120,
         )
         if claude_spinner(screen):
             rec.save("working", "thinking", screen, title)
-        screen, title = pane.wait_for(
+        screen, title = term.wait_for(
             "the permission prompt", lambda s, _t: "Do you want to proceed?" in s and "Esc to cancel" in s, 120
         )
         rec.save("waiting", "permission", screen, title)
-        pane.keys("Enter")
+        term.keys("Enter")
 
     if not rec.attempt("permission prompt", thinking_then_permission):
         return
 
     def tool_running() -> None:
         for sample in (1, 2):
-            screen, title = pane.wait_for("the tool-run spinner", lambda s, _t: claude_spinner(s), 60)
+            screen, title = term.wait_for("the tool-run spinner", lambda s, _t: claude_spinner(s), 60)
             rec.save("working", f"tool-{sample}", screen, title)
             time.sleep(4)
 
     rec.attempt("tool run", tool_running)
 
     def after_turn() -> None:
-        screen, title = pane.wait_for(
+        screen, title = term.wait_for(
             "the finished turn",
             lambda s, _t: re.search(r" for \d+[ms]", s) is not None and claude_prompt_box(s) and not claude_spinner(s),
             120,
@@ -448,23 +443,23 @@ def drive_claude(pane: Pane, rec: Recorder, work: pathlib.Path) -> None:
 
     # Independent of the question below: a vendor dropping its idle hint must not cost the waiting capture.
     def clear_hint() -> None:
-        screen, title = pane.wait_for("the /clear hint", lambda s, _t: "/clear to save" in s, 180)
+        screen, title = term.wait_for("the /clear hint", lambda s, _t: "/clear to save" in s, 180)
         rec.save("idle", "clear-hint", screen, title)
 
     rec.attempt("idle /clear hint", clear_hint)
 
     def question() -> None:
-        pane.wait_for("the prompt box", lambda s, _t: claude_prompt_box(s), 60)
-        pane.keys("C-u")
-        pane.submit(
+        term.wait_for("the prompt box", lambda s, _t: claude_prompt_box(s), 60)
+        term.keys("C-u")
+        term.submit(
             "Use your AskUserQuestion tool to ask me one question: tea or coffee? Two options. Do nothing else.",
             lambda s: "AskUserQuestion tool" in (claude_input(s) or ""),
         )
-        screen, title = pane.wait_for(
+        screen, title = term.wait_for(
             "the question form", lambda s, _t: "Enter to select" in s and "Esc to cancel" in s, 120
         )
         rec.save("waiting", "question", screen, title)
-        pane.keys("Escape")
+        term.keys("Escape")
 
     rec.attempt("question form", question)
 
@@ -479,14 +474,14 @@ def drive_claude(pane: Pane, rec: Recorder, work: pathlib.Path) -> None:
 
         # A returned input box can coexist with the question turn still finishing. Wait for that work to end so its
         # spinner cannot be saved as the compaction fixture before /compact starts.
-        pane.wait_for(
+        term.wait_for(
             "the idle prompt box before compaction",
             lambda s, _t: claude_prompt_box(s) and not claude_compaction_spinner(s),
             60,
         )
-        pane.keys("C-u")
-        pane.submit("/compact", lambda s: (claude_input(s) or "").startswith("/compact"))
-        screen, title = pane.wait_for(
+        term.keys("C-u")
+        term.submit("/compact", lambda s: (claude_input(s) or "").startswith("/compact"))
+        screen, title = term.wait_for(
             "the compaction spinner",
             lambda s, _t: claude_compaction_spinner(s),
             120,
@@ -498,11 +493,11 @@ def drive_claude(pane: Pane, rec: Recorder, work: pathlib.Path) -> None:
 
 
 def reach_prompt(
-    pane: Pane,
+    term: Terminal,
     rec: Recorder,
     is_trust: Callable[[str], bool],
     answer_trust: Callable[[str], None],
-    ready: Callable[[str], bool],
+    ready: Callable[[str, str], bool],
     timeout: float = 120,
     settle: float = 3,
 ) -> None:
@@ -511,17 +506,19 @@ def reach_prompt(
     One loop rather than "wait for the dialog, then wait for the prompt": an agent can paint a frame that looks like
     its prompt before the dialog arrives, and a dialog that swallows the answering keystroke must be answered again.
     The prompt counts as ready only once it has stayed ready for `settle` seconds, so the saved `idle-fresh` screen is
-    the settled first paint rather than a half-drawn one. The dialog is saved once, as `waiting-trust`.
+    the settled first paint rather than a half-drawn one. The dialog is saved once, as `waiting-trust`; an agent that
+    reaches its prompt without showing it (its configuration already trusts the scratch directory or a parent of it,
+    `/tmp` say) has the trust screen reported as not captured, like any other missed scenario.
     """
 
     deadline = time.monotonic() + timeout
     trust_saved = False
     ready_since: float | None = None
     while True:
-        screen, title = pane.screen(), pane.title()
+        screen, title, dead = term.state()
         # Checked before any branch can `continue`: a dialog that never accepts its answer (Codex's once ignored tmux
-        # input entirely) must still end in a timeout, and a dead pane keeps showing its last screen.
-        if pane.dead():
+        # input entirely) must still end in a timeout, and an exited agent keeps showing its last screen.
+        if dead:
             raise ScenarioTimeout(f"the agent exited before its prompt was ready:\n{screen}")
         if time.monotonic() >= deadline:
             raise ScenarioTimeout(f"timed out waiting for a settled prompt; last screen:\n{screen}")
@@ -533,10 +530,15 @@ def reach_prompt(
             ready_since = None
             time.sleep(2)
             continue
-        if ready(screen):
+        if ready(screen, title):
             ready_since = ready_since or time.monotonic()
             if time.monotonic() - ready_since >= settle:
                 rec.save("idle", "fresh", screen, title)
+                if not trust_saved:
+                    rec.missed.append(
+                        "waiting-trust (not captured: no trust dialog appeared; the agent's own configuration may "
+                        "already trust the scratch directory or a parent of it)"
+                    )
                 return
         else:
             ready_since = None
@@ -575,26 +577,37 @@ def codex_composer(screen: str) -> bool:
     return not any(footer in lowered for footer in ("esc to cancel", "enter continue", "enter to confirm"))
 
 
-def drive_codex(pane: Pane, rec: Recorder, work: pathlib.Path) -> None:
+def codex_ready(screen: str, title: str) -> bool:
+    """Whether Codex sits idle at its composer: the composer drawn and no Braille spinner in the title.
+
+    Codex 0.166.0 was seen drawing its composer while its title still spun after starting, which the Codex reader
+    reads as working. A fresh screen saved then would be labelled
+    idle while showing work.
+    """
+
+    return codex_composer(screen) and BRAILLE_SPINNER.match(title) is None
+
+
+def drive_codex(term: Terminal, rec: Recorder, work: pathlib.Path) -> None:
     """Drive Codex through trust, its model menu, idle, streaming, approval, a tool run, a recap, and a question form."""
 
-    pane.start(work, "codex -s read-only -a on-request")
+    term.start(work, ["codex", "-s", "read-only", "-a", "on-request"])
 
     if not rec.attempt(
         "fresh composer",
         lambda: reach_prompt(
-            pane, rec, lambda s: "Trust this folder?" in s, lambda _s: pane.keys("Enter"), codex_composer
+            term, rec, lambda s: "Trust this folder?" in s, lambda _s: term.keys("Enter"), codex_ready
         ),
     ):
         return
 
     # A screen that carries no state (the reader must answer "can't tell"), reachable without a model turn.
     def model_picker() -> None:
-        pane.submit("/model", lambda s: (codex_input(s) or "").startswith("/model"))
-        screen, title = pane.wait_for("the model picker", lambda s, _t: "Select Model and Effort" in s, 30)
+        term.submit("/model", lambda s: (codex_input(s) or "").startswith("/model"))
+        screen, title = term.wait_for("the model picker", lambda s, _t: "Select Model and Effort" in s, 30)
         rec.save("unknown", "model-picker", screen, title)
-        pane.keys("Escape")
-        pane.wait_for("the composer", lambda s, _t: codex_composer(s), 30)
+        term.keys("Escape")
+        term.wait_for("the composer", lambda s, _t: codex_composer(s), 30)
 
     rec.attempt("model picker", model_picker)
     if rec.ui_only:
@@ -602,62 +615,62 @@ def drive_codex(pane: Pane, rec: Recorder, work: pathlib.Path) -> None:
 
     def streaming_then_approval() -> None:
         prompt = "Run exactly this shell command: sleep 20 && echo capture-done > marker.txt"
-        pane.submit(prompt, lambda s: prompt in (codex_input(s) or ""))
+        term.submit(prompt, lambda s: prompt in (codex_input(s) or ""))
         # While Codex streams prose there is no on-screen working widget; only the title's Braille spinner says so.
-        screen, title = pane.wait_for(
+        screen, title = term.wait_for(
             "streaming or the approval prompt",
             lambda s, t: (BRAILLE_SPINNER.match(t) is not None and "Working (" not in s) or "esc to cancel" in s,
             120,
         )
         if "esc to cancel" not in screen:
             rec.save("working", "streaming", screen, title)
-        screen, title = pane.wait_for(
+        screen, title = term.wait_for(
             "the approval prompt", lambda s, _t: "Press enter to confirm or esc to cancel" in s, 180
         )
         rec.save("waiting", "permission", screen, title)
-        pane.keys("Enter")
+        term.keys("Enter")
 
     if not rec.attempt("approval prompt", streaming_then_approval):
         return
 
     def tool_running() -> None:
         for sample in (1, 2):
-            screen, title = pane.wait_for("the Working widget", lambda s, _t: "Working (" in s, 60)
+            screen, title = term.wait_for("the Working widget", lambda s, _t: "Working (" in s, 60)
             rec.save("working", f"tool-{sample}", screen, title)
             time.sleep(4)
 
     rec.attempt("tool run", tool_running)
 
     def after_turn() -> None:
-        pane.wait_for(
+        term.wait_for(
             "the finished turn",
             lambda s, t: "Worked for" in s and "Working (" not in s and not BRAILLE_SPINNER.match(t),
             180,
         )
         time.sleep(2)
-        rec.save("idle", "after-turn", pane.screen(), pane.title())
+        rec.save("idle", "after-turn", term.screen(), term.title())
 
     if not rec.attempt("idle after a turn", after_turn):
         return
 
     # Independent of the question below: a vendor dropping `/recap` must not cost the waiting capture.
     def recap() -> None:
-        pane.submit("/recap", lambda s: (codex_input(s) or "").startswith("/recap"))
-        screen, title = pane.wait_for("the recap", lambda s, _t: "Recap:" in s and codex_composer(s), 180)
+        term.submit("/recap", lambda s: (codex_input(s) or "").startswith("/recap"))
+        screen, title = term.wait_for("the recap", lambda s, _t: "Recap:" in s and codex_composer(s), 180)
         rec.save("idle", "recap", screen, title)
 
     rec.attempt("idle recap", recap)
 
     def question() -> None:
-        pane.wait_for("the composer", lambda s, _t: codex_composer(s), 60)
-        pane.keys("C-u")
-        pane.submit(
+        term.wait_for("the composer", lambda s, _t: codex_composer(s), 60)
+        term.keys("C-u")
+        term.submit(
             "Use your request_user_input tool to ask me one question: tea or coffee? Offer exactly two options. "
             "Do nothing else.",
             lambda s: "request_user_input tool" in (codex_input(s) or ""),
         )
         # Codex 0.159 reports this tool unavailable in its default mode; the scenario stays for versions that allow it.
-        screen, title = pane.wait_for(
+        screen, title = term.wait_for(
             "the pending question", lambda s, t: "1 question" in s or "Action Required" in t, 120
         )
         rec.save("waiting", "question", screen, title)
@@ -669,7 +682,7 @@ def drive_codex(pane: Pane, rec: Recorder, work: pathlib.Path) -> None:
 # Running a harness and publishing its fixtures
 # --------------------------------------------------------------------------------------------------------------------
 
-HARNESSES: dict[str, tuple[list[str], Callable[[Pane, Recorder, pathlib.Path], None]]] = {
+HARNESSES: dict[str, tuple[list[str], Callable[[Terminal, Recorder, pathlib.Path], None]]] = {
     "claude": (["claude", "--version"], drive_claude),
     "codex": (["codex", "--version"], drive_codex),
 }
@@ -685,18 +698,8 @@ def harness_version(argv: list[str]) -> str:
     return match.group(0)
 
 
-def agent_env() -> dict[str, str]:
-    """This process's environment minus anything that would tie the agent to an outer tmux or a Farhelm session."""
-
-    return {
-        key: value
-        for key, value in os.environ.items()
-        if key not in ("TMUX", "TMUX_PANE") and not key.startswith("FARHELM_")
-    }
-
-
 def capture_harness(
-    name: str, tmux: pathlib.Path, work_root: pathlib.Path, scrubber: Scrubber, ui_only: bool
+    name: str, farhelm: pathlib.Path, work_root: pathlib.Path, scrubber: Scrubber, ui_only: bool
 ) -> Recorder:
     """Capture one harness and write what it captured into its version directory.
 
@@ -714,12 +717,12 @@ def capture_harness(
     staging = work_root / f"{name}-fixtures"
     staging.mkdir()
     rec = Recorder(staging, scrubber, ui_only=ui_only)
-    pane = Pane(tmux, work_root, agent_env())
+    term = Terminal(farhelm)
     print(f"{name} {version}: capturing", file=sys.stderr)
     try:
-        drive(pane, rec, work)
+        drive(term, rec, work)
     finally:
-        pane.close()
+        term.close()
     if not rec.captured:
         print(f"{name} {version}: nothing captured; leaving existing fixtures alone", file=sys.stderr)
         return rec
@@ -758,7 +761,9 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--harness", action="append", choices=sorted(HARNESSES), help="capture only this agent (repeatable)"
     )
-    parser.add_argument("--tmux", type=pathlib.Path, default=DEFAULT_TMUX, help="tmux binary (default: pinned)")
+    parser.add_argument(
+        "--farhelm", type=pathlib.Path, default=default_farhelm(), help="the built farhelm (default: %(default)s)"
+    )
     parser.add_argument("--keep-work", action="store_true", help="keep the scratch directory for inspection")
     parser.add_argument("--no-test", action="store_true", help="skip running the fixture tests afterwards")
     parser.add_argument(
@@ -771,8 +776,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    if not args.tmux.is_file():
-        print(f"{args.tmux} is missing; build it with scripts/build-pinned-tmux-ci.sh", file=sys.stderr)
+    if not args.farhelm.is_file():
+        print(f"{args.farhelm} is missing; build it with `cargo build -p farhelm`", file=sys.stderr)
         return 2
     # Short on purpose: the scratch path appears in agent banners and status lines, and a long one wraps them.
     work_root = pathlib.Path(tempfile.mkdtemp(prefix="fhc-", dir="/tmp"))
@@ -780,7 +785,7 @@ def main(argv: list[str] | None = None) -> int:
     results: dict[str, Recorder] = {}
     try:
         for name in args.harness or sorted(HARNESSES):
-            results[name] = capture_harness(name, args.tmux, work_root, scrubber, args.ui_only)
+            results[name] = capture_harness(name, args.farhelm, work_root, scrubber, args.ui_only)
     finally:
         if args.keep_work:
             print(f"scratch kept at {work_root}", file=sys.stderr)

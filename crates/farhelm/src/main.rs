@@ -1356,6 +1356,30 @@ enum InternalCmd {
         #[arg(long)]
         socket: PathBuf,
     },
+    /// A development tool, with no compatibility promise: run one program in
+    /// a real terminal host the way a supervisor runs an agent in a new
+    /// terminal (the supervisor's emulator answering its queries, the
+    /// production child environment), and serve its screen, title and input
+    /// on `<run dir>/control` until asked to stop. Prints `ready` on stdout
+    /// once the program runs. The backend of `scripts/agent-tui.py` and
+    /// `scripts/capture-agent-screens.py`; see
+    /// `farhelm_supervisor::agent_screen`.
+    AgentScreen {
+        /// The run's own directory, absolute and short (the scripts make
+        /// one directly under `/tmp`): the host's state directory and the
+        /// control socket's home.
+        #[arg(long)]
+        run_dir: PathBuf,
+        /// The program's working directory, absolute.
+        #[arg(long)]
+        cwd: PathBuf,
+        /// The terminal's size, `COLSxROWS`.
+        #[arg(long, value_parser = parse_terminal_size)]
+        size: (u16, u16),
+        /// The program and its arguments, after `--`.
+        #[arg(last = true, required = true)]
+        argv: Vec<std::ffi::OsString>,
+    },
     /// End every terminal host with a socket in a state directory's `hosts`
     /// directory: `Shutdown` through the protocol, or the verified SIGTERM
     /// for a host that cannot take it, removing the socket files of hosts
@@ -1587,6 +1611,19 @@ fn run_install(args: InstallArgs) -> anyhow::Result<()> {
             std::process::exit(refusal.status)
         }
     }
+}
+
+/// `internal agent-screen --size`: `COLSxROWS`, each from 1 to 10,000 (the
+/// clamp a supervisor applies to a new terminal's size).
+fn parse_terminal_size(text: &str) -> Result<(u16, u16), String> {
+    let parse = |part: &str| {
+        part.parse::<u16>()
+            .ok()
+            .filter(|n| (1..=10_000).contains(n))
+    };
+    text.split_once('x')
+        .and_then(|(cols, rows)| Some((parse(cols)?, parse(rows)?)))
+        .ok_or_else(|| format!("{text:?} is not COLSxROWS"))
 }
 
 /// `internal stop-terminal-hosts --state-dir`'s rule: an absolute path,
@@ -1926,6 +1963,33 @@ fn main() -> anyhow::Result<()> {
                     std::ffi::OsString::from("--socket"),
                     socket.into_os_string(),
                 ]))
+            }
+            InternalCmd::AgentScreen {
+                run_dir,
+                cwd,
+                size: (cols, rows),
+                argv,
+            } => {
+                use farhelm_supervisor::agent_screen;
+                anyhow::ensure!(
+                    run_dir.is_absolute() && cwd.is_absolute(),
+                    "--run-dir and --cwd must be absolute paths"
+                );
+                anyhow::ensure!(
+                    agent_screen::run_dir_fits(&run_dir),
+                    "--run-dir {} is too long for the sockets it must hold",
+                    run_dir.display()
+                );
+                let farhelm_exe =
+                    anyhow::Context::context(std::env::current_exe(), "locating this program")?;
+                runtime()?.block_on(agent_screen::run(agent_screen::AgentScreen {
+                    run_dir,
+                    cwd,
+                    cols,
+                    rows,
+                    argv,
+                    farhelm_exe,
+                }))
             }
             InternalCmd::StopTerminalHosts { state_dir } => {
                 use farhelm_supervisor::hosts::stop;

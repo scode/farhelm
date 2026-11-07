@@ -1525,10 +1525,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`self-ssh-guidance-misses-skipped-tests.md`](self-ssh-guidance-misses-skipped-tests.md) — Sandbox instructions
   promise dependent test failures after missing self-SSH, although non-CI multi-host cases can skip instead.
 
-- [`agent-screen-tools-use-locale-decoder-for-utf8.md`](agent-screen-tools-use-locale-decoder-for-utf8.md) —
-  Agent-screen tools request UTF-8 tmux output but can decode it with a legacy Python encoding; the decoder mismatch is
-  verified conditionally.
-
 - [`feedback-discord-header-hides-send.md`](feedback-discord-header-hides-send.md) — The Discord header hides the
   feedback Send pointer target in short narrow static layouts on both engines; native Tab restores it.
 
