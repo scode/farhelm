@@ -95,7 +95,8 @@ was saved but could not be opened. In a browser, modifier-click still only downl
 [security model](/docs/how-it-works/security-model/) before opening agent-provided files.
 
 Paths can start with `/` or `~/`, contain a slash, or end in a file extension, such as `report.pdf`. A relative path uses
-the directory the session started in; it can miss after a shell changes directory. Programs can also print file links
+the directory the session started in; it can miss after a shell changes directory. A path that a program breaks onto
+the next line near the terminal's right edge works from either half. Programs can also print file links
 under their own text. Directories and files over 100 MB cannot be downloaded. Check the host and path before clicking:
 an agent's path can name any file its account can read on that host.
 
