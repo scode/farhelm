@@ -1,76 +1,110 @@
-## What this was about
+# Since the last review
 
-Clicking a printed file path could fail when a terminal program split it across two lines: Farhelm offered the head and
-the continuation as separate files. The maintainer chose joining the pieces over suppressing those links, explicitly
-accepting some false matches for the benefit of usable downloads.
+The existing draft, #3129, was corrected and rebased; no PR was added or dropped. The container-link failure that
+returned this plan is fixed, together with a second container-hover regression found by the required reviewer.
 
-Either half of a qualifying two-row path now discloses and downloads the whole file. Indentation and trailing padding do
-not become part of its destination. Normal terminal wrapping keeps working, and relative paths still resolve from the
-session's directory. The product and implementation specifications record this intentional recognition exception.
+# What this was about
 
-## Things you should know
+A terminal program can insert its own line break in a printed file path. Farhelm previously offered the two fragments as
+separate paths, so downloading either failed. The maintainer chose to join one qualifying pair of rows, accepting some
+false matches between unrelated lines for the improvement in usability. Either half now discloses and downloads the
+whole path. Ordinary terminal wrapping keeps its existing behavior.
 
-The rule allows four columns for a terminal program's right margin and only joins one isolated pair. Unrelated lines
-with the same shape can be joined; this is the agreed tradeoff. Three-row hard-break chains are left unchanged.
+# Things you should know
 
-Tests reproduced the reported failure with an explicit program newline. Ordinary terminal wraps and a known wrap
-crossing from history into the visible screen already worked. This establishes the failing shape, not which kind of
-break the original program emitted. No host-side path resolution or terminal emulator change was needed.
+The returned container test failed because recognition joined an ordinary word on the preceding history row to an
+absolute path on the screen. The preceding word was prepended to the valid absolute target, so the host correctly
+rejected an invented relative target. A first hover on the valid path also failed; hovering the rejected path first was
+incidental. The correction requires the first piece to already qualify as a path under the ordinary rules, as the plan
+specified. Both specifications now state that boundary explicitly. A plain word, version or URL cannot become a path
+head merely because the following line contains a slash.
 
-The real browser test downloaded the same file from each half on Chromium and WebKit. WebKit is browser coverage of the
-desktop engine family, not a direct native-app run. The live installation was not used.
+The reviewer separately found that an unrelated neighboring redraw could retire a container file hover and start
+asynchronous host admission again. That could repeatedly remove download permission during live output. The correction
+keeps the existing hover when only neighboring rows change and fresh recognition still returns the same path and cell
+range. An edit that creates a continuation still withdraws the old permission. Changes within the linked rows keep the
+existing recheck behavior, including hyperlink precedence. Every download independently checks recognition again.
 
-## Open questions and possible follow-ups
+The deliberate exception remains one isolated hard break, a four-column right-margin allowance, and optional space
+padding/indentation. It does not reconstruct every possible split: a bare-word first piece is excluded. Relative paths
+still resolve against the session's directory. Host admission and file resolution were not relaxed. The original
+container browser test and fixture were preserved. The addressed TODO entry is removed and the fixed changelog fragment
+is included.
 
-No required work remains. Paths split across more than two hard-broken rows and continuations with gutter characters
-remain outside this change.
+# Open questions and possible follow-ups
 
-## PRs
+No required decision remains. Unrelated path-like lines can still satisfy the intentionally permissive join rule; that
+is the accepted tradeoff. This work does not add reconstruction across chains of hard breaks or filenames with spaces.
 
-- [#3129: link paths split by terminal programs](https://github.com/scode/farhelm/pull/3129/changes) — reviewed draft,
-  commit `6e414d0936b42e5946a3877d9b8eb9a22a521e14`.
+# The PRs
 
-## Checks run, reused and skipped
+- [#3129: fix: link paths split by terminal programs](https://github.com/scode/farhelm/pull/3129/changes) — the complete
+  fix at `e6f32d624cd36eae5e160267deb70348f590f0fc`, still a draft for the landing monitor.
 
-Runtime commands below ran through the repository's test recorder. Commands name repository-relative child arguments;
-browser commands ran from `e2e/`.
+# Checks run, reused and skipped
 
-- The complete UI JavaScript harness (`node --test` from `crates/farhelm-ui/js-tests`) passed 527 tests, run
-  `e068de3e-5ce4-404a-9a94-9c9ac60f6e07`. This is reused from the fix's worktree based on `56d612b5`; its recorded
-  source fingerprint begins `1d964d8ec06fae37`. Product behavior is identical in the pushed revision: later changes
-  added a reader docstring, expanded one test and rebased over queue-only metadata. The expanded cached-endpoint test
-  separately passed in `bcf255d2-07d3-4b08-9c10-ec0b76e12f66`, covering hard/soft breaks and browser/native admission:
-  `node --test --test-name-pattern='program-broken printed path cannot grow' crates/farhelm-ui/js-tests/terminal-files.test.js`.
-- The focused recognizer and grid-buffer suites passed 76 tests in `4a7bd9fe-73b0-4704-aa66-4d517c9302d7`. They cover
-  both terminal adapters, delimiters, URI exclusions, margin boundaries, Unicode cells and the history/screen wrap:
-  `node --test crates/farhelm-ui/js-tests/terminal-files.test.js crates/farhelm-ui/js-tests/grid-buffer.test.js`.
-- The static grid browser selection for printed-path download and redraw admission passed four cases across Chromium and
-  WebKit in `5582eebb-886c-4b00-977f-aed8658f8068`:
-  `npx playwright test --config grid-client/playwright.config.ts grid-attach.spec.ts -g 'a printed path hovers|a redraw that changes the hovered path' --workers=3 --retries=0`.
-- The recorded Playwright selection of terminal-file and terminal-link specs passed 46 cases across both engines,
-  `43288ffc-a6ce-4702-b993-d675ee080365`. It includes the new live hard-break hover/download test on each engine.
-  Command: `npx playwright test 'terminal-files\.spec\.ts' 'terminal-links\.spec\.ts' 'terminal-link-clicks\.spec\.ts'`.
-  The separate old-terminal link-click selection passed 36 cases across both engines,
-  `f30819bc-f7a8-46a4-8459-348d309c2b52`, command `npx playwright test 'terminal-link-clicks\.spec\.ts'`, with
-  `FARHELM_E2E_SUITE_TERMINALS=tmux` explicitly retained by the recorder. Both runs required the pinned tmux, used a
-  three-worker budget and zero retries, and completed their owned stack cleanup. Two projects used two workers in the
-  old-terminal run. That selection was excluded from the first run as designed.
-- `cargo build -p farhelm -p farhelm-fixtures` and the Dioxus 0.7.10 release web build passed to prepare those browser
-  runs. An initial build invocation selected an unrelated `dx` executable and failed before compiling; selecting the
-  installed Dioxus CLI resolved it.
-- The source-only sleep check inspected 420 delays with none missing a rationale. Changelog format, whitespace and
-  dprint checks passed for the files they cover. Asset JavaScript and its unit tests are excluded from dprint.
-- The initial regression failed as intended in `10c0e315-cedf-47c6-aec5-f113f73d42a9`. A later unit run,
-  `c876b0e7-b13a-4f7c-bb18-0c4926b1534d`, caught two new fixture mistakes: an undersized history row and a purported
-  negative that actually matched the accepted rule. Both were corrected before the passing runs. Failure evidence is
-  retained; these were same-session authoring errors, not established latent flakes.
-- Rust runtime tests, Clippy, the full browser battery, native desktop and installer/release suites were skipped: this
-  changes shared JavaScript recognition and its browser integration, with no Rust behavior or those subsystems changed.
-  Existing JavaScript results remain applicable after the queue-only rebase.
+All runtime attempts used the test recorder. Browser engine claims below refer to Chromium and Playwright WebKit, which
+supplies engine-family coverage rather than a native macOS application run.
 
-## Review gate
+Run in this round:
 
-A fresh-context gpt-6.1-sol reviewer at high effort reviewed the complete change and the final test/docstring addendum,
-with the repository's test-authoring checklist supplied verbatim. Neither review found actionable issues. Two fresh
-wording readers checked the PR text; the final text passed its cold read. The executor also completed a separate
-documentation pass over all touched files.
+- `node --test terminal-files.test.js grid-buffer.test.js` from the UI JS harness: 77 passed, run
+  `727dbb84-81de-446a-8f2a-82f8d8f0513e`. This checked the head-eligibility correction, original hard/soft breaks,
+  Unicode cells, cached endpoints and history/screen mapping.
+- `node --test` from the same directory after both corrections: 528 passed, run `8de87c15-6798-450f-9c24-f24381d3d778`.
+  No skipped cases or runtime `SKIPPED` marker; retained source/output and cleanup are complete.
+- After rebasing onto main's row-tooltip and background Git cleanup changes, `node --test` passed all 530 cases, run
+  `dd72ef6f-2d66-485b-acd9-ed2e764e778c`, with no skips or runtime `SKIPPED` marker.
+- `npx playwright test --config grid-client/playwright.config.ts --workers=3 --retries=0 --reporter=line,json` from
+  `e2e`: 192 passed, 96 on each engine, no skips, failures or retries, run `2610ad3c-a257-47d6-ba65-bed1b2f5d189`. This
+  is the full grid-client suite required by the latest Decision, including the unchanged container test and the new
+  neighboring-redraw cases. Generic recording was used because strict browser mode does not accept this configuration;
+  the retained JSON supplies the per-engine counts.
+- That full run's recorded source is `86ba2fa68c24e318a82ff6139cc70bf05903152b` plus the corrections captured as
+  `42ae7c55d4508a5926d05ca6456daf97e4c59e58`; the retained complete source diff matches that revision exactly. The full
+  result is reused after rebasing onto `ea1919b7` and folding into `e6f32d62`: the grid/recognizer implementation and
+  assertions are unchanged. The new sidebar-tooltip behavior needs explicit row opt-ins absent from the static fixture,
+  and its notch correctly marks itself as a disclosure cover. A fresh integrated selection passed 16 cases on both
+  engines, run `72afd2b5-0837-40b8-b7fe-e2731381cb48`, using
+  `npx playwright test --config grid-client/playwright.config.ts -g 'container|a printed path hovers|a redraw that changes|a click whose file hover is covered' --workers=3 --retries=0 --reporter=line`.
+- Focused Chromium container tests after the hover correction: four passed, run `ccacebea-c35c-401d-8d79-bc3a4bdc0903`,
+  with
+  `npx playwright test --config grid-client/playwright.config.ts --project chromium -g 'a container file hover survives unrelated|a new neighboring continuation|a container session offers only' --workers=1 --retries=0 --reporter=line`.
+- `dprint check` on the changed recognized Markdown and stack-browser spec,
+  `python3 releasing/check-changelog.py format`, and the isolated interpreter's `python -B scripts/check-test-sleeps.py`
+  passed. The delay check inspected 420 calls with zero missing rationales. Asset JS, JS unit files and grid-client
+  specs are excluded by dprint; no formatter pass is claimed for those files.
+
+`cargo build -p farhelm -p farhelm-fixtures` and `dx build --package farhelm-ui --platform web --release` passed on the
+rebased sources. Against those matching builds, the strict recorded selection
+`npx playwright test 'terminal-files\.spec\.ts|terminal-links\.spec\.ts'` passed 46 cases, 23 per engine, run
+`12c1d698-7466-4e5b-ad3d-e6fab0b8689c`. It used three workers with one owned stack each, zero retries, the pinned tmux
+and ordinary host-terminal mode. All three stack cleanups completed. Both halves of the hard-broken path disclosed the
+whole target and downloaded the expected bytes on both engines. This also covers local and SSH file downloads, refusals,
+redraws, hyperlink precedence and link gestures.
+
+Retained failures established the causes before correction. The exact original container test failed in run
+`dee4fda5-d8ec-4d97-91e7-75531c5139e4`; request logging in `8a3cacc1-3aab-4547-93b3-f9b1dae75888` exposed the invented
+target. A first-valid-hover diagnostic also failed (`50424833-67a0-4899-a483-454a3700bd5b`). The new pure recognition
+regression failed before its fix (`a8f820b2-f189-46b8-ba24-4d535aba0662`). Both ordinary and cut-path redraw cases
+failed before the second correction (`d326a935-e96b-43e6-a637-a17858182c24`), issuing four stat requests instead of
+preserving the original two. Later passes do not replace these observations; their private records and browser artifacts
+remain.
+
+Reused: the original old-terminal link-click run, `f30819bc-f7a8-46a4-8459-348d309c2b52`, passed 36 cases, 18 per
+engine, using `FARHELM_E2E_SUITE_TERMINALS=tmux` and `npx playwright test 'terminal-link-clicks\.spec\.ts'` with the
+pinned tmux. Its retained source diff matches commit `6e414d09` exactly. Reuse is limited to the unchanged old-terminal
+gesture, disclosure and transfer behavior. Current recognition is checked through both line adapters by the fresh JS
+run; the new recovery hook belongs only to grid terminals. This does not claim a fresh old-terminal run of the amended
+revision.
+
+Skipped: broad Rust, desktop, installer, provisioning and release suites. The plan changes client recognition and grid
+hover handling; it changes no Rust behavior, host path resolution or installation behavior. No live installation was
+touched. No website content changed, so no preview was needed.
+
+# Review gate's outcome
+
+The required fresh-context native `gpt-6.1-sol` reviewer at high effort found the neighboring-redraw regression. It was
+reproduced and corrected. The same reviewer's complete-diff addendum found it resolved with no new findings. Fresh
+own-model scope checks supported the narrow head criterion and evidence-only recovery. The unchanged commit/PR wording
+passed its cold read.
