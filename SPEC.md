@@ -2668,8 +2668,13 @@ whatever the agent renders is what you see. There is no composer, no message abs
 - File paths in terminal output can be downloaded from the session's host, including the local host. Absolute and `~/`
   paths, relative paths containing a slash or a file extension, and `file://` hyperlinks emitted by a program count;
   plain words, version numbers and plain scheme-bearing text do not. Detection does not try to support file names that
-  contain whitespace. Diagnostic line/column suffixes and trailing punctuation are excluded. Relative paths use the
-  session's directory, not a shell's later directory. Hover immediately underlines the path and shows a checking
+  contain whitespace. As a deliberate exception to conservative recognition, a path cut by a program's line break links
+  to the joined path from either half when the head ends in an unclosed token and the next row starts with its
+  continuation (indentation is ignored), and that continuation would not fit in the head row's remaining columns after
+  allowing up to four columns for a TUI's right margin. Padding after the head is ignored. The joined token must meet
+  the ordinary path rules. This exception covers one isolated pair of rows, not chains of hard breaks; ordinary terminal
+  wraps still join as before. Diagnostic line/column suffixes and trailing punctuation are excluded. Relative paths use
+  the session's directory, not a shell's later directory. Hover immediately underlines the path and shows a checking
   spinner, then the host, full resolved path and size or refusal. Each hover checks afresh; a redraw beneath a pointer
   resting on the same path text and target at the same position is not a new hover. Leaving cancels it. Only a
   successful check over link text unchanged since that hover admits a click (OSC hyperlinks may show a pointer earlier).

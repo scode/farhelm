@@ -3760,8 +3760,15 @@ grid hosts directly and an old terminal loads as an xterm.js add-on (`XtermFileL
 web providers; only that add-on registers xterm.js link providers or wraps xterm.js's private OSC 8 provider. Link-line
 cells map UTF-16 token offsets to wrapped coordinates, preserving wide/combined glyphs. Logical lines over 8192
 characters or 128 rows are not linkified. Whitespace, quotes and brackets delimit ordinary paths; filenames with spaces
-require an OSC file link. Plain schemes and protocol-relative tokens are excluded. File URIs decode once; their path
-belongs to the session host regardless of URI authority. No shell directory tracking or hover cache is introduced.
+require an OSC file link. A deliberate exception reconstructs one isolated pair of rows broken by a program rather than
+the terminal: the head's last token has no whitespace, quote or bracket after it apart from space padding, the tail's
+first token has only space indentation before it, and that token is longer in terminal columns than the head's unused
+columns minus a four-column right-margin allowance. The existing tokenizer must recognize the joined token; URI
+exclusions and diagnostic suffixes still apply. Both halves share its whole target and mapped range, with padding and
+indentation left out of the target. Consecutive possible hard cuts are left unchanged rather than reconstructing a
+three-row path. Terminal wrap handling and the 8192-character bound remain in force. Plain schemes and protocol-relative
+tokens are excluded. File URIs decode once; their path belongs to the session host regardless of URI authority. No shell
+directory tracking or hover cache is introduced.
 
 The OSC handler enables `allowNonHttpProtocols` and owns the explicit scheme boundary: parsed http/https targets go
 unchanged to the existing opener, valid file targets go to file lookup/download, and every other scheme does nothing.
