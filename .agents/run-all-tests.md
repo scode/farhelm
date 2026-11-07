@@ -147,10 +147,8 @@ Generic recorder wrapping is fine but not required for these; record each result
 Deliberately not here: everything the sweep runs (workspace nextest including the tmux e2e suite, the browser suite on
 both engines, desktop nextest, both doctest runs, the two JS harnesses, `test-install-sh.sh`, CentOS provisioning,
 desktop smoke, including the public-to-local session identity boundary), `scripts/test-tmux-pinned-shutdown.sh` (the
-sweep's workspace nextest runs the same tests on the same pinned tmux), the macOS-only uninstall acceptance (the
-rehearsal's macOS leg runs it in step 4), and the emulator parity's `#[ignore]`d replay of recorded agent sessions
-(`emulator_parity::recordings`), which needs private recordings kept outside the repository; `.agents/validation.md`
-gives its manual command. Also not here: `scripts/test-start-stack-cleanup.sh`, a by-hand check of
+sweep's workspace nextest runs the same tests on the same pinned tmux), and the macOS-only uninstall acceptance (the
+rehearsal's macOS leg runs it in step 4). Also not here: `scripts/test-start-stack-cleanup.sh`, a by-hand check of
 `e2e/start-stack.sh`'s cleanup that `.agents/validation.md` names for changes to it; the sweep's browser phase stops
 every stack it boots through that same cleanup. The focused macOS CI job's terminal host step (the host crate, its entry
 test in the CLI, and the supervisor's spawning, its client, its host terminal runtime, discovery, the test-state cleanup

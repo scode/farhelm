@@ -2689,9 +2689,9 @@ and before a resize; `vte` itself ends one whose bytes reach its 2 MiB buffer. E
 program had not finished. The safety deadline, the buffer limit, a resize, the child's exit and the end of a replay are
 examples of the deliberate exceptions to frames never being drawn half done; a recovering replay also draws an open
 update where it crosses from output an earlier supervisor was sent to output none was, and where it crosses a gap,
-though it carries on to the same final state. The emulator's parity with tmux 3.7c (screen text, cursor, title and
-answers over generated and recorded output, `emulator_parity` in the supervisor) is tested against the pinned tmux, with
-the known differences pinned on both sides.
+though it carries on to the same final state. No test holds the emulator to a live tmux: the crate's own tests pin the
+answer table, the screen-text format and the modes as Farhelm's, and the supervisor's screen fixture tests paint every
+captured agent screen into the emulator and run its status reader on the emulator's text.
 
 Emoji and text variation selectors follow Ghostty's default Unicode width rules: only eligible bases change width,
 selectors after a combining mark are ignored, and text presentation can narrow a wide character. (Old terminals differ
@@ -7427,9 +7427,10 @@ constraint (see the GUI section's motivation), not an afterthought:
   protocol version, property tests, at least 95% line coverage and mutation testing; the suite also runs in the focused
   macOS CI job), higher than the rest of the workspace's because a running host outlives every release that could fix
   it. The supervisor's side starts real hosts from the built `farhelm`, never inside a test process, since a host forks;
-  the emulator is held to the pinned tmux 3.7c by its parity tests and to its snapshot round trip by property tests; and
-  the grid client has a static-page browser suite fed recorded grid streams beside the browser specs that run terminals
-  in hosts on a real stack. `.agents/validation.md` names the selections.
+  the emulator is held to Farhelm's answer table, screen-text format and modes by its own tests (the recorded agents'
+  startup probes among them), the status readers by the captured agent screens painted into it, and its snapshot round
+  trip by property tests; and the grid client has a static-page browser suite fed recorded grid streams beside the
+  browser specs that run terminals in hosts on a real stack. `.agents/validation.md` names the selections.
 - **`node --test` unit-tests the asset-JS layer's pure functions**, under `crates/farhelm-ui/js-tests/` (outside
   `assets/` for source/test separation — bundling itself is by explicit `asset!` registration, so placement alone
   neither includes nor excludes a file). It currently covers `term-bytes.js`'s byte-domain conversion for

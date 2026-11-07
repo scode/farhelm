@@ -532,34 +532,34 @@ that its required systemd or SSH substrate ran.
   file.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal emulator' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-terminal-emulator`
   — the supervisor's terminal emulator (`crates/farhelm-terminal-emulator/`), run in-process with no pty, tmux or
-  network: the query-answer table against tmux 3.7c's recorded answers, side effects by feed mode (live, replay of seen
-  and of unseen output), the synchronized-output deadline on a hand-stepped clock (and its flush before a resize), the
-  snapshot split candidate on agent-shaped reads, a property test that whole, byte-at-a-time, chunked and
-  candidate-split feeding end in the same state once any open update is flushed, the handler's forwarding as a property
-  test against a bare `alacritty_terminal`, screen text and titles shaped like tmux's capture (tabs, modes 47 and 1047),
-  the mode accessors (mouse tracking resets as in tmux), the browser theme's colors, one-column terminals with wide
-  characters and resizes (each bounded to 10 seconds, so that a regression of the vendored reflow fix fails after about
-  1 GB of allocation instead of running until memory runs out), a screen full of tabs captured in linear time, and
-  hostile output through the vendored caps (combining floods, 8 MB OSC 52 and titles, long hyperlinks, floods of
-  hyperlinks and combining marks against the per-terminal extra storage, a synchronized update past vte's 2 MiB buffer).
-  The terminal snapshot format: the round trip (a recording fed in reads, snapshots where the emulator is clean after a
-  read's split candidate or end, restore, then compare field by field with the uninterrupted emulator after the rest of
-  the output in the same reads, after probes, and after the rest in other reads and a final flush) as a property test
-  over generated output, over a one-column terminal and over two short synthetic recordings, and over 20,000 short
-  scripts of awkward output and resizes (from 8x4 and two columns, each continued after the restore); the review
-  reproducers (a one-column encoder panic, four round-trip losses); the version 1 golden fixtures
-  (`tests/fixtures/snapshots/v1/`: each blob restores to its recorded state, each script still encodes to its blob and
-  reaches its feature); hand-built version 1 blobs and refusals of malformed, truncated, oversized (before allocating)
-  and unknown-version blobs, of streams holding sequences version 1 never writes or taking too much work to replay
-  (before feeding), and of fixups no live output makes; history past the restore's cell bound dropped and marked
-  trimmed; mutated and crafted blobs never panicking; extras shared by content through a restore, within the extra
-  storage limit; the size ladder (titles before history); the trimmed mark across restores; an encode's cancel (nothing
-  once it fires, the same bytes until then); the character width table's fingerprint; the Restart seeds, and a seed's
-  encode stopping at whichever look its cancel fires on, and a seed from a tmux pane's capture cut short marked trimmed,
-  its styles carried across line ends without a background filling the next row, its line drawing restored, its history
-  bounded by its restore budget (none at 10,000 by 400), and the history lines a seed holds reported. About a minute.
-  Part of the workspace nextest run. Run it when the crate or anything under `vendor/` changes. Ignored tests, run by
-  hand in release: the snapshot spike's full round-trip configuration
+  network: Farhelm's query-answer table, side effects by feed mode (live, replay of seen and of unseen output), the
+  synchronized-output deadline on a hand-stepped clock (and its flush before a resize), the snapshot split candidate on
+  agent-shaped reads, a property test that whole, byte-at-a-time, chunked and candidate-split feeding end in the same
+  state once any open update is flushed, the handler's forwarding as a property test against a bare
+  `alacritty_terminal`, Farhelm's screen-text format and titles (tabs, modes 47 and 1047), the mode accessors (resetting
+  any mouse tracking mode ends reporting), the browser theme's colors, one-column terminals with wide characters and
+  resizes (each bounded to 10 seconds, so that a regression of the vendored reflow fix fails after about 1 GB of
+  allocation instead of running until memory runs out), a screen full of tabs captured in linear time, and hostile
+  output through the vendored caps (combining floods, 8 MB OSC 52 and titles, long hyperlinks, floods of hyperlinks and
+  combining marks against the per-terminal extra storage, a synchronized update past vte's 2 MiB buffer). The terminal
+  snapshot format: the round trip (a recording fed in reads, snapshots where the emulator is clean after a read's split
+  candidate or end, restore, then compare field by field with the uninterrupted emulator after the rest of the output in
+  the same reads, after probes, and after the rest in other reads and a final flush) as a property test over generated
+  output, over a one-column terminal and over two short synthetic recordings, and over 20,000 short scripts of awkward
+  output and resizes (from 8x4 and two columns, each continued after the restore); the review reproducers (a one-column
+  encoder panic, four round-trip losses); the version 1 golden fixtures (`tests/fixtures/snapshots/v1/`: each blob
+  restores to its recorded state, each script still encodes to its blob and reaches its feature); hand-built version 1
+  blobs and refusals of malformed, truncated, oversized (before allocating) and unknown-version blobs, of streams
+  holding sequences version 1 never writes or taking too much work to replay (before feeding), and of fixups no live
+  output makes; history past the restore's cell bound dropped and marked trimmed; mutated and crafted blobs never
+  panicking; extras shared by content through a restore, within the extra storage limit; the size ladder (titles before
+  history); the trimmed mark across restores; an encode's cancel (nothing once it fires, the same bytes until then); the
+  character width table's fingerprint; the Restart seeds, and a seed's encode stopping at whichever look its cancel
+  fires on, and a seed from a tmux pane's capture cut short marked trimmed, its styles carried across line ends without
+  a background filling the next row, its line drawing restored, its history bounded by its restore budget (none at
+  10,000 by 400), and the history lines a seed holds reported. About a minute. Part of the workspace nextest run. Run it
+  when the crate or anything under `vendor/` changes. Ignored tests, run by hand in release: the snapshot spike's full
+  round-trip configuration
   (`cargo nextest run -p farhelm-terminal-emulator --release --run-ignored only -E 'test(/^full_size_round_trip_seed_/)'`,
   a few minutes), the review's 300,000 short scripts (`-E 'test(short_scripts_round_trip_at_review_size)'`) and 230,000
   hostile blobs (`-E 'test(hostile_blobs_never_panic_at_review_size)'`), the full round trip over private recordings of
@@ -574,22 +574,13 @@ that its required systemd or SSH substrate ran.
   blob size and history dropped. Fixture shape and repeated bytes are asserted; elapsed time is not. Compare on the same
   machine with load recorded. Generic recording permits `--no-capture`; the controlled nextest mode does not. Run it
   when the snapshot encoder changes, beside correctness and memory checks; minutes, no tmux or network.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'emulator parity with tmux' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor --lib -E 'test(emulator_parity::)'`
-  — the terminal emulator against the pinned tmux 3.7c, run with Farhelm's server configuration in a private server per
-  test (`crates/farhelm-supervisor/src/emulator_parity/`): screen text, cursor, title and query answers compared at
-  every cut of hand-picked and seeded random output (wide, combining and emoji characters, wraps, trailing blanks,
-  colors, the alternate screen, scroll regions, origin and insert modes, erases, saved cursors, titles, synchronized
-  updates, resizes), with every update closed and the uncompared cuts inside updates bounded, the harness's own
-  comparator and dead-pane checks, the frozen agent screens repainted with their status readers run on the emulator's
-  text, recorded agents' startup probes, and the emulator's whole answer table, with the known screen and answer
-  differences pinned on both sides. Without that tmux first on `PATH` each test says `SKIPPED`. Under a minute on a
-  quiet machine, a few on a loaded one (the generated streams). Part of the workspace nextest run, in the supervisor's
-  two-slot tmux group; run it when the emulator crate, `vendor/`, the supervisor's tmux configuration or a status reader
-  changes. Its one `#[ignore]`d test replays real agent sessions, which stay outside the repository because they hold
-  conversation text: set `FARHELM_TEST_AGENT_RECORDINGS` to `<harness>=<directory>` entries separated by `:` (each
-  directory holding the session's `raw.bin` and `events.jsonl`, `recordings.rs` gives the format) and run the same
-  command with `--keep-farhelm-env FARHELM_TEST_AGENT_RECORDINGS` before the `--` and `--run-ignored only` after
-  `--lib`, selecting `test(emulator_parity::recordings::)`.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'agent screen fixtures' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^agent_kind::screen_fixtures::/) | test(/^agent_kind::status_line_fixtures::/)'`
+  — status detection against the captured agent screens (`crates/farhelm-supervisor/tests/fixtures/screens/` and
+  `tests/fixtures/status-lines/`, `docs/agent-screen-fixtures.md`): the fixtures' shape and privacy checks, each screen
+  read as the state it was captured in by its harness's reader, the permission-mode footers, and each screen painted
+  into the supervisor's terminal emulator reading back as the same text, with every row on its own row, and read by its
+  reader as the captured screen is. No tmux: the captured text is the expected value. Seconds, in-process. Part of the
+  workspace nextest run; run it when a status reader, the emulator crate, `vendor/` or the fixtures change.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'grid input encoder' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^grid_input::/)'`
   — the supervisor's encoder of grid viewer input (`crates/farhelm-supervisor/src/grid_input.rs`): keys against the
   golden table `crates/farhelm-supervisor/tests/fixtures/xterm-keys.jsonl` (the sequence the vendored xterm.js's

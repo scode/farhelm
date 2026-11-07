@@ -14,15 +14,21 @@
 //! name is the tool's ground truth, never a reader's verdict, which is what
 //! lets these screens act as an oracle for the per-harness screen readers:
 //! after a vendor upgrade, re-running the tool and then these tests shows which
-//! new screens the readers no longer understand.
+//! new screens the readers no longer understand. The last tests paint every
+//! screen into the supervisor's terminal emulator, so the readers are held to
+//! a new terminal's text as well as to the captured text.
 //!
 //! Screens are committed to a public repository, so the capture tool scrubs
 //! them and this module refuses any that still look identifying — a second,
 //! independent check on the one place personal data could enter.
 
-use super::screen_reader::{SAMPLE_TAIL_BYTES, SampleCounts, Screen, ScreenState, reader_for};
+use super::screen_reader::{
+    Reading, SAMPLE_TAIL_BYTES, SampleCounts, Screen, ScreenState, reader_for,
+};
 use farhelm_proto::AgentKind;
+use farhelm_terminal_emulator::{Collected, Emulator, FeedMode, Size, trim_screen_tail};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 /// The states a fixture's file name may promise. `unknown` is a screen the
 /// reader should decline to classify (a menu, a transcript viewer), keeping
@@ -32,9 +38,9 @@ const EXPECTED_STATES: &[&str] = &["working", "waiting", "idle", "unknown"];
 /// Harnesses represented by real or explicitly derived screen fixtures.
 const HARNESSES: &[&str] = &["claude", "codex", "muse"];
 
-/// The agent kind for a harness as fixture directories (and the emulator
-/// parity tests' recordings) name it, one of [`HARNESSES`].
-pub(crate) fn agent_kind(harness: &str) -> AgentKind {
+/// The agent kind for a harness as fixture directories name it, one of
+/// [`HARNESSES`].
+fn agent_kind(harness: &str) -> AgentKind {
     match harness {
         "claude" => AgentKind::Claude,
         "codex" => AgentKind::Codex,
@@ -45,21 +51,21 @@ pub(crate) fn agent_kind(harness: &str) -> AgentKind {
 
 /// One captured screen with the state the capture tool drove the agent into.
 #[derive(Debug)]
-pub(crate) struct ScreenFixture {
+struct ScreenFixture {
     /// The harness whose terminal was captured.
-    pub(crate) harness: String,
+    harness: String,
     /// The vendor's version string the screen was captured from.
-    pub(crate) version: String,
+    version: String,
     /// One of [`EXPECTED_STATES`].
-    pub(crate) expected: String,
+    expected: String,
     /// The rest of the file name, naming what the tool was doing.
-    pub(crate) scenario: String,
+    scenario: String,
     /// The raw visible grid.
-    pub(crate) screen: String,
+    screen: String,
     /// The pane title at capture time, without its trailing newline.
-    pub(crate) title: String,
+    title: String,
     /// Where the screen came from, for failure messages.
-    pub(crate) path: PathBuf,
+    path: PathBuf,
 }
 
 /// The fixture tree inside this crate.
@@ -72,7 +78,7 @@ fn fixtures_root() -> PathBuf {
 ///
 /// Stable ordering keeps a failing assertion pointing at the same screen on
 /// every run, which matters when a vendor upgrade breaks several at once.
-pub(crate) fn load_fixtures() -> Vec<ScreenFixture> {
+fn load_fixtures() -> Vec<ScreenFixture> {
     let mut fixtures = Vec::new();
     let root = fixtures_root();
     for harness_dir in sorted_dirs(&root) {
@@ -160,6 +166,18 @@ fn file_name(path: &Path) -> String {
 /// join the same complete activity contract as Claude and Codex.
 fn has_activity_contract(fixture: &ScreenFixture) -> bool {
     fixture.harness != "muse" || fixture.version != "1.4.10-R6427.1"
+}
+
+/// What `kind`'s reader concludes from a screen tail and title, asked the way
+/// the sampler asks once a run has history and the screen just changed: the
+/// one way every test here reads a screen, so that they all hold the readers
+/// to the same sampling state.
+fn read_as_sampled(kind: AgentKind, text: &str, title: &str) -> Reading {
+    let counts = SampleCounts {
+        samples: 9,
+        unchanged_streak: 0,
+    };
+    reader_for(kind).read(counts, &Screen { text, title })
 }
 
 /// Whether `text` holds something shaped like an email address: a local part
@@ -356,18 +374,8 @@ fn screen_fixtures_read_as_the_state_they_were_captured_in() {
             "idle" => ScreenState::Idle,
             _ => ScreenState::Unknown,
         };
-        let text = crate::tmux::retain_pane_tail(&fixture.screen, SAMPLE_TAIL_BYTES);
-        let counts = SampleCounts {
-            samples: 9,
-            unchanged_streak: 0,
-        };
-        let reading = reader_for(kind).read(
-            counts,
-            &Screen {
-                text: &text,
-                title: &fixture.title,
-            },
-        );
+        let text = trim_screen_tail(&fixture.screen, SAMPLE_TAIL_BYTES);
+        let reading = read_as_sampled(kind, text, &fixture.title);
         if reading.state != expected || !reading.anchored {
             failures.push(format!(
                 "{} {} {}-{}: expected {expected:?}, read {:?}{}",
@@ -416,17 +424,8 @@ fn claude_background_wait_screen_becomes_idle_after_the_turn_finishes() {
         finished, fixture.screen,
         "fixture premise: waiting line exists"
     );
-    let text = crate::tmux::retain_pane_tail(&finished, SAMPLE_TAIL_BYTES);
-    let reading = reader_for(AgentKind::Claude).read(
-        SampleCounts {
-            samples: 9,
-            unchanged_streak: 0,
-        },
-        &Screen {
-            text: &text,
-            title: &fixture.title,
-        },
-    );
+    let text = trim_screen_tail(&finished, SAMPLE_TAIL_BYTES);
+    let reading = read_as_sampled(AgentKind::Claude, text, &fixture.title);
     assert_eq!(reading.state, ScreenState::Idle);
     assert!(reading.anchored);
 }
@@ -452,17 +451,8 @@ fn codex_working_widget_alone_reads_real_screens_as_working() {
         {
             continue;
         }
-        let text = crate::tmux::retain_pane_tail(&fixture.screen, SAMPLE_TAIL_BYTES);
-        let reading = reader_for(AgentKind::Codex).read(
-            SampleCounts {
-                samples: 9,
-                unchanged_streak: 0,
-            },
-            &Screen {
-                text: &text,
-                title: "",
-            },
-        );
+        let text = trim_screen_tail(&fixture.screen, SAMPLE_TAIL_BYTES);
+        let reading = read_as_sampled(AgentKind::Codex, text, "");
         assert_eq!(
             reading.state,
             ScreenState::Working,
@@ -476,5 +466,120 @@ fn codex_working_widget_alone_reads_real_screens_as_working() {
     assert!(
         checked > 0,
         "no captured Codex working screen shows the widget"
+    );
+}
+
+// ---- The emulator's repaint of the captured screens ---------------------------
+//
+// A new terminal's text comes from the supervisor's emulator, not from a
+// capture like the ones stored here, so the readers' expectations must
+// survive that move too. The fixtures hold captured text, never the bytes the
+// agent wrote, so the readers cannot be run on the emulator's version of the
+// same session. What can be checked is the next best thing: paint each
+// captured screen into an emulator, row by row at an absolute position, and
+// run the reader on the emulator's own text. That holds the emulator to
+// exactly the characters agents draw (box drawing, block elements, spinners,
+// emoji, wide CJK), including whether each row still fits on its row: a row
+// the emulator drew wider than the capture's 133 columns would wrap, and its
+// text would no longer match.
+
+/// The terminal width the capture tool uses (`scripts/capture-agent-screens.py`,
+/// `PANE_COLUMNS`); a screen's height is its number of rows.
+const CAPTURE_COLUMNS: u16 = 133;
+
+/// The capture tool's stand-in for the host name an old terminal reports as
+/// its title before a program sets one. The repaint sets no title for it, so
+/// the emulator's empty title is what reaches the reader, as it would for a
+/// new terminal whose program set none.
+const SCRUBBED_HOST: &str = "host";
+
+/// The bytes that paint `rows`, each at its own absolute position, and set
+/// `title`.
+fn repaint(rows: &[&str], title: &str) -> Vec<u8> {
+    let mut out = String::new();
+    if title != SCRUBBED_HOST && !title.is_empty() {
+        out.push_str(&format!("\x1b]2;{title}\x07"));
+    }
+    for (index, row) in rows.iter().enumerate() {
+        out.push_str(&format!("\x1b[{};1H{row}", index + 1));
+    }
+    out.into_bytes()
+}
+
+/// Every captured agent screen, painted into the supervisor's emulator,
+/// reads back as the same text, and the emulator's tail and title read as
+/// the captured screen does.
+///
+/// Why: status detection's readers are held to these screens, which change only
+/// by re-capture, and a new terminal hands them the emulator's text instead of
+/// a capture. A character the emulator draws wide enough to push a row past the
+/// capture's width, or a format rule it spells differently, would turn a
+/// recognized prompt into an unrecognized one only in new terminals, where
+/// nothing else would notice. This replaced a comparison with a live tmux; it
+/// needs none, because the captured text itself is the expected value. Spec:
+/// for each fixture, the emulator's screen text equals the fixture (the premise
+/// that the repaint reproduces the screen, which a row drawn too wide would
+/// break), and the fixture's reader, given the emulator's own tail
+/// (`Emulator::screen_tail`) and title, reaches the same state and anchoring as
+/// on the fixture's text trimmed as the sampler trims it and its title.
+#[test]
+fn screen_fixtures_read_the_same_from_the_emulator() {
+    let mut failures = Vec::new();
+    let fixtures = load_fixtures();
+    assert!(!fixtures.is_empty(), "no captured screens found");
+    for fixture in &fixtures {
+        let name = format!(
+            "{} {} {}-{}",
+            fixture.harness, fixture.version, fixture.expected, fixture.scenario
+        );
+        let rows: Vec<&str> = fixture.screen.lines().collect();
+        let size = Size {
+            columns: CAPTURE_COLUMNS,
+            lines: u16::try_from(rows.len()).expect("rows"),
+        };
+        let mut emulator = Emulator::new(size, 0);
+        let mut effects = Collected::default();
+        emulator.feed(
+            &repaint(&rows, &fixture.title),
+            Instant::now(),
+            FeedMode::Live,
+            &mut effects,
+        );
+        let text = emulator.screen_text();
+        if text != fixture.screen {
+            failures.push(format!(
+                "{name}: the repaint does not reproduce the screen:\n  emulator: {text:?}\n  fixture:  {:?}",
+                fixture.screen
+            ));
+            continue;
+        }
+        let kind = agent_kind(&fixture.harness);
+        let captured = read_as_sampled(
+            kind,
+            trim_screen_tail(&fixture.screen, SAMPLE_TAIL_BYTES),
+            &fixture.title,
+        );
+        let painted = read_as_sampled(
+            kind,
+            &emulator.screen_tail(SAMPLE_TAIL_BYTES),
+            emulator.title(),
+        );
+        let (captured, painted) = (
+            (captured.state, captured.anchored),
+            (painted.state, painted.anchored),
+        );
+        if captured != painted {
+            failures.push(format!(
+                "{name}: the reader concludes {captured:?} (state, anchored) from the captured \
+                 screen, {painted:?} from the emulator's"
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} screens differ:\n\n{}",
+        failures.len(),
+        fixtures.len(),
+        failures.join("\n\n")
     );
 }

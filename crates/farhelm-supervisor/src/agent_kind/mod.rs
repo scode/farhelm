@@ -246,7 +246,7 @@ pub(crate) mod pi;
 mod records;
 pub(crate) mod report_pin;
 #[cfg(test)]
-pub(crate) mod screen_fixtures;
+mod screen_fixtures;
 pub(crate) mod screen_reader;
 #[cfg(test)]
 mod status_line_fixtures;
@@ -1595,7 +1595,9 @@ fn is_codex_composer_padding(line: &str) -> bool {
 /// No ASCII space is required after the prompt: a sparkle is allowed in its
 /// column-one blank cell, and requiring a space would reject the observed
 /// idle frame this normalization exists to handle. An empty first draft row
-/// captures as the bare prompt because tmux removes trailing blank cells.
+/// reads as the bare prompt because screen text drops trailing blank cells
+/// (Farhelm's screen-text format, `farhelm_terminal_emulator`'s `screen`
+/// module, which an old terminal's tmux capture follows too).
 fn is_codex_prompt_row(line: &str) -> bool {
     let Some(rest) = line.strip_prefix('›') else {
         return false;
@@ -1607,8 +1609,8 @@ fn is_codex_prompt_row(line: &str) -> bool {
 
 /// Whether a wrapped textarea row has only blank/sparkle cells in its indent.
 ///
-/// Tmux trims trailing blanks: a blank draft row can therefore contain zero
-/// characters, or just one sparkle. Missing captured cells are blank here;
+/// Screen text drops trailing blanks: a blank draft row can therefore contain
+/// zero characters, or just one sparkle. Missing captured cells are blank here;
 /// a present non-padding character in either indent cell still rejects it.
 fn is_codex_wrapped_row(line: &str) -> bool {
     line.chars()

@@ -335,3 +335,47 @@ fn a_query_inside_an_open_update_is_answered_when_it_ends() {
     assert_eq!(asked.replies, b"", "held until the update ends");
     assert_eq!(feed(&mut emulator, b"\x1b[?2026l").replies, b"\x1b[3;4R");
 }
+
+/// The startup probes Claude Code 2.1.316 and Codex 0.166.0 were recorded
+/// sending, byte for byte and each burst in one write, get fixed answers:
+/// Claude Code's first burst a version report first and DA1 last, with its
+/// kitty keyboard query and its unknown OSC 7501 unanswered; its second the
+/// synchronized-output report and DA1; Codex's DA1, the cursor position and
+/// both colors in the ST form it asked in.
+///
+/// Why: these are the answers agents act on at startup. Claude Code asks for
+/// mode 2026 only after a version report, and without one draws without
+/// synchronized output; Codex picks its palette from the background color.
+/// Only the queries are kept from those recordings, which hold conversation
+/// text and stay out of the repository. The cursor is placed away from the
+/// origin, at a production size, so the position report says something.
+/// Spec: `src/queries.rs`, the table and the XTVERSION paragraph.
+#[test]
+fn recorded_agent_startup_probes_get_their_answers() {
+    const CLAUDE_FIRST: &str = "\x1b[>0q\x1b[?u\x1b]7501;?\x07\x1b[c";
+    const CLAUDE_SECOND: &str = "\x1b[?2026$p\x1b[c";
+    const CODEX: &str = "\x1b[?u\x1b[c\x1b[6n\x1b]10;?\x1b\\\x1b]11;?\x1b\\";
+    let cases: [(&str, &str, String); 3] = [
+        (
+            "Claude Code 2.1.316, first burst",
+            CLAUDE_FIRST,
+            format!("{VERSION_REPORT}\x1b[?1;2c"),
+        ),
+        (
+            "Claude Code 2.1.316, second burst",
+            CLAUDE_SECOND,
+            "\x1b[?2026;2$y\x1b[?1;2c".to_owned(),
+        ),
+        (
+            "Codex 0.166.0",
+            CODEX,
+            "\x1b[?1;2c\x1b[31;3R\x1b]10;rgb:ffff/ffff/ffff\x1b\\\x1b]11;rgb:2828/2c2c/3434\x1b\\"
+                .to_owned(),
+        ),
+    ];
+    for (name, probe, expected) in cases {
+        let mut emulator = emulator(133, 42);
+        assert_eq!(feed(&mut emulator, b"\x1b[31;3H").replies, b"", "{name}");
+        assert_eq!(answer_from(&mut emulator, probe), expected, "{name}");
+    }
+}
