@@ -454,9 +454,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
   approval.
 
-- **Agent subscription logins in Tensorlake sandboxes.** Support subscription logins and credential upload for agents in
-  sandboxes, alongside the existing API endpoint settings. Plan: `plans/queue/settings-credentials.md`.
-
 - **Investigate Tensorlake's ssh gateway leaving forwarded channels open, and report it if it is a bug.** Through the
   gateway, an ssh client holding a remote-forwarded connection never learned that the sandbox side was gone: the sandbox
   side was torn down within half a second, but the local ssh and its connection to the local service were still up 185
@@ -500,7 +497,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     broke and was fixed on 2026-11-03).
   - Per-repository snapshots on top of a recipe's prepared snapshot, refreshed with an incremental `git fetch` at spawn,
     and a refresh story for those snapshots. Fresh sandboxes have no Git credentials, so private repositories need
-    credentials injected per sandbox; the GH_TOKEN entry above is a prerequisite, not a nicety.
+    credentials injected per sandbox; the GitHub token delivery recipes now give Tensorlake hosts is where that starts.
   - Session-owned host rows that the hosts panel hides, with the session's lifecycle driving the sandbox's (create,
     suspend, delete), and cleanup that cannot leave billed sandboxes or snapshots behind when a helm dies mid-spawn.
   - Either the supervisor baked into the prepared snapshot with its identity reset per clone (clones also share

@@ -223,6 +223,145 @@ impl Fixture {
             .unwrap()
             .unwrap();
     }
+
+    /// Use real catalog admission and recipe writes so delivery's frozen
+    /// binding can distinguish a pending mode edit from a value replacement.
+    async fn select_claude(&self, login: Option<&str>, api_endpoint: bool) {
+        let mut recipe = crate::tensorlake::recipes::tests_support::save();
+        recipe.claude = api_endpoint.then(|| endpoint("https://first.example/v1", "work"));
+        recipe.claude_login_credential = login.map(str::to_owned);
+        self.store
+            .update_tensorlake_recipe("recipe".into(), recipe)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    /// The fake value lives only in the catalog until delivery writes the
+    /// ordinary settings file. No fixture preinstalls the expected token.
+    async fn claude_credential(&self, value: &str) {
+        self.store
+            .create_credential(CreateCredential {
+                name: "claude-work".into(),
+                kind: CredentialKind::ClaudeLogin,
+                secret: value.into(),
+            })
+            .await
+            .unwrap();
+    }
+}
+
+/// A mode edit waits for connection, while a saved value replacement reaches
+/// the current connection. Durable settings fingerprints make an unchanged
+/// reconnect do no SSH work, without creating onboarding metadata.
+#[farhelm_testtrace::test]
+async fn claude_subscription_reconciles_modes_replacements_and_reconnects() {
+    const LOGIN: &str = "sk-ant-oat01-fictional-claude-first";
+    const REPLACED: &str = "sk-ant-oat01-fictional-claude-second";
+    let f = Fixture::new(false).await;
+    f.claude_credential(LOGIN).await;
+    let lease = f.connected().await;
+    let mut settings: serde_json::Value = serde_json::from_str(&f.claude().await).unwrap();
+    settings["permissions"] = serde_json::json!({"allow":["Read"]});
+    settings["env"]["KEEP"] = "personal".into();
+    std::fs::write(
+        f.home.join(".claude/settings.json"),
+        serde_json::to_vec(&settings).unwrap(),
+    )
+    .unwrap();
+    f.select_claude(Some("claude-work"), false).await;
+    let before = f.operations();
+    assert!(f.delivery.push("claude-work", &f.events).await.is_empty());
+    assert_eq!(f.operations(), before, "recipe edits remain deferred");
+    assert!(!f.claude().await.contains(LOGIN));
+    drop(lease);
+    let lease = f.delivery.enter(&f.row);
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(f.delivery.warning(f.row.id), None);
+    let settings: serde_json::Value = serde_json::from_str(&f.claude().await).unwrap();
+    assert_eq!(settings["env"]["CLAUDE_CODE_OAUTH_TOKEN"], LOGIN);
+    assert!(settings["env"].get("ANTHROPIC_BASE_URL").is_none());
+    assert!(settings["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
+    assert_eq!(settings["env"]["KEEP"], "personal");
+    assert_eq!(settings["permissions"]["allow"][0], "Read");
+    assert!(
+        !f.home.join(".claude.json").exists(),
+        "Farhelm writes no onboarding metadata"
+    );
+    assert_eq!(
+        std::fs::metadata(f.home.join(".claude/settings.json"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    f.replace("claude-work", REPLACED).await;
+    assert!(f.delivery.push("claude-work", &f.events).await.is_empty());
+    assert!(f.claude().await.contains(REPLACED) && !f.claude().await.contains(LOGIN));
+    let record = f.delivery.read_record(&f.row).await.unwrap();
+    assert!(!serde_json::to_string(&record).unwrap().contains(REPLACED));
+    drop(lease);
+    let restarted = CredentialDelivery::new(f.store.clone(), f.backend.clone());
+    let lease = restarted.enter(&f.row);
+    let before = f.operations();
+    restarted.connect(&f.row, &f.events).await;
+    assert_eq!(restarted.warning(f.row.id), None);
+    assert_eq!(
+        f.operations(),
+        before,
+        "unchanged reconnect performs no transport work"
+    );
+    drop(lease);
+    for endpoint in [true, false] {
+        f.select_claude(None, endpoint).await;
+        let lease = restarted.enter(&f.row);
+        restarted.connect(&f.row, &f.events).await;
+        assert_eq!(restarted.warning(f.row.id), None);
+        let settings: serde_json::Value = serde_json::from_str(&f.claude().await).unwrap();
+        assert!(settings["env"].get("CLAUDE_CODE_OAUTH_TOKEN").is_none());
+        assert_eq!(
+            settings["env"].get("ANTHROPIC_BASE_URL").is_some(),
+            endpoint
+        );
+        assert_eq!(
+            settings["env"].get("ANTHROPIC_AUTH_TOKEN").is_some(),
+            endpoint
+        );
+        assert_eq!(settings["env"]["KEEP"], "personal");
+        drop(lease);
+    }
+}
+
+/// A deleted name can be recreated at revision1. A completed None mode must
+/// not let its old subscription stamp suppress the new incarnation's value.
+#[farhelm_testtrace::test]
+async fn recreated_claude_login_is_delivered_after_none() {
+    let f = Fixture::new(false).await;
+    f.claude_credential("fictional-first-claude").await;
+    f.select_claude(Some("claude-work"), false).await;
+    let lease = f.delivery.enter(&f.row);
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(f.delivery.warning(f.row.id), None);
+    let first = f.stamp("claude-work", 1).await;
+    drop(lease);
+    f.select_claude(None, false).await;
+    let lease = f.delivery.enter(&f.row);
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(f.delivery.warning(f.row.id), None);
+    drop(lease);
+    f.store
+        .delete_credential("claude-work".into())
+        .await
+        .unwrap();
+    f.claude_credential("fictional-recreated-claude").await;
+    assert_ne!(f.stamp("claude-work", 1).await, first);
+    f.select_claude(Some("claude-work"), false).await;
+    let _lease = f.delivery.enter(&f.row);
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(f.delivery.warning(f.row.id), None);
+    assert!(f.claude().await.contains("fictional-recreated-claude"));
+    assert!(!f.claude().await.contains("fictional-first-claude"));
 }
 
 /// Codex owns refreshed auth bytes after the initial seed. Durable revision

@@ -31,7 +31,9 @@
 //! Endpoints store credential names, never values. Because an outdated client
 //! can still submit an embedded token, a body that does not
 //! decode gets a fixed refusal instead of serde's diagnostic, which can quote
-//! the submitted text. Only transient resolved endpoints carry secret values.
+//! the submitted text. Only transient delivery inputs carry secret values.
+//! Subscription names obey the same transactional reference protection as
+//! endpoint tokens; each agent selects exactly one authentication mode.
 //!
 //! Saving never builds: a build bills, so only the explicit build route starts
 //! one. The routes call Tensorlake only for a delete's cleanup and a retired
@@ -95,6 +97,7 @@ pub(crate) struct StoredRecipe {
     pub(crate) source: RecipeSource,
     pub(crate) claude: Option<StoredEndpoint>,
     pub(crate) codex: Option<StoredEndpoint>,
+    pub(crate) claude_login_credential: Option<String>,
     pub(crate) codex_login_credential: Option<String>,
     pub(crate) github_token_credential: Option<String>,
     pub(crate) tunnels: Vec<Tunnel>,
@@ -118,6 +121,7 @@ impl StoredRecipe {
             source: save.source,
             claude,
             codex,
+            claude_login_credential: save.claude_login_credential,
             codex_login_credential: save.codex_login_credential,
             github_token_credential: save.github_token_credential,
             tunnels: save.tunnels,
@@ -138,6 +142,7 @@ impl StoredRecipe {
             source: self.source.clone(),
             claude: endpoint(&self.claude),
             codex: endpoint(&self.codex),
+            claude_login_credential: self.claude_login_credential.clone(),
             codex_login_credential: self.codex_login_credential.clone(),
             github_token_credential: self.github_token_credential.clone(),
             tunnels: self.tunnels.clone(),
@@ -166,6 +171,17 @@ fn resolve_endpoint(save: Option<EndpointSave>) -> Result<Option<StoredEndpoint>
 /// Name/kind admission belongs to the same transaction that saves the recipe;
 /// a separate catalog preflight would race deletion on another connection.
 fn check_credentials(conn: &Connection, spec: &StoredRecipe) -> anyhow::Result<Option<Refusal>> {
+    if let Some(name) = &spec.claude_login_credential
+        && !crate::credentials::has_kind(
+            conn,
+            name,
+            farhelm_proto::credentials::CredentialKind::ClaudeLogin,
+        )?
+    {
+        return Ok(Some(Refusal::Invalid(
+            "select an existing Claude login in Settings → Credentials".into(),
+        )));
+    }
     if let Some(name) = &spec.codex_login_credential
         && !crate::credentials::has_kind(
             conn,
@@ -845,6 +861,7 @@ pub(crate) mod tests_support {
             claude: None,
             codex: None,
             github_token_credential: None,
+            claude_login_credential: None,
             codex_login_credential: None,
             tunnels: vec![],
         }

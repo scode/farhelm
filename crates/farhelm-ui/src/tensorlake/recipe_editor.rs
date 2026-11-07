@@ -13,7 +13,7 @@
 //! Requests follow the explicit-save pattern of the ntfy form: they are
 //! declared in the click handler and spawned with `spawn_forever`, so closing
 //! Settings does not retract an accepted save, and they touch component state
-//! only while it is still mounted. Endpoint tokens and Codex logins select
+//! only while it is still mounted. Endpoint tokens and agent logins select
 //! names from the metadata catalog; values never enter the recipe draft or save.
 //!
 //! Wording follows the goal's UI decisions: the built artifact is a
@@ -53,10 +53,10 @@ struct EndpointDraft {
     token_credential: String,
 }
 
-/// Codex keeps each mode's draft while only the selected mode reaches the
-/// recipe. None and Subscription both stop selecting Farhelm's API provider.
+/// Each agent keeps its mode's draft while only the selected choice reaches
+/// the recipe. A mode switch never submits a hidden endpoint or login name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CodexMode {
+enum AgentMode {
     None,
     Endpoint,
     Subscription,
@@ -86,7 +86,9 @@ struct Draft {
     snapshot_id: String,
     claude: EndpointDraft,
     codex: EndpointDraft,
-    codex_mode: CodexMode,
+    claude_mode: AgentMode,
+    claude_login_credential: String,
+    codex_mode: AgentMode,
     codex_login_credential: String,
     github_token_credential: String,
     tunnels: Vec<TunnelDraft>,
@@ -107,7 +109,9 @@ impl Draft {
             snapshot_id: String::new(),
             claude: EndpointDraft::default(),
             codex: EndpointDraft::default(),
-            codex_mode: CodexMode::None,
+            claude_mode: AgentMode::None,
+            claude_login_credential: String::new(),
+            codex_mode: AgentMode::None,
             codex_login_credential: String::new(),
             github_token_credential: String::new(),
             tunnels: Vec::new(),
@@ -148,12 +152,20 @@ impl Draft {
         };
         draft.claude = endpoint(&view.claude);
         draft.codex = endpoint(&view.codex);
-        draft.codex_mode = if view.codex.is_some() {
-            CodexMode::Endpoint
-        } else if view.codex_login_credential.is_some() {
-            CodexMode::Subscription
+        draft.claude_mode = if view.claude.is_some() {
+            AgentMode::Endpoint
+        } else if view.claude_login_credential.is_some() {
+            AgentMode::Subscription
         } else {
-            CodexMode::None
+            AgentMode::None
+        };
+        draft.claude_login_credential = view.claude_login_credential.clone().unwrap_or_default();
+        draft.codex_mode = if view.codex.is_some() {
+            AgentMode::Endpoint
+        } else if view.codex_login_credential.is_some() {
+            AgentMode::Subscription
+        } else {
+            AgentMode::None
         };
         draft.codex_login_credential = view.codex_login_credential.clone().unwrap_or_default();
         draft.github_token_credential = view.github_token_credential.clone().unwrap_or_default();
@@ -210,12 +222,25 @@ impl Draft {
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
-        let codex = if self.codex_mode == CodexMode::Endpoint {
+        let claude = if self.claude_mode == AgentMode::Endpoint {
+            Some(endpoint_save(&self.claude).ok_or("Claude API endpoint needs a base URL")?)
+        } else {
+            None
+        };
+        let claude_login_credential = if self.claude_mode == AgentMode::Subscription {
+            if self.claude_login_credential.is_empty() {
+                return Err("choose a Claude login in Subscription mode".into());
+            }
+            Some(self.claude_login_credential.clone())
+        } else {
+            None
+        };
+        let codex = if self.codex_mode == AgentMode::Endpoint {
             Some(endpoint_save(&self.codex).ok_or("Codex API endpoint needs a base URL")?)
         } else {
             None
         };
-        let codex_login_credential = if self.codex_mode == CodexMode::Subscription {
+        let codex_login_credential = if self.codex_mode == AgentMode::Subscription {
             if self.codex_login_credential.is_empty() {
                 return Err("choose a Codex login in Subscription mode".into());
             }
@@ -226,8 +251,9 @@ impl Draft {
         let save = RecipeSave {
             size,
             source,
-            claude: endpoint_save(&self.claude),
+            claude,
             codex,
+            claude_login_credential,
             codex_login_credential,
             github_token_credential: (!self.github_token_credential.is_empty())
                 .then(|| self.github_token_credential.clone()),
@@ -709,21 +735,42 @@ pub(crate) fn RecipeEditor(
                     p { class: "host-settings-help", "Claude Code and Codex are installed with their official installers when the snapshot is built." }
                 }
                 p { class: "host-settings-help",
-                    "Optionally point either agent at an API endpoint. The base URL usually points at a tunnel's sandbox port, such as http://127.0.0.1:8080. Farhelm writes these into each host's agent settings when it sets the host up."
+                    "Choose how each agent authenticates. An API endpoint's base URL can point at a tunnel's sandbox port, such as http://127.0.0.1:8080. Saved tokens and subscription logins are in Settings → Credentials."
                 }
-                EndpointFields { agent: Agent::Claude, draft, locked, credentials: (catalog.rows)(), error }
+                div { class: "recipe-endpoint", role: "group", aria_label: "Claude authentication",
+                    span { "Claude Code" }
+                    div { class: "segmented-control", role: "radiogroup", aria_label: "Claude authentication mode",
+                        for (mode, label) in [(AgentMode::None, "None"), (AgentMode::Endpoint, "API endpoint"), (AgentMode::Subscription, "Subscription")] {
+                            button { r#type: "button", role: "radio", disabled: locked,
+                                aria_checked: draft.read().claude_mode == mode,
+                                onclick: move |_| { draft.write().claude_mode = mode; error.set(None); }, "{label}" }
+                        }
+                    }
+                    if draft.read().claude_mode == AgentMode::Endpoint {
+                        EndpointFields { agent: Agent::Claude, draft, locked, credentials: (catalog.rows)(), error }
+                    } else if draft.read().claude_mode == AgentMode::Subscription {
+                        CredentialPicker {
+                            label: "Claude login", value: draft.read().claude_login_credential.clone(),
+                            kind: farhelm_proto::credentials::CredentialKind::ClaudeLogin,
+                            locked, credentials: (catalog.rows)(),
+                            missing_notice: "The selected Claude login is unavailable. Choose another login.",
+                            on_change: move |value| { draft.write().claude_login_credential = value; error.set(None); },
+                        }
+                    }
+                    p { class: "host-settings-help", "Subscription uses a Claude setup-token from Settings → Credentials. Claude may show its own first-run setup once on a new host." }
+                }
                 div { class: "recipe-endpoint", role: "group", aria_label: "Codex authentication",
                     span { "Codex" }
                     div { class: "segmented-control", role: "radiogroup", aria_label: "Codex authentication mode",
-                        for (mode, label) in [(CodexMode::None, "None"), (CodexMode::Endpoint, "API endpoint"), (CodexMode::Subscription, "Subscription")] {
+                        for (mode, label) in [(AgentMode::None, "None"), (AgentMode::Endpoint, "API endpoint"), (AgentMode::Subscription, "Subscription")] {
                             button { r#type: "button", role: "radio", disabled: locked,
                                 aria_checked: draft.read().codex_mode == mode,
                                 onclick: move |_| { draft.write().codex_mode = mode; error.set(None); }, "{label}" }
                         }
                     }
-                    if draft.read().codex_mode == CodexMode::Endpoint {
+                    if draft.read().codex_mode == AgentMode::Endpoint {
                         EndpointFields { agent: Agent::Codex, draft, locked, credentials: (catalog.rows)(), error }
-                    } else if draft.read().codex_mode == CodexMode::Subscription {
+                    } else if draft.read().codex_mode == AgentMode::Subscription {
                         CredentialPicker {
                             label: "Codex login", value: draft.read().codex_login_credential.clone(),
                             kind: farhelm_proto::credentials::CredentialKind::CodexLogin,

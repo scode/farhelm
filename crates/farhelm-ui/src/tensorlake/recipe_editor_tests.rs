@@ -23,6 +23,7 @@ fn saved_view() -> RecipeView {
         }),
         codex: None,
         github_token_credential: None,
+        claude_login_credential: None,
         codex_login_credential: None,
         tunnels: vec![Tunnel {
             sandbox_port: 8080,
@@ -124,7 +125,44 @@ fn named_endpoint_selection_survives_origin_changes_and_can_be_removed() {
     );
     draft.claude.token_credential = "work-endpoint".into();
     draft.claude.base_url.clear();
+    assert!(draft.to_save().err().unwrap().contains("base URL"));
+    draft.claude_mode = AgentMode::None;
     assert!(draft.to_save().unwrap().claude.is_none());
+}
+
+/// Claude's endpoint and login drafts survive mode changes, but only the
+/// explicit mode is submitted. Missing subscription input is a local refusal;
+/// reopening a saved login must not silently reactivate a hidden endpoint.
+#[test]
+fn claude_modes_keep_drafts_and_submit_only_the_selected_credentials() {
+    let mut draft = Draft::from_view(&saved_view());
+    assert_eq!(draft.claude_mode, AgentMode::Endpoint);
+    draft.claude_mode = AgentMode::Subscription;
+    assert!(
+        draft
+            .to_save()
+            .err()
+            .unwrap()
+            .contains("choose a Claude login")
+    );
+    draft.claude_login_credential = "claude-work".into();
+    let save = draft.to_save().unwrap();
+    assert!(save.claude.is_none());
+    assert_eq!(save.claude_login_credential.as_deref(), Some("claude-work"));
+    draft.claude_mode = AgentMode::None;
+    let save = draft.to_save().unwrap();
+    assert!(save.claude.is_none() && save.claude_login_credential.is_none());
+    assert!(!draft.claude.base_url.is_empty());
+    assert_eq!(draft.claude_login_credential, "claude-work");
+    let mut view = saved_view();
+    view.claude = None;
+    view.claude_login_credential = Some("claude-work".into());
+    let reopened = Draft::from_view(&view);
+    assert_eq!(reopened.claude_mode, AgentMode::Subscription);
+    assert_eq!(
+        reopened.to_save().unwrap().claude_login_credential,
+        view.claude_login_credential
+    );
 }
 
 /// Switching modes retains text but submits only the selected authentication.
@@ -132,13 +170,13 @@ fn named_endpoint_selection_survives_origin_changes_and_can_be_removed() {
 #[test]
 fn codex_modes_keep_drafts_and_submit_exclusive_selections() {
     let mut draft = Draft::new_recipe();
-    draft.codex_mode = CodexMode::Endpoint;
+    draft.codex_mode = AgentMode::Endpoint;
     assert!(draft.to_save().err().unwrap().contains("base URL"));
     draft.codex.base_url = "https://codex.example/v1".into();
     draft.codex.token_credential = "endpoint-work".into();
     let save = draft.to_save().unwrap();
     assert!(save.codex.is_some() && save.codex_login_credential.is_none());
-    draft.codex_mode = CodexMode::Subscription;
+    draft.codex_mode = AgentMode::Subscription;
     assert!(
         draft
             .to_save()
@@ -150,7 +188,7 @@ fn codex_modes_keep_drafts_and_submit_exclusive_selections() {
     let save = draft.to_save().unwrap();
     assert!(save.codex.is_none());
     assert_eq!(save.codex_login_credential.as_deref(), Some("codex-work"));
-    draft.codex_mode = CodexMode::None;
+    draft.codex_mode = AgentMode::None;
     let save = draft.to_save().unwrap();
     assert!(save.codex.is_none() && save.codex_login_credential.is_none());
     assert_eq!(draft.codex.base_url, "https://codex.example/v1");
@@ -158,7 +196,7 @@ fn codex_modes_keep_drafts_and_submit_exclusive_selections() {
     let mut view = saved_view();
     view.codex_login_credential = Some("codex-work".into());
     let reopened = Draft::from_view(&view);
-    assert_eq!(reopened.codex_mode, CodexMode::Subscription);
+    assert_eq!(reopened.codex_mode, AgentMode::Subscription);
     assert_eq!(
         reopened.to_save().unwrap().codex_login_credential,
         view.codex_login_credential

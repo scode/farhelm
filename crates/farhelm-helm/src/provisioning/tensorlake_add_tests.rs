@@ -223,7 +223,7 @@ async fn credential_delivery_warning_does_not_abort_tensorlake_setup() {
 
 /// Codex modes need setup's credential step even without any API endpoint.
 /// Subscription seeds before supervisor startup; None still reports a failed
-/// config cleanup as a warning while installation continues.
+/// settings cleanup as a warning while installation continues.
 #[farhelm_testtrace::test]
 async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
     use farhelm_proto::credentials::{CreateCredential, CredentialKind};
@@ -307,6 +307,72 @@ async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
             assert!(record["codex"].is_null() && record["codex_auth"].is_null());
         }
     }
+}
+
+/// Claude subscription setup must finish its private settings write before
+/// starting the supervisor, even when the recipe has no API endpoints. A
+/// nonsecret durable stamp witnesses completion without logging the token.
+#[farhelm_testtrace::test]
+async fn claude_subscription_setup_delivers_before_supervisor_startup() {
+    use farhelm_proto::credentials::{CreateCredential, CredentialKind};
+    let f = fixture(false).await;
+    let mut recipe = crate::tensorlake::recipes::tests_support::save();
+    recipe.source = RecipeSource::Image {
+        image: "example/systemd".into(),
+    };
+    f.harness
+        .store
+        .create_credential(CreateCredential {
+            name: "claude".into(),
+            kind: CredentialKind::ClaudeLogin,
+            secret: "sk-ant-oat01-fictional-setup-claude".into(),
+        })
+        .await
+        .unwrap();
+    recipe.claude_login_credential = Some("claude".into());
+    f.harness
+        .store
+        .update_tensorlake_recipe("test-recipe".into(), recipe)
+        .await
+        .unwrap()
+        .unwrap();
+    let accepted = f.add().await;
+    let view = f.finish(accepted.host_id).await;
+    assert_eq!(view.status, RunStatus::Completed);
+    let step = view
+        .steps
+        .iter()
+        .find(|step| step.step == "configure-agents")
+        .unwrap();
+    assert_eq!(step.status, StepStatus::Completed);
+    assert!(step.message.is_none());
+    let events = std::fs::read_to_string(f.root.path().join("backend/events.jsonl")).unwrap();
+    assert!(
+        events.find("check-supervisor-state").unwrap()
+            < events.find("wrote-claude-settings").unwrap()
+    );
+    assert!(
+        events.find("wrote-claude-settings").unwrap() < events.find("enable-supervisor").unwrap()
+    );
+    assert!(!events.contains("sk-ant-oat01-fictional-setup-claude"));
+    let host = accepted.host_id;
+    let json: String = f
+        .harness
+        .store
+        .conn()
+        .call("inspect fixture Claude stamp", move |conn| {
+            Ok(conn.query_row(
+                "SELECT tensorlake_credential_delivery FROM hosts WHERE id = ?1",
+                [host],
+                |row| row.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    let record: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(record["claude"]["Subscription"]["name"], "claude");
+    assert_eq!(record["claude"]["Subscription"]["revision"], 1);
+    assert!(!json.contains("sk-ant-oat01-fictional-setup-claude"));
 }
 
 /// GitHub-only recipes must enter setup's credential step without an agent

@@ -6,21 +6,13 @@
 
 use crate::tensorlake::recipes::ResolvedEndpoint;
 
-/// Set only Claude Code's two Farhelm-owned environment keys. Other top-level
-/// settings and environment entries survive; a non-object cannot be merged.
+/// Select an endpoint and remove a previously delivered subscription token.
+/// Only the three authentication keys belong to Farhelm; unrelated settings
+/// and environment entries survive, including Claude's first-run choices.
 pub(super) fn claude(bytes: Option<&[u8]>, endpoint: &ResolvedEndpoint) -> Result<Vec<u8>, String> {
-    let mut value = match bytes {
-        Some(bytes) => serde_json::from_slice(bytes)
-            .map_err(|_| "~/.claude/settings.json is not valid JSON".to_string())?,
-        None => serde_json::json!({}),
-    };
-    let object = value
-        .as_object_mut()
-        .ok_or("~/.claude/settings.json must be a JSON object")?;
-    let env = object.entry("env").or_insert_with(|| serde_json::json!({}));
-    let env = env
-        .as_object_mut()
-        .ok_or("the env in ~/.claude/settings.json must be an object")?;
+    let mut value = claude_document(bytes)?;
+    let env = claude_env(&mut value)?;
+    env.remove("CLAUDE_CODE_OAUTH_TOKEN");
     env.insert(
         "ANTHROPIC_BASE_URL".into(),
         endpoint.base_url.clone().into(),
@@ -30,6 +22,72 @@ pub(super) fn claude(bytes: Option<&[u8]>, endpoint: &ResolvedEndpoint) -> Resul
         endpoint.token.clone().unwrap_or_default().into(),
     );
     serde_json::to_vec_pretty(&value).map_err(|_| "could not encode Claude Code's settings".into())
+}
+
+/// Install a setup-token in Claude's ordinary settings, without completing
+/// onboarding. Endpoint keys must go away because their token takes precedence
+/// over a subscription; personal settings outside these three keys remain.
+pub(super) fn claude_subscription(bytes: Option<&[u8]>, token: &str) -> Result<Vec<u8>, String> {
+    let mut value = claude_document(bytes)?;
+    let env = claude_env(&mut value)?;
+    env.remove("ANTHROPIC_BASE_URL");
+    env.remove("ANTHROPIC_AUTH_TOKEN");
+    env.insert("CLAUDE_CODE_OAUTH_TOKEN".into(), token.into());
+    serde_json::to_vec_pretty(&value).map_err(|_| "could not encode Claude Code's settings".into())
+}
+
+/// None removes the managed authentication keys without inventing a settings
+/// file. A clean file keeps its exact bytes, and malformed input is refused
+/// intact with diagnostics that cannot quote its credentials.
+pub(super) fn clear_claude(bytes: Option<&[u8]>) -> Result<Option<Vec<u8>>, String> {
+    let Some(bytes) = bytes else { return Ok(None) };
+    let mut value = claude_document(Some(bytes))?;
+    if value.get("env").is_none() {
+        return Ok(None);
+    }
+    let env = claude_env(&mut value)?;
+    let mut changed = false;
+    for key in [
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_AUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+    ] {
+        changed |= env.remove(key).is_some();
+    }
+    changed
+        .then(|| {
+            serde_json::to_vec_pretty(&value)
+                .map_err(|_| "could not encode Claude Code's settings".into())
+        })
+        .transpose()
+}
+
+/// Share Claude's bounded caller-provided document and fixed parse errors
+/// across all modes; no parser diagnostic may disclose the saved token.
+fn claude_document(bytes: Option<&[u8]>) -> Result<serde_json::Value, String> {
+    let value = match bytes {
+        Some(bytes) => serde_json::from_slice(bytes)
+            .map_err(|_| "~/.claude/settings.json is not valid JSON".to_string())?,
+        None => serde_json::json!({}),
+    };
+    if !value.is_object() {
+        return Err("~/.claude/settings.json must be a JSON object".into());
+    }
+    Ok(value)
+}
+
+/// Authentication is confined to env. Its shape is checked before any change
+/// so an incompatible user document never becomes a partial replacement.
+fn claude_env(
+    value: &mut serde_json::Value,
+) -> Result<&mut serde_json::Map<String, serde_json::Value>, String> {
+    value
+        .as_object_mut()
+        .expect("validated Claude settings")
+        .entry("env")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .ok_or_else(|| "the env in ~/.claude/settings.json must be an object".into())
 }
 
 /// Select a dedicated Codex provider, retaining the rest of the TOML document,
@@ -138,6 +196,67 @@ fn codex_document(bytes: Option<&[u8]>) -> Result<toml_edit::DocumentMut, String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Switching modes must make the new credential authoritative without
+    /// erasing unrelated configuration or inventing onboarding metadata.
+    /// None is idempotent and does not create an otherwise absent file.
+    #[test]
+    fn claude_modes_replace_only_the_three_managed_authentication_keys() {
+        let original = br#"{"permissions":{"allow":["Read"]},"env":{"KEEP":"yes","ANTHROPIC_BASE_URL":"https://old.test","ANTHROPIC_AUTH_TOKEN":"fictional-old"},"theme":"dark"}"#;
+        let subscription = claude_subscription(Some(original), "fictional-subscription").unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&subscription).unwrap();
+        assert_eq!(
+            value["env"]["CLAUDE_CODE_OAUTH_TOKEN"],
+            "fictional-subscription"
+        );
+        assert!(value["env"].get("ANTHROPIC_BASE_URL").is_none());
+        assert!(value["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
+        assert_eq!(value["env"]["KEEP"], "yes");
+        assert_eq!(value["permissions"]["allow"][0], "Read");
+        assert_eq!(value["theme"], "dark");
+        assert_eq!(
+            value.as_object().unwrap().len(),
+            3,
+            "no first-run fields added"
+        );
+        let endpoint = ResolvedEndpoint {
+            base_url: "https://new.test/v1".into(),
+            token: Some("fictional-new".into()),
+            revision: None,
+            incarnation: None,
+        };
+        let endpoint = claude(Some(&subscription), &endpoint).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&endpoint).unwrap();
+        assert!(value["env"].get("CLAUDE_CODE_OAUTH_TOKEN").is_none());
+        assert_eq!(value["env"]["ANTHROPIC_AUTH_TOKEN"], "fictional-new");
+        let cleared = clear_claude(Some(&endpoint)).unwrap().unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&cleared).unwrap();
+        assert_eq!(value["env"], serde_json::json!({"KEEP":"yes"}));
+        assert_eq!(value["theme"], "dark");
+        assert!(clear_claude(Some(&cleared)).unwrap().is_none());
+        assert!(clear_claude(None).unwrap().is_none());
+        assert!(
+            clear_claude(Some(br#"{"theme":"dark"}"#))
+                .unwrap()
+                .is_none()
+        );
+        for invalid in [
+            b"[]".as_slice(),
+            br#"{"env":[]}"#,
+            b"fictional-private invalid",
+        ] {
+            assert!(
+                !claude_subscription(Some(invalid), "fictional-private")
+                    .unwrap_err()
+                    .contains("fictional-private")
+            );
+            assert!(
+                !clear_claude(Some(invalid))
+                    .unwrap_err()
+                    .contains("fictional-private")
+            );
+        }
+    }
 
     /// Cleanup removes only the owned selection and bearer token. It must not
     /// delete a provider table a user has extended or rewrite clean files.

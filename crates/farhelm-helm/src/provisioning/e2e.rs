@@ -358,11 +358,18 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         &self,
         target: &ProvisioningTarget,
         _content: &[u8],
-        _destination: &Path,
+        destination: &Path,
         _temporary: &Path,
         _mode: u32,
     ) -> Result<ActionOutcome, BackendFailure> {
-        self.action(target, "write-unit").await
+        let outcome = self.action(target, "write-unit").await?;
+        // Generic uploads also include the supervisor unit. A fixed completion
+        // marker lets setup tests prove this particular credential file was
+        // delivered before enablement, without recording its path or contents.
+        if destination.ends_with(".claude/settings.json") {
+            self.record(target, "wrote-claude-settings").await?;
+        }
+        Ok(outcome)
     }
 
     async fn daemon_reload(

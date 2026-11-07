@@ -32,6 +32,7 @@ const TIMED_OUT: &str = "credential delivery did not finish within the SSH timeo
 pub(crate) struct Bindings {
     claude: Option<StoredEndpoint>,
     codex: Option<StoredEndpoint>,
+    claude_login_credential: Option<String>,
     codex_login_credential: Option<String>,
     github_token_credential: Option<String>,
 }
@@ -46,6 +47,7 @@ impl Bindings {
         Self {
             claude: recipe.claude.clone(),
             codex: recipe.codex.clone(),
+            claude_login_credential: recipe.claude_login_credential.clone(),
             codex_login_credential: recipe.codex_login_credential.clone(),
             github_token_credential: recipe.github_token_credential.clone(),
         }
@@ -54,6 +56,7 @@ impl Bindings {
     /// A replacement must not activate another recipe's pending selection edit.
     fn uses(&self, name: &str) -> bool {
         self.github_token_credential.as_deref() == Some(name)
+            || self.claude_login_credential.as_deref() == Some(name)
             || self.codex_login_credential.as_deref() == Some(name)
             || [&self.claude, &self.codex]
                 .into_iter()
@@ -62,9 +65,9 @@ impl Bindings {
     }
 }
 
-/// Claude's optional endpoint still uses Absent for no file work. Codex's
-/// explicit None and Subscription modes use Cleared, so older absence records
-/// cannot bypass their first cleanup of Farhelm-owned provider settings.
+/// Explicit modes distinguish completed cleanup from older no-work records.
+/// Claude's login shares its settings file with endpoint keys, so that file's
+/// fingerprint includes the login identity without retaining its secret.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 enum EndpointStamp {
     Absent,
@@ -72,6 +75,11 @@ enum EndpointStamp {
     Endpoint {
         base_url: String,
         credential: Option<(String, u64, String)>,
+    },
+    Subscription {
+        name: String,
+        revision: u64,
+        incarnation: String,
     },
 }
 
@@ -104,6 +112,8 @@ struct Record {
 /// Secret-bearing values exist only while a serialized operation uses them.
 struct Slot {
     endpoint: Option<ResolvedEndpoint>,
+    /// Only Claude stores its subscription token in the settings file.
+    subscription: Option<String>,
     stamp: EndpointStamp,
 }
 
@@ -399,13 +409,23 @@ impl CredentialDelivery {
                 .ok_or("the host has no SSH destination")?,
             access: crate::ssh::SshAccessKind::Tensorlake,
         };
-        for (is_claude, folder, file, endpoint) in [
-            (true, ".claude", "settings.json", bindings.claude),
-            (false, ".codex", "config.toml", bindings.codex),
+        for (is_claude, folder, file, endpoint, login) in [
+            (
+                true,
+                ".claude",
+                "settings.json",
+                bindings.claude,
+                bindings.claude_login_credential,
+            ),
+            (false, ".codex", "config.toml", bindings.codex, None),
         ] {
             // Resolve at this slot: a missing retained name in a later slot
             // must not withhold an earlier replacement or its durable success.
-            let slot = self.resolve_endpoint(endpoint, is_claude).await?;
+            let slot = if let Some(login) = login {
+                self.resolve_claude_login(login).await?
+            } else {
+                self.resolve_endpoint(endpoint).await?
+            };
             let previous_stamp = if is_claude {
                 &record.claude
             } else {
@@ -414,7 +434,10 @@ impl CredentialDelivery {
             if previous_stamp.as_ref() == Some(&slot.stamp) {
                 continue;
             }
-            if slot.endpoint.is_some() || slot.stamp == EndpointStamp::Cleared {
+            if slot.endpoint.is_some()
+                || slot.subscription.is_some()
+                || slot.stamp == EndpointStamp::Cleared
+            {
                 let backend = self
                     .backend
                     .as_ref()
@@ -440,6 +463,13 @@ impl CredentialDelivery {
                     } else {
                         super::agent_endpoints::codex(previous.as_deref(), &endpoint)
                     }?)
+                } else if let Some(token) = slot.subscription {
+                    Some(super::agent_endpoints::claude_subscription(
+                        previous.as_deref(),
+                        &token,
+                    )?)
+                } else if is_claude {
+                    super::agent_endpoints::clear_claude(previous.as_deref())?
                 } else {
                     super::agent_endpoints::clear_codex(previous.as_deref())?
                 };
@@ -605,19 +635,12 @@ impl CredentialDelivery {
 
     /// Each catalog read binds a value to its revision. The shared resolver
     /// already keeps secrets transient; warnings discard storage diagnostics.
-    async fn resolve_endpoint(
-        &self,
-        endpoint: Option<StoredEndpoint>,
-        is_claude: bool,
-    ) -> Result<Slot, String> {
+    async fn resolve_endpoint(&self, endpoint: Option<StoredEndpoint>) -> Result<Slot, String> {
         let Some(endpoint) = endpoint else {
             return Ok(Slot {
                 endpoint: None,
-                stamp: if is_claude {
-                    EndpointStamp::Absent
-                } else {
-                    EndpointStamp::Cleared
-                },
+                subscription: None,
+                stamp: EndpointStamp::Cleared,
             });
         };
         let name = endpoint.token_credential.clone();
@@ -636,6 +659,36 @@ impl CredentialDelivery {
                 credential,
             },
             endpoint: Some(resolved),
+            subscription: None,
+        })
+    }
+
+    /// Bind the setup-token to its catalog incarnation and revision under the
+    /// host lock. Replacement uses the same connection lease and durable-file
+    /// boundary as endpoints, never a cached secret or a separate agent home.
+    async fn resolve_claude_login(&self, name: String) -> Result<Slot, String> {
+        let lookup = name.clone();
+        let (token, revision, incarnation) = self
+            .store
+            .conn()
+            .call("resolve Claude login", move |conn| {
+                crate::credentials::secret(
+                    conn,
+                    &lookup,
+                    farhelm_proto::credentials::CredentialKind::ClaudeLogin,
+                )?
+                .ok_or_else(|| anyhow::anyhow!("Claude login no longer exists"))
+            })
+            .await
+            .map_err(|_| "could not resolve the recipe's Claude login")?;
+        Ok(Slot {
+            endpoint: None,
+            subscription: Some(token),
+            stamp: EndpointStamp::Subscription {
+                name,
+                revision,
+                incarnation,
+            },
         })
     }
 

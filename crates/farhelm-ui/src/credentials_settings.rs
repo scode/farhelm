@@ -154,7 +154,7 @@ pub(crate) fn CredentialsSettings() -> Element {
                 p { class: "credential-delivery-warning", role: "status",
                     "Saved; not delivered to {crate::peer::display_peer(&failure.host)}: {crate::peer::display_peer(&failure.reason)}" }
             }
-            p { class: "host-settings-help", "Save credentials under names you choose. Replacing a saved value keeps its name." }
+            p { class: "host-settings-help", "Secrets Farhelm hands to hosts for you. Recipes refer to them by name, so replacing a token here never means editing a recipe." }
             StorageWarning { multiple: true }
             TensorlakeKey { credentials_location: true }
             if listed.is_none() && error().is_none() {
