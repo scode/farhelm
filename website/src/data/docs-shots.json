@@ -1,9 +1,9 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-11-05T01:00:52Z",
-  "captured_from": "2cbfdc77aba776967f3a5494e89af5bafe74862b",
-  "commit": "49ecc0b32297ec6912808a970e9127df0ec5ad03",
+  "captured_at": "2026-11-07T15:46:50Z",
+  "captured_from": "e6860153dafeb9ddf44013afab8c57600595fd6e",
+  "commit": "c56bb3c0b6b3e37eb11d7da85c8c261d451c75ed",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 576,
