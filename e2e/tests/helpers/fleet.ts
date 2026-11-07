@@ -546,10 +546,14 @@ export async function renameSession(
  * gone: a stop used as a FIXTURE is a precondition for the assertions that
  * follow — most often "this row now reads exited" — and a refused stop there
  * has to fail as a setup error rather than as a filter or a badge mysteriously
- * disagreeing with the test's expectations.
+ * disagreeing with the test's expectations. These owned-fixture actions
+ * explicitly authorize stopping the agent and tabs; HTTP omission is reserved
+ * for callers that did not authorize the newly destructive tab closure.
  */
 export async function stopSession(request: APIRequestContext, id: string): Promise<void> {
-  const response = await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`);
+  const response = await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, {
+    data: { refuse_if_tabs_open: false, refuse_if_agent_running: false },
+  });
   await ok(response, `stopping session ${id}`);
 }
 
@@ -558,10 +562,13 @@ export async function stopSession(request: APIRequestContext, id: string): Promi
  *
  * Cleanup runs after a failed test too, so "it is already gone" is a normal
  * outcome rather than an error worth propagating over the real failure.
+ * Cleanup authorizes all of this owned fixture's processes, including tabs.
  */
 export async function cleanupSession(request: APIRequestContext, id: string): Promise<void> {
   for (const [what, response] of [
-    ["stopping", await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`)],
+    ["stopping", await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, {
+      data: { refuse_if_tabs_open: false, refuse_if_agent_running: false },
+    })],
     ["deleting", await request.delete(`/api/sessions/${encodeURIComponent(id)}`)],
   ] as const) {
     if (!response.ok() && response.status() !== 404) {

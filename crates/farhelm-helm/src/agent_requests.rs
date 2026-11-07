@@ -506,9 +506,18 @@ impl AgentRequestHandler for HelmAgentRequests {
                     .await,
                 };
                 match approved(&state, origin, session_id, action).await {
-                    Ok(()) => crate::sessions::do_stop_session(&state, &target)
+                    Ok(()) => crate::sessions::do_stop_session(&state, &target, false, false)
                         .await
-                        .map(|()| AgentReply::Stopped {}),
+                        .and_then(|outcome| {
+                            // The agent reply has no notice field. Preserve
+                            // the truthful partial outcome in its existing
+                            // error message rather than claiming every tab
+                            // closed when Stop could not confirm that.
+                            if let Some(notice) = outcome.notice {
+                                anyhow::bail!(notice);
+                            }
+                            Ok(AgentReply::Stopped {})
+                        }),
                     Err(refused) => Err(refused),
                 }
             }
@@ -6666,14 +6675,18 @@ mod tests {
                 .await
                 .expect("read frame")
                 .expect("a request");
-            let ControlMsg::StopSession { req_id, session_id } =
-                parse_control(&frame).expect("decode request")
+            let ControlMsg::StopSession {
+                req_id, session_id, ..
+            } = parse_control(&frame).expect("decode request")
             else {
                 panic!("expected StopSession");
             };
             assert_eq!(session_id, "asker");
             writer
-                .write_control(&ControlMsg::SessionStopped { req_id })
+                .write_control(&ControlMsg::SessionStopped {
+                    req_id,
+                    notice: None,
+                })
                 .await
                 .expect("write reply");
         });
@@ -6700,6 +6713,63 @@ mod tests {
             ),
             "expected an empty Stopped reply, got {outcome:?}"
         );
+    }
+
+    /// An approved agent Stop authorizes all tabs, but cannot claim full
+    /// completion when the supervisor names one it could not close. The
+    /// existing agent error envelope preserves that partial-outcome text.
+    #[farhelm_testtrace::test]
+    async fn agent_stop_reports_tab_cleanup_notice_and_uses_no_tab_guard() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        const NOTICE: &str = "The agent stopped, but terminal tab t1 could not be closed";
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let responder = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("handshake");
+            let frame = reader.read_frame().await.expect("read").expect("request");
+            let ControlMsg::StopSession {
+                req_id,
+                session_id,
+                refuse_if_tabs_open,
+                refuse_if_agent_running,
+            } = parse_control(&frame).expect("decode")
+            else {
+                panic!("expected StopSession");
+            };
+            assert_eq!(session_id, "asker");
+            assert!(!refuse_if_tabs_open, "the approval authorized closing tabs");
+            assert!(
+                !refuse_if_agent_running,
+                "the approval authorized stopping the agent"
+            );
+            writer
+                .write_control(&ControlMsg::SessionStopped {
+                    req_id,
+                    notice: Some(NOTICE.into()),
+                })
+                .await
+                .expect("reply");
+        });
+        let (h, local) = spliced_local_fleet(client_side, vec![session("asker", 1)]).await;
+        let outcome = HelmAgentRequests::for_state(&h.state)
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Stop {
+                    session_id: Some("asker".into()),
+                },
+            )
+            .await;
+        join_responder(responder, &outcome).await;
+        match outcome {
+            AgentOutcome::Err { message, .. } => assert_eq!(message, NOTICE),
+            other => panic!("expected the partial Stop notice, got {other:?}"),
+        }
     }
 
     /// Delete retains the approval's liveness guard and returns checkout
@@ -7062,14 +7132,18 @@ mod tests {
                 .await
                 .expect("read frame")
                 .expect("a request");
-            let ControlMsg::StopSession { req_id, session_id } =
-                parse_control(&frame).expect("decode request")
+            let ControlMsg::StopSession {
+                req_id, session_id, ..
+            } = parse_control(&frame).expect("decode request")
             else {
                 panic!("expected StopSession");
             };
             assert_eq!(session_id, "other", "the NAMED target, not the asker");
             writer
-                .write_control(&ControlMsg::SessionStopped { req_id })
+                .write_control(&ControlMsg::SessionStopped {
+                    req_id,
+                    notice: None,
+                })
                 .await
                 .expect("write reply");
         });

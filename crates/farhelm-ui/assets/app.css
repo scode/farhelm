@@ -2095,6 +2095,7 @@ html.host-rail-open .session-status-filter .segment-radio > span { padding-inlin
 }
 .titlebar-actions > .btn,
 .titlebar-actions .header-action-split > .btn,
+.titlebar-actions .header-stop-anchor > .btn,
 .titlebar-actions .header-delete-anchor > .btn { display: inline-flex; align-items: center; gap: 4px; }
 .titlebar-actions .action-glyph { width: 13px; height: 13px; flex: 0 0 13px; }
 
@@ -7995,11 +7996,11 @@ a:any-link,
    compact steady state is the promise this section must not quietly break,
    so nothing below may render when it has nothing to say. */
 
-/* A restart refusal is the supervisor's own prose — a stale-offer conflict
-   names what the offer is NOW — so it gets a full-width line that wraps
-   rather than a slot in the header that would truncate the one sentence
-   saying what to do next. */
-.restart-error {
+/* Lifecycle refusals and partial Stop notices get a full-width line that
+   wraps. The host's explanation can name a tab left running, so clipping it
+   into a header slot would hide part of the operation's outcome. */
+.restart-error,
+.stop-error {
   padding: 4px 10px;
   font-size: 12px;
   color: var(--danger);
@@ -9581,8 +9582,16 @@ a:any-link,
    containment boundary around existing confirmations. */
 .session-topbar:has(> .session-tunnel-pill) { gap: 6px; }
 .session-topbar:has(> .session-tunnel-pill) .tab-strip { flex: 0 1 auto; min-width: 112px; }
-.session-topbar:has(> .session-tunnel-pill) .titlebar-actions { gap: 4px; }
+.session-topbar:has(> .session-tunnel-pill) .titlebar-actions { gap: 2px; }
 .session-topbar:has(> .session-tunnel-pill) .titlebar-actions .btn { padding: 2px; }
+/* Stop adds another labelled action to the fixed 650px budget. With a tunnel
+   pill present, tighten only the persistent actions; tabs keep their readable
+   scrollport, ports keep their digits, and menus and questions keep their size. */
+.session-topbar:has(> .session-tunnel-pill) .titlebar-actions :is(.header-stop, .restart-primary, .header-replace, .header-clone, .header-delete, .header-action-caret) {
+  font-size: 11px;
+  padding-inline: 0;
+  gap: 2px;
+}
 .session-topbar:has(> .session-tunnel-pill) .titlebar-actions .header-action-menu .menu-item { padding: 6px 7px; }
 .session-tunnel-pill { position: relative; flex: 0 1 auto; min-width: 0; max-width: 280px; }
 .session-tunnel-pill:has(> .session-tunnel-toggle > .session-tunnel-mapping) { min-width: 154px; }

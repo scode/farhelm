@@ -1017,10 +1017,8 @@ async fn podman_tabs_and_downloads_share_the_existing_container() {
             // sleep-ok: wait for tmux's dead-tab listing after confirmed whole-container Stop.
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        // This in-process harness has no activity ticker. Drive the same dead
-        // window cleanup that production's ticker performs before expecting
-        // the explicit attachment ending; shell death alone cannot send it.
-        h.client.close_tab(&session.id, &second.id).await.unwrap();
+        // Stop closes the tab terminal explicitly; container shutdown alone
+        // would leave its host/window and attachment for the ticker to reap.
         expect_detached(&mut second.rx, 10).await;
 
         std::fs::write(&token, "after-stop-token\n").unwrap();

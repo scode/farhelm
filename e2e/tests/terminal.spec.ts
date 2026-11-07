@@ -16,6 +16,8 @@ import { setCompact } from "./helpers/list-header";
 // reached the DOM, and a synthetic one-shot 500 to prove a failed refetch
 // doesn't clear `confirming` — neither is reachable by driving the real
 // stack alone). Every other test drives the real stack end to end.
+// Direct fixture Stop requests explicitly authorize their owned agent and
+// tabs. Bodyless HTTP Stop instead protects callers that never authorized tabs.
 //
 // Assertions read the xterm.js BUFFER, not the DOM: the DOM renderer
 // materializes only viewport rows, so scrolled-off content never appears in
@@ -728,7 +730,7 @@ test("switching sessions before the first terminal is ready mounts the second se
     );
   } finally {
     await restoreMountGlobals().catch(() => {});
-    await request.post(`/api/sessions/${encodeURIComponent(idB)}/stop`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(idB)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
     await request.delete(`/api/sessions/${encodeURIComponent(idB)}`).catch(() => {});
   }
 });
@@ -1691,7 +1693,7 @@ test("stop and delete a session through the HTTP API", async ({ page, request })
     await attachSession(page, id);
     await waitForTermText(page, "FH_STOP_READY");
 
-    const stopped = await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`);
+    const stopped = await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } });
     expect(stopped.status()).toBe(200);
     expect(await stopped.json()).toEqual({});
 
@@ -1810,8 +1812,8 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
       timeout: 10_000,
     });
 
-    // Stop session B via its row button. No confirmation for stop
-    // (SPEC.md gives confirmation to delete, not stop), and the
+    // Stop session B via its row button. With no terminal tabs shown,
+    // Stop needs no confirmation, and the
     // badge must flip on the next poll WITHOUT a reload.
     //
     // The badge still SAYS exited and adds the stop annotation as a
@@ -1889,7 +1891,7 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
     for (const title of [titleA, titleB]) {
       const id = await findSessionIdByTitle(request, title).catch(() => undefined);
       if (id) {
-        await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+        await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
         await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
       }
     }
@@ -1952,7 +1954,7 @@ test("create dialog surfaces a precondition failure, preserves the form, and cre
   } finally {
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
     if (id) {
-      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
       await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
@@ -2032,7 +2034,7 @@ test("create dialog disables the submit control while a create is in flight", as
     release(false);
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
     if (id) {
-      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
       await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
@@ -2117,7 +2119,7 @@ test("alive delete opens an inline confirming state with the is-still-running wo
   } finally {
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
     if (id) {
-      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
       await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
@@ -2164,7 +2166,7 @@ test("confirming an inline delete prompt deletes the session with exactly one DE
   } finally {
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
     if (id) {
-      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
       await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
@@ -2288,7 +2290,7 @@ test("delete confirmation safely displays a title containing executable HTML wit
     await expect(row.locator(".session-title")).toHaveText(title);
     expect(await page.evaluate(() => (window as any).__pwned)).toBeUndefined();
   } finally {
-    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
     await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
@@ -2404,7 +2406,7 @@ test("a legal multi-KB, unbroken title keeps the consequence text intact and cli
     expect(Math.abs(cancelBox!.y - confirmBox!.y)).toBeLessThanOrEqual(1);
     expect(cancelBox!.x + cancelBox!.width).toBeLessThanOrEqual(confirmBox!.x + 1);
   } finally {
-    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
     await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
@@ -2525,7 +2527,7 @@ test("an inline confirming state survives a listing refresh; cancel still works 
     await expect(row.locator(".session-row-delete")).toBeEnabled();
   } finally {
     await page.unroute(SESSION_LISTING);
-    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
     await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
@@ -2616,7 +2618,7 @@ test("one row's confirming state does not affect another row's controls", async 
     await expect(rowA.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
   } finally {
     for (const id of [idA, idB]) {
-      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
       await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
@@ -2659,7 +2661,7 @@ test("an alive-to-exited status change under an open confirm prompt keeps confir
 
     // Stopped from "elsewhere" (the raw API, standing in for another
     // client) while this row's prompt sits open.
-    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`);
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } });
 
     // The stop bumps the helm's revision, so the real feed carries it here
     // without anything in this test playing helm: the re-read it triggers
@@ -2786,7 +2788,7 @@ test("a failed listing read while confirming does not clear the confirming state
     await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`);
   } finally {
     await page.unroute(SESSION_LISTING);
-    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
     await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
@@ -3125,7 +3127,7 @@ test("submitting the create form twice while one create is in flight produces ex
     release(false);
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
     if (id) {
-      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
       await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
@@ -3200,7 +3202,7 @@ test("stop and delete failures surface in the row's own error line, without dist
     await expect(row).toHaveCount(1);
     await page.unroute(`**/api/sessions/${encodeURIComponent(id)}`);
   } finally {
-    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
     await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
@@ -3280,7 +3282,7 @@ test("a failed action's error is keyed to its own session, not shared across row
     await expect(rowB.locator(".action-error")).toHaveCount(0);
   } finally {
     for (const id of [idA, idB]) {
-      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
       await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
@@ -3406,7 +3408,7 @@ test("stop's in-flight guard disables this row's stop, delete, and open, while a
     // stop request parked on the held route.
     releaseStop();
     for (const id of [idA, idB]) {
-      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
       await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
@@ -3516,7 +3518,7 @@ test("rapid stop/delete clicks on the same row never let a confirmed delete sile
     expect(stopRequestsB).toBe(1);
   } finally {
     for (const id of [idA, idB]) {
-      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
       await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
@@ -3577,7 +3579,7 @@ test("dispatching cancel and confirm in the same tick never deletes the session"
     await expect(row.locator(".session-row-delete")).toBeEnabled();
     expect(deleteRequests).toBe(0);
   } finally {
-    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
     await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
@@ -3628,7 +3630,7 @@ test("the confirm prompt focuses delete; held Enter waits for a new press", asyn
     expect(deleteRequests).toBe(1);
   } finally {
     await page.keyboard.up("Enter");
-    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
     await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
@@ -3688,7 +3690,7 @@ test("a blank title creates a session titled after the working directory's basen
     id = createdSession.id;
   } finally {
     if (id) {
-      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
       await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
@@ -3725,7 +3727,7 @@ test("list refreshes an existing row from alive to exited, then drops it on dele
       timeout: 10_000,
     });
 
-    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`);
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } });
     // The exact exit code is NOT pinned here: `kill_process_tree`
     // (farhelm-supervisor/src/service.rs) sends SIGTERM, waits a grace
     // period, then RE-ENUMERATES the tree and SIGKILLs only whatever it
@@ -4535,7 +4537,7 @@ test("list polls and picks up a session created elsewhere", async ({
     // Best-effort: the session is long-running (`sleep 300`), so it must
     // be stopped and deleted regardless of whether the assertion above
     // passed, or it would sit in the list for every test after this one.
-    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, { data: { refuse_if_tabs_open: false, refuse_if_agent_running: false } }).catch(() => {});
     await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });

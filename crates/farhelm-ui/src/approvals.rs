@@ -833,7 +833,7 @@ fn action_summary(action: &ApprovalAction) -> &'static str {
             ..
         } => "start a copy of a session",
         ApprovalAction::Rename { .. } => "rename a session",
-        ApprovalAction::Stop { .. } => "stop a session's agent",
+        ApprovalAction::Stop { .. } => "stop a session's agent and close its terminal tabs",
         ApprovalAction::Prompt { .. } => "send a prompt to a session's agent",
         ApprovalAction::Delete { .. } => "delete a session and its stored state",
         ApprovalAction::Restart { .. } => "restart a session, resuming its conversation",
@@ -1699,7 +1699,7 @@ mod tests {
         assert!(edits.iter().any(|edit| matches!(edit,
             dioxus::core::Mutation::CreateTextNode { value, .. }
             | dioxus::core::Mutation::SetText { value, .. }
-            if value == "Stop a session's agent"
+            if value == "Stop a session's agent and close its terminal tabs"
         )));
         // Deny is the final control in ApprovalCard. Choosing it also avoids
         // any clipboard or native link side effect while exercising the real

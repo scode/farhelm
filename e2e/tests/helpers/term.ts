@@ -496,9 +496,13 @@ export async function fillCreateForm(
  * delete; this terminal helper stops at the first non-404 failure. That
  * fail-fast policy is inherited from the terminal specs. Changing it would be
  * observable fixture behavior, not part of moving the duplicate helpers.
+ * Both Stop guards are explicitly unrestricted because this cleanup owns
+ * every process and terminal tab of the session it removes.
  */
 export async function cleanupSession(request: APIRequestContext, id: string): Promise<void> {
-  const stopped = await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`);
+  const stopped = await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`, {
+    data: { refuse_if_tabs_open: false, refuse_if_agent_running: false },
+  });
   if (!stopped.ok() && stopped.status() !== 404) {
     throw new Error(
       `cleanup: stopping session ${id} failed (${stopped.status()}): ${await stopped.text()}`,

@@ -234,7 +234,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_69` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_70` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -245,9 +245,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-/// Version 69 adds supervisor-accepted TCP tunnels and directional relay EOF;
-/// old peers cannot decode these messages or preserve half-close semantics.
-pub const PROTOCOL_VERSION: u32 = 69;
+pub const PROTOCOL_VERSION: u32 = 70;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -2784,6 +2782,15 @@ pub struct SessionDeleteOutcome {
     pub archived: bool,
 }
 
+/// Facts established by a completed Stop. The agent stopped even when a
+/// tab could not be closed; `notice` names cleanup that remains unresolved.
+/// An ordinary success stays an empty object for older HTTP callers.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionStopOutcome {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+}
+
 /// The original managed-checkout request retained under one authenticated key.
 ///
 /// An inspection may be followed by a launch-capable reconciliation. The
@@ -3311,14 +3318,15 @@ pub enum ControlMsg {
     /// program (a terminal host keeps running with the final screen; an old
     /// terminal's pane is kept by `remain-on-exit`), so it stays viewable,
     /// including replaying to a client that was attached when the agent died.
-    /// Stop touches nothing else: not the session's DB row, not the in-memory
-    /// session map, not any live attachment.
+    /// Stop also closes the session's terminal tabs and their process trees.
+    /// A tab that cannot be closed is left in place and named in the reply's
+    /// notice; the other tabs still close. The agent's attachment stays live.
     ///
     /// Idempotent by design, not by accident: stopping a session whose
     /// agent already exited (or one whose terminal never existed, the
     /// restart-gap case) still replies `SessionStopped` rather than
-    /// erring, because from the caller's point of view "make sure nothing
-    /// is running" already holds. Such a stop records a PLAIN exit, not
+    /// erring: its agent cleanup is already unnecessary, and its tabs still
+    /// close. Such a stop records a PLAIN exit, not
     /// [`SessionInfo::annotation`]'s "stopped by user": the annotation
     /// says who ended the run, and a run that had already ended was not
     /// ended by this request (PLAN_M3.md item 4). A stop that does find a
@@ -3326,9 +3334,12 @@ pub enum ControlMsg {
     /// until a restart replaces the run it describes or a delete removes
     /// the session — surviving supervisor restarts and reboots alike.
     ///
-    /// Three distinct failure modes, not one: an unknown `session_id` is
-    /// the only PRECONDITION failure, reported the same way `Attach`
-    /// reports it. The kill sweep itself — enumerating and signaling the
+    /// An unknown `session_id` is reported the same way `Attach` reports it.
+    /// A guarded request also refuses before stopping anything when tabs
+    /// are open or an agent is running beyond what its display authorized:
+    /// a click showing no tabs cannot close a new one, and a click showing
+    /// an ended agent cannot stop one restarted meanwhile. The kill sweep
+    /// itself — enumerating and signaling the
     /// process tree, see `kill_process_tree` in the supervisor — can also
     /// fail (a `/proc` read erroring out, a signal coming back `EPERM`),
     /// and that is reported as an `Error` too rather than a false
@@ -3339,12 +3350,30 @@ pub enum ControlMsg {
     /// sides of the kill, since a failure BEFORE it means nothing was
     /// killed at all while one after it means the session did stop but may
     /// list as an ordinary exit.
-    StopSession { req_id: u64, session_id: String },
+    StopSession {
+        req_id: u64,
+        session_id: String,
+        /// Set when the user authorized Stop from a display with no tabs.
+        /// Omission authorizes closing every tab; agent-approved requests
+        /// and callers that already named tabs use that unrestricted form.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        refuse_if_tabs_open: bool,
+        /// Set when the displayed agent had ended, including tabs-only
+        /// confirmation. A running or uncertain agent then refuses the whole
+        /// Stop before recording intent or closing any tab.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        refuse_if_agent_running: bool,
+    },
     /// Acknowledges `StopSession`: sent only once the kill sweep has
     /// actually run to completion (or been confirmed unnecessary — an
     /// ended program or no terminal, the restart-gap case), never merely
-    /// because the request was accepted.
-    SessionStopped { req_id: u64 },
+    /// because the request was accepted. A notice reports tab cleanup that
+    /// failed after the agent stopped, without hiding the successful Stop.
+    SessionStopped {
+        req_id: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        notice: Option<String>,
+    },
     /// Remove a session and all its stored state — the DB row, the
     /// in-memory entry, and (if the terminal is still live) the agent's
     /// process tree and its terminals (terminal hosts, and an old
@@ -5616,8 +5645,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_69() {
-        assert_eq!(PROTOCOL_VERSION, 69);
+    fn protocol_version_is_pinned_at_70() {
+        assert_eq!(PROTOCOL_VERSION, 70);
     }
 
     /// A follow-up is an approved mutation even though its success has no
@@ -6181,6 +6210,8 @@ mod tests {
         let stop = ControlMsg::StopSession {
             req_id: 11,
             session_id: "s1".to_string(),
+            refuse_if_tabs_open: false,
+            refuse_if_agent_running: false,
         };
         assert_eq!(
             serde_json::to_value(&stop).unwrap(),
@@ -6191,13 +6222,78 @@ mod tests {
             })
         );
 
-        let stopped = ControlMsg::SessionStopped { req_id: 11 };
+        let stopped = ControlMsg::SessionStopped {
+            req_id: 11,
+            notice: None,
+        };
         assert_eq!(
             serde_json::to_value(&stopped).unwrap(),
             serde_json::json!({
                 "type": "session_stopped",
                 "req_id": 11,
             })
+        );
+
+        let guarded_stop = ControlMsg::StopSession {
+            req_id: 11,
+            session_id: "s1".to_string(),
+            refuse_if_tabs_open: true,
+            refuse_if_agent_running: false,
+        };
+        assert_eq!(
+            serde_json::to_value(&guarded_stop).unwrap(),
+            serde_json::json!({
+                "type": "stop_session", "req_id": 11, "session_id": "s1", "refuse_if_tabs_open": true,
+            })
+        );
+        let guarded_agent_stop = ControlMsg::StopSession {
+            req_id: 11,
+            session_id: "s1".to_string(),
+            refuse_if_tabs_open: false,
+            refuse_if_agent_running: true,
+        };
+        let guarded_agent_wire = serde_json::json!({
+            "type": "stop_session", "req_id": 11, "session_id": "s1", "refuse_if_agent_running": true,
+        });
+        assert_eq!(
+            serde_json::to_value(&guarded_agent_stop).unwrap(),
+            guarded_agent_wire
+        );
+        assert_eq!(
+            serde_json::from_value::<ControlMsg>(guarded_agent_wire).unwrap(),
+            guarded_agent_stop
+        );
+        assert_eq!(
+            serde_json::from_value::<ControlMsg>(serde_json::json!({
+                "type": "stop_session", "req_id": 11, "session_id": "s1",
+            }))
+            .unwrap(),
+            stop
+        );
+        assert_eq!(
+            serde_json::from_value::<ControlMsg>(serde_json::json!({
+                "type": "session_stopped", "req_id": 11,
+            }))
+            .unwrap(),
+            stopped
+        );
+        let partial = ControlMsg::SessionStopped {
+            req_id: 11,
+            notice: Some("tab t1 could not close".into()),
+        };
+        assert_eq!(
+            serde_json::to_value(&partial).unwrap(),
+            serde_json::json!({
+                "type": "session_stopped", "req_id": 11, "notice": "tab t1 could not close",
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(SessionStopOutcome::default()).unwrap(),
+            serde_json::json!({})
+        );
+        assert_eq!(
+            serde_json::from_value::<SessionStopOutcome>(serde_json::json!({})).unwrap(),
+            SessionStopOutcome::default()
         );
 
         let delete = ControlMsg::DeleteSession {
@@ -6294,8 +6390,13 @@ mod tests {
             ControlMsg::StopSession {
                 req_id: 1,
                 session_id: "s1".to_string(),
+                refuse_if_tabs_open: false,
+                refuse_if_agent_running: false,
             },
-            ControlMsg::SessionStopped { req_id: 1 },
+            ControlMsg::SessionStopped {
+                req_id: 1,
+                notice: None,
+            },
             ControlMsg::DeleteSession {
                 req_id: 2,
                 session_id: "s1".to_string(),
@@ -8747,7 +8848,11 @@ mod tests {
     fn reply_req_id_is_some_for_exactly_the_reply_variants() {
         // Replies: the `req_id` comes back verbatim, including `Error`'s.
         assert_eq!(
-            ControlMsg::SessionStopped { req_id: 7 }.reply_req_id(),
+            ControlMsg::SessionStopped {
+                req_id: 7,
+                notice: None
+            }
+            .reply_req_id(),
             Some(7)
         );
         assert_eq!(ControlMsg::TabClosed { req_id: 9 }.reply_req_id(), Some(9));
@@ -8777,6 +8882,8 @@ mod tests {
             ControlMsg::StopSession {
                 req_id: 7,
                 session_id: "s1".to_string(),
+                refuse_if_tabs_open: false,
+                refuse_if_agent_running: false,
             },
             ControlMsg::CommitUpload {
                 req_id: 11,

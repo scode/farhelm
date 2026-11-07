@@ -3,7 +3,7 @@
 //! Admission happens before these futures are polled. Keeping queued rows admitted
 //! holds navigation and automatic selection until all hosts finish, while polling
 //! one core at a time per host avoids the supervisor's management admission limit.
-//! Delete consent is a separate snapshot: reconciliation can shrink its identities
+//! Lifecycle consent is a separate snapshot: reconciliation can shrink its identities
 //! and replace its wording, but an answer can never discover additional targets.
 
 use std::future::{Future, poll_fn};
@@ -44,20 +44,36 @@ impl LifecycleAction {
         };
         format!("{label}: not started, another operation is in progress; try again")
     }
+
+    /// Match the batch question to the consequences this operation introduces.
+    pub(super) fn needs_confirmation(self, targets: &[DeleteSnapshot], skip: bool) -> bool {
+        !skip
+            && match self {
+                Self::Stop => targets.iter().any(|target| target.tabs > 0),
+                Self::Delete => needs_confirmation(targets, false),
+            }
+    }
 }
 
 /// Reserve every accepted row before the host runner can poll its first request.
 /// Refusals are reported separately, so one engaged row cannot silently vanish
-/// or prevent the other hosts' eligible work from being admitted.
+/// or prevent the other hosts' eligible work from being admitted. Both Delete's
+/// guard and Stop's independent agent/tab preconditions come from each target's
+/// drawn snapshot, including ended targets with no tabs that ask no question.
 pub(super) fn admit_batch(
     targets: Vec<DeleteSnapshot>,
-    mut admit: impl FnMut(String, crate::DeleteGuard) -> Option<RowWork>,
+    mut admit: impl FnMut(String, crate::DeleteGuard, bool, bool) -> Option<RowWork>,
     mut refused: impl FnMut(String),
 ) -> Vec<(Option<HostId>, RowWork)> {
     let mut work = Vec::new();
     for target in targets {
         let id = target.id.raw().to_owned();
-        if let Some(accepted) = admit(id.clone(), target.guard()) {
+        if let Some(accepted) = admit(
+            id.clone(),
+            target.guard(),
+            target.tabs == 0,
+            target.status.has_ended(),
+        ) {
             work.push((target.host, accepted));
         } else {
             refused(id);
@@ -192,18 +208,20 @@ pub(super) fn admitted_targets(
         .collect()
 }
 
-/// The persistent list addresses the same installed modal on every close path.
+/// Both lifecycle verbs reuse this styled modal, and every close path addresses
+/// that same installation. Separate confirmation slots keep the verbs distinct.
 pub(super) const DIALOG: &str = ".bulk-delete-dialog";
 /// The count remains focusable after confirmation disables every action button.
 pub(super) const ACCEPTED_FOCUS: &str = "(document.querySelector('.marked-count') ?? document.querySelector('.sort-title'))?.focus({preventScroll:true});";
 /// Cancellation retains marks and can return to their ordinary enabled action.
 pub(super) const CANCEL_FOCUS: &str = "(document.querySelector('.marked-menu-toggle') ?? document.querySelector('.sort-title'))?.focus({preventScroll:true});";
 
-/// Draw one structured question; all answers carry the opening this render drew.
+/// Draw one structured lifecycle question; answers carry this render's opening.
 /// The persistent list owns the slot and dispatch, so hiding marks cannot unmount
 /// this question or cancel accepted work.
 #[component]
 pub(super) fn DeleteDialog(
+    action: LifecycleAction,
     shown: ConfirmToken<Vec<DeleteSnapshot>>,
     disabled: bool,
     on_confirm: EventHandler<ConfirmToken<Vec<DeleteSnapshot>>>,
@@ -212,6 +230,13 @@ pub(super) fn DeleteDialog(
     let targets = shown.key().clone();
     let count = targets.len();
     let noun = if count == 1 { "session" } else { "sessions" };
+    let verb = match action {
+        LifecycleAction::Stop => "Stop",
+        LifecycleAction::Delete => "Delete",
+    };
+    let label = format!("{verb} {count} {noun}?");
+    let cancel_label = format!("Cancel bulk {}", verb.to_lowercase());
+    let confirm_tooltip = format!("{verb} the sessions listed in this question");
     let cancel = shown.clone();
     let escape = shown.clone();
     let close = shown.clone();
@@ -232,10 +257,10 @@ pub(super) fn DeleteDialog(
                     }
                 },
                 DialogHeader {
-                    title: rsx! { span { id: "bulk-delete-title", "Delete {count} {noun}?" } },
+                    title: rsx! { span { id: "bulk-delete-title", "{label}" } },
                     close: rsx! {
                         button {
-                            r#type: "button", class: "dialog-close", aria_label: "Cancel bulk deletion",
+                            r#type: "button", class: "dialog-close", aria_label: cancel_label,
                             "data-tooltip": "Cancel: keep the marked sessions",
                             onclick: move |_| on_cancel.call(close.clone()), "×"
                         }
@@ -243,7 +268,7 @@ pub(super) fn DeleteDialog(
                 }
                 ScrollRegion {
                     class: "host-settings-body bulk-delete-body", handle: DialogHandle::new(DIALOG),
-                    selector: ".bulk-delete-body", name: "Sessions to delete",
+                    selector: ".bulk-delete-body", name: "Sessions affected",
                     recovery: RecoveryFocus::new(".bulk-delete-cancel", None, true, RecoveryDelay::OneFrame),
                     for target in &targets {
                         div { class: "bulk-delete-row", "data-delete-target": target.id.raw(),
@@ -262,8 +287,11 @@ pub(super) fn DeleteDialog(
                                     SessionHostName { name: name.clone(), locality: target.locality }
                                 } else { "Host identity unavailable" }
                             }
-                            p { class: "bulk-delete-consequence", "{confirm_consequence(&target.status, target.tabs)}" }
-                            if target.managed {
+                            p { class: "bulk-delete-consequence", {match action {
+                                LifecycleAction::Stop => crate::status::stop_consequence(&target.status, target.tabs),
+                                LifecycleAction::Delete => confirm_consequence(&target.status, target.tabs),
+                            }} }
+                            if target.managed && action == LifecycleAction::Delete {
                                 p { class: "bulk-delete-consequence",
                                     "The managed checkout stays while another session uses it. When its last session is deleted, its folder moves to the trash; no files are deleted."
                                 }
@@ -277,9 +305,9 @@ pub(super) fn DeleteDialog(
                             "data-tooltip": "Cancel: keep the marked sessions",
                             onclick: move |_| on_cancel.call(cancel.clone()), "Cancel" }
                         button { r#type: "button", class: "btn btn-danger bulk-delete-confirm", disabled,
-                            "data-tooltip": "Delete the sessions listed in this question",
+                            "data-tooltip": confirm_tooltip,
                             onkeydown: crate::guard_confirmation_enter,
-                            onclick: move |_| on_confirm.call(shown.clone()), "Delete {noun}" }
+                            onclick: move |_| on_confirm.call(shown.clone()), "{verb} {noun}" }
                     }
                 }
             }
@@ -365,7 +393,7 @@ mod tests {
             let mut releases = Vec::new();
             let work = admit_batch(
                 snapshots(&rows),
-                |id, _guard| {
+                |id, _guard, _refuse_tabs, _refuse_agent| {
                     assert!(begin_row_operation(
                         state.ops,
                         state.pending,
@@ -445,7 +473,7 @@ mod tests {
             let mut held = Some((request, post_request_read));
             let work = admit_batch(
                 snapshots(&rows),
-                |id, _| {
+                |id, _, _, _| {
                     let asking = id == "question";
                     if !begin_row_operation(state.ops, state.pending, state.count, asking, &id) {
                         return None;
@@ -517,6 +545,42 @@ mod tests {
         assert!(!needs_confirmation(&mixed, true));
         assert_eq!(mixed[0].guard(), crate::DeleteGuard::NothingAlive);
         assert_eq!(mixed[1].guard(), crate::DeleteGuard::Unconditional);
+    }
+
+    /// A live agent alone never asks for Stop. A mixed batch asks once for
+    /// its tabs, while every queued row keeps its own agent/tab preconditions,
+    /// even when the setting skips the question altogether.
+    #[farhelm_testtrace::test]
+    fn stop_consent_is_per_target_and_skipping_does_not_expand_it() {
+        let mut live = session("live", 1);
+        live.status = SessionStatus::Running;
+        let bare = snapshots(std::slice::from_ref(&live));
+        assert!(!LifecycleAction::Stop.needs_confirmation(&bare, false));
+        let mut tabbed = DeleteSnapshot::for_session(&live, Some(1));
+        tabbed.tabs = 1;
+        let mut mixed = bare;
+        mixed.push(tabbed);
+        let mut ended = live.clone();
+        ended.status = SessionStatus::Exited { exit_code: Some(0) };
+        let mut ended_tabbed = DeleteSnapshot::for_session(&ended, Some(1));
+        ended_tabbed.tabs = 1;
+        mixed.extend([DeleteSnapshot::for_session(&ended, Some(1)), ended_tabbed]);
+        assert!(LifecycleAction::Stop.needs_confirmation(&mixed, false));
+        assert!(!LifecycleAction::Stop.needs_confirmation(&mixed, true));
+        let mut guards = Vec::new();
+        let work = admit_batch(
+            mixed,
+            |_, _, refuse_tabs, refuse_agent| {
+                guards.push((refuse_tabs, refuse_agent));
+                Some(Box::pin(async {}))
+            },
+            |_| panic!("all fixture rows must be admitted"),
+        );
+        assert_eq!(
+            guards,
+            [(true, false), (false, false), (true, true), (false, true)]
+        );
+        assert_eq!(work.len(), 4);
     }
 
     /// Failed/filtered omission cannot discard consent targets, and changed
@@ -655,7 +719,7 @@ mod tests {
             let mut targets = snapshots(&[live, unknown]);
             targets[0].managed = true;
             let shown = use_hook(move || question.open(targets, ()));
-            rsx! { DeleteDialog { shown, disabled: false, on_confirm: |_| {}, on_cancel: |_| {} } }
+            rsx! { DeleteDialog { action: LifecycleAction::Delete, shown, disabled: false, on_confirm: |_| {}, on_cancel: |_| {} } }
         }
         let mut dom = VirtualDom::new(app);
         let edits = dom.rebuild_to_vec().edits;

@@ -517,7 +517,7 @@ fn confirm_restart_prompt(
 pub(crate) fn SessionView(
     session: Session,
     /// The cross-pane write gate (see `ops::PaneGate`): the shared token
-    /// this view's restart claim, refused while the sidebar
+    /// this view's lifecycle claim, refused while the sidebar
     /// has a per-row operation in flight. Owned by `AppBody`, because a
     /// view-private token would let the two panes mutate this session
     /// under each other.
@@ -536,7 +536,7 @@ pub(crate) fn SessionView(
     /// One-shot bridge to the list's delete path, for the header's delete
     /// button once its confirmation is answered.
     header_delete: Signal<Option<crate::list::HeaderDeleteRequest>>,
-    /// Persistent one-shot listing demand; Replace can unmount this view.
+    /// Persistent listing demand after header actions; Replace can unmount this view.
     mut header_refresh: Signal<bool>,
     /// Sessions with a delete in flight (AppBody's set, written by the
     /// list's delete path). While this view's session is in it, the header
@@ -623,6 +623,12 @@ pub(crate) fn SessionView(
     // between opening and its answer; Restart with never goes through it.
     let mut confirming_restart: ConfirmSlot<(), OpGuard> = use_confirm_slot();
     let mut restart_error = use_signal(|| None::<String>);
+    // Stop owns a claim from opening through completion just like Restart.
+    // Its notice survives the refresh, since a stopped agent does not prove
+    // that the host closed every terminal tab.
+    let mut confirming_stop: ConfirmSlot<(), OpGuard> = use_confirm_slot();
+    let mut stopping = use_signal(|| false);
+    let mut stop_error = use_signal(|| None::<String>);
     // Replace has its own prompt and error because it creates a new session
     // before deleting this one; sharing restart state would lose the
     // endpoint's partial-failure wording or make the two operations race.
@@ -659,8 +665,8 @@ pub(crate) fn SessionView(
     // confirmed delete into a silent no-op.
     let mut confirming_header_delete: ConfirmSlot<(), OpGuard> = use_confirm_slot();
     let mut replace_error = use_signal(|| None::<String>);
-    // One synchronously claimed token covers the restart prompt as well as
-    // the request, so two clicks in one render frame cannot authorize
+    // One synchronously claimed token covers each header lifecycle prompt
+    // and its request, so two clicks in one render frame cannot authorize
     // operations from two different snapshots. The token
     // is the SHARED one (`gate` — see the prop doc), so the same claim
     // also excludes the sidebar's create/host mutations, and is refused
@@ -1445,6 +1451,37 @@ pub(crate) fn SessionView(
     let mut notice_restart = restart.clone();
     let mut direct_restart = restart;
 
+    let stop_base = base.clone();
+    let refresh_after_stop = request_detail.clone();
+    // Read fences protect both sides of Stop: a read begun before the request
+    // or while tabs are closing must not restore that intermediate tab strip.
+    // Both consent flags are passed by the answered render; current is read
+    // only for this keyed view's routing identity, never for stronger consent.
+    let stop = move |claim: OpGuard, refuse_if_tabs_open: bool, refuse_if_agent_running: bool| {
+        stopping.set(true);
+        stop_error.set(None);
+        detail_reads.write().fence();
+        let base = stop_base.clone();
+        let id = current.peek().id.raw().to_owned();
+        let refresh = refresh_after_stop.clone();
+        spawn(async move {
+            let _claim = claim;
+            match api::stop_session(&base, &id, refuse_if_tabs_open, refuse_if_agent_running).await
+            {
+                Ok(outcome) => {
+                    stop_error.set(outcome.notice.map(|notice| format!("Stop: {notice}")))
+                }
+                Err(error) => stop_error.set(Some(format!("Stop: {error}"))),
+            }
+            detail_reads.write().fence();
+            stopping.set(false);
+            header_refresh.set(true);
+            refresh(Trigger::Explicit);
+        });
+    };
+    let mut direct_stop = stop.clone();
+    let mut confirm_stop = stop;
+
     let replace_base = base.clone();
     let replace_preferences = preferences;
     // A Replace deletes its source, whose notice the session list shows.
@@ -1911,12 +1948,13 @@ pub(crate) fn SessionView(
         .as_ref()
         .and_then(|shown| tabs.iter().position(|candidate| candidate == shown.key()))
         .map(tab_label);
-    // The openings this render draws for the header's Restart, Replace and
+    // The openings this render draws for the header's Stop, Restart, Replace and
     // Delete questions and the interrupted card's Replace question. Their
     // buttons (and the header's Escape) answer only these, so a click drawn
     // before a cancel and reopen in the same burst cannot answer the
     // reopened question, nor spend the claim it holds.
     let header_restart_shown = confirming_restart.current();
+    let header_stop_shown = confirming_stop.current();
     let header_replace_shown = confirming_header_replace.current();
     let header_delete_shown = confirming_header_delete.current();
     let card_replace_shown = confirming_replace.current();
@@ -2140,12 +2178,13 @@ pub(crate) fn SessionView(
                 // lifecycle admission. Once an answer has taken a claim, a
                 // queued Escape must leave the running operation alone.
                 //
-                // Escape answers the Restart, Replace and Delete questions
+                // Escape answers the Stop, Restart, Replace and Delete questions
                 // as this render drew them, like their Cancel buttons: a
                 // question reopened since then is not the one the user
                 // dismissed. Taking a question drops the claim it held.
                 onkeydown: {
                     let header_restart_shown = header_restart_shown.clone();
+                    let header_stop_shown = header_stop_shown.clone();
                     let header_replace_shown = header_replace_shown.clone();
                     let header_delete_shown = header_delete_shown.clone();
                     move |event: KeyboardEvent| {
@@ -2153,6 +2192,11 @@ pub(crate) fn SessionView(
                             return;
                         }
                         let mut cancelled = false;
+                        if let Some(shown) = &header_stop_shown
+                            && confirming_stop.take(shown).is_some()
+                        {
+                            cancelled = true;
+                        }
                         if let Some(shown) = &header_restart_shown
                             && confirming_restart.take(shown).is_some()
                         {
@@ -2243,6 +2287,65 @@ pub(crate) fn SessionView(
                     if keep_terminal_surface(&shown, relaunched(), had_terminal()) {
                         div { inert: shown.stale.then_some(""), class: "toolbar-text-size",
                             TerminalTextSize {}
+                        }
+                    }
+                    div { class: "restart-offer header-stop-anchor",
+                        button {
+                            r#type: "button", class: "btn btn-neutral header-stop",
+                            "data-tooltip": "Stop the agent and close its terminal tabs",
+                            "aria-expanded": "{confirming_stop.is_open()}",
+                            "aria-controls": "stop-confirm-panel",
+                            disabled: lifecycle.busy() || shown.stale,
+                            onclick: {
+                                let tabs = tabs.len();
+                                let refuse_if_agent_running = shown.status.has_ended();
+                                let stale = shown.stale;
+                                move |_| {
+                                    if stale { return; }
+                                    if let Some(claim) = lifecycle.claim_guard() {
+                                        if tabs > 0 && !skip_session_confirmations {
+                                            confirming_stop.open((), claim);
+                                        } else {
+                                            direct_stop(claim, tabs == 0, refuse_if_agent_running);
+                                        }
+                                    }
+                                }
+                            },
+                            ActionIcon { glyph: ActionGlyph::Stop }
+                            "Stop"
+                        }
+                        if let Some(shown_stop) = header_stop_shown.clone() {
+                            div { id: "stop-confirm-panel", class: "header-confirm header-stop-confirm",
+                                "data-terminal-keyboard-owner": "true",
+                                onmounted: move |_| { document::eval(&crate::dialog_focus::install_js(".header-stop-confirm", crate::dialog_focus::ContainerEnter::None)); },
+                                span { class: "confirm-consequence",
+                                    "{crate::status::stop_consequence(&shown.status, tabs.len())}"
+                                }
+                                button {
+                                    r#type: "button", class: "btn btn-danger header-stop-confirm-submit",
+                                    disabled: stopping() || shown.stale, autofocus: !stopping() && !shown.stale,
+                                    "data-tooltip": "Stop this session's agent and close its terminal tabs",
+                                    onkeydown: crate::guard_confirmation_enter,
+                                    onmounted: move |_| crate::focus_confirmation(".header-stop-confirm-submit", ".header-stop-confirm .btn-neutral"),
+                                    onclick: {
+                                        let shown_stop = shown_stop.clone();
+                                        let refuse_if_tabs_open = tabs.is_empty();
+                                        let refuse_if_agent_running = shown.status.has_ended();
+                                        let stale = shown.stale;
+                                        move |_| {
+                                            if stale || stopping() { return; }
+                                            if let Some(claim) = confirming_stop.take(&shown_stop) {
+                                                confirm_stop(claim, refuse_if_tabs_open, refuse_if_agent_running);
+                                            }
+                                        }
+                                    }, "Stop"
+                                }
+                                button {
+                                    r#type: "button", class: "btn btn-neutral", autofocus: stopping() || shown.stale,
+                                    "data-tooltip": "Cancel: keep the agent and terminal tabs running",
+                                    onclick: move |_| confirming_stop.cancel_for(&shown_stop), "Cancel"
+                                }
+                            }
                         }
                     }
                     // The primary half remains the ordinary resume offer;
@@ -2572,6 +2675,12 @@ pub(crate) fn SessionView(
             if let Some(err) = restart_error.read().clone() {
                 PeerLine {
                     class: "restart-error".to_string(),
+                    parts: vec![DetailPart::peer(err)],
+                }
+            }
+            if let Some(err) = stop_error.read().clone() {
+                PeerLine {
+                    class: "stop-error".to_string(),
                     parts: vec![DetailPart::peer(err)],
                 }
             }

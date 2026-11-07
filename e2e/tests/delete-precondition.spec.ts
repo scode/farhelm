@@ -34,6 +34,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { attachSession, waitForTermText } from "./helpers/term";
 import type { APIRequestContext, Page, Route } from "@playwright/test";
 import {
   cleanupSession,
@@ -50,6 +51,19 @@ import {
 } from "./helpers/fleet";
 
 const REFUSAL = "cannot delete without confirmation: the agent is still running";
+
+/**
+ * Establish a started agent before Stop prepares an ended-agent Delete fixture.
+ * A running terminal can still contain the systemd launch wrapper; stopping it
+ * then can correctly leave a never-started Error instead of Exited. Complete
+ * this setup before the measured feed is installed or a Delete prompt opens,
+ * so readiness cannot refresh the intentionally stale display under test.
+ */
+async function prepareStartedAgent(page: Page, id: string): Promise<void> {
+  await page.goto("/");
+  await attachSession(page, id);
+  await waitForTermText(page, "FAKE-AGENT READY");
+}
 
 /**
  * Why this matters: without the precondition an unconfirmed delete from a
@@ -73,15 +87,10 @@ test(`an ${skip ? "opted-out tabs-only" : "unconfirmed"} delete sends the precon
   let bodyFailed = false;
   try {
     await patchPreferences(request, { skip_session_confirmations: skip });
-    if (skip) {
-      const tab = await request.post(`/api/sessions/${encodeURIComponent(session.id)}/tabs`);
-      expect(tab.ok(), await tab.text()).toBe(true);
-    }
-    // Creation publishes the session before its agent has necessarily started.
-    // Stopping in that interval can correctly produce a startup error rather
-    // than "exited"; this test needs an agent that was alive and then ended.
-    // Keep the complete status in the assertion so a failed start retains its
-    // diagnostic instead of looking like a delete-precondition regression.
+    await prepareStartedAgent(page, session.id);
+    // Output proves the agent started; status alone could name its launch
+    // wrapper. Retain the full status here to diagnose a fixture that ended
+    // before Stop, rather than treating that as a Delete failure.
     await expect
       .poll(
         async () => (await listSessions(request)).sessions.find((listed) => listed.id === session.id)?.status,
@@ -89,14 +98,28 @@ test(`an ${skip ? "opted-out tabs-only" : "unconfirmed"} delete sends the precon
       )
       .toMatchObject({ state: /^(running|waiting|idle)$/ });
     await stopSession(request, session.id);
-    // Settled server-side before the page looks: the stop returns when the
-    // kill is issued, not when "exited" reaches the helm's cache.
+    // Stop completes on the supervisor before the resulting state has
+    // necessarily reached the helm's merged listing.
     await expect
       .poll(
         async () => (await listSessions(request)).sessions.find((listed) => listed.id === session.id)?.status?.state,
         { timeout: 20_000 },
       )
       .toBe("exited");
+    // Stop closes existing tabs. A tabs-only Delete fixture opens its tab
+    // after Stop, when the agent has already ended.
+    if (skip) {
+      const tab = await request.post(`/api/sessions/${encodeURIComponent(session.id)}/tabs`);
+      expect(tab.ok(), await tab.text()).toBe(true);
+      const tabId: string = (await tab.json()).tab.id;
+      // Tab creation settles on the supervisor before the helm's merged
+      // listing catches up. Consent below must describe this exact tab.
+      await expect.poll(async () => {
+        const listed = (await listSessions(request)).sessions.find((one) => one.id === session.id);
+        return listed?.tabs?.map((one) => one.id) ?? [];
+      }, { timeout: 20_000, message: "the post-Stop tab must reach the listing before Delete consent is tested" })
+        .toContain(tabId);
+    }
     expect((await listSessions(request)).sessions.find((one) => one.id === session.id)?.tabs?.length ?? 0).toBe(skip ? 1 : 0);
     const build = (await request.get("/api/hosts")).headers()["x-farhelm-build"];
     expect(build, "the helm stamps every reply with its build").toBeTruthy();
@@ -164,13 +187,14 @@ test(`an ${skip ? "opted-out tabs-only" : "unconfirmed"} delete sends the precon
 
 /**
  * Open the sidebar delete prompt on a running session, then end its agent
- * (and, with `openTab`, open a terminal tab first) behind the page's back and
+ * (and, with `openTab`, open a terminal tab afterwards) behind the page's back and
  * let one listing read redraw the prompt. Confirms the reworded prompt and
  * returns the URL of the delete it sent, which is answered with a stub
  * success so nothing is actually deleted before cleanup.
  *
- * The drift is real server state reaching the page through the ordinary
- * listing read the stubbed feed triggers; only the delete's reply is stubbed.
+ * Initial agent readiness is established before the prompt opens. The later
+ * drift is real server state reaching the page through the ordinary listing
+ * read the stubbed feed triggers; only the delete's reply is stubbed.
  */
 async function confirmDriftedPrompt(
   page: Page,
@@ -178,6 +202,7 @@ async function confirmDriftedPrompt(
   sessionId: string,
   options: { openTab: boolean; expectWording: RegExp },
 ): Promise<URL> {
+  await prepareStartedAgent(page, sessionId);
   const build = (await request.get("/api/hosts")).headers()["x-farhelm-build"];
   expect(build, "the helm stamps every reply with its build").toBeTruthy();
   const feed = await stubFeed(page);
@@ -194,20 +219,22 @@ async function confirmDriftedPrompt(
   const consequence = row.locator(".confirm-consequence").first();
   await expect(consequence).toContainText("Still running");
 
+  await stopSession(request, sessionId);
+  let tabId: string | undefined;
   if (options.openTab) {
     const opened = await request.post(`/api/sessions/${encodeURIComponent(sessionId)}/tabs`);
     expect(opened.ok(), `opening a tab: ${await opened.text()}`).toBe(true);
+    tabId = (await opened.json()).tab.id;
   }
-  await stopSession(request, sessionId);
   await expect
     .poll(
       async () => {
         const listed = (await listSessions(request)).sessions.find((one) => one.id === sessionId);
-        return `${listed?.status?.state}/${listed?.tabs?.length ?? 0}`;
+        return { state: listed?.status?.state, tabs: listed?.tabs?.map((tab) => tab.id) ?? [] };
       },
       { timeout: 20_000 },
     )
-    .toBe(`exited/${options.openTab ? 1 : 0}`);
+    .toEqual({ state: "exited", tabs: tabId === undefined ? [] : [tabId] });
   feed.notify(2);
   // The prompt stayed open and now says what the user is answering.
   await expect(consequence).toHaveText(options.expectWording, { timeout: 20_000 });

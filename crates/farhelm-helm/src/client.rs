@@ -3635,7 +3635,10 @@ impl SupervisorClient {
     }
 
     /// Kill the agent's whole process tree while leaving the session and
-    /// its terminal in place (SPEC.md's "stop"). Idempotent: stopping an
+    /// its terminal in place, closing its terminal tabs (SPEC.md's "stop").
+    /// Unresolved tab cleanup returns its notice as an error; callers that
+    /// present partial outcomes separately use [`Self::stop_session_guarded`].
+    /// Idempotent: stopping an
     /// already-stopped or never-live session still succeeds.
     ///
     /// `Err` covers two different things, not one: the connection to the
@@ -3645,7 +3648,9 @@ impl SupervisorClient {
     /// (an unknown `id`) or that it was accepted but the kill sweep could
     /// not be confirmed complete (both surfaced via `SupervisorError`,
     /// `downcast_ref`-able from the returned error). `Ok` is the only
-    /// outcome that means the sweep actually ran to completion.
+    /// outcome that means the sweep and tab cleanup ran to completion. A
+    /// partial tab cleanup is an error carrying the supervisor's notice,
+    /// whose wording says that the agent did stop.
     ///
     /// A correlated reply of the WRONG variant is a third thing again, and
     /// comes back as [`SupervisorTransportError::SentWrongReply`] rather
@@ -3653,6 +3658,25 @@ impl SupervisorClient {
     /// relaying this must be told its outcome is unknown. See
     /// [`wrong_reply`].
     pub async fn stop_session(&self, id: &str) -> anyhow::Result<()> {
+        let outcome = self.stop_session_guarded(id, false, false).await?;
+        if let Some(notice) = outcome.notice {
+            anyhow::bail!(notice);
+        }
+        Ok(())
+    }
+
+    /// Stop with consent from the caller's displayed agent and tab state.
+    /// `refuse_if_tabs_open` protects a display with no tabs;
+    /// `refuse_if_agent_running` protects a display with an ended agent.
+    /// Either guard refuses the whole Stop before stopping either resource. A
+    /// successful outcome can still name tabs whose cleanup failed; callers
+    /// presenting Stop to a user must show that notice.
+    pub async fn stop_session_guarded(
+        &self,
+        id: &str,
+        refuse_if_tabs_open: bool,
+        refuse_if_agent_running: bool,
+    ) -> anyhow::Result<farhelm_proto::SessionStopOutcome> {
         let req_id = self.req_id();
         match self
             .request(
@@ -3660,11 +3684,15 @@ impl SupervisorClient {
                 ControlMsg::StopSession {
                     req_id,
                     session_id: id.to_string(),
+                    refuse_if_tabs_open,
+                    refuse_if_agent_running,
                 },
             )
             .await?
         {
-            ControlMsg::SessionStopped { .. } => Ok(()),
+            ControlMsg::SessionStopped { notice, .. } => {
+                Ok(farhelm_proto::SessionStopOutcome { notice })
+            }
             other => Err(wrong_reply("StopSession", &other)),
         }
     }
@@ -5727,7 +5755,10 @@ mod tests {
             panic!("the replacement must send a StopSession");
         };
         writer
-            .write_control(&ControlMsg::SessionStopped { req_id })
+            .write_control(&ControlMsg::SessionStopped {
+                req_id,
+                notice: None,
+            })
             .await
             .expect("answer the replacement");
         timeout(Duration::from_secs(5), stop)
@@ -6064,13 +6095,19 @@ mod tests {
 
             let first = next_stop(&mut reader).await;
             writer
-                .write_control(&ControlMsg::SessionStopped { req_id: first })
+                .write_control(&ControlMsg::SessionStopped {
+                    req_id: first,
+                    notice: None,
+                })
                 .await
                 .expect("answer the first request");
             // The same id a second time: issued, no longer pending, and
             // indistinguishable from a late answer.
             writer
-                .write_control(&ControlMsg::SessionStopped { req_id: first })
+                .write_control(&ControlMsg::SessionStopped {
+                    req_id: first,
+                    notice: None,
+                })
                 .await
                 .expect("answer it again");
 
@@ -6079,6 +6116,7 @@ mod tests {
             writer
                 .write_control(&ControlMsg::SessionStopped {
                     req_id: second + 1_000,
+                    notice: None,
                 })
                 .await
                 .expect("answer under an impossible id");
