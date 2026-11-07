@@ -622,12 +622,11 @@ const SSH_STDERR_LINE_BUDGET: usize = 200;
 /// Relay one ssh child's stderr into the tracing trail, bounded and
 /// escaped, and attributed to the host it came from.
 ///
-/// Every line is `Debug`-formatted, which is the same defense the
-/// supervisor applies to tmux's exit reasons and for the same reason: this
-/// is text a REMOTE party influences, arriving at a log an operator reads
-/// in a terminal emulator. `Display` would replay control bytes verbatim —
-/// cursor moves, screen clears, an OSC sequence retitling the window —
-/// while `Debug` escapes them into something legible and inert.
+/// Every line is `Debug`-formatted, because this is text a REMOTE party
+/// influences, arriving at a log an operator reads in a terminal emulator.
+/// `Display` would replay control bytes verbatim — cursor moves, screen
+/// clears, an OSC sequence retitling the window — while `Debug` escapes them
+/// into something legible and inert.
 ///
 /// Child exit and stderr EOF are independent: a descendant can retain stderr.
 /// The lifetime anchor aborts this task when its final owner drops.

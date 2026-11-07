@@ -121,7 +121,7 @@ pub fn eviction_victim<'a>(
 /// is the only reply computing a REAL answer, and that everywhere else the
 /// value means "not yet known" rather than "known not to be running" — so a
 /// restart's or a create's reply carries `Unknown` deliberately, because at
-/// the instant it is built the pane exists but the agent's own `exec`
+/// the instant it is built the terminal exists but the agent's own `exec`
 /// inside it has not been observed. Claiming liveness there would be a
 /// fabrication; the supervisor is right to refuse it.
 ///

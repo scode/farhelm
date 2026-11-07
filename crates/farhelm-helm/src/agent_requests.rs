@@ -6641,7 +6641,7 @@ mod tests {
     /// Despite this test's session starting `Running`, what it proves is
     /// ROUTING and the REPLY SHAPE, not that any process actually stopped:
     /// the scripted responder answers `SessionStopped` unconditionally,
-    /// without touching a real pane or process tree, so a `Stop` that
+    /// without touching a real terminal or process tree, so a `Stop` that
     /// routed correctly and one that silently no-op'd would look identical
     /// here. (This is a renamed, re-scoped version of what used to be
     /// called `stop_ends_a_running_sessions_agent`, whose name overclaimed

@@ -3478,7 +3478,7 @@ mod tests {
     fn http_error_maps_internal_supervisor_error_to_500() {
         let err = anyhow::Error::new(SupervisorError::helm(
             farhelm_proto::ErrorKind::Internal,
-            "tmux hiccup".to_string(),
+            "terminal hiccup".to_string(),
         ));
         let response = super::http_error(err);
         assert_eq!(

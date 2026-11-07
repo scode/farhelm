@@ -1215,10 +1215,10 @@ fn truncate_repo_text(repo: &str) -> &str {
 }
 
 // Dimensions for a caller that has no terminal yet — the CLI, a script,
-// a UI dialog that has not laid out a pane. 80x24 is a guess and it does
-// not have to be a good one: the first attach resizes the window to the
-// real client size, so these only decide how the agent's first few lines
-// wrap before anyone is looking.
+// a UI dialog that has not laid out a terminal. 80x24 is a guess and it
+// does not have to be a good one: the first attach resizes the terminal to
+// the real client size, so these only decide how the agent's first few
+// lines wrap before anyone is looking.
 pub(crate) fn default_cols() -> u16 {
     80
 }
@@ -4024,9 +4024,9 @@ fn replace_reply(
 /// `stop`/`delete` use, because there is something to hand back — the
 /// minted tab id a client needs before it can attach
 /// (`?tab=<id>` on `term_ws`). Every refusal the supervisor can give
-/// (vanished working directory, no tmux session to open a window on, a
-/// shell dead by reply time) reaches the browser through the same
-/// `http_error` mapping every other endpoint uses, verbatim.
+/// (vanished working directory, an agent terminal that is gone or cannot
+/// be read, a shell dead by reply time) reaches the browser through the
+/// same `http_error` mapping every other endpoint uses, verbatim.
 pub(crate) async fn open_tab(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,

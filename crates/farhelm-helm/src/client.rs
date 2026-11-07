@@ -697,18 +697,18 @@ pub enum TermEvent {
     /// One data frame: raw terminal bytes (replay first, then live output),
     /// or for a grid stream one grid message (`farhelm_proto::grid`).
     Data(Vec<u8>),
-    /// This attach's INITIAL catch-up is over: every byte the supervisor
+    /// This attach's INITIAL catch-up is over: everything the supervisor
     /// replays for THIS attach's own catch-up phase precedes this event in
     /// the queue, and live output follows (PLAN_M5.md item 4;
     /// `farhelm_proto::ControlMsg::ReplayComplete`'s docs carry the full
-    /// contract — exactly once per attach that completes its catch-up,
-    /// never owed to an attach a takeover/detach/stall ended early). The
-    /// qualifier is load-bearing, mirroring that same doc's own boundary:
-    /// M2.5's flow-control recovery after a tmux `%pause` can replay
-    /// retained history into this SAME attachment LATER, mid-stream, with
-    /// no marker of its own — so "live output follows" describes what
-    /// comes after THIS marker, not a promise that history can never
-    /// reappear on the channel again.
+    /// contract — exactly once per attach that completes its catch-up, never
+    /// owed to an attach a takeover/detach/stall ended early). The qualifier
+    /// is load-bearing, mirroring that same doc's own boundary: a grid
+    /// stream's `history_reset`, and an old terminal's flow-control recovery
+    /// after tmux paused its output, can send history into this SAME
+    /// attachment LATER, mid-stream, with no `ReplayComplete` of their own —
+    /// so "live output follows" describes what comes after THIS marker, not a
+    /// promise that history can never reappear on the channel again.
     ///
     /// Deliberately rides the SAME bounded queue as `Data`, unlike
     /// `Detached`'s out-of-band watch (see [`TerminalHandle`]'s docs for
@@ -2210,7 +2210,9 @@ impl SupervisorClient {
     /// # Why this hop detaches instead of backpressuring
     ///
     /// Every other bounded hop on the terminal path answers a full queue
-    /// by blocking, which propagates backpressure upstream until it
+    /// by blocking, which propagates backpressure upstream to the
+    /// supervisor's sender for the attachment: a grid stream's sender
+    /// coalesces its screen updates, and an old terminal's backpressure
     /// reaches tmux's own `pause-after`. This one must not, and the
     /// asymmetry is deliberate (PLAN_M2_5.md calls it the one failure this
     /// hop must never have): every terminal, every pending request, and
@@ -3806,17 +3808,17 @@ impl SupervisorClient {
     /// "delete"). After this returns `Ok`, the session no longer appears
     /// in `list_sessions` and `attach` against its id fails as unknown.
     ///
-    /// `Err` is not only "the supervisor rejected the request" (an
-    /// unknown `id`): the supervisor fails the whole delete, row and map
-    /// entry intact, if the process-tree kill, the tmux teardown, or the
-    /// launch-artifact cleanup could not be confirmed complete — removing
-    /// the last handle on a possibly-running agent (or leaving a
-    /// credential-bearing launch spec behind with nothing left to clean
-    /// it up) is the outcome delete must never risk (see
-    /// lore/2026-07-27-m2-process-tree-stop.md). A transport failure
-    /// (the connection itself going away) is a third, distinct cause,
-    /// surfaced as a plain `anyhow::Error` rather than `SupervisorError`.
-    /// Only `Ok` means the session and its state are actually gone.
+    /// `Err` is not only "the supervisor rejected the request" (an unknown
+    /// `id`): the supervisor fails the whole delete, row and map entry
+    /// intact, if the process-tree kill, the end of the session's terminals,
+    /// or the launch-artifact cleanup could not be confirmed complete —
+    /// removing the last handle on a possibly-running agent (or leaving a
+    /// credential-bearing launch spec behind with nothing left to clean it
+    /// up) is the outcome delete must never risk (see
+    /// lore/2026-07-27-m2-process-tree-stop.md). A transport failure (the
+    /// connection itself going away) is a third, distinct cause, surfaced as
+    /// a plain `anyhow::Error` rather than `SupervisorError`. Only `Ok` means
+    /// the session and its state are actually gone.
     pub async fn delete_session(&self, id: &str) -> anyhow::Result<()> {
         self.delete_session_with(id, farhelm_proto::DeleteGuard::Unconditional)
             .await
@@ -3880,10 +3882,10 @@ impl SupervisorClient {
     ///
     /// `Err` distinguishes nothing the caller has to branch on but does
     /// carry the supervisor's own refusal verbatim via [`SupervisorError`]:
-    /// a vanished working directory, a session whose tmux is gone (restart
-    /// it first), and a shell already dead by reply time all arrive here as
-    /// errors naming what happened, with the session and its other
-    /// terminals untouched in every case.
+    /// a vanished working directory, a session whose agent terminal is
+    /// gone (restart it first), and a shell already dead by reply time all
+    /// arrive here as errors naming what happened, with the session and its
+    /// other terminals untouched in every case.
     pub async fn open_tab(&self, session_id: &str) -> anyhow::Result<TabInfo> {
         let req_id = self.req_id();
         match self
@@ -4283,13 +4285,15 @@ impl SupervisorClient {
     /// Ask the supervisor to stop sending this attachment's output until
     /// a matching [`Self::resume_output`].
     ///
-    /// The helm end of PLAN_M2_5.md's watermark flow control: the browser
-    /// decides (from its own unflushed `term.write()` backlog) and this
-    /// forwards that decision verbatim. Deliberately no state is kept
-    /// here — the helm does not model whether a terminal "is" paused,
-    /// because the supervisor already ignores a pause for a channel the
-    /// sender no longer owns, and a second source of truth could only
-    /// disagree with it.
+    /// The helm end of an old terminal's watermark flow control
+    /// (PLAN_M2_5.md): the browser decides (from its xterm.js terminal's
+    /// unflushed `term.write()` backlog) and this forwards that decision
+    /// verbatim. Deliberately no state is kept here — the helm does not
+    /// model whether a terminal "is" paused, because the supervisor
+    /// already ignores a pause for a channel the sender no longer owns, and
+    /// a second source of truth could only disagree with it. A grid
+    /// stream's pause is the helm's own decision instead, sent by
+    /// `spawn_grid_flow` from the queue's fill.
     ///
     /// Fire-and-forget like `resize`, and for the same reason: there is
     /// no reply to correlate and nothing useful a caller could do with a

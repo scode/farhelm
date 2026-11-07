@@ -2888,7 +2888,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         // silently broken, with nothing on screen to say why.
         //
         // `running` is the target for the same reason the supervisor
-        // classifies every live pane that way at this step: it is the
+        // classifies every live terminal that way at this step: it is the
         // closest reading of what `alive` meant. A cached status is
         // last-known-and-possibly-stale by construction, and the owning
         // host's next successful drain replaces it wholesale.
@@ -7857,7 +7857,7 @@ impl HelmStore {
     ///
     /// An `Unknown` status in a fresh row retains this same host's previous
     /// status, when its old payload still decodes. The supervisor uses that
-    /// value while a reloaded live pane has no fresh activity evidence;
+    /// value while a reloaded live terminal has no fresh activity evidence;
     /// retaining only the status lets a new title or timestamp land at once.
     /// The merge happens inside this replacement transaction, so a reader
     /// never sees a partly updated row.
@@ -7948,7 +7948,7 @@ impl HelmStore {
             let mut changed = false;
             for entry in entries {
                 let mut entry = entry.into_info();
-                // A reloaded supervisor can identify a live pane before
+                // A reloaded supervisor can identify a live terminal before
                 // its sampler has enough evidence to classify the agent.
                 // `Unknown` carries no newer status claim, so keep this
                 // host's last answer until a definite observation arrives.

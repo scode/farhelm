@@ -7337,22 +7337,23 @@ shared: a dedicated one converges on its mode with `install -d -m` (which chmods
 point), while a shared one is handed to `install -d` only when it is missing, and the confirmation text says an existing
 one keeps its permissions.
 
-The supervisor unit uses `KillMode=process`. Sessions started through Farhelm belong to the private tmux server that the
-supervisor launches, so systemd's default `control-group` policy would kill that server and every session whenever an
-explicit UPDATE restarts the supervisor. Limiting the unit stop to its main process preserves the same ownership model
-as running `farhelm supervisor run` manually: stopping the supervisor detaches management, while tmux continues to own
-the session processes and terminals until the user deletes them, the host reboots, or Farhelm is uninstalled from the
-host, which ends the private tmux server on purpose.
+The supervisor unit uses `KillMode=process`. Sessions started through Farhelm belong to their terminals, which live in
+the unit's control group: each new terminal's terminal host, and for old sessions the private tmux server an earlier
+supervisor launched. systemd's default `control-group` policy would kill them and every session whenever an explicit
+UPDATE restarts the supervisor. Limiting the unit stop to its main process preserves the same ownership model as running
+`farhelm supervisor run` manually: stopping the supervisor detaches management, while the terminals continue to own the
+session processes until the user deletes them, the host reboots, or Farhelm is uninstalled from the host, which ends the
+terminal hosts and the private tmux server on purpose.
 
 The supervisor unit also sets `UnsetEnvironment=FARHELM_SESSION_ID FARHELM_AGENT_ID FARHELM_TAB_ID`. The kill sweep
 claims every process carrying a session's markers and has no exemption for the supervisor or its private tmux server. A
 tab's startup file that runs a bare `systemctl --user import-environment`, or
 `dbus-update-activation-environment --systemd --all`, copies that tab's markers into the user manager; a supervisor
 started afterwards would inherit them, and deleting that session or closing that tab would make it signal itself, and a
-tmux server it started would take every session's panes with it. A systemd-managed supervisor never legitimately belongs
-to a session, so stripping the markers is free. This covers supervisors started through the generated unit (local setup
-and provisioning share it); one started by hand from an environment carrying markers, and other user services that
-inherited them, are not protected, and the sweep deliberately has no protected-process set.
+tmux server it started would take every old session's panes with it. A systemd-managed supervisor never legitimately
+belongs to a session, so stripping the markers is free. This covers supervisors started through the generated unit
+(local setup and provisioning share it); one started by hand from an environment carrying markers, and other user
+services that inherited them, are not protected, and the sweep deliberately has no protected-process set.
 
 Motivation for shipping tmux ourselves when absent or too old: apt needs root, and SPEC.md forbids requiring it; a
 static tmux under our own lib dir keeps the no-root promise without asking the user to install anything.

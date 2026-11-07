@@ -1504,9 +1504,10 @@ impl ProvisioningService {
     /// unit file: with no unit file left nothing can start the supervisor
     /// again, so the remaining steps may go ahead without a connection, but
     /// only on positive evidence that no supervisor answers and that systemd
-    /// no longer runs its unit. A supervisor that exited while its tmux
-    /// server survived still passes, with that server's sessions unchecked;
-    /// nothing here covers that route.
+    /// no longer runs its unit. A supervisor that exited while its
+    /// terminals survived (its terminal hosts, or the private tmux server)
+    /// still passes, with their sessions unchecked; nothing here covers
+    /// that route.
     /// A host whose supervisor answers but cannot be used (another protocol,
     /// an identity problem) is refused outright, because something is
     /// running there and, for an identity problem, the destination may now
