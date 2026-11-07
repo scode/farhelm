@@ -90,7 +90,7 @@ async function loadRow(page: Page, overrides: Record<string, unknown> = {}, expe
  * density. The fixture uses a managed checkout so a missing body row or a
  * truncated directory cannot be hidden by an ordinary short path.
  */
-test("a session's title and open area share its summary card", async ({ page, request }) => {
+test("a session's title and open area share its summary card", async ({ page, request }, testInfo) => {
   const local = await localHostId(request);
   const started = 1_700_000_000;
   try {
@@ -130,7 +130,10 @@ test("a session's title and open area share its summary card", async ({ page, re
       const rowBox = (await row.locator(".session-row-open").boundingBox())!;
       await expect(tooltip(page)).toHaveAttribute("data-side", "right");
       expect(tipBox.x).toBeCloseTo(sidebarBox.x + sidebarBox.width + 6, 0);
-      expect(tipBox.y).toBeCloseTo(Math.max(4, Math.min(rowBox.y, page.viewportSize()!.height - 4 - tipBox.height)), 0);
+      expect(tipBox.y).toBeCloseTo(Math.max(4, Math.min(rowBox.y + rowBox.height / 2 - tipBox.height / 2,
+        page.viewportSize()!.height - 4 - tipBox.height)), 0);
+      await expectBesideRow(page, row.locator(".session-row-open"));
+      await page.screenshot({ path: testInfo.outputPath(`summary-${compact ? "compact" : "normal"}.png`) });
       await expect(card.locator(".session-summary-title")).toHaveText("A <peer> title");
       await expect(card.locator(".session-summary-state-word")).toHaveText("Running");
       await expect(card.locator(".session-summary-agent")).toContainText("Codex");
@@ -193,6 +196,8 @@ test("a session summary falls back to ordinary placement when the window is too 
   await row.locator(".session-title").hover();
   await expect(tooltip(page)).toBeVisible();
   await expect(tooltip(page)).toHaveAttribute("data-side", "right");
+  await expect(row.locator(".session-row-open")).toHaveClass(/tooltip-target-ring/);
+  await expect(page.locator(".farhelm-tooltip-pointer")).toBeVisible();
   const sidebar = (await page.locator(".app-sidebar").boundingBox())!;
   // Leave less than the 310px card needs beside the actual stored sidebar
   // width, rather than assuming this shared stack still has the default.
@@ -200,6 +205,8 @@ test("a session summary falls back to ordinary placement when the window is too 
   // Keep the pointer resting: a fixed sidebar can leave the target's box
   // unchanged, but the showing card must still notice the narrower window.
   await expect(tooltip(page)).not.toHaveAttribute("data-side", "right");
+  await expect(row.locator(".session-row-open")).not.toHaveClass(/tooltip-target-ring/);
+  await expect(page.locator(".farhelm-tooltip-pointer")).toBeHidden();
   await expect(tooltip(page)).toHaveAttribute("data-kind", "card");
   await expect(tooltip(page)).toBeVisible();
   const actual = (await tooltip(page).boundingBox())!;
@@ -299,13 +306,11 @@ function expectInsideViewport(tip: { x: number; y: number; width: number; height
 }
 
 /**
- * Hover shows the target's text above it, centred, inside the window, and
- * only after the delay. Why: this is the whole feature (fast, themed, out
- * from under the cursor); a regression to the native tooltip, or to placing
- * the box below a small mark where the cursor covers it, would leave every
- * other test in the suite passing.
+ * Row marks keep their own text and rest delay while sharing the summary's
+ * beside-the-list placement. The notch and ring must identify that mark,
+ * rather than its enclosing open button or a previously hovered target.
  */
-test("hovering a row mark shows its text above it after the delay", async ({ page }) => {
+test("hovering a row mark shows its text beside the list after the delay", async ({ page }) => {
   const row = await loadRow(page);
   await parkPointer(page);
   const age = row.locator(".status-time");
@@ -340,13 +345,85 @@ test("hovering a row mark shows its text above it after the delay", async ({ pag
   // on a loaded machine is not a failure.
   expect(timing.shown - timing.over, "the tooltip must wait for the pointer to rest").toBeGreaterThanOrEqual(250);
 
-  const { tip, anchor, viewport } = await boxes(page, age);
-  expect(tip.y + tip.height, "the tooltip sits above the mark").toBeLessThanOrEqual(anchor.y);
-  expect(anchor.y - (tip.y + tip.height), "about 6 px above").toBeLessThanOrEqual(8);
-  expectInsideViewport(tip, viewport);
+  await expectBesideRow(page, age);
+  await expect(row.locator(".session-row-open")).not.toHaveClass(/tooltip-target-ring/);
 
   // Leaving takes it away.
   await parkPointer(page);
+  await expect(age).not.toHaveClass(/tooltip-target-ring/);
+  await expect(page.locator(".farhelm-tooltip-pointer")).toBeHidden();
+});
+
+/** Compare real painted boxes with the agreed geometry, independently of the
+ * JS helper. The rotated notch's bounding-box centre is its square's centre. */
+async function expectBesideRow(page: Page, target: Locator) {
+  await expect(tooltip(page)).toHaveAttribute("data-side", "right");
+  await expect(target).toHaveClass(/tooltip-target-ring/);
+  await expect(target).not.toHaveCSS("box-shadow", "none");
+  const { tip, anchor, viewport } = await boxes(page, target);
+  const sidebar = (await page.locator(".app-sidebar").boundingBox())!;
+  expect(tip.x).toBeCloseTo(sidebar.x + sidebar.width + 6, 0);
+  const centre = anchor.y + anchor.height / 2;
+  expect(tip.y).toBeCloseTo(Math.max(4, Math.min(centre - tip.height / 2, viewport.height - 4 - tip.height)), 0);
+  const notch = page.locator("body > .farhelm-tooltip-pointer");
+  await expect(notch).toBeVisible();
+  const pointer = (await notch.boundingBox())!;
+  const inset = Math.min(12, tip.height / 2);
+  expect(pointer.x + pointer.width / 2).toBeCloseTo(tip.x, 0);
+  expect(pointer.y + pointer.height / 2).toBeCloseTo(
+    Math.max(tip.y + inset, Math.min(centre, tip.y + tip.height - inset)), 0);
+  await expect(notch).toHaveCSS("background-color", await resolveToken(page, "--bg-2"));
+  expectInsideViewport(tip, viewport);
+}
+
+/** Explicit row opt-ins must cover the controls in both densities, including
+ * the sibling bell. Menu contents stay ordinary even though their DOM lives
+ * beneath the row. This catches new nearer targets that would bypass the cue. */
+test("every visible session-row hover opts in, including the notification bell", async ({ page, request }, testInfo) => {
+  try {
+    await patchPreferences(request, { compact: false });
+    const row = await loadRow(page, {
+      stale: true,
+      launch: agentLaunchRow({ harness: "codex", permissions: "guarded", model: "gpt-6", effort: "high" }),
+      notifications: [{ seq: 1, text: "Check this session", at: 1_700_000_000 }],
+    });
+    for (const compact of [false, true]) {
+      await page.emulateMedia({ colorScheme: compact ? "light" : "dark" });
+      await patchPreferences(request, { compact });
+      await page.reload();
+      await expectCompactRows(page, compact);
+      const targets = row.locator("[data-tooltip], [data-tooltip-card]");
+      for (const target of await targets.all()) {
+        if (await target.isVisible()) await expect(target).toHaveAttribute("data-tooltip-anchor", "session-row");
+      }
+      const bell = row.locator(".session-row-bell");
+      await expect(bell).toBeVisible();
+      await parkPointer(page);
+      await bell.hover();
+      await expectBesideRow(page, bell);
+      await page.screenshot({ path: testInfo.outputPath(`bell-${compact ? "light" : "dark"}.png`) });
+      // A synthetic selected-row premise isolates cue contrast from session
+      // navigation, which this fixture deliberately does not implement.
+      await row.evaluate((element) => element.classList.add("selected"));
+      await expect(row).toHaveClass(/selected/);
+      const inverse = await resolveToken(page, "--on-fill");
+      await expect(bell).toHaveCSS("box-shadow", `${inverse} 0px 0px 0px 1px inset`);
+      const dot = row.locator(".status-dot").first();
+      await dot.hover();
+      await expect(dot).toHaveClass(/tooltip-target-ring/);
+      await expect(dot).toHaveCSS("outline-style", "solid");
+      await expect(dot).toHaveCSS("outline-width", "1px");
+      await expect(dot).toHaveCSS("outline-color", inverse);
+      await expect(dot).toHaveCSS("outline-offset", "-1px");
+      await page.screenshot({ path: testInfo.outputPath(`selected-dot-${compact ? "light" : "dark"}.png`) });
+      await page.keyboard.press("Escape");
+      await expect(bell).not.toHaveClass(/tooltip-target-ring/);
+      await expect(dot).not.toHaveClass(/tooltip-target-ring/);
+      await expect(page.locator(".farhelm-tooltip-pointer")).toBeHidden();
+    }
+  } finally {
+    await resetPreferences(request);
+  }
 });
 
 /**
