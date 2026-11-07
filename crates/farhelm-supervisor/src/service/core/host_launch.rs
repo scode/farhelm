@@ -479,12 +479,24 @@ impl Supervisor {
             }
         };
         let shell_variable = self.host_shell_variable(&shell).await;
-        let env = host_child_env(
+        let mut env = host_child_env(
             std::env::vars_os(),
             &self.seams.launch_env,
             &shell_variable,
             &cwd,
         );
+        // The login shell and managed clone inherit this before the launch
+        // shim applies persisted launch settings. The terminal host itself
+        // receives it only in its child's stdin spec, never its own environment.
+        if let Err(error) =
+            crate::github_token::inject(&mut env, &crate::github_token::host_file(&self.state_dir))
+        {
+            return Err(HostSpawnFailure::Host {
+                artifacts,
+                error,
+                left: HostLeft::Nothing,
+            });
+        }
         let child = ChildSpec {
             argv: cmd.into_iter().map(OsString::from).collect(),
             cwd: PathBuf::from(&cwd),

@@ -512,6 +512,18 @@ async fn run_guard(
     let mut command =
         tokio::process::Command::from(crate::launch::background_guard_command(farhelm_exe));
     command.arg("internal").arg("build-spare-guard").arg(path);
+    // This clone has no terminal child spec. Read the same current host file
+    // before its login shell, keeping the token out of BuildSpec and argv.
+    match crate::github_token::read_file(&crate::github_token::host_file(&sup.state_dir)) {
+        Ok(Some(token)) => {
+            command.env("GH_TOKEN", token);
+        }
+        Ok(None) => {}
+        Err(error) => {
+            remove_artifacts(path).await;
+            return Err(error);
+        }
+    }
     let mut child = match GroupChild::spawn_detached_tethered(&mut command, caps) {
         Ok(child) => child,
         Err(error) => {

@@ -5897,17 +5897,33 @@ Debug implementation. Tokens reuse the visible-ASCII 4096-byte bound; Codex acce
 KiB, preserving vendor fields. The 512 KiB request cap permits JSON escaping of the bounded pasted file.
 
 Credential metadata includes the names of recipes referring to it. The same reference query protects deletion inside its
-immediate transaction. Both recipe create and update check existence and endpoint-token kind inside their own immediate
-write transactions; this excludes a competing delete even across independent SQLite connections. Saving a recipe checks
-metadata alone. Delivery resolves values into a transient `ResolvedEndpoint` with neither Debug nor Serialize; persisted
-`StoredEndpoint` contains only `base_url` and optional `token_credential`.
+immediate transaction. Both recipe create and update check existence and the required endpoint-token or GitHub-token
+kind inside their own immediate write transactions; this excludes a competing delete even across independent SQLite
+connections. Saving a recipe checks metadata alone. Delivery resolves values into a transient `ResolvedEndpoint` with
+neither Debug nor Serialize; persisted `StoredEndpoint` contains only `base_url` and optional `token_credential`.
 
 Schema 77 adds nullable `hosts.tensorlake_credential_delivery`. The provisioning delivery component alone reads and
 writes this nonsecret JSON: known absolute home and independent successful Claude/Codex endpoint fingerprints (URL,
-credential name, revision and immutable creation UUID). Unknown slots retry; known absent endpoints require no file work
-under this optional-URL interface. This absence stamp does not represent explicit agent-mode cleanup. Each successful
-file's stamp is committed before the next file is attempted. The revision and value come from the same credential read;
-no secret is cached in the record or runtime binding.
+credential name, revision and immutable creation UUID), plus a GitHub absent/name/revision/creation-UUID stamp. Unknown
+slots retry; known absent endpoints require no file work under this optional-URL interface. This absence stamp does not
+represent explicit agent-mode cleanup. Each successful file's stamp is committed before the next file is attempted. The
+revision and value come from the same credential read; no secret is cached in the record or runtime binding.
+
+Recipes persist optional `github_token_credential` names. The GitHub slot atomically installs 0600 bytes through stdin
+at `github_token::host_file(remote_state_dir)`, the shared `github-token` basename, or unlinks only that file for None.
+The supervisor's path-injected reader trims and rejects empty/NUL or unreadable values with fixed errors; NotFound keeps
+the ordinary child environment. Host agent and tab paths inject after `host_child_env` into `ChildSpec.env`, before the
+login shell, managed clone and launch shim. Restart reuses the agent seam. LaunchSpec, launch records, host
+argv/environment and tmux `-e` never carry this value. Container configured-file reads share validation while retaining
+their stricter missing-file refusal. The background spare-clone guard reads the same current file into only its child
+command's environment before its login shell; its persisted `BuildSpec` stays secret-free. No protocol or terminal-host
+change is needed.
+
+Without a previous successful GitHub token stamp, delivery runs the token-free
+`gh auth setup-git --force --hostname github.com`; absence is a fixed warning after installing the file, and failure
+leaves the slot unknown or at its previous successful stamp. Endpoint stamps committed earlier stay successful. A
+successful GitHub stamp also means helper setup succeeded, so ordinary token replacements do not rerun it. None does not
+edit Git configuration. There is no additional helper journal or credential cache.
 
 Production backend and payload selection happen before manager startup. Provisioning and Tensorlake share one delivery
 object and backend, including when explicitly injected. Setup records preparation's home and reconciles after install
@@ -6166,7 +6182,7 @@ registration hint; any other 255 is unreachable, retried for up to 60 seconds wh
 sandbox's running state. The readiness script refuses a PID 1 other than systemd, polls `systemctl is-system-running`
 every 2 seconds for up to 180 until it says (right after boot it answers nothing, even with `--wait`) `running` or
 `degraded`, and requires `sudo -n`. The package script runs `dpkg --configure -a`, `apt-get update` and
-`apt-get install ca-certificates curl <packages>` through
+`apt-get install ca-certificates curl gh <packages>` through
 `sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a` with `DPkg::Lock::Timeout=600` and `confdef`/`confold`,
 each package shell-quoted. Each agent script downloads its installer with `curl --proto '=https' --tlsv1.2 -fsSL` into a
 file and runs that file (`bash` for `https://claude.ai/install.sh`, `CODEX_NON_INTERACTIVE=1 sh` for

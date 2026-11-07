@@ -1,4 +1,4 @@
-//! Per-host endpoint convergence on the ordinary provisioning transport.
+//! Per-host credential convergence on the ordinary provisioning transport.
 //!
 //! A connection registers before reading credentials and keeps its lease until
 //! it ends. Replacement therefore includes a hook that has read an old value
@@ -32,6 +32,7 @@ const TIMED_OUT: &str = "credential delivery did not finish within the SSH timeo
 pub(crate) struct Bindings {
     claude: Option<StoredEndpoint>,
     codex: Option<StoredEndpoint>,
+    github_token_credential: Option<String>,
 }
 
 #[cfg(test)]
@@ -44,15 +45,17 @@ impl Bindings {
         Self {
             claude: recipe.claude.clone(),
             codex: recipe.codex.clone(),
+            github_token_credential: recipe.github_token_credential.clone(),
         }
     }
 
     /// A replacement must not activate another recipe's pending selection edit.
     fn uses(&self, name: &str) -> bool {
-        [&self.claude, &self.codex]
-            .into_iter()
-            .flatten()
-            .any(|endpoint| endpoint.token_credential.as_deref() == Some(name))
+        self.github_token_credential.as_deref() == Some(name)
+            || [&self.claude, &self.codex]
+                .into_iter()
+                .flatten()
+                .any(|endpoint| endpoint.token_credential.as_deref() == Some(name))
     }
 }
 
@@ -68,6 +71,19 @@ enum EndpointStamp {
     },
 }
 
+/// A successful token stamp also attests that gh's helper was configured.
+/// A missing gh leaves this unknown/previous, so the next named event retries
+/// setup while the already-installed token remains available to new children.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+enum GithubStamp {
+    Absent,
+    Token {
+        name: String,
+        revision: u64,
+        incarnation: String,
+    },
+}
+
 /// Only successful slots are durable. Outer None is unknown, so a partial
 /// failure retries unfinished work without forgetting another slot's success.
 #[derive(Default, Deserialize, Serialize)]
@@ -75,12 +91,19 @@ struct Record {
     home: Option<PathBuf>,
     claude: Option<EndpointStamp>,
     codex: Option<EndpointStamp>,
+    github: Option<GithubStamp>,
 }
 
 /// Secret-bearing values exist only while a serialized operation uses them.
 struct Slot {
     endpoint: Option<ResolvedEndpoint>,
     stamp: EndpointStamp,
+}
+
+/// As with endpoints, raw token bytes exist only inside one guarded delivery.
+struct GithubSlot {
+    token: Option<String>,
+    stamp: GithubStamp,
 }
 
 /// Runtime selections and warnings belong to one registered host identity.
@@ -362,12 +385,9 @@ impl CredentialDelivery {
             record.home = Some(home);
             guard = self.write_record(row, &record, guard).await?;
         }
-        let [claude, codex] = self.resolve(bindings).await?;
-        if record.claude.as_ref() == Some(&claude.stamp)
-            && record.codex.as_ref() == Some(&codex.stamp)
-        {
-            return Ok(());
-        }
+        let [claude, codex] = self
+            .resolve_endpoints(bindings.claude, bindings.codex)
+            .await?;
         let target = ProvisioningTarget::Ssh {
             destination: row
                 .destination
@@ -437,10 +457,68 @@ impl CredentialDelivery {
             }
             guard = self.write_record(row, &record, guard).await?;
         }
+        // An active connection can still name a credential removed after a
+        // pending recipe edit. That later slot must not prevent independent
+        // endpoint rotations and their successful stamps from reaching disk.
+        let github = self
+            .resolve_github(bindings.github_token_credential)
+            .await?;
+        if record.github.as_ref() != Some(&github.stamp) {
+            let state_dir = row
+                .remote_state_dir
+                .as_deref()
+                .map(Path::new)
+                .filter(|path| path.is_absolute())
+                .ok_or("the host has no absolute supervisor state directory")?;
+            let path = farhelm_supervisor::github_token::host_file(state_dir);
+            let backend = self
+                .backend
+                .as_ref()
+                .ok_or("credential delivery is unavailable")?;
+            if let Some(token) = github.token {
+                backend
+                    .ensure_directories(
+                        &target,
+                        &[DirectorySpec {
+                            path: state_dir.to_path_buf(),
+                            mode: 0o700,
+                            shared: true,
+                        }],
+                    )
+                    .await
+                    .map_err(|_| "could not prepare the GitHub token directory")?;
+                let temporary = path.with_file_name(format!(
+                    ".github-token.farhelm-tmp-{}",
+                    uuid::Uuid::new_v4()
+                ));
+                backend
+                    .install_bytes(&target, token.as_bytes(), &path, &temporary, 0o600)
+                    .await
+                    .map_err(|_| "could not install the GitHub token")?;
+                if !matches!(record.github, Some(GithubStamp::Token { .. })) {
+                    let available = backend
+                        .setup_github_git(&target)
+                        .await
+                        .map_err(|_| "could not configure GitHub's git helper")?;
+                    if !available {
+                        return Err(
+                            "GitHub CLI (gh) is missing; private clones need gh installed".into(),
+                        );
+                    }
+                }
+            } else {
+                backend
+                    .remove_github_token(&target, &path)
+                    .await
+                    .map_err(|_| "could not remove the managed GitHub token")?;
+            }
+            record.github = Some(github.stamp);
+            self.write_record(row, &record, guard).await?;
+        }
         Ok(())
     }
 
-    /// Loading only two named slots does not read build state or vendor auth.
+    /// Load only credential selections, without build state or vendor auth.
     async fn read_bindings(&self, row: &HostRow) -> Result<Bindings, String> {
         let name = row
             .tensorlake
@@ -464,7 +542,11 @@ impl CredentialDelivery {
 
     /// Each catalog read binds a value to its revision. The shared resolver
     /// already keeps secrets transient; warnings discard storage diagnostics.
-    async fn resolve(&self, bindings: Bindings) -> Result<[Slot; 2], String> {
+    async fn resolve_endpoints(
+        &self,
+        claude: Option<StoredEndpoint>,
+        codex: Option<StoredEndpoint>,
+    ) -> Result<[Slot; 2], String> {
         let resolve = async |endpoint: Option<StoredEndpoint>| -> Result<Slot, String> {
             let Some(endpoint) = endpoint else {
                 return Ok(Slot {
@@ -490,10 +572,41 @@ impl CredentialDelivery {
                 endpoint: Some(resolved),
             })
         };
-        Ok([
-            resolve(bindings.claude).await?,
-            resolve(bindings.codex).await?,
-        ])
+        Ok([resolve(claude).await?, resolve(codex).await?])
+    }
+
+    /// Resolve the later GitHub slot only after earlier successful endpoint
+    /// writes. Missing retained names remain a warning without undoing them.
+    async fn resolve_github(&self, name: Option<String>) -> Result<GithubSlot, String> {
+        Ok(if let Some(name) = name {
+            let lookup = name.clone();
+            let (token, revision, incarnation) = self
+                .store
+                .conn()
+                .call("resolve GitHub credential", move |conn| {
+                    crate::credentials::secret(
+                        conn,
+                        &lookup,
+                        farhelm_proto::credentials::CredentialKind::GithubToken,
+                    )?
+                    .ok_or_else(|| anyhow::anyhow!("GitHub credential no longer exists"))
+                })
+                .await
+                .map_err(|_| "could not resolve the recipe's GitHub credential")?;
+            GithubSlot {
+                token: Some(token),
+                stamp: GithubStamp::Token {
+                    name,
+                    revision,
+                    incarnation,
+                },
+            }
+        } else {
+            GithubSlot {
+                token: None,
+                stamp: GithubStamp::Absent,
+            }
+        })
     }
 
     /// Missing state is unknown, not successful absence. Refuse corrupt state

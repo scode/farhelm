@@ -24,6 +24,162 @@ const REPO_TEXT: &str = "acme/bar";
 const SENTINEL_NAME: &str = "checkout-sentinel.txt";
 const SENTINEL_CONTENT: &str = "private checkout fixture\n";
 
+/// The managed clone precedes LaunchSpec.env. A real Git wrapper witnesses the
+/// value before cloning the fixture's private bare source; requiring it there
+/// distinguishes child-spec delivery from a token supplied only to the agent.
+/// Ready-spare publication and a later inode-preserving take also exercise the
+/// separate background guard, which must read replacements without a cache.
+/// No vendor authentication or public repository is involved in this proof.
+#[farhelm_testtrace::test]
+async fn a_host_checkout_clone_receives_the_managed_github_token() {
+    use crate::host_creates::{script, wait_for_file};
+    use std::os::unix::fs::MetadataExt as _;
+    const TOKEN: &str = "fictional-private-clone-token";
+    const REPLACED: &str = "fictional-private-clone-replaced";
+    let stack = CheckoutStack::start_with_default_spares().await;
+    assert!(
+        stack.spare_enabled().await,
+        "private spares keep the shipped default"
+    );
+    let wrappers = stack.markers.path().join("bin");
+    std::fs::create_dir(&wrappers).unwrap();
+    let clone_witness = stack.markers.path().join("clone-token");
+    let agent_witness = stack.markers.path().join("agent-token");
+    script(
+        &wrappers.join("git"),
+        &format!(
+            "for argument in \"$@\"; do\n  if [ \"$argument\" = clone ] || [ \"$argument\" = fetch ]; then\n    test -n \"$GH_TOKEN\" || exit 91\n    printf '%s\\n' \"$GH_TOKEN\" > {}\n    break\n  fi\ndone\nexec /usr/bin/git \"$@\"",
+            shell_words::quote(&clone_witness.to_string_lossy()),
+        ),
+    );
+    let profile = stack.git.home.join(".bash_profile");
+    let mut contents = std::fs::read_to_string(&profile).unwrap();
+    contents.push_str(&format!(
+        "export PATH={}:$PATH\n",
+        shell_words::quote(&wrappers.to_string_lossy())
+    ));
+    std::fs::write(profile, contents).unwrap();
+    let agent = script(
+        &wrappers.join("agent"),
+        &format!(
+            "printf '%s\\n' \"$GH_TOKEN\" > {}\nexec /bin/sleep 600",
+            shell_words::quote(&agent_witness.to_string_lossy()),
+        ),
+    );
+    let token_path = farhelm_supervisor::github_token::host_file(stack.supervisor.state.path());
+    std::fs::write(&token_path, format!(" {TOKEN}\n")).unwrap();
+    assert!(
+        !clone_witness.exists() && !agent_witness.exists(),
+        "premise: no launch has run"
+    );
+    let accepted = preview(&stack, "credential-clone").await;
+    let mut body: Value = serde_json::from_slice(&create_body(
+        &stack.claim,
+        &accepted,
+        "credential-clone",
+        "github-delivery-key",
+        &Selector::Raw,
+    ))
+    .unwrap();
+    body["command"] = json!({"command": shell_words::quote(&agent.to_string_lossy()), "yolo":true});
+    let (status, response) = post(
+        &stack.client,
+        &format!("{}/api/sessions", stack.helm().base),
+        body,
+    )
+    .await;
+    assert!(status.is_success(), "create the owned checkout: {response}");
+    let session: SessionInfo = serde_json::from_str(&response).unwrap();
+    assert_eq!(
+        wait_for_file(&clone_witness, REAL_STACK_SETTLE.as_secs()).await,
+        format!("{TOKEN}\n").as_bytes()
+    );
+    assert_eq!(
+        wait_for_file(&agent_witness, REAL_STACK_SETTLE.as_secs()).await,
+        format!("{TOKEN}\n").as_bytes()
+    );
+    stack.git.assert_clone(&session.cwd);
+    assert_eq!(
+        std::fs::read_to_string(Path::new(&session.cwd).join(SENTINEL_NAME)).unwrap(),
+        SENTINEL_CONTENT
+    );
+    let client = supervisor_client(stack.supervisor.state.path()).await;
+    let id = bare_session_id(&session.id);
+    let store = farhelm_supervisor::store::SessionStore::open(
+        &stack.supervisor.state.path().join("supervisor.db"),
+        false,
+    )
+    .await
+    .unwrap();
+    let row = store.session(&id).await.unwrap().unwrap();
+    assert_eq!(
+        row.terminal_kind,
+        farhelm_supervisor::store::TerminalKind::Host
+    );
+    assert!(!serde_json::to_string(&row.launch).unwrap().contains(TOKEN));
+    let slot = stack
+        .root_a
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join(".farhelm-spares/acme/bar");
+    let spare = await_ready_spare(&stack, &slot, 1).await;
+    assert_eq!(
+        std::fs::read_to_string(&clone_witness).unwrap(),
+        format!("{TOKEN}\n"),
+        "the background clone also received the token"
+    );
+    let previous = spare.metadata().unwrap();
+    std::fs::remove_file(&agent_witness).unwrap();
+    std::fs::remove_file(&clone_witness).unwrap();
+    let temporary = stack.markers.path().join("replacement-token");
+    std::fs::write(&temporary, REPLACED).unwrap();
+    std::fs::rename(temporary, &token_path).unwrap();
+    let accepted = preview(&stack, "credential-replaced").await;
+    let mut body: Value = serde_json::from_slice(&create_body(
+        &stack.claim,
+        &accepted,
+        "credential-replaced",
+        "github-replaced-key",
+        &Selector::Raw,
+    ))
+    .unwrap();
+    body["command"] = json!({"command": shell_words::quote(&agent.to_string_lossy()), "yolo":true});
+    let (status, response) = post(
+        &stack.client,
+        &format!("{}/api/sessions", stack.helm().base),
+        body,
+    )
+    .await;
+    assert!(status.is_success(), "take the private spare: {response}");
+    let second: SessionInfo = serde_json::from_str(&response).unwrap();
+    assert_eq!(
+        wait_for_file(&agent_witness, REAL_STACK_SETTLE.as_secs()).await,
+        format!("{REPLACED}\n").as_bytes()
+    );
+    let taken = std::fs::metadata(Path::new(&second.cwd).join(".git")).unwrap();
+    assert_eq!(
+        (taken.dev(), taken.ino()),
+        (previous.dev(), previous.ino()),
+        "the new session moved the authenticated ready spare"
+    );
+    let _replacement = await_ready_spare(&stack, &slot, 2).await;
+    assert_eq!(
+        std::fs::read_to_string(&clone_witness).unwrap(),
+        format!("{REPLACED}\n"),
+        "replenishment reads the replacement rather than caching the first token"
+    );
+    let second_id = bare_session_id(&second.id);
+    let second_row = store.session(&second_id).await.unwrap().unwrap();
+    assert!(
+        !serde_json::to_string(&second_row.launch)
+            .unwrap()
+            .contains(REPLACED)
+    );
+    client.delete_session(&second_id).await.unwrap();
+    client.delete_session(&id).await.unwrap();
+}
+
 /// The shipped CLI must turn repository intent into one owned checkout and
 /// reconcile keyed retries before proposing a new name. The post-clone
 /// marker and retained untracked file distinguish replay from a second clone.

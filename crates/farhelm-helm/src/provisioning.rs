@@ -411,6 +411,8 @@ mod tests {
         /// the fixture's notifications with the existing action gate.
         block_probe: std::sync::atomic::AtomicBool,
         pub(super) stateful: std::sync::atomic::AtomicBool,
+        /// A reused image may lack gh while still accepting the token file.
+        pub(super) github_cli: std::sync::atomic::AtomicBool,
         /// Run once when the named operation is recorded: what that step
         /// "did" to the far side, for a test that needs the host to change
         /// at a specific point in the run (the new supervisor coming up at
@@ -487,6 +489,7 @@ mod tests {
                 block_first: std::sync::atomic::AtomicBool::new(false),
                 block_probe: std::sync::atomic::AtomicBool::new(false),
                 stateful: std::sync::atomic::AtomicBool::new(false),
+                github_cli: std::sync::atomic::AtomicBool::new(true),
                 on_operation: Mutex::new(None),
                 present: Mutex::new(None),
                 repeat_probe: Mutex::new(None),
@@ -569,6 +572,34 @@ mod tests {
 
     #[async_trait]
     impl ProvisioningBackend for FakeBackend {
+        async fn remove_github_token(
+            &self,
+            _target: &ProvisioningTarget,
+            path: &Path,
+        ) -> Result<(), BackendFailure> {
+            self.record("remove-github-token")?;
+            if self.stateful.load(std::sync::atomic::Ordering::SeqCst) {
+                match tokio::fs::remove_file(path).await {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(_) => {
+                        return Err(BackendFailure::new(
+                            "fixture could not remove its GitHub token",
+                            "",
+                        ));
+                    }
+                }
+            }
+            Ok(())
+        }
+
+        async fn setup_github_git(
+            &self,
+            _target: &ProvisioningTarget,
+        ) -> Result<bool, BackendFailure> {
+            self.record("configure-github-helper")?;
+            Ok(self.github_cli.load(std::sync::atomic::Ordering::SeqCst))
+        }
         async fn host_home(&self, _target: &ProvisioningTarget) -> Result<PathBuf, BackendFailure> {
             self.record("read-home")?;
             match &*self.reach.lock().unwrap() {
@@ -11548,7 +11579,7 @@ mod tests {
         )
         .await
         .expect_err("a non-file temporary cannot be ignored as absent");
-        assert!(error.context.contains("removing temporary file"));
+        assert!(error.context.contains("removing owned file"));
         assert_eq!(
             tokio::fs::read(&blocked_destination).await.unwrap(),
             b"preserved"

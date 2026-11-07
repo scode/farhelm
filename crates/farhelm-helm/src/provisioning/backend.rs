@@ -300,6 +300,27 @@ impl BackendFailure {
 /// production implementation with only linger faked.
 #[async_trait]
 pub(super) trait ProvisioningBackend: Send + Sync {
+    /// Remove only the Farhelm-owned token path, with absence already clean.
+    /// No other GitHub authentication or user configuration is removed.
+    async fn remove_github_token(
+        &self,
+        _target: &ProvisioningTarget,
+        _path: &Path,
+    ) -> Result<(), BackendFailure> {
+        Err(BackendFailure::new(
+            "this backend cannot remove the managed GitHub token",
+            "",
+        ))
+    }
+
+    /// Configure gh's own github.com helper without receiving a token. False
+    /// means gh is missing; the token file can still serve new child processes.
+    async fn setup_github_git(&self, _target: &ProvisioningTarget) -> Result<bool, BackendFailure> {
+        Err(BackendFailure::new(
+            "this backend cannot configure the GitHub helper",
+            "",
+        ))
+    }
     /// Recover only the login home for legacy host bindings. Unlike sandbox
     /// preparation, this must never start services or alter the host.
     async fn host_home(&self, _target: &ProvisioningTarget) -> Result<PathBuf, BackendFailure> {
@@ -936,8 +957,9 @@ impl SystemBackend {
         }
     }
 
-    /// Remove exactly this run's temporary path on either transport.
-    async fn remove_temporary(
+    /// Remove exactly one Farhelm-owned file on either transport: a run's
+    /// temporary or the managed GitHub file. Callers own the path's authority.
+    async fn remove_owned_file(
         &self,
         target: &ProvisioningTarget,
         path: &Path,
@@ -947,7 +969,7 @@ impl SystemBackend {
                 Ok(()) => Ok(()),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
                 Err(error) => Err(BackendFailure::new(
-                    format!("removing temporary file {}", path.display()),
+                    format!("removing owned file {}", path.display()),
                     error.to_string(),
                 )),
             },
@@ -955,7 +977,7 @@ impl SystemBackend {
                 self.require_shell(
                     target,
                     &format!("rm -f -- {}", shell_path(path)?),
-                    "removing the remote temporary file",
+                    "removing the remote owned file",
                 )
                 .await?;
                 Ok(())
@@ -1000,7 +1022,7 @@ impl SystemBackend {
             )));
         }
 
-        self.remove_temporary(target, temporary).await?;
+        self.remove_owned_file(target, temporary).await?;
         let install: Result<(), BackendFailure> = match target {
             ProvisioningTarget::Local => {
                 async {
@@ -1109,7 +1131,7 @@ impl SystemBackend {
             }
         };
         if let Err(primary) = install {
-            if let Err(cleanup) = self.remove_temporary(target, temporary).await {
+            if let Err(cleanup) = self.remove_owned_file(target, temporary).await {
                 return Err(BackendFailure::new(
                     format!("{}; temporary cleanup also failed", primary.context),
                     format!("{}; {}", primary.stderr, cleanup.rendered()),
@@ -1150,13 +1172,13 @@ impl SystemBackend {
         if let Some(installed) = self.metadata_on_target(target, destination).await?
             && installed.hash == source_hash
         {
-            self.remove_temporary(target, temporary).await?;
+            self.remove_owned_file(target, temporary).await?;
             return Ok(ActionOutcome::Skipped(format!(
                 "{} already has the requested payload",
                 destination.display()
             )));
         }
-        self.remove_temporary(target, temporary).await?;
+        self.remove_owned_file(target, temporary).await?;
         let upload = async {
             self.ssh_put(ssh_destination, *access, source, temporary)
                 .await?;
@@ -1214,7 +1236,7 @@ impl SystemBackend {
             if repaired {
                 self.set_target_mode(target, destination, mode).await?;
             }
-            self.remove_temporary(target, temporary).await?;
+            self.remove_owned_file(target, temporary).await?;
             Ok::<_, BackendFailure>(Some(ActionOutcome::Skipped(format!(
                 "{} already has the requested payload{}",
                 destination.display(),
@@ -1266,7 +1288,7 @@ impl SystemBackend {
         temporary: &Path,
         primary: BackendFailure,
     ) -> BackendFailure {
-        match self.remove_temporary(target, temporary).await {
+        match self.remove_owned_file(target, temporary).await {
             Ok(()) => primary,
             Err(cleanup) => BackendFailure::new(
                 format!("{}; temporary cleanup also failed", primary.context),
@@ -2128,6 +2150,27 @@ fn handshake_io_failure(error: &std::io::Error) -> bool {
 
 #[async_trait]
 impl ProvisioningBackend for SystemBackend {
+    async fn remove_github_token(
+        &self,
+        target: &ProvisioningTarget,
+        path: &Path,
+    ) -> Result<(), BackendFailure> {
+        self.remove_owned_file(target, path).await
+    }
+
+    async fn setup_github_git(&self, target: &ProvisioningTarget) -> Result<bool, BackendFailure> {
+        let output = self.run_shell(target,
+            "command -v gh >/dev/null 2>&1 || exit 42\ngh auth setup-git --force --hostname github.com >/dev/null 2>&1",
+            COMMAND_TIMEOUT).await?;
+        match output.code {
+            Some(0) => Ok(true),
+            Some(42) => Ok(false),
+            _ => Err(BackendFailure::new(
+                "could not configure GitHub's git helper",
+                "",
+            )),
+        }
+    }
     async fn host_home(&self, target: &ProvisioningTarget) -> Result<PathBuf, BackendFailure> {
         let failure = || BackendFailure::new("could not read the sandbox home", "");
         let output = self

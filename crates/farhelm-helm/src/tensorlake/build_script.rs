@@ -72,8 +72,9 @@ pub(crate) fn ready() -> String {
         .to_string()
 }
 
-/// Install the recipe's packages, after `ca-certificates` and `curl`, which
-/// the agent installers need (apt treats already-installed packages as
+/// Install the recipe's packages, after the agent installers' HTTPS tools and
+/// gh, whose credential helper enables private GitHub clones. Ubuntu supplies
+/// these packages (apt treats already-installed packages as
 /// no-ops).
 ///
 /// - `sudo -n env ...`: sudo resets the environment, so the variables must be
@@ -86,7 +87,11 @@ pub(crate) fn ready() -> String {
 /// - Recommended packages stay on, so a package list behaves as it would in
 ///   the user's own shell.
 pub(crate) fn packages(packages: &[String]) -> String {
-    let mut words = vec!["ca-certificates".to_string(), "curl".to_string()];
+    let mut words = vec![
+        "ca-certificates".to_string(),
+        "curl".to_string(),
+        "gh".to_string(),
+    ];
     words.extend(packages.iter().map(|package| shell_quote(package)));
     format!(
         "{}apt_get() {{ sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -q -y -o DPkg::Lock::Timeout=600 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \"$@\" >>\"$log\" 2>&1 || fail; }}\n\
@@ -211,7 +216,7 @@ mod tests {
     fn packages_are_quoted_after_the_base_packages() {
         let script = packages(&["ripgrep".into(), "g++".into(), "pkg:amd64=1.0".into()]);
         assert!(script.ends_with(
-            "apt_get update\napt_get install ca-certificates curl 'ripgrep' 'g++' 'pkg:amd64=1.0'\n"
+            "apt_get update\napt_get install ca-certificates curl gh 'ripgrep' 'g++' 'pkg:amd64=1.0'\n"
         ), "{script}");
         assert!(script.contains("sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -q -y -o DPkg::Lock::Timeout=600"));
         assert!(script.contains("sudo -n env DEBIAN_FRONTEND=noninteractive dpkg --configure -a"));
@@ -223,12 +228,13 @@ mod tests {
                 "install",
                 "ca-certificates",
                 "curl",
+                "gh",
                 "ripgrep",
                 "g++",
                 "pkg:amd64=1.0"
             ]
         );
-        assert!(packages(&[]).ends_with("apt_get install ca-certificates curl\n"));
+        assert!(packages(&[]).ends_with("apt_get install ca-certificates curl gh\n"));
     }
 
     /// Spec: each agent script downloads its official installer over HTTPS

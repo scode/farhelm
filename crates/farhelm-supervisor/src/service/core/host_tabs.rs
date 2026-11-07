@@ -624,10 +624,21 @@ impl Supervisor {
         shell: &str,
     ) -> Result<StartedTab, TabStartFailure> {
         let shell_variable = self.host_shell_variable(shell).await;
+        // Only host terminals receive the managed value. Shared tab env also
+        // feeds tmux -e, whose arguments must never contain this credential.
+        let mut child_env = host_child_env(std::env::vars_os(), env, &shell_variable, cwd);
+        crate::github_token::inject(
+            &mut child_env,
+            &crate::github_token::host_file(&self.state_dir),
+        )
+        .map_err(|error| TabStartFailure::Unwind {
+            error,
+            left: HostLeft::Nothing,
+        })?;
         let child = ChildSpec {
             argv: argv.into_iter().map(OsString::from).collect(),
             cwd: PathBuf::from(cwd),
-            env: host_child_env(std::env::vars_os(), env, &shell_variable, cwd),
+            env: child_env,
             size: Size {
                 cols: size.cols.clamp(1, 10_000),
                 rows: size.rows.clamp(1, 10_000),

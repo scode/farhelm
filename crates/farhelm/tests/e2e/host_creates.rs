@@ -147,7 +147,7 @@ fn parse_env(raw: &[u8]) -> BTreeMap<String, String> {
 }
 
 /// Wait until `path` exists and is not empty, and return its contents.
-async fn wait_for_file(path: &Path, secs: u64) -> Vec<u8> {
+pub(crate) async fn wait_for_file(path: &Path, secs: u64) -> Vec<u8> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
     loop {
         if let Ok(contents) = std::fs::read(path)
@@ -421,6 +421,210 @@ async fn the_host_holds_no_credential_or_marker() {
     assert!(!child_env.contains_key("TMUX"), "{child_env:?}");
     assert!(!child_env.contains_key("TMUX_PANE"), "{child_env:?}");
     end_runtime(&host, host_pid).await;
+}
+
+/// Managed GitHub values must reach the login shell and every later spawn,
+/// including Restart, without becoming durable launch input or host argv.
+/// Existing agents keep their environment; removing the file restores the
+/// ordinary host environment for new children. A corrupt file refuses before
+/// starting a tab and leaves no extra host or launch record to recover.
+#[farhelm_testtrace::test]
+async fn managed_github_token_is_fresh_for_agents_tabs_and_restart() {
+    const FIRST: &str = "fictional-managed-github-first";
+    const SECOND: &str = "fictional-managed-github-second";
+    const AMBIENT: &str = "fictional-unmanaged-github";
+    let owned = farhelm_teststate::tempdir().unwrap();
+    let shell_witness = owned.path().join("shell-token");
+    let agent_witness = owned.path().join("agent-token");
+    let shell = script(
+        &owned.path().join("login-shell"),
+        &format!(
+            "printf '%s\\n' \"$GH_TOKEN\" >> {}\nexec /bin/sh \"$@\"",
+            shell_words::quote(&shell_witness.to_string_lossy()),
+        ),
+    );
+    let agent = script(
+        &owned.path().join("agent"),
+        &format!(
+            "printf '%s\\n' \"$GH_TOKEN\" >> {}\nprintf 'GITHUB-AGENT-READY\\n'\nexec /bin/sleep 600",
+            shell_words::quote(&agent_witness.to_string_lossy()),
+        ),
+    );
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            launch_shell: Some(shell.to_string_lossy().into_owned()),
+            launch_env: vec![
+                ("HOME".into(), owned.path().to_string_lossy().into_owned()),
+                ("GH_TOKEN".into(), AMBIENT.into()),
+            ],
+            ..host_seams()
+        },
+    )
+    .await;
+    let token_path = farhelm_supervisor::github_token::host_file(h.state.path());
+    std::fs::write(&token_path, format!(" {FIRST}\n")).unwrap();
+    let session = create_resumable_session_on(
+        &h.client,
+        &h.sup,
+        &owned.path().to_string_lossy(),
+        &shell_words::quote(&agent.to_string_lossy()),
+        80,
+        24,
+    )
+    .await;
+    let original = agent_host(&h, &session.id).await;
+    wait_for_screen(&original, "GITHUB-AGENT-READY").await;
+    assert_eq!(
+        wait_for_file(&agent_witness, WAIT_SECS).await,
+        format!("{FIRST}\n").as_bytes()
+    );
+    assert_eq!(
+        std::fs::read_to_string(&shell_witness).unwrap(),
+        format!("{FIRST}\n")
+    );
+    assert_eq!(
+        environ(original.status().child_pid)
+            .get("GH_TOKEN")
+            .map(String::as_str),
+        Some(FIRST)
+    );
+    let original_pid = host_process(original.socket()).unwrap();
+    assert!(environ(original_pid).is_empty());
+    assert_eq!(
+        cmdline(original_pid).len(),
+        5,
+        "only the host command and its socket"
+    );
+
+    let replacement = owned.path().join("replacement");
+    std::fs::write(&replacement, SECOND).unwrap();
+    std::fs::rename(&replacement, &token_path).unwrap();
+    let tab = h.client.open_tab(&session.id).await.unwrap();
+    let tab_host = h.sup.tab_host_for_test(&session.id, &tab.id).await.unwrap();
+    wait_for_liveness(&tab_host, "the GitHub tab's live shell", |liveness| {
+        matches!(liveness, Liveness::Running { child: Some(_) })
+    })
+    .await;
+    crate::host_restarts::type_line(&tab_host, "printf 'GITHUB-TAB-%s\\n' READY").await;
+    wait_for_screen(&tab_host, "GITHUB-TAB-READY").await;
+    assert_eq!(
+        environ(tab_host.status().child_pid)
+            .get("GH_TOKEN")
+            .map(String::as_str),
+        Some(SECOND)
+    );
+    assert_eq!(
+        environ(original.status().child_pid)
+            .get("GH_TOKEN")
+            .map(String::as_str),
+        Some(FIRST)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&shell_witness).unwrap(),
+        format!("{FIRST}\n{SECOND}\n")
+    );
+    h.client.restart_session(&session.id, true).await.unwrap();
+    let restarted = agent_host(&h, &session.id).await;
+    assert_ne!(restarted.socket(), original.socket());
+    wait_for_screen(&restarted, "GITHUB-AGENT-READY").await;
+    assert_eq!(
+        std::fs::read_to_string(&agent_witness).unwrap(),
+        format!("{FIRST}\n{SECOND}\n")
+    );
+    assert_eq!(
+        environ(restarted.status().child_pid)
+            .get("GH_TOKEN")
+            .map(String::as_str),
+        Some(SECOND)
+    );
+
+    std::fs::remove_file(&token_path).unwrap();
+    let unmanaged = h.client.open_tab(&session.id).await.unwrap();
+    let unmanaged_host = h
+        .sup
+        .tab_host_for_test(&session.id, &unmanaged.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        environ(unmanaged_host.status().child_pid)
+            .get("GH_TOKEN")
+            .map(String::as_str),
+        Some(AMBIENT)
+    );
+    let before = host_sockets(&h);
+    let records = std::fs::read_dir(h.state.path().join("launch"))
+        .unwrap()
+        .count();
+    std::fs::write(&token_path, format!("{SECOND}\0bad")).unwrap();
+    let refusal = h
+        .client
+        .open_tab(&session.id)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(!refusal.contains(SECOND));
+    assert_eq!(
+        host_sockets(&h),
+        before,
+        "a corrupt token starts no tab host"
+    );
+    assert_eq!(
+        std::fs::read_dir(h.state.path().join("launch"))
+            .unwrap()
+            .count(),
+        records,
+        "a refused tab leaves no launch artifact"
+    );
+    let refusal = h
+        .client
+        .create_session(
+            &owned.path().to_string_lossy(),
+            "/bin/sleep 600",
+            None,
+            80,
+            24,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(!refusal.contains(SECOND));
+    assert_eq!(
+        host_sockets(&h),
+        before,
+        "a corrupt token starts no agent host"
+    );
+    assert_eq!(
+        std::fs::read_dir(h.state.path().join("launch"))
+            .unwrap()
+            .count(),
+        records,
+        "refusal unwinds its launch artifacts"
+    );
+    let stored = stored_row(&h, &session.id).await.unwrap();
+    let persisted = serde_json::to_string(&stored.launch).unwrap();
+    for marker in [FIRST, SECOND] {
+        assert!(
+            !persisted.contains(marker),
+            "the launch must not persist the token"
+        );
+        for entry in std::fs::read_dir(h.state.path().join("launch")).unwrap() {
+            assert!(
+                !std::fs::read(entry.unwrap().path())
+                    .unwrap()
+                    .windows(marker.len())
+                    .any(|part| part == marker.as_bytes())
+            );
+        }
+        for host in [&restarted, &tab_host, &unmanaged_host] {
+            let pid =
+                host_process(host.socket()).expect("each owned host is alive before inspection");
+            assert!(environ(pid).is_empty());
+            assert!(!cmdline(pid).join(" ").contains(marker));
+            assert!(!cmdline(host.status().child_pid).join(" ").contains(marker));
+        }
+    }
+    h.client.delete_session(&session.id).await.unwrap();
 }
 
 /// The agent in a host runs in its launch's scope, and the host in none.

@@ -329,6 +329,89 @@ async fn missing_and_wrong_kind_references_are_refused_atomically() {
     assert_eq!(store.tensorlake_recipes().await.unwrap().len(), 1);
 }
 
+/// A GitHub selection is a catalog identity, never a token copy. Admission and
+/// deletion use the same transaction as their writes, so stale pickers cannot
+/// create dangling references or delete a credential another recipe just used.
+#[farhelm_testtrace::test]
+async fn github_references_require_the_right_kind_and_guard_deletion() {
+    use crate::credentials::Refusal as CredentialRefusal;
+    use farhelm_proto::credentials::{CreateCredential, CredentialKind, SaveCredential};
+    let (_dir, store) = store().await;
+    store
+        .create_credential(CreateCredential {
+            name: "git-work".into(),
+            kind: CredentialKind::GithubToken,
+            secret: TOKEN.into(),
+        })
+        .await
+        .unwrap();
+    super::tests_support::create(&store, "existing").await;
+    let before = raw_row(&store, "existing").await;
+    for bad in ["missing", ENDPOINT] {
+        let mut recipe = save();
+        recipe.github_token_credential = Some(bad.into());
+        assert!(matches!(
+            store
+                .create_tensorlake_recipe("new".into(), recipe.clone())
+                .await
+                .unwrap(),
+            Err(Refusal::Invalid(_))
+        ));
+        assert!(matches!(
+            store
+                .update_tensorlake_recipe("existing".into(), recipe)
+                .await
+                .unwrap(),
+            Err(Refusal::Invalid(_))
+        ));
+        assert_eq!(raw_row(&store, "existing").await, before);
+    }
+    let mut recipe = save();
+    recipe.github_token_credential = Some("git-work".into());
+    store
+        .update_tensorlake_recipe("existing".into(), recipe)
+        .await
+        .unwrap()
+        .unwrap();
+    let selected = raw_row(&store, "existing").await;
+    assert!(selected.0.contains("git-work") && !selected.0.contains(TOKEN));
+    assert_eq!(
+        store
+            .credentials()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.name == "git-work")
+            .unwrap()
+            .used_by,
+        vec!["existing"]
+    );
+    assert!(matches!(
+        store.delete_credential("git-work".into()).await,
+        Err(CredentialRefusal::InUse)
+    ));
+    store
+        .save_credential(
+            "git-work".into(),
+            SaveCredential {
+                secret: Some(OTHER_TOKEN.into()),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        raw_row(&store, "existing").await,
+        selected,
+        "value replacement leaves the reference unchanged"
+    );
+    store
+        .update_tensorlake_recipe("existing".into(), save())
+        .await
+        .unwrap()
+        .unwrap();
+    store.delete_credential("git-work".into()).await.unwrap();
+}
+
 /// Independent SQLite connections race admission against deletion. Exactly
 /// one operation can succeed: no committed recipe may reference the deleted
 /// identity. Exercise create and update, which historically had different

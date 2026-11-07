@@ -95,6 +95,7 @@ pub(crate) struct StoredRecipe {
     pub(crate) source: RecipeSource,
     pub(crate) claude: Option<StoredEndpoint>,
     pub(crate) codex: Option<StoredEndpoint>,
+    pub(crate) github_token_credential: Option<String>,
     pub(crate) tunnels: Vec<Tunnel>,
 }
 
@@ -116,6 +117,7 @@ impl StoredRecipe {
             source: save.source,
             claude,
             codex,
+            github_token_credential: save.github_token_credential,
             tunnels: save.tunnels,
         })
     }
@@ -134,6 +136,7 @@ impl StoredRecipe {
             source: self.source.clone(),
             claude: endpoint(&self.claude),
             codex: endpoint(&self.codex),
+            github_token_credential: self.github_token_credential.clone(),
             tunnels: self.tunnels.clone(),
             snapshot: None,
             build: BuildView::Idle,
@@ -160,6 +163,17 @@ fn resolve_endpoint(save: Option<EndpointSave>) -> Result<Option<StoredEndpoint>
 /// Name/kind admission belongs to the same transaction that saves the recipe;
 /// a separate catalog preflight would race deletion on another connection.
 fn check_credentials(conn: &Connection, spec: &StoredRecipe) -> anyhow::Result<Option<Refusal>> {
+    if let Some(name) = &spec.github_token_credential
+        && !crate::credentials::has_kind(
+            conn,
+            name,
+            farhelm_proto::credentials::CredentialKind::GithubToken,
+        )?
+    {
+        return Ok(Some(Refusal::Invalid(
+            "select an existing GitHub token in Settings → Credentials".into(),
+        )));
+    }
     for endpoint in [&spec.claude, &spec.codex].into_iter().flatten() {
         if let Some(name) = &endpoint.token_credential
             && !crate::credentials::has_kind(
@@ -816,6 +830,7 @@ pub(crate) mod tests_support {
             },
             claude: None,
             codex: None,
+            github_token_credential: None,
             tunnels: vec![],
         }
     }
