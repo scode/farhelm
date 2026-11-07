@@ -73,8 +73,9 @@ fn each_mode_follows_its_sequences() {
 /// whichever was set first; resetting it leaves UTF-8 if 1005 is set.
 ///
 /// Why: the encoder must report exactly the events the program asked for
-/// last, and in the encoding tmux and today's xterm.js use: SGR whenever
-/// 1006 is set (`vendor/README.md`, the independent mouse encodings).
+/// last, and in SGR whenever 1006 is set, whatever else the program set
+/// (`Modes::mouse_encoding`; `vendor/README.md`, the independent mouse
+/// encodings).
 #[test]
 fn mouse_modes_replace_one_another_but_encodings_combine() {
     let mut emulator = emulator(80, 24);
@@ -124,8 +125,8 @@ fn mouse_modes_replace_one_another_but_encodings_combine() {
 }
 
 /// Resetting any mouse tracking mode turns mouse reporting off, whichever
-/// mode is on, as in tmux 3.7c (probed) and xterm.js; 1001, which nothing
-/// implements, counts too. The encoding is left alone.
+/// mode is on; 1001, which alacritty does not implement, counts too. The
+/// encoding is left alone.
 ///
 /// Why: alacritty clears only the mode named. A program that turned on
 /// any-event tracking and resets click tracking on its way out would
@@ -152,7 +153,7 @@ fn resetting_any_tracking_mode_ends_mouse_reporting() {
     }
 }
 
-/// Modes 47 and 1047 show the alternate screen, as in tmux.
+/// Modes 47 and 1047 show the alternate screen.
 ///
 /// Why: alacritty ignores them, so a program using them would draw over the
 /// shell's screen, and status detection would read the wrong screen.

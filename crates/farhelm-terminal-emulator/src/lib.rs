@@ -1,13 +1,12 @@
-//! The supervisor's terminal emulator: for each terminal that runs in a
-//! terminal host rather than tmux, the one place its output is interpreted.
+//! The supervisor's terminal emulator: for each new terminal (one that runs
+//! in a terminal host), the one place its output is interpreted.
 //!
-//! Farhelm is replacing tmux and xterm.js for new terminals. The terminal
-//! host keeps the pty and journals raw output; the supervisor feeds that
-//! output to one [`Emulator`] per terminal, which answers the program's
-//! terminal queries, tracks the modes that input encoding needs, gives agent
-//! status detection the screen text and title it reads from tmux today, and
-//! is snapshotted so that a restarted supervisor can rebuild it. It is
-//! `alacritty_terminal` 0.26.0 with Farhelm's small patches
+//! The terminal host keeps the pty and journals raw output; the supervisor
+//! feeds that output to one [`Emulator`] per terminal, which answers the
+//! program's terminal queries, tracks the modes that input encoding needs,
+//! gives agent status detection the screen text and title it reads, serves the
+//! grid stream's reads, and is snapshotted so that a restarted supervisor can
+//! rebuild it. It is `alacritty_terminal` 0.26.0 with Farhelm's small patches
 //! (`vendor/README.md`), and this crate is the policy around it.
 //!
 //! - [`Emulator`] (`emulator`): feeding output, resizing, the
@@ -15,12 +14,13 @@
 //!   accessors.
 //! - [`FeedMode`], [`Effects`], [`Notice`] (`effects`): which side effects a
 //!   feed may have, depending on whether its bytes are live or replayed.
-//! - `queries`: the answers to terminal queries, and how they depart from
-//!   alacritty's own.
+//! - `queries`: Farhelm's answers to terminal queries, why each is true of
+//!   this emulator, and where they depart from alacritty's own.
 //! - `theme`: Farhelm's terminal colors, for color query answers.
 //! - [`Modes`] (`modes`): bracketed paste, mouse, focus, cursor-key and keypad
 //!   modes, alternate screen, cursor visibility.
-//! - `screen`: screen text shaped like tmux's capture.
+//! - `screen`, [`trim_screen_tail`]: Farhelm's screen-text format, which
+//!   status detection reads.
 //! - `sync`: the synchronized-output deadline on the caller's clock.
 //! - [`snapshot_split_candidate`] (`split`): where in a read to try a
 //!   snapshot, as a hint the emulator then confirms.
@@ -35,14 +35,13 @@
 //! storage, and by vte's own 2 MiB limit on a synchronized update;
 //! `tests/hostile.rs` checks them through this crate.
 //!
-//! Emoji and text variation selectors use Ghostty's default width rules,
-//! rather than tmux's widening of any character followed by VS16. A selector
-//! after an ineligible character or combining mark is ignored; a valid text
-//! selector can narrow a normally wide character. Two bounded exceptions
-//! remain: a plain space counts as empty when choosing the target at the
-//! right edge with autowrap off, and ordinary wide input on a one-column
-//! screen keeps Farhelm's existing drop behavior. See `vendor/README.md`
-//! for the pinned Ghostty source and the tests of both differences.
+//! Emoji and text variation selectors use Ghostty's default width rules. A
+//! selector after an ineligible character or combining mark is ignored; a valid
+//! text selector can narrow a normally wide character. Two bounded exceptions
+//! remain: a plain space counts as empty when choosing the target at the right
+//! edge with autowrap off, and ordinary wide input on a one-column screen keeps
+//! Farhelm's existing drop behavior. See `vendor/README.md` for the pinned
+//! Ghostty source and the tests of both differences.
 //!
 //! # Memory budget
 //!
@@ -114,6 +113,7 @@ pub use alacritty_terminal;
 pub use effects::{ClipboardTarget, Collected, Effects, FeedMode, Listener, Notice};
 pub use emulator::{Emulator, Size};
 pub use modes::{Modes, MouseEncoding, MouseReporting};
+pub use screen::trim_screen_tail;
 pub use snapshot::{
     Cancel, FORMAT_VERSION, LineStyles, LinesSeed, MAX_RESTORE_CELLS, MAX_SIDE, MIN_SNAPSHOT_LIMIT,
     NotClean, Restored, Snapshot, SnapshotError, SnapshotStopped, WidthTable,

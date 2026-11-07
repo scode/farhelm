@@ -1,15 +1,12 @@
-//! The screen as plain text, shaped like the tmux capture that agent status
-//! detection reads today.
+//! The screen as plain text: Farhelm's screen-text format, which agent
+//! status detection reads.
 //!
-//! The supervisor's status sampler reads each agent's visible screen with
-//! `tmux capture-pane -p`, trims it with `retain_pane_tail`
-//! (`crates/farhelm-supervisor/src/tmux.rs`), and hands the text to a
-//! per-agent screen reader that recognizes prompts and questions by their
-//! shape. Those readers were written and tested against tmux's output, down
-//! to details such as a blank draft row capturing as nothing at all
-//! (`agent_kind/mod.rs`, the Codex prompt-row rules). So the text here
-//! reproduces what tmux 3.7c produces for the same screen, as observed
-//! against it:
+//! The supervisor's status sampler takes the tail of this text
+//! ([`trim_screen_tail`]) and hands it, with the title, to a per-agent
+//! screen reader that recognizes prompts and questions by their shape. The
+//! readers depend on details of the format, down to a blank draft row
+//! reading as nothing at all (`agent_kind/mod.rs`, the Codex prompt-row
+//! rules), so the format is a contract between this module and them:
 //!
 //! - Only the visible screen, and for a full-screen program the alternate
 //!   screen (modes 1049, 47 and 1047), since that is what shows.
@@ -22,31 +19,33 @@
 //!   there and starts the next row.
 //! - Combining characters follow their base character.
 //! - A tab that moved the cursor over blank cells appears as one tab
-//!   character instead of those cells, as tmux records it. A tab whose cells
-//!   were written over since appears as spaces, as tmux turns it into
-//!   spaces, and a tab sent with the cursor already in the last column,
-//!   which moves nothing, appears as nothing.
+//!   character instead of those cells. A tab whose cells were written over
+//!   since appears as spaces, and a tab sent with the cursor already in the
+//!   last column, which moves nothing, appears as nothing.
 //!
-//! Tabs are where this falls short of tmux. tmux records each tab with the
-//! cells it covered and updates that record as cells are erased, inserted or
-//! deleted; alacritty keeps only a tab character in the cell where the tab
-//! started. The span is recovered here from the current tab stops and the
-//! cells after the tab, which matches tmux until a program erases part of a
-//! tab's span, shifts it with inserted or deleted characters, or changes the
-//! tab stops it crossed. Then the capture of that row can differ from tmux's
-//! in its spacing (`tests/screen.rs` pins those cases). Matching tmux there
-//! would mean tracking every tab's span through every edit.
+//! The format is the shape of `tmux capture-pane -p`, and that is
+//! deliberate: old terminals' text comes from tmux, the readers were first
+//! written against it, and one set of reader rules serves both kinds of
+//! terminal. It is pinned here on its own terms (`tests/screen.rs`), and the
+//! supervisor's tests run every status reader on this emulator's repaint of
+//! the captured agent screens.
 //!
-//! The tests here pin the shape on hand-built screens. The supervisor's
-//! `emulator_parity` tests compare it against a live pinned tmux, on
-//! generated output and on recorded agent sessions.
+//! Tabs are the one inexact part. alacritty keeps only a tab character in
+//! the cell where the tab started; the cells it covered are recovered here
+//! from the current tab stops and the cells after the tab. That is exact
+//! until a program erases part of a tab's span, shifts it with inserted or
+//! deleted characters, or changes the tab stops it crossed; then the row
+//! reads with a tab where the program's cells would call for spaces, or the
+//! reverse, though no visible character changes (`tests/screen.rs` pins
+//! those cases). Exactness there would mean tracking every tab's span
+//! through every edit.
 
 use alacritty_terminal::Term;
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::{Cell, Flags};
 
-/// The visible screen as `tmux capture-pane -p` prints it (see the module
+/// The visible screen in Farhelm's screen-text format (see the module
 /// docs).
 pub(crate) fn screen_text<L>(term: &Term<L>) -> String {
     let grid = term.grid();
@@ -69,10 +68,10 @@ pub(crate) fn screen_text<L>(term: &Term<L>) -> String {
             }
             if cell.c == '\t' {
                 // alacritty marks only the cell where the tab started and
-                // leaves the cells it moved over blank; tmux keeps the tab as
-                // one cell covering them, which prints as the tab alone. The
-                // tab moved the cursor to the next tab stop, or to the last
-                // column if there was none; the cells in between are its span.
+                // leaves the cells it moved over blank; the format prints a
+                // tab over blank cells as the tab alone. The tab moved the
+                // cursor to the next tab stop, or to the last column if there
+                // was none; the cells in between are its span.
                 let tab = column - 1;
                 let landing = landings[tab];
                 if landing > tab && (column..landing).all(|span| is_blank(&row[Column(span)])) {
@@ -121,11 +120,18 @@ fn is_blank(cell: &Cell) -> bool {
     cell.c == ' ' && cell.zerowidth().is_none()
 }
 
-/// The last `max_bytes` of [`screen_text`] after trimming trailing
-/// whitespace: what `retain_pane_tail` makes of tmux's capture for the
-/// status sampler. The cut lands on a character boundary, so the result may
-/// be a little shorter than `max_bytes`.
-pub(crate) fn screen_tail(text: &str, max_bytes: usize) -> &str {
+/// The last `max_bytes` of a screen text after trimming trailing whitespace:
+/// what the status sampler hands a screen reader. The cut lands on a
+/// character boundary, so the result may be a little shorter than
+/// `max_bytes`, and it never splits a character.
+///
+/// Public so that whatever reads screen text the way the sampler does (a
+/// host terminal's published view and the screen fixture tests among them)
+/// can cut it by this one rule instead of a copy of it. Trailing whitespace
+/// goes first because the text has a line for every row of the screen, and
+/// blank rows nobody wrote to are not output; the front is what gets cut,
+/// because a reader looks for prompts at the bottom of the screen.
+pub fn trim_screen_tail(text: &str, max_bytes: usize) -> &str {
     let trimmed = text.trim_end();
     if trimmed.len() <= max_bytes {
         return trimmed;

@@ -1,17 +1,18 @@
-//! Screen text and title shaped like tmux's capture, on hand-built screens.
+//! Farhelm's screen-text format and titles, on hand-built screens.
 //!
-//! Agent status detection recognizes prompts and questions in the text tmux
-//! captures, so the emulator's text has to come out the same shape. Every
-//! expected value below is what `tmux capture-pane -p` (tmux 3.7c, a pane
-//! of the size given, 20 by 6 unless named) printed for the same output, with
-//! the title as `#{pane_title}` returned it; where the emulator knowingly
-//! differs, the test names both. The comparison against a live tmux, on
-//! generated output and recorded agent sessions, is the supervisor's
-//! `emulator_parity`, where the status readers are.
+//! Agent status detection recognizes prompts and questions by their shape in
+//! this text, so every expected value below is part of the format's contract
+//! (`src/screen.rs`), on a terminal of the size given (20 by 6 unless named).
+//! The values were first taken from tmux 3.7c's capture of the same output,
+//! since old terminals' text comes from tmux and one set of reader rules
+//! serves both kinds; they are pinned here as Farhelm's own. The
+//! supervisor's tests, where the status readers are, run every reader on
+//! this emulator's repaint of the captured agent screens.
 
 mod common;
 
 use common::{emulator, feed};
+use farhelm_terminal_emulator::trim_screen_tail;
 
 /// The capture of `output` on a fresh 20x6 terminal.
 fn capture(output: &str) -> String {
@@ -40,14 +41,14 @@ fn check_captures(cases: &[(u16, u16, &str, &str)]) {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Each screen captures exactly as tmux 3.7c captured it.
+/// Each screen reads exactly as the screen-text format says.
 ///
-/// Why: the screen readers' rules are written against tmux's shape (a blank
-/// draft row capturing as nothing, a wrapped row as two lines), so any
-/// difference can turn a recognized prompt into an unrecognized one. Spec:
+/// Why: the screen readers' rules depend on the format's details (a blank
+/// draft row reading as nothing, a wrapped row as two lines), so any change
+/// can turn a recognized prompt into an unrecognized one. Spec:
 /// `src/screen.rs`, module docs.
 #[test]
-fn screens_capture_like_tmux() {
+fn screens_read_in_the_screen_text_format() {
     let cases: &[(&str, &str, &str)] = &[
         (
             "tab over blank cells",
@@ -122,19 +123,20 @@ fn screens_capture_like_tmux() {
         .iter()
         .filter_map(|(name, output, expected)| {
             let got = capture(output);
-            (got != *expected).then(|| format!("{name}: got {got:?}, tmux {expected:?}"))
+            (got != *expected).then(|| format!("{name}: got {got:?}, expected {expected:?}"))
         })
         .collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// The screen tail is the capture with trailing whitespace trimmed and cut
-/// to the last `max_bytes` on a character boundary, as the status sampler
-/// trims tmux's.
+/// The screen tail is the screen text with trailing whitespace trimmed and
+/// cut to the last `max_bytes` on a character boundary, the same through
+/// the emulator and through `trim_screen_tail` on its text.
 ///
-/// Why: the sampler compares tails between samples to notice output; the
-/// cut must be on the same rule, and never split a character.
-/// Spec: `retain_pane_tail` in the supervisor's tmux driver.
+/// Why: the sampler compares tails between samples to notice output, and
+/// readers look for prompts at the bottom; the cut must be one rule
+/// wherever a tail is taken, and never split a character. Spec:
+/// `trim_screen_tail`.
 #[test]
 fn the_tail_trims_and_cuts_like_the_sampler() {
     let mut emulator = emulator(20, 6);
@@ -146,21 +148,40 @@ fn the_tail_trims_and_cuts_like_the_sampler() {
     assert_eq!(emulator.screen_tail(0), "");
 }
 
-/// Titles come out as tmux reports them, except for the two documented
-/// differences: before any title is set the emulator reports nothing where
-/// tmux reports the host name, and surrounding whitespace is trimmed.
+/// `trim_screen_tail` on text that did not come from an emulator: trailing
+/// whitespace of any kind (spaces, tabs, blank lines) goes before the cut, a
+/// cut that lands inside a character moves forward past it, and a budget
+/// exactly the trimmed length keeps all of it.
+///
+/// Why: it is public so that callers holding screen text from elsewhere (a
+/// host terminal's published view, captured fixture screens) cut it by the
+/// sampler's rule; going through an emulator would only test the
+/// delegation. Spec: `trim_screen_tail`.
+#[test]
+fn trim_screen_tail_cuts_any_screen_text_by_the_samplers_rule() {
+    assert_eq!(trim_screen_tail("prompt> \t\n\n  \n", 4096), "prompt>");
+    assert_eq!(trim_screen_tail("abc\ndef\n\n", 7), "abc\ndef");
+    assert_eq!(trim_screen_tail("abc\ndef\n\n", 6), "bc\ndef");
+    // "é" is two bytes: a cut after its first byte moves past it.
+    assert_eq!(trim_screen_tail("xé€", 4), "€");
+    assert_eq!(trim_screen_tail("xé€", 5), "é€");
+    assert_eq!(trim_screen_tail(" \n\t\n", 4096), "");
+}
+
+/// Titles read as the program set them, with surrounding whitespace
+/// trimmed, nothing before any is set, and nothing after a full reset.
 ///
 /// Why: Codex's status is read from title prefixes (a spinner, "[ ! ]
 /// Action Required"), so a title must reach the reader as the program set
 /// it. Spec: `Emulator::title`.
 #[test]
-fn titles_read_like_pane_title() {
+fn titles_read_as_the_program_set_them() {
     let title = |output: &str| {
         let mut emulator = emulator(20, 6);
         feed(&mut emulator, output.as_bytes());
         emulator.title().to_owned()
     };
-    assert_eq!(title(""), "", "tmux: the host name");
+    assert_eq!(title(""), "");
     assert_eq!(title("\x1b]2;a;b;c\x07"), "a;b;c");
     assert_eq!(title("\x1b]0;\u{280b} working\x07"), "\u{280b} working");
     assert_eq!(
@@ -168,33 +189,25 @@ fn titles_read_like_pane_title() {
         "[ ! ] Action Required"
     );
     assert_eq!(title("\x1b]2;\x07"), "");
-    assert_eq!(
-        title("\x1b]2;  spaced title  \x07"),
-        "spaced title",
-        "tmux keeps the spaces"
-    );
+    assert_eq!(title("\x1b]2;  spaced title  \x07"), "spaced title");
     assert_eq!(
         title("\x1b]0;#(evil) x\x07"),
         "#(evil) x",
-        "tmux: _(evil) x"
+        "kept as set; only old terminals rewrite `#(`"
     );
-    assert_eq!(
-        title("\x1b]2;hello\x07\x1bc"),
-        "",
-        "tmux keeps the title on RIS"
-    );
+    assert_eq!(title("\x1b]2;hello\x07\x1bc"), "", "RIS clears the title");
 }
 
-/// Tabs capture as tmux captures them: one tab character for a tab over
-/// blank cells, spaces for a tab whose cells were written over since,
-/// nothing for a tab sent from the last column, and a tab after a pending
-/// wrap starting the next row.
+/// Tabs read as the format says: one tab character for a tab over blank
+/// cells, spaces for a tab whose cells were written over since, nothing for
+/// a tab sent from the last column, and a tab after a pending wrap starting
+/// the next row.
 ///
 /// Why: Codex's prompt rules look at a row's first characters and
 /// indentation, where a stray tab or missing spaces changes the reading.
 /// Spec: `src/screen.rs`, module docs.
 #[test]
-fn tabs_capture_like_tmux() {
+fn tabs_read_as_their_spans() {
     check_captures(&[
         (10, 3, "abcdefghi\t", "abcdefghi\n\n\n"),
         (10, 3, "abcdefghi\tX", "abcdefghiX\n\n\n"),
@@ -205,40 +218,42 @@ fn tabs_capture_like_tmux() {
     ]);
 }
 
-/// Known differences from tmux: a tab whose span was partly erased, whose
-/// crossed tab stops changed, or that was shifted by inserted characters.
+/// A tab whose span was partly erased, whose crossed tab stops changed, or
+/// that was shifted by inserted characters reads by the span inferred from
+/// the cells and tab stops as they are now, not the span it first covered.
 ///
-/// Why: tmux tracks each tab's span through edits; the emulator infers it
-/// from the cells and the current tab stops (`src/screen.rs`). This pins
-/// what the emulator does in exactly the cases where that inference fails,
-/// so a change is deliberate; the visible cell positions agree with tmux,
-/// only the tab-versus-spaces spelling differs.
+/// Why: alacritty keeps no record of a tab's span, so the format infers it
+/// (`src/screen.rs`, the paragraph on tabs). This pins what the emulator
+/// does in exactly the cases where that inference is not what the program
+/// drew, so a change is deliberate; only the tab-versus-spaces spelling is
+/// at stake, never a visible character.
 #[test]
-fn known_tab_differences_from_tmux() {
-    // (output, this emulator's first row, tmux's first row)
+fn tab_spans_after_edits_read_as_inferred() {
+    // (output, its first row)
     let cases = [
-        ("a\tb\r\x1b[5G\x1b[2X", "a\tb", "a\t  b"),
-        ("a\t\x1b[11Gb\r\x1b[3G\x1bH", "a\t        b", "a\t  b"),
-        ("a\tb\r\x1b[2@", "  a\t  b", "  a\tb"),
+        ("a\tb\r\x1b[5G\x1b[2X", "a\tb"),
+        ("a\t\x1b[11Gb\r\x1b[3G\x1bH", "a\t        b"),
+        ("a\tb\r\x1b[2@", "  a\t  b"),
     ];
-    for (output, ours, tmux) in cases {
+    for (output, first_row) in cases {
         assert_eq!(
             capture(output),
-            format!("{ours}\n\n\n\n\n\n"),
-            "{output:?} (tmux: {tmux:?})"
+            format!("{first_row}\n\n\n\n\n\n"),
+            "{output:?}"
         );
     }
 }
 
 /// Modes 47 and 1047 capture the alternate screen, and leaving keeps the
-/// cursor where the program left it and the saved cursor where it was, as
-/// in tmux; mixing them with 1049 knowingly differs.
+/// cursor where the program left it and the saved cursor where it was;
+/// leaving with 1049 after entering with 47 puts the cursor back where it
+/// was on the primary screen.
 ///
 /// Why: status detection reads whichever screen shows, and a program using
 /// these older modes must not have its text land on the shell's screen.
 /// Spec: `src/queries.rs` ("Beyond queries").
 #[test]
-fn modes_47_and_1047_capture_like_tmux() {
+fn modes_47_and_1047_read_the_alternate_screen() {
     check_captures(&[
         (10, 3, "primary\r\n\x1b[?47hALT", "\nALT\n\n"),
         (
@@ -262,18 +277,18 @@ fn modes_47_and_1047_capture_like_tmux() {
         ),
     ]);
 
-    // Known differences: entering with 47 and leaving with 1049. alacritty
-    // keeps a cursor per screen, tmux one cursor.
-    // (output, this emulator's first row, tmux's first row)
+    // Entering with 47 and leaving with 1049: alacritty keeps a cursor per
+    // screen, so the primary screen's cursor is where it was before the
+    // switch. (output, its first row)
     let mixed = [
-        ("p\x1b[?47hA\x1b[?1049hB\x1b[?1049lC", "pC", "p  C"),
-        ("p\x1b[?47hA\x1b[?1049lC", "pC", "p C"),
+        ("p\x1b[?47hA\x1b[?1049hB\x1b[?1049lC", "pC"),
+        ("p\x1b[?47hA\x1b[?1049lC", "pC"),
     ];
-    for (output, ours, tmux) in mixed {
+    for (output, first_row) in mixed {
         assert_eq!(
             capture_at(10, 3, output),
-            format!("{ours}\n\n\n"),
-            "{output:?} (tmux: {tmux:?})"
+            format!("{first_row}\n\n\n"),
+            "{output:?}"
         );
     }
 }

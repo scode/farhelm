@@ -1,13 +1,13 @@
 //! Resident memory of one emulator at Farhelm's full scrollback, against the
 //! per-terminal budget (crate docs, "Memory budget").
 //!
-//! Every supervisor-side terminal is one emulator in the shared supervisor,
-//! so its worst case, times the number of terminals, is what one machine's
-//! supervisor can be made to hold. These tests fill one emulator of 200
-//! columns by 60 lines with 12,000 lines of history (tmux's history limit
-//! today) with typical and with hostile output, and check its resident
-//! growth against the budget. They also report the snapshot's size and the
-//! time to take and restore it at that size.
+//! Every supervisor-side terminal is one emulator in the shared supervisor, so
+//! its worst case, times the number of terminals, is what one machine's
+//! supervisor can be made to hold. These tests fill one emulator of 200 columns
+//! by 60 lines with 12,000 lines of history (the supervisor's default
+//! scrollback) with typical and with hostile output, and check its resident
+//! growth against the budget. They also report the snapshot's size and the time
+//! to take and restore it at that size.
 //!
 //! They are ignored, because they measure the test process: run each in a
 //! process of its own, which nextest does, and in release mode, since the

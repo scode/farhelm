@@ -109,9 +109,9 @@ impl Emulator {
     /// An emulator in the state of a fresh terminal of `size`, keeping up to
     /// `scrollback_lines` lines of history above the screen.
     ///
-    /// The configuration is fixed, because it is part of what programs see:
-    /// the kitty keyboard protocol off (legacy key encoding, as in the browser
-    /// terminal today) and OSC 52 copy only (clipboard writes honored, reads
+    /// The configuration is fixed, because it is part of what programs see: the
+    /// kitty keyboard protocol off (legacy key encoding, the only one the input
+    /// encoder speaks) and OSC 52 copy only (clipboard writes honored, reads
     /// never answered). Both are alacritty's defaults; they are spelled out so
     /// that a change of default upstream cannot change them.
     pub fn new(size: Size, scrollback_lines: usize) -> Emulator {
@@ -262,35 +262,33 @@ impl Emulator {
         Modes::from_term_mode(*self.term.mode())
     }
 
-    /// The visible screen as plain text, shaped like `tmux capture-pane -p`
-    /// output (see `screen`).
+    /// The visible screen as plain text, in Farhelm's screen-text format
+    /// (see `screen`).
     pub fn screen_text(&self) -> String {
         screen::screen_text(&self.term)
     }
 
     /// The last `max_bytes` of [`Emulator::screen_text`] with trailing
-    /// whitespace trimmed: what the status sampler reads from tmux today.
+    /// whitespace trimmed ([`crate::trim_screen_tail`]): what the status
+    /// sampler hands a screen reader.
     pub fn screen_tail(&self, max_bytes: usize) -> String {
-        screen::screen_tail(&self.screen_text(), max_bytes).to_owned()
+        screen::trim_screen_tail(&self.screen_text(), max_bytes).to_owned()
     }
 
     /// The title the program last set (OSC 0 or 2), or the empty string if it
     /// set none or a full reset (RIS) cleared it.
     ///
-    /// tmux reports a pane's title as `#{pane_title}`, and status detection
-    /// matches prefixes of it. These differences remain, none of them visible
-    /// to the prefixes it matches:
+    /// Status detection matches prefixes of it (Codex keeps its spinner
+    /// there). The title is the program's as vte parsed it: leading and
+    /// trailing whitespace trimmed, the `;`-separated parts that are not
+    /// valid UTF-8 dropped, at most 4096 bytes (the vendored cap), and
+    /// nothing before the program sets one.
     ///
-    /// - Before the program sets a title, tmux reports the host name.
-    /// - vte trims leading and trailing whitespace, which tmux keeps.
-    /// - tmux turns `#(` into `_(`, so that a title cannot run a command in
-    ///   tmux's own formats; this emulator keeps it.
-    /// - A title with invalid UTF-8: vte drops the `;`-separated parts that
-    ///   are invalid, where tmux (from its source) ignores the whole
-    ///   sequence and keeps the previous title.
-    /// - RIS clears the title here, as alacritty does; tmux keeps it.
-    ///
-    /// Titles are at most 4096 bytes (the vendored cap).
+    /// An old terminal's title (tmux's `#{pane_title}`) differs in ways none
+    /// of those prefixes can see, so the readers need no rule per kind: it
+    /// is the host name before a title is set, keeps surrounding whitespace,
+    /// turns `#(` into `_(`, ignores a title with invalid UTF-8 whole, and
+    /// survives RIS.
     pub fn title(&self) -> &str {
         self.term.title().unwrap_or("")
     }

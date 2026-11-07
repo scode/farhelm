@@ -1,6 +1,7 @@
 //! The query handler changes answers only: fed the same output, the emulator
 //! ends in the same terminal state as a bare alacritty `Term` with the same
-//! configuration, except where it deliberately follows tmux instead.
+//! configuration, except where it deliberately departs from alacritty
+//! (`src/queries.rs`, "Beyond queries").
 //!
 //! The emulator puts its own handler between vte and alacritty so that it can
 //! answer queries its way. vte's handler trait gives every method an empty
@@ -9,8 +10,8 @@
 //! cursor movement to a mode change. Comparing against an unwrapped `Term`
 //! on generated output catches that. The output leaves out the mode changes
 //! where the emulator departs from alacritty on purpose (mouse tracking
-//! resets, modes 47 and 1047); `tests/modes.rs` and `tests/screen.rs` cover
-//! those against tmux's behavior.
+//! resets, modes 47 and 1047); `tests/modes.rs` and `tests/screen.rs` pin
+//! the emulator's own behavior there.
 //!
 //! Both are fed the output in one call, since inside a synchronized update
 //! vte's result can depend on how the output is cut into calls.

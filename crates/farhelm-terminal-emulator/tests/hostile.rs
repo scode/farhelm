@@ -315,7 +315,7 @@ fn a_screen_full_of_tabs_captures_in_linear_time() {
     );
     // With no stops left, every tab's span reaches the last column and holds
     // other tabs, so each captures as a space; only the one next to the last
-    // column has an empty span, and captures as a tab, as tmux records it.
+    // column has an empty span, and captures as a tab.
     let row = format!("{}\t\n", " ".repeat(COLUMNS - 2));
     assert!(tabs_text == row.repeat(LINES), "unexpected capture shape");
     assert!(

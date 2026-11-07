@@ -3,16 +3,17 @@
 //!
 //! The emulator only reports them; encoding keys, mouse events, focus changes
 //! and pastes from them is the input side's job. Keyboard modes are legacy
-//! xterm ones only: alacritty's kitty keyboard protocol stays off, as in the
-//! browser terminal today, so a program's request to turn it on is ignored and
-//! never shows up here.
+//! xterm ones only: alacritty's kitty keyboard protocol stays off, because
+//! turning it on would change how Shift+Enter and Escape reach agents (the
+//! input encoder speaks the legacy encoding only), so a program's request to
+//! turn it on is ignored and never shows up here.
 
 use alacritty_terminal::term::TermMode;
 
 /// Which mouse events the program asked to receive. The modes exclude each
 /// other: setting one replaces the others, and resetting any of them (or
 /// 1001, highlight tracking, which is otherwise ignored) turns reporting
-/// off, as in tmux 3.7c.
+/// off (`queries`, "Beyond queries").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseReporting {
     /// No mouse reporting; the viewer handles the mouse itself.
@@ -31,9 +32,10 @@ pub enum MouseReporting {
 /// default encoding.
 ///
 /// 1005 and 1006 are separate modes a program can hold at once (the
-/// vendored patch, as in tmux), and SGR wins whichever was set first, as in
-/// tmux and the browser terminal today (which does not implement 1005 at
-/// all). xterm, and upstream alacritty, keep only the one set last.
+/// vendored patch), and SGR wins whichever was set first. xterm, and
+/// upstream alacritty, keep only the one set last; Farhelm keeps the rule
+/// its old terminals follow, so a program that sets both gets SGR reports
+/// in either kind of terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseEncoding {
     /// The original X10-style encoding, `CSI M` and three bytes, which cannot
@@ -49,9 +51,8 @@ pub enum MouseEncoding {
 /// [`crate::Emulator::modes`].
 ///
 /// X10 compatibility mouse mode (9) is absent because alacritty does not
-/// implement it; tmux does not either, and answers DECRQM 9 as not
-/// recognized. Today the browser terminal does honor it, since it sees the
-/// program's raw output, so the input encoder loses it.
+/// implement it: setting it changes nothing, and DECRQM 9 answers not
+/// recognized, so a program asking first knows not to rely on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Modes {
     /// Bracketed paste (mode 2004): pasted text must be wrapped in
