@@ -29,7 +29,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `placeSessionCard`, opted into by the row's `data-tooltip-anchor="session-card"`); every other hover in a session row
   — status, agent mark, activity stamp, stale badge, pin, actions — still uses the ordinary above/below tooltip. Make
   them all open beside the bar like that one, and add a second cue beyond position that ties the card to its target: a
-  tasteful arrow or pointer of some kind. Exact visuals and mockups are for planning.
+  tasteful arrow or pointer of some kind. Exact visuals and mockups are for planning. Plan:
+  `plans/queue/row-hovers-beside-list.md`.
 
 - **Fix click-to-download when a printed absolute path is split by a line wrap.** On 2026-11-07 a macOS brick-test run
   printed `Before screenshot (/tmp/farhelm-tmp/8B3AAC70-9A39-4B45-8A69-0842AC8C77F4/before-reopen.jpg)`,
@@ -44,6 +45,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and whether a path-like token that opens a line should be offered at all when it is the visibly cut tail of the line
   above. A relative printed path resolving against the session cwd is by design
   (`crates/farhelm-supervisor/src/service/downloads.rs`, `resolve_path`), so any fix belongs in recognition, not there.
+  Plan: `plans/queue/cut-path-links.md`.
 
 - **Generally rethink the session filtering experience.** The list now names its active filters and shows a removable
   host chip; revisit the broader filtering experience.
@@ -98,15 +100,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - Initial version of agent2agent comms.
 
-- **Crappy model warning.** Let the user pick a list of models they never want to run. Warn when an agent's TUI
-  indicates that one of those models is being used anyway.
-
 - **Restore deleted sessions.** Support undeleting a session that is in the trash. Consider supporting undelete for
   sessions without a managed checkout too, by retaining their metadata.
 
 - **Deleting checkouts from the trash is far too slow.** Each delete costs a multi-second round trip and blocks its
   caller. Speed it up by doing the deletes concurrently, move them into the background so the UI is not blocked, or
-  both.
+  both. Plan: `plans/queue/instant-trash-delete.md`.
+
+- **Show the user when the trash cannot finish freeing space.** With `instant-trash-delete`, a deleted checkout leaves
+  the trash at once and the host removes its files in the background, retrying after restarts when it cannot (files
+  owned by a container's root user, say). Decided on 2026-11-07 while planning it: for now such a folder only gets a
+  logged warning, and nothing may get stuck or break because of it. Consider improving how visible this is to the user.
 
 - **Upgrade epochs.** Give every release an upgrade epoch, and only promise clean upgrades across one epoch: an
   installation on epoch N updates normally while the latest release is on N+1, and one whose latest release is N+2 is
@@ -249,7 +253,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Consider closing tabs on stop for ordinary sessions too.** Stopping a containerized session stops its whole
   container, terminal tabs included, while stopping an ordinary session ends only the agent and leaves its tabs running.
-  Consider making ordinary sessions match.
+  Consider making ordinary sessions match. Plan: `plans/queue/stop-closes-tabs.md`.
 
 - **Stop containers an agent started through podman before killing processes.** Today Stop, tab close and Delete end a
   podman container that an agent or tab started (`podman run -d`, say) only by killing its processes, because the
@@ -305,7 +309,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Investigate how terminal content reaches the helm/UI.** Switching sessions often takes a visible delay. Consider
   having the helm/UI receive terminal output from all sessions, or the recently used ones, so switching becomes instant
-  rather than reliant on remote round trips.
+  rather than reliant on remote round trips. Noted on 2026-11-07: it is unclear whether this is still a problem after
+  the switch to new terminals (TBD).
 
 - **Release stable from the approved RC without rebuilding.** When an RC has been built and declared correct, releasing
   stable should default to promoting that RC's artifacts, not rebuilding everything for the stable tag. Today a stable
@@ -356,7 +361,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Don't let git auto-gc run while a session is spawning.** On 2026-11-02, git auto-triggered gc on the farhelm repo
   itself when spawning a session — the user was actively waiting, which is exactly when auto-triggering is supposed to
   be deferred. Investigate what ran gc during the spawn (likely a jj/git operation in the colocated checkout) and move
-  it to a moment when the user is not waiting.
+  it to a moment when the user is not waiting. Plan: `plans/queue/no-gc-at-launch.md`.
 - **Closing or starting terminals must not block other actions.** Closing a terminal or starting new ones should not
   disable doing other things, like switching to other sessions.
 
@@ -797,6 +802,9 @@ problem a refactor targets (making drifted copies consistent, say) is allowed in
 are not.
 
 ## Maybe later
+
+- **Crappy model warning.** Let the user pick a list of models they never want to run. Warn when an agent's TUI
+  indicates that one of those models is being used anyway.
 
 - **Input-method typing in grid terminals.** Terminals that run in a terminal host are drawn by the grid terminal
   client, which does not show an input method's composition at the cursor or place the candidate window there: composed
