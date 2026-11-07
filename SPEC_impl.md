@@ -3265,12 +3265,12 @@ refuses a grid stream it did not ask for. Its relay differs from a byte stream's
 its links does not fit in 64 KiB), up to 4,096 of them, while holding no more bytes per attachment than a byte stream's
 worst case of 16 MiB; it forwards each browser message as one data frame, never cut into the 32 KiB input chunks, and
 ends the attachment on a message over the 64 KiB input bound rather than forward it; and it pauses the supervisor
-itself. The grid client sends no pause or resume, and the helm reads its supervisor connection without waiting on any
-one terminal, so without that a browser slower than the supervisor's link would fill its attachment's queue at the first
-large catch-up (a full scrollback can be thousands of messages) and be detached as stalled. Instead the helm sends
-`PauseOutput` once a grid attachment's queue holds 2 MiB or 512 messages, and `ResumeOutput` once it has drained to 1.5
-MiB and 384. A paused grid stream is sent nothing, history included, until the resume, then what it owes; it costs
-screen frames, never output.
+itself. The grid client sends no pause or resume (the helm drops one a page sends on a grid socket), and the helm reads
+its supervisor connection without waiting on any one terminal, so without that a browser slower than the supervisor's
+link would fill its attachment's queue at the first large catch-up (a full scrollback can be thousands of messages) and
+be detached as stalled. Instead the helm sends `PauseOutput` once a grid attachment's queue holds 2 MiB or 512 messages,
+and `ResumeOutput` once it has drained to 1.5 MiB and 384. A paused grid stream is sent nothing, history included, until
+the resume, then what it owes; it costs screen frames, never output.
 
 The supervisor ends an attachment that stays paused past its 60 second stall timeout, counted from the pause, which is
 what ends a browser that stopped reading, for both kinds. It also sets the slowest browser that still reads and is not

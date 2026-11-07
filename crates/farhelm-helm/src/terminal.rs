@@ -41,8 +41,9 @@
 //! bytes, or for a grid stream (`farhelm_proto::grid`) one grid message per
 //! frame, relayed without being read either way. Text frames are the control
 //! channel (`WsClientMsg`): resize, and an old terminal's watermark
-//! pause/resume (the grid client sends none), which is forwarded to the
-//! supervisor rather than interpreted here. Three text frames are made on
+//! pause/resume, which is forwarded to the supervisor rather than
+//! interpreted here (on a grid socket it is dropped; the grid client sends
+//! none). Three text frames are made on
 //! this side — `PONG_TEXT_MESSAGE` for the heartbeat,
 //! `REPLAY_COMPLETE_TEXT_MESSAGE` for the marker that separates replayed
 //! scrollback from live output, and the stream notice (`stream_notice`),
@@ -65,7 +66,8 @@
 //!   one data frame (`SupervisorClient::send_grid_input`) instead of being
 //!   cut into 32 KiB chunks; one over `GRID_MAX_INPUT_MESSAGE` ends the
 //!   attachment.
-//! - The grid client sends no pause or resume of its own, so the helm
+//! - The grid client sends no pause or resume of its own (and one a page
+//!   sends anyway on a grid socket is dropped, not forwarded), so the helm
 //!   pauses and resumes the supervisor from its own queue's fill (the
 //!   client's `GRID_PAUSE_BYTES`, which also works out how slow a browser
 //!   that still reads may be). A pause that outlives the supervisor's stall
@@ -388,9 +390,10 @@ async fn attach_from_query(
 /// - `{"type":"resize","cols":N,"rows":N}` — the terminal's new size.
 /// - `{"type":"pause"}` — an old terminal's unflushed `term.write()`
 ///   backlog crossed its high-water mark; stop sending output. The grid
-///   client never sends it (the helm pauses grid streams itself).
+///   client never sends it, and on a grid socket it is dropped unforwarded
+///   (the helm pauses grid streams itself).
 /// - `{"type":"resume"}` — that backlog drained below the low-water mark;
-///   output may flow again.
+///   output may flow again. Dropped on a grid socket, like `pause`.
 /// - `{"type":"ping"}` — the browser's idle-gated liveness probe
 ///   (PLAN_M6.md item 7), answered with `{"type":"pong"}` and forwarded to
 ///   nobody.
@@ -909,6 +912,16 @@ async fn serve_term(
                             .resize(&session_id_inbound, channel, cols, rows)
                             .await;
                     }
+                    // A grid stream's flow control is the helm's own
+                    // (`SupervisorClient::spawn_grid_flow`, from its queue's
+                    // fill), and the supervisor keeps one paused flag per
+                    // attachment. Forwarding a browser's pause or resume
+                    // here would let it hold the stream paused until the
+                    // stall detach, or lift a pause the helm still needs. The
+                    // grid client sends neither, so ignoring them costs a
+                    // well-behaved page nothing.
+                    Ok(WsClientMsg::Pause | WsClientMsg::Resume)
+                        if stream_kind == farhelm_proto::StreamKind::Grid => {}
                     Ok(WsClientMsg::Pause) => client_inbound.pause_output(channel).await,
                     Ok(WsClientMsg::Resume) => client_inbound.resume_output(channel).await,
                     // The one client message answered HERE rather than
@@ -2216,8 +2229,11 @@ mod tests {
     /// receives `{"type":"stream","kind":"grid"}`, a 200 KiB data frame byte
     /// for byte, then `replay_complete`; a binary message of exactly the
     /// 64 KiB input bound reaches the supervisor as one identical data
-    /// frame, and the resize, pause and resume sent after it follow as
-    /// `Resize`, `PauseOutput` and `ResumeOutput` for the channel.
+    /// frame, and of a resize, a pause, a resume and a second resize sent
+    /// after it, only the two resizes follow, in order: a grid socket's
+    /// flow control is the helm's own, so a browser's pause and resume are
+    /// not forwarded (the second resize shows they were read and dropped,
+    /// since the socket's messages are forwarded in arrival order).
     #[farhelm_testtrace::test]
     async fn a_grid_stream_is_relayed_unread_in_both_directions() {
         let early: Vec<u8> = (0..200 * 1024).map(|i| (i % 251) as u8).collect();
@@ -2299,6 +2315,8 @@ mod tests {
             .await;
         ws.send_text(r#"{"type":"pause"}"#).await;
         ws.send_text(r#"{"type":"resume"}"#).await;
+        ws.send_text(r#"{"type":"resize","cols":100,"rows":40}"#)
+            .await;
 
         let frame = tokio::time::timeout(Duration::from_secs(5), reader.read_frame())
             .await
@@ -2318,8 +2336,12 @@ mod tests {
                 cols: 90,
                 rows: 30,
             },
-            ControlMsg::PauseOutput { channel },
-            ControlMsg::ResumeOutput { channel },
+            ControlMsg::Resize {
+                session_id: "sess-1".to_string(),
+                channel,
+                cols: 100,
+                rows: 40,
+            },
         ] {
             let frame = tokio::time::timeout(Duration::from_secs(5), reader.read_frame())
                 .await
@@ -2505,7 +2527,26 @@ mod tests {
     /// it.
     #[farhelm_testtrace::test]
     async fn a_slow_browser_pauses_and_resumes_its_grid_stream() {
-        slow_browser_pauses_and_resumes(32 * 1024, 64).await;
+        slow_browser_pauses_and_resumes(32 * 1024, 64, false).await;
+    }
+
+    /// A browser's own resume and pause on a grid socket, sent while the
+    /// helm holds the stream paused, neither lift the helm's pause nor
+    /// reach the supervisor; the helm still resumes the stream itself once
+    /// the browser catches up.
+    ///
+    /// Why: the supervisor keeps one paused flag per attachment. A
+    /// forwarded browser resume would lift the pause the helm needs to keep
+    /// its queue within bounds, and a forwarded pause the helm never sent
+    /// would hold the stream paused until the stall detach, since the helm
+    /// resumes only its own pauses. Spec: as the 32 KiB case, but once the
+    /// helm's `PauseOutput` is heard the browser sends `resume`, `pause`
+    /// and then a resize; the supervisor's next message is that `Resize`,
+    /// with nothing before it, and after the browser reads every frame the
+    /// helm's `ResumeOutput` still arrives with nothing before it.
+    #[farhelm_testtrace::test]
+    async fn a_browser_pause_or_resume_never_touches_a_grid_streams_flow() {
+        slow_browser_pauses_and_resumes(32 * 1024, 64, true).await;
     }
 
     /// The same, with rows at the format's largest message and several of
@@ -2518,12 +2559,14 @@ mod tests {
     /// 1 MiB frames and 8 of them after the stand-in hears from the helm.
     #[farhelm_testtrace::test]
     async fn a_slow_browser_survives_large_rows_arriving_after_the_pause() {
-        slow_browser_pauses_and_resumes(farhelm_proto::grid::GRID_MAX_MESSAGE, 8).await;
+        slow_browser_pauses_and_resumes(farhelm_proto::grid::GRID_MAX_MESSAGE, 8, false).await;
     }
 
     /// One run of the slow-browser tests: frames of `size`, and `after`
-    /// more once the helm has spoken.
-    async fn slow_browser_pauses_and_resumes(size: usize, after: u32) {
+    /// more once the helm has spoken. With `browser_flow`, the browser sends
+    /// its own `resume` and `pause` (then a resize as a marker) while the
+    /// helm's pause holds, and the supervisor must hear only the resize.
+    async fn slow_browser_pauses_and_resumes(size: usize, after: u32, browser_flow: bool) {
         let (client_side, peer_side) = tokio::io::duplex(1024 * 1024);
         let peer = tokio::spawn(scripted_supervisor_attach_as(
             peer_side,
@@ -2546,6 +2589,29 @@ mod tests {
              after {written} frames",
             flood.heard
         );
+        if browser_flow {
+            // The socket's messages reach the supervisor in arrival order,
+            // so the resize arriving first, alone, shows that the resume and
+            // pause before it were read and dropped.
+            ws.send_text(r#"{"type":"resume"}"#).await;
+            ws.send_text(r#"{"type":"pause"}"#).await;
+            ws.send_text(r#"{"type":"resize","cols":91,"rows":31}"#)
+                .await;
+            let resize = ControlMsg::Resize {
+                session_id: "sess-1".to_string(),
+                channel,
+                cols: 91,
+                rows: 31,
+            };
+            let before = read_until(&mut reader, "the marker resize", |frame| {
+                is_control(frame, &resize)
+            })
+            .await;
+            assert!(
+                before.is_empty(),
+                "a browser's pause and resume on a grid socket must not be forwarded: {before:?}"
+            );
+        }
 
         expect_stream_notice(&mut ws, "grid").await;
         for expected in 0..written {
