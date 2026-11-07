@@ -2044,6 +2044,14 @@ fn detach_stalled(
 /// reporting forwarder's task id (`origin`), because a detach and reattach on
 /// the same channel of the same connection installs a replacement that
 /// matches on channel and connection alone.
+///
+/// Every verdict (a terminal that ended, a failed stream or input) for a
+/// session a Delete is tearing down waits for the Delete to have detached
+/// the session's viewers, or returned, before it claims anything: the
+/// Delete ends the session's terminals before it detaches their viewers, so
+/// a terminal host's stream can end first, and its viewer must hear the
+/// Delete's own notice (deleted, or why it failed), as an old terminal's
+/// viewer does (`Supervisor::deletes_in_progress`).
 fn detach_naturally(
     sup: &Arc<Supervisor>,
     key: AttachmentKey,
@@ -2057,6 +2065,12 @@ fn detach_naturally(
         if let Some(gate) = sup.seams.faults.natural_detach_gate() {
             gate().await;
         }
+        // A Delete that ended this terminal sends the notice itself once it
+        // knows its outcome; by the time it is over the attachment is either
+        // gone from the map (detached as deleted, or with why the Delete
+        // failed) or still here because the Delete failed before detaching
+        // it, and only then is this the notice to send.
+        sup.delete_over(&key.session).await;
         let mut attachments = sup.attachments.lock().await;
         let mine = attachments.get(&key).is_some_and(|a| {
             a.channel == channel && a.notify.same_channel(&tx) && a.forwarder.id() == origin

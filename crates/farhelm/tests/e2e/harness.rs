@@ -3379,13 +3379,6 @@ pub(crate) async fn scope_gated_harness(
     scope_gated_harness_with(test, SupervisorSeams::default()).await
 }
 
-/// [`scope_gated_harness`] for old terminals (see [`harness_tmux`]).
-pub(crate) async fn scope_gated_harness_tmux(
-    test: &str,
-) -> Option<(Harness, Arc<farhelm_supervisor::scope::ScopeManager>)> {
-    scope_gated_harness_with(test, SupervisorSeams::tmux_terminals()).await
-}
-
 /// [`scope_gated_harness`] built on `base`, whose scope manager the probed
 /// one replaces.
 async fn scope_gated_harness_with(
