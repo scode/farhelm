@@ -399,36 +399,58 @@ old behavior; leave them to the next docs screenshot refresh, whose procedure up
 
 A later change of mind by the maintainer is a follow-up, not a reason to stop the plan.
 
-## Blocked
+### 2026-11-07: answer to a blocked question
 
-Blocked while landing on 2026-11-07 (claim 57cb43).
+The question, as the executor put it:
 
-### A Delete test this plan rewrote fails 4 of 12 times, ending a stopped session as `error`
+> Blocked while landing on 2026-11-07 (claim 57cb43).
+>
+> ### A Delete test this plan rewrote fails 4 of 12 times, ending a stopped session as `error`
+>
+> This plan makes Stop also close a session's terminal tabs, asking first when tabs are showing. Its drafts,
+> [#3132](https://github.com/scode/farhelm/pull/3132/changes) (the change) and
+> [#3133](https://github.com/scode/farhelm/pull/3133/changes) (its docs), have not merged; the docs PR cannot land
+> without the change.
+>
+> The failing test is `e2e/tests/delete-precondition.spec.ts`, whose two cases stop a running session and then check
+> that a Delete without a confirmation is refused by the supervisor when something is still alive that the screen did
+> not show; in the second case, with confirmations skipped, a tab is that something. This plan rewrote the test's setup
+> for the new Stop: because Stop now closes existing tabs, the second case opens its tab after Stop. On trees without
+> this plan, the spec passed on both engines in each of the four full browser runs this monitor made on 2026-11-07.
+>
+> With this plan, the second case failed in the full browser run (Chromium, run `88d8738b-6a0d-43a7-a9e6-d455a1b7775f`):
+> a tab opened right after Stop was missing from the session listing. Three repeats of both cases on each engine
+> (`--repeat 3`) then failed 4 of 12 attempts (WebKit run `b53ee14b-9906-4d1d-9485-1526f9ff09e2`, Chromium run
+> `ad453809-f552-4140-91b0-2ac70a453e01`):
+>
+> - three times, after the test stopped a running session, its status settled as `error` rather than `exited`, in the
+>   first case too, which opens no tab;
+> - once more, the tab opened right after Stop was missing from the listing.
+>
+> Whether the `error` status comes from the new Stop or only from the test's timing is not established; the missing tab
+> looks like the test reading the listing before it catches up, but that is not established either.
+>
+> Should the plan go back to its executor to fix this? That delays Stop's tab closing by another executor round. The
+> landing cannot tell by itself whether Stop is misreporting an ordinary stop. Landing as it is would leave a test that
+> failed 4 of 12 times on main, and possibly ship a Stop that reports an error for an ordinary stop. I recommend sending
+> it back.
 
-This plan makes Stop also close a session's terminal tabs, asking first when tabs are showing. Its drafts,
-[#3132](https://github.com/scode/farhelm/pull/3132/changes) (the change) and
-[#3133](https://github.com/scode/farhelm/pull/3133/changes) (its docs), have not merged; the docs PR cannot land without
-the change.
+The maintainer's answer:
 
-The failing test is `e2e/tests/delete-precondition.spec.ts`, whose two cases stop a running session and then check that
-a Delete without a confirmation is refused by the supervisor when something is still alive that the screen did not show;
-in the second case, with confirmations skipped, a tab is that something. This plan rewrote the test's setup for the new
-Stop: because Stop now closes existing tabs, the second case opens its tab after Stop. On trees without this plan, the
-spec passed on both engines in each of the four full browser runs this monitor made on 2026-11-07.
+The landing monitor answered this on the maintainer's behalf (`plans/.agents/landing.md`, "Answering blocks"): the
+landing failed mainly on a test the plan changed, which failed 4 of 12 repeated attempts, so the plan goes back to be
+fixed.
 
-With this plan, the second case failed in the full browser run (Chromium, run `88d8738b-6a0d-43a7-a9e6-d455a1b7775f`): a
-tab opened right after Stop was missing from the session listing. Three repeats of both cases on each engine
-(`--repeat 3`) then failed 4 of 12 attempts (WebKit run `b53ee14b-9906-4d1d-9485-1526f9ff09e2`, Chromium run
-`ad453809-f552-4140-91b0-2ac70a453e01`):
+- Find why a stopped session's status sometimes settles as `error` rather than `exited` in
+  `e2e/tests/delete-precondition.spec.ts`, in both of its cases. If the new Stop reports an ordinary stop as an error,
+  fix the product; if only the test's timing is at fault, fix the test without weakening what it checks.
+- Make the tabs-only case wait until the tab it opens after Stop is listed before it relies on it, if the listing can
+  lag the tab's creation.
+- Run that spec file with `--repeat-each` of at least 10 on both engines, and the supervisor's Stop and tab tests,
+  before delivering again.
 
-- three times, after the test stopped a running session, its status settled as `error` rather than `exited`, in the
-  first case too, which opens no tab;
-- once more, the tab opened right after Stop was missing from the listing.
+Keep the fixes this landing made to the stack (the mixed-session host-tabs test's Delete coverage restored, Stop in
+SPEC.md's list of questions the confirmation setting skips, a supervisor comment) and the protocol version 70 that this
+plan now takes, because macos-tunnel-exit took 69: the landing pushed them to this plan's bookmarks, so build on those.
 
-Whether the `error` status comes from the new Stop or only from the test's timing is not established; the missing tab
-looks like the test reading the listing before it catches up, but that is not established either.
-
-Should the plan go back to its executor to fix this? That delays Stop's tab closing by another executor round. The
-landing cannot tell by itself whether Stop is misreporting an ordinary stop. Landing as it is would leave a test that
-failed 4 of 12 times on main, and possibly ship a Stop that reports an error for an ordinary stop. I recommend sending
-it back.
+A later change of mind by the maintainer is a follow-up, not a reason to stop the plan.
