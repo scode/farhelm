@@ -84,10 +84,28 @@ and
 [the second case](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L2189-L2262)
 show the behavior Farhelm will revisit.
 
+A new terminal is not tmux and does not claim to be: programs in it see `TERM_PROGRAM=farhelm`, with Farhelm's version
+in `TERM_PROGRAM_VERSION`, and no `TMUX` (inside a [containerized session](/docs/agents/containerized-sessions/)'s
+container, the agent gets `TERM` and `COLORTERM` but no `TERM_PROGRAM`). An agent started, or a tab opened, before you
+upgraded keeps the earlier environment, which claims tmux, until it is restarted or closed. If a startup file of your
+login shell starts tmux whenever it is not already inside tmux, it now does so in a new terminal too, including while
+the agent starts. One that replaces the shell with tmux (`exec tmux`) keeps the agent from starting at all, and the
+session's terminal shows your tmux instead. To leave Farhelm's terminals alone, have the startup file skip tmux when
+`TERM_PROGRAM` is `farhelm`.
+
 ## tmux is still needed
 
-Farhelm still needs tmux on your Mac, as before, even after you move every session: keep it installed.
-[Install Farhelm](/docs/get-started/install/#if-the-installer-asks-for-tmux) says which version. On a remote host,
-nothing changes either: Farhelm keeps using the tmux it found there, or the copy it brought along when the host had no
-new enough tmux ([Add a remote host](/docs/get-started/add-a-remote-host/) covers that). A later release will say when
-Farhelm stops needing tmux.
+Farhelm still requires tmux for now, and checks its version, even after you move every session: keep it installed. On
+your Mac, Farhelm does not start without a new enough tmux;
+[Install Farhelm](/docs/get-started/install/#if-the-installer-asks-for-tmux) says which version. Setting up a remote
+host still checks the host's tmux too, and brings Farhelm's own copy when the host has no new enough one
+([Add a remote host](/docs/get-started/add-a-remote-host/) covers that).
+
+Farhelm's tmux only runs for old terminals, though. Farhelm runs no tmux on a host whose sessions all have new
+terminals, and on a host that still has old terminals, Farhelm's tmux stops by itself once the last of them is gone
+(every old session restarted, replaced or deleted, and every old tab closed). An old session cannot do without it: if
+tmux is missing or too old on its host, Farhelm cannot reach that session's terminal and shows the session as exited.
+While that host's old tmux is still running, the agent may still be running in it too, so Farhelm refuses to restart or
+delete the session until a supported tmux is installed again; the refusal says how.
+
+A later release will say when Farhelm stops needing tmux.
