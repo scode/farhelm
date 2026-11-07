@@ -2,6 +2,31 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.37.0 - 2026-11-07
+
+**DRAFT release notes - not yet finalized**
+
+### 💥 Breaking
+
+- Tensorlake recipes no longer keep their own API endpoint tokens, and upgrading removes the ones they had. Re-enter those tokens in Settings → **Credentials** and choose them by name in the recipes that used them. (#3077)
+
+### 🚀 Added
+
+- Every session with something still running in an old terminal (one run by tmux) now gets a notification in the session list, linking to [Move sessions to new terminals](https://farhelm.io/docs/using/new-terminals/), because an upcoming release will forcibly terminate those terminals. Remote hosts show it only once you update them to this release. (#3137, #3139)
+- EXPERIMENTAL: Tensorlake recipes can now use named GitHub tokens, Claude Code and Codex subscription logins, and API endpoint tokens from the new Settings → **Credentials**, which stores them unencrypted on the machine running the helm. A ChatGPT login used on more than one host stops renewing on all but one; [Tensorlake sandboxes](https://farhelm.io/docs/using/tensorlake-sandboxes/) has the details. (#3074, #3081, #3082, #3086, #3126)
+
+### 🔄 Changed
+
+- The note at the top of a session in an old terminal now asks you to restart, replace, stop or delete it as soon as possible, and to reopen its old shell tabs, which a restart leaves running. (#3136)
+- Confirming **Delete all** in the trash now closes it at once, and the trash icon shows which hosts are still freeing disk space; emptying the trash no longer holds up starting, restarting or deleting sessions on that host. (#3131, #3134)
+- Hover help on a session row, its summary included, now opens beside the session list, with a pointer and a thin ring showing what it describes. (#3128)
+
+### 🩹 Misc fixes
+
+*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
+
+- Starting a session in a new managed checkout no longer stops in its terminal while Git tidies the repository cache; Farhelm now does that in the background afterwards, though another launch of the same repository can still wait for it to finish. (#3130)
+
 ## v0.36.0 - 2026-11-07
 
 ### 💥 Breaking
