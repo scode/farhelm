@@ -133,8 +133,8 @@ Tunnels run while Farhelm is connected to the host and stop when it disconnects,
 to recipe tunnels reach existing hosts at their next connection. Host details show each mapping and its status; a failed
 tunnel makes the host's dot amber and shows the reason while Farhelm retries.
 
-The helm's machine must reach Tensorlake's SSH gateway directly for tunnels. They do not use your SSH configuration or
-**ProxyJump**. These are separate from
+Tunnels use the host's existing connection, including your SSH configuration and **ProxyJump**. They close when the helm
+quits or crashes, and within about two minutes when its machine goes silent. These are separate from
 [opening a remote localhost link](/docs/using/work-in-a-session/#open-a-remote-localhost-link) in your browser, which
 carries traffic in the other direction.
 
@@ -200,8 +200,8 @@ Resuming shows **Resuming…**, then **Connecting…** until Farhelm can reach t
 
 On Tensorlake's Usage Credits plan, Tensorlake suspends a sandbox after 24 hours without a connection from Farhelm, for
 example while the helm's machine is asleep. An idle agent while Farhelm stays connected does not start that countdown.
-Farhelm does not suspend idle hosts itself or resume them without a user action. A tunnel by itself does not keep a
-sandbox from reaching Tensorlake's idle limit.
+Farhelm does not suspend idle hosts itself or resume them without a user action. After Farhelm disconnects, configured
+tunnels leave no separate connection keeping the sandbox awake.
 
 Launching on a suspended host shows progress while it resumes and reconnects, then starts the session automatically. For
 a fresh GitHub checkout, the directory is picked when the host is ready; a supplied session name determines its

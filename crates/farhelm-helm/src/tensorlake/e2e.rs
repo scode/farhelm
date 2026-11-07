@@ -377,7 +377,7 @@ pub(crate) struct E2eTensorlake {
 
 impl E2eTensorlake {
     /// Simulate a long-lived tunnel with failure injection. The production
-    /// lease still owns cancellation and retry; no real SSH reaches a vendor.
+    /// lease still owns cancellation and retry; no real listener is claimed.
     pub(crate) async fn run_tunnels(
         &self,
         _sandbox: &str,

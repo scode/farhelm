@@ -1190,12 +1190,17 @@ impl SandboxStatusSource for HookGate {
         SandboxCheck::Unavailable("fixture asks the supervisor directly".into())
     }
 
-    async fn connected(&self, row: &HostRow, events: Arc<FleetEvents>) -> ConnectedResources {
+    async fn connected(
+        &self,
+        row: &HostRow,
+        client: Arc<crate::client::SupervisorClient>,
+        events: Arc<FleetEvents>,
+    ) -> ConnectedResources {
         if row.tensorlake.is_none() {
             return ConnectedResources::default();
         }
         let service = self.service.lock().unwrap().clone().unwrap();
-        let resources = SandboxStatusSource::connected(&service, row, events).await;
+        let resources = SandboxStatusSource::connected(&service, row, client, events).await;
         if self.hold.swap(false, Ordering::SeqCst) {
             self.entered.notify_one();
             self.release.notified().await;
