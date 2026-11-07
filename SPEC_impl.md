@@ -428,10 +428,11 @@ rendered as YOLO for compatibility with older snapshots. The full invocation rem
 The working directory is tilde-folded against the `/home/<user>` and `/Users/<user>` shapes, since no home directory is
 on the wire to fold against properly. The full invocation stays on the agent mark; the untouched directory and other row
 facts ride in a hidden summary card source beside the row. The open button names that source with `data-tooltip-card`;
-the shared tooltip clones its DOM children on hover or keyboard focus. Its `data-tooltip-anchor="session-card"` opt-in
-places the card six pixels past the enclosing `.app-sidebar`, level with the row and clamped vertically to the window.
-The pure `placeSessionCard` falls back to `placeTooltip` when there is no room to the right; nearer marks retain
-ordinary placement. The source is a sibling, not a row descendant, so row-scoped controls and locators cannot match a
+the shared tooltip clones its DOM children on hover or keyboard focus. All row hover targets explicitly opt into
+`data-tooltip-anchor="session-row"`, including the open button, nearer marks and the sibling notification bell. The pure
+`placeSessionCard` puts their help six pixels past `.app-sidebar`, centred vertically on the target and clamped to the
+window, with a notch centre clamped inside the box's straight edge. It falls back to `placeTooltip` when there is no
+room to the right. The source is a sibling, not a row descendant, so row-scoped controls and locators cannot match a
 second, hidden copy. Rust renders the host's own mark, status classes and isolated peer text. The card gives the full
 title, host, managed checkout, directory and timestamps without changing the open button's accessible name; marks keep
 their nearer hover targets and the complete ended-status detail stays on the row. The source and cloned tooltip remain
@@ -1303,6 +1304,10 @@ target with a 6 px gap and, only without room there, below with a 28 px gap: a p
 standard cursors extend downward from their hot spot, so space above a control is never under the cursor while a box
 just below a small icon would be. It is `position: fixed` from the target's measured rectangle so no scroll container
 clips it, wears the row menu panels' background, border and shadow, wraps at about 280 px and clamps to eight lines.
+Explicit session-row targets instead use the beside-the-sidebar placement above. One reusable sibling notch stays
+outside the text box's clipping, matching the actions flyout's notch and theme. The showing target carries
+`tooltip-target-ring`; hiding, changing target or falling back removes that class and hides the notch. The watch tick
+also follows window and sidebar-size changes for text targets, so a resting hover switches placement and cues together.
 Split-action menu items and session Rename opt into their enclosing panel as the placement rectangle, so their full
 reasons and shortcut help do not cover neighboring choices at normal window heights. Other described row-menu commands
 and template-number options need no duplicate tooltip. The item retains tooltip ownership and dismissal; the existing

@@ -253,6 +253,8 @@ pub(crate) fn status_badge(
 /// The dot's hover text always starts with the status word. When the dot also
 /// toggles seen state, the action follows it; otherwise the child would hide
 /// the badge's status tooltip behind an action-only tooltip.
+/// `session_row` opts both targets into beside-the-list placement. Other
+/// surfaces keep the ordinary placement even when they share this badge.
 ///
 /// The dot itself stays `aria-hidden="true"` regardless: it is a MOUSE
 /// shortcut only, never a focusable control (`dot_title` sets a hover
@@ -264,6 +266,7 @@ pub(crate) fn StatusBadgeView(
     badge: StatusBadge,
     dot_onclick: EventHandler<MouseEvent>,
     dot_title: Option<String>,
+    #[props(default = false)] session_row: bool,
 ) -> Element {
     // Computed once, ahead of the rsx below, so the `onclick` closure has
     // its own `bool` to check rather than fighting the dot's tooltip for
@@ -277,6 +280,7 @@ pub(crate) fn StatusBadgeView(
     );
     rsx! {
         span { class: "status-badge {badge.class}", "data-tooltip": "{badge.text}",
+            "data-tooltip-anchor": if session_row { "session-row" },
             if badge.visible {
                 "{badge.text}"
             } else {
@@ -297,6 +301,7 @@ pub(crate) fn StatusBadgeView(
                     class: if toggle_offered { "status-dot status-dot-toggle" } else { "status-dot" },
                     "aria-hidden": "true",
                     "data-tooltip": dot_hover,
+                    "data-tooltip-anchor": if session_row { "session-row" },
                     onclick: move |evt| {
                         // `stop_propagation` is why a dot click does not
                         // also select the row: the row's own open control

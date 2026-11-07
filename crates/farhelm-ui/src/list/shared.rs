@@ -277,15 +277,22 @@ pub(crate) fn session_locality(
 /// Unknown locality draws nothing: a session's host name cannot establish
 /// which machine is local. The caller owns the surrounding layout slot, so
 /// the sidebar can keep its icon separate from the host's second-line label.
+/// Only the actual list row opts into beside-the-list hover placement; the
+/// session header and hidden summary-card source keep ordinary placement.
 #[component]
-pub(crate) fn SessionHostIcon(locality: HostLocality, icon: HostIcon, color: HostColor) -> Element {
+pub(crate) fn SessionHostIcon(
+    locality: HostLocality,
+    icon: HostIcon,
+    color: HostColor,
+    #[props(default = false)] session_row: bool,
+) -> Element {
     match locality {
         HostLocality::Local => rsx! {
-            HostMark { icon, color, local: true }
+            HostMark { icon, color, local: true, session_row }
             span { class: "visually-hidden", "Local" }
         },
         HostLocality::Remote => rsx! {
-            HostMark { icon, color }
+            HostMark { icon, color, session_row }
             span { class: "visually-hidden", "Remote" }
         },
         HostLocality::Unknown => rsx! {},

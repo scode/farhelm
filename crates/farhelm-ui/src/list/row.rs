@@ -1735,6 +1735,7 @@ pub(super) fn SessionRow(
                         disabled: pin_drag_disabled,
                         aria_label: "Drag pinned session",
                         "data-tooltip": "Drag to reorder pinned sessions",
+                        "data-tooltip-anchor": "session-row",
                         span { "aria-hidden": "true", class: "session-pin-grip-dots" }
                     }
                 }
@@ -1745,9 +1746,9 @@ pub(super) fn SessionRow(
                     // the open button, in either sidebar density. The marks
                     // keep their own nearer hover targets.
                     "data-tooltip-card": "{card_id}",
-                    // Clear neighbouring rows without changing the marks'
-                    // ordinary tooltip placement or the card's ownership.
-                    "data-tooltip-anchor": "session-card",
+                    // Every row target clears neighbouring sessions while
+                    // keeping its own content and hover ownership.
+                    "data-tooltip-anchor": "session-row",
                     // The accessible counterpart of the visual highlight:
                     // the sidebar is a navigation-shaped list of open
                     // buttons, and `aria-current` is the native way to say
@@ -1803,6 +1804,7 @@ pub(super) fn SessionRow(
                             // not offer the toggle.
                             StatusBadgeView {
                                 badge,
+                                session_row: true,
                                 dot_onclick: move |_| {
                                     if !offers_mark_seen || busy {
                                         return;
@@ -1817,6 +1819,7 @@ pub(super) fn SessionRow(
                                     // The summary names the directory, while
                                     // this mark keeps the full ended detail.
                                     span { class: "compact-ended-status", "data-tooltip": "{display_peer(&badge.text)}",
+                                        "data-tooltip-anchor": "session-row",
                                         EndedStatusIcon { glyph }
                                         span { class: "visually-hidden", "{badge.text}" }
                                     }
@@ -1843,7 +1846,7 @@ pub(super) fn SessionRow(
                         // uses for a status word next to a color-only dot),
                         // since the icon itself is `aria-hidden`.
                         span { class: "session-locality-slot",
-                            SessionHostIcon { locality, icon: host_icon, color: host_color }
+                            SessionHostIcon { locality, icon: host_icon, color: host_color, session_row: true }
                         }
                         // One grid child owns the title and compact-only
                         // qualifiers. Noncompact qualifier words move into
@@ -1868,7 +1871,7 @@ pub(super) fn SessionRow(
                                 }
                             }
                             if identity.pinned {
-                                span { class: "session-pin", role: "img", aria_label: "Pinned", "data-tooltip": "Pinned", "\u{f08d}" }
+                                span { class: "session-pin", role: "img", aria_label: "Pinned", "data-tooltip": "Pinned", "data-tooltip-anchor": "session-row", "\u{f08d}" }
                             }
                             PeerTitle {
                                 class: title_class,
@@ -1879,10 +1882,11 @@ pub(super) fn SessionRow(
                                 // Compact rows omit the directory line. Keep
                                 // checkout lifetime visible beside the name.
                                 if let Some(checkout) = &session.working_copy {
-                                    ManagedCheckoutMark { checkout: checkout.clone(), cwd: session.cwd.clone() }
+                                    ManagedCheckoutMark { checkout: checkout.clone(), cwd: session.cwd.clone(), session_row: true }
                                 }
                                 if session.stale {
                                     span { class: "compact-qualifier", "data-tooltip": "{stale_tooltip}",
+                                        "data-tooltip-anchor": "session-row",
                                         QualifierIcon { glyph: QualifierGlyph::Stale }
                                         span { class: "visually-hidden", "{unavailable_cause}" }
                                     }
@@ -1894,15 +1898,18 @@ pub(super) fn SessionRow(
                             class: "session-agent",
                             "data-tooltip": "{agent_tooltip}",
                             "data-tooltip-paragraphs": "true",
+                            "data-tooltip-anchor": "session-row",
                             // Give each glyph its own hover target. The
                             // parent still exposes the argv when the pointer
                             // is between the two marks.
                             span { "data-tooltip": "{agent_tooltip}",
                                 "data-tooltip-paragraphs": "true",
+                                "data-tooltip-anchor": "session-row",
                                 HarnessIcon { glyph: agent.harness }
                             }
                             span { "data-tooltip": "{agent_tooltip}",
                                 "data-tooltip-paragraphs": "true",
+                                "data-tooltip-anchor": "session-row",
                                 PermissionIcon { glyph: agent.permission }
                             }
                             span { class: "visually-hidden", "{agent.description}" }
@@ -1935,6 +1942,7 @@ pub(super) fn SessionRow(
                             span {
                                 class: "status-time",
                                 "data-tooltip": "{activity.absolute}",
+                                "data-tooltip-anchor": "session-row",
                                 "{activity.age}"
                             }
                         }
@@ -1948,10 +1956,10 @@ pub(super) fn SessionRow(
                     span { class: "session-row-line session-row-detail",
                         span { class: "session-detail-copy",
                             if let Some(badge) = ended_badge {
-                                StatusBadgeView { badge, dot_onclick: move |_| {}, dot_title: None }
+                                StatusBadgeView { badge, dot_onclick: move |_| {}, dot_title: None, session_row: true }
                             }
                             if let Some(cause) = stale_cause {
-                                span { class: "stale-badge", "data-tooltip": "{stale_tooltip}", "{cause}" }
+                                span { class: "stale-badge", "data-tooltip": "{stale_tooltip}", "data-tooltip-anchor": "session-row", "{cause}" }
                             }
                         }
                     }
@@ -1974,7 +1982,7 @@ pub(super) fn SessionRow(
                         // the shared mark keeps its lifetime and actual cwd
                         // reachable through one hover target.
                         if let Some(checkout) = &session.working_copy {
-                            ManagedCheckoutMark { checkout: checkout.clone(), cwd: session.cwd.clone(), show_repository: true }
+                            ManagedCheckoutMark { checkout: checkout.clone(), cwd: session.cwd.clone(), show_repository: true, session_row: true }
                         } else {
                             // Two spans, not one: `.session-cwd` is the rtl
                             // clipping container that puts the ellipsis on the
@@ -2054,6 +2062,7 @@ pub(super) fn SessionRow(
                     // read aloud in full.
                     aria_label: menu_label(&session.title),
                     "data-tooltip": "Session actions: rename, clone, replace, stop, delete and more",
+                    "data-tooltip-anchor": "session-row",
                     aria_expanded: menu_open,
                     // What this button opens, in the vocabulary the ARIA
                     // menu-button pattern uses — the counterpart of the

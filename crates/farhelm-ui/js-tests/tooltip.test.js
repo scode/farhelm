@@ -75,20 +75,20 @@ test("a tooltip that fits on neither side takes the roomier side, clamped inside
 });
 
 // ---------------------------------------------------------------------------
-// Session summary placement
+// Session-row placement and target tether
 // ---------------------------------------------------------------------------
 
 /** The card clears the sidebar, rather than just the narrower open button. */
-test("a session card sits six pixels past the sidebar level with its row", () => {
+test("a session card sits six pixels past the sidebar centred on its row", () => {
   assert.deepEqual(placeSessionCard(rect(60, 200, 300, 50), 396, { width: 310, height: 180 }, VIEWPORT), {
-    left: 402, top: 200, side: "right",
+    left: 402, top: 135, side: "right", pointerTop: 225,
   });
 });
 
 /** Lower rows move only far enough up to keep the whole card in view. */
 test("a session card near the bottom stays four pixels inside the window", () => {
   assert.deepEqual(placeSessionCard(rect(60, 700, 300, 50), 396, { width: 310, height: 180 }, VIEWPORT), {
-    left: 402, top: 616, side: "right",
+    left: 402, top: 616, side: "right", pointerTop: 725,
   });
 });
 
@@ -97,7 +97,7 @@ test("a session card fits exactly beside the list and falls back one pixel short
   const target = rect(60, 200, 300, 50);
   const size = { width: 310, height: 180 };
   assert.deepEqual(placeSessionCard(target, 396, size, { width: 716, height: 800 }), {
-    left: 402, top: 200, side: "right",
+    left: 402, top: 135, side: "right", pointerTop: 225,
   });
   const narrow = { width: 715, height: 800 };
   assert.deepEqual(placeSessionCard(target, 396, size, narrow), placeTooltip(target, size, narrow));
@@ -111,6 +111,20 @@ test("a cramped session card uses ordinary above or below placement", () => {
     const target = rect(60, top, 300, 50);
     assert.deepEqual(placeSessionCard(target, 396, size, viewport), placeTooltip(target, size, viewport));
   }
+});
+
+/** Clamping the box must not move the notch away from its target unless a
+ * rounded corner leaves no straight edge at that height. Text and cards use
+ * the same rule, including a single short line with very little edge. */
+test("row help keeps its notch on the target or inside the straight edge", () => {
+  assert.deepEqual(placeSessionCard(rect(60, 20, 16, 16), 396, { width: 100, height: 180 }, VIEWPORT), {
+    left: 402, top: 4, side: "right", pointerTop: 28,
+  });
+  assert.equal(placeSessionCard(rect(60, 0, 16, 16), 396, { width: 100, height: 180 }, VIEWPORT).pointerTop, 16);
+  assert.equal(placeSessionCard(rect(60, 780, 16, 16), 396, { width: 100, height: 180 }, VIEWPORT).pointerTop, 784);
+  assert.deepEqual(placeSessionCard(rect(60, 200, 16, 16), 396, { width: 100, height: 24 }, VIEWPORT), {
+    left: 402, top: 196, side: "right", pointerTop: 208,
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -184,8 +198,10 @@ function menuTooltipPage(menuFirst) {
   }
   /** Only the DOM contracts these assets use are modeled; unknown selectors fail. */
   function element(attributes = {}, parentElement = null) {
+    const classes = new Set();
     return {
       nodeType: 1, parentElement, isConnected: true, style: {}, dataset: {}, hidden: true,
+      classList: { add: (name) => classes.add(name), remove: (name) => classes.delete(name), contains: (name) => classes.has(name) },
       getAttribute(name) { return attributes[name] ?? null; },
       setAttribute(name, value) { attributes[name] = value; },
       matches(selector) {
@@ -199,8 +215,9 @@ function menuTooltipPage(menuFirst) {
         return true;
       },
       closest(selector) {
-        assert.ok(selector === "[data-menu-focus]" || selector === '[role="menu"]');
+        assert.ok(selector === "[data-menu-focus]" || selector === '[role="menu"]' || selector === ".app-sidebar");
         for (let node = this; node; node = node.parentElement) {
+          if (selector === ".app-sidebar" && node.getAttribute("class") === "app-sidebar") return node;
           if (selector === "[data-menu-focus]" && node.getAttribute("data-menu-focus") !== null) return node;
           if (selector === '[role="menu"]' && node.getAttribute("role") === "menu") return node;
         }
@@ -244,10 +261,17 @@ function menuTooltipPage(menuFirst) {
   if (!menuFirst) installMenuFocus(doc, win);
   const panel = element({ role: "menu" });
   return {
-    doc, dispatch,
+    doc, dispatch, win,
     item(key) { return element({ "data-menu-focus": key, "data-tooltip": `${key} help` }, panel); },
+    /** A real row opt-in, separate from the flyout's ordinary menu items. */
+    rowTarget() {
+      const sidebar = element({ class: "app-sidebar" });
+      sidebar.getBoundingClientRect = () => rect(0, 0, 396, 800);
+      return element({ "data-tooltip-anchor": "session-row", "data-tooltip": "row help" }, sidebar);
+    },
     outside: doc.body,
-    visible() { return tooltips.filter(tip => !tip.hidden); },
+    visible() { return tooltips.filter(tip => !tip.hidden && tip.className === "farhelm-tooltip"); },
+    pointers() { return tooltips.filter(tip => !tip.hidden && tip.className === "farhelm-tooltip-pointer"); },
     /** Fire every due task in deadline order, including recurring watch ticks. */
     advance(ms) {
       const end = now + ms;
@@ -264,6 +288,42 @@ function menuTooltipPage(menuFirst) {
     },
   };
 }
+
+/** The ring/notch must never survive their placement. Exercise the actual
+ * installed lifecycle, rather than just recomputing a pure position: a
+ * handoff, watch-tick fallback, restored width, removal and dismissal all
+ * share one box and must leave no highlight on the previous owner. */
+test("row cues follow ownership, resize fallback, removal and dismissal", () => {
+  const p = menuTooltipPage(true);
+  const row = p.rowTarget();
+  const next = p.rowTarget();
+  p.dispatch("pointerover", row, { pointerType: "mouse" });
+  p.advance(300);
+  assert.equal(p.pointers().length, 1);
+  assert.equal(row.classList.contains("tooltip-target-ring"), true);
+  p.dispatch("pointerover", next, { pointerType: "mouse" });
+  assert.equal(row.classList.contains("tooltip-target-ring"), false);
+  assert.equal(next.classList.contains("tooltip-target-ring"), true);
+  p.win.innerWidth = 450;
+  p.advance(200);
+  assert.equal(p.visible()[0].dataset.side, "above");
+  assert.equal(p.pointers().length, 0);
+  assert.equal(next.classList.contains("tooltip-target-ring"), false);
+  p.win.innerWidth = 1000;
+  p.advance(200);
+  assert.equal(p.pointers().length, 1);
+  assert.equal(next.classList.contains("tooltip-target-ring"), true);
+  next.isConnected = false;
+  p.advance(200);
+  assert.equal(p.visible().length, 0);
+  assert.equal(p.pointers().length, 0);
+  assert.equal(next.classList.contains("tooltip-target-ring"), false);
+  p.dispatch("pointerover", row, { pointerType: "mouse" });
+  p.advance(300);
+  p.dispatch("keydown", row, { key: "Escape" });
+  assert.equal(p.pointers().length, 0);
+  assert.equal(row.classList.contains("tooltip-target-ring"), false);
+});
 
 // A script focus may match :focus-visible after keyboard use. It must neither
 // bypass the pointer's rest timer nor keep help showing after the pointer leaves.
