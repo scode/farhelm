@@ -58,3 +58,8 @@ with in place.
   updates." became "In the desktop app, you can now click the version in the sidebar to check for updates.", and the
   entries that opened with "Choose", "Mark" or "Give" got the same treatment. (Stated by the maintainer during the
   v0.29.0 curation, 2026-10-16.)
+- An entry must represent an actual change relative to the previous stable release. Do not enumerate implementation
+  choices or design decisions as separate entries, or turn a new feature's entry into documentation of the feature. The
+  v0.36.0 Tensorlake draft split snapshot building, suspend/resume, tunnels, orphan cleanup and caveats into separate
+  entries; the maintainer replaced them with one experimental-support entry and a documentation link. (Stated by the
+  maintainer during the v0.36.0 curation, 2026-11-07.)

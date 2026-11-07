@@ -4,21 +4,13 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 ## v0.36.0 - 2026-11-07
 
-**DRAFT release notes - not yet finalized**
-
 ### 💥 Breaking
 
-- New terminals now tell programs they run in Farhelm's own terminal (`TERM_PROGRAM=farhelm`) instead of in tmux, so a login shell startup file that starts tmux whenever it is not already inside tmux now does so while the agent starts, and one that uses `exec tmux` keeps the agent from starting. Such a startup file can leave Farhelm's terminals alone by skipping tmux when `TERM_PROGRAM` is `farhelm`; agents and tabs started before the upgrade keep the old setting until they are restarted or closed. (#3087)
+- New terminals now tell programs they run in Farhelm's own terminal (TERM_PROGRAM=farhelm) instead of in tmux. This should have been the case already when we moved away from tmux for new terminals, but due to an oversight we still claimed to be tmux. This change does not affect old sessions that are still on tmux. (#3087)
 
 ### 🚀 Added
 
-- You can now add a Tensorlake sandbox as a host. Farhelm creates it from a recipe saved in Settings → Tensorlake (its size, Ubuntu packages or an existing image or snapshot, and optional Claude Code and Codex API endpoints) and shows its setup as progress in Hosts; [Tensorlake sandboxes](https://farhelm.io/docs/using/tensorlake-sandboxes/) explains how to set it up. (#2939, #2942, #2946, #2967, #2973, #3050, #3051, #3067)
-- A Tensorlake recipe that installs Ubuntu packages has **Build snapshot** in its row in Settings → Tensorlake, which builds a snapshot with those packages, Claude Code and Codex already installed for new hosts to start from; otherwise adding the first host builds it. **Rebuild snapshot** picks up newer packages and agents and replaces the old snapshot, while hosts already made from it keep running unchanged. (#2946)
-- Tensorlake support is experimental, rough in places and may change between releases, and Settings → Tensorlake opens with a red warning saying so. Sandboxes bill your Tensorlake account while they run, and you are responsible for not leaving them running; deleting a Tensorlake host deletes its sandbox and snapshots, but uninstalling Farhelm does not. (#2967, #3010)
-- Tensorlake hosts can be suspended and resumed without restarting their sessions, and launching a session on a suspended host resumes it and starts the session in the same press. A helm that goes quiet, such as a sleeping laptop, no longer keeps a sandbox awake: its connection closes after two minutes. (#2975, #3048, #3049, #3073)
-- A Tensorlake recipe can define tunnels that let anything in the sandbox reach a service on the helm's machine, such as an API proxy for the sandbox's agents, while the host is connected. Tunnels do not use a jump host from your ssh configuration. (#2976)
-- Settings → Tensorlake lists Farhelm sandboxes in your Tensorlake account that no host on this helm owns, such as ones left behind when a helm lost its state, and can delete them with their snapshots. Sandboxes created by another helm are marked, since they may still be in use there. (#2976)
-- New Tensorlake hosts start YOLO sessions without the usual confirmation. The Tensorlake API key and recipe endpoint tokens are stored unencrypted on the helm's machine, agents on a sandbox can sign in only through the recipe's API endpoints, since subscription logins are not supported yet, and private GitHub checkouts need Git credentials set up on the sandbox. (#2939, #2942, #2973)
+- EXPERIMENTAL: You can now add a Tensorlake sandbox as a host. Details will change, no backwards compatibility promised. Caveats are called out in the UI. [Tensorlake sandboxes](https://farhelm.io/docs/using/tensorlake-sandboxes/) explains how to set it up. (#2939, #2942, #2946, #2967, #2973, #3050, #3051, #3067)
 - You can now mark several sessions in the session list with Shift-click or Cmd-click (Ctrl-click outside a Mac), then stop, delete, pin, unpin, or mark them read or unread together. Only marked sessions the list currently shows are included, and a bulk Delete asks once, listing each session. (#3052, #3053)
 
 ### 🔄 Changed
