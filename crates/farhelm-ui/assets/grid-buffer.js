@@ -50,8 +50,12 @@
   "use strict";
 
   // xterm.js 6.0's default `wordSeparator`, which Farhelm leaves as is.
+  // Ported from xterm.js 6.0.0's default `wordSeparator` option, MIT;
+  // THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
   const WORD_SEPARATORS = " ()[]{}',\"`";
   // The vendored @xterm/addon-web-links's default `urlRegex`.
+  // Ported from @xterm/addon-web-links 0.12.0's `strictUrlRegex`, MIT;
+  // THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
   const URL_PATTERN = /(https?|HTTPS?):[/]{2}[^\s"'!*(){}|\\^<>`]*[^\s"':,.!?{}|\\^~[\]`()<>]/g;
   // How far the URL window reaches either way, in characters (the addon's),
   // and how far a double click's word search reaches.
@@ -122,6 +126,9 @@
    * copies it"). `source.line(abs)` gives `{row, width}` or null for a line
    * that is not there (dropped, or history not yet applied), which
    * contributes nothing. `newline` is "\n", or "\r\n" on Windows.
+   *
+   * Ported from xterm.js 6.0.0's `SelectionService.selectionText`, MIT;
+   * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
    */
   function selectionText(source, start, end, newline = "\n") {
     [start, end] = ordered(start, end);
@@ -236,6 +243,9 @@
    * The clicked character itself may be a separator, which then starts the
    * word (a double click on "(" in "(foo)" selects "(foo"). Null when there
    * is no line there.
+   *
+   * Ported from xterm.js 6.0.0's `SelectionService._getWordAt`, MIT;
+   * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
    */
   function wordRange(source, pos, separators = WORD_SEPARATORS) {
     if (!source.line(pos.abs)) return null;
@@ -432,6 +442,9 @@
    * The text of a column (block) selection, as xterm.js copies one: every
    * line from `start` to `end` cut to the same column span, trimmed on the
    * right, one per line with no joining of soft wraps.
+   *
+   * Ported from xterm.js 6.0.0's `SelectionService.selectionText` (its column
+   * mode), MIT; THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
    */
   function columnText(source, start, end, newline = "\n") {
     const from = Math.min(start.col, end.col);
@@ -494,6 +507,9 @@
    * The addon's second check on a match: the text must start with what the
    * URL parser makes of its scheme, credentials and host, so a match the
    * parser would rewrite is not offered.
+   *
+   * Ported from @xterm/addon-web-links 0.12.0's `isUrl`, MIT;
+   * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
    */
   function hostPrefixed(text) {
     try {
@@ -507,7 +523,12 @@
     }
   }
 
-  /** The rows the web-links addon would search around `abs` (see "Links"). */
+  /**
+   * The rows the web-links addon would search around `abs` (see "Links").
+   *
+   * Ported from @xterm/addon-web-links 0.12.0's `_getWindowedLineStrings`,
+   * MIT; THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
+   */
   function urlWindow(source, abs) {
     const line = source.line(abs);
     let first = abs;

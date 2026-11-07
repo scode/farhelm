@@ -160,6 +160,8 @@
   // A drag that leaves the screen scrolls it by up to this many lines per
   // tick, faster the farther out (xterm.js's DRAG_SCROLL_MAX_SPEED and
   // DRAG_SCROLL_MAX_THRESHOLD, at its 50 ms interval).
+  // Ported from xterm.js 6.0.0's `SelectionService` (these three constants),
+  // MIT; THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
   const DRAG_SCROLL_MAX_LINES = 15;
   const DRAG_SCROLL_MAX_DISTANCE = 50;
   const DRAG_SCROLL_INTERVAL_MS = 50;
@@ -180,6 +182,9 @@
    * `measureText` reports the font bounding box, or null where it does not
    * (then the 32-W span is used, as xterm.js falls back to it). One
    * context serves every grid terminal on the page.
+   *
+   * Ported from xterm.js 6.0.0's `CharSizeService`, with `measureChar` below,
+   * MIT; THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
    */
   let measureContext;
   function canvasMeasurer() {
@@ -202,6 +207,9 @@
    * `charWidth` x `charHeight` at `cols` x `rows` and pixel ratio `dpr`
    * (`DomRenderer._updateDimensions`, with no letter spacing and a line
    * height of 1, as Farhelm configures xterm.js).
+   *
+   * Ported from xterm.js 6.0.0's `DomRenderer._updateDimensions`, MIT;
+   * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
    */
   function cellFor(charWidth, charHeight, cols, rows, dpr) {
     const deviceWidth = charWidth * dpr;
@@ -219,6 +227,9 @@
    * (the container's computed width and height, minus this element's
    * padding) at the cell metrics of the current size. Never below 2 x 1,
    * and never past the format's 1000 x 1000.
+   *
+   * Ported from @xterm/addon-fit 0.11.0's `proposeDimensions`, MIT;
+   * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
    */
   function proposeSize(availableWidth, availableHeight, cell) {
     return {
@@ -244,6 +255,10 @@
    * where the engine has it, else lines or pixels / 40), 50 pixels a notch,
    * five times that with Alt. Positive scrolls toward older lines. Shift
    * turns the wheel horizontal off a Mac, which scrolls nothing here.
+   *
+   * Ported from Visual Studio Code's `StandardWheelEvent` and
+   * `ScrollableElement._onMouseWheel` as compiled into xterm.js 6.0.0, MIT;
+   * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
    */
   function wheelPixels(ev, isMac) {
     if (ev.shiftKey && !isMac) return 0;
@@ -392,6 +407,9 @@
      * Measure the character as xterm.js's `CharSizeService` does. Returns
      * whether the measurement changed; a font with no metrics yet (no
      * layout box for the span fallback) leaves the previous one.
+     *
+     * Ported from xterm.js 6.0.0's `CharSizeService`, MIT;
+     * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
      */
     function measureChar() {
       let width;
@@ -441,6 +459,10 @@
      * differs from the last one reported or carried through `onResize`. A
      * container with no layout box, or no font metrics yet, proposes
      * nothing.
+     *
+     * Ported from @xterm/addon-fit 0.11.0's `proposeDimensions` (the room
+     * read from the container and this element's padding), MIT;
+     * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
      */
     function fit() {
       if (!charWidth) {
@@ -1046,6 +1068,10 @@
      * or the nearest cell boundary (`round: true`, how a character
      * selection's ends move, as xterm.js's selection coordinates do).
      * Rows above or below the screen clamp to its first or last row.
+     *
+     * Ported from xterm.js 6.0.0's `getCoords` (src/browser/input/Mouse.ts) as
+     * `SelectionService` calls it, MIT; THIRD_PARTY_NOTICES.md, "Code ported
+     * from xterm.js".
      */
     function positionAt(ev, round) {
       const rect = screen.getBoundingClientRect();
@@ -1098,6 +1124,10 @@
      * the nearest boundary, a double click selects the word, a triple click
      * the soft-wrapped line, and Shift with a selection already there
      * extends it (xterm.js's `SelectionService` press handling).
+     *
+     * Ported from xterm.js 6.0.0's `SelectionService` press handling
+     * (`handleMouseDown`, `shouldColumnSelect`), MIT; THIRD_PARTY_NOTICES.md,
+     * "Code ported from xterm.js".
      */
     function startSelection(ev) {
       const detail = ev.detail || 1;
@@ -1530,6 +1560,10 @@
      * browser's menu offers Paste (and Copy, for the selection put in it)
      * and a paste lands in the terminal. `restoreInput` parks it again at
      * the next key, press, paste or blur.
+     *
+     * Ported from xterm.js 6.0.0's `moveTextAreaUnderMouseCursor`
+     * (src/browser/Clipboard.ts), MIT; THIRD_PARTY_NOTICES.md, "Code ported
+     * from xterm.js".
      */
     function moveInputUnder(ev) {
       const rect = element.getBoundingClientRect();

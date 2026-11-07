@@ -62,6 +62,8 @@
 
   // xterm.js's `KEYCODE_KEY_MAPPINGS`: the unshifted and shifted character
   // of each US-layout key that Alt+key encodes as ESC + character.
+  // Ported from xterm.js 6.0.0's src/common/input/Keyboard.ts, MIT;
+  // THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
   const KEYCODE_KEY_MAPPINGS = Object.freeze({
     48: ["0", ")"],
     49: ["1", "!"],
@@ -105,6 +107,10 @@
    * unit tests hold it to the vendored bundle. The supervisor's encoder
    * makes the same computation with the program's real modes; the page
    * only needs `type`, `cancel` and whether `key` exists.
+   *
+   * Ported from xterm.js 6.0.0's `evaluateKeyboardEvent`
+   * (src/common/input/Keyboard.ts), MIT; THIRD_PARTY_NOTICES.md, "Code ported
+   * from xterm.js".
    */
   function xtermKeyboardResult(ev, applicationCursorMode, isMac, macOptionIsMeta) {
     const result = { type: KEY_RESULT.SEND_KEY, cancel: false, key: undefined };
@@ -247,6 +253,10 @@
    * encoder decides Mac-only encodings from the `mac` flag this sets on key
    * messages, and both sides must agree with xterm.js on which viewers are
    * Macs (an iPad's "iPad" or a "MacSomething" are not).
+   *
+   * Ported from xterm.js 6.0.0's `isMac` and `isWindows`
+   * (src/common/Platform.ts), MIT; THIRD_PARTY_NOTICES.md, "Code ported from
+   * xterm.js".
    */
   function platformOf(platform) {
     const name = typeof platform === "string" ? platform : "";
@@ -261,6 +271,9 @@
    * `macOptionIsMeta` off, as Farhelm leaves it) or AltGr on Windows,
    * composing a character the text-input path delivers. Not for the arrow
    * and editing keys below key code 48.
+   *
+   * Ported from xterm.js 6.0.0's `CoreBrowserTerminal._isThirdLevelShift`, MIT;
+   * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
    */
   function isThirdLevelShift(ev, platform) {
     const { isMac, isWindows } = platformOf(platform);
@@ -298,6 +311,9 @@
    * left to text input instead, so the composed character is what arrives.
    * Pass the returned value back in on the next keydown, and reset it to
    * false when text input sends something, as xterm.js's text handlers do.
+   *
+   * Ported from xterm.js 6.0.0's `CoreBrowserTerminal._keyDown`, MIT;
+   * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
    */
   function keydownAction(ev, platform, deadKeyPending) {
     if (ev.isComposing || ev.keyCode === 229) return { action: "ignore", cancel: false, deadKeyPending };
@@ -473,6 +489,9 @@
    * rounded and clamped the way xterm.js's `getCoords` does for mouse
    * reports, so a press on a cell boundary or outside the grid lands on
    * the same cell it does today.
+   *
+   * Ported from xterm.js 6.0.0's `getCoords` (src/browser/input/Mouse.ts), MIT;
+   * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
    */
   function mouseCell(offsetX, offsetY, cellWidth, cellHeight, cols, rows) {
     const col = Math.min(Math.max(Math.ceil(offsetX / cellWidth), 1), cols);
@@ -543,6 +562,9 @@
    * Because the action is compared, a move is only ever a repeat of a
    * move: the first move after a press, release or wheel step in the same
    * cell is sent. Callers pass only messages they are about to send.
+   *
+   * Ported from xterm.js 6.0.0's `CoreMouseService._equalEvents`, MIT;
+   * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
    */
   function createMouseDeduper() {
     let last = null;
@@ -567,6 +589,9 @@
    * horizontal and scrolls nothing. Today's terminal sends one report (or
    * one arrow key) per event whose amount is not zero, so callers only
    * need the sign of `deltaY` once this says the event counts.
+   *
+   * Ported from xterm.js 6.0.0's `CoreMouseService.consumeWheelEvent`, MIT;
+   * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
    */
   function createWheelAccumulator() {
     let partial = 0;
@@ -718,6 +743,10 @@
    * screen rows as lines; `hasScrollback` is false on the alternate screen,
    * where the moves follow soft wraps and text, and true otherwise, where
    * they count cells.
+   *
+   * Ported from xterm.js 6.0.0's src/browser/input/MoveToCell.ts, with the
+   * helpers above it from `arrowSequence` on, MIT; THIRD_PARTY_NOTICES.md,
+   * "Code ported from xterm.js".
    */
   function moveToCellSequence(targetX, targetY, bufferService, applicationCursor) {
     const startX = bufferService.buffer.x;
