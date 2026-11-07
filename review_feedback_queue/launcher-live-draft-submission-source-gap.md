@@ -1,14 +1,93 @@
-# Delayed launcher submission has an unresolved target-binding premise
+# Pending Resume can launch edited permission flags
+
+Reviewed commit: 407a49435278844248d573083fdea6e23fd96c02
+
+## TLDR
+
+While a resumed host's checkout preview loads, editing Custom permission words can automatically launch the edited agent
+without a new Launch press. Supported edits can change guarded vendor settings into permission bypass. This specific
+source-confirmed route makes the item highest priority; the older generic target/container concerns below remain
+unverified after investigation.
+
+## Details
+
+Source coordinates from the original records: `crates/farhelm-ui/src/list/create_form.rs:3689-3715,6373-6415`;
+`SPEC_impl.md:6191-6192; crates/farhelm-ui/src/list/create_form.rs:3689-3715,6373-6415`. References below use these
+paths' basenames unless another path or revision is stated.
+
+### Confirmed pending Resume case
+
+Additional reviewed commit: 407a49435278844248d573083fdea6e23fd96c02
+
+While a resumed host's checkout preview loads, editing Custom permission words can automatically launch the edited agent
+without a new Launch press. Supported edits can change an agent from its guarded vendor mode to bypassing permission
+checks.
+
+This specific permission-widening route is **source-confirmed and highest**; the earlier generic live-draft concern
+remains **unverified after investigation** under its original scope. The new route supplies a compatible editor, waiting
+boundary, accepted request and permission consequence for this Resume case. It does not retroactively establish every
+earlier suspected target or container sequence.
+
+Completed later-turn synthesis. Concrete supported route: choose Claude/Custom with --permission-mode auto, press Launch
+for a fresh checkout on a suspended host, then after Resume releases its operation claim but before the fresh preview
+finishes, replace the Custom text with --dangerously-skip-permissions. Both are permission-only words.
+LaunchHarness::guarded_flags at proto/launch.rs:350-365 identifies the former as selecting the automatic guarded vendor
+mode; helm/launches.rs:444-458 uses the latter as Claude's shipped YOLO flag. offers_permission at
+proto/launch.rs:454-460 permits Custom for Claude.
+
+The parser at proto/launch.rs:830-859 checks quoting, nonempty words, NUL and the Custom/vector relationship, not
+meaning. helm/launches.rs:724-738 additionally refuses reserved placeholders, absent in both vectors. Its 433-470
+compiler applies no Guarded mode in Custom and appends the exact supplied vector; 792-798 confirms the harness offers
+the choice. SPEC.md:812-820 explicitly delegates permission flag choice and defines Guarded as a safety mechanism versus
+YOLO's absence of checks. SPEC_impl.md:5174-5185 confirms that custom words occupy the permission slot and are not
+interpreted by Farhelm. This example stays within that contract; it does not depend on abusing Custom to inject another
+command.
+
+The accepted press binds create_form.rs:5350-5355/5384-5385 to preview_agent_now, whose 3689-3715 fingerprint omits
+custom words. Resume drops the operation claim at 5397. The editable Custom input at launch_controls.rs:704-709 reaches
+draft.rs:1518-1519; apply_edit at 1420-1430 admits it once the claim ends, retiring only intent_key. On Ready, 6373-6415
+still accepts the stamp and ordinary submit snapshots the edited draft at 5206. SPEC_impl.md:6191-6192 says draft
+changes cancel this pending press.
+
+The supervisor handoff preserves the compiled permission vector: service/core.rs:2012-2026 selects launch.start_argv;
+prepare_launch keeps non-wrapper argv as the executable vector at 16924-16925 and publishes it unchanged in
+LaunchSpec.argv at 16988-17008. No late Custom-policy guard restores the pressed draft. Reserved-placeholder and
+shell-literal protections remain intact, so this is a temporal consent/agent-permission boundary bug, not shell
+injection.
+
+Both Custom choices count as YOLO to Farhelm; that conservative classification does not authorize changing the exact
+words after the press. On new Tensorlake hosts the host-level Start YOLO sessions without asking setting is on
+(SPEC.md:320-321), so no later host YOLO question closes this route. On a host that still asks, that independent
+confirmation remains a boundary and the scenario must account for it; the established default-Tensorlake route needs
+none.
+
+Suggested bucket: highest. Source proves a supported edit can replace an accepted guarded vendor mode with the
+permission-bypass mode across the required fresh-launch consent boundary; no hypothetical later data destruction is
+needed to establish the security consequence. Confidence: confirmed from source through the actual command handoff; no
+runtime/vendor/endpoint experiment performed. proposed_drop: false. possible_cover: none. Fix by including effective
+custom words in the pending submission identity (or retiring the pending press on semantic Custom edits), retaining the
+intentional naming/configuration allowances.
+
+Review provenance: trailing-review run `7c7c7b55-12fc-4573-b10e-01d690187f50`; original records `g006/g006-l1`,
+`g008/d2`. The retained append-only histories preserve all earlier claims and corrections. Reviewed source references
+name their own revisions; the inclusive reviewed tip is the hash above. This review used source inspection only, with no
+product runtime experiments or live-install changes.
+
+### Earlier generic live-draft investigation
+
+The following earlier record retains its original reviewed revisions, other-priority assessment and missing supported
+input sequence. Those qualifications describe that broader investigation, not the newly established pending-Resume
+permission route above.
 
 Reviewed commit: da9d7411fd5c69255ea6d0b857a6a3aa48bd0c6c
 
-## TLDR
+#### TLDR
 
 The launcher reads current choices when submission runs. A delayed action might therefore use choices different from
 those the user answered, but no complete shipped input sequence producing that contradictory accepted launch was
 established. Choosing a value and immediately pressing Enter is explicitly supported and is not itself a defect.
 
-## Details
+#### Details
 
 Suggested bucket: **other**. Confidence: **unverified after investigation**. Live reads are confirmed; an unintended
 accepted target, permission bypass or work-loss consequence is not. The latter would justify `highest` only after its
@@ -50,7 +129,7 @@ Provenance: trailing-review run `2b7a8eaf-c4e9-42ab-be93-1acf29106132`, `g11/f2`
 `g05/f5`, `g13/f6`, and the scoped `g14/f2` interface correction; independent checks `a01/f4`, `a02/f1` and `a03/f18`.
 These are one investigated concern, not multiple defects.
 
-## Additional review at d6645f77
+#### Additional review at d6645f77
 
 Additional reviewed commit: d6645f771bee8ed03a66486ef8755834937d759d
 

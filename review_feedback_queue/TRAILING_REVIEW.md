@@ -1,6 +1,6 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `8a8c9579e04299410652f0e4681975a7198dfc7b`
+Last reviewed commit: `407a49435278844248d573083fdea6e23fd96c02`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in `review_feedback_queue/.agents/trailing-review.md`, together with any resulting queue updates. A proposed
@@ -9,78 +9,73 @@ checkpoint reaches `main` only when its review-result PR is merged.
 This file holds only the checkpoint and the latest run's completion record. Earlier runs' records are in
 `review_feedback_queue/TRAILING_REVIEW_HISTORY.md`.
 
-## Review through 8a8c9579
+## Review through 407a4943
 
-Reviewed range: `c5ae8548439cc5bfa33c11ef7ce8da6129d8072a..8a8c9579e04299410652f0e4681975a7198dfc7b`, 159 commits. The
-exclusive base and inclusive main tip were fetched and pinned, with ancestry verified. All 801 individual commit/path
-patches were inventoried, including intermediate and deleted text: 81,974 lines, 4,427,539 bytes, assigned once across
-90 functional groups. Groups contain 58–1,726 mandatory lines and at most 65,516 bytes, within the 2,000-line/64-KiB
-ceilings. Reconstruction was checked against all 159 original commit patches; the sole serialization difference is their
-final newline. No assigned text remains unread.
+Reviewed range: `8a8c9579e04299410652f0e4681975a7198dfc7b..407a49435278844248d573083fdea6e23fd96c02`, 48 commits. The
+exclusive base and inclusive main tip were fetched and pinned, with ancestry verified. Every commit/path change was
+inventoried: 364 selected patches and 199 deliberate exclusions. Selected packets preserve intermediate and deleted text
+and reconstruct every original selected patch apart from its final newline. They contain 53,764 mandatory lines and
+2,728,372 bytes across 60 functional groups, each 21–1,623 lines and at most 59,975 bytes, within the 2,000-line/64-KiB
+ceilings. No assigned text remains unread.
 
-This batch retains its original full scope, including plans, review records and other workflow metadata. The maintainer
-requested a scope change while it was underway and explicitly kept this batch unchanged. Future reviews select product
-code, product tests/helpers/fixtures, executable maintainer tooling and behavior-bearing configuration, plus `SPEC.md`
-and `SPEC_impl.md`; workflow metadata and ordinary prose are excluded as review targets. Those future exclusions were
-not applied retrospectively here. Surrounding source and recording coverage were inspected selectively.
+Scope was landed product code, product tests/helpers/fixtures, executable maintainer tooling and behavior-bearing
+configuration, plus current SPEC.md/SPEC_impl.md contracts. Workflow metadata,
+plans/reports/queue/triage/TODO/flake/agent instructions, ordinary documentation and release prose were deliberately
+excluded as review targets. They were inspected selectively for contracts and recording coverage. The changed-code count
+is 32,969 added/deleted physical lines: 22,858 test lines (14,614 added, 8,244 removed) and 10,111 non-test lines (6,188
+added, 3,923 removed), counting inline Rust tests, comments and whitespace per commit. Specifications add 1,244 changed
+lines (696 added, 548 removed).
 
-The primary persistent review is **complete**. All 90 original external Codex `gpt-6.1-sol` identities, high reasoning,
-completed initial review, later-turn synthesis after verified delivery, and a credible final empty discovery search
-after their last pertinent input. There were 393 actual turns: 90 initial, 90 synthesis and 213 discovery, with at most
-nineteen concurrent primary reviewers. Discovery additions received further searches; globally known duplicates did not
-inflate novelty. The final scheduler has all 90 groups complete, with no live or queued turn, pending cross-group input,
-unjudged turn or open lead. Reopened scheduler aliases resumed the same original sessions, logs, working directory and
-model rather than replacing reviewers.
+The primary persistent review is **complete**. All 60 original external Codex `gpt-6.1-sol` identities, high reasoning,
+completed initial review, later synthesis after verified delivery and a credible final empty discovery search after
+their last pertinent input. There were 256 scheduled attempts, 255 successful and 1 failed, with at most 19 primary
+reviewers running concurrently. The label counts are {"initial":60,"synthesis":60,"discovery":136}. A service-filtered
+continuation added no review credit; its same original identity completed a narrower permitted defensive source/contract
+continuation with no blocked scope. A separately retained interrupted g001 startup attempt resumed that same original
+session and is not counted as a required synthesis or discovery turn. No replacement identities, manual
+transcript-payload fallback or hidden-reasoning inspection were used.
 
-Supported final delivery audits cover every assignment. Historical clipped/rejected packets earn no credit; smaller
-replacement packets repaired their gaps. No manual transcript-payload fallback or hidden-reasoning inspection was used.
-Each group's three-part final record was rendered once after its final turn from the append-only findings history,
-replies and audit ranges. Delivery proves neither attention nor understanding, correctness or exhaustiveness.
+Supported final audits verify all mandatory delivery. Historical clipped/rejected packets earn no credit; smaller
+replacement reads repaired their gaps. Every group's three-part final record was rendered once after its last turn from
+the append-only findings history, audit and progress. The final scheduler has all 60 groups complete, with no live or
+queued turn, pending cross-group input, unjudged turn or open lead. Delivery is not proof of attention, understanding,
+correctness or exhaustive defect discovery.
 
-There are **112 new items: thirteen highest, five high and ninety-four other**, plus one extension to the existing
-settings-test restoration record for the bulk-Delete test's optimistic sort save. Consolidated dispositions contain **78
-verified and 35 unverified-after-investigation groups**, including that extension. New items therefore comprise 78
-source-confirmed concerns and 34 investigated uncertainties. Each uncertainty preserves established source facts, checks
-and results, the missing premise, why available evidence cannot settle it, and what would. Exact priority and material
-caveats remain in every queue record; a source-confirmed conditional mechanism does not claim an observed incident.
+This result records **54 new items: 6 highest, 0 high and 48 other**, plus a highest-priority extension to the existing
+launcher live-draft item. Its specific pending-Resume Custom-permission edit has a source-complete permission-widening
+route; earlier generic target/container input sequences retain their original investigated uncertainty. Consolidated
+retained dispositions contain **46 verified and 9 unverified-after-investigation groups**, including that extension.
+Every uncertainty preserves source facts, actual checks/results, the exact missing premise, why available evidence
+cannot settle it and what would. The report-origin uncertainty remains highest after independent ambiguity over whether
+its missing ordinary collision sequence is an unestablished route or an unmeasured conditional ordering. No incident or
+practical frequency is inferred from source confidence.
 
-The 997 reviewer-local identities and their complete event histories include duplicates, corrected claims, refuted
-candidates and withdrawals. They are not 997 independent defects. Final consolidation has 630 excluded candidate groups
-and 33 rejected groups, including five interface-only composite encodings whose named roots remain handled. There are no
-undecided, stale, conflicting, under-investigation or open-lead records. The recorder preserves candidate disagreements,
-contributing severity suggestions and supplemental evidence, including first-file concurrent-save loss and the
-durability report's overbroad revocation claim.
+All reviewer-local records, original severities, withdrawals and later qualifications are reconciled in the complete
+drop register and dispositions. There are no undecided, stale, conflicting, duplicate-only or under-investigation
+groups. Independent exclusion consultation ran outside persistent-review: 25 fresh native one-turn agents checked 144
+named judgments, with exact sources and agreement scopes retained. Native model/effort and token totals were not
+separately exposed. The original failed-create fault-independence exclusion stayed ambiguous; new full exclusive-base
+cause-and-production-exposure proof received a separate narrow scope agreement, not approval of that superseded
+specification rationale. The report-origin whole-drop and later priority reduction remained ambiguous, so its
+uncertainty is retained at highest. The empty-history queue is excluded only as an independently matched existing item;
+its browser-scope uncertainty remains, and the owner's false 8 ms empty-entry drain bound was corrected. No unresolved
+ambiguity was used to exclude or lower its remainder.
 
-Independent exclusion consultation ran outside persistent-review: 25 fresh native agents checked 155 named judgments,
-followed by three bounded clarifications of unclear or changed stated bases. Native agents inherited the orchestrator's
-defaults; separate model/effort metadata is unavailable. All outputs were read, including checked sources, agreement
-scopes and unresolved remainders. The initial results were 150 AGREE, four DISAGREE and one AMBIGUOUS; no blanket safety
-inference follows. The original disagreements and ambiguity remain historical evidence. Exact additional source proof
-supports the later narrow PTY-hangup exclusion, and an explicit same-run development-tooling policy supports the
-fixture-PID exclusion; neither reinstates its earlier inadequate refutation. The orphan ownership race remains highest,
-the universal normalization wording concern remains queued, and the accepted-skew policy does not justify dropping the
-older-browser sensitive-approval gap. No disagreement or ambiguous verdict was used as permission to exclude or lower
-its unresolved concern. No incidental independent lead remained pending.
+This was a source-only review. No product runtime, browser, cloud, process or network-endpoint experiment ran, and no
+live installation changed. Read-only pinned dependency/primary-source retrieval supports named investigations; private
+helper tests validate bookkeeping only. Primary cumulative usage was 1287661007 input tokens, including 1265663360
+cached, and 3190062 output. Each resumed thread contributes only its latest cumulative usage. Orchestrator/native
+consultation totals and monetary cost were unavailable.
 
-This was a source-only review. Named investigations used pinned repository/dependency source and read-only primary
-documentation/source retrieval. No product runtime, browser, cloud, process or network-endpoint experiment ran, and no
-live installation was changed. No measured exploit, credential disclosure, user-data loss or provider behavior is
-implied by the source-derived findings. Only private coordination helpers were executed and checked; their tests
-validate bookkeeping, not product behavior. Primary reviewer cumulative usage was 1,048,440,571 input tokens, including
-1,029,843,584 cached, and 3,446,440 output tokens. Reasoning-output metadata was 895,606. Each resumed session
-contributes only its latest cumulative usage; native consultation and current orchestrator totals are unavailable.
+Private evidence remains under run `7c7c7b55-12fc-4573-b10e-01d690187f50`: completion.json/md preserve exact
+assignments, original sessions, actual turns, discovery judgments and final stopping evidence; each group's
+final-record.md retains all three reporting parts. inventory-proof.json, code-counts.json, final audits,
+consolidated.json, dispositions.jsonl, drop-register-final.json, the two independent-verdict files,
+recording-choices.json and curated drafts preserve coverage, confidence, exclusions and deduplication.
 
-Private evidence remains under run `dc410e54-098d-481c-be02-f2f9b4826f83`. `completion.json` and `completion.md`
-preserve exact assignments, original sessions, actual turns, aliases, discovery judgments and final stopping evidence.
-Each group's `final-record.md` preserves all three reporting parts and historical wording. `inventory-proof.json`, final
-audits, `consolidated.json`, `dispositions.jsonl`, `drop-register-final.json`, `independent-verdicts.json`,
-`recording-choices.json` and the curated queue drafts preserve reconstruction, semantic deduplication, confidence,
-coverage, filters and every consulted exclusion scope.
-
-Recording-time main is `fdacdba6f69eadd144d2238f3bae9d6f097c433e`, with the original checkpoint unchanged. Later
-planning state, three unlanded plans, test stand-ins and diagnostic additions were reconciled without expanding the
-pinned review. Product specs, known bugs, triage ledger and queue coverage are unchanged. No later change inspected
-removes a retained cause; the credential and fresh-checkout plans have different stated scope from the remaining
-authentication, concurrent-editor and Restart-with findings. Ambiguous coverage stays visible for triage. The result
-proposes the checkpoint, history move, queue additions/extension and future scope instructions in one draft PR for
-separate manual merging; preparing it does not advance main.
+Recording-time main is `21c3a99263c37a5bcb7622eac9ab15c32737894c`, with the original checkpoint unchanged. Only a
+near-term TODO request for faster background/concurrent trash-checkout deletion landed after the pinned tip; Planned
+remains empty, and no retained cause, specification, queue, filter, triage or governing instruction changed. The two
+unlanded blocked plans concern settings credentials and Mac tunnel exit, with no exact repair of a retained cause. The
+result proposes the queue updates, previous-record history move and checkpoint through 407a4943 in one draft PR for
+separate manual merging. Preparing it does not advance main; later commits were not added to the reviewed range.
