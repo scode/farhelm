@@ -108,3 +108,94 @@ The required fresh-context native `gpt-6.1-sol` reviewer at high effort found th
 reproduced and corrected. The same reviewer's complete-diff addendum found it resolved with no new findings. Fresh
 own-model scope checks supported the narrow head criterion and evidence-only recovery. The unchanged commit/PR wording
 passed its cold read.
+
+### Landing
+
+Landed as delivered, after one return to its executor. A file path that a terminal program broke across two rows (its
+own line break, not the terminal wrapping a long line) is now one link: hovering either half shows the whole path, and
+clicking it downloads that path.
+
+- #3129: the recognition, its tests and the specifications.
+
+#### What landed since the stack was based, and whether it interacted
+
+The first landing attempt, earlier on 2026-11-07, sent this plan back because path links in container sessions failed to
+appear in the grid terminal's tests. As the executor's report explains, recognition had joined an ordinary word on the
+row above to a path below it, and the host rightly rejected the invented path; the first piece must now already look
+like a path. Since the plan was rebased, main landed instant trash deletion (#3131, #3134) and documentation and test
+records (#3115, #3124, #3140), and this round also lands macos-tunnel-exit (recipe tunnels over the host's connection).
+A fresh-context review found no interaction: none of them touches terminal link recognition. It also confirmed that the
+fix the return asked for is present.
+
+While this round ran, main also gained three features about sessions still in old terminals (#3136, #3137, #3139) and
+the v0.37.0 release notes (#3141), which the round's checks did not include. They change the session list and app bar,
+not terminal link recognition; the JavaScript tests and the grid terminal suite were run again on main as merged and
+passed (see the checks).
+
+#### Fixes made at landing
+
+None.
+
+#### Things you should know
+
+Nothing beyond the executor's report.
+
+#### Checks
+
+This round's checks ran on both of its plans stacked on main `22f57676` (macos-tunnel-exit, then cut-path-links), after
+a clean build:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` (the whole workspace, so the protocol,
+  supervisor and helm crates together), the lint of the UI's browser build,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the check that every
+  test delay states its reason (`python -B scripts/check-test-sleeps.py`, 421 delays, none without a reason),
+  `dprint check`, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (no errors; three
+  warnings about older text), the docs website build (`bun run build` in `website/`), the workspace debug build and the
+  UI's release web build: all passed.
+- The UI's JavaScript tests (`node --test` in `crates/farhelm-ui/js-tests`), run `e44c74f8-855f-498a-8d38-9d340385ba82`:
+  all 530 passed. The desktop-build tests, `cargo nextest run -p farhelm-ui --features desktop`, run
+  `abfe00a8-174d-446c-9630-feb79b56e34e`: all 1091 passed.
+- The workspace's Rust tests, all but the desktop app's own crate,
+  `cargo nextest run --workspace --exclude farhelm-desktop` (with rootless Podman and its offline image present), run
+  `f6e2b00f-6c52-479f-a0c6-13f0e5614ed0`: 5771 passed, 69 skipped by their own design, 1 failed,
+  `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay`, a recorded flake with the same signature. This
+  includes the new protocol, supervisor and helm tunnel tests, and the helm's platform-independent tests of the desktop
+  app's localhost tunnels, run here on Linux. The JavaScript tests above include the path-link recognition tests.
+- The grid terminal's browser suite on Chromium and WebKit
+  (`npx playwright test --config grid-client/playwright.config.ts` in `e2e/`), run
+  `38079e30-164a-4bef-ae89-6b5e28306102`: all 192 passed, including the container-session path test.
+- The whole browser suite on Chromium and WebKit, on ten Tensorlake sandboxes at the maintainer's request (cloud virtual
+  machines; each ran its share of the suite's spec files through the test recorder,
+  `python3 scripts/record-test-run.py --kind development ...` running
+  `npx playwright test --project=<engine>-<spec> ... --retries=0`, built locally; the sandboxes run Node 24.16 rather
+  than the development machine's 24.20), runs `2ad820a7-3edf-40e0-b26e-e84d5210016f`,
+  `b9c1006b-0e98-40f4-870a-8636bf3fd278`, `e13cd06d-802a-4a99-a9d4-a112395a187d`,
+  `f2ac2bb3-3b74-47fe-8204-4b3e6cf2b4eb`, `05257e30-76b7-4d08-b984-700755fa3f23`,
+  `3f3ef639-f393-4328-8d8b-494baf7cc74c`, `17f0cee3-9e1f-4115-81e1-e46f2401a9ba`,
+  `1020458a-a921-46e8-a703-0d25e823525d`, `d6dd8b6b-2167-474f-bb3d-9bea4239b3a7`,
+  `be2661e5-87c0-4333-905e-b40beb4da967`: 3021 passed, 14 skipped by the specs' own design, 3 failed. Two are recorded
+  flakes with the same signatures, both in run `3f3ef639`: the trash dialog at width 360 (Chromium) and a pending
+  checkout folder save (WebKit). The third, "the remembered structured-launch permissions mode survives an open, a
+  reset, and a later default launch" (WebKit, run `b9c1006b`), failed inside the test's own interception of a request
+  ("Response has been disposed"), in a part of the app neither plan touches; it passed three repeats below, run alone
+  rather than under the full suite's load, and with one failure it is not recorded as a flake. Then the suite's
+  old-terminal set (the tests that only apply to sessions still in old terminals) on four sandboxes with the same build,
+  runs `66a3ec7d-b9ea-49d4-9c66-ccc49e32db0f`, `6dfc263f-7d75-49cf-bf85-dd6ebae74138`,
+  `f0f3ebb4-52e5-4c8c-b432-a02eef5e0038`, `8c8e4035-8064-46de-8c60-f3ad6400da08`: 107 passed, 1 skipped by its design.
+- After macos-tunnel-exit's landing fixes: `cargo fmt --all -- --check`, `dprint check` and the docs website build
+  passed; those fixes change two code comments, a TODO.md sentence and a guide page, so the other runs above still
+  apply. On sandboxes, reusing the round's build, three repeats of the remembered-permissions test on each engine, runs
+  `def1f987-659c-44e9-8a20-16661ca263bd` (WebKit) and `72ac81ab-7871-411d-b6b9-4c868cb1cfbd` (Chromium): all passed.
+- On main after macos-tunnel-exit merged on top of #3136, #3137, #3139 and #3141: `cargo fmt --all -- --check` and
+  `cargo clippy --all-targets -- -D warnings` passed, and the workspace's Rust tests (all but the desktop app's crate),
+  run `206e29ed-34a3-4de1-8553-cf57d8f374b8`: all 5779 passed, 69 skipped by their own design.
+- On main after cut-path-links merged as well: the UI's JavaScript tests, run `4c4bb90a-c344-436c-899e-5a81b6c09a73`:
+  all 530 passed; the grid terminal's browser suite on Chromium and WebKit, run `fb1c02e2-f8de-4813-a771-c1a433bfb818`:
+  all 192 passed.
+- Not run: the doctests (no doc examples changed), the desktop smoke tests and the installer tests (no desktop shell,
+  packaging or installer code changed), the docs website preview (the build above passed; no page was viewed), and the
+  native Mac app (not runnable on Linux). Recipe tunnels against real Tensorlake hosts and the macOS process-death
+  checks were the executor's, as its report records; this landing did not repeat them (the sandboxes above only ran the
+  browser tests).
+
+Nothing in the executor's report, which covers both its first round and its fix, became untrue at landing.
