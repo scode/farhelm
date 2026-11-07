@@ -23,6 +23,70 @@ import { shot } from "./shot";
 
 const PAGE = "release-notes";
 
+// v0.36.0's stills use only navigation and local selection. The staged fleet
+// has no Tensorlake key, recipes or pinned sessions, so recipe operations,
+// sandbox lifecycle and pin ordering cannot be shown without changing saved
+// state. Host attention needs a real problem or setup in progress as well.
+
+/** Show Tensorlake's warning before a reader supplies credentials or creates a billable host. */
+test("v0.36.0 Tensorlake settings", async ({ page, request }) => {
+  const name = `${PAGE}/v0-36-0-tensorlake-settings`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1600, height: 1100 });
+  const { director } = await open(page, request);
+  const dialog = await openSettings(page);
+  await dialog.getByRole("navigation", { name: "Settings sections" })
+    .getByRole("button", { name: "Tensorlake", exact: true }).click();
+  const panel = dialog.locator('#settings-tensorlake');
+  const warning = panel.locator(".tensorlake-experimental");
+  const key = panel.getByRole("region", { name: "Tensorlake API key", exact: true });
+  await expect(warning).toBeVisible();
+  await expect(key.locator("input")).toBeEnabled();
+  await dialog.focus();
+  await director.callout(warning,
+    "Read the caveats here before setting up Tensorlake. Its experimental support may change between releases.",
+    { side: "left", dy: -30 });
+  await director.callout(key,
+    "Start with your Tensorlake API key here. Recipes below describe the sandboxes Farhelm creates as hosts.",
+    { side: "left", dy: 80 });
+  await shot(page, name, [warning, key], { pad: 10, maxWidth: 930 });
+});
+
+/** Marking is browser-local: show the shared menu without applying an action to the staged sessions. */
+test("v0.36.0 marked sessions", async ({ page, request }) => {
+  const name = `${PAGE}/v0-36-0-marked-sessions`;
+  skipFrozenReleaseShot(name);
+  const { scenario, director } = await open(page, request);
+  const waiting = rowOf(page, scenario, (session) => session.status === "waiting");
+  const idle = rowOf(page, scenario, (session) => session.status === "idle" && session.seen === false);
+  await waiting.locator(".session-row-open").click({ modifiers: ["Control"] });
+  await idle.locator(".session-row-open").click({ modifiers: ["Control"] });
+  const bar = page.locator(".marked-bar");
+  await expect(bar).toHaveAttribute("data-marked-count", "2");
+  await page.locator(".marked-menu-toggle").click();
+  const menu = page.locator(".marked-menu-flyout");
+  await expect(menu).toBeVisible();
+  await director.callout(menu,
+    "Shift-click marks a range; Cmd-click (Ctrl-click outside a Mac) marks individual sessions. Apply an action to the marked sessions the list currently shows.",
+    // Below the menu keeps the whole explanation inside the docs' 930px crop.
+    { side: "bottom", dx: 40, dy: 90 });
+  await shot(page, name, [bar, menu, waiting, idle], { maxWidth: 930 });
+});
+
+/** Keep the chosen host visible beside the status filters, with its clear action in the same control. */
+test("v0.36.0 host filter", async ({ page, request }) => {
+  const name = `${PAGE}/v0-36-0-host-filter`;
+  skipFrozenReleaseShot(name);
+  const { director } = await open(page, request);
+  await page.locator(".host-rail-avatar").first().click();
+  const chip = page.locator(".host-filter-chip");
+  await expect(chip).toBeVisible();
+  await director.callout(chip,
+    "The chosen host stays beside the status filters. Click its × to show all hosts again.",
+    { side: "right", dx: 70, dy: 70 });
+  await shot(page, name, [page.locator(".session-status-filter")], { maxWidth: 930 });
+});
+
 // v0.35.0's static controls and styling can be shown without submitting a
 // launch, changing preferences or sending feedback. Launch progress and file
 // drops are behavior rather than a useful still. The relocated session summary
