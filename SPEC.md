@@ -2449,14 +2449,17 @@ The bell is grey when everything in it has been read and unmistakable when somet
 says how many are unread. Clicking it opens the session's notifications in a list in the style of the row's actions
 menu, never clipped by the sidebar, and does not open the session. The list is newest first, each entry saying how long
 ago it happened, with the full time available on the entry the way the row's activity age has it, and the entries new
-since the list was last opened set apart. Resolved entries remain visible, greyed and marked "Resolved", and count as
-read even if the user has never opened them; they never make the bell loud or appear as new. Closing the list, by
-clicking away, pressing Escape, or clicking the bell again, marks everything it showed as read; there is no mark unread.
-A clear button removes them all, and the bell disappears until a new one arrives. Notifications persist across
-supervisor and helm restarts and reloads; each session keeps its 10 most recent, with no time-based expiry, and deleting
-a session deletes them. Read and cleared state is kept by the helm and shared by every client, the same way seen state
-is. Other than ntfy waiting alerts, desktop or operating-system notifications, and notifications about a host or the
-whole app, are not part of v1.
+since the list was last opened set apart. An entry's text is shown as the supervisor wrote it, except that a link to a
+page of Farhelm's docs (an address starting `https://farhelm.io/docs/`) is clickable and opens the way the app's other
+external links do; any other address stays plain text, since a host's supervisor must not be able to put a link to
+anywhere it likes in front of the user. Resolved entries remain visible, greyed and marked "Resolved", and count as read
+even if the user has never opened them; they never make the bell loud or appear as new. Closing the list, by clicking
+away, pressing Escape, or clicking the bell again, marks everything it showed as read; there is no mark unread. A clear
+button removes them all, and the bell disappears until a new one arrives. Notifications persist across supervisor and
+helm restarts and reloads; each session keeps its 10 most recent, with no time-based expiry, and deleting a session
+deletes them. Read and cleared state is kept by the helm and shared by every client, the same way seen state is. Other
+than ntfy waiting alerts, desktop or operating-system notifications, and notifications about a host or the whole app,
+are not part of v1.
 
 An older helm or UI shows resolved entries as ordinary unresolved notifications. A newer helm connected to an older
 supervisor receives no resolutions; the rest of the notification behavior stays available without a protocol change.

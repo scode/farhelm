@@ -238,7 +238,10 @@ const RELEASE_NOTES_URL: &str = "https://farhelm.io/docs/release-notes/";
 /// Open a trusted help, community or announcement link through the shared opener
 /// (`terminal-links.js`), which knows how to reach the system browser from
 /// the desktop webview and opens a new tab elsewhere. Callers pass trusted
-/// content supplied by the app or helm, rather than a terminal's links.
+/// content supplied by the app or helm, rather than a terminal's links. The
+/// one URL that comes from peer text is a docs link inside a session
+/// notification (`list::bell`), and only after it was checked to be a page
+/// under `https://farhelm.io/docs/`, so it is as trusted as the app's own.
 ///
 /// That opener is its own script asset, loaded asynchronously, so a click
 /// right after the page loads can arrive before it exists. The fallback
