@@ -121,6 +121,7 @@ mod tcp_relays;
 mod teardown;
 mod terminals;
 mod ticker;
+mod trash_remover;
 mod uploads;
 
 pub use capture::{CaptureStoreFault, CaptureWrite};
