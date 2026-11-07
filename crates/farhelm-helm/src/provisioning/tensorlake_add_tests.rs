@@ -221,6 +221,94 @@ async fn credential_delivery_warning_does_not_abort_tensorlake_setup() {
     );
 }
 
+/// Codex modes need setup's credential step even without any API endpoint.
+/// Subscription seeds before supervisor startup; None still reports a failed
+/// config cleanup as a warning while installation continues.
+#[farhelm_testtrace::test]
+async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
+    use farhelm_proto::credentials::{CreateCredential, CredentialKind};
+    for subscription in [true, false] {
+        let f = fixture(false).await;
+        let mut recipe = crate::tensorlake::recipes::tests_support::save();
+        recipe.source = RecipeSource::Image {
+            image: "example/systemd".into(),
+        };
+        if subscription {
+            f.harness
+                .store
+                .create_credential(CreateCredential {
+                    name: "codex".into(),
+                    kind: CredentialKind::CodexLogin,
+                    secret: r#"{"opaque":"fictional-setup-codex-secret"}"#.into(),
+                })
+                .await
+                .unwrap();
+            recipe.codex_login_credential = Some("codex".into());
+        } else {
+            std::fs::write(f.root.path().join("backend/config.json"), r#"{"default":{"fail_action":"read-agent-settings","message":"fictional-private-diagnostic"}}"#).unwrap();
+        }
+        f.harness
+            .store
+            .update_tensorlake_recipe("test-recipe".into(), recipe)
+            .await
+            .unwrap()
+            .unwrap();
+        let accepted = f.add().await;
+        let view = f.finish(accepted.host_id).await;
+        assert_eq!(view.status, RunStatus::Completed);
+        let step = view
+            .steps
+            .iter()
+            .find(|step| step.step == "configure-agents")
+            .expect("every Codex mode has a configuration step");
+        assert_eq!(step.status, StepStatus::Completed);
+        assert_eq!(step.message.is_none(), subscription);
+        if !subscription {
+            assert_eq!(
+                step.message.as_deref(),
+                Some("could not read the agent settings")
+            );
+        }
+        let events = std::fs::read_to_string(f.root.path().join("backend/events.jsonl")).unwrap();
+        assert!(
+            events.find("check-supervisor-state").unwrap()
+                < events.find("read-agent-settings").unwrap()
+        );
+        assert!(
+            events.find("read-agent-settings").unwrap() < events.find("enable-supervisor").unwrap()
+        );
+        assert!(
+            !events.contains("fictional-setup-codex-secret")
+                && !events.contains("fictional-private-diagnostic")
+        );
+        let host = accepted.host_id;
+        let json: String = f
+            .harness
+            .store
+            .conn()
+            .call("inspect fixture Codex stamp", move |conn| {
+                Ok(conn.query_row(
+                    "SELECT tensorlake_credential_delivery FROM hosts WHERE id = ?1",
+                    [host],
+                    |row| row.get(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        let record: serde_json::Value = serde_json::from_str(&json).unwrap();
+        if subscription {
+            assert_eq!(record["codex"], "Cleared");
+            let auth = record["codex_auth"].as_array().unwrap();
+            assert_eq!(auth.len(), 3);
+            assert_eq!(auth[0], "codex");
+            assert_eq!(auth[1], 1);
+            uuid::Uuid::parse_str(auth[2].as_str().unwrap()).unwrap();
+        } else {
+            assert!(record["codex"].is_null() && record["codex_auth"].is_null());
+        }
+    }
+}
+
 /// GitHub-only recipes must enter setup's credential step without an agent
 /// endpoint to trigger it. Reused images without gh still finish installing
 /// Farhelm after the token upload, keeping the unsuccessful slot retryable.

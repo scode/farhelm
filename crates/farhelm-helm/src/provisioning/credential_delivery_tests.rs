@@ -13,6 +13,9 @@ use std::task::{Context, Waker};
 
 const FIRST: &str = "fictional-first-endpoint-token";
 const SECOND: &str = "fictional-replacement-endpoint-token";
+const CODEX_FIRST: &str =
+    r#"{"tokens":{"refresh_token":"fictional-codex-seed"},"vendor_field":true}"#;
+const CODEX_REFRESHED: &str = r#"{"tokens":{"refresh_token":"fictional-codex-refreshed"}}"#;
 
 /// Own both sides of delivery until every file and durable stamp is inspected.
 struct Fixture {
@@ -192,6 +195,232 @@ impl Fixture {
             self.row.remote_state_dir.as_deref().unwrap(),
         ))
     }
+
+    /// Seed only the catalog. The host file must be created by actual delivery,
+    /// so the test cannot accidentally prove its own fixture write instead.
+    async fn codex_credential(&self) {
+        self.store
+            .create_credential(CreateCredential {
+                name: "codex-work".into(),
+                kind: CredentialKind::CodexLogin,
+                secret: CODEX_FIRST.into(),
+            })
+            .await
+            .unwrap();
+    }
+
+    /// Change only Codex's selected mode, keeping the endpoint and optional
+    /// GitHub slot available to exercise earlier/later partial successes.
+    async fn select_codex(&self, login: bool, api_endpoint: bool, github: bool) {
+        let mut recipe = crate::tensorlake::recipes::tests_support::save();
+        recipe.claude = Some(endpoint("https://first.example/v1", "work"));
+        recipe.codex = api_endpoint.then(|| endpoint("https://codex.example/v1", "work"));
+        recipe.codex_login_credential = login.then(|| "codex-work".into());
+        recipe.github_token_credential = github.then(|| "git-work".into());
+        self.store
+            .update_tensorlake_recipe("recipe".into(), recipe)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+}
+
+/// Codex owns refreshed auth bytes after the initial seed. Durable revision
+/// memory must survive a helm restart and switches through Endpoint and None;
+/// only an explicitly replaced catalog value authorizes a fresh auth write.
+#[farhelm_testtrace::test]
+async fn codex_refresh_survives_reconnect_and_mode_changes_until_replacement() {
+    let f = Fixture::new(false).await;
+    f.codex_credential().await;
+    f.select_codex(true, false, false).await;
+    let lease = f.connected().await;
+    let auth = f.home.join(".codex/auth.json");
+    assert_eq!(std::fs::read_to_string(&auth).unwrap(), CODEX_FIRST);
+    assert_eq!(
+        std::fs::metadata(&auth).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert!(
+        !f.home.join(".codex/config.toml").exists(),
+        "absent clean config stays absent"
+    );
+    std::fs::write(&auth, CODEX_REFRESHED).unwrap();
+    drop(lease);
+    let delivery = CredentialDelivery::new(f.store.clone(), f.backend.clone());
+    let _lease = delivery.enter(&f.row);
+    let before = f.operations();
+    delivery.connect(&f.row, &f.events).await;
+    assert_eq!(
+        f.operations(),
+        before,
+        "persisted seed and cleared config require no SSH"
+    );
+    for (login, endpoint) in [(false, true), (false, false), (true, false)] {
+        f.select_codex(login, endpoint, false).await;
+        delivery.connect(&f.row, &f.events).await;
+        assert_eq!(delivery.warning(f.row.id), None);
+        assert_eq!(std::fs::read_to_string(&auth).unwrap(), CODEX_REFRESHED);
+        assert_eq!(
+            delivery.read_record(&f.row).await.unwrap().codex_auth,
+            Some(f.stamp("codex-work", 1).await)
+        );
+    }
+    let config = std::fs::read_to_string(f.home.join(".codex/config.toml")).unwrap();
+    let config: toml_edit::DocumentMut = config.parse().unwrap();
+    assert!(!config.contains_key("model_provider"));
+    assert!(
+        config["model_providers"]["farhelm"]
+            .as_table_like()
+            .unwrap()
+            .get("experimental_bearer_token")
+            .is_none()
+    );
+    let replacement = r#"{"new_vendor_shape":{"opaque":"fictional-new-login"}}"#;
+    f.replace("codex-work", replacement).await;
+    assert!(delivery.push("codex-work", &f.events).await.is_empty());
+    assert_eq!(std::fs::read_to_string(&auth).unwrap(), replacement);
+    assert_eq!(
+        delivery.read_record(&f.row).await.unwrap().codex_auth,
+        Some(f.stamp("codex-work", 2).await)
+    );
+    let record = serde_json::to_string(&delivery.read_record(&f.row).await.unwrap()).unwrap();
+    assert!(
+        !record.contains("fictional"),
+        "only names, revisions and creation identities are durable"
+    );
+}
+
+/// Leaving Subscription preserves refreshed bytes and its successful stamp.
+/// Deleting and recreating that name at revision1 is a different login, so
+/// returning afterwards must seed the new value rather than skip delivery.
+#[farhelm_testtrace::test]
+async fn recreated_codex_login_is_delivered_after_none_preserved_the_old_seed() {
+    let f = Fixture::new(false).await;
+    f.codex_credential().await;
+    f.select_codex(true, false, false).await;
+    let _lease = f.connected().await;
+    let auth = f.home.join(".codex/auth.json");
+    assert_eq!(std::fs::read_to_string(&auth).unwrap(), CODEX_FIRST);
+    let first = f.stamp("codex-work", 1).await;
+    std::fs::write(&auth, CODEX_REFRESHED).unwrap();
+    f.select_codex(false, false, false).await;
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(f.delivery.warning(f.row.id), None);
+    assert_eq!(std::fs::read_to_string(&auth).unwrap(), CODEX_REFRESHED);
+    assert_eq!(
+        f.delivery.read_record(&f.row).await.unwrap().codex_auth,
+        Some(first.clone())
+    );
+    f.store
+        .delete_credential("codex-work".into())
+        .await
+        .unwrap();
+    let value = r#"{"opaque":"fictional-recreated-codex-login"}"#;
+    let saved = f
+        .store
+        .create_credential(CreateCredential {
+            name: "codex-work".into(),
+            kind: CredentialKind::CodexLogin,
+            secret: value.into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(saved.revision, 1);
+    let next = f.stamp("codex-work", 1).await;
+    assert_ne!(first.2, next.2);
+    f.select_codex(true, false, false).await;
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(f.delivery.warning(f.row.id), None);
+    assert_eq!(std::fs::read_to_string(&auth).unwrap(), value);
+    assert_eq!(
+        f.delivery.read_record(&f.row).await.unwrap().codex_auth,
+        Some(next)
+    );
+    let before = f.operations();
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(f.operations(), before);
+}
+
+/// A later helper failure cannot erase an already committed Codex seed stamp.
+/// Retry must leave a refreshed file alone even though the overall connect
+/// originally warned; otherwise gh installation would silently undo a login.
+#[farhelm_testtrace::test]
+async fn codex_auth_success_is_durable_before_later_github_failure() {
+    let f = Fixture::new(false).await;
+    f.codex_credential().await;
+    f.github_credential().await;
+    f.select_codex(true, false, true).await;
+    f.backend.github_cli.store(false, Ordering::SeqCst);
+    let _lease = f.delivery.enter(&f.row);
+    f.delivery.connect(&f.row, &f.events).await;
+    let auth = f.home.join(".codex/auth.json");
+    assert_eq!(std::fs::read_to_string(&auth).unwrap(), CODEX_FIRST);
+    let record = f.delivery.read_record(&f.row).await.unwrap();
+    assert_eq!(record.codex_auth, Some(f.stamp("codex-work", 1).await));
+    assert!(record.github.is_none());
+    assert!(
+        f.delivery
+            .warning(f.row.id)
+            .unwrap()
+            .contains("private clones need gh")
+    );
+    std::fs::write(&auth, CODEX_REFRESHED).unwrap();
+    f.backend.github_cli.store(true, Ordering::SeqCst);
+    let before = f.operations().len();
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(f.delivery.warning(f.row.id), None);
+    assert_eq!(std::fs::read_to_string(&auth).unwrap(), CODEX_REFRESHED);
+    assert!(
+        !f.operations()[before..]
+            .iter()
+            .any(|operation| operation == "read-agent-settings")
+    );
+}
+
+/// The old Absent fingerprint represented no work. Explicit None must clear
+/// legacy owned settings once, while preserving manually selected providers,
+/// comments and unrelated table keys, then reconnect without any file access.
+#[farhelm_testtrace::test]
+async fn codex_none_cleans_legacy_absence_once_without_touching_auth() {
+    let f = Fixture::new(false).await;
+    std::fs::create_dir(f.home.join(".codex")).unwrap();
+    let config = f.home.join(".codex/config.toml");
+    let auth = f.home.join(".codex/auth.json");
+    std::fs::write(&config, "# personal comment\nmodel_provider = 'personal'\n[model_providers.farhelm]\nexperimental_bearer_token = 'fictional-old-token'\ncustom = true\n").unwrap();
+    // A directory at auth.json makes any attempted read or replacement fail;
+    // None has no authority over it, even when cleaning a legacy config.
+    std::fs::create_dir(&auth).unwrap();
+    let entry = f.delivery.entry(&f.row);
+    let guard = entry.serial.clone().lock_owned().await;
+    f.delivery
+        .write_record(
+            &f.row,
+            &Record {
+                home: Some(f.home.clone()),
+                codex: Some(EndpointStamp::Absent),
+                ..Record::default()
+            },
+            guard,
+        )
+        .await
+        .unwrap();
+    let _lease = f.connected().await;
+    let text = std::fs::read_to_string(&config).unwrap();
+    assert!(text.contains("# personal comment") && !text.contains("fictional-old-token"));
+    let doc: toml_edit::DocumentMut = text.parse().unwrap();
+    assert_eq!(doc["model_provider"].as_str(), Some("personal"));
+    assert_eq!(
+        doc["model_providers"]["farhelm"]["custom"].as_bool(),
+        Some(true)
+    );
+    assert!(auth.is_dir());
+    assert_eq!(
+        f.delivery.read_record(&f.row).await.unwrap().codex,
+        Some(EndpointStamp::Cleared)
+    );
+    let before = f.operations();
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(f.operations(), before);
 }
 
 /// Pending recipe edits do not update host stamps. Reusing an unreferenced
@@ -517,7 +746,7 @@ async fn unchanged_reconnect_uses_durable_stamps_without_remote_work() {
     );
     let record = restarted.read_record(&f.row).await.unwrap();
     assert_eq!(record.home, Some(f.home.clone()));
-    assert_eq!(record.codex, Some(EndpointStamp::Absent));
+    assert_eq!(record.codex, Some(EndpointStamp::Cleared));
     assert_eq!(
         std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
         0o600

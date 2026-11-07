@@ -412,6 +412,104 @@ async fn github_references_require_the_right_kind_and_guard_deletion() {
     store.delete_credential("git-work".into()).await.unwrap();
 }
 
+/// A subscription reference is metadata only and must name the right agent's
+/// login. A rejected create or update leaves recipes intact; a valid reference
+/// prevents deletion until explicitly deselected, including after replacement.
+#[farhelm_testtrace::test]
+async fn codex_login_references_validate_kind_and_guard_deletion() {
+    use crate::credentials::Refusal as CredentialRefusal;
+    use farhelm_proto::credentials::{CreateCredential, CredentialKind, SaveCredential};
+    let (_dir, store) = store().await;
+    for (name, kind, secret) in [
+        (
+            "codex-work",
+            CredentialKind::CodexLogin,
+            r#"{"opaque":"fictional-codex-first"}"#,
+        ),
+        (
+            "claude-work",
+            CredentialKind::ClaudeLogin,
+            "fictional-claude-token",
+        ),
+        ("git-work", CredentialKind::GithubToken, TOKEN),
+    ] {
+        store
+            .create_credential(CreateCredential {
+                name: name.into(),
+                kind,
+                secret: secret.into(),
+            })
+            .await
+            .unwrap();
+    }
+    super::tests_support::create(&store, "existing").await;
+    let before = raw_row(&store, "existing").await;
+    for bad in ["missing", ENDPOINT, "claude-work", "git-work"] {
+        let mut recipe = save();
+        recipe.codex_login_credential = Some(bad.into());
+        assert!(matches!(
+            store
+                .create_tensorlake_recipe("new".into(), recipe.clone())
+                .await
+                .unwrap(),
+            Err(Refusal::Invalid(_))
+        ));
+        assert!(matches!(
+            store
+                .update_tensorlake_recipe("existing".into(), recipe)
+                .await
+                .unwrap(),
+            Err(Refusal::Invalid(_))
+        ));
+        assert_eq!(raw_row(&store, "existing").await, before);
+    }
+    let mut recipe = save();
+    recipe.codex_login_credential = Some("codex-work".into());
+    store
+        .update_tensorlake_recipe("existing".into(), recipe)
+        .await
+        .unwrap()
+        .unwrap();
+    let selected = raw_row(&store, "existing").await;
+    assert!(selected.0.contains("codex-work") && !selected.0.contains("fictional-codex-first"));
+    let (_, view) = store
+        .tensorlake_recipes()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|(name, _)| name == "existing")
+        .unwrap();
+    assert_eq!(view.codex_login_credential.as_deref(), Some("codex-work"));
+    let row = store
+        .credentials()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.name == "codex-work")
+        .unwrap();
+    assert_eq!(row.used_by, vec!["existing"]);
+    assert!(matches!(
+        store.delete_credential("codex-work".into()).await,
+        Err(CredentialRefusal::InUse)
+    ));
+    store
+        .save_credential(
+            "codex-work".into(),
+            SaveCredential {
+                secret: Some(r#"{"next":"fictional-codex-second"}"#.into()),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(raw_row(&store, "existing").await, selected);
+    store
+        .update_tensorlake_recipe("existing".into(), save())
+        .await
+        .unwrap()
+        .unwrap();
+    store.delete_credential("codex-work".into()).await.unwrap();
+}
+
 /// Independent SQLite connections race admission against deletion. Exactly
 /// one operation can succeed: no committed recipe may reference the deleted
 /// identity. Exercise create and update, which historically had different

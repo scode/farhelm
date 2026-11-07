@@ -212,6 +212,7 @@ fn users(conn: &rusqlite::Connection, name: &str) -> rusqlite::Result<Vec<String
         "SELECT name FROM tensorlake_recipes
          WHERE json_extract(spec_json, '$.claude.token_credential') = ?1
             OR json_extract(spec_json, '$.codex.token_credential') = ?1
+            OR json_extract(spec_json, '$.codex_login_credential') = ?1
             OR json_extract(spec_json, '$.github_token_credential') = ?1 ORDER BY name",
     )?;
     statement.query_map([name], |row| row.get(0))?.collect()

@@ -119,9 +119,10 @@ pub struct EndpointSave {
 ///
 /// `claude` is Claude Code's endpoint (written into the sandbox as
 /// `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`), `codex` is Codex's
-/// (a model provider's `base_url` and `experimental_bearer_token`). `None`
-/// means the recipe configures no endpoint for that agent. Credential values
-/// belong exclusively to Settings → Credentials.
+/// (a model provider's `base_url` and `experimental_bearer_token`). An absent
+/// Claude endpoint leaves its settings alone. Codex selects that endpoint or
+/// `codex_login_credential`; neither means explicit None and cleans only the
+/// Farhelm provider selection/token. Values belong to Settings → Credentials.
 ///
 /// Unknown fields are refused at every level, nested size, source, tunnel and
 /// endpoint included: a field a newer client sets and this helm would silently
@@ -136,6 +137,10 @@ pub struct RecipeSave {
     pub source: RecipeSource,
     pub claude: Option<EndpointSave>,
     pub codex: Option<EndpointSave>,
+    /// Subscription and API endpoint selection are mutually exclusive. Both
+    /// absent asks Farhelm to clear only its Codex provider selection/token;
+    /// the host's auth.json remains Codex's after a successful delivery.
+    pub codex_login_credential: Option<String>,
     /// A catalog identity, never the token. None removes Farhelm's managed
     /// token file at the next setup/connection without clearing user gh auth.
     pub github_token_credential: Option<String>,
@@ -158,6 +163,7 @@ mod strict {
         source: RecipeSource,
         claude: Option<super::EndpointSave>,
         codex: Option<super::EndpointSave>,
+        codex_login_credential: Option<String>,
         github_token_credential: Option<String>,
         tunnels: Vec<Tunnel>,
     }
@@ -213,6 +219,7 @@ mod strict {
                 },
                 claude: save.claude,
                 codex: save.codex,
+                codex_login_credential: save.codex_login_credential,
                 github_token_credential: save.github_token_credential,
                 tunnels: save
                     .tunnels
@@ -259,6 +266,7 @@ pub struct RecipeView {
     pub source: RecipeSource,
     pub claude: Option<EndpointView>,
     pub codex: Option<EndpointView>,
+    pub codex_login_credential: Option<String>,
     pub github_token_credential: Option<String>,
     pub tunnels: Vec<Tunnel>,
     /// The snapshot Farhelm built for a managed recipe, which new hosts start
@@ -643,6 +651,13 @@ pub fn check_recipe(recipe: &RecipeSave) -> Result<(), String> {
             check_recipe_name(name)
                 .map_err(|_| format!("{agent}: select a valid endpoint credential name"))?;
         }
+    }
+    if recipe.codex.is_some() && recipe.codex_login_credential.is_some() {
+        return Err("Codex: select either an API endpoint or a subscription login".into());
+    }
+    if let Some(name) = recipe.codex_login_credential.as_deref() {
+        check_recipe_name(name)
+            .map_err(|_| "Codex: select a valid login credential name".to_string())?;
     }
     if let Some(name) = recipe.github_token_credential.as_deref() {
         check_recipe_name(name).map_err(|_| "select a valid GitHub credential name".to_string())?;

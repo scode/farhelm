@@ -17,6 +17,7 @@ fn recipe() -> RecipeSave {
         claude: None,
         codex: None,
         github_token_credential: None,
+        codex_login_credential: None,
         tunnels: vec![],
     }
 }
@@ -392,6 +393,41 @@ fn wire_shapes_are_tagged_and_saves_are_strict() {
         (older.snapshot, older.build, older.cleanup_pending),
         (None, BuildView::Idle, false),
         "a reply without build fields reads as nothing built and nothing running"
+    );
+}
+
+/// Codex has one active authentication choice. Older endpoint-only requests
+/// still decode, but a save cannot select both kinds or an invalid login name.
+#[test]
+fn codex_subscription_and_endpoint_are_exclusive_named_choices() {
+    let mut save = recipe();
+    save.codex_login_credential = Some("codex-work".into());
+    assert!(check_recipe(&save).is_ok());
+    let decoded: RecipeSave = serde_json::from_value(serde_json::to_value(&save).unwrap()).unwrap();
+    assert_eq!(
+        decoded.codex_login_credential.as_deref(),
+        Some("codex-work")
+    );
+    save.codex = Some(EndpointSave {
+        base_url: "https://endpoint.test/v1".into(),
+        token_credential: None,
+    });
+    assert!(check_recipe(&save).is_err());
+    save.codex = None;
+    for invalid in ["", "Uppercase", "../login", "name-"] {
+        save.codex_login_credential = Some(invalid.into());
+        assert!(check_recipe(&save).is_err());
+    }
+    let mut legacy = serde_json::to_value(recipe()).unwrap();
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("codex_login_credential");
+    assert!(
+        serde_json::from_value::<RecipeSave>(legacy)
+            .unwrap()
+            .codex_login_credential
+            .is_none()
     );
 }
 

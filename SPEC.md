@@ -367,34 +367,46 @@ template saved before this rule still launches, but saving any change to it is r
 
 Tensorlake recipes belong to the helm too: one catalog of named descriptions of the Tensorlake sandboxes Farhelm creates
 as hosts, kept in Settings → **Tensorlake**. A recipe has a size (CPUs, memory in GB and disk in GB, whole numbers), a
-software source, optional Claude Code and Codex API endpoints, an optional named GitHub token, and outbound tunnels. The
-source either installs Ubuntu packages (Farhelm builds a snapshot from Tensorlake's Ubuntu image with those packages,
-Claude Code and Codex) or reuses an existing Tensorlake image name or snapshot ID as is, which must have systemd
-installed, enabled and running as the init system at startup. Each endpoint is a base URL plus an optional named API
-endpoint credential from Settings → Credentials; a tunnel makes a sandbox loopback port reach a host and port as seen
-from the helm's machine. A recipe's name is lowercase letters, digits and hyphens, starts with a letter, does not end
-with a hyphen, is at most 32 characters, and never changes: hosts refer to their recipe by name, and renaming means
-creating a new recipe. Creating a recipe under a name that exists is refused rather than overwriting it, and deleting a
-recipe a host uses is refused. Endpoint tokens belong to the credential catalog, and recipes store only their names.
-Create and update refuse missing or wrong-kind credentials; deleting a credential a recipe uses is refused. The endpoint
-picker offers None and endpoint-token names, preserves the selected name across URL changes, and points to Settings →
-Credentials for entering or replacing values. An unavailable draft choice stays visible until the user chooses another
-or None; it cannot be saved as a missing reference. Upgrading drops old recipe-embedded tokens rather than importing
-them; the user re-enters them in Credentials. Edits to size and packages affect only hosts created afterwards (packages
-after the next snapshot build); tunnels and credential selections are read when a host connects or is set up. Replacing
-a named endpoint or GitHub token pushes its new value to hosts already using it, including a connection still being
-acquired. Pending recipe edits do not change that connection's selections. Other hosts receive the replacement before
-their next connection becomes usable. Each host serializes these deliveries and remembers successful settings
-independently, so an unchanged reconnect does no remote file work and a later file's failure does not undo an earlier
-success. Delivery failure leaves the connection usable, makes the host's status and navigation mark amber, and shows a
-sanitized reason in its details. The next connection or credential replacement retries; there is no periodic retry.
-Saving a replacement commits its value first, waits at most the usual SSH command timeout for delivery (including lock
-waits), and reports `Saved; not delivered to <host>: <reason>` for failures. Ending the connected phase cancels its
-pending pushes before further transport work. The list shows each recipe's name, size, package count or reused image or
-snapshot, and tunnel count. The editor replaces the list in place; leaving it with unsaved changes, whether by its own
-Back or Cancel or by closing Settings with Escape or a close control, asks whether to save, discard or keep editing, and
-saving or discarding then completes the close. Delete asks for confirmation. A list refresh that fails keeps the rows
-shown, says they may be out of date, and offers **Retry loading**.
+software source, an optional Claude Code API endpoint, a Codex authentication choice, an optional named GitHub token,
+and outbound tunnels. The source either installs Ubuntu packages (Farhelm builds a snapshot from Tensorlake's Ubuntu
+image with those packages, Claude Code and Codex) or reuses an existing Tensorlake image name or snapshot ID as is,
+which must have systemd installed, enabled and running as the init system at startup. Each endpoint is a base URL plus
+an optional named API endpoint credential from Settings → Credentials; a tunnel makes a sandbox loopback port reach a
+host and port as seen from the helm's machine. A recipe's name is lowercase letters, digits and hyphens, starts with a
+letter, does not end with a hyphen, is at most 32 characters, and never changes: hosts refer to their recipe by name,
+and renaming means creating a new recipe. Creating a recipe under a name that exists is refused rather than overwriting
+it, and deleting a recipe a host uses is refused. Endpoint tokens belong to the credential catalog, and recipes store
+only their names. Create and update refuse missing or wrong-kind credentials; deleting a credential a recipe uses is
+refused. The endpoint picker offers None and endpoint-token names, preserves the selected name across URL changes, and
+points to Settings → Credentials for entering or replacing values. An unavailable draft choice stays visible until the
+user chooses another or None; it cannot be saved as a missing reference. Upgrading drops old recipe-embedded tokens
+rather than importing them; the user re-enters them in Credentials. Edits to size and packages affect only hosts created
+afterwards (packages after the next snapshot build); tunnels and credential selections are read when a host connects or
+is set up. Replacing a named endpoint token, Codex login or GitHub token pushes its new value to hosts already using it,
+including a connection still being acquired. Pending recipe edits do not change that connection's selections. Other
+hosts receive the replacement before their next connection becomes usable. Each host serializes these deliveries and
+remembers successful settings independently, so an unchanged reconnect does no remote file work and a later file's
+failure does not undo an earlier success. Delivery failure leaves the connection usable, makes the host's status and
+navigation mark amber, and shows a sanitized reason in its details. The next connection or credential replacement
+retries; there is no periodic retry. Saving a replacement commits its value first, waits at most the usual SSH command
+timeout for delivery (including lock waits), and reports `Saved; not delivered to <host>: <reason>` for failures. Ending
+the connected phase cancels its pending pushes before further transport work. The list shows each recipe's name, size,
+package count or reused image or snapshot, and tunnel count. The editor replaces the list in place; leaving it with
+unsaved changes, whether by its own Back or Cancel or by closing Settings with Escape or a close control, asks whether
+to save, discard or keep editing, and saving or discarding then completes the close. Delete asks for confirmation. A
+list refresh that fails keeps the rows shown, says they may be out of date, and offers **Retry loading**.
+
+The recipe's Codex choice is **None | API endpoint | Subscription**. API endpoint requires a base URL and offers named
+endpoint tokens; Subscription requires a named Codex login from Credentials. Switching modes retains each draft but
+saves only the selected choice. None and Subscription remove `model_provider` only when it selects `farhelm`, and remove
+`experimental_bearer_token` from that provider table, preserving the table and unrelated configuration. Claude Code
+keeps its optional API endpoint controls; its saved subscription logins do not have recipe delivery yet.
+
+Codex Subscription atomically writes the selected login to the host's usual `~/.codex/auth.json` with mode 0600 only
+when its name or revision differs from the last successful login delivery. Codex owns and refreshes that file
+afterwards; Farhelm never reads it. The remembered login survives switching to Endpoint or None, so returning to the
+same saved login leaves refreshed bytes alone. Switching away leaves `auth.json` on the host; signing out in Codex
+removes it.
 
 The recipe's **GitHub** block selects None or a GitHub-token name from Settings → Credentials. Farhelm atomically
 replaces one private token file in that host's supervisor state directory. The matching supervisor reads it afresh at
@@ -1932,9 +1944,12 @@ JSON object of at most 64 KiB. An empty replacement keeps the saved value. Setti
 failed save keeps the draft and shows its reason. Closing discards unsaved text without a recipe-style departure
 question. Recipes select API endpoint tokens by name; setup, connection and replacement delivery resolve current saved
 values. A successful save with failed deliveries closes and clears the secret editor, and shows the delivery failures on
-the Credentials overview. Recipes also select GitHub tokens by name; subscription logins are stored in the catalog
-without recipe delivery yet. Delete is unavailable while a recipe uses a credential, with the recipe names shown.
-Reference changes refresh an open credential editor without discarding its unsaved replacement text.
+the Credentials overview. Recipes also select GitHub tokens and Codex subscription logins by name. Claude subscription
+logins are stored without recipe delivery yet. The Codex login editor explains that copies share a rotating refresh
+token: when one copy renews, the other copies cannot renew and need a fresh sign-in, so use one login per host. It
+recommends a proxy or load balancer through an API endpoint for shared inference access and makes the user responsible
+for following the provider's terms of service. Delete is unavailable while a recipe uses a credential, with the recipe
+names shown. Reference changes refresh an open credential editor without discarding its unsaved replacement text.
 
 The Credentials overview, every credential editor, and both Tensorlake key forms show a prominent danger-tinted **Not
 encrypted on disk** warning explaining that anyone who can read the helm's state directory can read the values.
@@ -3899,9 +3914,9 @@ Further requirements:
   tunnel alone does not prevent Tensorlake's idle suspension.
 - Agent credentials normally live on the host running the agent, in the agent's own standard configuration. The Settings
   credential catalog is an explicit exception: the helm stores logins and tokens the user enters there, unencrypted, and
-  never returns their saved values. Farhelm never reads credentials out of any machine's agent configuration, proxies
-  them, logs them or passes them as command-line arguments. Claude Code authenticates directly with a consumer
-  subscription, unmodified.
+  never returns their saved values. For Tensorlake recipes it writes selected values only to those hosts' usual
+  configuration. Farhelm never reads credentials out of any machine's agent configuration, proxies them, logs them or
+  passes them as command-line arguments. Claude Code authenticates directly with a consumer subscription, unmodified.
 - Updates are never forced: the desktop app installs new stable releases in the background by default, but the user can
   turn that off and then update by hand or pin a version with the installer; an installed update takes effect at the
   next start of Farhelm, which Restart to update only brings forward; remote hosts are updated by an explicit Update

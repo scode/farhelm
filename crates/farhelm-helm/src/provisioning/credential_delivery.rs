@@ -32,6 +32,7 @@ const TIMED_OUT: &str = "credential delivery did not finish within the SSH timeo
 pub(crate) struct Bindings {
     claude: Option<StoredEndpoint>,
     codex: Option<StoredEndpoint>,
+    codex_login_credential: Option<String>,
     github_token_credential: Option<String>,
 }
 
@@ -45,6 +46,7 @@ impl Bindings {
         Self {
             claude: recipe.claude.clone(),
             codex: recipe.codex.clone(),
+            codex_login_credential: recipe.codex_login_credential.clone(),
             github_token_credential: recipe.github_token_credential.clone(),
         }
     }
@@ -52,6 +54,7 @@ impl Bindings {
     /// A replacement must not activate another recipe's pending selection edit.
     fn uses(&self, name: &str) -> bool {
         self.github_token_credential.as_deref() == Some(name)
+            || self.codex_login_credential.as_deref() == Some(name)
             || [&self.claude, &self.codex]
                 .into_iter()
                 .flatten()
@@ -59,12 +62,13 @@ impl Bindings {
     }
 }
 
-/// Known absence means this endpoint-only interface requested no file work.
-/// It is not the later explicit agent-mode None cleanup. That mode must carry
-/// its own fingerprint and clean unknown host configuration once.
+/// Claude's optional endpoint still uses Absent for no file work. Codex's
+/// explicit None and Subscription modes use Cleared, so older absence records
+/// cannot bypass their first cleanup of Farhelm-owned provider settings.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 enum EndpointStamp {
     Absent,
+    Cleared,
     Endpoint {
         base_url: String,
         credential: Option<(String, u64, String)>,
@@ -91,6 +95,9 @@ struct Record {
     home: Option<PathBuf>,
     claude: Option<EndpointStamp>,
     codex: Option<EndpointStamp>,
+    /// Codex refreshes this file itself. Leaving subscription mode must retain
+    /// its last successful seed, or returning would overwrite refreshed bytes.
+    codex_auth: Option<(String, u64, String)>,
     github: Option<GithubStamp>,
 }
 
@@ -385,9 +392,6 @@ impl CredentialDelivery {
             record.home = Some(home);
             guard = self.write_record(row, &record, guard).await?;
         }
-        let [claude, codex] = self
-            .resolve_endpoints(bindings.claude, bindings.codex)
-            .await?;
         let target = ProvisioningTarget::Ssh {
             destination: row
                 .destination
@@ -395,10 +399,13 @@ impl CredentialDelivery {
                 .ok_or("the host has no SSH destination")?,
             access: crate::ssh::SshAccessKind::Tensorlake,
         };
-        for (is_claude, folder, file, slot) in [
-            (true, ".claude", "settings.json", claude),
-            (false, ".codex", "config.toml", codex),
+        for (is_claude, folder, file, endpoint) in [
+            (true, ".claude", "settings.json", bindings.claude),
+            (false, ".codex", "config.toml", bindings.codex),
         ] {
+            // Resolve at this slot: a missing retained name in a later slot
+            // must not withhold an earlier replacement or its durable success.
+            let slot = self.resolve_endpoint(endpoint, is_claude).await?;
             let previous_stamp = if is_claude {
                 &record.claude
             } else {
@@ -407,7 +414,7 @@ impl CredentialDelivery {
             if previous_stamp.as_ref() == Some(&slot.stamp) {
                 continue;
             }
-            if let Some(endpoint) = slot.endpoint {
+            if slot.endpoint.is_some() || slot.stamp == EndpointStamp::Cleared {
                 let backend = self
                     .backend
                     .as_ref()
@@ -427,11 +434,71 @@ impl CredentialDelivery {
                     .read_small_file(&target, &path)
                     .await
                     .map_err(|_| "could not read the agent settings")?;
-                let bytes = if is_claude {
-                    super::agent_endpoints::claude(previous.as_deref(), &endpoint)
+                let bytes = if let Some(endpoint) = slot.endpoint {
+                    Some(if is_claude {
+                        super::agent_endpoints::claude(previous.as_deref(), &endpoint)
+                    } else {
+                        super::agent_endpoints::codex(previous.as_deref(), &endpoint)
+                    }?)
                 } else {
-                    super::agent_endpoints::codex(previous.as_deref(), &endpoint)
-                }?;
+                    super::agent_endpoints::clear_codex(previous.as_deref())?
+                };
+                if let Some(bytes) = bytes {
+                    backend
+                        .ensure_directories(
+                            &target,
+                            &[DirectorySpec {
+                                path: directory,
+                                mode: 0o700,
+                                shared: true,
+                            }],
+                        )
+                        .await
+                        .map_err(|_| "could not prepare the agent settings directory")?;
+                    let temporary = path
+                        .with_file_name(format!(".{file}.farhelm-tmp-{}", uuid::Uuid::new_v4()));
+                    backend
+                        .install_bytes(&target, &bytes, &path, &temporary, 0o600)
+                        .await
+                        .map_err(|_| "could not install the agent settings")?;
+                }
+            }
+            if is_claude {
+                record.claude = Some(slot.stamp);
+            } else {
+                record.codex = Some(slot.stamp);
+            }
+            guard = self.write_record(row, &record, guard).await?;
+        }
+        if let Some(name) = bindings.codex_login_credential {
+            let lookup = name.clone();
+            let (auth, revision, incarnation) = self
+                .store
+                .conn()
+                .call("resolve Codex login", move |conn| {
+                    crate::credentials::secret(
+                        conn,
+                        &lookup,
+                        farhelm_proto::credentials::CredentialKind::CodexLogin,
+                    )?
+                    .ok_or_else(|| anyhow::anyhow!("Codex login no longer exists"))
+                })
+                .await
+                .map_err(|_| "could not resolve the recipe's Codex login")?;
+            let stamp = (name, revision, incarnation);
+            if record.codex_auth.as_ref() != Some(&stamp) {
+                // Config cleanup established the ordinary home first. Never
+                // read auth.json: its refreshed contents belong to Codex.
+                let directory = record
+                    .home
+                    .as_ref()
+                    .ok_or("the host has no known home directory")?
+                    .join(".codex");
+                let path = directory.join("auth.json");
+                let backend = self
+                    .backend
+                    .as_ref()
+                    .ok_or("credential delivery is unavailable")?;
                 backend
                     .ensure_directories(
                         &target,
@@ -442,20 +509,16 @@ impl CredentialDelivery {
                         }],
                     )
                     .await
-                    .map_err(|_| "could not prepare the agent settings directory")?;
+                    .map_err(|_| "could not prepare the Codex login directory")?;
                 let temporary =
-                    path.with_file_name(format!(".{file}.farhelm-tmp-{}", uuid::Uuid::new_v4()));
+                    path.with_file_name(format!(".auth.json.farhelm-tmp-{}", uuid::Uuid::new_v4()));
                 backend
-                    .install_bytes(&target, &bytes, &path, &temporary, 0o600)
+                    .install_bytes(&target, auth.as_bytes(), &path, &temporary, 0o600)
                     .await
-                    .map_err(|_| "could not install the agent settings")?;
+                    .map_err(|_| "could not install the Codex login")?;
+                record.codex_auth = Some(stamp);
+                guard = self.write_record(row, &record, guard).await?;
             }
-            if is_claude {
-                record.claude = Some(slot.stamp);
-            } else {
-                record.codex = Some(slot.stamp);
-            }
-            guard = self.write_record(row, &record, guard).await?;
         }
         // An active connection can still name a credential removed after a
         // pending recipe edit. That later slot must not prevent independent
@@ -542,37 +605,38 @@ impl CredentialDelivery {
 
     /// Each catalog read binds a value to its revision. The shared resolver
     /// already keeps secrets transient; warnings discard storage diagnostics.
-    async fn resolve_endpoints(
+    async fn resolve_endpoint(
         &self,
-        claude: Option<StoredEndpoint>,
-        codex: Option<StoredEndpoint>,
-    ) -> Result<[Slot; 2], String> {
-        let resolve = async |endpoint: Option<StoredEndpoint>| -> Result<Slot, String> {
-            let Some(endpoint) = endpoint else {
-                return Ok(Slot {
-                    endpoint: None,
-                    stamp: EndpointStamp::Absent,
-                });
-            };
-            let name = endpoint.token_credential.clone();
-            let resolved = self
-                .store
-                .resolve_endpoint(endpoint)
-                .await
-                .map_err(|_| "could not resolve the recipe's endpoint credentials")?;
-            let credential = name
-                .zip(resolved.revision)
-                .zip(resolved.incarnation.clone())
-                .map(|((name, revision), incarnation)| (name, revision, incarnation));
-            Ok(Slot {
-                stamp: EndpointStamp::Endpoint {
-                    base_url: resolved.base_url.clone(),
-                    credential,
+        endpoint: Option<StoredEndpoint>,
+        is_claude: bool,
+    ) -> Result<Slot, String> {
+        let Some(endpoint) = endpoint else {
+            return Ok(Slot {
+                endpoint: None,
+                stamp: if is_claude {
+                    EndpointStamp::Absent
+                } else {
+                    EndpointStamp::Cleared
                 },
-                endpoint: Some(resolved),
-            })
+            });
         };
-        Ok([resolve(claude).await?, resolve(codex).await?])
+        let name = endpoint.token_credential.clone();
+        let resolved = self
+            .store
+            .resolve_endpoint(endpoint)
+            .await
+            .map_err(|_| "could not resolve the recipe's endpoint credentials")?;
+        let credential = name
+            .zip(resolved.revision)
+            .zip(resolved.incarnation.clone())
+            .map(|((name, revision), incarnation)| (name, revision, incarnation));
+        Ok(Slot {
+            stamp: EndpointStamp::Endpoint {
+                base_url: resolved.base_url.clone(),
+                credential,
+            },
+            endpoint: Some(resolved),
+        })
     }
 
     /// Resolve the later GitHub slot only after earlier successful endpoint

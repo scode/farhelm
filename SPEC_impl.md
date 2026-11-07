@@ -5897,17 +5897,31 @@ Debug implementation. Tokens reuse the visible-ASCII 4096-byte bound; Codex acce
 KiB, preserving vendor fields. The 512 KiB request cap permits JSON escaping of the bounded pasted file.
 
 Credential metadata includes the names of recipes referring to it. The same reference query protects deletion inside its
-immediate transaction. Both recipe create and update check existence and the required endpoint-token or GitHub-token
-kind inside their own immediate write transactions; this excludes a competing delete even across independent SQLite
-connections. Saving a recipe checks metadata alone. Delivery resolves values into a transient `ResolvedEndpoint` with
-neither Debug nor Serialize; persisted `StoredEndpoint` contains only `base_url` and optional `token_credential`.
+immediate transaction. Both recipe create and update check existence and the required endpoint-token, Codex-login or
+GitHub-token kind inside their own immediate write transactions; this excludes a competing delete even across
+independent SQLite connections. Saving a recipe checks metadata alone. Delivery resolves values into a transient
+`ResolvedEndpoint` with neither Debug nor Serialize; persisted `StoredEndpoint` contains only `base_url` and optional
+`token_credential`.
 
 Schema 77 adds nullable `hosts.tensorlake_credential_delivery`. The provisioning delivery component alone reads and
 writes this nonsecret JSON: known absolute home and independent successful Claude/Codex endpoint fingerprints (URL,
-credential name, revision and immutable creation UUID), plus a GitHub absent/name/revision/creation-UUID stamp. Unknown
-slots retry; known absent endpoints require no file work under this optional-URL interface. This absence stamp does not
-represent explicit agent-mode cleanup. Each successful file's stamp is committed before the next file is attempted. The
-revision and value come from the same credential read; no secret is cached in the record or runtime binding.
+credential name, revision and creation UUID), a separate last-successful Codex auth name/revision/creation UUID, plus a
+GitHub absent/name/revision/creation-UUID stamp. Unknown slots retry. Claude's absent endpoint requires no file work.
+Codex None and Subscription use a distinct Cleared fingerprint, so old endpoint-only Absent records cannot bypass their
+first cleanup. Clean or missing config files need no write, but still commit Cleared. Each successful file's stamp is
+committed before the next file is attempted. The revision and value come from the same credential read; no secret is
+cached in the record or runtime binding.
+
+Recipes persist optional `codex_login_credential` names, mutually exclusive with the existing optional `codex` endpoint.
+Neither present means None. The endpoint and login drafts stay separate in the editor; only the selected mode is saved.
+Delivery resolves concrete slots in order: Claude endpoint, Codex config, Codex auth, GitHub. Each name is resolved at
+its own slot so a later missing retained selection cannot withhold an earlier successful replacement. Codex auth goes
+through the existing private stdin uploader into the ordinary `.codex/auth.json`, only when the selected
+name/revision/creation UUID differs from the last successful auth write. Its stamp commits before GitHub and is retained
+across Endpoint/None. Neither a reconnect nor a later-slot failure can cause an unchanged seed to overwrite Codex's
+refreshed file. Delivery never reads auth.json, tests no remote ownership marker and creates no separate agent home or
+retry task. Remote-success with a lost response or a process crash before the local stamp remains ambiguous; this is not
+exactly-once installation.
 
 Recipes persist optional `github_token_credential` names. The GitHub slot atomically installs 0600 bytes through stdin
 at `github_token::host_file(remote_state_dir)`, the shared `github-token` basename, or unlinks only that file for None.
@@ -6056,12 +6070,15 @@ copied-state check; that write records both coordinates together and imports no 
 Agent settings are read with a 1 MiB bound, merged on the helm, and streamed through backend stdin into mode-0600 atomic
 installs. Claude's JSON must be an object with an object `env`; only `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`
 change. `toml_edit` preserves Codex's comments and unrelated tables while selecting and updating
-`model_providers.farhelm`. Unset endpoints never touch files. Parse/read failures omit contents and parser details so
-tokens cannot enter progress. The shared delivery component writes at Add, connection and credential replacement; Update
-does not independently reapply settings. Failures become warnings and do not abort supervisor installation or
-connection. The shared SSH uploader sets `umask 077` before creating its temporary, so even an existing mode-0755 agent
-directory cannot expose tokens during upload or after interruption. Its finishing command applies the requested final
-mode.
+`model_providers.farhelm`. Codex None and Subscription remove only a `farhelm` model_provider selection and that table's
+experimental_bearer_token, retaining its table, unrelated keys and comments. An unset Claude endpoint still leaves its
+file alone. Setup always includes credential configuration because Codex cleanup can do work even without selected
+credentials; the copied-state check and install-coordinate admission still precede it. Parse/read failures omit contents
+and parser details so tokens cannot enter progress. The shared delivery component writes at Add, connection and
+credential replacement; Update does not independently reapply settings. Failures become warnings and do not abort
+supervisor installation or connection. The shared SSH uploader sets `umask 077` before creating its temporary, so even
+an existing mode-0755 agent directory cannot expose tokens during upload or after interruption. Its finishing command
+applies the requested final mode.
 
 The add dialog embeds the full recipe editor with deletion disabled and a `DialogCloseGuard` for Escape and Close. It
 selects the editor outside its own body wrapper: the editor supplies a body and `DialogFooter` as direct siblings of the
