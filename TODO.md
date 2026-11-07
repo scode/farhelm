@@ -24,21 +24,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Fix click-to-download when a printed absolute path is split by a line wrap.** On 2026-11-07 a macOS brick-test run
-  printed `Before screenshot (/tmp/farhelm-tmp/8B3AAC70-9A39-4B45-8A69-0842AC8C77F4/before-reopen.jpg)`,
-  `Failure screenshot (/tmp/farhelm-tmp/8B3AAC70-9A39-4B45-8A69-0842AC8C77F4/failure.jpg)` and
-  `Report and logs (/tmp/farhelm-tmp/8B3AAC70-9A39-4B45-8A69-0842AC8C77F4/report/REPORT.md)` on one line, and the
-  terminal wrapped that line after `/tmp/farhelm-`. Hovering the `failure.jpg` link disclosed `failure.jpg`, with the
-  session's checkout directory followed by `tmp/8B3AAC70-9A39-4B45-8A69-0842AC8C77F4/` as the directory, and
-  `Not found`. So recognition offered only the wrapped continuation (`tmp/8B3AAC70-…/failure.jpg`) as a path, the host
-  resolved that relative path against the session cwd, and the click to download failed. Start by reproducing a printed
-  absolute path that soft-wraps, then check both seams: whether the continuation row carries `wrapped` in the terminal
-  that showed this (`crates/farhelm-ui/assets/terminal-files.js`, `pathLinks`, against `grid-buffer.js`'s `linkLines`),
-  and whether a path-like token that opens a line should be offered at all when it is the visibly cut tail of the line
-  above. A relative printed path resolving against the session cwd is by design
-  (`crates/farhelm-supervisor/src/service/downloads.rs`, `resolve_path`), so any fix belongs in recognition, not there.
-  Plan: `plans/queue/cut-path-links.md`.
-
 - **Generally rethink the session filtering experience.** The list now names its active filters and shows a removable
   host chip; revisit the broader filtering experience.
 

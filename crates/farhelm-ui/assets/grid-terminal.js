@@ -1235,7 +1235,7 @@
     // gives the program's hyperlinks, printed URLs and file paths, with the
     // same displays and checks as an old terminal's; without a provider
     // there are no links).
-    // A link is `{kind, web, ranges, evidence?, hover(event), leave(),
+    // A link is `{kind, web, ranges, evidence?, revalidateEvidence?, hover(event), leave(),
     // activate(event), decorations}`; `decorations.underline` and
     // `decorations.pointerCursor` may change while it is hovered (a file
     // link shows the hand only once its check succeeds), so they are setters
@@ -1244,16 +1244,21 @@
     // question, about rows still in place and the line still under the
     // pointer, counts (`answerLines`).
     //
-    // A hover rests on the row objects it read, captured when its `hover()`
-    // runs and nowhere else: the lines the link covers, plus its `evidence`
+    // A hover rests on the row objects it read, initially captured when its
+    // `hover()` runs: the lines the link covers, plus its `evidence`
     // lines. OSC 8 links include adjacent tagged rows and their boundaries;
     // printed URLs include the search window and its boundary rows, since
     // an edit outside the matched cells can change the address.
+    // A provider may synchronously revalidate changed evidence outside the
+    // covered rows. Printed paths use this to keep an unchanged hover while
+    // unrelated output changes, without another asynchronous container check.
+    // Covered-row changes always retire the link: text and provider precedence
+    // may have changed even when a recognizer returns the same target.
     // Rows are immutable and replaced only when the
     // supervisor sends that row, so "the hover is current" is one identity
     // check per line. Every path checks it before relying on the hover: a
     // pointer move, the paint after rows changed, and a release. A hover
-    // that is not current is left first (withdrawing a stale target display
+    // that cannot revalidate its changed neighbors is left first (withdrawing a stale target display
     // and a file link's permission) and the link under the pointer asked for
     // afresh, a new link object hovered afresh; the file addon reuses its
     // check when path, text and range are unchanged. That is how an old
@@ -1289,10 +1294,23 @@
       return lines;
     }
 
-    /** Whether every row the hovered link read is still the row on its line. */
+    /** Keep a hover only over its original rows or revalidated neighboring evidence.
+     * Covered rows always take the normal leave/requery path. Only a provider
+     * that can synchronously prove its unchanged recognition may acknowledge a
+     * neighboring redraw without losing the hover's existing host permission.
+     */
     function hoverCurrent() {
       if (!hoverRows) return true;
-      for (const [abs, row] of hoverRows) if (rowAt(abs) !== row) return false;
+      let changed = false;
+      for (const [abs, row] of hoverRows) {
+        if (rowAt(abs) === row) continue;
+        if (!hoverLink.revalidateEvidence || hoverLink.ranges.some(range => abs >= range.start.abs && abs <= range.end.abs)) return false;
+        changed = true;
+      }
+      if (changed) {
+        if (!hoverLink.revalidateEvidence()) return false;
+        for (const abs of hoverRows.keys()) hoverRows.set(abs, rowAt(abs));
+      }
       return true;
     }
 
@@ -1380,7 +1398,7 @@
       };
     }
 
-    /** The only place a hover starts or ends, and where its rows are captured. */
+    /** Start or end a hover, capturing its initial row evidence before its callback. */
     function setHover(link, ev) {
       if (link === hoverLink) return;
       if (hoverLink) hoverLink.leave();
@@ -1422,8 +1440,9 @@
 
     /**
      * After a paint (as an old terminal rechecks a hovered link after a
-     * render): a hover whose rows changed, or that is no longer under the
-     * resting pointer because the view moved, is left and asked for afresh.
+     * render): a hover whose covered rows changed or whose neighboring evidence
+     * cannot be revalidated is left and asked for afresh. So is a link no longer
+     * under the resting pointer because the view moved.
      * With nothing hovered nothing happens until the pointer moves.
      */
     function refreshHover() {

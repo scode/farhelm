@@ -2784,36 +2784,42 @@ whatever the agent renders is what you see. There is no composer, no message abs
 - File paths in terminal output can be downloaded from the session's host, including the local host. Absolute and `~/`
   paths, relative paths containing a slash or a file extension, and `file://` hyperlinks emitted by a program count;
   plain words, version numbers and plain scheme-bearing text do not. Detection does not try to support file names that
-  contain whitespace. Diagnostic line/column suffixes and trailing punctuation are excluded. Relative paths use the
-  session's directory, not a shell's later directory. Hover immediately underlines the path and shows a checking
-  spinner, then the host, full resolved path and size or refusal. Each hover checks afresh; a redraw beneath a pointer
-  resting on the same path text and target at the same position is not a new hover. Leaving cancels it. Only a
-  successful check over link text unchanged since that hover admits a click (OSC hyperlinks may show a pointer earlier).
-  A partial redraw that changes the link text withdraws transfer and opening permission even if the terminal library
-  retains its old target. A click cannot transfer or open a file while the full hover disclosure does not fit in the
-  window or is covered by another Farhelm surface such as an approval card or tunnel-error notice. Only a fully visible
-  hover counts as disclosing the target; otherwise the click is refused with a visible explanation to move the pointer
-  or enlarge the window and hover again. While the pointer stays on a refused link, its explanation may cover the top of
-  an approval card, including its heading and the requesting session and host. The card stays answerable from the
-  keyboard meanwhile; the cover ends when the pointer leaves the link. File disclosures and transfer messages make
-  presentation-unsafe characters visible, distinguish literal escape notation from escaped characters, and preserve
-  repeated spaces. They do not guarantee that names differing only by leading or trailing spaces, other Unicode spaces,
-  or lookalike letters render differently (confirmed 2026-10-17): a trailing space only makes a file less openable, and
-  in the usual case the program that could plant such a name can already write the file it imitates. Files must be
-  readable regular files no larger than 100 MB, including while transferring; directories are refused. A browser saves a
-  complete file by basename. The desktop app saves into Downloads under a unique name and shows where it went, with no
-  partial file after failure or interruption. Status appears at the top of that terminal: success fades after a few
-  seconds, while a failure stays until the next click or download there. Plain click only downloads. In the desktop app,
-  Cmd-click on macOS (Ctrl-click elsewhere) also opens the completed save with the default app when the saved file's
-  final extension is in the helm's shared list, case-insensitively. The list defaults to .md, .txt and .json, and the
-  saved file must still have the same final extension as the path disclosed at hover. Other types are saved without
-  opening; an opening failure leaves the save successful and says why it was not opened. A browser modifier-click only
-  downloads. The hover uses a file icon and bright name, the host and full directory on a second line, and decimal size
-  with the action hints on a third. A left stripe and size color show under 1 MB green, 1–10 MB blue stripe with neutral
-  size, and 10–100 MB amber; refusals are red and checking has a neutral stripe. Only an eligible desktop file has the
-  opening hint. Any file the session's account can read is in reach, within the existing shell authority; hover
-  discloses the agent-provided target before an explicit click. Only the helm can ask the supervisor for file reads. OSC
-  hyperlink schemes are explicitly limited to http, https and file; every other scheme is ignored.
+  contain whitespace. As a deliberate exception to conservative recognition, a path cut by a program's line break links
+  to the joined path from either half when the head ends in an unclosed path-like token and the next row starts with its
+  continuation (indentation is ignored), and that continuation would not fit in the head row's remaining columns after
+  allowing up to four columns for a TUI's right margin. Padding after the head is ignored. Both the head's final token
+  and the joined token must meet the ordinary path rules; a plain word cannot donate a head. This exception covers one
+  isolated pair of rows, not chains of hard breaks; ordinary terminal wraps still join as before. Diagnostic line/column
+  suffixes and trailing punctuation are excluded. Relative paths use the session's directory, not a shell's later
+  directory. Hover immediately underlines the path and shows a checking spinner, then the host, full resolved path and
+  size or refusal. Each hover checks afresh; a redraw beneath a pointer resting on the same path text and target at the
+  same position is not a new hover. Leaving cancels it. Only a successful check over link text unchanged since that
+  hover admits a click (OSC hyperlinks may show a pointer earlier). A partial redraw that changes the link text
+  withdraws transfer and opening permission even if the terminal library retains its old target. A click cannot transfer
+  or open a file while the full hover disclosure does not fit in the window or is covered by another Farhelm surface
+  such as an approval card or tunnel-error notice. Only a fully visible hover counts as disclosing the target; otherwise
+  the click is refused with a visible explanation to move the pointer or enlarge the window and hover again. While the
+  pointer stays on a refused link, its explanation may cover the top of an approval card, including its heading and the
+  requesting session and host. The card stays answerable from the keyboard meanwhile; the cover ends when the pointer
+  leaves the link. File disclosures and transfer messages make presentation-unsafe characters visible, distinguish
+  literal escape notation from escaped characters, and preserve repeated spaces. They do not guarantee that names
+  differing only by leading or trailing spaces, other Unicode spaces, or lookalike letters render differently (confirmed
+  2026-10-17): a trailing space only makes a file less openable, and in the usual case the program that could plant such
+  a name can already write the file it imitates. Files must be readable regular files no larger than 100 MB, including
+  while transferring; directories are refused. A browser saves a complete file by basename. The desktop app saves into
+  Downloads under a unique name and shows where it went, with no partial file after failure or interruption. Status
+  appears at the top of that terminal: success fades after a few seconds, while a failure stays until the next click or
+  download there. Plain click only downloads. In the desktop app, Cmd-click on macOS (Ctrl-click elsewhere) also opens
+  the completed save with the default app when the saved file's final extension is in the helm's shared list,
+  case-insensitively. The list defaults to .md, .txt and .json, and the saved file must still have the same final
+  extension as the path disclosed at hover. Other types are saved without opening; an opening failure leaves the save
+  successful and says why it was not opened. A browser modifier-click only downloads. The hover uses a file icon and
+  bright name, the host and full directory on a second line, and decimal size with the action hints on a third. A left
+  stripe and size color show under 1 MB green, 1–10 MB blue stripe with neutral size, and 10–100 MB amber; refusals are
+  red and checking has a neutral stripe. Only an eligible desktop file has the opening hint. Any file the session's
+  account can read is in reach, within the existing shell authority; hover discloses the agent-provided target before an
+  explicit click. Only the helm can ask the supervisor for file reads. OSC hyperlink schemes are explicitly limited to
+  http, https and file; every other scheme is ignored.
 
 ## Attachments
 

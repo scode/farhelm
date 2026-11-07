@@ -437,6 +437,25 @@ test("link lines present history at its own width and wrap across the history/sc
   assert.equal(lines.line(model.screenBase + 1).wrapped, false);
 });
 
+/** The incident must not be attributed to a lost wrap flag when history is
+ * available. Recognition crosses that boundary using the real grid adapter.
+ */
+test("printed paths retain a soft wrap from history into the first screen row", () => {
+  const model = build({ cols: 20, history: [wire([[0, "/tmp/farhelm-"]], true)], historyCols: 13,
+    screen: [wire([[0, "tmp/run/failure.jpg)"]])] });
+  const lines = linesOver(model);
+  assert.equal(lines.line(model.screenBase).wrapped, true);
+  const expected = [{ path: "/tmp/farhelm-tmp/run/failure.jpg", range: {
+    start: at(100, 0), end: at(model.screenBase, 19),
+  } }];
+  assert.deepEqual(files.pathLinks(lines, 100), expected);
+  assert.deepEqual(files.pathLinks(lines, model.screenBase), expected);
+  // An alternate screen deliberately exposes no history. Missing bytes
+  // cannot prove a prior wrap or supply the beginning of its path.
+  const alternate = buffer.linkLines(buffer.modelSource(model, false));
+  assert.equal(alternate.line(model.screenBase).wrapped, false);
+});
+
 test("a copy leaves out the padding before a wide character that wrapped", () => {
   // A two-cell character that does not fit in the last column wraps whole,
   // leaving the cell before the edge empty. That cell is not copied; a blank
