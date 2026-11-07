@@ -736,7 +736,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
         "the report must precede launch confirmation"
     );
     assert!(
-        row.pane.is_empty(),
+        row.terminal_address.is_empty(),
         "the report must have been made before the pane was published"
     );
     assert_eq!(

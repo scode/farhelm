@@ -163,7 +163,7 @@ impl Supervisor {
     ///
     /// A session with no recorded terminal (a restart gap, or a reload that
     /// has not seen its pane yet) contributes every pane found under its
-    /// durable tmux name, agent pane included, since none is recorded to
+    /// tmux session's name, agent pane included, since none is recorded to
     /// root at. A session whose agent runs in a terminal host contributes
     /// every pane of its tmux session (its tmux tabs, if it has any; see
     /// `tmux_tab_home`), since its agent is not one of them; the agent's
@@ -185,12 +185,12 @@ impl Supervisor {
             }
             None => match self
                 .store
-                .tmux_name(session_id)
+                .has_session_row(session_id)
                 .await
                 .map_err(TeardownError::TabRediscovery)?
             {
-                Some(tmux_name) => (tmux_name, None),
-                None => return Ok(Vec::new()),
+                true => (session_tmux_name(session_id), None),
+                false => return Ok(Vec::new()),
             },
         };
         // A name this process knows holds no tmux session has no panes to
@@ -769,7 +769,12 @@ impl Supervisor {
                         }
                     }
                 }
-                None => match self.store.tmux_name(session_id).await {
+                None => match self
+                    .store
+                    .has_session_row(session_id)
+                    .await
+                    .map(|exists| exists.then(|| session_tmux_name(session_id)))
+                {
                     // Not asked when this process knows the name holds
                     // nothing (`TmuxDriver::knows_session_absent`). Asked
                     // while the server cannot be used, which refuses: the
@@ -784,7 +789,7 @@ impl Supervisor {
                         Ok(false) => None,
                         Err(error) => {
                             return Err(format!(
-                                "checking whether the durable tmux session still exists before \
+                                "checking whether the session's tmux session still exists before \
                                  delete: {error:#}"
                             ));
                         }
@@ -796,7 +801,8 @@ impl Supervisor {
                     }
                     Err(error) => {
                         return Err(format!(
-                            "reading the durable tmux name before delete: {error:#}"
+                            "reading the session's row before deleting its tmux terminal: \
+                             {error:#}"
                         ));
                     }
                 },
@@ -1543,8 +1549,7 @@ mod tests {
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: format!("fh-{id}"),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
@@ -2461,8 +2466,7 @@ mod tests {
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: format!("fh-{id}"),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
@@ -2527,8 +2531,7 @@ mod tests {
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: format!("fh-{id}"),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: Some(cwd.to_string()),

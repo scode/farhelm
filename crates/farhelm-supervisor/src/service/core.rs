@@ -2362,18 +2362,18 @@ impl Drop for KeyedGuard {
     }
 }
 
-/// The identities one launch will wear: the session id, and the tmux
-/// session name derived from it.
+/// The identity one launch will wear: its session id.
 ///
 /// Assigned BEFORE the launch (and, for a keyed create, stored with the
 /// reservation) rather than discovered from it, because every later
-/// reconciliation is a question about these two names — "did anything
-/// happen under them?" — which cannot be asked about a name that was never
-/// written down.
+/// reconciliation is a question about this id — "did anything happen under
+/// it?" — which cannot be asked about an id that was never written down.
+/// Whatever names a launch's terminal follows from the id: a tmux launch's
+/// session name ([`session_tmux_name`]), or a host's tag. No tmux name is
+/// minted for a launch that does not run in tmux.
 #[derive(Debug, Clone)]
 struct SessionIdentity {
     session_id: String,
-    tmux_name: String,
 }
 
 /// How long delivering one prompt into a host terminal may take, from the
@@ -2450,36 +2450,36 @@ async fn deliver_prompt_to_host(
         })?
 }
 
-/// Mint identities for a launch that does not inherit any.
+/// Mint the identity for a launch that does not inherit one.
 ///
 /// The FULL uuid, not a truncated prefix: an 8-hex-char prefix collides
 /// often enough in practice for two sessions — one live, one a dead row
-/// surviving in SQLite across a restart — to plausibly share a tmux name,
-/// which would cross-wire attach between an unrelated pair of sessions
-/// after a reload. The schema's `UNIQUE` constraint on `tmux_name` (see
-/// `store.rs`) backstops this at the DB layer; a full UUID is what makes
-/// that constraint never fire in the first place. Dashes are legal in tmux
-/// session names (verified empirically against a scratch server).
+/// surviving in SQLite across a restart — to plausibly share an id, and with
+/// it the tmux session name derived from it, which would cross-wire attach
+/// between an unrelated pair of sessions after a reload. The id is the
+/// `sessions` table's primary key, which backstops this at the DB layer; a
+/// full UUID is what makes that constraint never fire in the first place.
+/// Dashes are legal in tmux session names (verified empirically against a
+/// scratch server).
 fn new_session_identity() -> SessionIdentity {
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let tmux_name = session_tmux_name(&session_id);
     SessionIdentity {
-        session_id,
-        tmux_name,
+        session_id: uuid::Uuid::new_v4().to_string(),
     }
 }
 
 /// The name of a session's tmux session: `fh-` and its id.
 ///
-/// Every stored row's `tmux_name` is exactly this. [`new_session_identity`]
-/// is the only place a session's identity is minted, and it has used this
-/// name since sessions were first persisted (the truncated names before
-/// that never reached a database). So code that knows a session but holds
-/// no tmux terminal for it can name its tmux session without a store read:
+/// The only name any tmux terminal of a session lives under, and nowhere
+/// stored: the rows store none since schema 34, which dropped the
+/// `tmux_name` columns after checking that every value in them was exactly
+/// this (it has been since sessions were first persisted; the truncated
+/// names before that never reached a database). So code that knows a
+/// session can name its tmux session without a store read, and only tmux
+/// code ever needs to: a tmux row's agent pane is found under it,
 /// [`super::status::KnownTmuxNames`] counts it as farhelm's, and tab
 /// rediscovery for a session whose agent runs in a terminal host looks for
-/// tabs there ([`super::terminals::tmux_tab_home`]). A change to this
-/// scheme has to keep reading the old one for existing rows.
+/// old tmux tabs there ([`super::terminals::tmux_tab_home`]). The scheme
+/// cannot change while tmux sessions named by it may still run.
 pub(crate) fn session_tmux_name(session_id: &str) -> String {
     format!("fh-{session_id}")
 }
@@ -2924,14 +2924,6 @@ impl Reserved {
         match self {
             Reserved::Unkeyed(identity) | Reserved::New { identity, .. } => &identity.session_id,
             Reserved::Retry(reservation) => &reservation.session_id,
-        }
-    }
-
-    /// The tmux session name this launch runs under.
-    fn tmux_name(&self) -> &str {
-        match self {
-            Reserved::Unkeyed(identity) | Reserved::New { identity, .. } => &identity.tmux_name,
-            Reserved::Retry(reservation) => &reservation.tmux_name,
         }
     }
 
@@ -6804,7 +6796,7 @@ impl Supervisor {
     /// ## Host rows
     ///
     /// A row whose agent runs in a terminal host is never looked up in
-    /// tmux: its `pane` column holds a socket name, which tmux's pane
+    /// tmux: its terminal address is a socket name, which tmux's pane
     /// lookup would read as a pane that does not exist, and so as an agent
     /// that exited. Its terminal comes from discovery instead
     /// ([`host_handover::attribute_host_rows`], given `hosts`), after the
@@ -7093,8 +7085,7 @@ impl Supervisor {
         // `status::PaneEvidence`), built from the rows because the session
         // map does not exist yet.
         let known = super::status::KnownTmuxNames::from_sessions(
-            rows.iter()
-                .map(|row| (row.id.as_str(), Some(row.tmux_name.as_str()))),
+            rows.iter().map(|row| (row.id.as_str(), None)),
         );
         for row in &rows {
             // A recorded pane tmux now reports under a name no row answers
@@ -7114,13 +7105,13 @@ impl Supervisor {
             // existing pane must remain reachable for Attach and for
             // DeleteSession's tmux kill sweep.
             let found = match row.terminal_kind {
-                TerminalKind::Tmux if row.pane.is_empty() => {
+                TerminalKind::Tmux if row.terminal_address.is_empty() => {
                     // Marker-led, not positional (PLAN_M4.md item 2): with
                     // tabs on the same tmux session, "the lowest pane id"
                     // could hand this row a TAB's pane. See
                     // `agent_pane_from_states` for the preference ladder and
                     // its legacy fallback.
-                    agent_pane_from_states(&pane_states, &row.tmux_name, &row.id)
+                    agent_pane_from_states(&pane_states, &session_tmux_name(&row.id), &row.id)
                         .map(|(pane, state)| FoundTerminal::tmux(row, pane, &state))
                 }
                 TerminalKind::Tmux => {
@@ -7129,13 +7120,13 @@ impl Supervisor {
                     // looked up beside it (the evidence carries only what
                     // status decides with).
                     let state = || {
-                        pane_states
-                            .get(&row.pane)
-                            .map(|state| FoundTerminal::tmux(row, row.pane.clone(), state))
+                        pane_states.get(&row.terminal_address).map(|state| {
+                            FoundTerminal::tmux(row, row.terminal_address.clone(), state)
+                        })
                     };
                     match super::status::pane_evidence(
-                        &row.pane,
-                        &row.tmux_name,
+                        &row.terminal_address,
+                        &session_tmux_name(&row.id),
                         &pane_states,
                         &known,
                     ) {
@@ -7261,7 +7252,7 @@ impl Supervisor {
                             row.generation,
                             Transition::SentinelError {
                                 detail: detail.clone(),
-                                pane: found.as_ref().map(|found| found.pane.clone()),
+                                address: found.as_ref().map(|found| found.address.clone()),
                             },
                         ));
                         sentinel_hits.insert(row.id.clone(), detail);
@@ -7332,7 +7323,7 @@ impl Supervisor {
                                 row.generation,
                                 Transition::SentinelError {
                                     detail: detail.clone(),
-                                    pane: found.as_ref().map(|found| found.pane.clone()),
+                                    address: found.as_ref().map(|found| found.address.clone()),
                                 },
                             ));
                             sentinel_hits.insert(row.id.clone(), detail);
@@ -7370,7 +7361,7 @@ impl Supervisor {
             if let Some(found) = unattributed {
                 info!(
                     session = %row.id,
-                    pane = %found.pane,
+                    pane = %found.address,
                     "session's tmux pane is now under a session name farhelm does not \
                      recognize; leaving its recorded outcome alone"
                 );
@@ -7402,7 +7393,7 @@ impl Supervisor {
                 }
                 continue;
             };
-            let (pane, state) = (&found.pane, found.state);
+            let (address, state) = (&found.address, found.state);
             if !row.outcome.is_terminal() {
                 if state.dead {
                     // A dead pane found BY NAME (the row has none of its
@@ -7422,7 +7413,7 @@ impl Supervisor {
                     // A host found by its tag has no such doubt: the tag
                     // names the launch generation it was started for.
                     let stale_pane = match row.terminal_kind {
-                        TerminalKind::Tmux => row.pane.is_empty() && row.generation > 0,
+                        TerminalKind::Tmux => row.terminal_address.is_empty() && row.generation > 0,
                         TerminalKind::Host => false,
                     };
                     if !stale_pane {
@@ -7435,9 +7426,9 @@ impl Supervisor {
                         transitions.push((
                             row.id.clone(),
                             row.generation,
-                            if row.pane.is_empty() {
+                            if row.terminal_address.is_empty() {
                                 Transition::RediscoveredExit {
-                                    pane: pane.clone(),
+                                    address: address.clone(),
                                     exit_code: state.exit_code,
                                 }
                             } else {
@@ -7454,7 +7445,7 @@ impl Supervisor {
                     // stop's kill missed: the stop intent stays, and the
                     // observer records the exit, annotated as stopped,
                     // once the record is replayed.
-                } else if row.outcome != LastOutcome::Running || row.pane != *pane {
+                } else if row.outcome != LastOutcome::Running || row.terminal_address != *address {
                     // Live, and either not yet confirmed, confirmed
                     // against a different pane, or carrying a stop intent
                     // whose kill sweep evidently never landed — the last
@@ -7467,7 +7458,9 @@ impl Supervisor {
                     transitions.push((
                         row.id.clone(),
                         row.generation,
-                        Transition::ConfirmRunning { pane: pane.clone() },
+                        Transition::ConfirmRunning {
+                            address: address.clone(),
+                        },
                     ));
                 }
             }
@@ -7542,7 +7535,7 @@ impl Supervisor {
         for row in rows {
             let terminal = found_panes.remove(&row.id).map(|found| found.terminal);
             let outcome = committed.get(&row.id).cloned().unwrap_or(row.outcome);
-            if terminal.is_some() || !row.pane.is_empty() {
+            if terminal.is_some() || !row.terminal_address.is_empty() {
                 // Pane provenance only (R1.2): an `Error` outcome is no
                 // longer launch evidence BY ITSELF. A retained
                 // create-refusal row is an Error row with an EMPTY pane —
@@ -8320,13 +8313,13 @@ impl Supervisor {
                 match self.store.session(&entry.info.id).await {
                     Ok(Some(row)) if row.generation == entry.generation => {
                         match row.terminal_kind {
-                            TerminalKind::Tmux if row.pane.is_empty() => {
-                                agent_pane_from_states(states, &row.tmux_name, &row.id)
+                            TerminalKind::Tmux if row.terminal_address.is_empty() => {
+                                agent_pane_from_states(states, &session_tmux_name(&row.id), &row.id)
                                     .is_some_and(|(_, pane)| !pane.dead)
                             }
                             TerminalKind::Tmux => match super::status::pane_evidence(
-                                &row.pane,
-                                &row.tmux_name,
+                                &row.terminal_address,
+                                &session_tmux_name(&row.id),
                                 states,
                                 &known,
                             ) {
@@ -8334,7 +8327,7 @@ impl Supervisor {
                                 super::status::PaneEvidence::Absent => false,
                                 super::status::PaneEvidence::Unattributed => true,
                             },
-                            // A host row's `pane` is a socket name, which no pane
+                            // A host row's address is a socket name, which no pane
                             // lookup may read: every such row would read as
                             // abandoned. The host of the row's own launch decides,
                             // found by the socket the row (or, unconfirmed, its
@@ -8966,7 +8959,6 @@ impl Supervisor {
                     dedup_scope: DedupScope::SessionLifetime,
                 },
                 &identity.session_id,
-                &identity.tmux_name,
                 ErrorKind::CheckoutConflict,
                 "this checkout request was refused before allocation; its key replays this refusal for 24 hours; obtain a new preview and explicitly resubmit",
             ).await.context("recording the fresh refusal; its durable outcome is unresolved")?;
@@ -10459,10 +10451,10 @@ impl Supervisor {
     async fn reserved_launch_evidence(&self, reservation: &Reservation) -> LaunchEvidence {
         let kind = match self.store.session(&reservation.session_id).await {
             Ok(Some(row)) => {
-                // Pane and conversation reports are the only ROW-SHAPE
-                // evidence left here (R1.2): an outcome that is not
+                // A terminal address and conversation reports are the only
+                // ROW-SHAPE evidence left here (R1.2): an outcome that is not
                 // Launching/Interrupted — including a retained
-                // create-refusal's `Error` row, which has an EMPTY pane —
+                // create-refusal's `Error` row, which has an EMPTY address —
                 // is no longer evidence BY ITSELF. The physical probes
                 // below (scope, sentinel, tmux) are what distinguish a
                 // real launch from a refusal the refusal transaction
@@ -10470,7 +10462,9 @@ impl Supervisor {
                 // Created, and every genuine launch leaves one of the
                 // physical traces behind. A restart since the interrupted
                 // attempt (generation past zero) launched it too.
-                if !row.pane.is_empty() || row.conversation_source.is_some() || row.generation != 0
+                if !row.terminal_address.is_empty()
+                    || row.conversation_source.is_some()
+                    || row.generation != 0
                 {
                     return LaunchEvidence::Present;
                 }
@@ -10537,13 +10531,15 @@ impl Supervisor {
 
     /// Whether the reserved launch's tmux session exists right now: the
     /// last source of [`Self::reserved_launch_evidence`] for a tmux row.
+    /// The tmux session is the one the reserved session id names
+    /// ([`session_tmux_name`]), the only name a tmux launch of it uses.
     async fn tmux_launch_evidence(&self, reservation: &Reservation) -> LaunchEvidence {
-        match self.tmux.has_session(&reservation.tmux_name).await {
+        let tmux_name = session_tmux_name(&reservation.session_id);
+        match self.tmux.has_session(&tmux_name).await {
             Ok(true) => LaunchEvidence::Present,
             Ok(false) => LaunchEvidence::Absent,
             Err(e) => LaunchEvidence::Unresolved(e.context(format!(
-                "asking tmux whether the reserved session {} exists",
-                reservation.tmux_name
+                "asking tmux whether the reserved session {tmux_name} exists"
             ))),
         }
     }
@@ -10710,13 +10706,7 @@ impl Supervisor {
             Reserved::Unkeyed(_) => return Err(refusal),
             Reserved::New { claim, identity } => {
                 self.store
-                    .record_failed_intent(
-                        claim.clone(),
-                        &identity.session_id,
-                        &identity.tmux_name,
-                        kind,
-                        &message,
-                    )
+                    .record_failed_intent(claim.clone(), &identity.session_id, kind, &message)
                     .await
             }
             // A relaunch refused by validation settles the reservation it
@@ -10792,7 +10782,7 @@ impl Supervisor {
     ///
     /// `terminal` is present only when the failed path already received a
     /// pane from tmux. No discovery belongs here: an unknown pane stays
-    /// unknown, and Delete uses the row's durable tmux name to tear down a
+    /// unknown, and Delete uses the tmux session its id names to tear down a
     /// terminal-less entry. `outcome` is `Launching` for the ambiguous arms
     /// (the error path has not established whether the agent started, only
     /// that it is unsafe to discard its record) and `Error` for the
@@ -10987,7 +10977,6 @@ impl Supervisor {
         // retry takeover instead of rereading SQLite after an error.
         let mut retained_snapshot: Option<StoredSession> = None;
         let id = reserved.session_id().to_string();
-        let tmux_name = reserved.tmux_name().to_string();
         // The working-copy plan for a fresh checkout, minted BEFORE the
         // launching row so `insert_session_with_plan` can commit the
         // registry row, the origin membership, the session row, and the
@@ -11166,8 +11155,7 @@ impl Supervisor {
                 creation_seq: 0,
                 cwd: cwd.to_string(),
                 launch: launch.clone(),
-                tmux_name: tmux_name.clone(),
-                pane: String::new(),
+                terminal_address: String::new(),
                 terminal_kind,
                 outcome: LastOutcome::Launching,
                 canonical_cwd: canonical_cwd.clone(),
@@ -11304,10 +11292,9 @@ impl Supervisor {
                 creation_seq: 0,
                 cwd: cwd.to_string(),
                 launch: launch.clone(),
-                tmux_name: tmux_name.clone(),
-                // Not known until tmux has created the session —
-                // see `StoredSession::pane`.
-                pane: String::new(),
+                // Not known until the launch has created the terminal —
+                // see `StoredSession::terminal_address`.
+                terminal_address: String::new(),
                 terminal_kind,
                 outcome: LastOutcome::Launching,
                 // For a FRESH checkout this is deliberately None:
@@ -11770,92 +11757,97 @@ impl Supervisor {
         // shape here: the spec never landed, or the start failed and either
         // nothing of it is left or something may be.
         let started = match terminal_kind {
-            TerminalKind::Tmux => match self
-                .spawn_agent(
-                    &id,
-                    &session_token,
-                    generation,
-                    &tmux_name,
-                    argv,
-                    shell_source,
-                    // The very snapshot the entry published below carries, so
-                    // the kind that chose this launch's hook flags is the kind
-                    // the session is durably recorded as. Re-deriving it here
-                    // would be a second classifier for one decision.
-                    &snapshot,
-                    args_mode,
-                    // The VERIFIED directory, not the caller's spelling: see
-                    // [`LaunchRequest::launch_cwd`]. They differ only on the
-                    // retry path, and only there because that path had an
-                    // identity to check.
-                    &launch_cwd,
-                    cols,
-                    rows,
-                    SpawnTarget::NewSession,
-                    launch_scope.as_deref(),
-                    preparation,
-                    initial_prompt,
-                    container_config,
-                )
-                .await
-            {
-                Ok(Spawned {
-                    pane,
-                    artifacts,
-                    hooked,
-                    launch_excerpt,
-                }) => Ok(StartedLaunch {
-                    terminal: Terminal::Tmux(TmuxTerminal {
-                        tmux_name: tmux_name.clone(),
+            // The tmux session is named from the id alone (`session_tmux_name`),
+            // so nothing about it is stored or minted before this arm.
+            TerminalKind::Tmux => {
+                let tmux_name = session_tmux_name(&id);
+                match self
+                    .spawn_agent(
+                        &id,
+                        &session_token,
+                        generation,
+                        &tmux_name,
+                        argv,
+                        shell_source,
+                        // The very snapshot the entry published below carries, so
+                        // the kind that chose this launch's hook flags is the kind
+                        // the session is durably recorded as. Re-deriving it here
+                        // would be a second classifier for one decision.
+                        &snapshot,
+                        args_mode,
+                        // The VERIFIED directory, not the caller's spelling: see
+                        // [`LaunchRequest::launch_cwd`]. They differ only on the
+                        // retry path, and only there because that path had an
+                        // identity to check.
+                        &launch_cwd,
+                        cols,
+                        rows,
+                        SpawnTarget::NewSession,
+                        launch_scope.as_deref(),
+                        preparation,
+                        initial_prompt,
+                        container_config,
+                    )
+                    .await
+                {
+                    Ok(Spawned {
                         pane,
+                        artifacts,
+                        hooked,
+                        launch_excerpt,
+                    }) => Ok(StartedLaunch {
+                        terminal: Terminal::Tmux(TmuxTerminal {
+                            tmux_name: tmux_name.clone(),
+                            pane,
+                        }),
+                        artifacts,
+                        hooked,
+                        launch_excerpt,
+                        spawning: None,
                     }),
-                    artifacts,
-                    hooked,
-                    launch_excerpt,
-                    spawning: None,
-                }),
-                Err(SpawnFailure::Spec(error)) => Err(FailedStart::Spec(error)),
-                Err(SpawnFailure::Tmux {
-                    artifacts,
-                    error,
-                    created,
-                    ..
-                }) => {
-                    // A tmux failure is AMBIGUOUS in a way the spec write is
-                    // not: `new-session` can fail after the session already
-                    // exists (a lost reply, a timeout mid-command), so
-                    // deleting the row on the strength of the error alone
-                    // would orphan a running agent — no row, no id, nothing
-                    // left that knows to reap it. Ask tmux instead, and only
-                    // roll back on a CONFIRMED absence; an ambiguous or failed
-                    // probe keeps the row, which is the only record anything
-                    // will ever have of that launch.
-                    let left = match self.tmux.has_session(&tmux_name).await {
-                        Ok(false) => None,
-                        Ok(true) => Some(format!(
-                            "the tmux session {tmux_name} exists despite the failure, so \
-                             session {id} is kept as a launching record rather than deleted; \
-                             stop or delete it to reap whatever is running there"
-                        )),
-                        Err(probe) => Some(format!(
-                            "could not determine whether tmux session {tmux_name} was created \
-                             ({probe:#}), so session {id} is kept as a launching record rather \
-                             than deleted"
-                        )),
-                    };
-                    Err(FailedStart::Terminal {
+                    Err(SpawnFailure::Spec(error)) => Err(FailedStart::Spec(error)),
+                    Err(SpawnFailure::Tmux {
                         artifacts,
                         error,
-                        left,
-                        // The pane tmux handed back, when the failure came
-                        // after `new-session` (marking the window): without
-                        // it the running agent could not be opened until a
-                        // reload rediscovered the pane.
-                        retained: created.map(Terminal::Tmux),
-                        refused: "tmux refused to create the session",
-                    })
+                        created,
+                        ..
+                    }) => {
+                        // A tmux failure is AMBIGUOUS in a way the spec write is
+                        // not: `new-session` can fail after the session already
+                        // exists (a lost reply, a timeout mid-command), so
+                        // deleting the row on the strength of the error alone
+                        // would orphan a running agent — no row, no id, nothing
+                        // left that knows to reap it. Ask tmux instead, and only
+                        // roll back on a CONFIRMED absence; an ambiguous or failed
+                        // probe keeps the row, which is the only record anything
+                        // will ever have of that launch.
+                        let left = match self.tmux.has_session(&tmux_name).await {
+                            Ok(false) => None,
+                            Ok(true) => Some(format!(
+                                "the tmux session {tmux_name} exists despite the failure, so \
+                                 session {id} is kept as a launching record rather than deleted; \
+                                 stop or delete it to reap whatever is running there"
+                            )),
+                            Err(probe) => Some(format!(
+                                "could not determine whether tmux session {tmux_name} was created \
+                                 ({probe:#}), so session {id} is kept as a launching record rather \
+                                 than deleted"
+                            )),
+                        };
+                        Err(FailedStart::Terminal {
+                            artifacts,
+                            error,
+                            left,
+                            // The pane tmux handed back, when the failure came
+                            // after `new-session` (marking the window): without
+                            // it the running agent could not be opened until a
+                            // reload rediscovered the pane.
+                            retained: created.map(Terminal::Tmux),
+                            refused: "tmux refused to create the session",
+                        })
+                    }
                 }
-            },
+            }
             TerminalKind::Host => match self
                 .spawn_agent_in_host(
                     &id,
@@ -12151,15 +12143,18 @@ impl Supervisor {
         // created is torn back down (best effort). If teardown cannot prove
         // it is gone, the launching row and entry remain as the caller's
         // handle for stopping or deleting it.
-        // For a host the `pane` column takes the socket's name (the plan's
-        // D-14); the kind it is read by was committed with the launching row.
-        let pane = terminal.recorded_pane().to_string();
+        // The row's terminal address is the tmux pane id or, for a host, the
+        // socket's name (the plan's D-14); the kind it is read by was
+        // committed with the launching row.
+        let address = terminal.recorded_address().to_string();
         let confirmed = self
             .store
             .transition(
                 &id,
                 generation,
-                Transition::ConfirmRunning { pane: pane.clone() },
+                Transition::ConfirmRunning {
+                    address: address.clone(),
+                },
             )
             .await;
         if let Ok(None) = confirmed {
@@ -12352,7 +12347,7 @@ impl Supervisor {
         if let Some(trigger) = spare_trigger {
             self.spare_builder.register(trigger);
         }
-        info!(session = %id, tmux = %tmux_name, %pane, kind = ?terminal_kind, "session created");
+        info!(session = %id, %address, kind = ?terminal_kind, "session created");
         // A host runtime is published only before an orderly stop gathers
         // the host terminals it closes (`Self::publishable`); after, its
         // launch stays recorded for the next supervisor.
@@ -13863,30 +13858,16 @@ impl Supervisor {
         };
         let tmux_name = match terminal {
             Some(terminal) => terminal.tmux_name.clone(),
-            // A session whose terminal did not survive keeps the tmux name
-            // its row was created with — read back rather than re-derived,
-            // because the name is part of the session's durable identity
-            // (create reservations reconcile against exactly this string)
-            // and a relaunch is the same session, not a new one.
+            // A session whose terminal did not survive relaunches under the
+            // tmux session its id names, the only name any tmux launch of it
+            // has used (`session_tmux_name`): a relaunch is the same session,
+            // not a new one. A row that vanished meanwhile is caught by the
+            // credential read below.
             //
             // The row is a tmux row: the claim wrote `tmux` for a launch
             // that is not `into_host`, and a host row with no terminal is
             // `into_host` (`restart_session_named`).
-            None => match self.store.session(&id).await {
-                Ok(Some(row)) => row.tmux_name,
-                Ok(None) => {
-                    return Err(RelaunchFailure::definitive(anyhow::anyhow!(
-                        "session {} vanished between opening its launch generation and \
-                         relaunching it",
-                        truncate_for_error(&id)
-                    )));
-                }
-                Err(e) => {
-                    return Err(RelaunchFailure::definitive(
-                        e.context("reading this session's tmux name for a relaunch"),
-                    ));
-                }
-            },
+            None => session_tmux_name(&id),
         };
         // Read every fallible durable launch input before killing a tmux
         // husk or touching the reusable pane. A credential read failure
@@ -14053,7 +14034,9 @@ impl Supervisor {
                     .transition(
                         &id,
                         generation,
-                        Transition::ConfirmRunning { pane: pane.clone() },
+                        Transition::ConfirmRunning {
+                            address: pane.clone(),
+                        },
                     )
                     .await
             }
@@ -18330,7 +18313,7 @@ impl Supervisor {
             );
             entry.terminal.clone()
         };
-        let socket_name = Terminal::Host(host.clone()).recorded_pane().to_string();
+        let socket_name = Terminal::Host(host.clone()).recorded_address().to_string();
         self.store
             .set_terminal_for_test(id, crate::store::TerminalKind::Host, &socket_name)
             .await?;
@@ -18513,7 +18496,7 @@ impl Supervisor {
     /// or no longer this session's is `Conflict`, a definitive refusal.
     ///
     /// A row whose agent runs in a terminal host is anchored at the host's
-    /// child instead ([`Self::host_agent_anchor`]); its `pane` column holds
+    /// child instead ([`Self::host_agent_anchor`]); its terminal address is
     /// the host's socket name, which no tmux lookup may read as a pane.
     pub(crate) async fn owned_pane_anchor(
         &self,
@@ -18523,14 +18506,15 @@ impl Supervisor {
             crate::store::TerminalKind::Tmux => {}
             crate::store::TerminalKind::Host => return self.host_agent_anchor(row).await,
         }
-        let pane = if row.pane.is_empty() {
+        let tmux_name = session_tmux_name(&row.id);
+        let pane = if row.terminal_address.is_empty() {
             let states = self.tmux.pane_states().await.map_err(|_| {
                 RequestError::new(
                     ErrorKind::Internal,
                     "the session's foreground pane could not be inspected",
                 )
             })?;
-            agent_pane_from_states(&states, &row.tmux_name, &row.id)
+            agent_pane_from_states(&states, &tmux_name, &row.id)
                 .map(|(pane, _)| pane)
                 .ok_or_else(|| {
                     RequestError::new(
@@ -18539,11 +18523,11 @@ impl Supervisor {
                     )
                 })?
         } else {
-            row.pane.clone()
+            row.terminal_address.clone()
         };
         let process = self
             .tmux
-            .pane_process(&row.tmux_name, &pane)
+            .pane_process(&tmux_name, &pane)
             .await
             .map_err(|_| {
                 RequestError::new(
@@ -18955,11 +18939,11 @@ struct PendingHold {
 /// of either kind: what its reconciliation decides with, and what the
 /// rebuilt entry holds.
 struct FoundTerminal {
-    /// What the row's `pane` column holds for this terminal: a tmux pane
-    /// id, or a host's socket name (the plan's D-14). A transition that
-    /// records the terminal (`ConfirmRunning`, `RediscoveredExit`,
-    /// `SentinelError`) writes this.
-    pane: String,
+    /// The row's terminal address for this terminal
+    /// (`StoredSession::terminal_address`): a tmux pane id, or a host's
+    /// socket name (the plan's D-14). A transition that records the terminal
+    /// (`ConfirmRunning`, `RediscoveredExit`, `SentinelError`) writes this.
+    address: String,
     /// Whether its program has exited, and how, as status reads it. For a
     /// host, from its runtime's processed exit record, so a child that
     /// exited while no supervisor was attached reads as running until the
@@ -18978,10 +18962,10 @@ impl FoundTerminal {
     fn tmux(row: &StoredSession, pane: String, state: &PaneState) -> Self {
         FoundTerminal {
             terminal: Terminal::Tmux(TmuxTerminal {
-                tmux_name: row.tmux_name.clone(),
+                tmux_name: session_tmux_name(&row.id),
                 pane: pane.clone(),
             }),
-            pane,
+            address: pane,
             state: state.into(),
             reaped: false,
         }
@@ -19010,7 +18994,7 @@ impl FoundTerminal {
         );
         let terminal = Terminal::Host(host);
         FoundTerminal {
-            pane: terminal.recorded_pane().to_string(),
+            address: terminal.recorded_address().to_string(),
             state,
             terminal,
             reaped,
@@ -19419,7 +19403,6 @@ pub(crate) mod tests {
             intent_key: "message-key".into(),
             fingerprint: original,
             session_id: "interrupted".into(),
-            tmux_name: "fh-interrupted".into(),
             dedup_scope: DedupScope::Permanent,
             outcome: ReservationOutcome::Pending,
         };
@@ -19606,8 +19589,7 @@ pub(crate) mod tests {
                     creation_seq: 0,
                     cwd: cwd.clone(),
                     launch: ordinary.clone(),
-                    tmux_name: "fh-named".into(),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: Some(cwd.clone()),
@@ -20782,8 +20764,7 @@ pub(crate) mod tests {
                                 crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
                             ]),
                         },
-                        tmux_name: format!("fh-{id}"),
-                        pane: String::new(),
+                        terminal_address: String::new(),
                         terminal_kind: crate::store::TerminalKind::Tmux,
                         outcome: outcome.clone(),
                         canonical_cwd: Some(canonical.clone()),
@@ -20891,8 +20872,7 @@ pub(crate) mod tests {
                             crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
                         ]),
                     },
-                    tmux_name: format!("fh-{id}"),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     // Restart only resumes, so the row carries a captured
@@ -20994,8 +20974,7 @@ pub(crate) mod tests {
                             crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
                         ]),
                     },
-                    tmux_name: format!("fh-{id}"),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
@@ -22443,8 +22422,7 @@ pub(crate) mod tests {
                         agent_kind: AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: "fh-rename-fixture".to_string(),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
@@ -24635,8 +24613,7 @@ pub(crate) mod tests {
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: "fh-renamed".to_string(),
-                    pane: pane.clone(),
+                    terminal_address: pane.clone(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
@@ -24726,7 +24703,7 @@ pub(crate) mod tests {
         // past: it is what the restore assertion below distinguishes from
         // both a re-mint and a reset.
         let stored_activity_at = now_unix() - 3_600;
-        for (id, tmux_name) in [("live", "fh-live"), ("dead", "fh-dead")] {
+        for id in ["live", "dead"] {
             sup.store
                 .insert_session(
                     StoredSession {
@@ -24749,8 +24726,7 @@ pub(crate) mod tests {
                             agent_kind: farhelm_proto::AgentKind::Generic,
                             resume_template: None,
                         },
-                        tmux_name: tmux_name.to_string(),
-                        pane: String::new(),
+                        terminal_address: String::new(),
                         terminal_kind: crate::store::TerminalKind::Tmux,
                         outcome: LastOutcome::Launching,
                         canonical_cwd: None,
@@ -24843,7 +24819,7 @@ pub(crate) mod tests {
         let rows = sup.store.load_all().await.expect("load");
         for row in rows {
             assert!(
-                !row.pane.is_empty(),
+                !row.terminal_address.is_empty(),
                 "the rediscovered pane must be recorded, not merely used once"
             );
             assert_ne!(row.outcome, LastOutcome::Launching);
@@ -24905,8 +24881,7 @@ pub(crate) mod tests {
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: tmux_name.to_string(),
-                    pane: pane.clone(),
+                    terminal_address: pane.clone(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Error {
                         detail: "exec failed".to_string(),
@@ -25033,7 +25008,7 @@ pub(crate) mod tests {
         let scoped_id = uuid::Uuid::new_v4().to_string();
         sup.tmux
             .create_session(
-                "fh-scoped",
+                &session_tmux_name(&scoped_id),
                 "/tmp",
                 80,
                 24,
@@ -25064,8 +25039,7 @@ pub(crate) mod tests {
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: "fh-scoped".to_string(),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
@@ -25197,8 +25171,7 @@ pub(crate) mod tests {
                             "{conversation}".to_string(),
                         ]),
                     },
-                    tmux_name: "fh-kind-gone".to_string(),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Interrupted,
                     // An integrated kind must carry a conversation-bearing
@@ -25262,8 +25235,7 @@ pub(crate) mod tests {
                         agent_kind: farhelm_proto::AgentKind::Codex,
                         resume_template: integration.resume_template.clone(),
                     },
-                    tmux_name: format!("fh-{id}"),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
@@ -25653,8 +25625,7 @@ pub(crate) mod tests {
                         agent_kind: farhelm_proto::AgentKind::Grok,
                         resume_template: integration.resume_template.clone(),
                     },
-                    tmux_name: format!("fh-{id}"),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
@@ -25708,8 +25679,7 @@ pub(crate) mod tests {
                         agent_kind: AgentKind::Pi,
                         resume_template: integration.resume_template.clone(),
                     },
-                    tmux_name: format!("fh-{id}"),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
@@ -25857,8 +25827,7 @@ pub(crate) mod tests {
                         agent_kind: AgentKind::Claude,
                         resume_template: integration.resume_template,
                     },
-                    tmux_name: format!("fh-{id}"),
-                    pane: "%0".into(),
+                    terminal_address: "%0".into(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
@@ -26120,7 +26089,6 @@ pub(crate) mod tests {
                 intent_key: "already-created".into(),
                 fingerprint: String::new(),
                 session_id: id.into(),
-                tmux_name: format!("fh-{id}"),
                 dedup_scope: crate::store::DedupScope::Permanent,
                 outcome: ReservationOutcome::Created,
             })
@@ -26682,8 +26650,7 @@ pub(crate) mod tests {
                                 crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
                             ]),
                         },
-                        tmux_name: format!("fh-{id}"),
-                        pane: String::new(),
+                        terminal_address: String::new(),
                         terminal_kind: crate::store::TerminalKind::Tmux,
                         outcome: LastOutcome::Exited {
                             exit_code: Some(0),
@@ -26783,8 +26750,7 @@ pub(crate) mod tests {
                         agent_kind: AgentKind::Pi,
                         resume_template: integration.resume_template.clone(),
                     },
-                    tmux_name: format!("fh-{id}"),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
@@ -27435,8 +27401,7 @@ exit 0
                             agent_kind: farhelm_proto::AgentKind::Omp,
                             resume_template: Some(template),
                         },
-                        tmux_name: format!("fh-{id}"),
-                        pane: pane.into(),
+                        terminal_address: pane.into(),
                         terminal_kind: crate::store::TerminalKind::Tmux,
                         outcome: LastOutcome::Exited {
                             exit_code: Some(0),
@@ -28884,8 +28849,7 @@ exit 0
                             crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
                         ]),
                     },
-                    tmux_name: format!("fh-{id}"),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
@@ -29112,8 +29076,7 @@ exit 0
                         agent_kind: farhelm_proto::AgentKind::Claude,
                         resume_template: None,
                     },
-                    tmux_name: format!("fh-{doomed}"),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
@@ -29208,8 +29171,7 @@ exit 0
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: format!("fh-{id}"),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
@@ -29290,8 +29252,7 @@ exit 0
                             agent_kind: farhelm_proto::AgentKind::Generic,
                             resume_template: None,
                         },
-                        tmux_name,
-                        pane: pane.clone(),
+                        terminal_address: pane.clone(),
                         terminal_kind: crate::store::TerminalKind::Tmux,
                         outcome: LastOutcome::Running,
                         canonical_cwd: None,
@@ -29386,8 +29347,7 @@ exit 0
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: "fh-1".to_string(),
-                    pane: "%0".to_string(),
+                    terminal_address: "%0".to_string(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
@@ -29508,8 +29468,7 @@ exit 0
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: tmux_name.into(),
-                    pane: pane.clone(),
+                    terminal_address: pane.clone(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
@@ -29608,8 +29567,7 @@ exit 0
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: "fh-1".to_string(),
-                    pane: "%0".to_string(),
+                    terminal_address: "%0".to_string(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
@@ -30191,8 +30149,7 @@ exit 0
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: "fh-does-not-exist".to_string(),
-                    pane: "%0".to_string(),
+                    terminal_address: "%0".to_string(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
@@ -31395,12 +31352,14 @@ exit 0
                 .unwrap()
                 .into_iter()
                 // Columns a later schema drops on purpose: the retired
-                // archive and scan bookkeeping, and (schema 25) the profile
-                // snapshot that went with profiles.
+                // archive and scan bookkeeping, (schema 25) the profile
+                // snapshot that went with profiles, and (schema 34) the
+                // stored tmux name, which every row derives from its id.
                 .filter(|column| {
                     !matches!(
                         column.as_str(),
                         "archived"
+                            | "tmux_name"
                             | "captured_record"
                             | "capture_ambiguous"
                             | "first_input_at"
@@ -31423,14 +31382,25 @@ exit 0
         let store = SessionStore::open(&db, true).await.unwrap();
         {
             let conn = store.conn.lock();
-            assert_eq!(historical_rows(&conn, &columns), before);
+            // Schema 34 renamed `pane`; its values are kept under the new
+            // name.
+            let renamed = columns
+                .split(',')
+                .map(|column| match column {
+                    "pane" => "terminal_address",
+                    other => other,
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            assert_eq!(historical_rows(&conn, &renamed), before);
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                33,
+                crate::store::SCHEMA_VERSION,
                 "the v17 fixture migrates through scan-column, profile-snapshot, launch-kind, \
                  session-notification, notification-resolution, launch-hook, boot-finality, \
-                 Codex-pin and terminal-kind changes and the terminal-host marker bump too"
+                 Codex-pin and terminal-kind changes, the terminal-host marker bump and the \
+                 tmux-name removal too"
             );
             // Every historical session ran in tmux, so the upgrade records
             // each of them as a tmux session.
@@ -31648,8 +31618,7 @@ exit 0
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: "fh-stranded".to_string(),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
@@ -32288,7 +32257,6 @@ exit 0
             .record_failed_intent(
                 claim.clone(),
                 "refused",
-                "fh-refused",
                 ErrorKind::InvalidRequest,
                 "missing folder",
             )
@@ -32349,8 +32317,7 @@ exit 0
                     cwd: "/".into(),
                     canonical_cwd: None,
                     launch: SessionLaunch::plain_command("agent"),
-                    tmux_name: "fh-refused".into(),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     conversation_source: None,
@@ -32382,13 +32349,7 @@ exit 0
                 ..claim.clone()
             };
             sup.store
-                .record_failed_intent(
-                    excluded.clone(),
-                    key,
-                    "fh-excluded",
-                    ErrorKind::InvalidRequest,
-                    "refused",
-                )
+                .record_failed_intent(excluded.clone(), key, ErrorKind::InvalidRequest, "refused")
                 .await
                 .unwrap();
             assert!(!sup.ordinary_create_was_refused(&excluded).await.unwrap());
@@ -32417,7 +32378,6 @@ exit 0
                     ..claim.clone()
                 },
                 "never-recorded",
-                "never-launched",
                 ErrorKind::InvalidRequest,
                 "placeholder",
             )
@@ -32460,7 +32420,6 @@ exit 0
             .unwrap();
         assert_eq!(failed.dedup_scope, DedupScope::SessionLifetime);
         assert_eq!(failed.session_id, pending.session_id);
-        assert_eq!(failed.tmux_name, pending.tmux_name);
         assert!(matches!(failed.outcome, ReservationOutcome::Failed { .. }));
         assert!(sup.ordinary_create_was_refused(&claim).await.unwrap());
     }
@@ -32994,8 +32953,7 @@ exit 0
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: "fh-stranded".to_string(),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
@@ -33083,8 +33041,7 @@ exit 0
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: "fh-ended".to_string(),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
@@ -33853,8 +33810,7 @@ exit 0
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: "fh-stranded".to_string(),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
@@ -33951,8 +33907,7 @@ exit 0
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: "fh-stranded".to_string(),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
@@ -34385,8 +34340,7 @@ exit 0
                         creation_seq: 0,
                         cwd: recorded.clone(),
                         launch: SessionLaunch::plain_command("agent --as-first-resolved"),
-                        tmux_name: format!("fh-{id}"),
-                        pane: String::new(),
+                        terminal_address: String::new(),
                         terminal_kind: crate::store::TerminalKind::Tmux,
                         outcome: LastOutcome::Launching,
                         canonical_cwd: Some(
@@ -34545,8 +34499,7 @@ exit 0
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: "fh-stranded".to_string(),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     // What the crashed attempt resolved, and what capture
@@ -34693,8 +34646,7 @@ exit 0
                 agent_kind: farhelm_proto::AgentKind::Generic,
                 resume_template: None,
             },
-            tmux_name: "fh-stranded".to_string(),
-            pane: String::new(),
+            terminal_address: String::new(),
             terminal_kind: crate::store::TerminalKind::Tmux,
             outcome: LastOutcome::Launching,
             canonical_cwd: Some(cwd.clone()),
@@ -34722,7 +34674,6 @@ exit 0
             intent_key: "key".to_string(),
             fingerprint: "fp".to_string(),
             session_id: "stranded".to_string(),
-            tmux_name: "fh-stranded".to_string(),
             dedup_scope: DedupScope::Permanent,
             outcome: ReservationOutcome::Pending,
         };
@@ -34841,8 +34792,7 @@ exit 0
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: "fh-stranded".to_string(),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: Some(cwd.clone()),
@@ -35137,8 +35087,7 @@ exit 0
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: "fh-stranded".to_string(),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: Some(canonical_original.clone()),
@@ -37718,7 +37667,6 @@ exit 0
             .record_failed_intent(
                 claim,
                 "never-launched",
-                "never-launched-tmux",
                 ErrorKind::InvalidRequest,
                 "original refusal",
             )
@@ -37787,7 +37735,6 @@ exit 0
                         dedup_scope: DedupScope::Permanent,
                     },
                     &format!("{key}-session"),
-                    &format!("{key}-tmux"),
                     ErrorKind::InvalidRequest,
                     "placeholder",
                 )
@@ -38186,14 +38133,17 @@ exit 0
                 assert_eq!(stored[0].id, winner.id);
                 assert_eq!(sup.store.working_copy_rows().await.unwrap().len(), 1);
                 assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
-                sup.tmux.kill_session(&stored[0].tmux_name).await.unwrap();
+                sup.tmux
+                    .kill_session(&session_tmux_name(&stored[0].id))
+                    .await
+                    .unwrap();
                 assert!(
                     !sup.tmux
                         .pane_states()
                         .await
                         .unwrap()
                         .values()
-                        .any(|pane| pane.session_name == stored[0].tmux_name)
+                        .any(|pane| pane.session_name == session_tmux_name(&stored[0].id))
                 );
             }
         }
@@ -38274,8 +38224,8 @@ exit 0
                 "insert-conflict" => conn.execute_batch(
                     "CREATE TRIGGER inject_refusal_winner BEFORE INSERT ON create_reservations BEGIN
                        INSERT INTO create_reservations
-                         (intent_key, fingerprint, state, session_id, tmux_name, error_kind, error_detail, created_at, dedup_scope)
-                       VALUES (NEW.intent_key, '[]', NEW.state, 'foreign-winner', 'foreign-tmux', NEW.error_kind,
+                         (intent_key, fingerprint, state, session_id, error_kind, error_detail, created_at, dedup_scope)
+                       VALUES (NEW.intent_key, '[]', NEW.state, 'foreign-winner', NEW.error_kind,
                          'foreign outcome', NEW.created_at, NEW.dedup_scope);
                      END;"
                 ).unwrap(),
@@ -39235,7 +39185,7 @@ exit 0
             .unwrap();
         assert_eq!(row.generation, 0);
         assert_eq!(row.outcome, LastOutcome::Launching);
-        assert!(row.pane.is_empty());
+        assert!(row.terminal_address.is_empty());
         assert!(!row.launch_scoped);
         assert!(
             sup.tmux
@@ -39243,7 +39193,7 @@ exit 0
                 .await
                 .unwrap()
                 .values()
-                .any(|p| p.session_name == row.tmux_name),
+                .any(|p| p.session_name == session_tmux_name(&row.id)),
             "premise: tmux actually accepted this session before its durable pane was recorded"
         );
         PendingSentinelFixture {
@@ -39266,14 +39216,17 @@ exit 0
             checkout,
             row,
         } = accepted_pending_launch_fixture(fresh).await;
-        sup.tmux.kill_session(&row.tmux_name).await.unwrap();
+        sup.tmux
+            .kill_session(&session_tmux_name(&row.id))
+            .await
+            .unwrap();
         assert!(
             !sup.tmux
                 .pane_states()
                 .await
                 .unwrap()
                 .values()
-                .any(|p| p.session_name == row.tmux_name),
+                .any(|p| p.session_name == session_tmux_name(&row.id)),
             "premise: the sentinel must become the only remaining launch witness"
         );
         let spec = crate::launch::spec_path_for_launch(state.path(), &row.id, 0);
@@ -39329,7 +39282,7 @@ exit 0
         let durable = sup.store.session(&row.id).await.unwrap().unwrap();
         assert!(matches!(durable.outcome, LastOutcome::Error { .. }));
         assert_eq!(durable.generation, 0);
-        assert!(durable.pane.is_empty());
+        assert!(durable.terminal_address.is_empty());
         assert!(!crate::launch::spec_path_for_launch(&sup.state_dir, &row.id, 0).exists());
         assert!(
             !sup.tmux
@@ -39337,7 +39290,7 @@ exit 0
                 .await
                 .unwrap()
                 .values()
-                .any(|p| p.session_name == row.tmux_name)
+                .any(|p| p.session_name == session_tmux_name(&row.id))
         );
     }
 
@@ -39363,7 +39316,7 @@ exit 0
                         0,
                         Transition::SentinelError {
                             detail: "fixture durable error".into(),
-                            pane: None,
+                            address: None,
                         },
                     )])
                     .await
@@ -39411,21 +39364,21 @@ exit 0
             ..
         } = accepted_pending_launch_fixture(false).await;
         wait_for_dead_fixture_pane(&sup, "unconfirmed wrapper-shaped launch", |_, state| {
-            state.session_name == row.tmux_name
+            state.session_name == session_tmux_name(&row.id)
         })
         .await;
         let states = sup.tmux.pane_states().await.unwrap();
         let (pane, observed) = states
             .iter()
-            .find(|(_, state)| state.session_name == row.tmux_name)
+            .find(|(_, state)| state.session_name == session_tmux_name(&row.id))
             .unwrap();
         assert!(observed.dead);
-        assert!(row.pane.is_empty());
+        assert!(row.terminal_address.is_empty());
         let spec = crate::launch::spec_path_for_launch(state.path(), &row.id, 0);
         assert!(spec.exists());
         assert!(!crate::launch::status_path_for_spec(&spec).exists());
         let mut entry = entry_with(
-            Some(Terminal::tmux(row.tmux_name.clone(), pane.clone())),
+            Some(Terminal::tmux(session_tmux_name(&row.id), pane.clone())),
             LastOutcome::Launching,
         );
         entry.info.id = row.id.clone();
@@ -39455,11 +39408,14 @@ exit 0
             .unwrap();
         let durable = sup.store.session(&row.id).await.unwrap().unwrap();
         assert_eq!(
-            durable.pane, *pane,
+            durable.terminal_address, *pane,
             "the known accepted pane must survive classification"
         );
         assert!(matches!(durable.outcome, LastOutcome::Error { .. }));
-        sup.tmux.kill_session(&row.tmux_name).await.unwrap();
+        sup.tmux
+            .kill_session(&session_tmux_name(&row.id))
+            .await
+            .unwrap();
         assert!(!sup.tmux.pane_states().await.unwrap().contains_key(pane));
         drop(sup);
         let reopened = Supervisor::new_with_seams(
@@ -39493,7 +39449,7 @@ exit 0
                 .await
                 .unwrap()
                 .values()
-                .any(|state| state.session_name == row.tmux_name)
+                .any(|state| state.session_name == session_tmux_name(&row.id))
         );
     }
 
@@ -39546,7 +39502,7 @@ exit 0
                             0,
                             Transition::SentinelError {
                                 detail: "previous durable classification".into(),
-                                pane: None,
+                                address: None,
                             },
                         )])
                         .await
@@ -39609,7 +39565,7 @@ exit 0
                         0,
                         Transition::SentinelError {
                             detail: "prior classification".into(),
-                            pane: None,
+                            address: None,
                         },
                     )])
                     .await
@@ -39705,7 +39661,7 @@ exit 0
                 0,
                 Transition::SentinelError {
                     detail: "durable error awaiting create settlement".into(),
-                    pane: None,
+                    address: None,
                 },
             )])
             .await
@@ -40290,7 +40246,7 @@ exit 0
                 .unwrap()
                 .expect("origin retained");
             assert!(matches!(retained.outcome, LastOutcome::Error { .. }));
-            assert!(retained.pane.is_empty());
+            assert!(retained.terminal_address.is_empty());
             assert_eq!(retained.generation, original.generation);
             let failed = sup
                 .store
@@ -40629,8 +40585,14 @@ exit 0
             .unwrap();
         let path = crate::launch::preparation_state_path(state.path(), &plan.id);
         let mut panes = sup.tmux.pane_states().await.unwrap();
-        let pane = panes.get_mut(&row.pane).expect("accepted pane exists");
-        assert_eq!(pane.session_name, row.tmux_name);
+        let pane = panes
+            .get_mut(&row.terminal_address)
+            .expect("accepted pane exists");
+        assert_eq!(
+            pane.session_name,
+            session_tmux_name(&row.id),
+            "premise: the accepted pane is the session's own"
+        );
         pane.dead = false;
         for (preparation, protect) in [
             (crate::launch::PreparationState::NotStarted, true),
@@ -40681,29 +40643,33 @@ exit 0
             &crate::files::RealFs,
         )
         .unwrap();
-        panes.get_mut(&row.pane).unwrap().session_name = "unattributed-fixture-owner".into();
+        panes.get_mut(&row.terminal_address).unwrap().session_name =
+            "unattributed-fixture-owner".into();
         assert!(
             sup.spare_claims_from_panes(&panes)
                 .await
                 .protected
                 .contains(&(origin.id.clone(), row.generation))
         );
-        panes.get_mut(&row.pane).unwrap().session_name = row.tmux_name.clone();
-        panes.get_mut(&row.pane).unwrap().dead = true;
+        panes.get_mut(&row.terminal_address).unwrap().session_name = session_tmux_name(&row.id);
+        panes.get_mut(&row.terminal_address).unwrap().dead = true;
         assert!(
             sup.spare_claims_from_panes(&panes)
                 .await
                 .protected
                 .is_empty()
         );
-        panes.remove(&row.pane);
+        panes.remove(&row.terminal_address);
         assert!(
             sup.spare_claims_from_panes(&panes)
                 .await
                 .protected
                 .is_empty()
         );
-        sup.tmux.kill_session(&row.tmux_name).await.unwrap();
+        sup.tmux
+            .kill_session(&session_tmux_name(&row.id))
+            .await
+            .unwrap();
     }
 
     /// A stopped accepted terminal with incomplete setup must not look like
@@ -40762,7 +40728,10 @@ exit 0
                 _ => {}
             }
             let row = sup.store.session(&info.id).await.unwrap().unwrap();
-            assert!(!row.pane.is_empty(), "premise: terminal was accepted");
+            assert!(
+                !row.terminal_address.is_empty(),
+                "premise: terminal was accepted"
+            );
             assert!(
                 super::super::status::interrupted_preparation_detail(
                     state.path(),
@@ -40786,8 +40755,14 @@ exit 0
             );
             let entry = sup.sessions.lock().await[&info.id].clone();
             let mut live = sup.tmux.pane_states().await.unwrap();
-            let pane = live.get_mut(&row.pane).expect("accepted pane exists");
-            assert_eq!(pane.session_name, row.tmux_name);
+            let pane = live
+                .get_mut(&row.terminal_address)
+                .expect("accepted pane exists");
+            assert_eq!(
+                pane.session_name,
+                session_tmux_name(&row.id),
+                "premise: the accepted pane is the session's own"
+            );
             // This supplied observation tests the classifier's liveness gate,
             // not the dummy process's lifetime or preparation execution.
             pane.dead = false;
@@ -40803,9 +40778,15 @@ exit 0
                 .sentinel
                 .is_none()
             );
-            sup.tmux.kill_session(&row.tmux_name).await.unwrap();
+            sup.tmux
+                .kill_session(&session_tmux_name(&row.id))
+                .await
+                .unwrap();
             let absent = sup.tmux.pane_states().await.unwrap();
-            assert!(!absent.contains_key(&row.pane), "premise: terminal is gone");
+            assert!(
+                !absent.contains_key(&row.terminal_address),
+                "premise: terminal is gone"
+            );
             let observed = super::super::status::observe_entry(
                 &sup,
                 &entry,
@@ -40869,7 +40850,7 @@ exit 0
         .unwrap();
         let row = sup.store.session(&info.id).await.unwrap().unwrap();
         assert!(
-            !row.pane.is_empty(),
+            !row.terminal_address.is_empty(),
             "premise: accepted pane owns preparation duty"
         );
         assert!(
@@ -40887,15 +40868,19 @@ exit 0
         .unwrap();
         let entry = sup.sessions.lock().await[&info.id].clone();
         let mut states = sup.tmux.pane_states().await.unwrap();
-        let pane = states.get_mut(&row.pane).unwrap();
-        assert_eq!(pane.session_name, row.tmux_name);
+        let pane = states.get_mut(&row.terminal_address).unwrap();
+        assert_eq!(
+            pane.session_name,
+            session_tmux_name(&row.id),
+            "premise: the accepted pane is the session's own"
+        );
         // The dummy executable does not run preparation or the shim. Supply
         // the classification boundary explicitly, as in the preparation tests
         // above, so this proof depends on neither process timing nor Git.
         pane.dead = true;
         let known = super::super::status::KnownTmuxNames::from_sessions([(
             info.id.as_str(),
-            Some(row.tmux_name.as_str()),
+            Some(session_tmux_name(&row.id).as_str()),
         )]);
         super::super::ticker::observe_entries(&sup, &[Arc::clone(&entry)], &states, &known).await;
         assert!(
@@ -40956,7 +40941,10 @@ exit 0
         )
         .unwrap();
         let row = sup.store.session(&info.id).await.unwrap().unwrap();
-        assert!(!row.pane.is_empty(), "premise: accepted terminal");
+        assert!(
+            !row.terminal_address.is_empty(),
+            "premise: accepted terminal"
+        );
         assert!(
             sup.store
                 .preparation_origin(&info.id, row.generation)
@@ -40972,14 +40960,18 @@ exit 0
         .unwrap();
         let entry = sup.sessions.lock().await[&info.id].clone();
         let mut states = sup.tmux.pane_states().await.unwrap();
-        let pane = states.get_mut(&row.pane).unwrap();
-        assert_eq!(pane.session_name, row.tmux_name);
+        let pane = states.get_mut(&row.terminal_address).unwrap();
+        assert_eq!(
+            pane.session_name,
+            session_tmux_name(&row.id),
+            "premise: the accepted pane is the session's own"
+        );
         // The dummy shim never performs setup. Supply the owned-dead boundary
         // explicitly so this test concerns evidence caching, not process timing.
         pane.dead = true;
         let known = super::super::status::KnownTmuxNames::from_sessions([(
             info.id.as_str(),
-            Some(row.tmux_name.as_str()),
+            Some(session_tmux_name(&row.id).as_str()),
         )]);
         super::super::ticker::observe_entries(&sup, &[entry], &states, &known).await;
         let exited = sup.store.session(&info.id).await.unwrap().unwrap().outcome;
@@ -40990,7 +40982,10 @@ exit 0
                 ..
             }
         ));
-        sup.tmux.kill_session(&row.tmux_name).await.unwrap();
+        sup.tmux
+            .kill_session(&session_tmux_name(&row.id))
+            .await
+            .unwrap();
         assert!(sup.tmux.pane_states().await.unwrap().is_empty());
         let seams = SupervisorSeams {
             boot_id: Arc::new(|| Ok(Some("preparation-next-boot".into()))),
@@ -41379,7 +41374,7 @@ exit 0
             .into_iter()
             .find(|row| row.id != owner.id)
             .expect("durable borrower");
-        assert!(borrower.pane.is_empty());
+        assert!(borrower.terminal_address.is_empty());
         assert_eq!(
             sup.store
                 .member_working_copies_all(&borrower.id)
@@ -41598,7 +41593,7 @@ exit 0
             .into_iter()
             .next()
             .expect("the interrupted attempt's launching row survives the reopen");
-        assert_eq!(row.pane, "", "nothing was ever launched");
+        assert_eq!(row.terminal_address, "", "nothing was ever launched");
         assert!(
             !row.launch_scoped,
             "with scopes disabled the row carries no scope evidence for Delete to refuse on"
@@ -41820,7 +41815,7 @@ exit 0
             .into_iter()
             .next()
             .expect("the error session row is retained, listed");
-        assert_eq!(row.pane, "", "nothing was ever launched");
+        assert_eq!(row.terminal_address, "", "nothing was ever launched");
         assert!(
             matches!(row.outcome, LastOutcome::Error { .. }),
             "the retained refusal is a visible error row"

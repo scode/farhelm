@@ -3309,8 +3309,9 @@ async fn cutover_failure_is_request_local() {
             session,
             SessionStatus::Exited { exit_code: None }
         )],
-        "the stored tmux_name no longer resolves to a live pane, so this must list as \
-         exited rather than fabricating liveness — the same honesty rule as the restart gap"
+        "the session's tmux session name no longer resolves to a live pane, so this must \
+         list as exited rather than fabricating liveness — the same honesty rule as the \
+         restart gap"
     );
 }
 
@@ -5403,7 +5404,7 @@ async fn delete_after_its_terminal_was_ended_externally_succeeds() {
 ///
 /// Renaming the session (verified empirically — `display-message -t
 /// <pane>` happily resolves the renamed session and reports its NEW name)
-/// makes the stored `tmux_name` mismatch what tmux reports, so
+/// makes the tmux name the entry holds mismatch what tmux reports, so
 /// `pane_process` classifies the pane as foreign exactly as a recycled
 /// pane id does. The two are not interchangeable, which is the whole
 /// point of `Supervisor::known_session_tmux_name`: a recycled id is owned

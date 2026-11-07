@@ -75,16 +75,16 @@
 //! failed (the new host is then published as launching). Ending it before the
 //! reply keeps the session's Delete out meanwhile; the reply can wait for a
 //! wedged old host up to the runtime's 15-second `Shutdown` bound plus the
-//! verified signal's graces. Until then the old host is the session's
-//! terminal: a restart that fails definitively puts it back, with its screen
-//! and history, and the row's restored `pane` keeps naming it. A crash leaves
-//! the next start enough to converge (`host_handover`): before the
-//! replacement has a launch record, the old host is taken back as the row's
-//! terminal by the first start that can read it (one that cannot adopts
-//! nothing and leaves it for the next); after the new launch started, the
-//! reload confirms it and ends the old host as superseded. A failed end is
-//! logged and left to that same rule or to the session's Delete, which finds
-//! the host by its launch record: the restart itself has succeeded.
+//! verified signal's graces. Until then the old host is the session's terminal:
+//! a restart that fails definitively puts it back, with its screen and history,
+//! and the row's restored `terminal_address` keeps naming it. A crash leaves
+//! the next start enough to converge (`host_handover`): before the replacement
+//! has a launch record, the old host is taken back as the row's terminal by the
+//! first start that can read it (one that cannot adopts nothing and leaves it
+//! for the next); after the new launch started, the reload confirms it and ends
+//! the old host as superseded. A failed end is logged and left to that same
+//! rule or to the session's Delete, which finds the host by its launch record:
+//! the restart itself has succeeded.
 //!
 //! ## From a tmux pane
 //!
@@ -114,16 +114,15 @@
 //!
 //! Once the new launch is published, the old agent window is removed by its
 //! recorded pane (identity-checked in tmux, so a pane that is not this
-//! session's any more is left alone), and the row's `pane` names the host's
-//! socket, so nothing records the old pane. The window is removed only when
-//! the new host started with lines of its history
-//! ([`RestartSeed::holds_history`]; a seed can exist and hold none):
-//! otherwise it may hold the only copy, and is left to the session's Delete.
-//! The session's tmux tabs stay in its tmux session, which the row still
-//! names, until they are closed; new tabs are hosts. Nothing about the agent
-//! then depends on that tmux session: when its last tab closes, tmux ends
-//! it, and the agent's liveness, Stop, Restart and Delete ask the host
-//! alone.
+//! session's any more is left alone), and the row's `terminal_address` names
+//! the host's socket, so nothing records the old pane. The window is removed
+//! only when the new host started with lines of its history
+//! ([`RestartSeed::holds_history`]; a seed can exist and hold none): otherwise
+//! it may hold the only copy, and is left to the session's Delete. The
+//! session's tmux tabs stay in its tmux session, which the row still names,
+//! until they are closed; new tabs are hosts. Nothing about the agent then
+//! depends on that tmux session: when its last tab closes, tmux ends it, and
+//! the agent's liveness, Stop, Restart and Delete ask the host alone.
 //!
 //! What a failure leaves, beside what it leaves for a host agent:
 //!
@@ -217,12 +216,12 @@ const SEED_SETTLE: Duration = Duration::from_secs(5);
 /// shutdown, and the reviews' claim window).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostRestartStage {
-    /// The generation is claimed (the row is `Launching` at the new
-    /// generation with no `pane`), and nothing of the new launch exists yet:
+    /// The generation is claimed (the row is `Launching` at the new generation
+    /// with no `terminal_address`), and nothing of the new launch exists yet:
     /// no spec, no launch record.
     GenerationClaimed,
     /// The new host runs and is adopted, its launch record written; the row
-    /// is still `Launching` for the new generation with no `pane`.
+    /// is still `Launching` for the new generation with no `terminal_address`.
     ReplacementStarted,
     /// Not a crash: an error here stands for the confirmation's database
     /// write failing, and the restart goes on as it does then.
@@ -502,15 +501,15 @@ impl Supervisor {
         }
 
         // Confirmed as a create confirms its host: the row moves to running
-        // with the new socket's name in `pane` (the plan's D-14), fenced on
-        // this launch's generation.
+        // with the new socket's name in `terminal_address` (the plan's D-14),
+        // fenced on this launch's generation.
         let terminal = Terminal::Host(host.clone());
-        let pane = terminal.recorded_pane().to_string();
+        let address = terminal.recorded_address().to_string();
         let confirmed = match self.host_restart_fault(HostRestartStage::Confirmation) {
             Err(failed) => Err(failed),
             Ok(()) => {
                 self.store
-                    .transition(&id, generation, Transition::ConfirmRunning { pane })
+                    .transition(&id, generation, Transition::ConfirmRunning { address })
                     .await
             }
         };

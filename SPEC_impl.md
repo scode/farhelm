@@ -1867,9 +1867,13 @@ tmux into one, only under the supervisor's switch ("Creating agents in hosts", "
 session into a host" below), which every shipped launch has on: new terminals run in hosts, and old tmux terminals keep
 running in tmux until they are closed or their session moves; an agent already in a host restarts into a new host
 whatever the switch says. Each session row records its agent terminal's kind (the supervisor schema 32 column
-`terminal_kind`), which is `tmux` unless a create or a Restart under that switch wrote `host`. Schema 33 changes nothing
-stored: it came with the flag that turns the switch on, so that every build at 32, which stores the kind without
-handling a host row everywhere, refuses a database such a supervisor has opened.
+`terminal_kind`), which is `tmux` unless a create or a Restart under that switch wrote `host`, and where that terminal
+is (`terminal_address`: a tmux pane id, or a host's socket name). Schema 33 changes nothing stored: it came with the
+flag that turns the switch on, so that every build at 32, which stores the kind without handling a host row everywhere,
+refuses a database such a supervisor has opened. Schema 34 stores no tmux concepts for a terminal that is not a tmux
+one: no row stores a tmux session name (a session's is `fh-` and its id, derived where tmux code needs it, for a tmux
+row's agent and for the old tmux tabs of a session moved into a host), and the address that held a host's socket name in
+a column named `pane` has a name of its own.
 
 The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
 
@@ -2184,9 +2188,9 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   held such an autostart back, and a host started then keeps that environment until its agent is restarted. The
   containerized launch forwards only `TERM` and `COLORTERM` into the container, so a containerized agent sees no
   `TERM_PROGRAM` either way. The host's tag binds it to the session and the launch generation, and confirming the launch
-  writes the socket's name to the row's `pane`. **The launch record**: the socket's name is drawn before the host's
-  first stage starts, and before that first stage is given the spec (it starts nothing until it has read it whole), the
-  launch's artifacts record the socket's name and the first stage's process, pinned to its start identity
+  writes the socket's name to the row's `terminal_address`. **The launch record**: the socket's name is drawn before the
+  host's first stage starts, and before that first stage is given the spec (it starts nothing until it has read it
+  whole), the launch's artifacts record the socket's name and the first stage's process, pinned to its start identity
   (`<state>/launch/<id>.<generation>.host`). A supervisor that dies after the record leaves a first stage that can still
   start the host on its own, and the record is how a retry finds it; one that dies before it leaves a first stage whose
   stdin ends without a spec, which starts nothing. A failed host start is classified from the first stage's exit status:
@@ -2207,17 +2211,17 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   binds the socket and starts the child before its readiness report finds the first stage gone and it ends both, so the
   socket is looked at again for up to five seconds while such a process remains, and the retry is left unresolved if one
   stays. The record stays through an agent's launch error (the error settles the agent, not its host, which may still
-  run with the failed launch's final screen and is named nowhere else while the row's `pane` is empty). A retry that
-  finds the host replays the session as created and starts nothing; the interrupted attempt's host itself stays running,
-  and a restarted supervisor's reload adopts it by its tag, as it finds an interrupted tmux launch's pane by its marker.
-  The supervisor-wide `host_scan` lock keeps host spawns (holding it shared from just before the first stage starts
-  until the host's entry is published, or until the create gives the host up) apart from what must not overlap them
-  (holding it exclusively): the removal of an ended host's socket file (by a create or by Delete), whose re-verifying
-  removal requires that nothing binds sockets in the directory meanwhile, and any scan of the socket directory inside a
-  running supervisor (today `serve`'s reload), since a scan would take a host over from the create that is starting it.
-  Delete's settling of its session's launch records takes no part in it: the session's lifecycle claim keeps that
-  session's own creates out. A session kept as a launching record with its host unconfirmed ended has that host ended by
-  its Delete, which finds it by the launch record.
+  run with the failed launch's final screen and is named nowhere else while the row's `terminal_address` is empty). A
+  retry that finds the host replays the session as created and starts nothing; the interrupted attempt's host itself
+  stays running, and a restarted supervisor's reload adopts it by its tag, as it finds an interrupted tmux launch's pane
+  by its marker. The supervisor-wide `host_scan` lock keeps host spawns (holding it shared from just before the first
+  stage starts until the host's entry is published, or until the create gives the host up) apart from what must not
+  overlap them (holding it exclusively): the removal of an ended host's socket file (by a create or by Delete), whose
+  re-verifying removal requires that nothing binds sockets in the directory meanwhile, and any scan of the socket
+  directory inside a running supervisor (today `serve`'s reload), since a scan would take a host over from the create
+  that is starting it. Delete's settling of its session's launch records takes no part in it: the session's lifecycle
+  claim keeps that session's own creates out. A session kept as a launching record with its host unconfirmed ended has
+  that host ended by its Delete, which finds it by the launch record.
 - **Tabs in hosts** (`service/core/host_tabs.rs`): under the same switch every new tab is a terminal host of its own,
   whatever its session's agent runs in, so a tmux agent's session holds its old tmux tabs and new host tabs side by side
   (a mixed session), and a host agent's only host tabs; a tab never changes kind. The tab-open gate asks the agent's
@@ -2300,41 +2304,42 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   reply for the runtime's 15-second `Shutdown` bound plus the verified signal's graces. A replacement that does not
   start is unwound as a failed create is: a host the start may have left is ended, the launch's spec, waypoint and host
   record are removed and its process tree swept, and the failure is definitive, so the previous outcome, the row's
-  `pane` and the old host as the session's terminal come back (the generation stays advanced, so the row's `pane` then
-  names a host tagged with an earlier generation, which reload takes as the row's own). The restored terminal, like a
-  published one, goes back only before an orderly stop gathers the host terminals (otherwise a placeholder, its runtime
-  stopped), and a runtime the restored entry does not hold is stopped. Only a replacement host that cannot be confirmed
-  ended keeps the launching record: the session then holds no terminal, the old host's runtime is stopped, and both
-  hosts stay reachable by their records. A restart that finds its row deleted when it confirms sweeps the new agent's
-  tree and ends both hosts. A restarted agent's runtime is published only before an orderly stop gathers the host
-  terminals, as a create's is. The session's host tabs keep running across a Restart, but while the session is off the
-  session map for the Restart's window its tab cell is held beside the map, under the same lock as the stop's flag, so a
-  stop in the window still checkpoints and closes the tab runtimes; a Restart that puts the session back (published or
-  restored) after the stop began stops them, as it stops the new agent runtime. **A crash in a restart** leaves both
-  generations' records, from which the next start converges with no other state. Before the replacement had a launch
-  record (the generation claimed, or a failed replacement cleaned up before the previous record was restored), the row's
-  own generation has no host, no `pane` and no record; then, and only then, the host of the newest earlier generation
-  that has an agent launch record is taken as the row's terminal when the scan read it at the record's socket. A record
-  whose host the scan found gone is passed over for the next older one, since a dead host has nothing to keep or
-  supersede; any other record whose host was not read there, or a launch directory that cannot be listed in full, leaves
-  the row with none, and the next start tries again, so that an older host with older history is never taken while the
-  newer one is merely unreadable. Its socket is recorded in `pane` (the row lists the previous run's exit), so the next
-  Restart seeds from it and ends it. After the new host started, the reload finds it by its tag and confirms it, and the
-  old host is superseded. **Superseded agent hosts** (the plan's D-25): an old host left running is no orphan, since its
-  session exists. So every reload, after its reconciliation has committed (a restart whose new host it just confirmed by
-  its tag counts), ends each live agent host no row claimed whose tag names a host row at a later generation whose
-  launch is confirmed (a `pane` naming another socket), all at once within one stop budget, over the scan's own
-  connection (`Shutdown`, then the verified signal to its peer), and removes its launch record. The current generation's
-  host is never one, nor is a host the scan could not read, nor a tab's host (its tag names a tab, not a launch
-  generation). The old program was stopped by the restart; a descendant that survives the host's hangup is left to the
-  session's next marker sweep. **The residual**: the earlier host of a restart whose replacement started but was never
-  confirmed and is gone by the next start (its launch record names nothing, so the fallback above does not apply) stays
-  until the session's Delete, or a later restart is confirmed and a supervisor starts. So does the old host of a restart
-  that failed ambiguously in a running supervisor (a replacement that could not be confirmed ended): the session holds
-  no terminal, so the next Restart from that supervisor starts empty while the old host, with the history, runs on until
-  a later start supersedes it or Delete ends it. And a runtime stopped while it encodes a checkpoint or a seed leaves
-  its emulator away for good; a runtime is stopped only where its host is given up (a stopping supervisor, or a
-  create's, a Restart's or a reload's cleanup, or the end of a superseded host), so nothing reads it afterwards.
+  `terminal_address` and the old host as the session's terminal come back (the generation stays advanced, so the row's
+  `terminal_address` then names a host tagged with an earlier generation, which reload takes as the row's own). The
+  restored terminal, like a published one, goes back only before an orderly stop gathers the host terminals (otherwise a
+  placeholder, its runtime stopped), and a runtime the restored entry does not hold is stopped. Only a replacement host
+  that cannot be confirmed ended keeps the launching record: the session then holds no terminal, the old host's runtime
+  is stopped, and both hosts stay reachable by their records. A restart that finds its row deleted when it confirms
+  sweeps the new agent's tree and ends both hosts. A restarted agent's runtime is published only before an orderly stop
+  gathers the host terminals, as a create's is. The session's host tabs keep running across a Restart, but while the
+  session is off the session map for the Restart's window its tab cell is held beside the map, under the same lock as
+  the stop's flag, so a stop in the window still checkpoints and closes the tab runtimes; a Restart that puts the
+  session back (published or restored) after the stop began stops them, as it stops the new agent runtime. **A crash in
+  a restart** leaves both generations' records, from which the next start converges with no other state. Before the
+  replacement had a launch record (the generation claimed, or a failed replacement cleaned up before the previous record
+  was restored), the row's own generation has no host, no `terminal_address` and no record; then, and only then, the
+  host of the newest earlier generation that has an agent launch record is taken as the row's terminal when the scan
+  read it at the record's socket. A record whose host the scan found gone is passed over for the next older one, since a
+  dead host has nothing to keep or supersede; any other record whose host was not read there, or a launch directory that
+  cannot be listed in full, leaves the row with none, and the next start tries again, so that an older host with older
+  history is never taken while the newer one is merely unreadable. Its socket is recorded in `terminal_address` (the row
+  lists the previous run's exit), so the next Restart seeds from it and ends it. After the new host started, the reload
+  finds it by its tag and confirms it, and the old host is superseded. **Superseded agent hosts** (the plan's D-25): an
+  old host left running is no orphan, since its session exists. So every reload, after its reconciliation has committed
+  (a restart whose new host it just confirmed by its tag counts), ends each live agent host no row claimed whose tag
+  names a host row at a later generation whose launch is confirmed (a `terminal_address` naming another socket), all at
+  once within one stop budget, over the scan's own connection (`Shutdown`, then the verified signal to its peer), and
+  removes its launch record. The current generation's host is never one, nor is a host the scan could not read, nor a
+  tab's host (its tag names a tab, not a launch generation). The old program was stopped by the restart; a descendant
+  that survives the host's hangup is left to the session's next marker sweep. **The residual**: the earlier host of a
+  restart whose replacement started but was never confirmed and is gone by the next start (its launch record names
+  nothing, so the fallback above does not apply) stays until the session's Delete, or a later restart is confirmed and a
+  supervisor starts. So does the old host of a restart that failed ambiguously in a running supervisor (a replacement
+  that could not be confirmed ended): the session holds no terminal, so the next Restart from that supervisor starts
+  empty while the old host, with the history, runs on until a later start supersedes it or Delete ends it. And a runtime
+  stopped while it encodes a checkpoint or a seed leaves its emulator away for good; a runtime is stopped only where its
+  host is given up (a stopping supervisor, or a create's, a Restart's or a reload's cleanup, or the end of a superseded
+  host), so nothing reads it afterwards.
 - **Moving an old session into a host** (`service/core/host_restart.rs`, "From a tmux pane"): with the internal switch
   on, a Restart of a session whose agent runs in tmux, or of a tmux row whose session holds no terminal, starts the new
   launch in a terminal host, through the host Restart above (the settle of earlier host starts, the start, the
@@ -2385,11 +2390,11 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   that dies before the confirmation must look for it by its tag, as for a create; the previous kind is saved with the
   rest of the prior run. Once the new launch is published, the old agent window is removed by its recorded pane,
   identity-checked inside tmux, only when the new host started with lines of the pane's history (a seed without it
-  leaves the window, which may hold the only copy, to the session's Delete), and the row's `pane` names the host's
-  socket; a removal that fails is logged and the Restart still succeeds (the window holds no program, its agent marker
-  keeps it out of the tab strip, and the session's Delete ends it with its tmux session). The session's tmux tabs stay
-  in the tmux session the row still names until they are closed, and new tabs are hosts (a mixed session, "Tabs in
-  hosts" above); tmux ends that session with its last window, and nothing about the moved agent depends on it: its
+  leaves the window, which may hold the only copy, to the session's Delete), and the row's `terminal_address` names the
+  host's socket; a removal that fails is logged and the Restart still succeeds (the window holds no program, its agent
+  marker keeps it out of the tab strip, and the session's Delete ends it with its tmux session). The session's tmux tabs
+  stay in the tmux session the session's id names until they are closed, and new tabs are hosts (a mixed session, "Tabs
+  in hosts" above); tmux ends that session with its last window, and nothing about the moved agent depends on it: its
   liveness, Stop, Restart and Delete ask its host. A new host that does not start is unwound as for a host agent,
   definitively, and the abort restores the tmux kind with the old pane: the session is again the tmux session it was,
   its stopped agent's window and history kept, and a later Restart tries the move again. A replacement that cannot be
@@ -2498,71 +2503,72 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   unseen, and its queries are answered. A crash or a kill leaves each host its latest checkpoint and the tail after it,
   the same way. A starting supervisor reloads its sessions only once it holds its state directory and has opened, and
   checked, its database, so a build that cannot read the database refuses before contacting any host. Host rows never go
-  through tmux's pane lookup, since their `pane` holds a socket name: reload scans the socket directory (discovery,
-  above) and matches each host row to a host by its tag (session and launch generation), else by the socket the row
-  names (its `pane`, or for a launch never confirmed, the launch record of its own generation, never an earlier one's).
-  A host at the row's `pane` whose tag names the same session's agent at an earlier generation is the row's own: only a
-  confirmation writes `pane`, a Restart empties it, and one that failed definitively puts back the `pane` of the host
-  that stays the session's terminal. A host found is adopted as recovered (its snapshot restored, the tail replayed
-  under the replay policy) and taken as a found pane is: an unconfirmed launch found by its tag is confirmed with its
-  socket's name. A host that may run and cannot be used (no answer, another protocol version, busy, a tag this build
-  cannot read, a tag naming another launch, a socket directory that cannot be scanned, a launch record that cannot be
-  read) is left as it is and never treated as gone: the session holds a handle that answers as unavailable, never no
-  terminal, which records nothing durable (not even a launch sentinel, also in later observations), lists the session as
-  unknown and makes the verbs refuse. A host row's host is absent only when no live host carries its tag and nothing
-  serves the socket the row names (names are drawn fresh per launch) or its file is missing, or when the launch never
-  reached a host (unconfirmed, with no launch record); the session is then reconciled as a vanished pane's. A host whose
-  child exited while no supervisor was attached reads as running until its runtime has replayed the exit record, after
-  which the ticker records the exit, with any never-started classification; reload confirms such a session's launch, but
-  leaves a durable stop request as it is, so that the exit is recorded as stopped by the user, and clears it only for a
-  child the host reports alive. The scan takes over the hosts it reaches, so a supervisor without its state directory's
-  claim scans nothing (its host rows are unavailable to it); `serve`'s second reload keeps the terminals the
-  constructor's made, skips their sockets and those found gone (socket names are never reused), and runs under a lock
-  re-adoption takes too; hosts no row claims are left as they were, except the superseded agent hosts of restarts
-  ("Restarting a host agent" above). Every session's tab hosts are found again beside this, whatever its agent runs in:
-  each tab record of a session the store holds names a socket, and a live host there whose tag names that session and
-  tab is adopted as recovered into the session's cell; a host there that may run and cannot be used, a tag naming
-  anything else, or a record that cannot be read leaves a placeholder that lists the tab and refuses its close (its
-  session's Delete ends it), and a socket the scan found nothing at leaves no tab only once the record is settled as a
-  retried create settles its own (the first stage waited for, then ended with the verified signal; the socket looked at
-  again while a forked second stage may still bind it), since a start its supervisor did not finish has its spec and may
-  still bring the host up, during the scan or after it: a host that comes up is adopted, and a start that cannot be
-  settled leaves a placeholder. Settling costs nothing much for a first stage long gone and a missing socket file, the
-  client's three-second refusal window for a socket file a killed host left, and at worst, for a first stage that never
-  finishes, about twenty seconds (its five-second wait, the verified signal's graces, a forked second stage's
-  five-second wait); every record is settled at once, so a reload pays the slowest. `serve`'s second reload keeps the
-  constructor's tab runtimes, and its scan for agent hosts skips their sockets. Tab placeholders whose reason may pass
-  and tab runtimes that become unavailable are retried while the supervisor runs, by the same re-adoption task as agent
-  terminals. Tab records of sessions the store no longer holds are left to the startup reclaim of orphaned hosts, and so
-  is the record of a tab dropped as gone. The orderly stop checkpoints and closes the tab runtimes with the agents'. The
-  spare-checkout claims at startup read a host row's terminal, and for a host row with no terminal, whether a socket
-  file is still at the path the row (or its launch record) names and was not found gone by the reload: a claim is
-  released only then. **Re-adoption**: a running supervisor retries an agent or tab host that startup could not adopt,
-  or whose runtime became unavailable later, for a reason that can pass (no answer in time, busy, closed connections, a
-  child that could not be pinned, a socket directory that could not be scanned, an encode task lost with its emulator).
-  Retries start after a second and double to a minute, each next try scheduled before the try. The attempt count is kept
-  for that session and launch (or session and tab id) even after success. A tab's count survives an agent Restart, whose
-  temporary removal of the session entry keeps the tab cell aside. Every episode of a connection that kept ending waits
-  at least the runtime's full minute reconnect window before its first try, so re-adoption does not resume a takeover
-  fight at once. Healthy launches keep their counts but contribute no wake time. The ticker forwards a passing
-  unavailability notice to the retry task, without waiting for its ordinary tick. A Restart's republication also wakes
-  retries that may have parked while the session was off-map. A try takes the session's lifecycle claim without waiting
-  (a busy session is tried later), checks that the entry still holds that very handle for the same launch generation and
-  that no orderly stop has begun, looks only at the one socket the handle names (its tag must name the session's launch,
-  or, as at startup, an earlier one of its agent's), and swaps the outcome in under the session map after checking
-  again, keeping the entry's run and session cells; a launch or stop request is then confirmed as reload would for a
-  child the host reports alive. A runtime it made but does not install is stopped, leaving the host as it was. An
-  orderly stop sets a flag under the session map as it gathers the host terminals it closes, after which no try installs
-  a runtime. A handle whose reason will not pass on its own (another protocol version, snapshot format or tag, a launch
-  record that cannot be read) is not retried. A failed try leaves a placeholder with its new reason, so a refusal that
-  will not pass stops the retries. An unconditional Delete that aborts an unavailable runtime without finishing may
-  leave it eligible for re-adoption; Delete's retry then acts through the replacement runtime. A tab retry checks the
-  same session cell still holds that tab id and exact handle, and that no close has failed; a failed close belongs to
-  the reap. A tab runtime that ran keeps its creation stamp and scope through retry outcomes, while a startup
-  placeholder learns both from the recovered host's tag. Failed tab retries keep the earlier runtime's adopted process
-  through every placeholder. A tab found gone gets a gone handle carrying that process, so the normal reap confirms that
-  process ended and removes the launch record before forgetting the tab. A startup tab whose interrupted start could not
-  be settled and left an `Unidentified` placeholder remains final, as before.
+  through tmux's pane lookup, since their `terminal_address` holds a socket name: reload scans the socket directory
+  (discovery, above) and matches each host row to a host by its tag (session and launch generation), else by the socket
+  the row names (its `terminal_address`, or for a launch never confirmed, the launch record of its own generation, never
+  an earlier one's). A host at the row's `terminal_address` whose tag names the same session's agent at an earlier
+  generation is the row's own: only a confirmation writes `terminal_address`, a Restart empties it, and one that failed
+  definitively puts back the `terminal_address` of the host that stays the session's terminal. A host found is adopted
+  as recovered (its snapshot restored, the tail replayed under the replay policy) and taken as a found pane is: an
+  unconfirmed launch found by its tag is confirmed with its socket's name. A host that may run and cannot be used (no
+  answer, another protocol version, busy, a tag this build cannot read, a tag naming another launch, a socket directory
+  that cannot be scanned, a launch record that cannot be read) is left as it is and never treated as gone: the session
+  holds a handle that answers as unavailable, never no terminal, which records nothing durable (not even a launch
+  sentinel, also in later observations), lists the session as unknown and makes the verbs refuse. A host row's host is
+  absent only when no live host carries its tag and nothing serves the socket the row names (names are drawn fresh per
+  launch) or its file is missing, or when the launch never reached a host (unconfirmed, with no launch record); the
+  session is then reconciled as a vanished pane's. A host whose child exited while no supervisor was attached reads as
+  running until its runtime has replayed the exit record, after which the ticker records the exit, with any
+  never-started classification; reload confirms such a session's launch, but leaves a durable stop request as it is, so
+  that the exit is recorded as stopped by the user, and clears it only for a child the host reports alive. The scan
+  takes over the hosts it reaches, so a supervisor without its state directory's claim scans nothing (its host rows are
+  unavailable to it); `serve`'s second reload keeps the terminals the constructor's made, skips their sockets and those
+  found gone (socket names are never reused), and runs under a lock re-adoption takes too; hosts no row claims are left
+  as they were, except the superseded agent hosts of restarts ("Restarting a host agent" above). Every session's tab
+  hosts are found again beside this, whatever its agent runs in: each tab record of a session the store holds names a
+  socket, and a live host there whose tag names that session and tab is adopted as recovered into the session's cell; a
+  host there that may run and cannot be used, a tag naming anything else, or a record that cannot be read leaves a
+  placeholder that lists the tab and refuses its close (its session's Delete ends it), and a socket the scan found
+  nothing at leaves no tab only once the record is settled as a retried create settles its own (the first stage waited
+  for, then ended with the verified signal; the socket looked at again while a forked second stage may still bind it),
+  since a start its supervisor did not finish has its spec and may still bring the host up, during the scan or after it:
+  a host that comes up is adopted, and a start that cannot be settled leaves a placeholder. Settling costs nothing much
+  for a first stage long gone and a missing socket file, the client's three-second refusal window for a socket file a
+  killed host left, and at worst, for a first stage that never finishes, about twenty seconds (its five-second wait, the
+  verified signal's graces, a forked second stage's five-second wait); every record is settled at once, so a reload pays
+  the slowest. `serve`'s second reload keeps the constructor's tab runtimes, and its scan for agent hosts skips their
+  sockets. Tab placeholders whose reason may pass and tab runtimes that become unavailable are retried while the
+  supervisor runs, by the same re-adoption task as agent terminals. Tab records of sessions the store no longer holds
+  are left to the startup reclaim of orphaned hosts, and so is the record of a tab dropped as gone. The orderly stop
+  checkpoints and closes the tab runtimes with the agents'. The spare-checkout claims at startup read a host row's
+  terminal, and for a host row with no terminal, whether a socket file is still at the path the row (or its launch
+  record) names and was not found gone by the reload: a claim is released only then. **Re-adoption**: a running
+  supervisor retries an agent or tab host that startup could not adopt, or whose runtime became unavailable later, for a
+  reason that can pass (no answer in time, busy, closed connections, a child that could not be pinned, a socket
+  directory that could not be scanned, an encode task lost with its emulator). Retries start after a second and double
+  to a minute, each next try scheduled before the try. The attempt count is kept for that session and launch (or session
+  and tab id) even after success. A tab's count survives an agent Restart, whose temporary removal of the session entry
+  keeps the tab cell aside. Every episode of a connection that kept ending waits at least the runtime's full minute
+  reconnect window before its first try, so re-adoption does not resume a takeover fight at once. Healthy launches keep
+  their counts but contribute no wake time. The ticker forwards a passing unavailability notice to the retry task,
+  without waiting for its ordinary tick. A Restart's republication also wakes retries that may have parked while the
+  session was off-map. A try takes the session's lifecycle claim without waiting (a busy session is tried later), checks
+  that the entry still holds that very handle for the same launch generation and that no orderly stop has begun, looks
+  only at the one socket the handle names (its tag must name the session's launch, or, as at startup, an earlier one of
+  its agent's), and swaps the outcome in under the session map after checking again, keeping the entry's run and session
+  cells; a launch or stop request is then confirmed as reload would for a child the host reports alive. A runtime it
+  made but does not install is stopped, leaving the host as it was. An orderly stop sets a flag under the session map as
+  it gathers the host terminals it closes, after which no try installs a runtime. A handle whose reason will not pass on
+  its own (another protocol version, snapshot format or tag, a launch record that cannot be read) is not retried. A
+  failed try leaves a placeholder with its new reason, so a refusal that will not pass stops the retries. An
+  unconditional Delete that aborts an unavailable runtime without finishing may leave it eligible for re-adoption;
+  Delete's retry then acts through the replacement runtime. A tab retry checks the same session cell still holds that
+  tab id and exact handle, and that no close has failed; a failed close belongs to the reap. A tab runtime that ran
+  keeps its creation stamp and scope through retry outcomes, while a startup placeholder learns both from the recovered
+  host's tag. Failed tab retries keep the earlier runtime's adopted process through every placeholder. A tab found gone
+  gets a gone handle carrying that process, so the normal reap confirms that process ended and removes the launch record
+  before forgetting the tab. A startup tab whose interrupted start could not be settled and left an `Unidentified`
+  placeholder remains final, as before.
 - **The startup reclaim of orphaned hosts** (`service/core/host_reclaim.rs`), the start-up cleanup the maintainer
   approved ("Cleanup on quit"). Delete ends every host a session records before it removes the session's records and
   row, every host start writes its record first, and a tab's close ends its host before it removes the record, so a live
@@ -5669,22 +5675,36 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   described under Runtime state. Older supervisors refuse this upgraded database on downgrade.
 - Schema 32 adds the supervisor session column `terminal_kind` (text, `tmux` or `host`, held to those two by a `CHECK`,
   default `tmux`): whether the session's agent terminal is a tmux pane or a terminal host, so a restarted supervisor
-  looks for it in the right place. For a host row `pane` holds the host's socket name, so an empty `pane` still means
-  "launch not confirmed" for both kinds. The row's insert writes the kind, never the confirm, so a crash before confirm
-  is reconciled against the right kind, and a create retry whose kind differs from the crashed attempt's replays instead
-  of taking the row over (the evidence that the attempt started nothing covers its own kind only). A relaunch writes the
-  kind of its new launch as it opens the generation (a Restart that moves an old tmux session into a terminal host
-  writes `host` there), saves the previous kind with the rest of its prior state, and an abort restores it with the
-  pane, so a restored `pane` is read the way it was written. Existing rows become `tmux`. Older supervisors refuse this
-  upgraded database on downgrade, which is why the kind got a schema bump instead of riding on an existing column: a
-  supervisor from before terminal hosts would otherwise take a host's socket name for a tmux pane, find no such pane,
-  and record a live session as exited (SPEC.md, "Upgrade compatibility and client scale"). Schema 32 alone did not fence
-  every such build: builds at 32 decode the kind but do not act on it everywhere, so the change that let a supervisor be
-  started with host terminals on bumped the schema again, to 33, so that every one of them refuses a database that may
-  hold host rows.
+  looks for it in the right place. For a host row `pane` (`terminal_address` since schema 34) holds the host's socket
+  name, so an empty `pane` still means "launch not confirmed" for both kinds. The row's insert writes the kind, never
+  the confirm, so a crash before confirm is reconciled against the right kind, and a create retry whose kind differs
+  from the crashed attempt's replays instead of taking the row over (the evidence that the attempt started nothing
+  covers its own kind only). A relaunch writes the kind of its new launch as it opens the generation (a Restart that
+  moves an old tmux session into a terminal host writes `host` there), saves the previous kind with the rest of its
+  prior state, and an abort restores it with the pane, so a restored `pane` is read the way it was written. Existing
+  rows become `tmux`. Older supervisors refuse this upgraded database on downgrade, which is why the kind got a schema
+  bump instead of riding on an existing column: a supervisor from before terminal hosts would otherwise take a host's
+  socket name for a tmux pane, find no such pane, and record a live session as exited (SPEC.md, "Upgrade compatibility
+  and client scale"). Schema 32 alone did not fence every such build: builds at 32 decode the kind but do not act on it
+  everywhere, so the change that let a supervisor be started with host terminals on bumped the schema again, to 33, so
+  that every one of them refuses a database that may hold host rows.
 - Schema 33 changes no table or row. It came with `farhelm supervisor run --new-terminals`, so that every build at 32
   (which stores the kind but does not handle a host row everywhere) refuses a database that a supervisor able to create
   host terminals has opened.
+- Schema 34 drops `sessions.tmux_name` and `create_reservations.tmux_name` and renames `sessions.pane` to
+  `terminal_address`, so that a row of a terminal that is not a tmux one carries no tmux session name and code reading a
+  host row reads no tmux pane field (SPEC.md, "Upgrade compatibility and client scale"). Every stored tmux name was
+  `fh-` and the session's id, as `session_tmux_name` derives it, and has been since sessions were first persisted; the
+  step checks that before it drops a column and refuses the upgrade, naming the row, for one that is not (only a hand
+  edit makes one), rather than derive a name the row never had and lose an old tmux session. Of the reservations it
+  checks only pending ones, the only ones whose name was ever read again. One address column serves both kinds rather
+  than one column per kind because every rule about it is the same for both: written with the confirmation, emptied by a
+  relaunch, restored by an abort together with the kind, empty meaning "launch not confirmed". `sessions` is rebuilt
+  (SQLite's `DROP COLUMN` refuses a `UNIQUE` column): the old table is renamed aside and copied by column name, the
+  notification trigger dropped first and recreated on the new table, all in one transaction with the version bump. The
+  rebuilt `terminal_kind` has no default (schema 32 gave it `tmux`): every writer names the kind, so the default changed
+  nothing, and without it a writer that forgot the kind fails at its insert instead of quietly writing a tmux row. Like
+  every step it is one-way: a build at 33 refuses the database.
 - Session notifications (SPEC.md, Status) are recorded by the supervisor, which holds the specifics their wording
   depends on (which agent, which reporter, why a hook was not added), in a `session_notifications` table of its own
   database: a per-session sequence number that only grows, a kind naming the problem, the launch generation it belongs

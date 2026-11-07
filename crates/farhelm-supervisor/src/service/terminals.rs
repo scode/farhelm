@@ -280,24 +280,25 @@ impl Terminal {
         }
     }
 
-    /// The value this terminal contributes to the session row's `pane`
-    /// column, which outcome transitions carry so a launch's provenance
-    /// survives the physical terminal's disappearance.
+    /// The value this terminal contributes to the session row's terminal
+    /// address ([`crate::store::StoredSession::terminal_address`]), which
+    /// outcome transitions carry so a launch's provenance survives the
+    /// physical terminal's disappearance.
     ///
     /// This is the one dispatch that collapses the kind into a bare string,
     /// so the string is only meaningful beside the row's
     /// [`crate::store::StoredSession::terminal_kind`]: a tmux pane id for a
     /// tmux row, the host's socket name (the file name inside the state
     /// directory's socket directory, never a path) for a host row (the
-    /// plan's D-14). A reader that interprets the column checks the kind
+    /// plan's D-14). A reader that interprets the address checks the kind
     /// first; one that took a host's socket name for a pane id would find
     /// no such pane, and could then record a live session as exited.
     ///
     /// Socket names are short base32 names this supervisor mints
     /// (`crate::hosts::names`), always valid UTF-8 and never empty, so the
-    /// empty fallback below is unreachable; an empty `pane` would read as a
+    /// empty fallback below is unreachable; an empty address would read as a
     /// launch never confirmed, which is the conservative misreading.
-    pub(crate) fn recorded_pane(&self) -> &str {
+    pub(crate) fn recorded_address(&self) -> &str {
         match self {
             Terminal::Tmux(tmux) => &tmux.pane,
             Terminal::Host(host) => host
@@ -708,9 +709,9 @@ pub(crate) fn tabs_from_pane_states<'a>(
 }
 
 /// The pane backing one session's AGENT terminal when the durable record
-/// has none — the pane-less recovery `reload_sessions` performs for a row
-/// whose `pane` column is empty (a launch that crashed before the pane id
-/// could be written, or a row that predates the column).
+/// has none — the pane-less recovery `reload_sessions` performs for a tmux
+/// row whose terminal address is empty (a launch that crashed before the
+/// pane id could be written, or a row that predates the column).
 ///
 /// Preference order, and the reason for each rung:
 ///

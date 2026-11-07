@@ -881,15 +881,16 @@ pub(crate) async fn observe_entry_with_capture_budget(
         }
         if let Some(detail) = detail {
             // An in-memory Terminal can precede durable confirmation when
-            // create's confirmation write fails. Preserve its accepted pane
-            // with the error: wrapper failures have no sentinel to keep that
-            // provenance alive after the physical terminal disappears.
+            // create's confirmation write fails. Preserve its accepted terminal
+            // address with the error: wrapper failures have no sentinel to
+            // keep that provenance alive after the physical terminal
+            // disappears.
             let transition = sup.may_record().then(|| Transition::SentinelError {
                 detail: detail.clone(),
-                pane: entry
+                address: entry
                     .terminal
                     .as_ref()
-                    .map(|terminal| terminal.recorded_pane().to_owned()),
+                    .map(|terminal| terminal.recorded_address().to_owned()),
             });
             return Ok(EntryObservation {
                 sentinel: Some(detail),

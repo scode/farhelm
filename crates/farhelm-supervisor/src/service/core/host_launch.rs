@@ -20,9 +20,9 @@
 //!   which reach the child through this environment and the launch spec,
 //!   are never on the host: Stop's marker sweep never finds it, and a
 //!   process that lives for weeks keeps no credential readable by others.
-//! - **Which launch a host belongs to**: its tag, which names the session
-//!   and the launch generation, and, until the launch is confirmed (which
-//!   records the socket's name in the row's `pane`, the plan's D-14), the
+//! - **Which launch a host belongs to**: its tag, which names the session and
+//!   the launch generation, and, until the launch is confirmed (which records
+//!   the socket's name in the row's `terminal_address`, the plan's D-14), the
 //!   launch record below.
 //! - **The launch record** ([`LaunchHostRecord`]): before the host's first
 //!   stage is given the spec it starts the host from, the launch's

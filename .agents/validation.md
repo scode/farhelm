@@ -292,43 +292,43 @@ that its required systemd or SSH substrate ran.
   — Restart of an agent in a terminal host (`crates/farhelm-supervisor/src/service/core/host_restart.rs`) and the
   startup rules for the hosts a restart left (`host_handover`, "Superseded agent hosts" and a restart that never started
   its replacement). The unit tests pin the superseded rule as a function of a host's tag and its session's row
-  (superseded only by a confirmed later launch in another host: never while the row is launching, when its `pane` names
-  the host itself, for the current generation, a tmux row, another session, a tab, or no row), which hosts count as the
-  row's own at its `pane`, and the claim-window fallback choosing only from a launch directory listed in full; a Restart
-  of a terminal-less host row going to a host, never tmux (with no host program, failing definitively with the row as it
-  was); the runtime's Restart seed against a stand-in host (encoded on the blocking pool with the emulator handed back
-  and the runtime driving on; on a runtime with one blocking thread held busy, a seed whose runtime is stopped while its
-  encode is queued answering at once with the encode ending, and a cancelled seed of a runtime that had ended leaving
-  the emulator readable; a seed's caller cancelled at the encode gate leaving the emulator to come back); an orderly
-  stop during a Restart's seed (held at the gate) refusing the Restart promptly with no generation claimed; a Restart
-  without consent of a working host agent touching neither its program nor that of an earlier start's host, also when
-  the agent turned working while the Restart settled that start; and a host restart failing definitively after an
-  orderly stop gathered the host terminals (held at its window) putting back a placeholder, the old runtime ended and
-  its held checkpoint encode cancelled. The e2e tests run in-process supervisors with the switch on and real hosts
-  started from the built `farhelm`: a Restart starting a new host at the old size that keeps the old history (and none
-  of the old screen) with default modes, ending the old host and removing its launch record; Restart stopping a running
-  host agent's tree, with a grandchild that ignores SIGHUP, before the new host's start begins, as that start records
-  (in `host_terminals.rs`); a second Restart fencing the first stage an interrupted one left holding its spec, so that
-  releasing it afterwards starts no second agent; a host agent's tab, its host, shell and launch record surviving a
-  Restart; an orderly stop during a Restart's window (held at its gate) closing the session's host tab runtime, with the
-  Restart, succeeding or failing, bringing none back connected; a wedged host a confirmed restart replaced not holding a
-  later Restart up; a replacement whose first stage refuses unwound definitively, the old host kept as the session's
-  terminal for that supervisor and adopted by the next one through the row's `pane`, and a later Restart moving on from
-  it; an unusable replacement host ended by the verified signal and the restart unwound; one that cannot be confirmed
-  ended keeping the launching record with no terminal and the old runtime stopped, and Delete then ending both; a failed
-  confirmation write publishing the new host and still ending the old one; a grid viewer detached as "session restarted"
-  and reattaching to the new host's screen and history; the seed able to hold what the old program printed as it was
-  stopped; a crash (the fault seam) right after the generation claim, and one after a failed replacement was cleaned up,
-  each leaving the old host the session's terminal at the next start, with its history kept by the next Restart; with
-  the newest earlier host unreadable at that start, no older host taken, and the newest taken at the start after; with
-  the newest earlier host dead, the next older one taken with its history; a restart interrupted after its new host
-  started, and one after its confirmation, each converging at the next start (the new host adopted and confirmed, the
-  old host ended and its record removed); an earlier host stopped with SIGSTOP left alone by the next start and ended by
-  the one after; a restart whose row is deleted through the store mid-launch ending both hosts; and Delete after an
-  interrupted restart ending both generations' hosts. Needs the pinned tmux first on `PATH` and Python 3 at
-  `/usr/bin/python3` (the unusable host's stand-in). Linux only (the e2e suite), about three minutes; part of the
-  workspace nextest run. Run it when Restart's host path, the host spawn, the runtime's seed, reload's host attribution
-  or the superseded rule changes.
+  (superseded only by a confirmed later launch in another host: never while the row is launching, when its
+  `terminal_address` names the host itself, for the current generation, a tmux row, another session, a tab, or no row),
+  which hosts count as the row's own at its `terminal_address`, and the claim-window fallback choosing only from a
+  launch directory listed in full; a Restart of a terminal-less host row going to a host, never tmux (with no host
+  program, failing definitively with the row as it was); the runtime's Restart seed against a stand-in host (encoded on
+  the blocking pool with the emulator handed back and the runtime driving on; on a runtime with one blocking thread held
+  busy, a seed whose runtime is stopped while its encode is queued answering at once with the encode ending, and a
+  cancelled seed of a runtime that had ended leaving the emulator readable; a seed's caller cancelled at the encode gate
+  leaving the emulator to come back); an orderly stop during a Restart's seed (held at the gate) refusing the Restart
+  promptly with no generation claimed; a Restart without consent of a working host agent touching neither its program
+  nor that of an earlier start's host, also when the agent turned working while the Restart settled that start; and a
+  host restart failing definitively after an orderly stop gathered the host terminals (held at its window) putting back
+  a placeholder, the old runtime ended and its held checkpoint encode cancelled. The e2e tests run in-process
+  supervisors with the switch on and real hosts started from the built `farhelm`: a Restart starting a new host at the
+  old size that keeps the old history (and none of the old screen) with default modes, ending the old host and removing
+  its launch record; Restart stopping a running host agent's tree, with a grandchild that ignores SIGHUP, before the new
+  host's start begins, as that start records (in `host_terminals.rs`); a second Restart fencing the first stage an
+  interrupted one left holding its spec, so that releasing it afterwards starts no second agent; a host agent's tab, its
+  host, shell and launch record surviving a Restart; an orderly stop during a Restart's window (held at its gate)
+  closing the session's host tab runtime, with the Restart, succeeding or failing, bringing none back connected; a
+  wedged host a confirmed restart replaced not holding a later Restart up; a replacement whose first stage refuses
+  unwound definitively, the old host kept as the session's terminal for that supervisor and adopted by the next one
+  through the row's `terminal_address`, and a later Restart moving on from it; an unusable replacement host ended by the
+  verified signal and the restart unwound; one that cannot be confirmed ended keeping the launching record with no
+  terminal and the old runtime stopped, and Delete then ending both; a failed confirmation write publishing the new host
+  and still ending the old one; a grid viewer detached as "session restarted" and reattaching to the new host's screen
+  and history; the seed able to hold what the old program printed as it was stopped; a crash (the fault seam) right
+  after the generation claim, and one after a failed replacement was cleaned up, each leaving the old host the session's
+  terminal at the next start, with its history kept by the next Restart; with the newest earlier host unreadable at that
+  start, no older host taken, and the newest taken at the start after; with the newest earlier host dead, the next older
+  one taken with its history; a restart interrupted after its new host started, and one after its confirmation, each
+  converging at the next start (the new host adopted and confirmed, the old host ended and its record removed); an
+  earlier host stopped with SIGSTOP left alone by the next start and ended by the one after; a restart whose row is
+  deleted through the store mid-launch ending both hosts; and Delete after an interrupted restart ending both
+  generations' hosts. Needs the pinned tmux first on `PATH` and Python 3 at `/usr/bin/python3` (the unusable host's
+  stand-in). Linux only (the e2e suite), about three minutes; part of the workspace nextest run. Run it when Restart's
+  host path, the host spawn, the runtime's seed, reload's host attribution or the superseded rule changes.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'moving old sessions into terminal hosts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(a_relaunch_into_a_host_writes_the_kind_and_an_abort_restores_tmux) | test(/^tmux::tests::pane_history_/) | test(/^host_migrations::/)'`
   — a Restart that moves a tmux session's agent into a terminal host under the internal switch
   (`crates/farhelm-supervisor/src/service/core/host_restart.rs`, "From a tmux pane"). The unit tests pin the store's
@@ -464,12 +464,16 @@ that its required systemd or SSH substrate ran.
   first on `PATH`. Linux only (the e2e suite), about a minute with four slots (stale sockets, a stopped host and a
   fenced first stage wait out their deadlines); part of the workspace nextest run. Run it when the reclaim, discovery,
   the launch records' settling, a host runtime's adoption, `serve`'s startup order or the store's reservations change.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminals under a real supervisor process' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/^host_processes::/) | test(a_startup_terminal_kind_is_the_switch_the_supervisor_runs_with) | test(the_schema_33_marker_changes_no_table_and_keeps_every_row)'`
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminals under a real supervisor process' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/^host_processes::/) | test(a_startup_terminal_kind_is_the_switch_the_supervisor_runs_with) | test(the_schema_33_marker_changes_no_table_and_keeps_every_row) | test(/^store::tests::schema_34_/)'`
   — terminal hosts the way a real supervisor process creates them: `farhelm supervisor run`, whose hidden
   `--new-terminals` defaults to `host` (`SupervisorStartup::new_terminals`). The unit tests check that the startup value
-  is the switch the supervisor runs with (`Supervisor::new_terminals`), and that schema 33, the marker that makes every
+  is the switch the supervisor runs with (`Supervisor::new_terminals`), that schema 33, the marker that makes every
   build at 32 refuse a database such a supervisor opened, changes no table or row and is not taken by a process without
-  the state directory's claim; the `farhelm` binary's own unit test
+  the state directory's claim, and that schema 34, which drops the stored tmux session names and renames `pane` to
+  `terminal_address`, keeps every session field for field (a tmux pane, an unconfirmed launch, a host socket), both
+  kinds of reservation and the notification trigger, matches a fresh database, and refuses, leaving the database at 33,
+  one whose stored tmux name of a session or pending reservation is not `fh-` and its session id (a settled
+  reservation's does not stop it); the `farhelm` binary's own unit test
   (`supervisor_run_defaults_to_terminal_hosts_and_can_still_ask_for_tmux`, part of the workspace nextest run, or alone
   as
   `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'supervisor run default' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm --bin farhelm -E 'test(supervisor_run_defaults)'`)
@@ -717,13 +721,13 @@ that its required systemd or SSH substrate ran.
   desktop asset handler, and that the teardown's terminal-host stop ends a real host planted in the answering-supervisor
   leg's state directory. The app's supervisor creates its sessions in terminal hosts, as every shipped one does, and the
   smoke requires every session it creates to be a host row; a session's terminal counts as alive by its database row
-  (`terminal_kind` and `pane`: a listening host socket in the kernel's socket table, or a tmux session for a tmux row).
-  Which session the relaunched window holds open, and that a token rotation left that attachment open, are read from the
-  embedded helm's attachment trace (the `farhelm_helm::terminal_attachments` debug events, turned on through the
-  launches' `RUST_LOG`), and after the supervisor replacement the kept session is attached as a grid viewer through the
-  replacement and a typed command must write its file. API checks retain host-qualified session references; row and
-  scope checks use their local session IDs. The optional coordinate-driven leg is not part of CI; it checks typed input
-  through a file the typed command writes.
+  (`terminal_kind` and `terminal_address`: a listening host socket in the kernel's socket table, or a tmux session for a
+  tmux row, named from the session's id). Which session the relaunched window holds open, and that a token rotation left
+  that attachment open, are read from the embedded helm's attachment trace (the `farhelm_helm::terminal_attachments`
+  debug events, turned on through the launches' `RUST_LOG`), and after the supervisor replacement the kept session is
+  attached as a grid viewer through the replacement and a typed command must write its file. API checks retain
+  host-qualified session references; row and scope checks use their local session IDs. The optional coordinate-driven
+  leg is not part of CI; it checks typed input through a file the typed command writes.
 - `DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh` — optional Linux native appearance integration using the
   ordinary owned Xvfb/openbox setup. Four fresh/stored dark/light cases check native media-query premises, palette
   before renderer content, real Settings choices, private WebKit profile persistence, Inter, embedded assets and the

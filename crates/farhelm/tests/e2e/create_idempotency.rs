@@ -867,7 +867,7 @@ async fn a_crash_during_the_launch_reconciles_to_the_session_that_started() {
     let row = scene.row.expect("the launching row survives");
     assert_eq!(row.outcome, LastOutcome::Launching);
     assert!(
-        row.pane.is_empty(),
+        row.terminal_address.is_empty(),
         "the confirmation never ran, so no pane was recorded"
     );
     assert_eq!(
@@ -901,7 +901,10 @@ async fn a_crash_before_the_outcome_commit_still_replays_the_same_session() {
         LastOutcome::Running,
         "the launch was confirmed durably before the crash"
     );
-    assert!(!row.pane.is_empty(), "with its pane recorded alongside");
+    assert!(
+        !row.terminal_address.is_empty(),
+        "with its pane recorded alongside"
+    );
     assert_eq!(scene.tmux, vec![format!("fh-{}", row.id)]);
     assert_eq!(
         scene.reservation_after_reload.outcome,

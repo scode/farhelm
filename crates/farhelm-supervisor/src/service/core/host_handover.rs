@@ -64,47 +64,47 @@
 //!
 //! ## Finding the hosts again
 //!
-//! A host outlives the supervisor that started it, and the supervisor keeps
-//! no list of hosts: a restarted supervisor finds them by scanning its socket
+//! A host outlives the supervisor that started it, and the supervisor keeps no
+//! list of hosts: a restarted supervisor finds them by scanning its socket
 //! directory (`crate::hosts::registry`) and matches them to rows here, in
 //! [`attribute_host_rows`], the one place a supervisor learns which host
 //! belongs to which session. Host rows never go through tmux's pane lookup:
-//! their `pane` column holds a socket name (the plan's D-14), which no tmux
-//! lookup may read as a pane, and "no such pane" would record a running
+//! their `terminal_address` column holds a socket name (the plan's D-14), which
+//! no tmux lookup may read as a pane, and "no such pane" would record a running
 //! agent as exited.
 //!
 //! What identifies a row's host, in order:
 //!
 //! - **The tag.** A live host whose tag names the row's session and launch
 //!   generation is the row's, whatever its socket is called. This is how a
-//!   launch that never reached its confirmation (an empty `pane`) is found
-//!   again, as tmux's agent-window marker finds an unconfirmed pane.
-//! - **The socket the row names**: its `pane` once the launch was confirmed,
-//!   else the socket the launch record of the row's own generation names
-//!   (`<state>/launch/<id>.<gen>.host`, `host_launch`'s "The launch
-//!   record"), never an earlier generation's record. What is there when no
-//!   live host carries the row's tag decides between "unavailable" and
-//!   "absent". One host there is the row's although its tag names an
-//!   earlier generation: an agent host of the same session at the socket the
-//!   row's `pane` names. Only a confirmation writes `pane`, and a Restart
-//!   empties it as it opens a generation, so a `pane` naming such a host is
-//!   one a Restart that failed definitively put back with the previous run's
-//!   record: that host is still the session's terminal (`host_restart`).
+//!   launch that never reached its confirmation (an empty `terminal_address`)
+//!   is found again, as tmux's agent-window marker finds an unconfirmed pane.
+//! - **The socket the row names**: its `terminal_address` once the launch was
+//!   confirmed, else the socket the launch record of the row's own generation
+//!   names (`<state>/launch/<id>.<gen>.host`, `host_launch`'s "The launch
+//!   record"), never an earlier generation's record. What is there when no live
+//!   host carries the row's tag decides between "unavailable" and "absent". One
+//!   host there is the row's although its tag names an earlier generation: an
+//!   agent host of the same session at the socket the row's `terminal_address`
+//!   names. Only a confirmation writes `terminal_address`, and a Restart
+//!   empties it as it opens a generation, so a `terminal_address` naming such a
+//!   host is one a Restart that failed definitively put back with the previous
+//!   run's record: that host is still the session's terminal (`host_restart`).
 //! - **A Restart that never started its replacement.** A Restart empties
-//!   `pane` as it claims the new generation, before its replacement host has
-//!   a launch record. A supervisor that dies in between leaves a row whose
-//!   own generation has no host, no `pane` and no record, and the previous
-//!   host, which still holds the session's history. Only then (never when the
-//!   row's generation has a record, readable or not, or a host) the host of
-//!   the newest earlier generation that has a launch record is the row's
-//!   terminal, when the scan read it at the record's socket. A record whose
-//!   host the scan found gone is passed over for the next older one; any
+//!   `terminal_address` as it claims the new generation, before its replacement
+//!   host has a launch record. A supervisor that dies in between leaves a row
+//!   whose own generation has no host, no `terminal_address` and no record, and
+//!   the previous host, which still holds the session's history. Only then
+//!   (never when the row's generation has a record, readable or not, or a host)
+//!   the host of the newest earlier generation that has a launch record is the
+//!   row's terminal, when the scan read it at the record's socket. A record
+//!   whose host the scan found gone is passed over for the next older one; any
 //!   other record whose host was not read there (and a launch directory that
 //!   cannot be listed in full) leaves the row with none, and the next start
 //!   tries again ([`newest_recorded_earlier`]). Reconciliation records the
-//!   socket of a host it takes in `pane` as for any found host (the row then
-//!   lists the previous run's exit, or running if its program still runs),
-//!   and the next Restart seeds from it and ends it.
+//!   socket of a host it takes in `terminal_address` as for any found host (the
+//!   row then lists the previous run's exit, or running if its program still
+//!   runs), and the next Restart seeds from it and ends it.
 //!
 //! Each row ends in one of three classes ([`RowHost`]), and the reload treats
 //! them as it treats a found, an unattributed and an absent pane, except that
@@ -149,19 +149,19 @@
 //! ## Superseded agent hosts
 //!
 //! A Restart of a host agent starts a new host and ends the old one once the
-//! new launch is confirmed (`host_restart`). A supervisor that dies in
-//! between leaves the old host running with nothing in memory to end it, and
-//! it is no orphan: its session exists. So the reload ends it, with the
-//! plan's D-25 rule ([`superseded`]): a live agent host that no row claimed,
-//! whose tag names a session whose row is a host row at a later launch
-//! generation, and whose row's later launch is confirmed (its `pane` names a
-//! socket, and not this host's). The decision is taken after the reload's
-//! own reconciliation has committed, on the row as it then stands, so a
-//! restart interrupted before its confirmation converges in one start: the
-//! reload finds the new host by its tag and confirms it, and then the old
-//! host is superseded. Until a row's later launch is confirmed, its earlier
-//! host is kept (a definitive failure may still make it the session's
-//! terminal, and an unconfirmed launch may have started nothing).
+//! new launch is confirmed (`host_restart`). A supervisor that dies in between
+//! leaves the old host running with nothing in memory to end it, and it is no
+//! orphan: its session exists. So the reload ends it, with the plan's D-25 rule
+//! ([`superseded`]): a live agent host that no row claimed, whose tag names a
+//! session whose row is a host row at a later launch generation, and whose
+//! row's later launch is confirmed (its `terminal_address` names a socket, and
+//! not this host's). The decision is taken after the reload's own
+//! reconciliation has committed, on the row as it then stands, so a restart
+//! interrupted before its confirmation converges in one start: the reload finds
+//! the new host by its tag and confirms it, and then the old host is
+//! superseded. Until a row's later launch is confirmed, its earlier host is
+//! kept (a definitive failure may still make it the session's terminal, and an
+//! unconfirmed launch may have started nothing).
 //!
 //! It is ended over the scan's own connection (`Shutdown`, then the
 //! verified signal to the connection's peer), never by connecting to its
@@ -195,12 +195,12 @@
 //! 2. checks that the session's entry still holds that very handle for
 //!    the same launch generation, or its tab cell still holds it for the
 //!    same tab id, and that no orderly stop has begun;
-//! 3. looks at the one socket the handle names, and nothing else: a
-//!    scan restricted to that name, which a launch drew for itself, so no
-//!    host another runtime of this supervisor holds or is starting can be
-//!    taken over; a host whose tag names the session's launch (or, as at
-//!    startup, an earlier launch of its agent: the socket is the one the
-//!    row's `pane` names) is adopted as recovered, and anything else is
+//! 3. looks at the one socket the handle names, and nothing else: a scan
+//!    restricted to that name, which a launch drew for itself, so no host
+//!    another runtime of this supervisor holds or is starting can be taken
+//!    over; a host whose tag names the session's launch (or, as at startup, an
+//!    earlier launch of its agent: the socket is the one the row's
+//!    `terminal_address` names) is adopted as recovered, and anything else is
 //!    classified as at startup;
 //! 4. under [`Supervisor::host_adoption`] and the session map, checks the
 //!    entry and the stop again and swaps the outcome in (a runtime, a new
@@ -760,17 +760,17 @@ pub(super) async fn attribute_host_rows(
 
     let mut adopting = JoinSet::new();
     for row in pending {
-        // The row's host: the one its tag names for the row's generation,
-        // else an earlier generation's at the socket the row's `pane`
+        // The row's host: the one its tag names for the row's generation, else
+        // an earlier generation's at the socket the row's `terminal_address`
         // names (module docs).
         let claimed = match registry.agent(&row.id, row.generation) {
             Ok(Some(host)) => Ok(Some(host.name.clone())),
-            Ok(None) => match earlier_at_pane(&registry, row) {
+            Ok(None) => match earlier_at_address(&registry, row) {
                 Some(name) => Ok(Some(name)),
                 // Nothing of the row's own generation ever started (no host
-                // carries its tag, its `pane` is empty and it has no launch
-                // record): a Restart claimed the generation and died before
-                // its replacement got a record (module docs).
+                // carries its tag, its `terminal_address` is empty and it has
+                // no launch record): a Restart claimed the generation and died
+                // before its replacement got a record (module docs).
                 None if matches!(named[&row.id], NamedSocket::NoHostStarted) => {
                     Ok(newest_recorded_earlier(&registry, state_dir, row).await)
                 }
@@ -870,15 +870,15 @@ pub(super) async fn attribute_host_rows(
 /// leaves those hosts as they were.
 pub(super) struct EarlierAgentHosts(Vec<LiveHost>);
 
-/// The name of a live host at the socket `row`'s `pane` names whose tag
-/// names `row`'s session's agent at an earlier launch generation, if there
-/// is one: the row's own host after a Restart that failed definitively
-/// (module docs, "What identifies a row's host").
-fn earlier_at_pane(registry: &HostRegistry, row: &StoredSession) -> Option<OsString> {
-    if row.pane.is_empty() {
+/// The name of a live host at the socket `row`'s `terminal_address` names whose
+/// tag names `row`'s session's agent at an earlier launch generation, if there
+/// is one: the row's own host after a Restart that failed definitively (module
+/// docs, "What identifies a row's host").
+fn earlier_at_address(registry: &HostRegistry, row: &StoredSession) -> Option<OsString> {
+    if row.terminal_address.is_empty() {
         return None;
     }
-    match registry.by_name(std::ffi::OsStr::new(&row.pane)) {
+    match registry.by_name(std::ffi::OsStr::new(&row.terminal_address)) {
         Some(NamedHost::Live(host)) if earlier_agent_of(&host.tag, &row.id, row.generation) => {
             Some(host.name.clone())
         }
@@ -982,15 +982,15 @@ fn earlier_agent_of(tag: &HostTag, session_id: &str, generation: i64) -> bool {
         }
 }
 
-/// Whether the live agent host tagged `tag`, at the socket called `name`,
-/// is superseded (the plan's D-25, module docs): `row` is its session's row
-/// as it stands after the reload, and it must be a host row at a later
-/// launch generation than the tag's whose launch is confirmed, which is
-/// what a non-empty `pane` naming another socket says (only a confirmation
-/// writes `pane`; a Restart empties it as it opens a generation, and one
-/// that failed definitively puts back the `pane` of the host that stays the
-/// session's terminal). A session with no row is an orphan, which is not
-/// this rule's to end; a tab host is not an agent's.
+/// Whether the live agent host tagged `tag`, at the socket called `name`, is
+/// superseded (the plan's D-25, module docs): `row` is its session's row as it
+/// stands after the reload, and it must be a host row at a later launch
+/// generation than the tag's whose launch is confirmed, which is what a
+/// non-empty `terminal_address` naming another socket says (only a confirmation
+/// writes `terminal_address`; a Restart empties it as it opens a generation,
+/// and one that failed definitively puts back the `terminal_address` of the
+/// host that stays the session's terminal). A session with no row is an orphan,
+/// which is not this rule's to end; a tab host is not an agent's.
 pub(super) fn superseded(
     tag: &HostTag,
     name: &std::ffi::OsStr,
@@ -1002,8 +1002,8 @@ pub(super) fn superseded(
     row.terminal_kind == TerminalKind::Host
         && earlier_agent_of(tag, &row.id, row.generation)
         && row.outcome != LastOutcome::Launching
-        && !row.pane.is_empty()
-        && std::ffi::OsStr::new(&row.pane) != name
+        && !row.terminal_address.is_empty()
+        && std::ffi::OsStr::new(&row.terminal_address) != name
 }
 
 /// End the superseded hosts among `earlier` (module docs, "Superseded agent
@@ -1176,7 +1176,7 @@ fn still_driven(host: &HostTerminal) -> bool {
 
 /// The socket a row names for its host, before any host is asked.
 enum NamedSocket {
-    /// A socket name: the row's `pane`, or its launch record's.
+    /// A socket name: the row's `terminal_address`, or its launch record's.
     Name(String),
     /// The launch was never confirmed and has no launch record, so no host
     /// start ever got as far as being given its spec: there is no host.
@@ -1187,8 +1187,8 @@ enum NamedSocket {
 
 /// What `row` names as its host's socket (module docs).
 async fn named_socket(state_dir: &Path, row: &StoredSession) -> NamedSocket {
-    if !row.pane.is_empty() {
-        return NamedSocket::Name(row.pane.clone());
+    if !row.terminal_address.is_empty() {
+        return NamedSocket::Name(row.terminal_address.clone());
     }
     let record = LaunchArtifacts::for_launch(state_dir, &row.id, row.generation);
     match read_launch_record(record.host()).await {
@@ -1612,10 +1612,11 @@ impl Supervisor {
                 .insert(name.clone());
         }
         let hosts_dir = absolute_hosts_dir(&self.state_dir);
-        // An unavailable handle's socket is the one its row names (its `pane`, or
-        // its generation's launch record), so a host there tagged for the
-        // session's agent at an earlier generation is the row's own, as at
-        // startup (module docs, "What identifies a row's host").
+        // An unavailable handle's socket is the one its row names (its
+        // `terminal_address`, or its generation's launch record), so a host
+        // there tagged for the session's agent at an earlier generation is the
+        // row's own, as at startup (module docs, "What identifies a row's
+        // host").
         let earlier_here = matches!(registry.by_name(&name),
             Some(NamedHost::Live(host)) if earlier_agent_of(&host.tag, id, generation));
         let ours = match registry.agent(id, generation) {
@@ -1727,9 +1728,9 @@ impl Supervisor {
                         LastOutcome::Launching | LastOutcome::StopRequested
                     )
                 {
-                    let pane = Terminal::Host(host.clone()).recorded_pane().to_string();
+                    let address = Terminal::Host(host.clone()).recorded_address().to_string();
                     if let Err(error) = self
-                        .record(id, &replacement, Transition::ConfirmRunning { pane })
+                        .record(id, &replacement, Transition::ConfirmRunning { address })
                         .await
                     {
                         warn!(session = %id, error = %format!("{error:#}"),
@@ -1779,12 +1780,12 @@ mod tests {
         }
     }
 
-    /// A host row for `s1` at `generation`, naming socket `pane`, with
+    /// A host row for `s1` at `generation`, naming socket `socket`, with
     /// `outcome`.
-    fn row(generation: i64, pane: &str, outcome: LastOutcome) -> StoredSession {
+    fn row(generation: i64, socket: &str, outcome: LastOutcome) -> StoredSession {
         let mut row = host_row("s1", Path::new("/state/hosts/placeholder"));
         row.generation = generation;
-        row.pane = pane.to_string();
+        row.terminal_address = socket.to_string();
         row.outcome = outcome;
         row
     }
@@ -1792,16 +1793,16 @@ mod tests {
     /// An earlier generation's agent host is superseded once its session's
     /// later launch is confirmed in another host, and only then.
     ///
-    /// Why: the rule ends hosts at startup, so every case where it must not
-    /// is a running program or a session's only terminal lost. Spec: the
+    /// Why: the rule ends hosts at startup, so every case where it must not is
+    /// a running program or a session's only terminal lost. Spec: the
     /// generation-0 agent host `OLDHOST1` of `s1` is superseded by a running
-    /// (or exited) host row at generation 1 naming `NEWHOST1`; it is not
-    /// when the row is still launching with no `pane` (the restart is
-    /// unconfirmed), when the row's `pane` names `OLDHOST1` itself (a
-    /// restart that failed definitively put it back), when the row is at
-    /// generation 0 (it is the current host), when the row is a tmux row,
-    /// when the tag names another session or a tab, or when no row exists
-    /// (an orphan, not this rule's).
+    /// (or exited) host row at generation 1 naming `NEWHOST1`; it is not when
+    /// the row is still launching with no `terminal_address` (the restart is
+    /// unconfirmed), when the row's `terminal_address` names `OLDHOST1` itself
+    /// (a restart that failed definitively put it back), when the row is at
+    /// generation 0 (it is the current host), when the row is a tmux row, when
+    /// the tag names another session or a tab, or when no row exists (an
+    /// orphan, not this rule's).
     #[test]
     fn an_earlier_agent_host_is_superseded_only_by_a_confirmed_later_launch() {
         let old = OsStr::new("OLDHOST1");
@@ -1856,16 +1857,16 @@ mod tests {
     }
 
     /// Only an agent host of the same session at an earlier generation counts
-    /// as the row's own at the socket its `pane` names.
+    /// as the row's own at the socket its `terminal_address` names.
     ///
-    /// Why: the row's `pane` is what lets a reload keep a session's terminal
-    /// after a restart that failed definitively; a host of another session,
-    /// a tab, or a later generation there is not the row's and must stay
-    /// unavailable rather than be adopted. Spec: for `s1` at generation 2,
-    /// `s1`'s agent at generations 0 and 1 counts, at 2 and 3 it does not,
-    /// nor does `s2`'s agent at 0 or `s1`'s tab.
+    /// Why: the row's `terminal_address` is what lets a reload keep a session's
+    /// terminal after a restart that failed definitively; a host of another
+    /// session, a tab, or a later generation there is not the row's and must
+    /// stay unavailable rather than be adopted. Spec: for `s1` at generation 2,
+    /// `s1`'s agent at generations 0 and 1 counts, at 2 and 3 it does not, nor
+    /// does `s2`'s agent at 0 or `s1`'s tab.
     #[test]
-    fn an_earlier_agent_of_the_same_session_is_the_rows_own_at_its_pane() {
+    fn an_earlier_agent_of_the_same_session_is_the_rows_own_at_its_address() {
         assert!(earlier_agent_of(&agent_tag("s1", 0), "s1", 2));
         assert!(earlier_agent_of(&agent_tag("s1", 1), "s1", 2));
         assert!(!earlier_agent_of(&agent_tag("s1", 2), "s1", 2));

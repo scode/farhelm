@@ -364,7 +364,10 @@ async fn an_orderly_restart_keeps_a_host_agent_running_with_its_screen() {
     assert_eq!(host.screen_tail(4096), screen, "the same screen");
     let row = stored_row(stack.state.path(), &session.id).await;
     assert_eq!(row.outcome, LastOutcome::Running);
-    assert_eq!(std::ffi::OsStr::new(&row.pane), socket.file_name().unwrap());
+    assert_eq!(
+        std::ffi::OsStr::new(&row.terminal_address),
+        socket.file_name().unwrap()
+    );
     assert_reloaded_as_running(&sup, &client, stack.state.path(), &session.id).await;
     let serving = crate::hook_identity::ServeTask::spawn(&sup, stack.state.path()).await;
     let served = agent_host(&sup, &session.id).await;
@@ -524,7 +527,10 @@ async fn an_unconfirmed_host_launch_is_found_by_its_tag() {
         .pop()
         .expect("the launching row");
     assert_eq!(row.outcome, LastOutcome::Launching, "premise");
-    assert!(row.pane.is_empty(), "premise: the launch was not confirmed");
+    assert!(
+        row.terminal_address.is_empty(),
+        "premise: the launch was not confirmed"
+    );
     let socket = recorded_socket(stack.state.path(), &row.id);
     let host_pid = host_process(&socket).expect("premise: the interrupted launch's host runs");
     retire(stack.state.path(), sup, client).await;
@@ -536,7 +542,7 @@ async fn an_unconfirmed_host_launch_is_found_by_its_tag() {
     let recorded = stored_row(stack.state.path(), &row.id).await;
     assert_eq!(recorded.outcome, LastOutcome::Running);
     assert_eq!(
-        std::ffi::OsStr::new(&recorded.pane),
+        std::ffi::OsStr::new(&recorded.terminal_address),
         host.socket().file_name().unwrap()
     );
     assert_reloaded_as_running(&sup, &client, stack.state.path(), &row.id).await;
@@ -898,7 +904,10 @@ async fn an_unconfirmed_launch_that_never_started_ends_as_an_error() {
         .pop()
         .expect("the launching row");
     assert_eq!(row.outcome, LastOutcome::Launching, "premise");
-    assert!(row.pane.is_empty(), "premise: the launch was not confirmed");
+    assert!(
+        row.terminal_address.is_empty(),
+        "premise: the launch was not confirmed"
+    );
     let socket = recorded_socket(stack.state.path(), &row.id);
     let host_pid = host_process(&socket).expect("premise: the interrupted launch's host runs");
     retire(stack.state.path(), sup, client).await;

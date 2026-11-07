@@ -229,8 +229,11 @@ impl HostStack {
             "a create by a supervisor started with {:?} starts its agent in a host",
             self.kind_args
         );
-        assert!(!row.pane.is_empty(), "the launch is confirmed: {row:?}");
-        self.state.join("hosts").join(&row.pane)
+        assert!(
+            !row.terminal_address.is_empty(),
+            "the launch is confirmed: {row:?}"
+        );
+        self.state.join("hosts").join(&row.terminal_address)
     }
 
     /// Kill the supervisor and wait for it, leaving the hosts for the state

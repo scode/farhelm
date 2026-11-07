@@ -251,7 +251,7 @@ async fn a_create_starts_its_agent_in_a_terminal_host() {
     assert_eq!(row.terminal_kind, TerminalKind::Host);
     assert_eq!(row.outcome, LastOutcome::Running);
     let socket_name = host.socket().file_name().expect("a socket name");
-    assert_eq!(OsString::from(&row.pane), socket_name);
+    assert_eq!(OsString::from(&row.terminal_address), socket_name);
     assert_eq!(host_sockets(&h), vec![socket_name.to_os_string()]);
     assert_eq!(
         host.socket(),
@@ -736,7 +736,10 @@ async fn an_interrupted_create_is_retried_without_a_second_agent() {
     };
     assert_eq!(row.outcome, LastOutcome::Launching);
     assert_eq!(row.terminal_kind, TerminalKind::Host);
-    assert!(row.pane.is_empty(), "nothing confirmed the launch");
+    assert!(
+        row.terminal_address.is_empty(),
+        "nothing confirmed the launch"
+    );
     assert_eq!(wait_for_file(&runs, WAIT_SECS).await, b"run\n");
     let sockets = host_sockets(&h);
     let hosts = host_processes(&h);
@@ -1270,7 +1273,11 @@ async fn a_retry_waits_for_an_interrupted_first_stage_and_finds_its_host() {
         panic!("one launching row: {rows:?}");
     };
     assert_eq!(
-        (row.outcome.clone(), row.terminal_kind, row.pane.as_str()),
+        (
+            row.outcome.clone(),
+            row.terminal_kind,
+            row.terminal_address.as_str()
+        ),
         (LastOutcome::Launching, TerminalKind::Host, "")
     );
     let starter = recorded_starter(&h, &row.id);
@@ -1541,7 +1548,7 @@ async fn a_retry_keeps_a_tmux_rows_kind_with_the_switch_on() {
         .unwrap()
         .expect("the row");
     assert_eq!(row.terminal_kind, TerminalKind::Tmux);
-    assert!(!row.pane.is_empty(), "the launch was confirmed");
+    assert!(!row.terminal_address.is_empty(), "the launch was confirmed");
     assert!(sup.agent_host_for_test(&session.id).await.is_none());
     wait_for_tmux_agent_ready(&state.path().join("tmux.sock"), &session.id).await;
 }
@@ -1571,7 +1578,7 @@ async fn a_retry_keeps_a_host_rows_kind_with_the_switch_off() {
         .await
         .expect("the retry runs in a host");
     assert_eq!(
-        OsString::from(&row.pane),
+        OsString::from(&row.terminal_address),
         host.socket().file_name().unwrap()
     );
     wait_for_screen(&host, AGENT_READY_MARKER).await;

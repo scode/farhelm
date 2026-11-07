@@ -948,10 +948,10 @@ async fn handle_stop_session(
             let classification = match sentinel {
                 Ok(Some(detail)) => Transition::SentinelError {
                     detail,
-                    pane: entry
+                    address: entry
                         .terminal
                         .as_ref()
-                        .map(|t| t.recorded_pane().to_owned()),
+                        .map(|t| t.recorded_address().to_owned()),
                 },
                 // The wrapper-failure shape outranks the plain exit
                 // for the same reason a sentinel does: an agent that
@@ -1000,10 +1000,10 @@ async fn handle_stop_session(
                     {
                         Ok(Some(detail)) => Transition::SentinelError {
                             detail: append_launch_excerpt(&sup, &entry, detail, &mut true).await,
-                            pane: entry
+                            address: entry
                                 .terminal
                                 .as_ref()
-                                .map(|t| t.recorded_pane().to_owned()),
+                                .map(|t| t.recorded_address().to_owned()),
                         },
                         Ok(None) | Err(_) => Transition::ObservedExit { exit_code },
                     }
@@ -4330,8 +4330,7 @@ mod tests {
                     creation_seq: 0,
                     cwd: cwd.to_string_lossy().into_owned(),
                     launch,
-                    tmux_name: format!("fh-{id}"),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
@@ -4704,8 +4703,7 @@ mod tests {
                         agent_kind: AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: format!("fh-{session_id}"),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: exited.clone(),
                     canonical_cwd: None,
@@ -4798,8 +4796,7 @@ mod tests {
                         agent_kind: AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: format!("fh-{session_id}"),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
@@ -4947,8 +4944,7 @@ mod tests {
                             crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
                         ]),
                     },
-                    tmux_name: format!("fh-{session_id}"),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     // Restart only resumes, so the row can resume: a reported
@@ -5597,7 +5593,10 @@ mod tests {
         );
         let all_permits = settled.unwrap().expect("admission remains open");
         for stored in sup.store.load_all().await.expect("read cleanup handles") {
-            let _ = sup.tmux.kill_session(&stored.tmux_name).await;
+            let _ = sup
+                .tmux
+                .kill_session(&super::super::core::session_tmux_name(&stored.id))
+                .await;
         }
         drop(all_permits);
         if let Err(error) = observed {
@@ -8108,8 +8107,7 @@ mod tests {
                             .expect("every agent kind has an agent type"),
                         Some("claude --resume {conversation} {farhelm_args}"),
                     ),
-                    tmux_name: format!("fh-{id}"),
-                    pane: String::new(),
+                    terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: Some("/tmp".to_string()),
