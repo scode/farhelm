@@ -452,10 +452,11 @@
 
   let terminalFontSize = storedFontSize();
 
-  // Whether this is a Mac, read off the platform string like xterm.js's own
-  // `Browser.isMac` (which matches an exact list of Mac platform names; the
-  // two agree on every real platform string), so the shortcut's modifier
-  // agrees with the platform xterm already treats this page as running on.
+  // Whether this is a Mac, read off the platform string. On every real
+  // platform string it agrees with the exact list of Mac platform names both
+  // terminals use (grid-input.js's `platformOf`, and old terminals'
+  // xterm.js), so the page's shortcut and link-click modifiers agree with
+  // the platform the terminal treats this page as running on.
   const IS_MAC = /Mac/.test(
     (typeof navigator !== "undefined" && navigator.platform) || "",
   );

@@ -143,11 +143,11 @@ fn every_key_encodes_as_the_key_table_says() {
     assert!(compared > 90_000, "only {compared} comparisons");
 }
 
-/// SPEC.md promises Shift+Enter inserts a newline in agents: ESC CR, and in
-/// one write, since programs that tell a lone Escape apart by read boundary
-/// (Codex) read a split pair as Escape then Enter. One message's bytes are
-/// one `Input` frame of at most `ATOMIC_INPUT` bytes, which the host offers
-/// to the pty in one write. Other modifiers keep xterm.js's own encoding.
+/// SPEC.md promises Shift+Enter inserts a newline in agents: ESC CR, and in one
+/// write, since programs that tell a lone Escape apart by read boundary (Codex)
+/// read a split pair as Escape then Enter. One message's bytes are one `Input`
+/// frame of at most `ATOMIC_INPUT` bytes, which the host offers to the pty in
+/// one write. Other modifiers keep the key table's encoding.
 #[test]
 fn shift_enter_is_esc_cr_in_one_atomic_input_frame() {
     for code in ["Enter", "NumpadEnter"] {
@@ -189,8 +189,9 @@ fn arrows_follow_the_programs_cursor_key_mode() {
     assert_eq!(encode(&shift_up, &application, SIZE), b"\x1b[1;2A");
 }
 
-/// xterm.js has no application keypad: the keypad's keys type their
-/// characters whatever DECKPAM says, so the encoder ignores that mode too.
+/// The keypad's keys type their characters whatever DECKPAM says (old
+/// terminals' xterm.js has no application keypad), so the encoder ignores that
+/// mode.
 #[test]
 fn the_keypad_types_its_characters_in_either_keypad_mode() {
     let keypad = Modes {
@@ -259,10 +260,10 @@ fn text_is_written_as_is() {
 
 // ---- Paste ------------------------------------------------------------------
 
-/// Bracketed paste (mode 2004) is how agents tell a paste from typing: a
-/// pasted newline must not submit. The markers wrap the paste when the
-/// program asked, and every CRLF and LF becomes CR as xterm.js converts
-/// them, so a pasted line ends as a typed Enter would.
+/// Bracketed paste (mode 2004) is how agents tell a paste from typing: a pasted
+/// newline must not submit. The markers wrap the paste when the program asked,
+/// and every CRLF and LF becomes CR, so a pasted line ends as a typed Enter
+/// would.
 #[test]
 fn a_paste_is_bracketed_when_the_program_asked_and_its_line_endings_converted() {
     let bracketed = Modes {
@@ -338,7 +339,7 @@ fn an_end_of_paste_marker_split_across_parts_is_still_removed_whole() {
     assert_eq!(part("x\x1b\x1b[2", true), b"[20x[2");
 }
 
-/// Today's page checks a paste for emptiness before sanitizing it, so a
+/// The page checks a paste for emptiness before sanitizing it, so a
 /// paste of nothing but ESC still writes the two markers (around nothing);
 /// the emptiness check must stay on the text as sent.
 #[test]
@@ -376,7 +377,7 @@ fn paste_open_spans_the_first_part_to_the_last() {
 
 /// Pasted text must not be able to end the bracketed paste around it and
 /// have what follows run as typed commands: every ESC is dropped, an
-/// end-of-paste marker whole, as Farhelm's page does today.
+/// end-of-paste marker whole, as Farhelm's page does.
 #[test]
 fn pasted_text_cannot_close_the_bracketed_paste() {
     let bracketed = Modes {
@@ -487,8 +488,8 @@ fn input_between_the_parts_of_a_paste_is_refused() {
     }
 }
 
-/// Today's page drops an empty paste before xterm.js would write a pair of
-/// markers around nothing; an empty part inside a longer paste is just
+/// An empty paste writes nothing, not a pair of markers around nothing (as old
+/// terminals' paste path drops it); an empty part inside a longer paste is just
 /// empty.
 #[test]
 fn an_empty_paste_writes_nothing() {
@@ -595,7 +596,7 @@ fn every_mouse_event_encodes_as_the_mouse_table_says() {
     assert!(past_the_screen, "an event past the screen's last column");
 }
 
-/// Each reporting mode reports what xterm.js's protocol reports and drops
+/// Each reporting mode reports what it is defined to report and drops
 /// the rest: 1000 presses, releases and the wheel; 1002 also motion with a
 /// button held; 1003 all motion. With reporting off nothing is sent. The
 /// client filters by the mode it last heard of, which can be stale, so the
@@ -660,9 +661,9 @@ fn the_default_encoding_writes_three_bytes() {
     );
 }
 
-/// The default encoding cannot express a column or row past 223 (a byte
-/// past 255), and xterm.js sends nothing rather than a wrong cell. SGR and
-/// UTF-8 coordinates have no such limit within the largest grid.
+/// The default encoding cannot express a column or row past 223 (a byte past
+/// 255), so nothing is sent rather than a wrong cell (as in old terminals). SGR
+/// and UTF-8 coordinates have no such limit within the largest grid.
 #[test]
 fn the_default_encoding_drops_events_past_its_byte_limit() {
     let default = reporting(MouseReporting::Clicks, MouseEncoding::Default);
@@ -701,10 +702,10 @@ fn sgr_reports_say_which_button_was_released() {
     );
 }
 
-/// UTF-8 coordinates (1005), which the emulator tracks though xterm.js
-/// does not: the default encoding's values, each a UTF-8 character, so a
-/// value past 127 takes two bytes where the default encoding would write
-/// one byte the program reads as broken UTF-8.
+/// UTF-8 coordinates (1005), which the emulator tracks though old terminals do
+/// not: the default encoding's values, each a UTF-8 character, so a value past
+/// 127 takes two bytes where the default encoding would write one byte the
+/// program reads as broken UTF-8.
 #[test]
 fn utf8_reports_encode_large_values_as_characters() {
     let modes = reporting(MouseReporting::Clicks, MouseEncoding::Utf8);
@@ -715,11 +716,11 @@ fn utf8_reports_encode_large_values_as_characters() {
     assert_eq!(up, b"\x1b[M#!!");
 }
 
-/// A program that asks for SGR (1006) and also for UTF-8 coordinates
-/// (1005) gets SGR reports, whichever it set first, as from tmux and
-/// today's xterm.js; resetting 1006 leaves UTF-8. The modes are read from a
-/// real emulator fed the program's output, since the order is what the
-/// emulator used to get wrong (it kept only the mode set last).
+/// A program that asks for SGR (1006) and also for UTF-8 coordinates (1005)
+/// gets SGR reports, whichever it set first, as from tmux and old terminals;
+/// resetting 1006 leaves UTF-8. The modes are read from a real emulator fed the
+/// program's output, since the order is what the emulator used to get wrong (it
+/// kept only the mode set last).
 #[test]
 fn sgr_wins_over_utf8_whichever_was_set_first() {
     use farhelm_terminal_emulator::{Collected, Emulator, FeedMode};
@@ -754,7 +755,7 @@ fn sgr_wins_over_utf8_whichever_was_set_first() {
 }
 
 /// The screen may have shrunk since the client sent an event; one past the
-/// current screen is dropped, as xterm.js drops one outside its grid.
+/// current screen is dropped, as old terminals drop one outside their grid.
 #[test]
 fn events_past_the_current_screen_are_dropped() {
     let modes = reporting(MouseReporting::Clicks, MouseEncoding::Sgr);
@@ -773,10 +774,10 @@ fn events_past_the_current_screen_are_dropped() {
 }
 
 /// Scrolling in a full-screen program without mouse reporting (a pager, an
-/// editor) moves through it with arrow keys, one per wheel step, as
-/// xterm.js does on a screen without scrollback; on the normal screen the
-/// wheel scrolls the viewer's history and sends nothing; with reporting on,
-/// the wheel is a mouse report even on the alternate screen.
+/// editor) moves through it with arrow keys, one per wheel step, as in old
+/// terminals; on the normal screen the wheel scrolls the viewer's history and
+/// sends nothing; with reporting on, the wheel is a mouse report even on the
+/// alternate screen.
 #[test]
 fn the_wheel_on_the_alternate_screen_without_reporting_sends_arrows() {
     let alternate = Modes {

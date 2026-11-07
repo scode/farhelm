@@ -2,13 +2,13 @@
 // buffer of lines, and what selection copies, what a double or triple
 // click selects, and which link is under a cell.
 //
-// These are the parts of today's terminal (xterm.js's selection service and
-// the web-links addon) that users notice when they differ: copied text that
-// gains or loses newlines at soft wraps, a wrapped URL that stops being
-// clickable, a word selection that stops at the wrong character. The rows
-// are built by grid-model.js from wire messages, so the tests exercise the
-// shapes the renderer really holds, including history lines written at
-// another width.
+// These rules are the old terminal's (xterm.js's selection service and the
+// web-links add-on, ported), kept because users notice when they differ:
+// copied text that gains or loses newlines at soft wraps, a wrapped URL that
+// stops being clickable, a word selection that stops at the wrong character.
+// The rows are built by grid-model.js from wire messages, so the tests
+// exercise the shapes the renderer really holds, including history lines
+// written at another width.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const grid = require("../assets/grid-model.js");
@@ -58,9 +58,9 @@ test("a row's text has blanks for uncovered cells and each wide character once",
 });
 
 test("a selection joins soft-wrapped rows without a newline and trims lines that end", () => {
-  // xterm.js's SelectionService.selectionText: a wrapped row continues on
-  // the next with nothing between them, and keeps its trailing blanks (they
-  // are part of the logical line); a row that ends is trimmed on the right.
+  // A wrapped row continues on the next with nothing between them, and
+  // keeps its trailing blanks (they are part of the logical line); a row
+  // that ends is trimmed on the right.
   const model = build({
     cols: 6,
     screen: [wire([[0, "echo"]]), wire([[0, "abc"]], true), wire([[0, "defg"]]), wire([[0, "x"]])],
@@ -110,7 +110,7 @@ test("lines that are not there contribute nothing", () => {
   assert.equal(buffer.selectionText(source, at(50, 0), at(model.screenBase, 5)), "h\ns");
 });
 
-test("a double click selects a word as xterm.js does", () => {
+test("a double click selects a word up to the word separators", () => {
   const model = build({ cols: 30, screen: [wire([[0, "cat (foo.txt) and  more"]])] });
   const source = buffer.modelSource(model);
   const base = model.screenBase;
@@ -157,8 +157,8 @@ test("an OSC 8 run is a link covering its runs, whatever its text says", () => {
   const link = buffer.linkAt(source, at(base, 5));
   assert.equal(link.kind, "osc");
   assert.equal(link.uri, "https://example.com/a");
-  // Each contiguous stretch is a link of its own, as xterm.js's OSC
-  // provider makes them; the underline is that stretch.
+  // Each contiguous stretch is a link of its own, as old terminals make
+  // them; the underline is that stretch.
   assert.deepEqual(link.ranges, [{ start: at(base, 4), end: at(base, 8) }]);
   assert.deepEqual(buffer.linkAt(source, at(base, 10)).ranges, [{ start: at(base, 9), end: at(base, 12) }]);
   assert.deepEqual(buffer.rowLinks(source, base).map((l) => [l.kind, l.uri]), [
@@ -204,7 +204,7 @@ test("a text URL continues across soft wraps", () => {
 });
 
 test("a text URL that overlaps an OSC 8 run gives way to it", () => {
-  // xterm.js resolves the OSC provider first and drops overlapped links.
+  // A program's hyperlink wins, and printed URLs it overlaps are dropped.
   const links = [["id", "https://target.example/"]];
   const model = build({ cols: 40, screen: [wire([[0, "https://shown.example/ "], [23, "x", 0]])], links });
   const source = buffer.modelSource(model);
@@ -418,8 +418,8 @@ test("hostile text stays data on the grid's lines", () => {
 });
 
 test("link lines present history at its own width and wrap across the history/screen boundary", () => {
-  // A history line written at another width keeps it (xterm.js reflows,
-  // the grid does not), and the first screen row continues the last history
+  // A history line written at another width keeps it (an old terminal
+  // reflows, the grid does not), and the first screen row continues the last history
   // line when that line wrapped: the link code must see both.
   const model = build({
     cols: 6,
@@ -439,8 +439,8 @@ test("link lines present history at its own width and wrap across the history/sc
 
 test("a copy leaves out the padding before a wide character that wrapped", () => {
   // A two-cell character that does not fit in the last column wraps whole,
-  // leaving the cell before the edge empty. xterm.js does not copy that
-  // cell; a blank the program printed there is text and is copied.
+  // leaving the cell before the edge empty. That cell is not copied; a blank
+  // the program printed there is text and is copied.
   const screen = build({ cols: 4, screen: [wire([[0, "abc"]], true), cells([[0, 2, "\u4e2d"], [2, 1, "x"]])] });
   const lines = buffer.modelSource(screen);
   const base = screen.screenBase;
@@ -461,7 +461,7 @@ test("a copy leaves out the padding before a wide character that wrapped", () =>
 });
 
 test("a column selection copies the same columns of every line, without joining wraps", () => {
-  // xterm.js's column mode (Alt-drag off a Mac): each line cut to the span
+  // Column mode (Alt-drag off a Mac): each line cut to the span
   // and trimmed, one per line.
   const model = build({ cols: 8, screen: [wire([[0, "abcdefgh"]], true), wire([[0, "ijklmnop"]]), wire([[0, "qr"]])] });
   const source = buffer.modelSource(model);

@@ -1,62 +1,62 @@
 //! Viewer input for terminals in terminal hosts: the bytes a program reads
 //! for each grid input message.
 //!
-//! For a tmux terminal the browser's xterm.js encodes keys, mouse reports,
-//! focus reports and pastes itself, from the program's modes as it tracks
-//! them, and the supervisor passes the bytes through. For a terminal in a
-//! terminal host the grid client only reports what the user did
-//! ([`GridInput`]: `key`, `text`, `paste`, `mouse`, `focus`), and the
-//! program's modes live in the supervisor's emulator, so this module turns
-//! each message into bytes from those modes. It is pure: no I/O, no clock,
-//! and the only state is the paste in progress, so the grid sender that
-//! receives messages and writes `Input` frames to the host owns everything
-//! else.
+//! A terminal in a terminal host gets its input as the grid client's reports
+//! of what the user did ([`GridInput`]: `key`, `text`, `paste`, `mouse`,
+//! `focus`), and the program's modes live in the supervisor's emulator, so
+//! this module turns each message into bytes from those modes. (An old tmux
+//! terminal is different: the browser's xterm.js encodes its input and the
+//! supervisor passes the bytes through.) It is pure: no I/O, no clock, and
+//! the only state is the paste in progress, so the grid sender that receives
+//! messages and writes `Input` frames to the host owns everything else.
 //!
-//! The target is byte-for-byte what today's terminal sends, because agents
-//! and shells depend on it (SPEC.md promises Shift+Enter's and Escape's
-//! behavior), and today's terminal is xterm.js 6.0.0 as vendored in
-//! `crates/farhelm-ui/assets/vendor/xterm.js`, with Farhelm's options and
-//! its own additions in `terminal.js`:
+//! The bytes are Farhelm's input contract. They are the xterm terminal
+//! family's encodings, which agents and shells depend on (SPEC.md promises
+//! Shift+Enter's and Escape's behavior), and they are byte for byte what an
+//! old terminal sends, so a program reads the same keys and clicks in both
+//! kinds of terminal. The key and mouse encodings are ported from xterm.js
+//! 6.0.0 (each ported function says what it came from), and the checked-in
+//! key and mouse tables pin them:
 //!
-//! - **Keys** ([`encode_key`]): for a keydown xterm.js would send a
-//!   sequence for, the sequence its `evaluateKeyboardEvent` computes, legacy
-//!   xterm encoding only (the kitty keyboard protocol stays off, as in the
-//!   browser today), with `macOptionIsMeta` off as `terminal.js` leaves it,
-//!   plus Shift+Enter as ESC CR in one write (`shift-enter-key.js`).
-//!   Farhelm's key table (`tests/fixtures/grid-keys.jsonl`, rendered by
+//! - **Keys** ([`encode_key`]): for a keydown with a sequence of its own,
+//!   that sequence in the legacy xterm encoding only (the kitty keyboard
+//!   protocol stays off, as in old terminals), with Option on a Mac not
+//!   acting as Meta, plus Shift+Enter as ESC CR in one write
+//!   (`shift-enter-key.js`). Farhelm's key table
+//!   (`tests/fixtures/grid-keys.jsonl`, rendered by
 //!   `crates/farhelm-ui/js-tests/grid-input-tables.js`, and first computed by
-//!   the vendored bundle itself) holds this encoder and the page's keyboard
+//!   the vendored xterm.js itself) holds this encoder and the page's keyboard
 //!   rules to the same bytes for every key code, modifier set, platform and
-//!   cursor-key mode. xterm.js ignores the application keypad mode (DECKPAM): its
-//!   function has no such input, and the keypad's keys send their digits, so
-//!   this does too.
+//!   cursor-key mode. The application keypad mode (DECKPAM) is ignored: the
+//!   keypad's keys send their digits, as in old terminals, whose xterm.js has
+//!   no such mode.
 //!
 //!   Which keydowns are sent at all is the grid client's decision, not this
-//!   module's: the filters xterm.js's `_keyDown` applies around that
-//!   function (a third-level shift, Option on a Mac or Ctrl+Alt and AltGraph
-//!   on Windows, leaving the key to text input or sending nothing for F1 to
-//!   F12 and the iOS arrows; capitals A to Z left to text input; the keydown
-//!   after a dead key) run in the client's keydown port, which sends only
-//!   the keydowns that survive them as `key` messages (`GridInput::Key`'s
-//!   docs list them). The table pins the function, not those filters; the
-//!   client's own tests pin them.
+//!   module's: its filters (a third-level shift, Option on a Mac or Ctrl+Alt
+//!   and AltGraph on Windows, leaving the key to text input or sending
+//!   nothing for F1 to F12 and the iOS arrows; capitals A to Z left to text
+//!   input; the keydown after a dead key) send only the keydowns that survive
+//!   them as `key` messages (`GridInput::Key`'s docs list them). The key
+//!   table pins the encoding, not those filters; the client's own tables pin
+//!   them.
 //! - **Text** is written as is, as UTF-8.
-//! - **Paste**: Farhelm's own paste path (`term-bytes.js`'s
+//! - **Paste**: Farhelm's own paste sanitizing (`term-bytes.js`'s
 //!   `sanitizePastedText`, which drops ESC so the text cannot end a
-//!   bracketed paste) followed by xterm.js's (`\r?\n` becomes CR; bracketed
-//!   paste markers when the program set mode 2004), over the whole paste
-//!   from its first part to the one marked `last`.
-//! - **Mouse**: xterm.js's `CoreMouseService`, for the reporting modes the
-//!   emulator tracks (1000, 1002, 1003) and xterm.js's encodings (the
-//!   default one with its byte limit, and SGR 1006). On the alternate screen
-//!   with mouse reporting off, a wheel step becomes an up or down arrow key,
-//!   as xterm.js does there. The modes come from the emulator, which departs
-//!   from xterm.js in two places. X10 mode 9 is not tracked, so a program
-//!   that sets only it gets no reports. UTF-8 coordinates (1005), which
-//!   xterm.js ignores (sending the default encoding, which a 1005 program
+//!   bracketed paste), then every CRLF and LF as CR, then bracketed paste
+//!   markers when the program set mode 2004, over the whole paste from its
+//!   first part to the one marked `last`.
+//! - **Mouse**: the reporting modes the emulator tracks (1000, 1002, 1003)
+//!   in the default encoding (with its byte limit) and SGR 1006, by
+//!   Farhelm's mouse table (`tests/fixtures/grid-mouse.jsonl`). On the
+//!   alternate screen with mouse reporting off, a wheel step becomes an up
+//!   or down arrow key, so a full-screen program without mouse support still
+//!   scrolls. The modes come from the emulator, which departs from old
+//!   terminals in two places. X10 mode 9 is not tracked, so a program that
+//!   sets only it gets no reports. UTF-8 coordinates (1005), which old
+//!   terminals ignore (sending the default encoding, which a 1005 program
 //!   misreads past column 94), are encoded as the program asked, unless SGR
 //!   (1006) is set too: then SGR wins, whichever the program set first, as
-//!   in tmux and today's xterm.js (the emulator keeps the two modes apart and
+//!   in tmux and old terminals (the emulator keeps the two modes apart and
 //!   reports SGR when both are set). De-duplicating motion is the client's
 //!   job (`GridInput::Mouse`'s docs).
 //! - **Focus**: `CSI I` and `CSI O`, only while the program set mode 1004.
@@ -80,8 +80,8 @@ pub const PASTE_END: &[u8] = b"\x1b[201~";
 // ---- The encoder --------------------------------------------------------
 
 /// The platform the viewer's keyboard is on, which changes a few keys'
-/// bytes: xterm.js treats Option as a key of its own on a Mac (where it
-/// types characters) and Alt as Meta (ESC plus the key) everywhere else.
+/// bytes: Option is a key of its own on a Mac (where it types characters)
+/// and Alt acts as Meta (ESC plus the key) everywhere else.
 ///
 /// The keys that differ are mostly ones a Mac client never sends as `key`
 /// messages, but not all: Ctrl+Option with `_` or `@` sends US or NUL on a
@@ -89,7 +89,8 @@ pub const PASTE_END: &[u8] = b"\x1b[201~";
 /// which (its `mac` field), so [`InputEncoder`] reads it from the message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyPlatform {
-    /// A Mac (xterm.js's `isMac`: `navigator.platform` is a Mac one).
+    /// A Mac: `navigator.platform` is one of the Mac values the grid client's
+    /// `platformOf` lists.
     Mac,
     /// Anything else.
     Other,
@@ -137,12 +138,12 @@ impl InputEncoder {
     /// The bytes to write for one message, from the program's current
     /// `modes` and the terminal's current `size`; empty when the program
     /// gets nothing for it (a mouse event its mode does not report, focus
-    /// without mode 1004, a key xterm.js sends nothing for).
+    /// without mode 1004, a key with no sequence).
     ///
     /// For a message that passed [`GridInput::validate`], the bytes fit one
     /// `Input` frame. `size` matters only for mouse events: one past the
     /// current screen (the screen shrank after the client sent it) is
-    /// dropped, as xterm.js drops one outside its grid.
+    /// dropped, as old terminals drop one outside their grid.
     pub fn encode(
         &mut self,
         input: &GridInput,
@@ -225,8 +226,8 @@ impl InputEncoder {
         let mut out = Vec::with_capacity(data.len() + PASTE_START.len() + PASTE_END.len());
         let mut paste = match self.paste.take() {
             Some(paste) => paste,
-            // Today's paste path drops an empty paste before xterm.js could
-            // write a pair of markers around nothing.
+            // An empty paste writes nothing, not a pair of markers around
+            // nothing (old terminals' paste path drops it the same way).
             None if data.is_empty() && last => return out,
             None => {
                 let bracketed = modes.bracketed_paste;
@@ -275,22 +276,21 @@ pub fn input_frames(bytes: &[u8]) -> std::slice::Chunks<'_, u8> {
 
 const ESC: &str = "\x1b";
 
-/// The bytes today's terminal sends for a keydown it sends a sequence for:
-/// xterm.js's `evaluateKeyboardEvent(ev, applicationCursor, isMac, false)`,
-/// and ESC before the CR of a Shift+Enter, as `shift-enter-key.js` merges
-/// it. Empty where that function gives no sequence.
+/// The bytes a keydown with a sequence sends: the key table's row for it
+/// (`xterm_key`'s sequence with Option not acting as Meta), and ESC before
+/// the CR of a Shift+Enter, as `shift-enter-key.js` merges it. Empty where
+/// the key has no sequence.
 ///
-/// Whether xterm.js would send the sequence at all is not decided here:
-/// `_keyDown` drops or leaves to text input some keydowns the function
-/// gives a sequence for (a third-level shift, a lone capital, the keydown
-/// after a dead key), and the grid client applies those filters before it
-/// sends a `key` message (module docs, "Keys").
+/// Whether the sequence is sent at all is not decided here: the grid client
+/// drops or leaves to text input some keydowns that have one (a third-level
+/// shift, a lone capital, the keydown after a dead key) before it sends a
+/// `key` message (module docs, "Keys").
 ///
-/// `key`, `code` and `kc` are the browser's `key`, `code` and `keyCode`;
-/// `mods` is the grid format's [`modifiers`] bit set, which is xterm.js's
-/// own modifier number. Where xterm.js measures `key` in UTF-16 code units
-/// or slices `code`, so does this, and a lone surrogate it would produce
-/// becomes U+FFFD as the page's `TextEncoder` makes it.
+/// `key`, `code` and `kc` are the browser's `key`, `code` and `keyCode`; `mods`
+/// is the grid format's [`modifiers`] bit set, which is the xterm encoding's
+/// modifier number less one. Where the ported original measures `key` in UTF-16
+/// code units or slices `code`, so does this, and a lone surrogate it would
+/// produce becomes U+FFFD as the page's `TextEncoder` makes it.
 ///
 /// Shift+Enter is recognized as `shiftEnterKeyAction` does, by `key` and
 /// exactly the Shift modifier. That function also refuses the chord under
@@ -314,12 +314,11 @@ pub fn encode_key(
     sent.into_bytes()
 }
 
-/// A port of the vendored xterm.js 6.0.0's `evaluateKeyboardEvent`, case for
-/// case, returning the `key` it computes: the sequence for a keydown, or
-/// `None` where it sends nothing (including Shift+PageUp/PageDown, which
-/// scroll locally, and Cmd+A on a Mac, which selects locally). Kept in the
-/// original's shape rather than simplified, since its whole value is being
-/// the same function; the key table holds it to the same bytes.
+/// The keyboard rules, case for case: the sequence for a keydown, or `None`
+/// where it sends nothing (including Shift+PageUp/PageDown, which scroll
+/// locally, and Cmd+A on a Mac, which selects locally). Kept in the ported
+/// original's shape rather than simplified, since its value is giving
+/// exactly the old terminal's bytes; the key table holds it to them.
 ///
 /// Ported from xterm.js 6.0.0's `evaluateKeyboardEvent`
 /// (src/common/input/Keyboard.ts), MIT; THIRD_PARTY_NOTICES.md, "Code ported
@@ -399,7 +398,7 @@ fn xterm_key(
                 ESC.to_owned()
             }
         }
-        // The arrows, which xterm.js leaves to the browser under Meta.
+        // The arrows, which are left to the browser under Meta.
         37..=40 if meta => return None,
         37 => cursor('D'),
         39 => cursor('C'),
@@ -533,8 +532,8 @@ fn other_key(
     None
 }
 
-/// xterm.js's `KEYCODE_KEY_MAPPINGS`: the unshifted and shifted character of
-/// each US-layout key that Alt (as Meta) sends after ESC.
+/// The unshifted and shifted character of each US-layout key that Alt (as Meta)
+/// sends after ESC.
 ///
 /// Ported from xterm.js 6.0.0's src/common/input/Keyboard.ts, MIT;
 /// THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
@@ -573,21 +572,21 @@ fn utf16_len(text: &str) -> usize {
 // ---- Paste ----------------------------------------------------------------
 
 /// The pasted text between the markers, made from the parts as they arrive:
-/// Farhelm's sanitizing and then xterm.js's line-ending conversion, carried
+/// Farhelm's sanitizing and then the line-ending conversion, carried
 /// across parts so that a paste comes out the same however it was split.
 ///
 /// - Sanitizing is `term-bytes.js`'s `sanitizePastedText`,
 ///   `text.replace(/\x1b\[201~|\x1b/g, "")`: every end-of-paste marker goes
 ///   whole and every other ESC alone, so pasted text can never close the
 ///   bracketed paste around it and have the rest run as typed commands.
-///   Today's page applies it before handing the text to xterm.js, and the
-///   grid client does too; applying it again changes nothing (the first pass
+///   The page applies it before handing a paste to either kind of terminal;
+///   applying it again changes nothing (the first pass
 ///   leaves no ESC). It is applied here as well because the supervisor now
 ///   writes the markers, so the guarantee that pasted text stays inside them
 ///   belongs here.
-/// - Conversion is xterm.js's `prepareTextForTerminal`,
-///   `text.replace(/\r?\n/g, "\r")`: every CRLF and every lone LF becomes
-///   one CR, so a pasted line ends the way a typed Enter does.
+/// - Conversion is `text.replace(/\r?\n/g, "\r")`, as in old terminals: every
+///   CRLF and every lone LF becomes one CR, so a pasted line ends the way a
+///   typed Enter does.
 ///
 /// The grid client never splits a CRLF, and the format does not forbid
 /// splitting a marker after its ESC; carrying both across parts is simpler
@@ -660,11 +659,12 @@ impl PasteText {
 
 // ---- Mouse ----------------------------------------------------------------
 
-/// xterm.js's button numbers (`CoreMouseButton`).
+/// Button numbers, as the ported original numbers them (`CoreMouseButton`).
 const BUTTON_NONE: u8 = 3;
 const BUTTON_WHEEL: u8 = 4;
 
-/// xterm.js's actions (`CoreMouseAction`); wheel steps reuse up and down.
+/// Actions (the ported original's `CoreMouseAction`); wheel steps reuse up and
+/// down.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Action {
     Up,
@@ -672,17 +672,17 @@ enum Action {
     Move,
 }
 
-/// The bytes for one mouse event, following xterm.js's `CoreMouseService`
-/// from the point where it has a cell, a button and an action: the event
-/// must be on the screen, the program's reporting mode must report it, and
-/// the encoding must be able to express it; otherwise nothing.
+/// The bytes for one mouse event, from the point where it has a cell, a button
+/// and an action: the event must be on the screen, the program's reporting mode
+/// must report it, and the encoding must be able to express it; otherwise
+/// nothing.
 ///
 /// A wheel step with mouse reporting off is the exception: on the alternate
-/// screen it is an up or down arrow key, one per step, as xterm.js sends for
-/// a screen with no scrollback (honoring application cursor keys, ignoring
-/// modifiers and the event's position, and regardless of mode 1007, which
-/// xterm.js does not implement); on the normal screen it is the viewer's own
-/// scrolling and sends nothing.
+/// screen it is an up or down arrow key, one per step, so a full-screen program
+/// without mouse support still scrolls (honoring application cursor keys,
+/// ignoring modifiers and the event's position, and regardless of mode 1007,
+/// which old terminals do not implement either); on the normal screen it is the
+/// viewer's own scrolling and sends nothing.
 ///
 /// Ported from xterm.js 6.0.0's `CoreMouseService.triggerMouseEvent` and its
 /// encodings, and its wheel handling in `CoreBrowserTerminal`, MIT;
@@ -714,7 +714,7 @@ fn encode_mouse(
         MouseEventKind::Down => (held.unwrap_or(BUTTON_NONE), Action::Down),
         MouseEventKind::Up => (held.unwrap_or(BUTTON_NONE), Action::Up),
         MouseEventKind::Move => (held.unwrap_or(BUTTON_NONE), Action::Move),
-        // Wheel up is xterm.js's "up" action, wheel down its "down".
+        // Wheel up is the "up" action, wheel down the "down" one.
         MouseEventKind::Wheel if button == 0 => (BUTTON_WHEEL, Action::Up),
         MouseEventKind::Wheel => (BUTTON_WHEEL, Action::Down),
     };
@@ -733,7 +733,7 @@ fn encode_mouse(
     if !reported {
         return Vec::new();
     }
-    // xterm.js's report coordinates are 1-based.
+    // Report coordinates are 1-based.
     let column = u32::from(x) + 1;
     let row = u32::from(y) + 1;
     match modes.mouse_encoding {
@@ -753,7 +753,7 @@ fn encode_mouse(
                 row + 32,
             ];
             // One byte each: past 255 (a column or row past 223) the
-            // encoding cannot say it, and xterm.js sends nothing.
+            // encoding cannot say it, and nothing is sent (as in old terminals).
             let mut out = b"\x1b[M".to_vec();
             for value in values {
                 let Ok(byte) = u8::try_from(value) else {
@@ -784,11 +784,11 @@ fn encode_mouse(
     }
 }
 
-/// xterm.js's event code (`h` in `CoreMouseService`): the button, the
-/// modifiers (Shift 4, Alt 8, Ctrl 16; Meta is not reported), 32 for motion
-/// and 64 for the wheel. A release is button 3 in the encodings that cannot
-/// say which button was released; SGR keeps the button and marks the
-/// release with its final `m` instead.
+/// The report's event code (`h` in the ported `CoreMouseService`): the button,
+/// the modifiers (Shift 4, Alt 8, Ctrl 16; Meta is not reported), 32 for motion
+/// and 64 for the wheel. A release is button 3 in the encodings that cannot say
+/// which button was released; SGR keeps the button and marks the release with
+/// its final `m` instead.
 ///
 /// Ported from xterm.js 6.0.0's `CoreMouseService`, MIT;
 /// THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".

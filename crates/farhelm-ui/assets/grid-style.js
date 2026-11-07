@@ -8,11 +8,12 @@
 // direct color. Because every value comes from those tables or from a
 // validated integer, no wire string can reach CSS.
 //
-// ## Matching today's terminal
+// ## Matching old terminals
 //
-// The rules are xterm.js's DOM renderer's, as Farhelm configures it (read
-// from the vendored bundle's `DomRendererRowFactory`), so a new terminal
-// looks like an old one:
+// A new terminal draws styles by the same rules as an old one, so a
+// session looks the same whichever kind of terminal shows it. The rules
+// were read from the vendored xterm.js bundle's `DomRendererRowFactory`,
+// as Farhelm configures it:
 //
 // - Inverse swaps foreground and background first; a default color that
 //   gets swapped becomes the other default.
@@ -22,12 +23,12 @@
 // - Dim is the foreground at half opacity.
 // - Hidden text keeps its background and decorations; the renderer swaps
 //   its characters for spaces, so the text is not in the page at all.
-// - Blink (SGR 5) is not drawn: xterm.js has no text blink.
+// - Blink (SGR 5) is not drawn, as old terminals draw no text blink.
 //
-// Two deliberate departures, both where xterm.js's own CSS loses a
+// Two deliberate departures, both where the old terminal's CSS loses a
 // declaration to the cascade rather than choosing a look: a dim direct
-// color is dimmed (xterm.js's inline color overrides its dim rule), and an
-// underlined, struck-through cell shows both lines (xterm.js's two classes
+// color is dimmed (there, the inline color overrides the dim rule), and an
+// underlined, struck-through cell shows both lines (there, two classes
 // both set `text-decoration` and the later one wins).
 //
 // ## Why inline styles, cached per style
@@ -94,8 +95,8 @@
 
   /**
    * The 256-color palette: the theme's 16 named colors, then xterm's
-   * standard 6x6x6 cube and 24-step gray ramp (xterm.js computes the same
-   * table for indices the theme does not name).
+   * standard 6x6x6 cube and 24-step gray ramp (the same table old terminals
+   * compute for indices the theme does not name).
    */
   function buildPalette(theme) {
     const palette = ANSI_NAMES.map((name) => themeColor(theme && theme[name], "#000000"));
@@ -117,7 +118,7 @@
     return `#${(value - DIRECT_COLOR_BASE).toString(16).padStart(6, "0")}`;
   }
 
-  /** `#rrggbb` at half opacity, the way xterm.js draws dim text. */
+  /** `#rrggbb` at half opacity, the dim text color (as in old terminals). */
   function halfOpacity(color) {
     const n = parseInt(color.slice(1), 16);
     return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},0.5)`;

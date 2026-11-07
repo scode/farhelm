@@ -1372,8 +1372,10 @@ This section covers the old terminals, the ones in the private tmux server ("Ter
 for as long as both kinds exist. A terminal in a terminal host ("Terminal host") reaches the same island as a grid
 stream, which the grid client draws instead of xterm.js ("The grid client", at the end of this section); the attach
 reply says which kind an attachment carries, so one page holds both. Much of the GUI section describes terminal behavior
-in xterm.js's terms (sizes, selection, links, input); the grid client reproduces that behavior for grid terminals, and
-its file headers say how and where it departs.
+in xterm.js's terms (sizes, selection, links, input). For grid terminals the same behavior, kept where it does a job, is
+Farhelm's own contract: the grid client's file headers state each rule in their own terms, say when a rule's job is that
+a session behaves the same in either kind of terminal, say where it departs, and name xterm.js only as a rule's origin
+or when describing old terminals (the code ported from it is listed in `THIRD_PARTY_NOTICES.md`).
 
 The old terminal is xterm.js, vendored as a static asset (no CDN — the UI must be fully self-contained, consistent with
 SPEC.md's no-public-relay, no-third-party-services posture and the loopback deployment), mounted as a JS island inside
@@ -1705,22 +1707,23 @@ so the addon still performs the write; the grid counts completed `onClipboard` c
 primary writes that it does not copy to the system clipboard. Local grid selection copying is a separate callback and
 does not increment that count. The release checks for a plain drag under press-time mouse tracking without the forcing
 modifier, and 1.5 seconds later whether any OSC 52 arrived since the press. A retained local selection does not suppress
-this notice: that program-owned gesture does not copy it. The forcing modifier it names copies the vendored xterm's own
-`isMac` platform list. Agent-specific wording comes from the session's agent kind (`SessionAgentKind::drag_copy_hint` in
-the UI crate, an exhaustive per-kind function per the harness map), passed on the agent terminal's spec only; tabs
-always get the generic text. The persistent Rust-rendered live region holds an initially empty text span and a dismiss
-button. `createDragCopyNotice` owns its placement and thirty-second timer per mount; every qualifying drag replaces its
-position and deadline. Horizontal placement reuses `placeTooltip`. The bottom edge sits three terminal rows above the
-release pointer when the whole box fits inside the pane and viewport, otherwise the top edge sits three rows below. When
-neither fits, vertical placement falls back to six pixels above, clamped to the viewport. Row height comes from the
-rendered grid row (screen height divided by model rows before any row is painted), or xterm's screen height divided by
-its rows. CSS caps the box to the viewport and hides its entire subtree when dismissed. Only × takes pointer events; its
-mousedown prevents the native focus change, and its click hides locally outside the terminal element. A terminal press
-cancels both the visible notice and any pending OSC 52 grace check. The grid observes presses in capture phase,
-including its scrollbar, and marks a withheld link press as ineligible. Resize repositions the notice; surface teardown
-removes listeners, cancels timers and invalidates deferred work even when the mount itself survives an xterm-to-grid
-swap. The grid's teardown runs before it becomes a frozen takeover snapshot, so that snapshot remains selectable without
-raising guidance.
+this notice: that program-owned gesture does not copy it. The forcing modifier it names follows the exact Mac platform
+list both kinds of terminal use (`copy-on-select.js`'s `MAC_PLATFORMS`, the list old terminals' xterm.js uses).
+Agent-specific wording comes from the session's agent kind (`SessionAgentKind::drag_copy_hint` in the UI crate, an
+exhaustive per-kind function per the harness map), passed on the agent terminal's spec only; tabs always get the generic
+text. The persistent Rust-rendered live region holds an initially empty text span and a dismiss button.
+`createDragCopyNotice` owns its placement and thirty-second timer per mount; every qualifying drag replaces its position
+and deadline. Horizontal placement reuses `placeTooltip`. The bottom edge sits three terminal rows above the release
+pointer when the whole box fits inside the pane and viewport, otherwise the top edge sits three rows below. When neither
+fits, vertical placement falls back to six pixels above, clamped to the viewport. Row height comes from the rendered
+grid row (screen height divided by model rows before any row is painted), or xterm's screen height divided by its rows.
+CSS caps the box to the viewport and hides its entire subtree when dismissed. Only × takes pointer events; its mousedown
+prevents the native focus change, and its click hides locally outside the terminal element. A terminal press cancels
+both the visible notice and any pending OSC 52 grace check. The grid observes presses in capture phase, including its
+scrollbar, and marks a withheld link press as ineligible. Resize repositions the notice; surface teardown removes
+listeners, cancels timers and invalidates deferred work even when the mount itself survives an xterm-to-grid swap. The
+grid's teardown runs before it becomes a frozen takeover snapshot, so that snapshot remains selectable without raising
+guidance.
 
 Terminal web-link click ownership is the nullable `terminal_link_click` shared preference added by helm schema 46:
 `intercept` is the default, `both` preserves Farhelm activation plus program mouse reporting, and `program` disables

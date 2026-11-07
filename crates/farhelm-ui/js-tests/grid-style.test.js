@@ -1,13 +1,13 @@
 // Unit coverage for grid-style.js, the mapping from a grid run's style to
 // inline CSS.
 //
-// A new terminal must look like an old one, so these cases pin the rules
-// xterm.js's DOM renderer applies as Farhelm configures it: the theme's
-// palette and xterm's 256-color table, bold drawing palette colors 0-7 in
-// their bright twins, inverse swapping the defaults, dim at half opacity,
-// and the underline variants. They also pin that the CSS is built only
-// from fixed tables and validated integers, which is what keeps a program's
-// output from reaching style text.
+// A new terminal must look like an old one, so these cases pin the grid's
+// color rules, which are the old terminal's as Farhelm configures it: the
+// theme's palette and the standard xterm 256-color table, bold drawing
+// palette colors 0-7 in their bright twins, inverse swapping the defaults,
+// dim at half opacity, and the underline variants. They also pin that the CSS
+// is built only from fixed tables and validated integers, which is what keeps
+// a program's output from reaching style text.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const style = require("../assets/grid-style.js");
@@ -22,7 +22,7 @@ function resolve(raw, colors = defaults) {
   return style.resolveStyle(model.decodeStyle(raw), palette, colors);
 }
 
-test("the palette is the theme's 16 colors, xterm's cube and its gray ramp", () => {
+test("the palette is the theme's 16 colors, the standard 256-color cube and its gray ramp", () => {
   assert.equal(palette.length, 256);
   assert.equal(palette[1], "#cc6666");
   assert.equal(palette[15], "#eaeaea");
@@ -50,7 +50,7 @@ test("palette, direct and default colors resolve to concrete values", () => {
   assert.equal(resolve([0, -1, -1]).bg, null);
 });
 
-test("bold draws palette colors 0-7 in their bright twins, as xterm.js does by default", () => {
+test("bold draws palette colors 0-7 in their bright twins, as old terminals do", () => {
   assert.equal(resolve([FLAGS.BOLD, 1, -1]).fg, palette[9]);
   assert.equal(resolve([FLAGS.BOLD, 9, -1]).fg, palette[9]);
   assert.equal(resolve([FLAGS.BOLD, 100, -1]).fg, palette[100]);
@@ -89,7 +89,7 @@ test("underline variants, underline color and strikethrough become text decorati
 test("bold, italic and hidden are attributes; blink draws nothing", () => {
   assert.equal(style.styleCss(resolve([FLAGS.BOLD | FLAGS.ITALIC, -1, -1])), "font-weight:bold;font-style:italic;");
   assert.equal(resolve([FLAGS.HIDDEN, -1, -1]).hidden, true);
-  assert.equal(style.styleCss(resolve([FLAGS.BLINK, -1, -1])), "", "xterm.js has no text blink");
+  assert.equal(style.styleCss(resolve([FLAGS.BLINK, -1, -1])), "", "text blink is not drawn");
 });
 
 test("every style the format allows maps to CSS built only from safe characters", () => {

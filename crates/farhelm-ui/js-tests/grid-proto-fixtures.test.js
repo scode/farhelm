@@ -480,7 +480,7 @@ const INPUT_PRODUCERS = new Map([
   // The Mac-only encoding the review found: Ctrl+Option+Shift+- on a Mac.
   // The client sends it (Option is not a third-level shift with Ctrl held)
   // and must say the viewer is a Mac, or the supervisor encodes it as
-  // Alt-as-Meta (ESC _) where xterm.js sends US.
+  // Alt-as-Meta (ESC _) where a Mac sends US.
   [
     "key-mac.json",
     () => {
@@ -495,14 +495,14 @@ const INPUT_PRODUCERS = new Map([
     () => input.mouseReport("down", input.pressButton(0), cellAt(84, 88), pointerEvent({ button: 0, buttons: 1 })),
   ],
   ["mouse-move-no-button.json", () => input.mouseReport("move", input.moveButton(0), cellAt(0, 0), pointerEvent({}))],
-  // Far past the grid's edge, which xterm.js's rounding clamps to the last cell.
+  // Far past the grid's edge, which the grid's rounding clamps to the last cell.
   [
     "mouse-up-right.json",
     () => input.mouseReport("up", input.pressButton(2), cellAt(1e6, 1e6), pointerEvent({ button: 2, ctrlKey: true })),
   ],
   // A wheel step down (a positive `deltaY`). The fixture's Shift is a shape
-  // the client never sends from a real wheel (xterm.js treats Shift+wheel as
-  // horizontal and `createWheelAccumulator` scrolls nothing for it), but the
+  // the client never sends from a real wheel (Shift+wheel is horizontal
+  // and `createWheelAccumulator` scrolls nothing for it), but the
   // message the builders make for it is still the format's.
   [
     "mouse-wheel-down.json",
