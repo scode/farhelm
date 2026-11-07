@@ -112,7 +112,7 @@ can dismiss the line with ×. Delete the directory on the host yourself if you w
 
 Uninstall never stops a session for you. If any session on the host has not ended (it is running, waiting or idle, or
 its status is not known yet), or still has a terminal tab open, it says which ones and does nothing. Stop those sessions
-and close their terminal tabs first, as in [Stop, restart, and resume](/docs/using/stop-restart-resume/). Do not start a
+first; Stop also closes their terminal tabs, as in [Stop, restart, and resume](/docs/using/stop-restart-resume/). Do not start a
 session on the host while the uninstall runs: one started then can end along with Farhelm. Uninstall also needs Farhelm
 to be connected to the host so it can check. If its row shows **Unreachable, retrying**, **Needs update**, **Too new**,
 **Identity mismatch**, **Identity unverified** or **Duplicate**, fix that first: the refusal says how, and so do the

@@ -122,10 +122,10 @@ and container.
 
 ## Stopping and deleting
 
-[Stop](/docs/using/stop-restart-resume/) stops the whole container, including its terminal tabs and processes that
-detached from a tab. Closing just one tab ends its shell; a process it detached may keep running until the container
-stops. The container also stays running after the agent exits on its own. Opening a tab after Stop starts the existing
-container again.
+[Stop](/docs/using/stop-restart-resume/) closes terminal tabs for every session. Here it also stops the whole container,
+including processes that detached from a tab. Closing just one tab ends its shell; a process it detached may keep
+running until the container stops. The container also stays running after the agent exits on its own. Opening a tab
+after Stop starts the existing container again.
 
 Delete removes the session's container, including detached work still running after the agent and its tabs have ended.
 Its confirmation follows the agent and tabs shown in Farhelm; it does not inspect those detached processes. Images in
