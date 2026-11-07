@@ -1,4 +1,4 @@
-//! One owed spare attempt per repository, one running host build, no retry queue.
+//! One owed cache/spare attempt per repository, one host worker, no retry queue.
 //!
 //! Fresh accepted origins register their frozen policy. Replays and Restart do
 //! not. The ticker wakes pending clone gates; this worker alone mutates records
@@ -236,9 +236,6 @@ pub(super) async fn next(sup: &Supervisor) -> Option<Desired> {
         .cloned()
         .collect();
     for mut desired in candidates {
-        if !desired.trigger.enabled {
-            return Some(desired);
-        }
         let trigger = &desired.trigger;
         let origin = match sup
             .store
@@ -270,6 +267,11 @@ pub(super) async fn next(sup: &Supervisor) -> Option<Desired> {
             }
         };
         if clone_finished(&state) {
+            // Off still owes cache consolidation, but needs no checkout root.
+            // Both policies wait here so cleanup cannot race the launch's clone.
+            if !trigger.enabled {
+                return Some(desired);
+            }
             let root = crate::working_copies::verified_root_dir(&origin)
                 .and_then(|root| Ok(crate::working_copies::DirectoryEvidence::capture(&root)?));
             if let Ok(identity) = root {
@@ -309,8 +311,10 @@ async fn disk<T: Send + 'static>(
     .context("spare filesystem worker panicked")?
 }
 
-/// Cancellation is a policy event, not a failed build to retry. Record writes
-/// happen outside the gate; the final rename below shares registration's lock.
+/// Each registration runs either a spare build or cache-only consolidation through
+/// the same guarded helper. A spare build's refresh already consolidates, so it
+/// needs no second cleanup command. Cancellation is a policy event, never a retry.
+/// Record writes happen outside the final publication gate.
 async fn attempt(
     sup: &Supervisor,
     farhelm_exe: &std::path::Path,
@@ -348,9 +352,6 @@ async fn attempt(
         )
     })
     .await?;
-    let Some(prepared) = prepared else {
-        return Ok(());
-    };
     let result = async {
         if *stopped.borrow() || !sup.spare_builder.current(desired) {
             return Ok(false);
@@ -364,7 +365,7 @@ async fn attempt(
         let spec = crate::spare_build::BuildSpec {
             cache: cache.clone(),
             repo: desired.trigger.repo.clone(),
-            target: prepared.target.clone(),
+            target: prepared.as_ref().map(|prepared| prepared.target.clone()),
             shell: desired.trigger.shell.clone(),
             farhelm_exe: farhelm_exe.to_owned(),
             farhelm_bin_dir: sup.session_bin_dir().to_owned(),
@@ -377,6 +378,11 @@ async fn attempt(
         if !run? {
             return Ok(false);
         }
+        // A ready spare or disabled spares still owes consolidation. That mode
+        // has no building directory to publish and keeps the current ready slot.
+        let Some(prepared) = prepared else {
+            return Ok(false);
+        };
         let builder = sup.spare_builder.clone();
         let token = desired.token;
         let repository = key(&desired.trigger.repo);
@@ -558,7 +564,7 @@ async fn run_guard(
                 match &ended {
                     crate::bounded_command::Ended::Exited(output) => warn!(status = %output.status,
                 stderr = %String::from_utf8_lossy(&output.stderr[..output.stderr.len().min(4096)]),
-                "spare guard did not produce accepted clone completion"),
+                "spare guard did not produce accepted cache-work completion"),
                     other => warn!(?other, "spare guard exceeded its execution bounds"),
                 }
             }

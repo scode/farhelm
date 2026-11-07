@@ -1,9 +1,11 @@
-//! One login-shell clone under an owner tether and independent wall-clock bound.
+//! Cache maintenance and spare clones share one bounded login-shell helper.
 //!
 //! The supervisor alone owns publication and removal. These synchronous internal
 //! commands carry no session authority: the guard owns ordinary same-group signal
-//! cleanup, and the clone helper owns only cache-locked Git work. A delayed helper
-//! still checks target identity because group signals are not filesystem ordering.
+//! cleanup, and the helper owns only cache-locked Git work. Consolidation without
+//! a clone still needs that guard: login initialization and Git must not outlive
+//! their owner or deadline. A delayed clone also checks target identity because
+//! group signals are not filesystem ordering.
 
 use std::io::Read;
 use std::os::unix::fs::MetadataExt as _;
@@ -17,8 +19,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::spare_checkouts::BuildTarget;
 
-/// Immutable input for one private build. The duration is carried across the
-/// exec boundary so deterministic short-deadline tests use the real guard too.
+/// Immutable, secret-free input for one private cache operation. A target requests
+/// a spare clone; no target requests only cache consolidation, with the same
+/// guard and completion contract. The duration crosses the exec boundary so
+/// deterministic short-deadline tests use the real guard too.
 /// Production supplies the remaining part of one ten-minute attempt, including
 /// cache admission; the reader refuses a larger value.
 #[derive(Clone, Serialize, Deserialize)]
@@ -26,7 +30,7 @@ use crate::spare_checkouts::BuildTarget;
 pub(crate) struct BuildSpec {
     pub(crate) cache: PathBuf,
     pub(crate) repo: farhelm_proto::GithubRepo,
-    pub(crate) target: BuildTarget,
+    pub(crate) target: Option<BuildTarget>,
     pub(crate) shell: String,
     pub(crate) farhelm_exe: PathBuf,
     pub(crate) farhelm_bin_dir: PathBuf,
@@ -39,8 +43,9 @@ pub(crate) fn result_path(spec: &Path) -> PathBuf {
     spec.with_extension("result")
 }
 
-/// The helper writes this only after dissociation. Guard promotion then proves
-/// rc files did not merely exit zero before executing their supplied command.
+/// The helper writes this only after its requested Git work succeeds: either
+/// dissociation or cache consolidation. Guard promotion then proves rc files did
+/// not merely exit zero before executing their supplied command.
 pub(crate) fn receipt_path(spec: &Path) -> PathBuf {
     spec.with_extension("receipt")
 }
@@ -71,21 +76,30 @@ fn read_spec(path: &Path) -> anyhow::Result<BuildSpec> {
     Ok(spec)
 }
 
-/// Execute only Git, in the environment established by the user's login shell.
-/// The target must already exist; startup removal cannot be undone by this step.
+/// Execute the requested cache work in the user's login-shell environment.
+/// A clone target must already exist and is checked under the cache lock, so
+/// startup removal cannot be undone by this step. Consolidation has no checkout
+/// target to verify and never creates one. Both modes write a receipt only after
+/// all requested Git work succeeds.
 pub fn build_spare(path: &Path) -> anyhow::Result<()> {
     let spec = read_spec(path)?;
-    crate::launch::clone_from_repo_cache(
-        &spec.cache,
-        &spec.repo.clone_url(),
-        &spec.target.path(),
-        || crate::launch::background_git_command(&spec.farhelm_bin_dir),
-        || {
-            spec.target
-                .verify()
-                .map_err(|error| format!("building target: {error:#}"))
-        },
-    )
+    match &spec.target {
+        Some(target) => crate::launch::clone_from_repo_cache(
+            &spec.cache,
+            &spec.repo.clone_url(),
+            &target.path(),
+            crate::launch::CacheCleanup::Run,
+            || crate::launch::background_git_command(&spec.farhelm_bin_dir),
+            || {
+                target
+                    .verify()
+                    .map_err(|error| format!("building target: {error:#}"))
+            },
+        ),
+        None => crate::launch::consolidate_repo_cache(&spec.cache, || {
+            crate::launch::background_git_command(&spec.farhelm_bin_dir)
+        }),
+    }
     .map_err(anyhow::Error::msg)?;
     crate::files::write_private_file_sync(&receipt_path(path), b"true", &crate::files::RealFs)?;
     Ok(())
@@ -156,18 +170,19 @@ pub fn guard_spare_build(path: &Path) -> anyhow::Result<()> {
     if let Ok(status) = &completed
         && !status.success()
     {
-        eprintln!("spare login/clone failed: {status}");
+        eprintln!("spare login/cache work failed: {status}");
     }
     if success && let Err(error) = std::fs::hard_link(receipt_path(path), result_path(path)) {
         // Hard-link publication refuses collisions and preserves the receipt's
-        // private mode. A successful shell alone is not successful clone proof.
+        // private mode. A successful shell alone proves neither clone nor cleanup.
         eprintln!("could not promote spare helper completion: {error}");
     }
     retire_group(group)
 }
 
 /// A marker cannot override an outer refusal. Only the expected natural guard
-/// retirement plus fresh complete true is permission to consider publication.
+/// retirement plus fresh complete true proves the requested cache work finished.
+/// A clone caller still owns the separate checks that authorize publication.
 pub(crate) fn completed(ended: &crate::bounded_command::Ended, path: &Path) -> bool {
     if !matches!(ended, crate::bounded_command::Ended::Exited(output)
         if output.status.signal() == Some(libc::SIGKILL))
@@ -194,7 +209,7 @@ pub(crate) fn completed(ended: &crate::bounded_command::Ended, path: &Path) -> b
 }
 
 /// Startup never adopts old jobs. Remove only our strict private filenames;
-/// delayed helpers still need the cache-locked target identity before any Git.
+/// delayed clone helpers still need the cache-locked target identity before Git.
 pub(crate) fn sweep_specs(state: &Path) -> std::io::Result<()> {
     let mut entries = match std::fs::read_dir(state.join("spare-builds")) {
         Ok(entries) => entries,
@@ -237,8 +252,90 @@ mod tests {
     use crate::bounded_command::Ended;
     use std::os::unix::process::ExitStatusExt;
 
+    /// Keep the targetless fixture valid at the real exec boundary, without
+    /// borrowing credentials, shell startup or paths from the test process.
+    fn consolidation_spec(root: &Path) -> BuildSpec {
+        BuildSpec {
+            cache: root.join("repo-cache/acme/bar.git"),
+            repo: farhelm_proto::parse_github_repo("acme/bar").unwrap(),
+            target: None,
+            shell: "/bin/sh".into(),
+            farhelm_exe: root.join("farhelm"),
+            farhelm_bin_dir: root.join("bin"),
+            deadline_millis: 600_000,
+        }
+    }
+
+    /// Cache-only work crosses the same private spec boundary as a clone. It
+    /// must not require or invent a checkout target to select that mode.
+    #[farhelm_testtrace::test]
+    fn consolidation_spec_round_trips_without_a_target() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("consolidation.json");
+        let spec = consolidation_spec(directory.path());
+        let encoded = serde_json::to_vec(&spec).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(value["target"], serde_json::Value::Null);
+        std::fs::write(&path, encoded).unwrap();
+
+        let decoded = read_spec(&path).unwrap();
+        assert!(decoded.target.is_none());
+        assert_eq!(decoded.cache, spec.cache);
+        assert_eq!(decoded.repo, spec.repo);
+        assert_eq!(decoded.deadline_millis, spec.deadline_millis);
+    }
+
+    /// Removing the checkout target must not bypass bounded input, deadline or
+    /// repository validation, or admit session authority into a persisted spec.
+    #[farhelm_testtrace::test]
+    fn consolidation_spec_keeps_the_existing_input_refusals() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("consolidation.json");
+        let valid = serde_json::to_value(consolidation_spec(directory.path())).unwrap();
+        std::fs::write(&path, serde_json::to_vec(&valid).unwrap()).unwrap();
+        assert!(read_spec(&path).is_ok());
+
+        for (field, replacement, diagnostic) in [
+            (
+                "deadline_millis",
+                serde_json::json!(0),
+                "invalid spare deadline",
+            ),
+            (
+                "deadline_millis",
+                serde_json::json!(600_001),
+                "invalid spare deadline",
+            ),
+            (
+                "repo",
+                serde_json::json!({"owner": "acme", "name": ".."}),
+                "repository",
+            ),
+            (
+                "session_token",
+                serde_json::json!("fixture-only-secret"),
+                "unknown field",
+            ),
+        ] {
+            let mut invalid = valid.clone();
+            invalid[field] = replacement;
+            std::fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+            let error = read_spec(&path).err().expect("invalid spec was accepted");
+            assert!(error.to_string().contains(diagnostic), "{error:#}");
+        }
+
+        // Trailing JSON whitespace keeps this otherwise-valid input parseable;
+        // refusal must come from the byte limit, not a convenient syntax error.
+        let mut oversized = serde_json::to_vec(&valid).unwrap();
+        oversized.resize(65_537, b' ');
+        assert!(serde_json::from_slice::<BuildSpec>(&oversized).is_ok());
+        std::fs::write(&path, oversized).unwrap();
+        let error = read_spec(&path).err().expect("oversized spec was accepted");
+        assert!(error.to_string().contains("exceeds its limit"), "{error:#}");
+    }
+
     /// A true marker is necessary but cannot turn a timed-out, overflowing or
-    /// unrelated run into permission to publish an otherwise completed clone.
+    /// unrelated run into proof that this helper's requested work completed.
     #[farhelm_testtrace::test]
     fn completion_marker_cannot_override_outer_refusal_or_another_run() {
         let directory = tempfile::tempdir().unwrap();
