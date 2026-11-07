@@ -197,8 +197,8 @@ pub(super) fn start(sup: &Arc<Supervisor>) -> Handle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::service::core::CreateInputs;
     use crate::service::core::tests::{StateDir, dummy_exe};
+    use crate::service::core::{CreateInputs, StateDirOwnership};
     use crate::working_copies::{self, PlannedWorkingCopy};
     use std::path::{Path, PathBuf};
     use std::time::Duration;
@@ -273,9 +273,34 @@ mod tests {
         }
     }
 
+    /// Observe detached recovery through its claim, since its awaiter is gone.
+    /// The runtime must stay alive while waiting: shutdown can discard blocking
+    /// work that has not started, so dropping it is not a completion barrier.
+    async fn wait_for_recovery_claim_release(
+        ownership: &std::sync::Weak<StateDirOwnership>,
+        original: &Path,
+        hidden: &Path,
+    ) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while ownership.upgrade().is_some() {
+                // sleep-ok: bounded polling of detached recovery's own ownership release.
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "startup recovery still owns its claim: original exists={}, hidden exists={}",
+                original.exists(),
+                hidden.exists()
+            )
+        });
+    }
+
     /// Losing startup's awaiter cannot release the state-directory claim while
-    /// its recovery still owes a rename. Holding the real database mutex pins
-    /// that boundary without a scheduling delay or replacement recovery routine.
+    /// recovery still owes a rename. The real database mutex holds that unsettled
+    /// boundary; after release, the detached recovery must finish the rename and
+    /// give its claim back without anyone awaiting its task handle.
     #[farhelm_testtrace::test]
     fn startup_recovery_keeps_ownership_after_its_awaiter_disappears() {
         let state = StateDir::new();
@@ -313,8 +338,9 @@ mod tests {
             "recovery still owns the state directory"
         );
         drop(held);
-        // Runtime drop joins real blocking work. Only after the rename finishes
-        // may this in-process owner release its claim to a successor.
+        runtime.block_on(wait_for_recovery_claim_release(
+            &ownership, &original, &hidden,
+        ));
         drop(runtime);
         assert!(!original.exists());
         assert_eq!(std::fs::read(hidden.join("marker")).unwrap(), b"recover");

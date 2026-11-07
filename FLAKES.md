@@ -4247,3 +4247,37 @@ evidence, which expires with cleanup.
 Class: readiness
 
 Cause: hypothesis
+
+## 2026-11-07 — startup trash recovery checked after runtime shutdown (crates/farhelm-supervisor/src/service/trash_remover.rs)
+
+`startup_recovery_keeps_ownership_after_its_awaiter_disappears` failed alone in the v0.37.0 Linux release gate, run
+`42417367066`, recorder `6945cac9-f00b-44c8-a205-6c4d270d6138`: 4,872 passed, one failed, 63 skipped. The case failed in
+0.043 seconds after dropping its Tokio runtime and finding the original archive still present. The leading explanation
+is that recovery was still queued when shutdown discarded it: the held database mutex proves that a rename cannot
+finish, not that its blocking task has started. One isolated local attempt and a further 20 recorded attempts all passed
+before the change, so that scheduling explanation was not reproduced locally. Fixed in #3143 by keeping the runtime
+alive until detached recovery releases its state-directory claim, then checking the rename and marker as before.
+
+```text
+assertion failed: !original.exists()
+```
+
+Evidence: clean commit `370a33e3498d45eb9643db5d8b06e2fc924d20ec`, hosted x86_64 Linux release runner, workspace nextest
+selection excluding `farhelm` and `farhelm-desktop`, four shared slots and zero retries. Recorded tmux 3.7c SHA256
+`ebb4554aebd8e9112c2b701285c7527ad346ae9c0ec3954fb3cd44b724d54dae`; locale C.UTF-8; no ambient Farhelm variables, with
+only recorder-owned `FARHELM_TEST_TRACE_DIR` supplied. Concurrent machine load and tests sharing the case's slot were
+not measured. The test arrived in #3131. Hosted failure artifact `test-run-failure-42417367066-1-2` was downloaded
+before expiry; isolated run `4e014efb-6b09-47af-ac72-5dbc5149e605` and batch `aa817c08-12a1-469f-8290-a3d6d8504e98`
+retain the local non-reproductions. Raw records expire with their artifact or temporary-file retention; these passes do
+not erase the hosted failure.
+
+After the correction, the three-case trash-remover module passed in `efe8b8f2-ad04-43b2-8675-763d754e427c`, and all 20
+isolated attempts passed in batch `296cce43-f8e5-4d1e-b98c-0232532ad405`. These local checks used main
+`ebaaf6a7d52b91cb083318b3bf5055b9b445c59c` with the test and this log changed, four nextest slots, zero retries, tmux
+3.7c SHA256 `b6072ff2bb37ea68676d41f1ba42681d7b0c26e4755d8aba0a82cbf05eff79a3`, locale C.UTF-8 and only recorder-owned
+`FARHELM_TEST_TRACE_DIR`. No added load was arranged; other work shared the machine without measured load. Passing
+repetitions support the correction but do not establish the hosted failure's scheduling cause.
+
+Class: peer-lifecycle
+
+Cause: hypothesis
