@@ -1,0 +1,19 @@
+{
+  "screenshots": [
+    {
+      "entry": 2939,
+      "name": "release-notes/v0-36-0-tensorlake-settings",
+      "alt": "Settings → Tensorlake opens with an experimental warning and the API key controls."
+    },
+    {
+      "entry": 3052,
+      "name": "release-notes/v0-36-0-marked-sessions",
+      "alt": "Two marked sessions and the menu of actions that apply to them together."
+    },
+    {
+      "entry": 3054,
+      "name": "release-notes/v0-36-0-host-filter",
+      "alt": "The chosen host appears beside the session status filters, with a button to remove the host filter."
+    }
+  ]
+}
