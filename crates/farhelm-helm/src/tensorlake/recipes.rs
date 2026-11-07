@@ -77,6 +77,11 @@ pub(crate) struct StoredEndpoint {
 pub(crate) struct ResolvedEndpoint {
     pub(crate) base_url: String,
     pub(crate) token: Option<String>,
+    /// Bound to the token by the same catalog read; never inferred from time.
+    pub(crate) revision: Option<u64>,
+    /// A deleted catalog name may be reused at revision1. Delivery compares
+    /// this hidden identity too, so the new value cannot match an old stamp.
+    pub(crate) incarnation: Option<String>,
 }
 
 /// A recipe's `spec_json`: user choices and credential names, without values.
@@ -430,7 +435,7 @@ impl HelmStore {
     ) -> anyhow::Result<ResolvedEndpoint> {
         self.conn()
             .call("resolve endpoint credential", move |conn| {
-                let token = match endpoint.token_credential {
+                let value = match endpoint.token_credential {
                     Some(name) => Some(
                         crate::credentials::secret(
                             conn,
@@ -445,7 +450,9 @@ impl HelmStore {
                 };
                 Ok(ResolvedEndpoint {
                     base_url: endpoint.base_url,
-                    token,
+                    token: value.as_ref().map(|(secret, _, _)| secret.clone()),
+                    revision: value.as_ref().map(|(_, revision, _)| *revision),
+                    incarnation: value.map(|(_, _, incarnation)| incarnation),
                 })
             })
             .await

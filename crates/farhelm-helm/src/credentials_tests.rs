@@ -331,7 +331,10 @@ async fn routes_never_return_secrets_and_refuse_identity_changes() {
     let (status, text) = call(&harness, "PUT", "/api/credentials/work", &replacement).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        serde_json::from_str::<Credential>(&text).unwrap().revision,
+        serde_json::from_str::<farhelm_proto::credentials::SavedCredential>(&text)
+            .unwrap()
+            .credential
+            .revision,
         2
     );
     assert_eq!(

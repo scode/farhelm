@@ -662,6 +662,7 @@ mod tests {
             fake.clone(),
             None,
             Some(fake),
+            crate::provisioning::credential_delivery::CredentialDelivery::detached(store.clone()),
         )));
         let events = Arc::new(FleetEvents::new());
         let lease = service.start_tunnels(&row, events.clone()).await.unwrap();

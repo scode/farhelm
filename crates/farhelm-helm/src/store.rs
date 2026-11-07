@@ -336,7 +336,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 76;
+pub(crate) const SCHEMA_VERSION: i64 = 77;
 
 /// Named secrets have their own table so list responses never need to decode a
 /// secret-bearing configuration object. The monotonically increasing revision
@@ -2494,6 +2494,7 @@ pub struct HelmStore {
 ///   preserve existing positions on version-only fixture rewinds.
 /// - 75: an empty named, write-only credential catalog, kept outside preferences.
 /// - 76: drop recipe-embedded endpoint tokens; recipes now select credential names.
+/// - 77: per-host nonsecret credential delivery fingerprints and known home.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2597,6 +2598,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
                  tensorlake_resources TEXT,
                  tensorlake_suspended_at INTEGER,
                  tensorlake_pending_create_at INTEGER,
+                 tensorlake_credential_delivery TEXT,
                  CHECK (
                      (kind = 'local' AND destination IS NULL AND remote_farhelm IS NULL
                           AND remote_state_dir IS NULL)
@@ -2816,7 +2818,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 76;",
+              PRAGMA user_version = 77;",
             announcement_schema = crate::announcements::SCHEMA,
         ))
         .context("creating schema")?;
@@ -4502,6 +4504,17 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
              PRAGMA user_version = 76;",
         ).map_err(|_| anyhow::anyhow!("could not migrate Tensorlake recipe endpoint credentials"))?;
         version = 76;
+    }
+    if version == 76 {
+        // Version-only historical fixtures can retain a later column. Preserve
+        // its successes rather than resetting them when the version is rewound.
+        let exists: bool = tx.query_row("SELECT count(*) != 0 FROM pragma_table_info('hosts') WHERE name = 'tensorlake_credential_delivery'", [], |row| row.get(0))?;
+        if !exists {
+            tx.execute_batch("ALTER TABLE hosts ADD COLUMN tensorlake_credential_delivery TEXT;")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 77;")
+            .context("migrating helm.db to schema version 77")?;
+        version = 77;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -9767,6 +9780,7 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN tensorlake_resources;
                  ALTER TABLE hosts DROP COLUMN tensorlake_suspended_at;
                  ALTER TABLE hosts DROP COLUMN tensorlake_pending_create_at;
+                 ALTER TABLE hosts DROP COLUMN tensorlake_credential_delivery;
                  DROP INDEX hosts_entry_uuid;
                  ALTER TABLE hosts DROP COLUMN entry_uuid;
                  PRAGMA user_version = 27;",
@@ -15501,6 +15515,7 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN tensorlake_resources;
                  ALTER TABLE hosts DROP COLUMN tensorlake_suspended_at;
                  ALTER TABLE hosts DROP COLUMN tensorlake_pending_create_at;
+                 ALTER TABLE hosts DROP COLUMN tensorlake_credential_delivery;
                  DROP INDEX hosts_entry_uuid;
                  ALTER TABLE hosts DROP COLUMN entry_uuid;
                  PRAGMA user_version = 22;",

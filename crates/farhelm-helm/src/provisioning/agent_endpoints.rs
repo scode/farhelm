@@ -80,6 +80,8 @@ mod tests {
         let endpoint = ResolvedEndpoint {
             base_url: "http://127.0.0.1:8080".into(),
             token: Some("secret".into()),
+            revision: None,
+            incarnation: None,
         };
         let json = claude(
             Some(
@@ -119,6 +121,8 @@ mod tests {
         let endpoint = ResolvedEndpoint {
             base_url: "https://example.test".into(),
             token: None,
+            revision: None,
+            incarnation: None,
         };
         for bytes in [b"[]".as_slice(), br#"{"env":[]}"#, b"secret invalid"] {
             assert!(

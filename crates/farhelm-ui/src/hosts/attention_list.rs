@@ -161,6 +161,9 @@ fn problem_words(host: &Host, update: Option<bool>, unseen: bool) -> Option<Stri
         | HostPhase::Connected { .. } => None,
     };
     let mut words: Vec<_> = phase.into_iter().collect();
+    if super::credential_delivery_failed(host) {
+        words.push("Credentials not delivered");
+    }
     if crate::tensorlake::tunnels::failed(host) {
         words.push("Tunnels failed");
     }
@@ -475,6 +478,7 @@ mod tests {
             );
             host.kind = HostKind::Tensorlake;
             host.tensorlake = Some(TensorlakeHost {
+                credential_warning: None,
                 sandbox: "sandbox".into(),
                 recipe: "recipe".into(),
                 size: None,
@@ -598,6 +602,7 @@ mod tests {
         let mut sandbox = host(1, connected());
         sandbox.kind = HostKind::Tensorlake;
         sandbox.tensorlake = Some(TensorlakeHost {
+            credential_warning: None,
             sandbox: "sandbox".into(),
             recipe: "recipe".into(),
             size: None,
@@ -622,6 +627,58 @@ mod tests {
         );
         assert_eq!(identities(&rows), [(1, AttentionKind::Problem)]);
         assert_eq!(rows[0].words, "Tunnels failed");
+    }
+
+    /// A credential warning outranks an optional update but must not hide a
+    /// connection failure or a separate tunnel warning. Compact copy never
+    /// repeats the potentially long peer diagnostic from the host details.
+    #[test]
+    fn credential_warnings_preserve_other_problem_reasons() {
+        let mut sandbox = host(1, connected());
+        sandbox.kind = HostKind::Tensorlake;
+        sandbox.tensorlake = Some(TensorlakeHost {
+            sandbox: "sandbox".into(),
+            recipe: "recipe".into(),
+            size: None,
+            tunnels: Some(TunnelView {
+                state: TunnelState::Failed {
+                    reason: "fixture tunnel reason".into(),
+                },
+                tunnels: Vec::new(),
+            }),
+            credential_warning: Some("fixture credential reason".into()),
+        });
+        let updates = HostUpdates {
+            optional: vec![sandbox.clone()],
+            required: Vec::new(),
+        };
+        let rows = classify(
+            &[sandbox.clone()],
+            &updates,
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+            "a",
+        );
+        assert_eq!(identities(&rows), [(1, AttentionKind::Problem)]);
+        assert_eq!(rows[0].words, "Credentials not delivered; Tunnels failed");
+        sandbox.state = HostPhase::Unreachable {
+            cause: "transport".into(),
+            last_error: "fixture connection reason".into(),
+        };
+        let rows = classify(
+            &[sandbox],
+            &updates,
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+            "a",
+        );
+        assert_eq!(identities(&rows), [(1, AttentionKind::Problem)]);
+        assert_eq!(
+            rows[0].words,
+            "Unreachable, retrying; Credentials not delivered"
+        );
     }
 
     /// Stable verbs and fixed-size bars keep session popovers open across polls;

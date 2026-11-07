@@ -15,7 +15,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::warn;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+pub(super) const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 /// The uninstall stop step's bound: [`COMMAND_TIMEOUT`] for its systemd,
 /// tmux and cleanup commands, plus the time this build's
 /// `farhelm internal stop-terminal-hosts` takes at most between them, and ten
@@ -300,6 +300,14 @@ impl BackendFailure {
 /// production implementation with only linger faked.
 #[async_trait]
 pub(super) trait ProvisioningBackend: Send + Sync {
+    /// Recover only the login home for legacy host bindings. Unlike sandbox
+    /// preparation, this must never start services or alter the host.
+    async fn host_home(&self, _target: &ProvisioningTarget) -> Result<PathBuf, BackendFailure> {
+        Err(BackendFailure::new(
+            "this backend cannot read the sandbox home",
+            "",
+        ))
+    }
     /// Prepare a newly created sandbox's user manager and return its home.
     /// Unsupported backends fail explicitly rather than skipping preparation.
     async fn prepare_tensorlake_sandbox(
@@ -2120,6 +2128,21 @@ fn handshake_io_failure(error: &std::io::Error) -> bool {
 
 #[async_trait]
 impl ProvisioningBackend for SystemBackend {
+    async fn host_home(&self, target: &ProvisioningTarget) -> Result<PathBuf, BackendFailure> {
+        let failure = || BackendFailure::new("could not read the sandbox home", "");
+        let output = self
+            .run_shell(target, "printf '%s' \"$HOME\"", COMMAND_TIMEOUT)
+            .await
+            .map_err(|_| failure())?;
+        if output.code != Some(0) {
+            return Err(failure());
+        }
+        let home = PathBuf::from(String::from_utf8(output.stdout).map_err(|_| failure())?);
+        if !home.is_absolute() {
+            return Err(failure());
+        }
+        Ok(home)
+    }
     async fn prepare_tensorlake_sandbox(
         &self,
         target: &ProvisioningTarget,

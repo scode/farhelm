@@ -5899,8 +5899,38 @@ KiB, preserving vendor fields. The 512 KiB request cap permits JSON escaping of 
 Credential metadata includes the names of recipes referring to it. The same reference query protects deletion inside its
 immediate transaction. Both recipe create and update check existence and endpoint-token kind inside their own immediate
 write transactions; this excludes a competing delete even across independent SQLite connections. Saving a recipe checks
-metadata alone. Setup resolves values into a transient `ResolvedEndpoint` with neither Debug nor Serialize; persisted
+metadata alone. Delivery resolves values into a transient `ResolvedEndpoint` with neither Debug nor Serialize; persisted
 `StoredEndpoint` contains only `base_url` and optional `token_credential`.
+
+Schema 77 adds nullable `hosts.tensorlake_credential_delivery`. The provisioning delivery component alone reads and
+writes this nonsecret JSON: known absolute home and independent successful Claude/Codex endpoint fingerprints (URL,
+credential name, revision and immutable creation UUID). Unknown slots retry; known absent endpoints require no file work
+under this optional-URL interface. This absence stamp does not represent explicit agent-mode cleanup. Each successful
+file's stamp is committed before the next file is attempted. The revision and value come from the same credential read;
+no secret is cached in the record or runtime binding.
+
+Production backend and payload selection happen before manager startup. Provisioning and Tensorlake share one delivery
+object and backend, including when explicitly injected. Setup records preparation's home and reconciles after install
+coordinates are admitted but before releasing the actor hold. Legacy hosts recover their home with a bounded read-only
+backend query, without rerunning user-manager preparation. A per-host mutex serializes setup, connect and replacement.
+Its owned guard moves through each noncancellable `Db::call` write, so cancelling the caller cannot let later work
+overtake a queued SQLite update. Writes require the same host entry identity and Tensorlake binding.
+
+The real connect hook registers a counted lifetime lease before any await or credential read. Its returned resource
+bundle retains that lease and the tunnel lease through Connected publication and serving; the actor's existing
+Suspend/Remove cancellation path drops both before acknowledging parking. Replacement selects these active leases,
+including hooks that have not published Connected, rather than filtering the manager's public phase. It uses the
+connection's nonsecret selection snapshot; pending recipe edits wait for a later connection. A hook that has not yet
+loaded a binding reads the committed replacement itself or reports its own connection-delivery failure; a skipped push
+does not supersede that warning. Dropping the final lease cancels in-progress pushes before their next transport poll.
+Host removal forgets retained runtime state.
+
+A nonblank replacement uses the existing owned-handler task around commit and push, so an HTTP disconnect cannot abandon
+delivery after saving. One absolute SSH timeout bounds all candidates, mutex waits and remote operations, with four
+hosts processed concurrently. `SavedCredential` acknowledges the committed metadata plus per-host fixed failure reasons;
+create still returns metadata directly. Runtime warning attempt ordering prevents an older timeout replacing a newer
+result. Warning changes invalidate the host feed and project through host details, rail color and attention grouping
+independently of connection phase. No timer or separate retry worker is added.
 
 The Settings dialog owns one Tensorlake account context above both mounted panels. Key editors share only acknowledged
 metadata, key/test discovery revisions and serialization of key requests. Their secret drafts and outcomes stay local.
@@ -6011,9 +6041,11 @@ Agent settings are read with a 1 MiB bound, merged on the helm, and streamed thr
 installs. Claude's JSON must be an object with an object `env`; only `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`
 change. `toml_edit` preserves Codex's comments and unrelated tables while selecting and updating
 `model_providers.farhelm`. Unset endpoints never touch files. Parse/read failures omit contents and parser details so
-tokens cannot enter progress. Only Add, including its rerun, writes endpoint settings; Update does not. The shared SSH
-uploader sets `umask 077` before creating its temporary, so even an existing mode-0755 agent directory cannot expose
-tokens during upload or after interruption. Its finishing command applies the requested final mode.
+tokens cannot enter progress. The shared delivery component writes at Add, connection and credential replacement; Update
+does not independently reapply settings. Failures become warnings and do not abort supervisor installation or
+connection. The shared SSH uploader sets `umask 077` before creating its temporary, so even an existing mode-0755 agent
+directory cannot expose tokens during upload or after interruption. Its finishing command applies the requested final
+mode.
 
 The add dialog embeds the full recipe editor with deletion disabled and a `DialogCloseGuard` for Escape and Close. It
 selects the editor outside its own body wrapper: the editor supplies a body and `DialogFooter` as direct siblings of the

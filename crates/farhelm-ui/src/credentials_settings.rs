@@ -125,6 +125,7 @@ pub(crate) fn CredentialsSettings() -> Element {
         reload,
     } = use_catalog();
     let mut editing = use_signal(|| None::<Editing>);
+    let mut delivery_failures = use_signal(Vec::<farhelm_proto::credentials::DeliveryFailure>::new);
     use_effect(move || {
         // Subscribe even before an editor opens; peek keeps the draft update
         // itself from scheduling a second effect or replacing unsaved text.
@@ -149,6 +150,10 @@ pub(crate) fn CredentialsSettings() -> Element {
     let listed = rows();
     rsx! {
         div { class: "credential-overview", hidden: editing().is_some(),
+            for failure in delivery_failures() {
+                p { class: "credential-delivery-warning", role: "status",
+                    "Saved; not delivered to {crate::peer::display_peer(&failure.host)}: {crate::peer::display_peer(&failure.reason)}" }
+            }
             p { class: "host-settings-help", "Save credentials under names you choose. Replacing a saved value keeps its name." }
             StorageWarning { multiple: true }
             TensorlakeKey { credentials_location: true }
@@ -195,7 +200,8 @@ pub(crate) fn CredentialsSettings() -> Element {
         }
         if let Some(target) = editing() {
             CredentialEditor { key: "{target.existing.as_ref().map_or(\"new\", |row| row.name.as_str())}", target,
-                on_done: move |_| {
+                on_done: move |failures| {
+                    delivery_failures.set(failures);
                     editing.set(None); reload.call(());
                     // A fast Add after Back retires this handoff. Capture the
                     // panel now, then yield to any replacement editor or
@@ -218,7 +224,10 @@ pub(crate) fn CredentialsSettings() -> Element {
 /// A selected Codex file populates the same bounded draft as paste and never
 /// saves automatically. Native file-read failures never expose its contents.
 #[component]
-fn CredentialEditor(target: Editing, on_done: EventHandler<()>) -> Element {
+fn CredentialEditor(
+    target: Editing,
+    on_done: EventHandler<Vec<farhelm_proto::credentials::DeliveryFailure>>,
+) -> Element {
     let base = use_context::<ApiBase>().0;
     let existing = target.existing.clone();
     let replacing = existing.is_some();
@@ -273,9 +282,9 @@ fn CredentialEditor(target: Editing, on_done: EventHandler<()>) -> Element {
             }
             busy.set(false);
             match result {
-                Ok(_) => {
+                Ok(saved) => {
                     secret.set(String::new());
-                    on_done.call(());
+                    on_done.call(saved.delivery_failures);
                 }
                 Err(reason) => error.set(Some(reason)),
             }
@@ -300,7 +309,7 @@ fn CredentialEditor(target: Editing, on_done: EventHandler<()>) -> Element {
             }
             busy.set(false);
             match result {
-                Ok(()) => on_done.call(()),
+                Ok(()) => on_done.call(Vec::new()),
                 Err(reason) => error.set(Some(reason)),
             }
         });
@@ -327,7 +336,7 @@ fn CredentialEditor(target: Editing, on_done: EventHandler<()>) -> Element {
     rsx! {
         div { class: "credential-editor", onmounted: move |_| focus_editor(),
             button { r#type: "button", class: "btn btn-neutral", "data-tooltip": "Return to credentials without saving this draft",
-                onclick: move |_| on_done.call(()), "‹ Credentials" }
+                onclick: move |_| on_done.call(Vec::new()), "‹ Credentials" }
             h4 { class: "host-settings-section-title credential-editor-title", tabindex: "-1", "{title}" }
             if agent {
                 div { class: "segmented-control", role: "radiogroup", aria_label: "Agent",
@@ -391,7 +400,7 @@ fn CredentialEditor(target: Editing, on_done: EventHandler<()>) -> Element {
                     if replacing { button { r#type: "button", class: "btn btn-danger", disabled: busy() || in_use,
                         "data-tooltip": "Delete this saved credential", onclick: move |_| on_delete.call(()), "Delete" } }
                     button { r#type: "button", class: "btn btn-neutral", "data-tooltip": "Discard this unsaved credential draft",
-                        onclick: move |_| on_done.call(()), "Cancel" }
+                        onclick: move |_| on_done.call(Vec::new()), "Cancel" }
                     button { r#type: "button", class: "btn btn-primary", disabled: busy() || (!replacing && secret().trim().is_empty()),
                         "data-tooltip": "Save this credential in the helm's state", onclick: move |_| on_save.call(()), "Save" }
                 }

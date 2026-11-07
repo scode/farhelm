@@ -668,7 +668,7 @@ pub(crate) fn RecipeEditor(
 
             if !is_new {
                 p { class: "host-settings-help recipe-edit-note",
-                    "Size and packages apply only to hosts created after you save (packages after the next snapshot build). Tunnels and endpoints are read when a host connects or is set up, so tunnel changes reach existing hosts at their next connection."
+                    "Size and packages apply only to hosts created after you save (packages after the next snapshot build). Tunnels and endpoints are read when a host connects or is set up, so those changes reach existing hosts at their next connection."
                 }
             }
 

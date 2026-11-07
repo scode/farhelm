@@ -324,13 +324,14 @@ Setup builds a managed recipe's snapshot if missing (or joins a build already ru
 recipe's size with the plan's maximum idle timeout and automatic resume off, prepares its user manager, writes any
 recipe agent endpoints, and installs Farhelm's supervisor. A reuse recipe builds nothing and installs no agents. Claude
 Code's endpoint is merged into its settings' environment; Codex gets a Farhelm model provider. Unrelated settings are
-preserved, malformed files are refused, and unset endpoints leave their files alone. Updates do not reapply these
-settings. Token-bearing settings files are private from the start of upload. A reused image or snapshot that already
-contains Farhelm supervisor state is refused: it would copy another host's identity. Farhelm does not connect to that
-supervisor after refusing it, including after the helm restarts. Failed setup keeps the host and its sandbox listed;
-rerunning continues against the same sandbox. When a create's outcome is unknown and the sandbox is not yet visible,
-setup and Delete sandbox keep the host listed until that request settles. A later retry finds and cleans up a sandbox
-that appeared after the failed reply; absence settles only after 15 minutes from the create request.
+preserved, malformed files are refused, and unset endpoints leave their files alone. Endpoint delivery also runs before
+each connection becomes usable, and when a named token is replaced. Updates do not independently reapply these settings.
+Token-bearing settings files are private from the start of upload. A reused image or snapshot that already contains
+Farhelm supervisor state is refused: it would copy another host's identity. Farhelm does not connect to that supervisor
+after refusing it, including after the helm restarts. Failed setup keeps the host and its sandbox listed; rerunning
+continues against the same sandbox. When a create's outcome is unknown and the sandbox is not yet visible, setup and
+Delete sandbox keep the host listed until that request settles. A later retry finds and cleans up a sandbox that
+appeared after the failed reply; absence settles only after 15 minutes from the create request.
 
 Confirmed 2026-10-10: a host entry is one logical host from the user's point of view. Correcting its destination, or
 adopting a new identity for it, changes the machine or installation behind the entry, not which host it is to the user;
@@ -380,11 +381,20 @@ endpoint-token names, preserves the selected name across URL changes, and points
 or replacing values. An unavailable draft choice stays visible until the user chooses another or None; it cannot be
 saved as a missing reference. Upgrading drops old recipe-embedded tokens rather than importing them; the user re-enters
 them in Credentials. Edits to size and packages affect only hosts created afterwards (packages after the next snapshot
-build); tunnels are read when a host connects. The list shows each recipe's name, size, package count or reused image or
-snapshot, and tunnel count. The editor replaces the list in place; leaving it with unsaved changes, whether by its own
-Back or Cancel or by closing Settings with Escape or a close control, asks whether to save, discard or keep editing, and
-saving or discarding then completes the close. Delete asks for confirmation. A list refresh that fails keeps the rows
-shown, says they may be out of date, and offers **Retry loading**.
+build); tunnels and endpoint selections are read when a host connects or is set up. Replacing a named endpoint token
+pushes its new value to hosts already using it, including a connection still being acquired. Pending recipe edits do not
+change that connection's selections. Other hosts receive the replacement before their next connection becomes usable.
+Each host serializes these deliveries and remembers successful settings independently, so an unchanged reconnect does no
+remote file work and a later file's failure does not undo an earlier success. Delivery failure leaves the connection
+usable, makes the host's status and navigation mark amber, and shows a sanitized reason in its details. The next
+connection or credential replacement retries; there is no periodic retry. Saving a replacement commits its value first,
+waits at most the usual SSH command timeout for delivery (including lock waits), and reports
+`Saved; not delivered to <host>: <reason>` for failures. Ending the connected phase cancels its pending pushes before
+further transport work. The list shows each recipe's name, size, package count or reused image or snapshot, and tunnel
+count. The editor replaces the list in place; leaving it with unsaved changes, whether by its own Back or Cancel or by
+closing Settings with Escape or a close control, asks whether to save, discard or keep editing, and saving or discarding
+then completes the close. Delete asks for confirmation. A list refresh that fails keeps the rows shown, says they may be
+out of date, and offers **Retry loading**.
 
 In Settings the editor opens at its top, including Back, with field labels smaller than its section captions. Its
 actions and leave/delete questions and refusal messages stay visible at the bottom of the scrolling panel, above the
@@ -1907,10 +1917,11 @@ Back, Name, a write-only secret field, Delete, Cancel and Save. The agent-login 
 Claude accepts the token from `claude setup-token`; Codex accepts a pasted or selected `auth.json`, validated only as a
 JSON object of at most 64 KiB. An empty replacement keeps the saved value. Settings never returns a saved secret; a
 failed save keeps the draft and shows its reason. Closing discards unsaved text without a recipe-style departure
-question. Recipes select API endpoint tokens by name, and setup resolves their current saved values. GitHub tokens and
-subscription logins are stored in the catalog; recipe delivery for those kinds is separate. Delete is unavailable while
-a recipe uses a credential, with the recipe names shown. Reference changes refresh an open credential editor without
-discarding its unsaved replacement text.
+question. Recipes select API endpoint tokens by name; setup, connection and replacement delivery resolve current saved
+values. A successful save with failed deliveries closes and clears the secret editor, and shows the delivery failures on
+the Credentials overview. GitHub tokens and subscription logins are stored in the catalog; recipe delivery for those
+kinds is separate. Delete is unavailable while a recipe uses a credential, with the recipe names shown. Reference
+changes refresh an open credential editor without discarding its unsaved replacement text.
 
 The Credentials overview, every credential editor, and both Tensorlake key forms show a prominent danger-tinted **Not
 encrypted on disk** warning explaining that anyone who can read the helm's state directory can read the values.
