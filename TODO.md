@@ -440,6 +440,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Agent subscription logins in Tensorlake sandboxes.** Support subscription logins and credential upload for agents in
   sandboxes, alongside the existing API endpoint settings. Plan: `plans/queue/settings-credentials.md`.
 
+- **Skip Claude Code's first-run setup on new Tensorlake hosts.** Decided by the maintainer on 2026-11-07, answering the
+  settings-credentials plan's block: Farhelm delivers a selected Claude subscription to a Tensorlake host but writes no
+  other Claude configuration, so the first Claude session on a fresh host can stop at Claude Code's own first-run setup
+  (its theme chooser and onboarding), which the user goes through once. Claude Code 2.1.318 stopped there in a fresh
+  home and also checks a separate onboarding-completion setting. The fix the maintainer deferred: have Farhelm write the
+  smallest set of non-secret first-run settings Claude needs, found by an isolated probe, keeping the user's other
+  settings and the normal agent home, and check it with a valid subscription login.
+
 - **GH_TOKEN in Tensorlake sandboxes.** Inject `GH_TOKEN` into Tensorlake sandboxes like containerized sessions, from a
   named file on the host. Plan: `plans/queue/settings-credentials.md`.
 
