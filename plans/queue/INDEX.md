@@ -4,7 +4,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [complete] `settings-credentials.md` — Settings → Credentials: named GitHub tokens, Claude Code and Codex subscription logins and endpoint tokens for Tensorlake recipes, delivered per host; GH_TOKEN with gh for private checkouts; "not encrypted on disk" warnings
 - [pending] `macos-tunnel-exit.md` — Recipe tunnels end when the helm dies (a stdin pipe the sandbox side waits on) or goes silent (30 s heartbeat, 120 s timeout), verified on macOS CI and real sandboxes
-- [in-flight cc0bf5] `row-hovers-beside-list.md` — Every hover in a session row (and the bell) opens beside the list, centred on its target, with a pointer notch and an accent ring on the hovered mark; the summary card too
+- [complete] `row-hovers-beside-list.md` — Every hover in a session row (and the bell) opens beside the list, centred on its target, with a pointer notch and an accent ring on the hovered mark; the summary card too
 - [in-flight d886e6] `cut-path-links.md` — A printed path that a program broke across two lines links to the whole path from both halves, specced as a deliberate exception to conservative recognition
 - [in-flight 400fd2] `instant-trash-delete.md` — Trash deletes answer at once and hosts remove the files in the background; the dialog closes on a confirmed bulk delete and the trash icon animates until the space is freed
 - [in-flight 1cda6a] `stop-closes-tabs.md` — Stop closes the session's terminal tabs, asking first when tabs are open (skippable), with a precondition when it did not ask; Restart keeps tabs
