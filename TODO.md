@@ -432,6 +432,18 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   before the shape is settled. Related to, but not the same as, the grid stream encoding overhaul in this bucket, which
   keeps the split and changes how the same lines are encoded.
 
+- **Review how the helm-to-supervisor connection multiplexes its streams.** One connection carries every terminal,
+  upload, download, TCP relay and control reply as framed channels, and the maintainer wants to challenge its sizing and
+  scheduling before more traffic (recipe tunnels) moves onto it. As read from the code on 2026-11-07, not measured:
+  frames up to 8 MiB; uploads, downloads and relays in 256 KiB chunks with a 4 MiB credit window per stream, so one
+  stream's throughput is capped near window / round-trip time; terminal output in 32 KiB chunks with no credit window
+  (watermark pause and resume instead); on the helm, a single 64-slot writer queue with no priority lane, where bulk
+  traffic is rationed to 4 queued frames ahead of keystrokes and acks; on the supervisor, priority, ordinary and bulk
+  queues, with bulk drained only when the other two are empty, so sustained terminal output can starve relays and
+  downloads; no cap on concurrent relays; no half-close on relays; and a 60-second write stall that ends the whole
+  connection. Challenge the chunk sizes, window sizes, queue depths and the fairness between streams, measure where it
+  matters, and change what does not hold up.
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
@@ -439,6 +451,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Agent subscription logins in Tensorlake sandboxes.** Support subscription logins and credential upload for agents in
   sandboxes, alongside the existing API endpoint settings. Plan: `plans/queue/settings-credentials.md`.
+
+- **Investigate Tensorlake's ssh gateway leaving forwarded channels open, and report it if it is a bug.** Through the
+  gateway, an ssh client holding a remote-forwarded connection never learned that the sandbox side was gone: the sandbox
+  side was torn down within half a second, but the local ssh and its connection to the local service were still up 185
+  seconds later, with keep-alives on or off, while an ordinary OpenSSH server ended the same setup in about 1.3 seconds
+  and the gateway did end a connection with no forwarded channel open. Confirm what the gateway does (including whether
+  it relays a forwarded channel's close in the ordinary case where only the sandbox-side client hangs up), and if it is
+  a gateway bug, send Tensorlake a report with the minimal reproduction. Everything known so far, measured and inferred
+  kept apart, is in `lore/2026-11-07-tensorlake-gateway-forwarded-channels.md`.
 
 - **Skip Claude Code's first-run setup on new Tensorlake hosts.** Decided by the maintainer on 2026-11-07, answering the
   settings-credentials plan's block: Farhelm delivers a selected Claude subscription to a Tensorlake host but writes no
