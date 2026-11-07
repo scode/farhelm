@@ -742,13 +742,14 @@ that its required systemd or SSH substrate ran.
 - `DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh` — optional Linux native appearance integration using the
   ordinary owned Xvfb/openbox setup. Four fresh/stored dark/light cases check native media-query premises, palette
   before renderer content, real Settings choices, private WebKit profile persistence, Inter, embedded assets and the
-  same live terminal attachment's input and ordered output. The terminal part of its in-page probe reads xterm.js (its
-  theme, buffer and input methods), so on a grid terminal (every session the app now creates runs in a terminal host) it
-  is skipped, saying so in the case's evidence, and the leg's other checks run; TODO.md, "The desktop smoke's appearance
-  leg on grid terminals", has what migrating it needs. Retains bounded JSON and one final client screenshot per case.
-  DOM assertions do not prove transient paint correctness; normal appshots provide visual review. No live native
-  system-appearance event, physical keyboard dispatch, throughput or macOS claim. Run through the recorder; the script
-  supplies its own private profile and closed scenario inputs.
+  same live terminal attachment's input and ordered output. The session's terminal is a grid terminal (every session the
+  app creates runs in a terminal host), and the in-page probe reads it as the browser suite's terminal helpers do: the
+  grid's painted background, its input field for focus, its own paste and grid text messages for typing, and its model
+  for the 512-line burst; a terminal that is not a grid, a stream the helm did not announce as grid, or any xterm.js
+  surface added to the page during the case (recorded from the page's start) fails it. Retains bounded JSON and one
+  final client screenshot per case. DOM assertions do not prove transient paint correctness; normal appshots provide
+  visual review. No live native system-appearance event, physical keyboard dispatch, throughput or macOS claim. Run
+  through the recorder; the script supplies its own private profile and closed scenario inputs.
 - `DESKTOP_SMOKE_APPEARANCE=no-initialize scripts/desktop-smoke.sh` — one optional Linux missing-initialize leg using
   the same builds and owned display. A fixed valid rootless index exercises the creation-time startup deadline before
   App renders. It requires actual hidden native creation, natural refusal with exit 1, the owned supervisor's birth, its
