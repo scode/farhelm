@@ -1819,7 +1819,8 @@ html.host-rail-open .session-status-filter .segment-radio > span { padding-inlin
    measured rectangle, so no scroll container clips it (`.app-sidebar` would
    clip anything anchored inside a row). It wears the row menu panels' look
    (`.session-row-menu-panel`: same background, border, radius and shadow)
-   so it reads as the same floating level in both themes, with no arrow.
+   so it reads as the same floating level in both themes. Ordinary help has
+   no arrow; session-row help uses the separate notch below.
    Text wraps at about 280px and is clamped to eight lines, because session
    titles have no length limit and the native tooltips it replaces were
    truncated by the platform; the viewport bound covers a window shorter
@@ -1861,6 +1862,36 @@ html.host-rail-open .session-status-filter .segment-radio > span { padding-inlin
    script toggles. */
 .farhelm-tooltip[hidden] {
   display: none;
+}
+
+/* A sibling of the clipped text box, behind its border: the visible left
+   half matches the session actions flyout's notch in either theme. */
+.farhelm-tooltip-pointer {
+  position: fixed;
+  z-index: 49;
+  width: 10px;
+  height: 10px;
+  background: var(--bg-2);
+  border-left: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+.farhelm-tooltip-pointer[hidden] { display: none; }
+/* Inset keeps the cue visible inside the sidebar's clipping boundary and
+   leaves the keyboard's own focus outline independent. */
+.tooltip-target-ring { box-shadow: inset 0 0 0 1px var(--tooltip-ring, var(--accent)); }
+/* The current row already has the accent fill. Its inverse role keeps the
+   cue visible there, including in the light theme's closely related blues. */
+.session-row.selected .tooltip-target-ring { --tooltip-ring: var(--on-fill); }
+/* The filled status shape is a pseudo-element painted above inset shadows.
+   An inward outline paints above it without escaping the badge's clip or
+   changing the dot's hit area. The dot is not a keyboard focus target. */
+.status-dot.tooltip-target-ring {
+  box-shadow: none;
+  outline: 1px solid var(--tooltip-ring, var(--accent));
+  outline-offset: -1px;
 }
 
 /* Permission modes need their closing caveat to remain visible. Ordinary

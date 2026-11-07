@@ -2074,21 +2074,24 @@ when the helm-wide compact preference is on, which defaults off and is shared at
 clients. The working directory and launch command remain abbreviated only where shown, with the directory in the row's
 hover summary card and the full invocation on its agent mark on web and desktop; an abbreviation is never the only place
 a value is recorded. The same card appears from the title or any unmarked part of the open button, in either density and
-on keyboard focus. It sits just right of the sidebar, level with the row and shifted up when needed to fit the window.
-When there is no room to the right, it uses the ordinary above/below tooltip placement. Other tooltips keep their
-placement. It names the title, status, agent, host, checkout when managed, directory, start and last-activity times, and
-what a click does; meaningful marks keep their own hover text. The summary may clip very long values or whole rows in a
-short window; the session view provides those details in full. Its agent line retains the stored launch facts and adds
-"YOLO observed" when the shield has status-line evidence, including when the launch was already YOLO. The actions-menu
-header describes only the stored launch. A row's own actions menu, beyond the lifecycle operations above, also offers a
-mark read / mark unread toggle — reachable there or by clicking the dot itself — that sets the session's seen state
-directly (see Status). Directly after it in the menu's first metadata group, **Pin to top** / **Unpin** toggles the
-shared pin. Directly after Unpin, **Move up** and **Move down** rearrange eligible pins relative to the displayed
-neighbor; an unavailable direction is hidden, and unpinned rows offer neither action. Accepting a move closes the menu
-and keeps keyboard focus on the moved row's menu button. Every session row carries one permission mark. An amber slashed
-shield means the session's launch is YOLO by the rule under Creation: its effective agent-launch permission is custom or
-YOLO, or its command was asserted to be YOLO. A green plain shield means an agent launch in guarded or an approval mode,
-or a command asserted not to be YOLO. A session created before launch kinds existed that was not an agent launch has no
+on keyboard focus. Every session-row hover, including the summary card and notification bell, sits just right of the
+sidebar, vertically centred on its target and shifted only to fit the window. A left-edge notch points back to the
+target's centre, clamped to the box's straight edge, and a thin accent ring identifies that target while its help shows.
+When there is no room to the right, it uses ordinary above/below placement without a notch or ring. Tooltips outside
+session rows, including the actions menu's items, keep their placement without these cues. The summary card names the
+title, status, agent, host, checkout when managed, directory, start and last-activity times, and what a click does;
+meaningful marks keep their own hover text. The summary may clip very long values or whole rows in a short window; the
+session view provides those details in full. Its agent line retains the stored launch facts and adds "YOLO observed"
+when the shield has status-line evidence, including when the launch was already YOLO. The actions-menu header describes
+only the stored launch. A row's own actions menu, beyond the lifecycle operations above, also offers a mark read / mark
+unread toggle — reachable there or by clicking the dot itself — that sets the session's seen state directly (see
+Status). Directly after it in the menu's first metadata group, **Pin to top** / **Unpin** toggles the shared pin.
+Directly after Unpin, **Move up** and **Move down** rearrange eligible pins relative to the displayed neighbor; an
+unavailable direction is hidden, and unpinned rows offer neither action. Accepting a move closes the menu and keeps
+keyboard focus on the moved row's menu button. Every session row carries one permission mark. An amber slashed shield
+means the session's launch is YOLO by the rule under Creation: its effective agent-launch permission is custom or YOLO,
+or its command was asserted to be YOLO. A green plain shield means an agent launch in guarded or an approval mode, or a
+command asserted not to be YOLO. A session created before launch kinds existed that was not an agent launch has no
 assertion and carries an amber question mark. Hover and screen-reader text name the specific agent-launch mode (guarded,
 custom, approve, smart approve, chat, or YOLO), or say that the mark is the assertion made when the command was
 launched, by the user or by an agent, and not something Farhelm checked, or that a pre-existing session's command was

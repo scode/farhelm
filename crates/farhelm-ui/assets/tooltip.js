@@ -1,6 +1,6 @@
 // Farhelm's own hover tooltip: a short text that appears 300 ms after the
 // pointer comes onto a control, or a control gains keyboard focus, and sits
-// directly above it.
+// above it, or beside the session list for a row target.
 //
 // ## Why not the browser's `title` tooltip
 //
@@ -90,10 +90,12 @@
 // `data-tooltip-anchor="panel"`. The item still owns the help and dismissal;
 // only placement clears the other choices. The existing short-window clamp
 // still applies when neither side of the whole panel has enough room.
-// Session summary cards opt into `data-tooltip-anchor="session-card"`: six
-// pixels past the enclosing sidebar, level with their row and shifted up to
-// fit the window. They fall back to ordinary placement when there is no room
-// to the right, rather than covering the list by shifting left.
+// Session-row targets opt into `data-tooltip-anchor="session-row"`: six
+// pixels past the sidebar, vertically centred on the hovered target and
+// clamped to the window. A sibling notch points back to the target, which
+// wears a ring only while that placement shows. The notch lives outside the
+// clipped text box. A cramped window uses ordinary placement without either
+// cue, rather than covering neighbouring rows by shifting left.
 //
 // ## Testability
 //
@@ -151,16 +153,21 @@
   }
 
   /**
-   * Keep a session summary clear of the list while there is room beside it.
+   * Keep session-row help clear of the list while there is room beside it.
    * Coordinates are in viewport CSS pixels, including the sidebar's right
    * edge. A cramped window preserves the ordinary tooltip rule exactly;
-   * pushing the card left would hide the neighbouring rows again.
+   * pushing the box left would hide the neighbouring rows again. The notch's
+   * centre stays level with the target except at the rounded corners, where
+   * its inset keeps it on the box's straight edge, even for a short text box.
    */
   function placeSessionCard(target, sidebarRight, size, viewport) {
     const left = Math.max(EDGE, sidebarRight + GAP_ABOVE);
     if (left + size.width > viewport.width - EDGE) return placeTooltip(target, size, viewport);
-    const top = Math.max(EDGE, Math.min(target.top, viewport.height - EDGE - size.height));
-    return { left, top, side: "right" };
+    const centre = (target.top + target.bottom) / 2;
+    const top = Math.max(EDGE, Math.min(centre - size.height / 2, viewport.height - EDGE - size.height));
+    const inset = Math.min(12, size.height / 2);
+    const pointerTop = Math.max(top + inset, Math.min(centre, top + size.height - inset));
+    return { left, top, side: "right", pointerTop };
   }
 
   /**
@@ -234,6 +241,9 @@
     const doc = win.document;
 
     let tip = null;
+    let pointer = null;
+    // The previous owner may differ from `target` during an instant handoff.
+    let ringTarget = null;
     // The element the tooltip currently belongs to, shown or still pending.
     let target = null;
     let shown = false;
@@ -298,10 +308,35 @@
       watchTimer = null;
     }
 
+    /** The cue belongs to a showing placement, never to pending or hidden help. */
+    function clearCue() {
+      if (pointer) pointer.hidden = true;
+      if (ringTarget) ringTarget.classList.remove("tooltip-target-ring");
+      ringTarget = null;
+    }
+
+    /** Reuse one notch beside the box so its clipped content cannot cut it off. */
+    function pointerElement() {
+      if (!pointer) {
+        pointer = doc.createElement("div");
+        pointer.className = "farhelm-tooltip-pointer";
+        pointer.setAttribute("aria-hidden", "true");
+        pointer.setAttribute("data-link-cover", "true");
+      }
+      if (!pointer.isConnected && doc.body) doc.body.appendChild(pointer);
+      return pointer;
+    }
+
+    /** Explicit opt-in leaves flyout items and shared marks elsewhere alone. */
+    function sessionSidebar() {
+      return target.getAttribute("data-tooltip-anchor") === "session-row" ? target.closest(".app-sidebar") : null;
+    }
+
     // `warm` is true only when the pointer moved off the target, the one
     // kind of hide that opens the instant follow-on window (module docs).
     function hide(warm = false) {
       stopTimers();
+      clearCue();
       if (shown) {
         tip.hidden = true;
         if (warm) lastHiddenAt = win.performance.now();
@@ -312,6 +347,7 @@
     }
 
     function position(content) {
+      clearCue();
       const box = element();
       // Permission help deliberately includes mode, flags and caveats as
       // paragraphs. Its target opts out of the short-help line clamp; this
@@ -340,16 +376,22 @@
         viewportWidth: win.innerWidth, viewportHeight: win.innerHeight,
       };
       const viewport = { width: win.innerWidth, height: win.innerHeight };
-      // Only the row's card opts in. A nearer mark still owns ordinary
-      // text help, even though it lives inside that same sidebar row.
-      const sidebar = content.kind === "card" && target.getAttribute("data-tooltip-anchor") === "session-card"
-        ? target.closest(".app-sidebar") : null;
+      const sidebar = sessionSidebar();
+      placedAt.sidebarRight = sidebar?.getBoundingClientRect().right;
       const place = sidebar
-        ? placeSessionCard(rect, sidebar.getBoundingClientRect().right, size, viewport)
+        ? placeSessionCard(rect, placedAt.sidebarRight, size, viewport)
         : placeTooltip(rect, size, viewport);
       box.style.left = `${place.left}px`;
       box.style.top = `${place.top}px`;
       box.dataset.side = place.side;
+      if (place.side === "right") {
+        const notch = pointerElement();
+        notch.style.left = `${place.left - 5}px`;
+        notch.style.top = `${place.pointerTop - 5}px`;
+        notch.hidden = false;
+        ringTarget = target;
+        ringTarget.classList.add("tooltip-target-ring");
+      }
     }
 
     /** Prefer a live card source, falling back to short text if one exists. */
@@ -387,11 +429,12 @@
       const rect = tooltipAnchor(target).getBoundingClientRect();
       const moved = rect.left !== placedAt.left || rect.top !== placedAt.top
         || rect.width !== placedAt.width || rect.height !== placedAt.height;
-      // A fixed-width sidebar row need not move when the window narrows.
-      // Its card must still switch between beside and ordinary placement.
-      const cardWindowChanged = content.kind === "card" && target.getAttribute("data-tooltip-anchor") === "session-card"
-        && (win.innerWidth !== placedAt.viewportWidth || win.innerHeight !== placedAt.viewportHeight);
-      if (moved || cardWindowChanged || content.signature !== placedContent) position(content);
+      // A small mark need not move when the sidebar resizes or the window
+      // narrows. Its placement and cues must still follow that boundary.
+      const sidebar = sessionSidebar();
+      const rowWindowChanged = sidebar && (win.innerWidth !== placedAt.viewportWidth
+        || win.innerHeight !== placedAt.viewportHeight || sidebar.getBoundingClientRect().right !== placedAt.sidebarRight);
+      if (moved || rowWindowChanged || content.signature !== placedContent) position(content);
     }
 
     function schedule(next, focus) {
@@ -404,6 +447,7 @@
       }
       const instant = instantFollowOn(win.performance.now(), lastHiddenAt, shown);
       stopTimers();
+      clearCue();
       target = next;
       viaFocus = focus;
       watchTimer = win.setInterval(watch, WATCH_MS);
