@@ -586,6 +586,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   says there is no checkpoint policy), auto-vacuum, and page size. Decide whether the long-lived stores need explicit
   settings or a periodic maintenance step as they grow.
 
+### Trivial
+
+- **Show the effort level as "xhigh".** The sentence-case pass (steel-sentence-case) made the launcher and its summaries
+  show the extra-high effort level as "Xhigh"; it should read "xhigh", lowercase.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
