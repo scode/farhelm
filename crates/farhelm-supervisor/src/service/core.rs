@@ -65,8 +65,9 @@ const LOG_TARGET: &str = module_path!();
 use super::capture::{CaptureGate, CaptureState, CaptureStoreFault};
 use super::connection::{handle_connection, notify_detached};
 use super::launch_artifacts::{
-    cleanup_launch_artifacts, clear_launch_artifacts_fail_closed, read_launch_sentinel,
-    sentinel_could_still_apply, sweep_launch_dir, wrapper_failure_detail,
+    LaunchError, cleanup_launch_artifacts, clear_launch_artifacts_fail_closed,
+    read_launch_sentinel, sentinel_could_still_apply, stopped_before_start, sweep_launch_dir,
+    wrapper_failure_detail,
 };
 use super::session_hosts::SessionHosts;
 use super::sweep::{
@@ -4591,7 +4592,9 @@ pub(crate) struct RunCells {
     /// A read-only supervisor or failed write must still show Error rather than
     /// lose the only classification a dead pane cannot supply. Successful Error
     /// persistence clears this mirror; a relaunch resets it, and a rename shares it.
-    pub(crate) launch_error: Arc<std::sync::Mutex<Option<String>>>,
+    /// Provenance stays with the detail so a pending Stop rejects an old
+    /// inference even if that cache was published after Stop committed.
+    pub(crate) launch_error: Arc<std::sync::Mutex<Option<LaunchError>>>,
     /// Process-local proof fencing an optional startup-error excerpt to this
     /// launch. A rename shares the cell, but a new generation starts empty
     /// until its own spawn supplies a fence. Reload cannot recover the proof
@@ -7108,7 +7111,7 @@ impl Supervisor {
         // cleanup already ran) — id to detail, so the removal loop after
         // `transition_many`'s call can gate cleanup on the commit actually
         // having landed; see that loop for the lifecycle rationale.
-        let mut sentinel_hits: HashMap<String, String> = HashMap::new();
+        let mut sentinel_hits: HashMap<String, LaunchError> = HashMap::new();
         // The same rule the list and the lifecycle verbs apply to a pane
         // that tmux now reports under another session name (see
         // `status::TerminalEvidence`), built from the rows because the session
@@ -7280,11 +7283,18 @@ impl Supervisor {
                             row.id.clone(),
                             row.generation,
                             Transition::SentinelError {
+                                inferred: false,
                                 detail: detail.clone(),
                                 address: found.as_ref().map(|found| found.address.clone()),
                             },
                         ));
-                        sentinel_hits.insert(row.id.clone(), detail);
+                        sentinel_hits.insert(
+                            row.id.clone(),
+                            LaunchError {
+                                detail,
+                                inferred: false,
+                            },
+                        );
                         // The pane still rides into `found_panes` even
                         // though this row takes the sentinel branch (item
                         // 5/19 of the review-swarm fix batch): a
@@ -7305,8 +7315,12 @@ impl Supervisor {
                         // shim leaves behind.
                         let pane_dead = found.as_ref().is_some_and(|found| found.state.dead);
                         // Both inferences below read the pane, which an
-                        // unattributed row cannot claim.
-                        let mut failure = if unattributed.is_some() {
+                        // unattributed row cannot claim. Stop's own kill
+                        // produces the same shape, so a pending Stop excludes
+                        // both while direct shim evidence above still applies.
+                        let mut failure = if unattributed.is_some()
+                            || row.outcome == LastOutcome::StopRequested
+                        {
                             None
                         } else {
                             wrapper_failure_detail(
@@ -7325,6 +7339,7 @@ impl Supervisor {
                         // can turn incomplete setup into a runtime failure.
                         // A pending preterminal create remains recoverable.
                         if failure.is_none()
+                            && row.outcome != LastOutcome::StopRequested
                             && unattributed.is_none()
                             && found.as_ref().is_none_or(|found| found.state.dead)
                         {
@@ -7351,11 +7366,18 @@ impl Supervisor {
                                 row.id.clone(),
                                 row.generation,
                                 Transition::SentinelError {
+                                    inferred: true,
                                     detail: detail.clone(),
                                     address: found.as_ref().map(|found| found.address.clone()),
                                 },
                             ));
-                            sentinel_hits.insert(row.id.clone(), detail);
+                            sentinel_hits.insert(
+                                row.id.clone(),
+                                LaunchError {
+                                    detail,
+                                    inferred: true,
+                                },
+                            );
                             if let Some(found) = found {
                                 found_panes.insert(row.id.clone(), found);
                             }
@@ -7417,7 +7439,15 @@ impl Supervisor {
                     transitions.push((
                         row.id.clone(),
                         row.generation,
-                        Transition::ObservedExit { exit_code: None },
+                        Transition::ObservedExit {
+                            stopped_before_start: stopped_before_start(
+                                state_dir,
+                                &row.id,
+                                row.generation,
+                            )
+                            .await,
+                            exit_code: None,
+                        },
                     ));
                 }
                 continue;
@@ -7457,11 +7487,23 @@ impl Supervisor {
                             row.generation,
                             if row.terminal_address.is_empty() {
                                 Transition::RediscoveredExit {
+                                    stopped_before_start: stopped_before_start(
+                                        state_dir,
+                                        &row.id,
+                                        row.generation,
+                                    )
+                                    .await,
                                     address: address.clone(),
                                     exit_code: state.exit_code,
                                 }
                             } else {
                                 Transition::ObservedExit {
+                                    stopped_before_start: stopped_before_start(
+                                        state_dir,
+                                        &row.id,
+                                        row.generation,
+                                    )
+                                    .await,
                                     exit_code: state.exit_code,
                                 }
                             },
@@ -29881,7 +29923,14 @@ exit 0
 
         let entry = entry_with(None, LastOutcome::Running);
         let err = sup
-            .record("s1", &entry, Transition::ObservedExit { exit_code: None })
+            .record(
+                "s1",
+                &entry,
+                Transition::ObservedExit {
+                    stopped_before_start: false,
+                    exit_code: None,
+                },
+            )
             .await
             .expect_err("an unreadable row must fail the write");
         assert!(format!("{err:#}").contains("teleported"));
@@ -33351,7 +33400,14 @@ exit 0
             .await
             .expect("seed a pending reservation");
         sup.store
-            .transition("ended", 0, Transition::ObservedExit { exit_code: Some(1) })
+            .transition(
+                "ended",
+                0,
+                Transition::ObservedExit {
+                    stopped_before_start: false,
+                    exit_code: Some(1),
+                },
+            )
             .await
             .expect("the session ran and finished");
 
@@ -39624,6 +39680,285 @@ exit 0
         }
     }
 
+    /// Freeze the exact evidence Stop can leave before its final write.
+    /// The accepted dummy terminal dies without consuming its spec. Scoped
+    /// cases plant the wrapper waypoint for observation and reload; unscoped
+    /// cases retain the real fixture's launch so Stop can run its cleanup.
+    /// A fresh checkout additionally has genuine accepted preparation duty.
+    /// Stop is recorded through the store rather than only in the entry.
+    async fn pending_startup_stop_fixture(
+        fresh: bool,
+        scoped: bool,
+    ) -> (PendingSentinelFixture, Arc<SessionEntry>) {
+        let fixture = accepted_pending_launch_fixture(fresh).await;
+        let row = &fixture.row;
+        wait_for_dead_fixture_pane(&fixture.sup, "pending startup Stop", |_, pane| {
+            pane.session_name == session_tmux_name(&row.id)
+        })
+        .await;
+        let states = fixture.sup.tmux.pane_states().await.unwrap();
+        let (address, pane) = states
+            .iter()
+            .find(|(_, pane)| pane.session_name == session_tmux_name(&row.id))
+            .unwrap();
+        assert!(pane.dead, "premise: startup stopped before classification");
+        let spec = crate::launch::spec_path_for_launch(fixture.state.path(), &row.id, 0);
+        if scoped {
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&spec).unwrap()).unwrap();
+            value["scope_waypoint_expected"] = true.into();
+            std::fs::write(&spec, serde_json::to_vec(&value).unwrap()).unwrap();
+            std::fs::write(crate::launch::waypoint_path_for_spec(&spec), b"").unwrap();
+        }
+        assert!(!crate::launch::status_path_for_spec(&spec).exists());
+        let competing_detail = if scoped {
+            "systemd scope wrapper exited"
+        } else {
+            "your login shell exited"
+        };
+        assert!(
+            wrapper_failure_detail(
+                fixture.state.path(),
+                &row.id,
+                0,
+                scoped,
+                true,
+                pane.exit_code
+            )
+            .await
+            .unwrap()
+            .is_some_and(|detail| detail.contains(competing_detail)),
+            "premise: the competing startup inference applies before Stop is recorded"
+        );
+        if fresh {
+            // The accepted-before-confirmation fixture deliberately has no
+            // durable terminal address. Preparation inference requires that
+            // acceptance to have committed, so establish it through the real
+            // transition before recording Stop's intent.
+            fixture
+                .sup
+                .store
+                .transition(
+                    &row.id,
+                    0,
+                    Transition::ConfirmRunning {
+                        address: address.clone(),
+                    },
+                )
+                .await
+                .unwrap();
+            assert!(
+                fixture
+                    .sup
+                    .store
+                    .preparation_origin(&row.id, 0)
+                    .await
+                    .unwrap()
+                    .is_some(),
+                "premise: this accepted launch owns incomplete checkout preparation"
+            );
+            assert!(
+                super::super::status::interrupted_preparation_detail(
+                    fixture.state.path(),
+                    &fixture.sup.store,
+                    &row.id,
+                    0
+                )
+                .await
+                .unwrap()
+                .is_some(),
+                "premise: preparation is incomplete, not merely owned"
+            );
+        }
+        fixture
+            .sup
+            .store
+            .transition(&row.id, 0, Transition::StopRequested)
+            .await
+            .unwrap();
+        let mut entry = entry_with(
+            Some(Terminal::tmux(session_tmux_name(&row.id), address.clone())),
+            LastOutcome::StopRequested,
+        );
+        entry.info.id = row.id.clone();
+        // A planted scope is classification evidence only. Handler cases keep
+        // the actual unscoped launch: a disabled manager cannot verify a fake
+        // cgroup during Stop's real cleanup sweep.
+        if scoped {
+            entry.scope = Some(format!("farhelm-{}-0.scope", row.id));
+            let conn =
+                rusqlite::Connection::open(fixture.state.path().join("supervisor.db")).unwrap();
+            conn.execute(
+                "UPDATE sessions SET launch_scoped = 1 WHERE id = ?1",
+                [&row.id],
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            entry.scope.is_some(),
+            scoped,
+            "premise: in-memory scope selection"
+        );
+        assert_eq!(
+            fixture
+                .sup
+                .store
+                .session(&row.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .launch_scoped,
+            scoped,
+            "premise: durable scope selection matches the classification fixture"
+        );
+        (fixture, Arc::new(entry))
+    }
+
+    /// The observer must skip both wrapper and checkout-preparation inference
+    /// during a pending Stop. The exact dead/spec/waypoint shape is present,
+    /// so an Exited result cannot pass by avoiding the original failure mode.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn pending_stop_observation_ignores_inferred_startup_failures() {
+        for fresh in [false, true] {
+            let (fixture, entry) = pending_startup_stop_fixture(fresh, true).await;
+            let states = fixture.sup.tmux.pane_states().await.unwrap();
+            let observed = super::super::status::observe_entry(
+                &fixture.sup,
+                &entry,
+                &states,
+                &super::super::status::KnownTmuxNames::default(),
+            )
+            .await
+            .unwrap();
+            assert!(observed.sentinel.is_none());
+            fixture
+                .sup
+                .record(&entry.info.id, &entry, observed.transition.unwrap())
+                .await
+                .unwrap();
+            assert!(
+                matches!(fixture.sup.store.session(&entry.info.id).await.unwrap().unwrap().outcome,
+                LastOutcome::Exited { annotation: Some(annotation), .. }
+                    if annotation == farhelm_proto::STOP_BEFORE_START_ANNOTATION)
+            );
+        }
+    }
+
+    /// Reload must make the same Stop decision with a dead terminal or no
+    /// terminal at all. Both preserve the unread spec until the annotation
+    /// commits; incomplete accepted preparation cannot turn either into Error.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn pending_stop_reload_keeps_startup_annotation_with_and_without_terminal() {
+        for fresh in [false, true] {
+            for absent in [false, true] {
+                let (fixture, entry) = pending_startup_stop_fixture(fresh, true).await;
+                if absent {
+                    fixture
+                        .sup
+                        .tmux
+                        .kill_session(&session_tmux_name(&entry.info.id))
+                        .await
+                        .unwrap();
+                }
+                Supervisor::reload_sessions(
+                    fixture.state.path(),
+                    &fixture.sup.store,
+                    &fixture.sup.tmux,
+                    &sentinel_recovery_seams(),
+                    true,
+                )
+                .await
+                .unwrap();
+                assert!(
+                    matches!(fixture.sup.store.session(&entry.info.id).await.unwrap().unwrap().outcome,
+                    LastOutcome::Exited { annotation: Some(annotation), .. }
+                        if annotation == farhelm_proto::STOP_BEFORE_START_ANNOTATION),
+                    "fresh={fresh}, absent={absent}"
+                );
+            }
+        }
+    }
+
+    /// Retrying Stop after a sweep failed sees an already-dead startup, but
+    /// that must remain the pending Stop's outcome rather than login-shell Error.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn pending_stop_ended_agent_branch_keeps_startup_annotation() {
+        let (fixture, entry) = pending_startup_stop_fixture(false, false).await;
+        fixture
+            .sup
+            .sessions
+            .lock()
+            .await
+            .insert(entry.info.id.clone(), entry.clone());
+        stop_error_fixture(&fixture.sup, &entry.info.id).await;
+        assert!(
+            matches!(fixture.sup.store.session(&entry.info.id).await.unwrap().unwrap().outcome,
+            LastOutcome::Exited { annotation: Some(annotation), .. }
+                if annotation == farhelm_proto::STOP_BEFORE_START_ANNOTATION)
+        );
+    }
+
+    /// Direct shim reports retain their stronger evidence while Stop is only
+    /// pending. Exercise every classifier, so an early pending-stop gate cannot
+    /// accidentally hide the sentinel with the pane-based inferences.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn pending_stop_preserves_direct_shim_failure_in_every_classifier() {
+        for classifier in ["observer", "reload", "stop"] {
+            let (fixture, entry) = pending_startup_stop_fixture(false, classifier != "stop").await;
+            let spec = crate::launch::spec_path_for_launch(fixture.state.path(), &entry.info.id, 0);
+            std::fs::write(
+                crate::launch::status_path_for_spec(&spec),
+                b"exec_failed argv0=agent errno=2",
+            )
+            .unwrap();
+            match classifier {
+                "observer" => {
+                    let states = fixture.sup.tmux.pane_states().await.unwrap();
+                    let observed = super::super::status::observe_entry(
+                        &fixture.sup,
+                        &entry,
+                        &states,
+                        &super::super::status::KnownTmuxNames::default(),
+                    )
+                    .await
+                    .unwrap();
+                    assert!(!observed.inferred);
+                    fixture
+                        .sup
+                        .record(&entry.info.id, &entry, observed.transition.unwrap())
+                        .await
+                        .unwrap();
+                }
+                "reload" => {
+                    Supervisor::reload_sessions(
+                        fixture.state.path(),
+                        &fixture.sup.store,
+                        &fixture.sup.tmux,
+                        &sentinel_recovery_seams(),
+                        true,
+                    )
+                    .await
+                    .unwrap();
+                }
+                "stop" => {
+                    fixture
+                        .sup
+                        .sessions
+                        .lock()
+                        .await
+                        .insert(entry.info.id.clone(), entry.clone());
+                    stop_error_fixture(&fixture.sup, &entry.info.id).await;
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                matches!(fixture.sup.store.session(&entry.info.id).await.unwrap().unwrap().outcome,
+                LastOutcome::Error { detail } if detail.contains("exec_failed")),
+                "{classifier}"
+            );
+        }
+    }
+
     /// An identical retry must replay the retained Error without creating a
     /// terminal or a new spec after cleanup has removed all physical proof.
     async fn assert_sentinel_replay(
@@ -39693,6 +40028,7 @@ exit 0
                         row.id.clone(),
                         0,
                         Transition::SentinelError {
+                            inferred: false,
                             detail: "fixture durable error".into(),
                             address: None,
                         },
@@ -39879,6 +40215,7 @@ exit 0
                             row.id.clone(),
                             0,
                             Transition::SentinelError {
+                                inferred: false,
                                 detail: "previous durable classification".into(),
                                 address: None,
                             },
@@ -39942,6 +40279,7 @@ exit 0
                         row.id.clone(),
                         0,
                         Transition::SentinelError {
+                            inferred: false,
                             detail: "prior classification".into(),
                             address: None,
                         },
@@ -40046,6 +40384,7 @@ exit 0
                 row.id.clone(),
                 0,
                 Transition::SentinelError {
+                    inferred: false,
                     detail: "durable error awaiting create settlement".into(),
                     address: None,
                 },

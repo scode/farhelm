@@ -1162,6 +1162,9 @@ async fn a_restart_reaps_a_daemon_left_by_a_self_exited_agent() {
 /// The annotation is what makes this more than an error-message test: the
 /// clear commits with the new launch generation, so a restart that never
 /// gets a generation must leave the stopped outcome exactly as it was.
+/// Wait for the fake agent's post-exec marker before Stop so the preserved
+/// outcome is an ordinary user stop. A create reply alone also permits a
+/// stop of the startup wrapper, which correctly gets a different annotation.
 #[farhelm_testtrace::test]
 async fn a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotation() {
     let h = harness().await;
@@ -1170,6 +1173,7 @@ async fn a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotati
     let session =
         create_resumable_session(&h, &cwd, &fixture_cmd("fake-agent --script basic"), 80, 24).await;
 
+    wait_for_agent_ready(&h, &session.id).await;
     h.client.stop_session(&session.id).await.expect("stop");
     // On a new terminal the annotation arrives with the host's exit record,
     // which a listing right after Stop can still precede.

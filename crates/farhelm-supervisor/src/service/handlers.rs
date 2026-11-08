@@ -26,7 +26,7 @@ use super::core::{
 };
 use super::launch_artifacts::{
     append_launch_excerpt, cleanup_error_once, read_launch_sentinel, sentinel_could_still_apply,
-    wrapper_failure_detail,
+    stopped_before_start, wrapper_failure_detail,
 };
 use super::listing::list_all;
 use super::status::{KnownTmuxNames, dead_pane_exit_code, entry_info};
@@ -932,12 +932,13 @@ async fn handle_stop_session(
 
         // What this stop records, and why the two branches differ.
         //
-        // Only a pane observed ALIVE gets the stop lifecycle and
+        // Only a pane observed ALIVE starts the stop lifecycle and
         // its annotation: an agent that had already exited on its
         // own is not something the user
         // stopped, and claiming otherwise would credit them with
         // an ending they had nothing to do with. That case records
-        // the plain exit instead — with whatever code the dead
+        // the plain exit instead — unless an earlier Stop's intent is
+        // still pending, in which case this completes that Stop. Keep whatever code the dead
         // pane still retains — because a stop is also the moment
         // this supervisor witnesses an exit nobody had listed yet.
         //
@@ -958,8 +959,8 @@ async fn handle_stop_session(
         // verbatim with PLAN_M3.md item 9's restart, which stops a
         // still-running agent before relaunching it
         // (`stop_live_agent`). The dead-or-absent path is this
-        // handler's alone: it records a CLASSIFICATION rather than
-        // an intent, and has no annotation to write.
+        // handler's alone: it records a CLASSIFICATION rather than a new
+        // intent. The store adds an annotation only for an existing intent.
         let stop_error = if alive_pane.is_some() {
             // Nothing is read off the pane before the kill. A stop
             // used to capture an alternate-screen app's last frame
@@ -991,6 +992,7 @@ async fn handle_stop_session(
             };
             let classification = match sentinel {
                 Ok(Some(detail)) => Transition::SentinelError {
+                    inferred: false,
                     detail,
                     address: entry
                         .terminal
@@ -1000,6 +1002,22 @@ async fn handle_stop_session(
                 // The wrapper-failure shape outranks the plain exit
                 // for the same reason a sentinel does: an agent that
                 // never started did not "run and finish".
+                Ok(None) if current == LastOutcome::StopRequested => {
+                    // A prior Stop may have recorded intent and then failed its
+                    // sweep. Its dead terminal is evidence of that Stop, not a
+                    // shell or wrapper that failed on its own.
+                    let exit_code =
+                        dead_pane_exit_code(&sup, entry.terminal.as_ref(), &session_id).await;
+                    Transition::ObservedExit {
+                        exit_code,
+                        stopped_before_start: stopped_before_start(
+                            &sup.state_dir,
+                            &session_id,
+                            entry.generation,
+                        )
+                        .await,
+                    }
+                }
                 Ok(None) => {
                     // The never-started classification reads the dead
                     // terminal (its exit code, and the excerpt quoted from
@@ -1043,13 +1061,22 @@ async fn handle_stop_session(
                     .await
                     {
                         Ok(Some(detail)) => Transition::SentinelError {
+                            inferred: true,
                             detail: append_launch_excerpt(&sup, &entry, detail, &mut true).await,
                             address: entry
                                 .terminal
                                 .as_ref()
                                 .map(|t| t.recorded_address().to_owned()),
                         },
-                        Ok(None) | Err(_) => Transition::ObservedExit { exit_code },
+                        Ok(None) | Err(_) => Transition::ObservedExit {
+                            stopped_before_start: stopped_before_start(
+                                &sup.state_dir,
+                                &session_id,
+                                entry.generation,
+                            )
+                            .await,
+                            exit_code,
+                        },
                     }
                 }
                 Err(e) => {
@@ -11682,7 +11709,11 @@ mod tests {
             .unwrap();
         let mut entry = entry_with(None, LastOutcome::Running);
         entry.info.id = "cached-reply".into();
-        *entry.run.launch_error.lock().unwrap() = Some("uncommitted failure".into());
+        *entry.run.launch_error.lock().unwrap() =
+            Some(super::super::launch_artifacts::LaunchError {
+                detail: "uncommitted failure".into(),
+                inferred: false,
+            });
         let entry = Arc::new(entry);
         sup.sessions
             .lock()

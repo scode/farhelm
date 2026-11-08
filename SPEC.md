@@ -1319,13 +1319,14 @@ Failures split cleanly in two: precondition failures (nonexistent directory, unk
 the create with a visible error and no session; launch failures of a session that was successfully created surface on
 the session itself — **Error** when the program handed to exec could not be started at all. For a command launch or a
 wrapped agent that program is Bash: a missing command inside the line instead exits with Bash's code 127 and its message
-in the terminal. **Exited** means the program started and then ended, however quickly, with its exit code visible. In
-the session launcher every refused launch (New, Clone, Replace with, quick launch) shows as a bordered alert with a
-warning icon beside Launch, starting "Not launched." before the refusal's own words, and announced to assistive
-technology. Restart mode uses the same alert beside Restart, with "Restart error." before the refusal's words. Errors
-that are not a refused launch, such as "Save as template" refusing a wrapper, keep the plain line. When the refusal says
-the folder does not exist, is not a directory or is not usable, the folder field is also marked and says so under it,
-naming the host, for as long as the form still names that host, its connection and that folder.
+in the terminal. **Exited** means the program started and then ended, however quickly, with its exit code visible, or
+the user stopped the session before its agent finished starting, with that annotation. In the session launcher every
+refused launch (New, Clone, Replace with, quick launch) shows as a bordered alert with a warning icon beside Launch,
+starting "Not launched." before the refusal's own words, and announced to assistive technology. Restart mode uses the
+same alert beside Restart, with "Restart error." before the refusal's words. Errors that are not a refused launch, such
+as "Save as template" refusing a wrapper, keep the plain line. When the refusal says the folder does not exist, is not a
+directory or is not usable, the folder field is also marked and says so under it, naming the host, for as long as the
+form still names that host, its connection and that folder.
 
 The GUI's sixty-second request deadline is not a refusal: the helm may still finish the launch. On that deadline the
 launcher stays open and its alert instead starts "Still waiting on <host>." It says the session may still start and will
@@ -2399,7 +2400,10 @@ directed at the user), **Idle** (agent alive and at rest, no pending ask), **Exi
 agent process could not be started at all). Exited sessions show their exit code when known; an exit that happened while
 the supervisor was down shows the code only when the surviving terminal genuinely retains it, and an explicit unknown
 otherwise — never a guess (see Durability). A user-initiated stop yields exited with an annotation — "stopped" is not a
-distinct status. Host unreachability is per-host connection state, not a session status.
+distinct status. If the stop was recorded before launch classification and the agent never consumed its launch spec, the
+annotation reads "stopped before the agent finished starting"; otherwise it reads "stopped by user". While a stop is
+pending, a dead terminal alone never becomes a launch error: direct evidence from the launch shim can still report a
+real failure until an annotated exit commits. Host unreachability is per-host connection state, not a session status.
 
 After a supervisor restart, a live pane keeps its last cached status while the supervisor gathers new screen evidence.
 The first new screen alone does not turn an idle or waiting session into running. A witnessed exit, launch error,

@@ -19,6 +19,7 @@
 //! what stop promises a user must not vary by host.
 
 use super::core::{SessionEntry, Supervisor};
+use super::launch_artifacts::stopped_before_start;
 use super::status::dead_pane_exit_code;
 use crate::procs::{self, ProcessState};
 use crate::store::Transition;
@@ -1990,9 +1991,21 @@ pub(crate) async fn stop_live_agent(
         container.stop().await.map_err(StopFailure::Sweep)?;
     }
     let exit_code = dead_pane_exit_code(sup, entry.terminal.as_ref(), session_id).await;
-    sup.record(session_id, entry, Transition::StopCompleted { exit_code })
-        .await
-        .map_err(StopFailure::UnrecordedOutcome)
+    // The sweep ended this launch's writers. Sample its spec before any
+    // cleanup can remove the startup evidence; an observer may already have
+    // committed the same choice, which the store preserves monotonically.
+    let stopped_before_start =
+        stopped_before_start(&sup.state_dir, session_id, entry.generation).await;
+    sup.record(
+        session_id,
+        entry,
+        Transition::StopCompleted {
+            stopped_before_start,
+            exit_code,
+        },
+    )
+    .await
+    .map_err(StopFailure::UnrecordedOutcome)
 }
 
 #[cfg(test)]

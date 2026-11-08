@@ -22,6 +22,25 @@ use std::path::Path;
 use std::sync::atomic::Ordering;
 use tracing::{debug, warn};
 
+/// An observed launch failure with the provenance needed by a pending Stop.
+///
+/// The cache exists for degraded or failed writes too, so a store refusal
+/// cannot be its only fence. Readers check the current outcome: an inference
+/// may have been collected before Stop committed and published afterwards.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LaunchError {
+    pub(crate) detail: String,
+    pub(crate) inferred: bool,
+}
+
+impl LaunchError {
+    /// Apply the same Stop precedence to transient replies as durable writes.
+    pub(crate) fn applies_to(&self, outcome: &LastOutcome) -> bool {
+        sentinel_could_still_apply(outcome)
+            && !(self.inferred && *outcome == LastOutcome::StopRequested)
+    }
+}
+
 /// Append terminal evidence only after the caller has proved never-started.
 ///
 /// For tmux, the fence belongs to this entry's launch, not its reusable pane.
@@ -138,8 +157,10 @@ pub(crate) async fn append_launch_excerpt(
 ///
 /// An unscoped command goes directly from the shell to the shim, so its
 /// unconsumed spec already identifies the shell, including on older builds.
-/// Callers keep annotated Stop outcomes and unattributed panes outside this
-/// inference. Exit codes explain the failed step; they never establish it.
+/// Callers keep pending and completed Stop outcomes and unattributed panes
+/// outside this inference. A Stop's kill produces the same evidence shape,
+/// so it cannot identify a shell or wrapper failure. Exit codes explain the
+/// failed step; they never establish it.
 ///
 /// A stat failure is inconclusive, not a proven absence. Callers may preserve
 /// their last-resort exit inference, but must not settle future reads from it:
@@ -198,6 +219,18 @@ pub(crate) async fn wrapper_failure_detail(
              exits or replaces the shell"
         )
     }))
+}
+
+/// Choose Stop's startup wording only from a readable, still-present spec.
+///
+/// Callers first establish that this launch has stopped. Its shim can no
+/// longer consume the file then, so this evidence is stable until cleanup.
+/// An absent or unreadable spec proves nothing about how far the launch got;
+/// retain the ordinary stop wording rather than guessing from a failed read.
+pub(crate) async fn stopped_before_start(state_dir: &Path, id: &str, generation: i64) -> bool {
+    tokio::fs::read(LaunchArtifacts::for_launch(state_dir, id, generation).spec())
+        .await
+        .is_ok()
 }
 
 /// Read launch evidence off the async worker for observation and reload.
@@ -775,6 +808,26 @@ impl LaunchArtifacts {
 mod tests {
     use super::super::core::tests::StateDir;
     use super::*;
+
+    /// A missing or unreadable spec cannot justify the more specific startup
+    /// annotation. A directory at the spec path forces a portable read failure
+    /// without depending on permissions that a privileged test might bypass.
+    #[farhelm_testtrace::test]
+    async fn stopped_startup_wording_requires_a_readable_spec() {
+        let state = StateDir::new();
+        let spec = crate::launch::spec_path_for_launch(state.path(), "stop-evidence", 0);
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        assert!(!stopped_before_start(state.path(), "stop-evidence", 0).await);
+        std::fs::write(&spec, b"unconsumed launch spec").unwrap();
+        assert!(stopped_before_start(state.path(), "stop-evidence", 0).await);
+        std::fs::remove_file(&spec).unwrap();
+        std::fs::create_dir(&spec).unwrap();
+        assert!(
+            tokio::fs::read(&spec).await.is_err(),
+            "premise: this spec cannot be read"
+        );
+        assert!(!stopped_before_start(state.path(), "stop-evidence", 0).await);
+    }
 
     /// Item 1's regression, and the reason `sweep_launch_dir` exists at
     /// all instead of the old blanket "remove everything" sweep: a
