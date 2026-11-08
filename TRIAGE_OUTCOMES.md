@@ -21716,7 +21716,8 @@
   the right edge with autowrap off an unattached sign joins the cell before the last-column character, by the tmux
   parity rule, so a following selector applies to the last-column character. No code or vendor change. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-misc-nov7.md`.
+- Execution: implemented in change `xpqvsonrzymwruwottuqkkyotpslmqsm`, bookmark
+  `plan/triage-misc-nov7/03-right-edge-sign-spec`, [PR #3175](https://github.com/scode/farhelm/pull/3175/changes).
 
 ## guarded-container-launch-approval-omits-sensitive-options.md
 

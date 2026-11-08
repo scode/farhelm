@@ -2750,7 +2750,10 @@ too-wide input before processing a pending wrap. Both are pinned against the sou
 [one-column input, lines 2189–2262](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L2189-L2262)).
 
 Unattached vowel or trailing signs use ordinary scalar printing, including zero-width combining storage. Selectors apply
-only to the immediately preceding stored character, so a retained sign blocks a following selector.
+only to the immediately preceding stored character, so a retained sign blocks a following selector. At the right edge
+with autowrap off, an unattached zero-width sign instead joins the cell before the last-column character under the tmux
+parity rule, so a following selector applies to the last-column character; the resulting retained-text order is
+accepted.
 
 New terminals discard the ignored-format character class before storing output, even without an emoji or selector:
 zero-width space, directional marks, embeddings and isolates, line and paragraph separators, word joiner, BOM, two
