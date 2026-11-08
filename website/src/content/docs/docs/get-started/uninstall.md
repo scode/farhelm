@@ -14,8 +14,8 @@ delete the recipes' prepared snapshots too. Check **Sandboxes not on this helm**
 list. You can knowingly keep resources instead, but running sandboxes and stored snapshots continue to bill; suspending
 a sandbox still leaves snapshot storage charges. Keep Farhelm's local state if you keep cloud resources.
 
-First stop your sessions on your Mac and close their terminal tabs, then quit Farhelm. Uninstalling does not stop
-sessions or check for them, and a session left running afterwards loses the `farhelm` command and its connection to
+First stop your sessions on your Mac, which also closes their terminal tabs, then quit Farhelm. Uninstalling does not
+stop sessions or check for them, and a session left running afterwards loses the `farhelm` command and its connection to
 Farhelm. Then run:
 
 ```sh

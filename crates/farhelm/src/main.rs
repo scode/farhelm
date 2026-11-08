@@ -242,7 +242,7 @@ enum AgentCmd {
         #[arg(long = "expected-title", allow_hyphen_values = true)]
         expected_title: String,
     },
-    /// Stop an explicitly named session's agent process tree.
+    /// Stop a named session's agent and close its terminal tabs.
     Stop {
         /// Exact session id from `farhelm agent sessions`.
         #[arg(long = "session", allow_hyphen_values = true)]

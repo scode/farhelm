@@ -186,11 +186,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Podman rigor: review findings for containerized sessions.** Future work for the experimental feature, from the
   2026-11-04 triage; these findings were assessed from source, not reproduced at runtime.
-  - Stop approval cards and the session menu describe ending only the agent, although a containerized Stop ends the
-    whole container and its independent tab work. The agent-request route is shipped. Make both descriptions disclose
-    that tabs end too.
-  - The wrapper guide promises Stop preserves terminal tabs without naming the container exception. Qualify that
-    sentence: a containerized Stop ends the whole container, including tabs.
   - Podman's default detach keys (Ctrl-P then Ctrl-Q) can leave the agent running while Farhelm shows it as exited;
     later Delete can kill it without the live-agent warning, and tab detachment can end the tab's shell. Disable detach
     keys for agent and tab connections; first verify the accepted spelling on supported Podman versions.
@@ -223,10 +218,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Containerized sessions: `farhelm spawn` and CLI flags.** Let `farhelm spawn` and the other CLI entry points request
   a containerized launch directly; today only the launcher, templates and launches copied from another session carry the
   settings.
-
-- **Consider closing tabs on stop for ordinary sessions too.** Stopping a containerized session stops its whole
-  container, terminal tabs included, while stopping an ordinary session ends only the agent and leaves its tabs running.
-  Consider making ordinary sessions match. Plan: `plans/queue/stop-closes-tabs.md`.
 
 - **Stop containers an agent started through podman before killing processes.** Today Stop, tab close and Delete end a
   podman container that an agent or tab started (`podman run -d`, say) only by killing its processes, because the

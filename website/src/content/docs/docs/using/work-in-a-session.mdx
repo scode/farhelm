@@ -28,7 +28,7 @@ on a host still on a version that makes only old terminals, the bar does not men
 [Move sessions to new terminals](/docs/using/new-terminals/) explains the difference and how to move a session that still
 has old ones.
 
-The terminal tabs and action buttons share the row above the terminal. The buttons at its right end restart, replace,
+The terminal tabs and action buttons share the row above the terminal. The buttons at its right end stop, restart, replace,
 clone, and delete the session; the arrows beside **Restart** and **Replace** open menus that also offer **Restart
 with…** and **Replace with…**. [Stop, restart, and resume](/docs/using/stop-restart-resume/) covers them. **Cmd+W** in the
 Mac app, or **Ctrl+Shift+Backspace** in a browser, does the same as the open session's Delete button. In the Mac app, Cmd+W does not close the window; use its close
@@ -43,8 +43,8 @@ button or Cmd+Q.
 
 Click **+** after the tabs to open a shell. Each shell tab is named **Terminal 1**, **Terminal 2**, and so on, and runs on the same host as the agent, in the
 session's directory. In a [containerized session](/docs/agents/containerized-sessions/), it opens inside the session's
-container. It belongs to the session: it keeps running when you switch to another session, and deleting the
-session closes it. Closing a tab yourself asks you to confirm first, since it ends whatever is running in it; press Enter
+container. It belongs to the session: it keeps running when you switch to another session or restart the agent.
+Stopping or deleting the session closes it. Closing a tab yourself asks you to confirm first, since it ends whatever is running in it; press Enter
 to confirm, or **Cancel** to keep it open. You can skip that question with
 [Skip session confirmations](/docs/using/stop-restart-resume/#stop-or-delete) under **Sessions** in settings.
 
