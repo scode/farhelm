@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`macos-tunnel-exit`](reports/macos-tunnel-exit.report.md) landed 2026-11-07 in #3135, #3138: Recipe tunnels end when the helm dies (a stdin pipe the sandbox side waits on) or goes silent (30 s heartbeat, 120 s timeout), verified on macOS CI and real sandboxes
 - [`cut-path-links`](reports/cut-path-links.report.md) landed 2026-11-07 in #3129: A printed path that a program broke across two lines links to the whole path from both halves, specced as a deliberate exception to conservative recognition
 - [`stop-closes-tabs`](reports/stop-closes-tabs.report.md) landed 2026-11-08 in #3132, #3133: Stop closes the session's terminal tabs, asking first when tabs are open (skippable), with a precondition when it did not ask; Restart keeps tabs
 - [`tensorlake-credentials-polish`](reports/tensorlake-credentials-polish.report.md) landed 2026-11-08 in #3165: Settings → Credentials shows one plain-text storage warning for the whole section and labels its key field "Tensorlake API key"
