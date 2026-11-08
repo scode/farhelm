@@ -4463,3 +4463,111 @@ The maintainer also asked to restore the full Rust integration release gate, whi
 Class: unknown
 
 Cause: unknown
+
+## 2026-11-08 — reconnect fixture accepts an older host reply (e2e/tests/provisioning.spec.ts)
+
+`incarnation churn keeps a followed run while a target change detaches it` failed twice on WebKit in batch
+`3dd98db0-b985-4cab-a183-55aaff5f33f1`, runs `82c00254-7710-4855-a536-6cd42ade7bd8` and
+`9b3b0fd9-91bb-4790-80e5-ffdba5dd587c`. The URL-only response waiter accepted a refresh dispatched before the fixture
+changed phase. In the first trace the old reply was fulfilled at 105487.701 ms, the assertion failed at 105548.583 ms,
+and the rewritten reply followed at 105583.457 ms; the failure snapshot already showed its marker. The waiter now
+requires that marker in the owned host's response, while the existing rendered-name check still proves application. The
+test passed ten subsequent attempts per engine across batches `859dd63c-1cc2-4640-a572-4d6828dcb1ed` and
+`f43a0ec2-bf67-4d58-8e5a-93a12bff0ee6`. This fixes the response-selection failure, not the separately reported missing
+progress-step name; that report and exclusion remain open.
+
+```text
+Error: expect(received).toContain(expected) // indexOf
+Expected substring: "reconnected-marker"
+```
+
+Common evidence for this entry and the following follow-ups: shared x86_64 Linux, 18 reported CPUs, kernel
+6.8.0-147-generic, Python 3.15.2, Node 26.13.0, Playwright 1.64.0; locale C.UTF-8. Recorded tmux 3.7c executable SHA256
+`39d8d6a031abbdc450145b81026d58ce58f6ea9ae6c0f242eea9c23a5975b480`. The first two batches used main `9d2ff7da` with
+uncommitted test diagnostics, then fixture corrections; the later batches used `5331b984` with those test changes.
+Intervening main changes affected TODOs and plans only. Three workers, one owned stack each, both engines, zero retries,
+one execution per case per invocation; every attempt used the recorder through `hunt-browser-tests.py`, timeout 600
+seconds per invocation. Ambient `FARHELM_*` variables were scrubbed; child names were `FARHELM_PLAYWRIGHT_POLICY_FILE`
+and `FARHELM_TEST_TRACE_DIR`. Each first batch repeated this exact selection five times:
+
+```text
+npx playwright test --grep 'visit history chooses and remembers|native tunnel preview keeps ports|trash header and global confirmation|create-intent-key-rebinds-on|editing the working directory after a failed create|changed-host advice while following|a first identity learned while following|a sequence refused at its prefix|typed page refusals are atomic|expanded setup failure closes|incarnation churn keeps a followed|a progress read failure during an update'
+```
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-11-08 — visit-history setup interrupts an unstarted agent (e2e/tests/sidebar.spec.ts)
+
+`visit history chooses and remembers the next session after header with failed preference read deletion` reproduced the
+shared fixture's Error-instead-of-Exited premise in WebKit run `574c0935-fb8b-42a4-b9a8-4dc1f7cc9cdc`. The retained
+listing detail said the agent never started and its scope wrapper exited first. The fixture issued Stop immediately
+after creating its two sessions, consistent with stopping before the agent started. Selection after deletion needs an
+ended session, so the fixture now runs `true` and still requires `exited`, without exercising Stop's startup boundary.
+All three deletion variants passed ten subsequent attempts per engine in the two follow-up batches named above. The
+active fixture report and exclusion are retired. The misleading product message for Stop during startup is separately
+tracked in TODO.md; this test change does not fix it or establish the cause of every historical Error observation.
+Substrate and selection are recorded in the preceding entry.
+
+```text
+Expected: "exited"
+Received: "error"
+the agent was never started: the systemd scope wrapper exited before starting the agent
+```
+
+Class: fixture-premise
+
+Cause: hypothesis
+
+## 2026-11-08 — preview checks exhaust their combined case budget (e2e/tests/header.spec.ts)
+
+The native tunnel preview reproduced its 60-second WebKit timeout three times in batch
+`859dd63c-1cc2-4640-a572-4d6828dcb1ed`. Driver-side phase markers in run `86d2d319-ebb5-4411-9a57-89d9a1e86231` showed
+both themes' geometry and shell-tab assertions completing before cleanup began at 58.405 seconds. Splitting only by
+theme was insufficient: run `5c4fa8c5-cdac-4a1a-84df-4dcaf35d7eeb` reached shell tabs at 56.951 seconds and timed out.
+That failure remains retained. The test now gives each theme's tunnel states and shell-tab geometry independent owned
+sessions and unchanged 60-second case limits. Every original state, width and assertion remains. All 24 resulting
+preview executions passed in three repetitions of batch `5bc8bac5-63e7-43fa-a6f8-e651d958f676`, taking 8.794–26.598
+seconds each; the selection also passed all twelve trash-dialog executions. The active budget report and old exclusion
+are retired. Measured shared-machine load varied substantially, about 33–61 in later samples, so these timings are not a
+controlled performance comparison or a long-term flake-rate claim.
+
+```text
+Test timeout of 60000ms exceeded.
+```
+
+Substrate and runner policy are as above. The theme-only experiment repeated five times with
+`--grep 'visit history chooses and remembers|native tunnel preview keeps ports|trash header and global confirmation|incarnation churn keeps a followed'`;
+final validation repeated three times with
+`--grep 'native tunnel preview keeps ports|trash header and global confirmation'`. Raw evidence remains in the named
+UUID run directories and expires with temporary-file cleanup.
+
+Class: budget
+
+Cause: established
+
+## 2026-11-08 — remaining recent fingerprints still open after focused repetition
+
+The first two five-attempt batches above did not reproduce the reported host-menu, launcher-option, missing-step-name,
+body-focus or PageDown fingerprints. Their fourteen individual exclusions remain. Existing diagnostics already covered
+menu, launcher and scrolling premises; capped passive browser progress snapshots and terminal replay/focus samples now
+retain additional state without product hooks or extra HTTP requests. Two WebKit width-1000 trash cases instead failed
+before PageDown, waiting for archive count 48 while it remained 0: `86d2d319-ebb5-4411-9a57-89d9a1e86231` and
+`5c4fa8c5-cdac-4a1a-84df-4dcaf35d7eeb`. These are startup-premise failures, not evidence of the original scroll cause.
+Failure-only diagnostics now retain the fixture's existing list-request count and eight recent host IDs without another
+browser call. All 18 recorder reports across the four batches are complete: 476 case observations, 467 passed, five
+assertion failures and four timeouts, with no skips, interrupted cases or global errors. Later passes do not replace any
+failure. Substrate, selections and batch identities are recorded above; no cause is assigned to the remaining reports
+from non-reproduction.
+
+```text
+Locator: locator('.checkout-trash-button')
+Expected: "48"
+Received: "0"
+Timeout: 5000ms
+```
+
+Class: unknown
+
+Cause: unknown

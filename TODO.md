@@ -667,22 +667,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `919edd50-a83c-4c2a-a5f1-ee90f7387526`). Cause unknown; preserve the growth and menu-closing assertions (FLAKES.md,
   2026-11-05).
 
-- **Visit-history deletion fixture stops in error instead of exited.**
-  `visit history chooses and remembers the next session after row deletion` in `e2e/tests/sidebar.spec.ts` failed its
-  stopped-session premise in Chromium sweep run `ceac5813-b025-478a-9019-a370b5fc97e5`: expected `exited`, observed
-  `error` for five seconds. All three isolated classification reruns passed (`46ef9fa7-7605-4b68-9a5f-77a4e60d1e6c`,
-  `7a1c431b-99c8-4581-b46b-b126c58b3407`, `63f93b25-ad0e-4db1-99a5-6b9367db2d30`). Cause unknown (FLAKES.md,
-  2026-11-04). On 2026-11-05 it passed five attempts per engine across ordinary and host terminals; no fresh
-  error-status detail was captured, and the exclusion remains.
-
-- **Native tunnel preview exceeds WebKit's case budget.**
-  `native tunnel preview keeps ports and actions inside a 650px pane` in `e2e/tests/header.spec.ts` timed out during
-  cleanup at its unchanged 60-second deadline in recorder `1fc8687c-1044-4c63-83f9-dfddf8da2604`, then passed unchanged
-  in 58 seconds in `9ebdc54c-8229-4787-a96b-19c2836e083e`. The new-terminal-button report records the same case timing
-  out twice and passing unchanged in 58.7 seconds. Cause unknown; the narrow timing margin is a hypothesis, not a
-  diagnosed fix. On 2026-11-05 it passed five attempts per engine; WebKit took 45.9–56.6 seconds across those runs. The
-  deadline and exclusion remain unchanged; see the bounded-attempt follow-up in FLAKES.md.
-
 - **Trash dialog's PageDown check on Chromium.** `trash header and global confirmation remain reachable` (both widths)
   in `e2e/tests/trash-dialog.spec.ts` sometimes leaves the Delete all confirmation's scroll area at the top after
   PageDown: sandbox runs `1a264a30-cd27-4f6e-bd2c-f3c3853fe0b6`, `e57f9fe2-36de-43f7-aade-46eadb89f6ee`,
@@ -691,7 +675,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   three (`03eda759-efdb-41ff-956b-564f134ad83d`), and it also failed on a stack without launch-progress. Cause unknown;
   whether launch-progress's waiting status raises its rate is open (FLAKES.md, 2026-11-04). Both widths passed five
   attempts per engine on 2026-11-05 across ordinary and host terminals. Focus/scroll assertions and exclusions remain
-  unchanged; no fresh trace establishes why the earlier PageDown had no effect.
+  unchanged; no fresh trace establishes why the earlier PageDown had no effect. On 2026-11-08, two WebKit width-1000
+  attempts failed before PageDown with archive count 0 instead of 48 (`86d2d319-ebb5-4411-9a57-89d9a1e86231`,
+  `5c4fa8c5-cdac-4a1a-84df-4dcaf35d7eeb`). These are a different startup premise failure; failure-only fixture-listing
+  diagnostics were added, and the original scroll report remains open.
 
 - **The launcher's YOLO question does not take its answer on WebKit.** `answerYolo` in `e2e/tests/helpers/term.ts`
   (through `fillCreateForm`) failed with "Clicking the checkbox did not change its state" in three tests in three

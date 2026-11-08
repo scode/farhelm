@@ -802,11 +802,20 @@ for (const width of [1000, 360]) {
    */
   test(`trash header and global confirmation remain reachable at width ${width}`, async ({ page, request }) => {
     const names = ["layout-local", ...[1, 2, 3].map((i) => `archive-host-${i}-` + "long-name-".repeat(20))];
-    await stubArchives(page, request, names);
+    const { listings } = await stubArchives(page, request, names);
     await page.setViewportSize({ width, height: 300 });
     await page.goto("/");
     const trigger = page.locator(".checkout-trash-button");
-    await expect(trigger).toHaveAttribute("data-count", "48");
+    try {
+      await expect(trigger).toHaveAttribute("data-count", "48");
+    } catch (error) {
+      // A zero count can precede the scroll scenario entirely. Keep the
+      // fixture's own request history without another call into a stalled page.
+      recordPage(page, "trash-fixture-count-unready", [
+        ["list_reads", listings.length], ["recent_hosts", listings.slice(-8).join(",")],
+      ]);
+      throw error;
+    }
     await trigger.click();
     const dialog = page.locator(".checkout-trash-dialog");
     await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(48);

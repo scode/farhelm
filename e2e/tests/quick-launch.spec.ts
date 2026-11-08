@@ -42,12 +42,18 @@ async function expectPageBodyFocus(page: Page, boundary: string): Promise<void> 
   await expect.poll(async () => {
     const state = await page.evaluate(() => {
       const active = document.activeElement;
+      // A late terminal reveal may legitimately claim body focus. Retain
+      // that readiness state beside the focus sample before cleanup hides it.
+      const replay = (window as any).__farhelmIslands?.terminal?.test?.replay;
       return {
         body: active === document.body,
         document_focused: document.hasFocus(),
         tag: active?.tagName ?? "",
         classes: active?.getAttribute("class")?.slice(0, 128) ?? "",
         terminal: active?.closest("[data-terminal]")?.getAttribute("data-terminal") ?? "",
+        replay_revealed: replay?.revealed ?? "unmounted",
+        replay_buffering: replay?.buffering ?? "unmounted",
+        modal_open: document.querySelector('[aria-modal="true"]') !== null,
       };
     });
     recordPage(page, "body-focus-sample", [["boundary", boundary], ...Object.entries(state)]);

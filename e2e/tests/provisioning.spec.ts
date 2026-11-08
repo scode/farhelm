@@ -370,6 +370,43 @@ test.beforeAll(async ({ request }) => {
   baselineHostIds = new Set(((await response.json()).hosts as Host[]).map((host) => host.id));
 });
 
+/** Retain the browser's progress snapshots without delaying or refreshing them.
+ * A later backend read cannot establish whether the UI kept an all-pending
+ * snapshot. Sampling is capped, as is the declared body size, so diagnostic
+ * reads cannot turn a large retained setup log into another workload.
+ */
+function observeProgressReplies(page: Page): void {
+  let observed = 0;
+  page.on("response", async (response) => {
+    const match = new URL(response.url()).pathname.match(/^\/api\/hosts\/(\d+)\/provisioning$/);
+    if (!match || response.request().method() !== "GET") return;
+    if (observed++ >= 32) {
+      if (observed === 33) recordPage(page, "browser-progress-observation-exhausted");
+      return;
+    }
+    const bytes = Number(response.headers()["content-length"]);
+    recordPage(page, "browser-progress-reply", [["host", match[1]], ["http_status", response.status()]]);
+    if (!response.ok() || !Number.isSafeInteger(bytes) || bytes < 0 || bytes > 64 * 1024) {
+      recordPage(page, "browser-progress-body-omitted", [["declared_bytes", Number.isFinite(bytes) ? bytes : "unknown"]]);
+      return;
+    }
+    try {
+      const snapshot = await response.json() as Progress;
+      recordPage(page, "browser-progress-snapshot", [
+        ["host", match[1]], ["run", snapshot.run_id ?? "none"], ["status", snapshot.status],
+        ["step_count", snapshot.steps.length],
+      ]);
+      for (const [index, step] of snapshot.steps.slice(0, 12).entries()) {
+        recordPage(page, "browser-progress-step", [
+          ["host", match[1]], ["index", index], ["step", step.step], ["status", step.status],
+        ]);
+      }
+    } catch {
+      recordPage(page, "browser-progress-body-unavailable", [["host", match[1]]]);
+    }
+  });
+}
+
 test.beforeEach(async () => {
   await configureBackend();
 });
@@ -3637,6 +3674,7 @@ test("a progress read failure during an update recovers on retry demand alone", 
   request,
 }, testInfo) => {
   const remote = destination(testInfo, "update-read-retry");
+  observeProgressReplies(page);
   const accepted = await startAdd(request, remote);
   await waitForProgress(request, accepted.host_id, "completed");
   await configureBackend({ targets: { [target(remote)]: { hold_actions: true } } });
@@ -4521,6 +4559,7 @@ for (const boundary of ["following", "submitting"] as const) {
       request,
     }, testInfo) => {
       const remote = destination(testInfo, `first-identity-${boundary}-${outcome}`);
+      observeProgressReplies(page);
       const added = await startAdd(request, remote);
       await waitForProgress(request, added.host_id, "completed");
       await configureBackend({ targets: { [target(remote)]: { hold_actions: true } } });
@@ -4687,6 +4726,7 @@ for (const boundary of ["following", "submitting", "submitting-current"] as cons
     if (boundary === "submitting-current" && change === "identity") continue;
     test(`changed-host advice while ${boundary}: ${change}`, async ({ page, request }, testInfo) => {
       const remote = destination(testInfo, `advice-${boundary}-${change}`);
+      observeProgressReplies(page);
       const added = await startAdd(request, remote);
       await waitForProgress(request, added.host_id, "completed");
       await configureBackend({ targets: { [target(remote)]: { hold_actions: true } } });
@@ -4936,6 +4976,7 @@ test("incarnation churn keeps a followed run while a target change detaches it",
   request,
 }, testInfo) => {
   const remote = destination(testInfo, "continuity");
+  observeProgressReplies(page);
   const accepted = await startAdd(request, remote);
   await waitForProgress(request, accepted.host_id, "completed");
   await configureBackend({ targets: { [target(remote)]: { hold_actions: true } } });
@@ -4974,11 +5015,15 @@ test("incarnation churn keeps a followed run while a target change detaches it",
 
   // A reconnect mid-run (fresh incarnation, same target) is normal: the
   // run stays followed and the row stays folded.
-  const registryRefresh = page.waitForResponse(
-    (response) =>
-      new URL(response.url()).pathname === "/api/hosts" &&
-      response.request().method() === "GET",
-  );
+  // A refresh dispatched before this phase can finish after the waiter is
+  // installed. Match the rewritten entry, not merely the next registry URL;
+  // otherwise a healthy old reply fails before the reconnect even renders.
+  const registryRefresh = page.waitForResponse(async (response) => {
+    if (new URL(response.url()).pathname !== "/api/hosts" ||
+      response.request().method() !== "GET" || !response.ok()) return false;
+    const hosts = (await response.json()).hosts as Host[];
+    return hosts.some((host) => host.id === accepted.host_id && host.alias === "reconnected-marker");
+  });
   phase = "reconnected";
   await notifyFeed(feed, 2);
   const refreshed = await registryRefresh;
