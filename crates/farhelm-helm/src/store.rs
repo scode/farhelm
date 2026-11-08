@@ -7584,6 +7584,8 @@ impl HelmStore {
     /// so forgetting it first would leave the sandbox billing with nothing
     /// in Farhelm pointing at it. Kept in the store rather than at each
     /// caller so that no removal path, present or future, can get it wrong.
+    /// Removal also revokes the row's grants: full sync keeps a power loss
+    /// from restoring that authority after the user was told it was removed.
     pub(crate) async fn remove_host_row(
         &self,
         host: HostId,
@@ -7591,7 +7593,8 @@ impl HelmStore {
     ) -> anyhow::Result<()> {
         let proven = deleted.is_some_and(|proof| proof.host() == host);
         self.conn
-            .call(
+            .call_full_sync_if(
+                true,
                 "remove host task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<()> {
                     let kind: Option<(String, Option<String>)> = conn
@@ -16397,7 +16400,7 @@ mod tests {
     }
 
     /// Revocations must reach FULL before acknowledgement, while unrelated preferences keep NORMAL.
-    /// Triggers witness all four host permissions and tunnel consent inside their real writes;
+    /// Triggers witness all four host permissions, tunnel consent and host removal inside their real writes;
     /// SQLite cannot change synchronous within a transaction, so the commit keeps that barrier.
     #[farhelm_testtrace::test]
     async fn trust_revocations_commit_with_full_sync() {
@@ -16416,6 +16419,9 @@ mod tests {
                    commands_without_asking, links_without_asking, local_links_without_asking ON main.hosts
                  WHEN (SELECT synchronous FROM pragma_synchronous) != 2
                  BEGIN SELECT RAISE(ABORT, 'host trust write needs FULL'); END;
+                 CREATE TEMP TRIGGER observe_host_removal BEFORE DELETE ON main.hosts
+                 WHEN (SELECT synchronous FROM pragma_synchronous) != 2
+                 BEGIN SELECT RAISE(ABORT, 'host removal needs FULL'); END;
                  CREATE TEMP TRIGGER observe_tunnel_trust BEFORE UPDATE ON main.preferences
                  WHEN (SELECT synchronous FROM pragma_synchronous) !=
                    CASE WHEN NEW.tunnel_consent IS OLD.tunnel_consent THEN 1 ELSE 2 END
@@ -16448,6 +16454,15 @@ mod tests {
         };
         store.update_preferences(clear).await.unwrap();
         store.update_preferences(Default::default()).await.unwrap();
+        store.remove_ssh_host(host).await.unwrap();
+        assert!(
+            store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .all(|row| row.id != host)
+        );
         let conn = store.conn.lock();
         let sync: i64 = conn
             .query_row("PRAGMA synchronous", [], |r| r.get(0))
