@@ -203,7 +203,12 @@ test("Settings lists unknown Farhelm sandboxes and confirms snapshot cleanup", a
     });
     await list.getByRole("button", { name: "Delete sandbox", exact: true })
       .click();
-    await expect(list.getByRole("alert")).toContainText(
+    // Delete answers the question it was drawn for, so the question closes
+    // at once; a failed cleanup is then reported on the sandbox's own row,
+    // which offers Retry cleanup. (The section repeats the reason in its own
+    // alert, so the row's alert is the one checked here.)
+    await expect(list.locator(".orphan-delete-confirm")).toHaveCount(0);
+    await expect(own.getByRole("alert")).toContainText(
       "snapshot cleanup blocked",
     );
     expect(
@@ -214,13 +219,11 @@ test("Settings lists unknown Farhelm sandboxes and confirms snapshot cleanup", a
     ).toBe(true);
     await list.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(own).toBeVisible();
-    await expect(list.getByRole("alert")).toContainText(
+    await expect(own.getByRole("alert")).toContainText(
       "snapshot cleanup blocked",
     );
-    await expect(list.locator(".orphan-delete-confirm")).toBeVisible();
-    // Cancel and unmount Settings: recovery must come from the helm's
-    // operation state, rather than this confirmation's captured sandbox ID.
-    await list.getByRole("button", { name: "Cancel", exact: true }).click();
+    // Unmount Settings: recovery must come from the helm's operation state,
+    // rather than anything the closed question captured.
     await expect(
       own.getByRole("button", { name: "Retry cleanup", exact: true }),
     ).toBeVisible();

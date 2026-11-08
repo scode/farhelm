@@ -3,11 +3,27 @@
 use crate::{
     ApiBase,
     api::{delete_orphan_sandbox, fetch_orphan_sandboxes},
+    ops::{ConfirmSlot, ConfirmToken, use_confirm_slot},
     peer::display_peer,
 };
 use dioxus::prelude::*;
 use farhelm_proto::tensorlake::{OrphanCleanup, OrphanSandbox};
 use std::{cell::Cell, rc::Rc};
+
+/// Consume only the opening the answer displayed, before constructing a
+/// destructive request. A queued answer after Cancel must authorize nothing.
+fn delete_for_offer<T>(
+    slot: &mut ConfirmSlot<OrphanSandbox>,
+    shown: &ConfirmToken<OrphanSandbox>,
+    busy: bool,
+    deleting: impl FnOnce(&str) -> T,
+) -> Option<T> {
+    if busy {
+        return None;
+    }
+    slot.take(shown)?;
+    Some(deleting(&shown.key().id))
+}
 
 /// Record a completed check in the viewer's local time on either renderer.
 ///
@@ -44,7 +60,7 @@ pub(crate) fn OrphanList(api_key_set: bool, key_revision: u64, test_revision: u6
     // not admitted a cleanup operation. List refresh must not erase it.
     let mut action_error = use_signal(|| None::<String>);
     let mut generation = use_signal(|| 0_u64);
-    let mut confirm = use_signal(|| None::<OrphanSandbox>);
+    let mut confirm = use_confirm_slot::<OrphanSandbox, ()>();
     let mut busy = use_signal(|| false);
     let mounted = use_hook(|| Rc::new(Cell::new(true)));
     let drop_mounted = mounted.clone();
@@ -121,7 +137,7 @@ pub(crate) fn OrphanList(api_key_set: bool, key_revision: u64, test_revision: u6
     // A manual refresh also discovers resources created outside this helm;
     // the invalidation feed cannot observe another helm or the vendor CLI.
     rsx! {
-        if api_key_set || !rows().is_empty() || error().is_some() || confirm().is_some() || action_error().is_some() {
+        if api_key_set || !rows().is_empty() || error().is_some() || confirm.is_open() || action_error().is_some() {
             section { class: "host-settings-section tensorlake-orphans", aria_label: "Sandboxes not on this helm",
                 div { class: "tensorlake-orphans-heading",
                     h4 { class: "host-settings-section-title", "Sandboxes not on this helm" }
@@ -147,11 +163,11 @@ pub(crate) fn OrphanList(api_key_set: bool, key_revision: u64, test_revision: u6
                             if let Some(created) = sandbox.created_at { " · Created {super::recipes::utc_minute(created / 1000)}" }
                         }
                         if let Some(OrphanCleanup::Failed { reason }) = sandbox.cleanup.as_ref()
-                            && confirm().as_ref().is_none_or(|shown| shown.id != sandbox.id) {
+                            && confirm.current().is_none_or(|shown| shown.key().id != sandbox.id) {
                             p { class: "checkout-root-error", role: "alert", "Cleanup unfinished: {display_peer(reason)}" }
                         }
                         button { r#type: "button", class: "btn btn-neutral", disabled: busy() || sandbox.cleanup == Some(OrphanCleanup::Running),
-                            onclick: move |_| { action_error.set(None); confirm.set(Some(sandbox.clone())); },
+                            onclick: move |_| { action_error.set(None); confirm.open(sandbox.clone(), ()); },
                             match sandbox.cleanup {
                                 Some(OrphanCleanup::Running) => "Cleaning up…",
                                 Some(OrphanCleanup::Failed { .. }) => "Retry cleanup",
@@ -160,22 +176,21 @@ pub(crate) fn OrphanList(api_key_set: bool, key_revision: u64, test_revision: u6
                         }
                     }
                 }
-                if let Some(sandbox) = confirm() {
+                if let Some((shown, cancel_shown)) = confirm.current().map(|shown| (shown.clone(), shown)) {
                     div { class: "templates-departure orphan-delete-confirm", role: "status",
-                        p { "Delete sandbox {display_peer(&sandbox.name)}? Its files, sessions and snapshots will be deleted." }
+                        p { "Delete sandbox {display_peer(&shown.key().name)}? Its files, sessions and snapshots will be deleted." }
                         crate::modal_dialog::DialogActions {
-                            button { r#type: "button", class: "btn btn-neutral", disabled: busy(), onclick: move |_| { confirm.set(None); action_error.set(None); }, "Cancel" }
+                            button { r#type: "button", class: "btn btn-neutral", disabled: busy(), onclick: move |_| { if confirm.is_current(&cancel_shown) { confirm.cancel_for(&cancel_shown); action_error.set(None); } }, "Cancel" }
                             button { r#type: "button", class: "btn btn-danger", disabled: busy(), onclick: move |_| {
-                                if *busy.peek() { return; }
+                                let Some(deleting) = delete_for_offer(&mut confirm, &shown, *busy.peek(), |id| delete_orphan_sandbox(&delete_base, id)) else { return; };
                                 busy.set(true);
                                 action_error.set(None);
-                                let deleting = delete_orphan_sandbox(&delete_base, &sandbox.id);
                                 let mounted = mounted.clone();
                                 dioxus::core::spawn_forever(async move {
                                     let result = deleting.await;
                                     if !mounted.get() { return; }
                                     busy.set(false);
-                                    match result { Ok(()) => { confirm.set(None); reload.call(()); }, Err(reason) => action_error.set(Some(reason)) }
+                                    match result { Ok(()) => reload.call(()), Err(reason) => action_error.set(Some(reason)) }
                                 });
                             }, "Delete sandbox" }
                         }
@@ -185,5 +200,66 @@ pub(crate) fn OrphanList(api_key_set: bool, key_revision: u64, test_revision: u6
                 if let Some(reason) = action_error() { p { class: "checkout-root-error", role: "alert", "{display_peer(&reason)}" } }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Cancel and a queued Delete share one render: cancellation must prevent
+    /// request construction. Reopening cannot revive that answer, and a fresh
+    /// answer still constructs exactly one request rather than disabling Delete.
+    #[farhelm_testtrace::test]
+    fn cancelled_and_stale_delete_answers_send_nothing() {
+        std::thread_local! {
+            static SLOT: Cell<Option<ConfirmSlot<OrphanSandbox>>> = const { Cell::new(None) };
+        }
+        /// Own a real hook slot while the test delivers answers without a render.
+        fn app() -> Element {
+            let slot = use_confirm_slot::<OrphanSandbox, ()>();
+            SLOT.with(|cell| cell.set(Some(slot)));
+            rsx! {}
+        }
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        dom.in_runtime(|| {
+            let mut slot = SLOT.with(|cell| cell.get().unwrap());
+            let sandbox = OrphanSandbox {
+                id: "sandbox-id".into(),
+                name: "sandbox".into(),
+                created_at: None,
+                state: "running".into(),
+                from_another_helm: false,
+                cleanup: None,
+            };
+            let cancelled = slot.open(sandbox.clone(), ());
+            let requests = std::cell::RefCell::new(Vec::new());
+            let deleting = |id: &str| requests.borrow_mut().push(id.to_string());
+            assert!(
+                slot.is_current(&cancelled),
+                "the question is open before Cancel"
+            );
+            slot.cancel_for(&cancelled);
+            assert!(delete_for_offer(&mut slot, &cancelled, false, deleting).is_none());
+            let current = slot.open(sandbox, ());
+            assert!(delete_for_offer(&mut slot, &cancelled, false, deleting).is_none());
+            assert!(
+                slot.is_current(&current),
+                "a stale answer leaves the new question open"
+            );
+            assert!(delete_for_offer(&mut slot, &current, true, deleting).is_none());
+            assert!(
+                slot.is_current(&current),
+                "busy refuses without consuming the question"
+            );
+            assert!(
+                requests.borrow().is_empty(),
+                "no refused answer constructs a request"
+            );
+            assert!(delete_for_offer(&mut slot, &current, false, deleting).is_some());
+            assert!(delete_for_offer(&mut slot, &current, false, deleting).is_none());
+            assert_eq!(*requests.borrow(), ["sandbox-id"]);
+        });
     }
 }
