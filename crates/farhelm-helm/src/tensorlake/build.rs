@@ -1,8 +1,9 @@
-//! Snapshot builds: turning a managed recipe into a Tensorlake snapshot that
+//! Snapshot builds: turning a recipe into a Tensorlake snapshot that
 //! hosts start from.
 //!
-//! A build creates a builder sandbox from [`TENSORLAKE_BASE_IMAGE`] with the
-//! recipe's size, checks it boots systemd, installs the recipe's apt
+//! A build creates a builder sandbox from the recipe's base
+//! ([`TENSORLAKE_BASE_IMAGE`] for Tensorlake Ubuntu) with the recipe's size,
+//! checks the base's requirements ([`build_script::ready`]), installs its apt
 //! packages and the two agents (the scripts are in `build_script.rs`),
 //! empties `/etc/machine-id`, takes a filesystem snapshot and waits for it
 //! to complete, records the snapshot ID, terminates the builder and deletes
@@ -56,7 +57,7 @@ use std::{
 
 use anyhow::Context as _;
 use farhelm_proto::tensorlake::recipes::{
-    BuildStep, BuildView, RecipeSize, RecipeSource, SnapshotView,
+    BuildStep, BuildView, RecipeBase, RecipeSize, SnapshotView,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
@@ -73,7 +74,7 @@ use super::ssh::TensorlakeSshAccess;
 use super::ssh_key::SshKeyStore;
 use crate::{feed::FleetEvents, store::HelmStore};
 
-/// The image every managed recipe builds on. The one place the base image
+/// The standard Tensorlake Ubuntu base. The one place its image
 /// is named: goal D1's fallback, should Tensorlake's ssh to CAS-format
 /// sandboxes regress, changes this to `tensorlake/legacy/ubuntu-systemd`.
 pub(crate) const TENSORLAKE_BASE_IMAGE: &str = "tensorlake/ubuntu-systemd";
@@ -167,7 +168,8 @@ impl Default for BuildTimings {
 pub(crate) struct BuiltSnapshot {
     pub(crate) id: String,
     pub(crate) built_at: i64,
-    pub(crate) base_image: String,
+    /// Missing in older state, whose builds always used Tensorlake Ubuntu.
+    pub(crate) base: RecipeBase,
     /// The builder's disk, which is the smallest disk a sandbox started from
     /// this snapshot can have.
     pub(crate) disk_gb: u32,
@@ -185,8 +187,8 @@ pub(crate) struct FailureRecord {
 }
 
 /// A recipe's `state_json`: the helm's own build bookkeeping, written only
-/// by the build engine, the recipe's deletion, and a save that stops the
-/// recipe being managed (which retires its snapshot). `{}` decodes to the
+/// by the build engine and the recipe's deletion. Saves never retire a
+/// snapshot: a successful replacement build does. `{}` decodes to the
 /// default; unknown fields are ignored so an older helm can read a newer
 /// state.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -210,8 +212,8 @@ pub(crate) struct RecipeState {
     pub(crate) build_started_at: Option<i64>,
     pub(crate) last_failure: Option<FailureRecord>,
     /// Snapshots this recipe no longer uses whose deletion has not succeeded
-    /// yet: superseded by a rebuild, or left when the recipe stopped being
-    /// managed.
+    /// yet: superseded by a rebuild, or retained from an older helm's
+    /// save-time retirement rule.
     pub(crate) retired_snapshots: Vec<String>,
 }
 
@@ -382,8 +384,6 @@ struct Registry {
 #[derive(Debug)]
 pub(crate) enum StartRefusal {
     Missing,
-    /// The recipe reuses an image or snapshot; Farhelm builds nothing for it.
-    NotManaged,
     NoApiKey,
     /// Farhelm's ssh key is missing or unreadable; the text says which.
     NoSshKey(String),
@@ -426,6 +426,7 @@ struct BuildContext {
     key: ApiKey,
     access: TensorlakeSshAccess,
     size: RecipeSize,
+    base: RecipeBase,
     packages: Vec<String>,
     events: Arc<FleetEvents>,
     progress: watch::Sender<Progress>,
@@ -519,7 +520,7 @@ impl RecipeBuilds {
         let snapshot = state.snapshot.as_ref().map(|snapshot| SnapshotView {
             id: snapshot.id.clone(),
             built_at: snapshot.built_at,
-            base_image: snapshot.base_image.clone(),
+            base: snapshot.base.clone(),
             disk_gb: snapshot.disk_gb,
             packages: snapshot.packages.clone(),
             claude_version: snapshot.claude_version.clone(),
@@ -541,7 +542,7 @@ impl RecipeBuilds {
     /// Start a build of the recipe `name`, or join the one already running
     /// (a second Build, Rebuild or Retry click starts nothing).
     ///
-    /// Refuses a recipe that does not exist or is not managed, and a helm
+    /// Refuses a recipe that does not exist, and a helm
     /// without an API key or ssh key. `events` is bumped at every step.
     pub(crate) async fn start_or_join(
         self: &Arc<Self>,
@@ -570,9 +571,6 @@ impl RecipeBuilds {
             .map_err(StartRefusal::Storage)?
             .ok_or(StartRefusal::Missing)?;
         let spec = frozen.unwrap_or(stored);
-        let RecipeSource::Packages { packages } = spec.source else {
-            return Err(StartRefusal::NotManaged);
-        };
         let key = self
             .api_key()
             .await
@@ -611,7 +609,8 @@ impl RecipeBuilds {
             key,
             access,
             size: spec.size,
-            packages,
+            base: spec.base,
+            packages: spec.packages,
             events,
             progress,
             cancel: cancel_rx,
@@ -640,11 +639,11 @@ impl RecipeBuilds {
         Ok(())
     }
 
-    /// Return a managed recipe's prepared snapshot, building it when absent
+    /// Return a recipe's built snapshot, building it when absent
     /// and joining an already running rebuild. A host keeps its confirmed
     /// definition; edits made while confirmation was open cannot change the
-    /// packages or size of a build it starts. Existing snapshots keep the
-    /// recipe's explicit-rebuild semantics (package edits alone do not rebuild).
+    /// base, packages or size of a build it starts. Existing snapshots keep the
+    /// recipe's explicit-rebuild semantics (base or package edits do not rebuild).
     /// Progress follows the same watch channel Settings reads, without a
     /// second builder, detached waiter, or polling timer.
     pub(crate) async fn ensure_snapshot<F, Fut>(
@@ -677,7 +676,6 @@ impl RecipeBuilds {
             .map_err(|reason| {
                 anyhow::anyhow!(match reason {
                     StartRefusal::Missing => "the recipe no longer exists".into(),
-                    StartRefusal::NotManaged => "this recipe does not build a snapshot".into(),
                     StartRefusal::NoApiKey =>
                         "save a Tensorlake API key in Settings → Tensorlake first".into(),
                     StartRefusal::NoSshKey(message) => message,
@@ -883,26 +881,22 @@ impl RecipeBuilds {
         let built = BuiltSnapshot {
             id: snapshot,
             built_at: now_secs(),
-            base_image: TENSORLAKE_BASE_IMAGE.to_string(),
+            base: ctx.base.clone(),
             disk_gb: ctx.size.disk_gb,
             packages: ctx.packages.clone(),
             claude_version: claude,
             codex_version: codex,
         };
         // One write records the new snapshot and retires the old one, so the
-        // old one is deleted only after the new one is recorded. A recipe
-        // that stopped being managed while this build ran keeps no snapshot:
-        // the new one is retired at once.
+        // old one is deleted only after the new one is recorded. The snapshot's
+        // frozen base and packages remain visible if the recipe changed during
+        // the build; edits require another explicit rebuild.
         self.store
-            .update_tensorlake_recipe_state(&ctx.recipe, move |spec, state| {
+            .update_tensorlake_recipe_state(&ctx.recipe, move |_, state| {
                 if let Some(old) = state.snapshot.take() {
                     state.retired_snapshots.push(old.id);
                 }
-                if matches!(spec.source, RecipeSource::Packages { .. }) {
-                    state.snapshot = Some(built);
-                } else {
-                    state.retired_snapshots.push(built.id);
-                }
+                state.snapshot = Some(built);
                 state.build_started_at = None;
                 state.last_failure = None;
             })
@@ -1001,7 +995,15 @@ impl RecipeBuilds {
         }
         let request = CreateSandbox {
             name: ctx.builder.clone(),
-            source: SandboxSource::Image(TENSORLAKE_BASE_IMAGE.to_string()),
+            source: match &ctx.base {
+                RecipeBase::TensorlakeUbuntu => {
+                    SandboxSource::Image(TENSORLAKE_BASE_IMAGE.to_string())
+                }
+                RecipeBase::Image { image } => SandboxSource::Image(image.clone()),
+                RecipeBase::Snapshot { snapshot_id } => {
+                    SandboxSource::Snapshot(snapshot_id.clone())
+                }
+            },
             resources: Resources {
                 cpus: f64::from(ctx.size.cpus),
                 memory_mb: u64::from(ctx.size.memory_gb) * 1024,

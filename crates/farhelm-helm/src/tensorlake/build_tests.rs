@@ -507,14 +507,14 @@ async fn a_build_records_its_snapshot_and_leaves_nothing_else_billing() {
     let snapshot = state.snapshot.clone().expect("a snapshot is recorded");
     assert_eq!(
         (
-            snapshot.base_image.as_str(),
+            snapshot.base.clone(),
             snapshot.disk_gb,
             snapshot.packages.clone(),
             snapshot.claude_version.as_deref(),
             snapshot.codex_version.as_deref(),
         ),
         (
-            TENSORLAKE_BASE_IMAGE,
+            RecipeBase::TensorlakeUbuntu,
             20,
             vec!["git".to_string(), "ripgrep".to_string()],
             Some("1.0.0 (Claude Code)"),
@@ -568,6 +568,145 @@ async fn a_build_records_its_snapshot_and_leaves_nothing_else_billing() {
         !f.builds.view(RECIPE, &f.state().await).2,
         "nothing awaits cleanup"
     );
+}
+
+/// Every base starts the builder from exactly the selected image or snapshot
+/// and runs the same package and official-agent layers. Snapshot provenance
+/// must describe what was built so later recipe edits can be shown as stale.
+#[farhelm_testtrace::test(start_paused = true)]
+async fn all_bases_build_their_selected_source_and_record_the_layers() {
+    for choice in 0..3 {
+        let f = fixture().await;
+        let users_snapshot = f.api.model().plant_snapshot("usersbuilder");
+        let base = match choice {
+            0 => RecipeBase::TensorlakeUbuntu,
+            1 => RecipeBase::Image {
+                image: "team/base".into(),
+            },
+            _ => RecipeBase::Snapshot {
+                snapshot_id: users_snapshot.clone(),
+            },
+        };
+        let mut save = tests_support::save();
+        save.base = base.clone();
+        save.packages = if choice == 1 {
+            vec![]
+        } else {
+            vec!["jq".into()]
+        };
+        let packages = save.packages.clone();
+        f.store
+            .update_tensorlake_recipe(RECIPE.into(), save)
+            .await
+            .unwrap()
+            .unwrap();
+        f.build().await;
+        let built = f
+            .state()
+            .await
+            .snapshot
+            .expect("every base produces a snapshot");
+        assert_eq!(built.base, base);
+        assert_eq!(built.packages, packages);
+        assert!(built.claude_version.is_some() && built.codex_version.is_some());
+        assert_eq!(
+            f.shell.labels(),
+            ["ready", "packages", "claude", "codex", "prepare"]
+        );
+        let model = f.api.model();
+        let builder = &model.sandboxes[0];
+        match base {
+            RecipeBase::TensorlakeUbuntu => {
+                assert_eq!(builder.image.as_deref(), Some(TENSORLAKE_BASE_IMAGE))
+            }
+            RecipeBase::Image { image } => assert_eq!(builder.image, Some(image)),
+            RecipeBase::Snapshot { snapshot_id } => {
+                assert_eq!(builder.snapshot_id, Some(snapshot_id))
+            }
+        }
+        assert_eq!(builder.status, "terminated");
+        assert!(
+            model
+                .snapshots
+                .iter()
+                .any(|snapshot| snapshot.id == users_snapshot),
+            "the user's base is never cleanup-owned"
+        );
+    }
+}
+
+/// A save racing a build cannot relabel its filesystem. The completed result
+/// keeps the frozen base and package layer, and an explicit rebuild catches up
+/// to the edited definition and only then deletes the previous result.
+#[farhelm_testtrace::test(start_paused = true)]
+async fn edits_during_build_keep_frozen_provenance_until_rebuilt() {
+    let f = fixture().await;
+    f.shell.hold.send_replace(true);
+    f.start().await;
+    f.shell.started(1).await;
+    let mut save = tests_support::save();
+    save.base = RecipeBase::Image {
+        image: "team/next".into(),
+    };
+    save.packages = vec!["jq".into()];
+    f.store
+        .update_tensorlake_recipe(RECIPE.into(), save)
+        .await
+        .unwrap()
+        .unwrap();
+    f.shell.hold.send_replace(false);
+    f.finish().await;
+    let previous = f.state().await.snapshot.unwrap();
+    assert_eq!(previous.base, RecipeBase::TensorlakeUbuntu);
+    assert_eq!(previous.packages, vec!["git", "ripgrep"]);
+    let (spec, _) = f
+        .store
+        .tensorlake_recipe_row(RECIPE)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(spec.base, previous.base);
+    assert_ne!(spec.packages, previous.packages);
+    f.build().await;
+    let rebuilt = f.state().await.snapshot.unwrap();
+    assert_eq!(rebuilt.base, spec.base);
+    assert_eq!(rebuilt.packages, spec.packages);
+    assert_ne!(rebuilt.id, previous.id);
+    assert!(!f.snapshot_ids().contains(&previous.id));
+}
+
+/// A failed requirement check must reach neither packages nor either agent
+/// installer. The failure remains on the existing step and the builder is swept,
+/// while any earlier ready snapshot stays usable.
+#[farhelm_testtrace::test(start_paused = true)]
+async fn base_requirement_failures_stop_before_installing_and_keep_the_old_snapshot() {
+    for requirement in ["systemd", "sudo", "apt", "bash", "curl", "git"] {
+        let f = fixture().await;
+        let old = f.api.model().plant_snapshot("oldbuilder");
+        let id = old.clone();
+        f.set_state(move |state| {
+            state.snapshot = Some(BuiltSnapshot {
+                id,
+                ..Default::default()
+            })
+        })
+        .await;
+        f.shell.answer(
+            "ready",
+            Err(ShellFailure::Exited {
+                code: 1,
+                stderr: format!("missing {requirement}"),
+            }),
+        );
+        f.build().await;
+        let state = f.state().await;
+        let failure = state.last_failure.unwrap();
+        assert_eq!(failure.step, BuildStep::Connecting);
+        assert!(failure.message.contains(requirement));
+        assert_eq!(f.shell.labels(), ["ready"]);
+        assert_eq!(state.snapshot.unwrap().id, old);
+        assert!(f.api.model().live_sandboxes().is_empty());
+    }
 }
 
 /// Spec: a rebuild records its new snapshot and only then deletes the old
@@ -880,15 +1019,12 @@ async fn the_store_refuses_to_forget_a_recipe_with_billed_resources() {
     );
 }
 
-/// Spec: a save that switches a recipe from packages to an image retires its
-/// snapshot in the same write, leaving no current snapshot; a save that
-/// keeps packages keeps it.
+/// Spec: changing base preserves the current snapshot until a successful
+/// replacement build, just as changing packages does.
 ///
-/// Why: a recipe that reuses an image never starts hosts from the built
-/// snapshot, so it must be deleted rather than billed unseen, and it must
-/// stay recorded until that deletion succeeds.
+/// Why: an edit must not remove a usable snapshot or hide billed ownership.
 #[farhelm_testtrace::test(start_paused = true)]
-async fn switching_to_an_image_retires_the_snapshot() {
+async fn switching_to_an_image_keeps_the_snapshot_until_rebuilt() {
     let f = fixture().await;
     f.set_state(|state| {
         state.snapshot = Some(BuiltSnapshot {
@@ -906,7 +1042,7 @@ async fn switching_to_an_image_retires_the_snapshot() {
         .ok()
         .unwrap();
     assert!(f.state().await.snapshot.is_some());
-    save.source = RecipeSource::Image {
+    save.base = RecipeBase::Image {
         image: "team-base".into(),
     };
     f.store
@@ -916,10 +1052,8 @@ async fn switching_to_an_image_retires_the_snapshot() {
         .ok()
         .unwrap();
     let state = f.state().await;
-    assert_eq!(
-        (state.snapshot, state.retired_snapshots),
-        (None, vec!["snap1".to_string()])
-    );
+    assert_eq!(state.snapshot.unwrap().id, "snap1");
+    assert!(state.retired_snapshots.is_empty());
 }
 
 /// Spec: a recorded `build_started_at` with no live build reads as
@@ -1006,7 +1140,7 @@ async fn a_failed_snapshot_fails_the_build() {
 // The route
 // ---------------------------------------------------------------------------
 
-/// Spec: the build route refuses a recipe that reuses an image, a helm
+/// Spec: the build route requires an API key for every base, and a helm
 /// without an API key, and one without Farhelm's ssh key, each with its
 /// reason; with both keys it answers 202 with the recipe building, and a
 /// second request joins that build (one builder created).
@@ -1048,7 +1182,7 @@ async fn the_build_route_refuses_what_it_cannot_build_and_joins_a_running_build(
         }
     };
     let mut reuse = tests_support::save();
-    reuse.source = RecipeSource::Image {
+    reuse.base = RecipeBase::Image {
         image: "team-base".into(),
     };
     for (name, save) in [("reuse", reuse), (RECIPE, tests_support::save())] {
@@ -1066,7 +1200,7 @@ async fn the_build_route_refuses_what_it_cannot_build_and_joins_a_running_build(
         call("POST", build("reuse"), None).await,
         (
             StatusCode::BAD_REQUEST,
-            "this recipe uses an existing image or snapshot; Farhelm builds nothing for it".into()
+            "save a Tensorlake API key in Settings first".into()
         )
     );
     assert_eq!(
@@ -1438,13 +1572,13 @@ async fn a_builder_found_by_name_is_recorded_before_it_is_terminated() {
     );
 }
 
-/// Spec: a reuse source that is a snapshot Farhelm built (any recipe's
+/// Spec: a snapshot base Farhelm built (any recipe's
 /// current or retired one) is refused on create and on update with a
 /// message naming the owning recipe; a snapshot of the user's own is
 /// accepted and survives the save and the retired-snapshot cleanup.
 ///
 /// Why: Farhelm deletes the snapshots it built when their recipe moves on;
-/// a recipe reusing one, itself included, would be left with a source that
+/// a recipe built on one, itself included, would be left with a base that
 /// no longer exists.
 #[farhelm_testtrace::test(start_paused = true)]
 async fn reusing_a_snapshot_farhelm_built_is_refused() {
@@ -1463,7 +1597,7 @@ async fn reusing_a_snapshot_farhelm_built_is_refused() {
     .await;
     let reuse = |snapshot_id: &str| {
         let mut save = tests_support::save();
-        save.source = RecipeSource::Snapshot {
+        save.base = RecipeBase::Snapshot {
             snapshot_id: snapshot_id.into(),
         };
         save
@@ -1507,16 +1641,16 @@ async fn reusing_a_snapshot_farhelm_built_is_refused() {
         f.snapshot_ids().contains(&users),
         "the reuse source survives the cleanup"
     );
-    assert!(!f.snapshot_ids().contains(&built) && !f.snapshot_ids().contains(&retired));
+    assert!(f.snapshot_ids().contains(&built));
+    assert!(!f.snapshot_ids().contains(&retired));
 }
 
-/// Spec: a switch to an image whose retired snapshot cannot be deleted
-/// leaves the snapshot listed and the view reporting pending cleanup.
+/// Spec: changing base keeps the old snapshot current, without attempting to
+/// delete it or reporting it as retired cleanup.
 ///
-/// Why: the reuse recipe offers no build, so the list's pending-cleanup
-/// line is the only sign that the old snapshot still bills.
+/// Why: a save is not a build and cannot retire the replacement's fallback.
 #[farhelm_testtrace::test(start_paused = true)]
-async fn a_switch_to_an_image_with_a_failed_deletion_reports_pending_cleanup() {
+async fn a_switch_to_an_image_does_not_attempt_snapshot_deletion() {
     let f = fixture().await;
     let snapshot = f.api.model().plant_snapshot("builder00000000000001");
     let id = snapshot.clone();
@@ -1535,7 +1669,7 @@ async fn a_switch_to_an_image_with_a_failed_deletion_reports_pending_cleanup() {
         },
     );
     let mut save = tests_support::save();
-    save.source = RecipeSource::Image {
+    save.base = RecipeBase::Image {
         image: "team-base".into(),
     };
     f.store
@@ -1545,8 +1679,14 @@ async fn a_switch_to_an_image_with_a_failed_deletion_reports_pending_cleanup() {
         .ok()
         .unwrap();
     let key = ApiKey::new("test-key".into());
-    assert!(f.builds.delete_retired(RECIPE, &key).await.is_err());
+    f.builds.delete_retired(RECIPE, &key).await.unwrap();
     let state = f.state().await;
-    assert_eq!(state.retired_snapshots, std::slice::from_ref(&snapshot));
-    assert!(f.builds.view(RECIPE, &state).2, "cleanup is pending");
+    assert!(state.retired_snapshots.is_empty());
+    assert_eq!(state.snapshot.unwrap().id, snapshot);
+    assert!(
+        !f.api
+            .ops()
+            .iter()
+            .any(|op| op.starts_with("delete_snapshot"))
+    );
 }

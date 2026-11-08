@@ -357,7 +357,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn retries_recover_with_the_original_recipe_until_the_next_connection() {
         use crate::tensorlake::e2e::E2eTensorlake;
-        use farhelm_proto::tensorlake::recipes::{RecipeSave, RecipeSize, RecipeSource};
+        use farhelm_proto::tensorlake::recipes::{RecipeBase, RecipeSave, RecipeSize};
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("fake");
         std::fs::create_dir(&root).unwrap();
@@ -377,7 +377,8 @@ mod tests {
                 memory_gb: 1,
                 disk_gb: 10,
             },
-            source: RecipeSource::Image {
+            packages: vec![],
+            base: RecipeBase::Image {
                 image: "tensorlake/ubuntu-systemd".into(),
             },
             claude: None,

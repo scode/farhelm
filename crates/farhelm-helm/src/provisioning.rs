@@ -3937,7 +3937,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn late_ssh_discovery_cannot_admit_a_refused_tensorlake_install() {
         use crate::tensorlake::{Tensorlake, e2e::E2eTensorlake};
-        use farhelm_proto::tensorlake::{SaveSettings, recipes::RecipeSource};
+        use farhelm_proto::tensorlake::{SaveSettings, recipes::RecipeBase};
         let harness = FleetBuilder::new().await.start().await;
         let root = tempfile::tempdir().unwrap();
         let api_dir = root.path().join("api");
@@ -3954,6 +3954,7 @@ mod tests {
         let api = Arc::new(E2eTensorlake::new(api_dir, root.path()).unwrap());
         let tensorlake = Tensorlake::production(harness.store.clone(), root.path())
             .unwrap()
+            .with_shell(api.clone())
             .with_api(api);
         harness
             .store
@@ -3965,7 +3966,7 @@ mod tests {
             .ok()
             .expect("save fixture Tensorlake settings");
         let mut recipe = crate::tensorlake::recipes::tests_support::save();
-        recipe.source = RecipeSource::Image {
+        recipe.base = RecipeBase::Image {
             image: "example/systemd".into(),
         };
         harness

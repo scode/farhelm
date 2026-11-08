@@ -14,9 +14,8 @@ fn saved_view() -> RecipeView {
             memory_gb: 8,
             disk_gb: 50,
         },
-        source: RecipeSource::Packages {
-            packages: vec!["git".into(), "ripgrep".into()],
-        },
+        base: RecipeBase::TensorlakeUbuntu,
+        packages: vec!["git".into(), "ripgrep".into()],
         claude: Some(EndpointView {
             base_url: "http://127.0.0.1:8080".into(),
             token_credential: Some("work-endpoint".into()),
@@ -47,7 +46,8 @@ fn an_unchanged_reopened_recipe_saves_back_unchanged() {
     let draft = Draft::from_view(&view);
     let save = draft.to_save().expect("a saved recipe is valid");
     assert_eq!(save.size, view.size);
-    assert_eq!(save.source, view.source);
+    assert_eq!(save.base, view.base);
+    assert_eq!(save.packages, view.packages);
     assert_eq!(save.tunnels, view.tunnels);
     let claude = save.claude.expect("the endpoint is kept");
     assert_eq!(claude.base_url, "http://127.0.0.1:8080");
@@ -56,8 +56,8 @@ fn an_unchanged_reopened_recipe_saves_back_unchanged() {
     assert_eq!(Draft::from_view(&view), draft, "reopening is stable");
 }
 
-/// Spec: package text splits on spaces and newlines; switching the software
-/// kind keeps each kind's text, and the request carries only the chosen one;
+/// Spec: package text splits on spaces and newlines; switching bases keeps
+/// each base's text, and the request carries only the selected base plus packages;
 /// ports and sizes must be whole numbers; shared rules (names aside) apply
 /// before anything is sent.
 ///
@@ -68,21 +68,29 @@ fn drafts_become_requests_or_local_refusals() {
     let mut draft = Draft::new_recipe();
     draft.packages = "git ripgrep\njq  git".into();
     let save = draft.to_save().unwrap();
-    assert_eq!(
-        save.source,
-        RecipeSource::Packages {
-            packages: vec!["git".into(), "ripgrep".into(), "jq".into()]
-        }
-    );
-    draft.software = Software::Image;
+    assert_eq!(save.base, RecipeBase::TensorlakeUbuntu);
+    assert_eq!(save.packages, vec!["git", "ripgrep", "jq"]);
+    draft.base = Base::Image;
     draft.image = " team-base ".into();
     assert_eq!(
-        draft.to_save().unwrap().source,
-        RecipeSource::Image {
+        draft.to_save().unwrap().base,
+        RecipeBase::Image {
             image: "team-base".into()
         }
     );
-    draft.software = Software::Packages;
+    draft.base = Base::Snapshot;
+    draft.snapshot_id = " snapshot1 ".into();
+    let save = draft.to_save().unwrap();
+    assert_eq!(
+        save.base,
+        RecipeBase::Snapshot {
+            snapshot_id: "snapshot1".into()
+        }
+    );
+    assert_eq!(save.packages, vec!["git", "ripgrep", "jq"]);
+    draft.base = Base::TensorlakeUbuntu;
+    assert_eq!(draft.image, " team-base ");
+    assert_eq!(draft.snapshot_id, " snapshot1 ");
     assert_eq!(
         draft.packages, "git ripgrep\njq  git",
         "switching kept the text"
@@ -101,6 +109,37 @@ fn drafts_become_requests_or_local_refusals() {
     let mut bad = Draft::new_recipe();
     bad.packages = "-oAPT::x".into();
     assert!(bad.to_save().is_err(), "the shared package rule applies");
+    bad.base = Base::Image;
+    bad.image = "team-base".into();
+    assert!(
+        bad.to_save().is_err(),
+        "custom bases still validate packages"
+    );
+}
+
+/// Every base must reopen with its packages intact. Otherwise an unchanged
+/// edit of a custom base could silently remove its next build's packages.
+#[test]
+fn all_bases_reopen_with_their_packages() {
+    for base in [
+        RecipeBase::TensorlakeUbuntu,
+        RecipeBase::Image {
+            image: "team-base".into(),
+        },
+        RecipeBase::Snapshot {
+            snapshot_id: "snapshot1".into(),
+        },
+    ] {
+        let view = RecipeView {
+            base,
+            ..saved_view()
+        };
+        let draft = Draft::from_view(&view);
+        assert_eq!(draft.packages, "git\nripgrep");
+        let save = draft.to_save().expect("saved base stays valid");
+        assert_eq!(save.base, view.base);
+        assert_eq!(save.packages, view.packages);
+    }
 }
 
 /// A stale draft carries a chosen name rather than an unseen saved secret.

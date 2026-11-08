@@ -378,7 +378,7 @@ impl RecipeFixture {
     /// Keep all state outside the assertion task, so a panic cannot remove
     /// the database while the independently owned connection is cleaning up.
     async fn new(tunnels: Vec<Tunnel>) -> Self {
-        use farhelm_proto::tensorlake::recipes::{RecipeSave, RecipeSize, RecipeSource};
+        use farhelm_proto::tensorlake::recipes::{RecipeBase, RecipeSave, RecipeSize};
         let state = tempfile::tempdir().unwrap();
         let store = crate::store::HelmStore::open(&state.path().join("helm.db"))
             .await
@@ -389,7 +389,8 @@ impl RecipeFixture {
                 memory_gb: 4,
                 disk_gb: 20,
             },
-            source: RecipeSource::Image {
+            packages: vec![],
+            base: RecipeBase::Image {
                 image: "tensorlake/ubuntu-systemd".into(),
             },
             claude: None,

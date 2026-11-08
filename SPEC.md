@@ -163,8 +163,9 @@ Everything else — no usable systemd user manager, or an architecture with no p
 [Supported host setup](#supported-host-setup).
 
 Tensorlake sandboxes get a preparation step before that inspection: Farhelm uses passwordless sudo to start the login
-manager and enable lingering for the sandbox user. A reused image must have systemd installed, enabled, and running as
-the init system at startup; otherwise setup refuses with an explanation.
+manager and enable lingering for the sandbox user. Every recipe's snapshot build checks first that its base boots
+systemd as its init system. Setup still refuses, with an explanation, a sandbox where systemd is not running, such as
+one created from an image a recipe reused before recipes always built snapshots.
 
 Provisioning is idempotent and doubles as recovery: re-running it against an already-provisioned host — including from a
 brand-new helm whose registry was lost — detects the existing supervisor and re-registers the host with all its sessions
@@ -310,8 +311,8 @@ sandbox running indefinitely. Ordinary SSH hosts and connections from older helm
 the full recipe editor inside the dialog and saves it under its name. Without an API key, the form points to Settings →
 Tensorlake. The inline editor opens at **New recipe**, focuses Name and keeps Cancel / Save in the dialog's pinned
 footer; it has no Recipes back button. Help under Name distinguishes the displayed host name from the generated
-`farhelm-host-…` sandbox name. Recipe uses the same control styling as Name and shows the selected recipe's size,
-software source and tunnel count beneath it. Continue opens the standard setup confirmation, titled **Create Tensorlake
+`farhelm-host-…` sandbox name. Recipe uses the same control styling as Name and shows the selected recipe's size, base,
+package count and tunnel count beneath it. Continue opens the standard setup confirmation, titled **Create Tensorlake
 sandbox · &lt;Name&gt;**, with the size beneath the title, numbered setup steps and Copy plan in the body. One callout
 says the sandbox bills while running, links to Tensorlake pricing and explains the 24-hour idle-suspend limit on Usage
 Credits. **Back** returns to Name and Recipe without creating anything; the next Continue obtains a fresh plan. Only
@@ -322,15 +323,16 @@ or a sandbox is created, and shows progress in the usual setup view. Its details
 memory. New Tensorlake hosts start with **Start YOLO sessions without asking** on; the other three host permissions
 remain off.
 
-Setup builds a managed recipe's snapshot if missing (or joins a build already running), creates the named sandbox at the
+Setup builds the recipe's snapshot if missing (or joins a build already running), creates the named sandbox at the
 recipe's size with the plan's maximum idle timeout and automatic resume off, prepares its user manager, writes any
-recipe agent credentials, and installs Farhelm's supervisor. A reuse recipe builds nothing and installs no agents.
+recipe agent credentials, and installs Farhelm's supervisor. Every base uses this build path. Rerunning setup against a
+sandbox that already exists skips snapshot building, including for hosts created before recipes always built snapshots.
 Claude Code's authentication is merged into its settings' environment; Codex gets a Farhelm model provider or
 subscription login. Unrelated settings are preserved and malformed files are refused. None clears the managed
 authentication keys without creating an otherwise absent settings file. Credential delivery also runs before each
 connection becomes usable, and when a named token is replaced. Updates do not independently reapply these settings.
-Token-bearing settings files are private from the start of upload. A reused image or snapshot that already contains
-Farhelm supervisor state is refused: it would copy another host's identity. Farhelm does not connect to that supervisor
+Token-bearing settings files are private from the start of upload. A sandbox that already contains Farhelm supervisor
+state is refused on first setup: it would copy another host's identity. Farhelm does not connect to that supervisor
 after refusing it, including after the helm restarts. Failed setup keeps the host and its sandbox listed; rerunning
 continues against the same sandbox. When a create's outcome is unknown and the sandbox is not yet visible, setup and
 Delete sandbox keep the host listed until that request settles. A later retry finds and cleans up a sandbox that
@@ -370,34 +372,39 @@ template saved before this rule still launches, but saving any change to it is r
 
 Tensorlake recipes belong to the helm too: one catalog of named descriptions of the Tensorlake sandboxes Farhelm creates
 as hosts, kept in Settings → **Tensorlake**. A recipe has a size (CPUs, memory in GB and disk in GB, whole numbers), a
-software source, Claude Code and Codex authentication choices, an optional named GitHub token, and outbound tunnels. The
-source either installs Ubuntu packages (Farhelm builds a snapshot from Tensorlake's Ubuntu image with those packages,
-Claude Code and Codex) or reuses an existing Tensorlake image name or snapshot ID as is, which must have systemd
-installed, enabled and running as the init system at startup. Each endpoint is a base URL plus an optional named API
-endpoint credential from Settings → Credentials; a tunnel makes a sandbox loopback port reach a host and port as seen
-from the helm's machine. A recipe's name is lowercase letters, digits and hyphens, starts with a letter, does not end
-with a hyphen, is at most 32 characters, and never changes: hosts refer to their recipe by name, and renaming means
-creating a new recipe. Creating a recipe under a name that exists is refused rather than overwriting it, and deleting a
-recipe a host uses is refused. Endpoint tokens belong to the credential catalog, and recipes store only their names.
-Create and update refuse missing or wrong-kind credentials; deleting a credential a recipe uses is refused. The endpoint
-picker offers None and endpoint-token names, preserves the selected name across URL changes, and points to Settings →
-Credentials for entering or replacing values. An unavailable draft choice stays visible until the user chooses another
-or None; it cannot be saved as a missing reference. Upgrading drops old recipe-embedded tokens rather than importing
-them; the user re-enters them in Credentials. Edits to size and packages affect only hosts created afterwards (packages
-after the next snapshot build); tunnels and credential selections are read when a host connects or is set up. Replacing
-a named endpoint token, agent login or GitHub token pushes its new value to hosts already using it, including a
-connection still being acquired. Pending recipe edits do not change that connection's selections. Other hosts receive
-the replacement before their next connection becomes usable. Each host serializes these deliveries and remembers
-successful settings independently, so an unchanged reconnect does no remote file work and a later file's failure does
-not undo an earlier success. Delivery failure leaves the connection usable, makes the host's status and navigation mark
-amber, and shows a sanitized reason in its details. The next connection or credential replacement retries; there is no
-periodic retry. Saving a replacement commits its value first, waits at most the usual SSH command timeout for delivery
-(including lock waits), and reports `Saved; not delivered to <host>: <reason>` for failures. Ending the connected phase
-cancels its pending pushes before further transport work. The list shows each recipe's name, size, package count or
-reused image or snapshot, and tunnel count. The editor replaces the list in place; leaving it with unsaved changes,
-whether by its own Back or Cancel or by closing Settings with Escape or a close control, asks whether to save, discard
-or keep editing, and saving or discarding then completes the close. Delete asks for confirmation. A list refresh that
-fails keeps the rows shown, says they may be out of date, and offers **Retry loading**.
+base, optional Ubuntu packages, Claude Code and Codex authentication choices, an optional named GitHub token, and
+outbound tunnels. The base is **Tensorlake Ubuntu** (`tensorlake/ubuntu-systemd`), **Your image** (an image name in the
+user's Tensorlake project), or **Your snapshot** (a snapshot ID in that project). Farhelm always builds on the base,
+adding the packages, Claude Code and Codex before taking the snapshot used for hosts. Each endpoint is a base URL plus
+an optional named API endpoint credential from Settings → Credentials; a tunnel makes a sandbox loopback port reach a
+host and port as seen from the helm's machine. A recipe's name is lowercase letters, digits and hyphens, starts with a
+letter, does not end with a hyphen, is at most 32 characters, and never changes: hosts refer to their recipe by name,
+and renaming means creating a new recipe. Creating a recipe under a name that exists is refused rather than overwriting
+it, and deleting a recipe a host uses is refused. Endpoint tokens belong to the credential catalog, and recipes store
+only their names. Create and update refuse missing or wrong-kind credentials; deleting a credential a recipe uses is
+refused. The endpoint picker offers None and endpoint-token names, preserves the selected name across URL changes, and
+points to Settings → Credentials for entering or replacing values. An unavailable draft choice stays visible until the
+user chooses another or None; it cannot be saved as a missing reference. Upgrading drops old recipe-embedded tokens
+rather than importing them; the user re-enters them in Credentials. Edits to size, base and packages affect only hosts
+created afterwards (base and packages after the next snapshot build); tunnels and credential selections are read when a
+host connects or is set up. Replacing a named endpoint token, agent login or GitHub token pushes its new value to hosts
+already using it, including a connection still being acquired. Pending recipe edits do not change that connection's
+selections. Other hosts receive the replacement before their next connection becomes usable. Each host serializes these
+deliveries and remembers successful settings independently, so an unchanged reconnect does no remote file work and a
+later file's failure does not undo an earlier success. Delivery failure leaves the connection usable, makes the host's
+status and navigation mark amber, and shows a sanitized reason in its details. The next connection or credential
+replacement retries; there is no periodic retry. Saving a replacement commits its value first, waits at most the usual
+SSH command timeout for delivery (including lock waits), and reports `Saved; not delivered to <host>: <reason>` for
+failures. Ending the connected phase cancels its pending pushes before further transport work. The list shows each
+recipe's name, size, base, package count and tunnel count. The editor's Software block offers the three base cards, an
+Image or Snapshot ID field for a custom base, and Ubuntu packages for every base. The custom-base note explains that the
+base must run systemd as its init system, allow passwordless sudo, be Ubuntu or Debian with apt, and include bash, curl
+and git. The build checks these requirements first and stops with the missing requirement. Help explains that Farhelm
+then installs Claude Code and Codex with their official installers and takes a snapshot. The editor replaces the list in
+place; leaving it with unsaved changes, whether by its own Back or Cancel or by closing Settings with Escape or a close
+control, asks whether to save, discard or keep editing, and saving or discarding then completes the close. Delete asks
+for confirmation. A list refresh that fails keeps the rows shown, says they may be out of date, and offers **Retry
+loading**.
 
 Each agent's recipe choice is **None | API endpoint | Subscription**. API endpoint requires a base URL and offers named
 endpoint tokens; Subscription requires a named login for that agent from Credentials. Switching modes retains each draft
@@ -423,9 +430,10 @@ processes keep their environment. Older supervisors ignore the file and need set
 receive this injection.
 
 Farhelm-built snapshots include Ubuntu's `gh` package. First GitHub-token delivery configures gh's own global Git
-credential helper for github.com without supplying a token to that command. Reused images and older snapshots need `gh`
-installed for private HTTPS clones. If it is missing, the token file is still installed, the connection remains usable,
-and host details warn that private clones need gh. The next connection or credential replacement retries it.
+credential helper for github.com without supplying a token to that command. Hosts created from reused images before
+recipes always built snapshots, and hosts using older snapshots, need `gh` installed for private HTTPS clones. If it is
+missing, the token file is still installed, the connection remains usable, and host details warn that private clones
+need gh. The next connection or credential replacement retries it.
 
 In Settings the editor opens at its top, including Back, with field labels smaller than its section captions. Its
 actions and leave/delete questions and refusal messages stay visible at the bottom of the scrolling panel, above the
@@ -443,30 +451,35 @@ read shows **Checking…**, then an empty success shows **None found · checked 
 failed read shows its reason and keeps earlier rows rather than claiming an empty result. Farhelm never cleans it
 automatically. The browser-test namespace `farhelm-sbx-` and sandboxes without Farhelm's reserved prefixes never appear.
 
-A package recipe's hosts start from a snapshot Farhelm builds; the UI calls it a snapshot, never a template, which means
+Every recipe's new hosts start from a snapshot Farhelm builds; the UI calls it a snapshot, never a template, which means
 launch templates. Saving a recipe never builds one, because a build bills: the list offers **Build snapshot** while a
 recipe has none, **Rebuild snapshot** once it has one, and **Retry** after a build failed or was cut short by the helm
 stopping, all three needing a saved API key and Farhelm's registered SSH key. One build per recipe runs at a time; a
 second click joins it, and different recipes build at once. A build creates a builder sandbox named
-`farhelm-build-<helm tag>-<recipe>` from `tensorlake/ubuntu-systemd` at the recipe's size, which bills while it runs;
-refuses to go on unless systemd is the sandbox's init and passwordless sudo works; installs the recipe's packages with
-apt, then Claude Code and Codex with their official installers, each downloaded completely over HTTPS before it runs,
-and links both onto every default `PATH`; empties `/etc/machine-id` so each host gets its own; takes a filesystem
-snapshot and waits until Tensorlake reports it completed; records it; then terminates the builder and deletes the
-builder's other snapshots. While a build runs, the recipe's row names its step ("step 5 of 9"); afterwards it says when
-the snapshot was built and the agents' versions, or that the build failed, at which step and why, with **Retry**. The
-row warns when the recipe's packages changed since the build, and when its disk is now smaller than the snapshot's,
-which a host cannot start from. A rebuild replaces the snapshot only once the new one is recorded and then deletes the
-old one; hosts already started from it keep running. A failed build leaves the previous snapshot in use and deletes its
-builder and the builder's snapshots. Every builder and snapshot is recorded before anything else happens, so whatever a
-failed deletion or a helm stopping mid-build leaves is deleted by the next build or by deleting the recipe, and the row
-says when something still awaits deletion; nothing cleans up at helm start. Deleting a recipe cancels its running build
-and deletes its builder and snapshots first; if Tensorlake refuses any of that, or a build sandbox Farhelm asked for in
-the last 15 minutes may still appear, the recipe stays, with the reason, so a retry finishes the job. Switching a recipe
-from packages to an existing image or snapshot deletes its built snapshot. A recipe that reuses an image or snapshot
-builds nothing and is used as is; its row still shows a build that was running or cut short when it was switched, and
-anything that awaits deletion. A recipe cannot reuse a snapshot Farhelm built for a recipe, its own included, because
-Farhelm deletes those when their recipe moves on; that save is refused.
+`farhelm-build-<helm tag>-<recipe>` from the recipe's base at the recipe's size, which bills while it runs; refuses to
+go on unless systemd is the sandbox's init, passwordless sudo works, apt is available, and bash, curl and git exist,
+naming the first missing requirement; installs the recipe's packages with apt, then Claude Code and Codex with their
+official installers, each downloaded completely over HTTPS before it runs, and links both onto every default `PATH`;
+empties `/etc/machine-id` so each host gets its own; takes a filesystem snapshot and waits until Tensorlake reports it
+completed; records it; then terminates the builder and deletes the builder's other snapshots. While a build runs, the
+recipe's row names its step ("step 5 of 9"); afterwards it says when the snapshot was built and the agents' versions, or
+that the build failed, at which step and why, with **Retry**. The row warns when the recipe's base or packages changed
+since the build, and when its disk is now smaller than the snapshot's, which a host cannot start from. A rebuild
+replaces the snapshot only once the new one is recorded and then deletes the old one; hosts already started from it keep
+running. A failed build leaves the previous snapshot in use and deletes its builder and the builder's snapshots. Every
+builder and snapshot is recorded before anything else happens, so whatever a failed deletion or a helm stopping
+mid-build leaves is deleted by the next build or by deleting the recipe, and the row says when something still awaits
+deletion; nothing cleans up at helm start. Deleting a recipe cancels its running build and deletes its builder and
+snapshots first; if Tensorlake refuses any of that, or a build sandbox Farhelm asked for in the last 15 minutes may
+still appear, the recipe stays, with the reason, so a retry finishes the job. Changing a base keeps the built snapshot
+until a successful rebuild replaces it. A recipe cannot select a snapshot Farhelm built for a recipe as its base, its
+own included, because Farhelm deletes those when their recipe moves on; that save is refused.
+
+Upgrading converts recipes that installed packages to the Tensorlake Ubuntu base, keeping their packages and built
+snapshot. Recipes that reused an image or snapshot become that base with no packages and no built snapshot. Their rows
+show **No snapshot yet** with **Build snapshot**, unless an earlier build failed or was cut short, which keeps its
+failure and offers **Retry**, the same build; adding a host builds first. Hosts already created from those recipes keep
+running, reconnecting, suspending and deleting as before, and rerunning their setup does not build a snapshot.
 
 Cursor is an agent type launched as `cursor-agent`, and YOLO adds `--force`; Farhelm launches Cursor by that name, never
 as the generic `agent`, which other tools also use. Its model is optional, with `auto`, `composer-2.5` and literal

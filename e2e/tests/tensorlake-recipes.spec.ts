@@ -159,7 +159,8 @@ for (const palette of ["dark", "light"] as const) {
           name: existing,
           recipe: {
             size: { cpus: 2, memory_gb: 4, disk_gb: 20 },
-            source: { kind: "packages", packages: [] },
+            base: { kind: "tensorlake_ubuntu" },
+            packages: [],
             claude: null,
             codex: null,
             tunnels: [],
@@ -622,7 +623,7 @@ test("a managed recipe is created, edited and deleted without exposing its token
       .toHaveValue("4");
     await expect(editor.getByRole("spinbutton", { name: /^Disk, GB/ }))
       .toHaveValue("20");
-    await expect(editor.getByRole("button", { name: /^Install packages/ }))
+    await expect(editor.getByRole("button", { name: /^Tensorlake Ubuntu/ }))
       .toHaveAttribute("aria-pressed", "true");
     await editor.getByRole("textbox", { name: "Ubuntu packages", exact: true })
       .fill("git ripgrep\njq git");
@@ -662,7 +663,7 @@ test("a managed recipe is created, edited and deleted without exposing its token
     // Saving returns to the list, which shows the stored recipe.
     const row = list.getByRole("listitem").filter({ hasText: name });
     await expect(row).toContainText(
-      "2 CPU · 4 GB · 20 GB · 3 packages · 1 tunnel",
+      "2 CPU · 4 GB · 20 GB · base: Tensorlake Ubuntu · 3 packages · 1 tunnel",
     );
     await expect(row).toContainText("No snapshot yet");
     const listed = await request.get("/api/tensorlake/recipes");
@@ -673,7 +674,8 @@ test("a managed recipe is created, edited and deleted without exposing its token
     expect(stored).toEqual({
       name,
       size: { cpus: 2, memory_gb: 4, disk_gb: 20 },
-      source: { kind: "packages", packages: ["git", "ripgrep", "jq"] },
+      base: { kind: "tensorlake_ubuntu" },
+      packages: ["git", "ripgrep", "jq"],
       claude: { base_url: "http://127.0.0.1:8080", token_credential: credentialName },
       codex: null,
       claude_login_credential: null,
@@ -712,7 +714,7 @@ test("a managed recipe is created, edited and deleted without exposing its token
     await reopened.getByRole("spinbutton", { name: /^Disk, GB/ }).fill("30");
     await reopened.getByRole("button", { name: "Save", exact: true }).click();
     await expect(row).toContainText(
-      "2 CPU · 4 GB · 30 GB · 3 packages · 1 tunnel",
+      "2 CPU · 4 GB · 30 GB · base: Tensorlake Ubuntu · 3 packages · 1 tunnel",
     );
     const edited = (await recipes(request)).find((r) => r.name === name);
     expect(edited.size.disk_gb).toBe(30);
@@ -755,29 +757,31 @@ test("a managed recipe is created, edited and deleted without exposing its token
 
 /** Spec: the editor refuses an invalid name locally, shows the helm's refusal
  * for a name that already exists (without overwriting it), asks before Back
- * drops unsaved changes, and stores a reused image as "uses image" with the
- * systemd requirement spelled out in user terms.
+ * drops unsaved changes, and stores custom bases with their packages. Each
+ * base card keeps the package draft and the custom inputs explain what a
+ * successful build needs before installation can start.
  *
  * Why: "New recipe" must never overwrite another recipe, refusals must leave
  * the draft editable, and leaving with unsaved changes must not lose them
- * silently. The systemd wording is a user decision ("never the bare phrase
- * 'must boot systemd'"). */
-test("the recipe editor refuses bad names, asks before leaving, and saves a reused image", async ({ page, request }) => {
+ * silently. Base selection must not quietly discard packages or imply that
+ * an image or snapshot will run without Farhelm building on it. */
+test("the recipe editor refuses bad names, asks before leaving, and saves a custom base", async ({ page, request }) => {
   const existing = "e2e-existing";
-  const reuse = "e2e-reuse";
+  const custom = "e2e-custom-base";
   await page.goto("/");
   const before = (await recipes(request)).map((r) => r.name);
   expect(before, "fixture premise: no leftover recipes").not.toContain(
     existing,
   );
-  expect(before).not.toContain(reuse);
+  expect(before).not.toContain(custom);
   try {
     const created = await request.post("/api/tensorlake/recipes", {
       data: {
         name: existing,
         recipe: {
           size: { cpus: 1, memory_gb: 1, disk_gb: 10 },
-          source: { kind: "packages", packages: [] },
+          base: { kind: "tensorlake_ubuntu" },
+          packages: [],
           claude: null,
           codex: null,
           tunnels: [],
@@ -788,7 +792,7 @@ test("the recipe editor refuses bad names, asks before leaving, and saves a reus
 
     const list = await openRecipes(page);
     await expect(list.getByRole("listitem").filter({ hasText: existing }))
-      .toContainText("1 CPU · 1 GB · 10 GB · 0 packages");
+      .toContainText("1 CPU · 1 GB · 10 GB · base: Tensorlake Ubuntu · 0 packages");
     await list.getByRole("button", { name: "New recipe", exact: true }).click();
     const editor = page.getByRole("region", {
       name: "New recipe",
@@ -832,34 +836,64 @@ test("the recipe editor refuses bad names, asks before leaving, and saves a reus
     await editor.getByRole("button", { name: "Discard", exact: true }).click();
     await expect(editor).toHaveCount(0);
 
-    // A reused image: the systemd requirement in user terms, no packages.
+    // Packages are a layer on every base, so changing cards must retain them.
     await list.getByRole("button", { name: "New recipe", exact: true }).click();
-    await nameField.fill(reuse);
-    await editor.getByRole("button", {
-      name: /^Use an existing image or snapshot/,
-    }).click();
-    await expect(
-      editor.getByRole("button", { name: "Image name", exact: true }),
-    ).toHaveAttribute("aria-pressed", "true");
-    await expect(
-      editor.getByText(
-        /Your image must have systemd installed, enabled, and running as the init system at startup/,
-      ),
-    ).toBeVisible();
-    await expect(editor.getByText(/must boot systemd/)).toHaveCount(0);
+    await nameField.fill(custom);
+    const packages = editor.getByRole("textbox", { name: "Ubuntu packages", exact: true });
+    await expect(editor.getByRole("button", { name: /^Tensorlake Ubuntu/ }))
+      .toHaveAttribute("aria-pressed", "true");
+    await packages.fill("jq\nripgrep");
+    await editor.getByRole("button", { name: /^Your image/ }).click();
+    await expect(editor.getByRole("button", { name: /^Your image/ }))
+      .toHaveAttribute("aria-pressed", "true");
+    const requirements = editor.locator(".recipe-base-requirements");
+    await expect(requirements).toContainText("systemd");
+    await expect(requirements).toContainText("sudo without a password");
+    await expect(requirements).toContainText("Ubuntu or Debian");
+    await expect(requirements).toContainText("apt");
+    await expect(requirements).toContainText("bash, curl and git");
+    await expect(requirements).toContainText("missing");
     await editor.getByRole("textbox", { name: "Image", exact: true }).fill(
       "team-base",
     );
+    await expect(packages).toHaveValue("jq\nripgrep");
+    await editor.getByRole("button", { name: /^Your snapshot/ }).click();
+    await editor.getByRole("textbox", { name: "Snapshot ID", exact: true })
+      .fill("usersnapshot");
+    await expect(packages).toHaveValue("jq\nripgrep");
+    await expect(requirements).toBeVisible();
+    await editor.getByRole("button", { name: /^Tensorlake Ubuntu/ }).click();
+    await expect(packages).toHaveValue("jq\nripgrep");
+    await expect(requirements).toHaveCount(0);
+    await editor.getByRole("button", { name: /^Your image/ }).click();
+    await expect(editor.getByRole("textbox", { name: "Image", exact: true }))
+      .toHaveValue("team-base");
+    await expect(editor.getByText(
+      "Farhelm then adds Claude Code and Codex with their official installers and takes a snapshot.",
+      { exact: true },
+    )).toBeVisible();
     await editor.getByRole("button", { name: "Save", exact: true }).click();
-    const row = list.getByRole("listitem").filter({ hasText: reuse });
+    const row = list.getByRole("listitem").filter({ hasText: custom });
     await expect(row).toContainText(
-      "2 CPU · 4 GB · 20 GB · uses image team-base",
+      "2 CPU · 4 GB · 20 GB · base: your image team-base · 2 packages",
     );
-    await expect(row).toContainText("Uses the image as is");
-    expect((await recipes(request)).find((r) => r.name === reuse).source)
-      .toEqual({ kind: "image", image: "team-base" });
+    await expect(row).toContainText("No snapshot yet");
+    const saved = (await recipes(request)).find((r) => r.name === custom);
+    expect(saved.base).toEqual({ kind: "image", image: "team-base" });
+    expect(saved.packages).toEqual(["jq", "ripgrep"]);
+    await row.getByRole("button", { name: `Edit ${custom}`, exact: true }).click();
+    const reopened = page.getByRole("region", { name: `Recipe: ${custom}`, exact: true });
+    await reopened.getByRole("button", { name: /^Your snapshot/ }).click();
+    await reopened.getByRole("textbox", { name: "Snapshot ID", exact: true })
+      .fill("usersnapshot");
+    await expect(reopened.getByRole("textbox", { name: "Ubuntu packages", exact: true }))
+      .toHaveValue("jq\nripgrep");
+    await reopened.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(row).toContainText("base: your snapshot usersnapshot · 2 packages");
+    expect((await recipe(request, custom)).base)
+      .toEqual({ kind: "snapshot", snapshot_id: "usersnapshot" });
   } finally {
-    await removeRecipes(request, [existing, reuse]);
+    await removeRecipes(request, [existing, custom]);
   }
 });
 
@@ -1023,7 +1057,8 @@ test("a failed recipe refresh says so and Retry loading recovers", async ({ page
         name,
         recipe: {
           size: { cpus: 1, memory_gb: 1, disk_gb: 10 },
-          source: { kind: "packages", packages: [] },
+          base: { kind: "tensorlake_ubuntu" },
+          packages: [],
           claude: null,
           codex: null,
           tunnels: [],
@@ -1055,12 +1090,18 @@ test("a failed recipe refresh says so and Retry loading recovers", async ({ page
 // ---------------------------------------------------------------------------
 
 type FakeShell = { hold?: boolean; fail?: Record<string, string> };
+/** The three saved base choices; packages remain independent of the choice. */
+type RecipeBase =
+  | { kind: "tensorlake_ubuntu" }
+  | { kind: "image"; image: string }
+  | { kind: "snapshot"; snapshot_id: string };
 type FakeModel = {
   sandboxes: {
     id: string;
     name: string;
     status: string;
     image: string | null;
+    snapshot_id: string | null;
     auto_resume: boolean;
   }[];
   snapshots: { id: string; sandbox_id: string; status: string }[];
@@ -1085,6 +1126,15 @@ async function resetFake(): Promise<void> {
   const root = await fakeRoot();
   await writeFile(path.join(root, "state.json"), "{}\n", { mode: 0o600 });
   await writeFile(path.join(root, "events.jsonl"), "", { mode: 0o600 });
+}
+
+/** Seed a user-owned base only while the build registry is idle. Its source
+ * sandbox differs from every builder, so build cleanup must leave it alone. */
+async function seedSnapshotBase(id: string): Promise<void> {
+  const file = path.join(await fakeRoot(), "state.json");
+  const model = JSON.parse(await readFile(file, "utf8"));
+  model.snapshots.push({ id, sandbox_id: "user-base-sandbox", status: "completed", polls_left: 0 });
+  await writeFile(file, `${JSON.stringify(model)}\n`, { mode: 0o600 });
 }
 
 /** What the fake holds: every sandbox and snapshot the helm created. */
@@ -1115,20 +1165,31 @@ async function recipe(request: APIRequestContext, name: string): Promise<any> {
   return found;
 }
 
-/** Spec: with a key saved, a managed recipe without a snapshot offers Build
+/** Spec: with a key saved, a recipe without a snapshot offers Build
  * snapshot; while a build runs the row says which step it is on ("step n of
  * 9") and offers no action; once it ends the row says when it was built and
  * with which agents, the fake shows the builder terminated, only the recorded
  * snapshot left, and the steps run in order (ready, packages, claude, codex,
- * prepare). Rebuild records a new snapshot and deletes the old one. A failing
- * step shows its message with Retry and keeps the built snapshot; Retry
- * builds. Deleting the recipe deletes its snapshot.
+ * prepare). Changing from Tensorlake Ubuntu to an image and then a snapshot
+ * keeps the prior build until replacement. Each base creates the right builder
+ * source and runs the same install steps. A failed base check names its missing
+ * requirement with Retry and keeps the built snapshot; Retry builds. Deleting
+ * the recipe deletes its snapshot, leaving the user's base snapshot alone.
  *
  * Why: this is the user's whole loop with snapshots, and the fake's state is
  * the evidence that nothing the helm created is left billing; a regression
  * in the cleanup would otherwise be invisible until a Tensorlake bill. */
 test("a recipe's snapshot builds, rebuilds, recovers from a failed step and goes with the recipe", async ({ page, request }) => {
   const name = "e2e-build";
+  const userBase = "e2euserbasesnapshot";
+  const definition = {
+    size: { cpus: 2, memory_gb: 4, disk_gb: 20 },
+    base: { kind: "tensorlake_ubuntu" } as RecipeBase,
+    packages: ["jq"],
+    claude: null,
+    codex: null,
+    tunnels: [],
+  };
   const original = await (await request.get("/api/tensorlake")).json();
   expect(
     original.api_key_set,
@@ -1151,13 +1212,7 @@ test("a recipe's snapshot builds, rebuilds, recovers from a failed step and goes
     response = await request.post("/api/tensorlake/recipes", {
       data: {
         name,
-        recipe: {
-          size: { cpus: 2, memory_gb: 4, disk_gb: 20 },
-          source: { kind: "packages", packages: ["jq"] },
-          claude: null,
-          codex: null,
-          tunnels: [],
-        },
+        recipe: definition,
       },
     });
     expect(response.ok(), await response.text()).toBe(true);
@@ -1175,7 +1230,7 @@ test("a recipe's snapshot builds, rebuilds, recovers from a failed step and goes
       exact: true,
     }).click();
     await expect(row).toContainText(
-      "Building snapshot: connecting to the build sandbox (step 4 of 9)",
+      "Building snapshot: connecting and checking the base (step 4 of 9)",
     );
     await expect(row.getByRole("button", { name: /snapshot for|Retry/ }))
       .toHaveCount(0);
@@ -1211,11 +1266,26 @@ test("a recipe's snapshot builds, rebuilds, recovers from a failed step and goes
       "prepare",
     ]);
 
-    // Rebuild: a new snapshot, the old one deleted.
+    // A base edit does no billed work and keeps the old snapshot usable until
+    // replacement. Hold the new builder to observe that boundary explicitly.
+    definition.base = { kind: "image", image: "team/devbox-base" };
+    response = await request.put(`/api/tensorlake/recipes/${name}`, { data: definition });
+    expect(response.ok(), await response.text()).toBe(true);
+    expect((await recipe(request, name)).snapshot.id).toBe(first);
+    expect((await fakeModel()).snapshots.map((s) => s.id)).toEqual([first]);
+    await expect(row).toContainText("base: your image team/devbox-base");
+    await expect(row).toContainText("changed since this snapshot was built");
+    await configureShell({ hold: true });
     await row.getByRole("button", {
       name: `Rebuild snapshot for ${name}`,
       exact: true,
     }).click();
+    await expect(row).toContainText("connecting and checking the base (step 4 of 9)");
+    expect((await recipe(request, name)).snapshot.id).toBe(first);
+    model = await fakeModel();
+    expect(model.snapshots.map((s) => s.id)).toEqual([first]);
+    expect(model.sandboxes.at(-1)?.image).toBe("team/devbox-base");
+    await configureShell({});
     await expect.poll(async () => (await recipe(request, name)).snapshot?.id)
       .not.toBe(first);
     await expect.poll(async () => (await recipe(request, name)).build.state)
@@ -1227,6 +1297,8 @@ test("a recipe's snapshot builds, rebuilds, recovers from a failed step and goes
       }),
     ).toBeEnabled();
     const second = (await recipe(request, name)).snapshot.id as string;
+    expect((await recipe(request, name)).snapshot.base)
+      .toEqual({ kind: "image", image: "team/devbox-base" });
     model = await fakeModel();
     expect(model.snapshots.map((s) => s.id)).toEqual([second]);
     expect(model.sandboxes.map((s) => s.status)).toEqual([
@@ -1234,24 +1306,33 @@ test("a recipe's snapshot builds, rebuilds, recovers from a failed step and goes
       "terminated",
     ]);
 
-    // A failing step: its message and Retry, with the built snapshot kept.
+    // The user's snapshot is a base, not the finished build, and must survive
+    // both a failed requirements check and eventual replacement cleanup.
+    await seedSnapshotBase(userBase);
+    expect((await fakeModel()).snapshots.some((s) => s.id === userBase)).toBe(true);
+    definition.base = { kind: "snapshot", snapshot_id: userBase };
+    response = await request.put(`/api/tensorlake/recipes/${name}`, { data: definition });
+    expect(response.ok(), await response.text()).toBe(true);
+    expect((await recipe(request, name)).snapshot.id).toBe(second);
+    await expect(row).toContainText(`base: your snapshot ${userBase}`);
     await configureShell({
-      fail: { packages: "E: Unable to locate package nope" },
+      fail: { ready: "the sandbox user cannot use sudo without a password" },
     });
     await row.getByRole("button", {
       name: `Rebuild snapshot for ${name}`,
       exact: true,
     }).click();
     await expect(row).toContainText(
-      "Snapshot build failed while installing packages: E: Unable to locate package nope",
+      "Snapshot build failed while connecting and checking the base (step 4 of 9): the sandbox user cannot use sudo without a password",
     );
     await expect(row).toContainText("Snapshot built");
     expect((await recipe(request, name)).snapshot.id).toBe(second);
     model = await fakeModel();
     expect(
       model.snapshots.map((s) => s.id),
-      "the failed build left no snapshot",
-    ).toEqual([second]);
+      "the failed build kept the previous snapshot and the user's base",
+    ).toEqual([second, userBase]);
+    expect(model.sandboxes.at(-1)?.snapshot_id).toBe(userBase);
     expect(
       model.sandboxes.every((s) => s.status === "terminated"),
       "the failed builder was terminated",
@@ -1264,6 +1345,17 @@ test("a recipe's snapshot builds, rebuilds, recovers from a failed step and goes
     await expect.poll(async () => (await recipe(request, name)).build.state)
       .toBe("idle");
     await expect(row).not.toContainText("failed");
+    const third = (await recipe(request, name)).snapshot;
+    expect(third.base).toEqual({ kind: "snapshot", snapshot_id: userBase });
+    expect(third.packages).toEqual(["jq"]);
+    model = await fakeModel();
+    expect(model.sandboxes.at(-1)?.snapshot_id).toBe(userBase);
+    expect(model.snapshots.map((s) => s.id)).toEqual([userBase, third.id]);
+    expect(await shellSteps()).toEqual([
+      ...[0, 1].flatMap(() => ["ready", "packages", "claude", "codex", "prepare"]),
+      "ready",
+      "ready", "packages", "claude", "codex", "prepare",
+    ]);
 
     // Deleting the recipe deletes its snapshot, after saying so.
     await row.getByRole("button", { name: `Edit ${name}`, exact: true })
@@ -1283,7 +1375,7 @@ test("a recipe's snapshot builds, rebuilds, recovers from a failed step and goes
     await expect(list.getByRole("listitem").filter({ hasText: name }))
       .toHaveCount(0);
     model = await fakeModel();
-    expect(model.snapshots).toEqual([]);
+    expect(model.snapshots.map((s) => s.id)).toEqual([userBase]);
     expect(model.sandboxes.every((s) => s.status === "terminated")).toBe(true);
   } finally {
     await configureShell({});

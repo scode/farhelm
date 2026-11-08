@@ -18,13 +18,13 @@
 //!
 //! Wording follows the goal's UI decisions: the built artifact is a
 //! "snapshot", never a "template" (that word means launch templates), and the
-//! systemd requirement for reused images is spelled out in user terms.
+//! requirements for a user-provided base are spelled out in user terms.
 
 use std::{cell::Cell, future::Future, pin::Pin, rc::Rc};
 
 use dioxus::prelude::*;
 use farhelm_proto::tensorlake::recipes::{
-    CreateRecipe, EndpointSave, EndpointView, RecipeSave, RecipeSize, RecipeSource, RecipeView,
+    CreateRecipe, EndpointSave, EndpointView, RecipeBase, RecipeSave, RecipeSize, RecipeView,
     Tunnel, check_recipe, check_recipe_name, parse_packages,
 };
 
@@ -37,11 +37,11 @@ use crate::ops::use_confirm_slot;
 // The draft: what the form holds, as text
 // ---------------------------------------------------------------------------
 
-/// Where the draft's software comes from. Kept apart from the per-kind text
-/// fields so switching kinds back and forth never loses what was typed.
+/// The base Farhelm builds on. Kept apart from the per-kind text fields so
+/// switching bases never loses what was typed; packages apply to every base.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Software {
-    Packages,
+enum Base {
+    TensorlakeUbuntu,
     Image,
     Snapshot,
 }
@@ -80,7 +80,7 @@ struct Draft {
     cpus: String,
     memory_gb: String,
     disk_gb: String,
-    software: Software,
+    base: Base,
     packages: String,
     image: String,
     snapshot_id: String,
@@ -96,14 +96,14 @@ struct Draft {
 
 impl Draft {
     /// A new recipe's starting values: a small size inside the Usage Credits
-    /// plan's limits, and managed software with no extra packages.
+    /// plan's limits, and Tensorlake Ubuntu with no extra packages.
     fn new_recipe() -> Self {
         Self {
             name: String::new(),
             cpus: "2".into(),
             memory_gb: "4".into(),
             disk_gb: "20".into(),
-            software: Software::Packages,
+            base: Base::TensorlakeUbuntu,
             packages: String::new(),
             image: String::new(),
             snapshot_id: String::new(),
@@ -126,17 +126,17 @@ impl Draft {
         draft.cpus = view.size.cpus.to_string();
         draft.memory_gb = view.size.memory_gb.to_string();
         draft.disk_gb = view.size.disk_gb.to_string();
-        match &view.source {
-            RecipeSource::Packages { packages } => {
-                draft.software = Software::Packages;
-                draft.packages = packages.join("\n");
+        draft.packages = view.packages.join("\n");
+        match &view.base {
+            RecipeBase::TensorlakeUbuntu => {
+                draft.base = Base::TensorlakeUbuntu;
             }
-            RecipeSource::Image { image } => {
-                draft.software = Software::Image;
+            RecipeBase::Image { image } => {
+                draft.base = Base::Image;
                 draft.image = image.clone();
             }
-            RecipeSource::Snapshot { snapshot_id } => {
-                draft.software = Software::Snapshot;
+            RecipeBase::Snapshot { snapshot_id } => {
+                draft.base = Base::Snapshot;
                 draft.snapshot_id = snapshot_id.clone();
             }
         }
@@ -183,6 +183,8 @@ impl Draft {
 
     /// The save request this draft describes, or the first problem a user
     /// can fix in the form, checked with the same rules the helm applies.
+    /// Only the selected base is sent; package text belongs to every base,
+    /// while hidden image and snapshot text stays local to the editing session.
     /// Messages are lowercase like the helm's; the caller capitalizes them.
     fn to_save(&self) -> Result<RecipeSave, String> {
         let number = |text: &str, what: &str| {
@@ -200,14 +202,12 @@ impl Draft {
             memory_gb: number(&self.memory_gb, "memory")?,
             disk_gb: number(&self.disk_gb, "disk")?,
         };
-        let source = match self.software {
-            Software::Packages => RecipeSource::Packages {
-                packages: parse_packages(&self.packages),
-            },
-            Software::Image => RecipeSource::Image {
+        let base = match self.base {
+            Base::TensorlakeUbuntu => RecipeBase::TensorlakeUbuntu,
+            Base::Image => RecipeBase::Image {
                 image: self.image.trim().to_string(),
             },
-            Software::Snapshot => RecipeSource::Snapshot {
+            Base::Snapshot => RecipeBase::Snapshot {
                 snapshot_id: self.snapshot_id.trim().to_string(),
             },
         };
@@ -250,7 +250,8 @@ impl Draft {
         };
         let save = RecipeSave {
             size,
-            source,
+            base,
+            packages: parse_packages(&self.packages),
             claude,
             codex,
             claude_login_credential,
@@ -555,7 +556,7 @@ pub(crate) fn RecipeEditor(
 
     let leave_shown = leave_prompt.current();
     let delete_shown = delete_prompt.current();
-    let software = draft.read().software;
+    let recipe_base = draft.read().base;
     let tunnels = draft.read().tunnels.clone();
     let shown_name = existing
         .as_ref()
@@ -628,39 +629,27 @@ pub(crate) fn RecipeEditor(
             div { class: "checkout-root-label", span { "Software" }
                 div { class: "recipe-source-cards", role: "group", aria_label: "Software",
                     button { r#type: "button", class: "recipe-source-card", disabled: locked,
-                        aria_pressed: software == Software::Packages,
-                        onclick: move |_| { draft.write().software = Software::Packages; error.set(None); },
-                        span { class: "recipe-source-card-title", "Install packages" }
-                        span { class: "recipe-source-card-help", "Farhelm builds a snapshot from Tensorlake's Ubuntu image with these packages, Claude Code and Codex." }
+                        aria_pressed: recipe_base == Base::TensorlakeUbuntu,
+                        onclick: move |_| { draft.write().base = Base::TensorlakeUbuntu; error.set(None); },
+                        span { class: "recipe-source-card-title", "Tensorlake Ubuntu" }
+                        span { class: "recipe-source-card-help", "Tensorlake's Ubuntu image with systemd. Nothing else to prepare." }
                     }
                     button { r#type: "button", class: "recipe-source-card", disabled: locked,
-                        aria_pressed: software != Software::Packages,
-                        onclick: move |_| {
-                            if draft.peek().software == Software::Packages {
-                                draft.write().software = Software::Image;
-                            }
-                            error.set(None);
-                        },
-                        span { class: "recipe-source-card-title", "Use an existing image or snapshot" }
-                        span { class: "recipe-source-card-help", "Farhelm uses it as is and installs only its supervisor." }
+                        aria_pressed: recipe_base == Base::Image,
+                        onclick: move |_| { draft.write().base = Base::Image; error.set(None); },
+                        span { class: "recipe-source-card-title", "Your image" }
+                        span { class: "recipe-source-card-help", "An image in your Tensorlake project, by name." }
+                    }
+                    button { r#type: "button", class: "recipe-source-card", disabled: locked,
+                        aria_pressed: recipe_base == Base::Snapshot,
+                        onclick: move |_| { draft.write().base = Base::Snapshot; error.set(None); },
+                        span { class: "recipe-source-card-title", "Your snapshot" }
+                        span { class: "recipe-source-card-help", "A snapshot in your Tensorlake project, by ID." }
                     }
                 }
             }
-            if software == Software::Packages {
-                label { class: "checkout-root-label", span { "Ubuntu packages" }
-                    textarea { class: "recipe-packages font-mono", rows: "4", value: "{draft.read().packages}", readonly: locked,
-                        autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                        oninput: move |event| { draft.write().packages = event.value(); error.set(None); } }
-                }
-                p { class: "host-settings-help", "Separated by spaces or new lines. Changes take effect at the next snapshot build." }
-            } else {
-                div { class: "segmented-control", role: "group", aria_label: "Reuse",
-                    button { r#type: "button", disabled: locked, aria_pressed: software == Software::Image,
-                        onclick: move |_| { draft.write().software = Software::Image; error.set(None); }, "Image name" }
-                    button { r#type: "button", disabled: locked, aria_pressed: software == Software::Snapshot,
-                        onclick: move |_| { draft.write().software = Software::Snapshot; error.set(None); }, "Snapshot ID" }
-                }
-                if software == Software::Image {
+            if recipe_base != Base::TensorlakeUbuntu {
+                if recipe_base == Base::Image {
                     label { class: "checkout-root-label", span { "Image" }
                         input { r#type: "text", class: "font-mono", value: "{draft.read().image}", readonly: locked,
                             autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
@@ -675,10 +664,17 @@ pub(crate) fn RecipeEditor(
                     }
                     p { class: "host-settings-help", "A Tensorlake snapshot in your project; `tl sbx checkpoint ls` lists them." }
                 }
-                p { class: "host-settings-help recipe-systemd-note",
-                    "Your image must have systemd installed, enabled, and running as the init system at startup (for example, images built from tensorlake/ubuntu-systemd). Farhelm prepares user services with sudo and installs its supervisor; nothing else. Installing Claude Code or Codex is up to the image."
+                p { class: "host-settings-help recipe-base-requirements",
+                    "Farhelm builds on this base. It must boot systemd as its init system, let the sandbox user use sudo without a password, be Ubuntu or Debian with apt, and have bash, curl and git. The build checks these first and stops with the one that's missing."
                 }
             }
+            label { class: "checkout-root-label", span { "Ubuntu packages" }
+                textarea { class: "recipe-packages font-mono", rows: "4", value: "{draft.read().packages}", readonly: locked,
+                    autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
+                    oninput: move |event| { draft.write().packages = event.value(); error.set(None); } }
+            }
+            p { class: "host-settings-help", "Optional. Separated by spaces or new lines. Changes take effect at the next snapshot build." }
+            p { class: "host-settings-help", "Farhelm then adds Claude Code and Codex with their official installers and takes a snapshot." }
 
             div { class: "checkout-root-label", span { "Tunnels to your side" }
                 for (index, row) in tunnels.into_iter().enumerate() {
@@ -731,9 +727,6 @@ pub(crate) fn RecipeEditor(
                 }
             }
             div { class: "checkout-root-label", span { "Agents" }
-                if software == Software::Packages {
-                    p { class: "host-settings-help", "Claude Code and Codex are installed with their official installers when the snapshot is built." }
-                }
                 p { class: "host-settings-help",
                     "Choose how each agent authenticates. An API endpoint's base URL can point at a tunnel's sandbox port, such as http://127.0.0.1:8080. Saved tokens and subscription logins are in Settings → Credentials."
                 }
@@ -788,7 +781,7 @@ pub(crate) fn RecipeEditor(
 
             if !is_new {
                 p { class: "host-settings-help recipe-edit-note",
-                    "Size and packages apply only to hosts created after you save (packages after the next snapshot build). Tunnels, endpoints and credential selections are read when a host connects or is set up, so those changes reach existing hosts at their next connection."
+                    "Size applies only to hosts created after you save. Base and package changes take effect at the next snapshot build and leave existing hosts unchanged. Tunnels, endpoints and credential selections are read when a host connects or is set up, so those changes reach existing hosts at their next connection."
                 }
             }
 

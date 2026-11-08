@@ -19,7 +19,7 @@
 //! reads nor saves contain token values; changing the endpoint server does
 //! not silently change which named credential the recipe selects.
 //!
-//! The read shape also reports a managed recipe's snapshot build: the built
+//! The read shape also reports a recipe's snapshot build: the built
 //! snapshot ([`SnapshotView`]) and whether a build runs or how the last one
 //! ended ([`BuildView`]). The helm owns that state; no save carries it.
 //!
@@ -63,20 +63,18 @@ pub struct RecipeSize {
     pub disk_gb: u32,
 }
 
-/// Where a recipe's software comes from.
+/// The starting filesystem Farhelm builds on for every recipe.
 ///
-/// `Packages` is the managed kind: Farhelm builds a snapshot from its base
-/// image with these Ubuntu packages plus Claude Code and Codex. `Image` and
-/// `Snapshot` reuse something that already exists in the user's Tensorlake
-/// project as is; Farhelm installs only its supervisor there. A Tensorlake
-/// image is a named pointer to a snapshot, and snapshots have IDs only, so the
-/// two reuse kinds stay distinct rather than guessing from the text.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+/// Packages and the official Claude Code and Codex installers run for every
+/// base. An image is a named pointer and a snapshot has an ID, so those choices
+/// stay distinct rather than guessing from the supplied text. The default also
+/// identifies snapshots built before recipes had an explicit base.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum RecipeSource {
-    /// Ubuntu packages to install, in order, without duplicates. May be
-    /// empty: the snapshot then has only the base image and the agents.
-    Packages { packages: Vec<String> },
+pub enum RecipeBase {
+    /// Farhelm's standard Tensorlake Ubuntu image with systemd.
+    #[default]
+    TensorlakeUbuntu,
     /// A Tensorlake image name.
     Image { image: String },
     /// A Tensorlake snapshot ID.
@@ -122,17 +120,19 @@ pub struct EndpointSave {
 /// keys, while Codex clears only Farhelm's provider selection/token and keeps
 /// its auth.json. Values belong to Settings → Credentials; recipes carry names.
 ///
-/// Unknown fields are refused at every level, nested size, source, tunnel and
+/// Unknown fields are refused at every level, nested size, base, tunnel and
 /// endpoint included: a field a newer client sets and this helm would silently
 /// drop is worse than a clear refusal. `deny_unknown_fields` does not reach
-/// into nested types, and [`RecipeSize`], [`RecipeSource`] and [`Tunnel`] stay
+/// into nested types, and [`RecipeSize`], [`RecipeBase`] and [`Tunnel`] stay
 /// tolerant because reads share them, so decoding goes through the strict
 /// save mirror `strict::RecipeSave`.
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(from = "strict::RecipeSave")]
 pub struct RecipeSave {
     pub size: RecipeSize,
-    pub source: RecipeSource,
+    pub base: RecipeBase,
+    /// Optional apt package words for any base; saves remove exact duplicates.
+    pub packages: Vec<String>,
     pub claude: Option<EndpointSave>,
     pub codex: Option<EndpointSave>,
     /// Claude's None mode clears its three managed authentication keys;
@@ -161,7 +161,8 @@ mod strict {
     #[serde(deny_unknown_fields)]
     pub(super) struct RecipeSave {
         size: RecipeSize,
-        source: RecipeSource,
+        base: RecipeBase,
+        packages: Vec<String>,
         claude: Option<super::EndpointSave>,
         codex: Option<super::EndpointSave>,
         claude_login_credential: Option<String>,
@@ -179,11 +180,14 @@ mod strict {
         disk_gb: u32,
     }
 
-    /// [`super::RecipeSource`], refusing unknown fields inside each kind.
+    /// [`super::RecipeBase`], refusing unknown fields inside each kind.
     #[derive(Deserialize)]
     #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-    enum RecipeSource {
-        Packages { packages: Vec<String> },
+    enum RecipeBase {
+        // Serde's internally tagged unit visitor discards extra fields even
+        // with deny_unknown_fields. An empty struct variant enforces the save
+        // contract while the shared read enum remains tolerant.
+        TensorlakeUbuntu {},
         Image { image: String },
         Snapshot { snapshot_id: String },
     }
@@ -210,15 +214,14 @@ mod strict {
                     memory_gb,
                     disk_gb,
                 },
-                source: match save.source {
-                    RecipeSource::Packages { packages } => {
-                        super::RecipeSource::Packages { packages }
-                    }
-                    RecipeSource::Image { image } => super::RecipeSource::Image { image },
-                    RecipeSource::Snapshot { snapshot_id } => {
-                        super::RecipeSource::Snapshot { snapshot_id }
+                base: match save.base {
+                    RecipeBase::TensorlakeUbuntu {} => super::RecipeBase::TensorlakeUbuntu,
+                    RecipeBase::Image { image } => super::RecipeBase::Image { image },
+                    RecipeBase::Snapshot { snapshot_id } => {
+                        super::RecipeBase::Snapshot { snapshot_id }
                     }
                 },
+                packages: save.packages,
                 claude: save.claude,
                 codex: save.codex,
                 claude_login_credential: save.claude_login_credential,
@@ -266,15 +269,16 @@ pub struct CreateRecipe {
 pub struct RecipeView {
     pub name: String,
     pub size: RecipeSize,
-    pub source: RecipeSource,
+    pub base: RecipeBase,
+    pub packages: Vec<String>,
     pub claude: Option<EndpointView>,
     pub codex: Option<EndpointView>,
     pub claude_login_credential: Option<String>,
     pub codex_login_credential: Option<String>,
     pub github_token_credential: Option<String>,
     pub tunnels: Vec<Tunnel>,
-    /// The snapshot Farhelm built for a managed recipe, which new hosts start
-    /// from. Always `None` for a recipe that reuses an image or snapshot.
+    /// The snapshot new hosts start from. Base or package edits keep it until
+    /// an explicit rebuild records its replacement.
     #[serde(default)]
     pub snapshot: Option<SnapshotView>,
     /// Whether a snapshot build is running, or how the last one ended when
@@ -290,8 +294,8 @@ pub struct RecipeView {
 
 /// A built snapshot as the list shows it. Times are seconds since the epoch.
 ///
-/// `packages` and `disk_gb` are what the snapshot was built with, so a client
-/// can tell when the recipe has moved on since: different packages mean the
+/// `base`, `packages` and `disk_gb` are what the snapshot was built with, so a client
+/// can tell when the recipe has moved on since: a different base or packages mean the
 /// snapshot is stale, and a recipe disk smaller than `disk_gb` means hosts
 /// cannot start from it at all (a Tensorlake sandbox cannot be smaller than
 /// the snapshot it starts from).
@@ -299,7 +303,9 @@ pub struct RecipeView {
 pub struct SnapshotView {
     pub id: String,
     pub built_at: i64,
-    pub base_image: String,
+    /// Older snapshots were always built on Tensorlake Ubuntu.
+    #[serde(default)]
+    pub base: RecipeBase,
     pub disk_gb: u32,
     pub packages: Vec<String>,
     /// The `--version` lines the build read from the installed agents.
@@ -318,7 +324,7 @@ pub enum BuildStep {
     Creating,
     /// Waiting for the build sandbox to run.
     Starting,
-    /// Reaching the build sandbox over ssh and checking it boots systemd.
+    /// Reaching the build sandbox and checking every base requirement.
     Connecting,
     Packages,
     ClaudeCode,
@@ -355,7 +361,7 @@ impl BuildStep {
             BuildStep::Cleaning => "cleaning up after the last build",
             BuildStep::Creating => "creating the build sandbox",
             BuildStep::Starting => "waiting for the build sandbox to start",
-            BuildStep::Connecting => "connecting to the build sandbox",
+            BuildStep::Connecting => "connecting and checking the base",
             BuildStep::Packages => "installing packages",
             BuildStep::ClaudeCode => "installing Claude Code",
             BuildStep::Codex => "installing Codex",
@@ -585,10 +591,10 @@ pub fn check_token(token: &str) -> Result<(), &'static str> {
 /// Refuse a recipe the helm will not store.
 ///
 /// Checks the size's sanity bounds (1 to 64 CPUs, 1 to 512 GB of memory, 1 to
-/// 4096 GB of disk), the source (package words per `package_word_is_valid`,
+/// 4096 GB of disk), package words per `package_word_is_valid`,
 /// at most [`PACKAGES_CAP`]; an image name of 1 to 200 bytes of
 /// `[A-Za-z0-9._/:-]` not starting with `-`; a snapshot ID of 1 to 64
-/// lowercase letters and digits), each endpoint's base URL and credential
+/// lowercase letters and digits, each endpoint's base URL and credential
 /// name, and the tunnels (at most [`TUNNELS_CAP`], unique non-zero sandbox
 /// ports other than 22, which the sandbox's own sshd holds, non-zero target
 /// ports, valid hosts).
@@ -608,18 +614,21 @@ pub fn check_recipe(recipe: &RecipeSave) -> Result<(), String> {
     if !(1..=4096).contains(&size.disk_gb) {
         return Err("disk must be a whole number of GB from 1 to 4096".into());
     }
-    match &recipe.source {
-        RecipeSource::Packages { packages } => {
-            if packages.len() > PACKAGES_CAP {
-                return Err(format!(
-                    "a recipe can install at most {PACKAGES_CAP} packages"
-                ));
-            }
-            if let Some(bad) = packages.iter().find(|word| !package_word_is_valid(word)) {
-                return Err(format!("{bad:?} is not a valid Ubuntu package name"));
-            }
-        }
-        RecipeSource::Image { image } => {
+    if recipe.packages.len() > PACKAGES_CAP {
+        return Err(format!(
+            "a recipe can install at most {PACKAGES_CAP} packages"
+        ));
+    }
+    if let Some(bad) = recipe
+        .packages
+        .iter()
+        .find(|word| !package_word_is_valid(word))
+    {
+        return Err(format!("{bad:?} is not a valid Ubuntu package name"));
+    }
+    match &recipe.base {
+        RecipeBase::TensorlakeUbuntu => {}
+        RecipeBase::Image { image } => {
             if image.is_empty() {
                 return Err("enter an image name".into());
             }
@@ -635,7 +644,7 @@ pub fn check_recipe(recipe: &RecipeSave) -> Result<(), String> {
                 );
             }
         }
-        RecipeSource::Snapshot { snapshot_id } => {
+        RecipeBase::Snapshot { snapshot_id } => {
             if snapshot_id.is_empty() {
                 return Err("enter a snapshot ID".into());
             }

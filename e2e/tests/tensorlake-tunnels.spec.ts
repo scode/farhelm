@@ -127,7 +127,8 @@ test("Settings lists unknown Farhelm sandboxes and confirms snapshot cleanup", a
         name: recipe,
         recipe: {
           size: { cpus: 1, memory_gb: 1, disk_gb: 10 },
-          source: { kind: "image", image: "tensorlake/ubuntu-systemd" },
+          base: { kind: "image", image: "tensorlake/ubuntu-systemd" },
+          packages: [],
           claude: null,
           codex: null,
           tunnels: [],

@@ -68,30 +68,38 @@ Give the recipe a name and choose **CPUs**, **Memory, GB** and **Disk, GB**. Ten
 when the sandbox is created. Names use lowercase letters, digits and hyphens, start with a letter, end with a letter or
 digit, and have at most 32 characters. A saved recipe cannot be renamed; create another recipe for a different name.
 
-Under **Software**, choose one of these:
+Under **Software**, choose the base Farhelm builds on:
 
-- **Install packages** builds a snapshot from Tensorlake's Ubuntu image with the Ubuntu packages you enter, separated by
-  spaces or newlines. Farhelm also installs Claude Code and Codex with their official installers.
-- **Use an existing image or snapshot** takes an image name or snapshot ID from your Tensorlake project. You supply the
-  agents yourself. The image must have systemd installed, enabled and running as the init system at startup, for example
-  an image built from `tensorlake/ubuntu-systemd`. Farhelm uses passwordless sudo to prepare user services, installs its
-  [supervisor](/docs/how-it-works/the-pieces/) to keep sessions running, and applies any agent endpoints in the recipe.
-  An image containing an existing Farhelm supervisor installation is refused because it would copy another host's
-  identity. You also cannot reuse a snapshot Farhelm manages for a recipe: a later rebuild would delete it.
+- **Tensorlake Ubuntu** uses Tensorlake's Ubuntu image with systemd; nothing else needs preparing.
+- **Your image** takes an image name from your Tensorlake project.
+- **Your snapshot** takes a snapshot ID from that project.
+
+A custom base must run systemd as its init system, allow sudo without a password, be Ubuntu or Debian with apt, and
+include bash, curl and git. The build checks these first and names the first missing requirement. A base containing an
+existing Farhelm supervisor installation is refused at host setup because it would copy another host's identity. You
+cannot select a snapshot Farhelm manages for a recipe: a later rebuild would delete it.
+
+For any base, enter optional **Ubuntu packages**, separated by spaces or newlines. Farhelm builds a snapshot with those
+packages, Claude Code and Codex from their official installers. Each host gets Farhelm's
+[supervisor](/docs/how-it-works/the-pieces/) when it is set up.
 
 **Cancel** and **Save** stay at the bottom of the editor while its fields scroll. Saving a recipe does not build a
 snapshot or create a host.
 
-Saving a change from **Install packages** to **Use an existing image or snapshot** deletes the recipe's prepared
-snapshot; existing hosts keep running. Switching back needs another billed snapshot build.
+Changing the base keeps the previous built snapshot until a successful rebuild replaces it. Hosts already created from
+it keep their software.
+
+Recipes saved under the old **Use an existing image or snapshot** choice become custom bases with no built snapshot.
+Build one before adding another host, or let adding the host build it. Existing hosts keep working, and **Re-run** setup
+on those hosts does not start a snapshot build. Old package recipes keep their built snapshots.
 
 ### Agent API endpoints
 
 Under **Agents**, choose **API endpoint** for Claude Code, Codex, or both, then set a base URL and choose a named
 endpoint token. Create the token in Settings → **Credentials** first; **None** in the token picker uses the endpoint
 without a token. A base URL can point at a [tunnel](#tunnels-to-your-side), such as `http://127.0.0.1:8080`. Farhelm
-writes these settings when it sets up each host, for both software choices, and before it connects. Recipe changes reach
-existing hosts at their next connection or setup. Updating Farhelm on a host does not independently reapply them.
+writes these settings when it sets up each host, for every base, and before it connects. Recipe changes reach existing
+hosts at their next connection or setup. Updating Farhelm on a host does not independently reapply them.
 
 Replacing a token in Credentials keeps its name, so you do not need to edit the recipes that use it. Changing a base URL
 keeps the selected token name. A credential cannot be deleted while a recipe uses it; choose **None** or another name in
@@ -140,15 +148,15 @@ carries traffic in the other direction.
 
 ## Build or rebuild a snapshot
 
-A recipe using **Install packages** has **Build snapshot** in its Settings row. You can build it there, or let adding
+Every recipe without a built snapshot has **Build snapshot** in its Settings row. You can build it there, or let adding
 the first host build it. The row shows progress and then the build time and installed agents' versions. A failed build
 shows its error and **Retry**.
 
-Use **Rebuild snapshot** for fresh packages and agents, or after changing the recipe's packages. A rebuild replaces the
-old snapshot and deletes it once the new one is ready. Hosts already created from the old snapshot keep running; their
-software and size do not change. A failed rebuild keeps the previous snapshot available. Size changes apply to new
-hosts, and package changes apply to new hosts after a rebuild. If you reduce the disk below the snapshot's size, rebuild
-before adding a host.
+Use **Rebuild snapshot** for fresh packages and agents, or after changing the recipe's base or packages. A rebuild
+replaces the old snapshot and deletes it once the new one is ready. Hosts already created from the old snapshot keep
+running; their software and size do not change. A failed rebuild keeps the previous snapshot available. Size changes
+apply to new hosts, and base or package changes apply to new hosts after a rebuild. If you reduce the disk below the
+snapshot's size, rebuild before adding a host.
 
 The recipe's row warns if Farhelm could not delete an old build sandbox or snapshot; the next build or deleting the
 recipe retries that cleanup. Deleting a recipe also deletes its managed snapshot, and is refused while a host uses the
@@ -158,8 +166,8 @@ recipe.
 
 Open **Add host** and choose **Tensorlake sandbox**. Enter a **Name**, which is how Farhelm shows the host, and choose a
 **Recipe**. **New recipe…** opens the same editor inside this dialog, with **Cancel** and **Save** in its footer. Choose
-**Save** to save the recipe and return to the host form. The selected recipe's summary shows its size, software and
-tunnels. Farhelm generates the sandbox's name; **Name** is the name you see on the host and its sessions.
+**Save** to save the recipe and return to the host form. The selected recipe's summary shows its size, base, packages
+and tunnels. Farhelm generates the sandbox's name; **Name** is the name you see on the host and its sessions.
 
 Choose **Continue**, review the size and numbered setup steps, then **Create sandbox**. **Back** lets you change the
 name or recipe before creating anything. The confirmation groups billing, the pricing link and the 24-hour idle limit
@@ -180,10 +188,10 @@ in the launcher. Turn the host setting off if you want that question. The other 
 named token from Settings → **Credentials**. Select it under **GitHub** in the host's recipe. New agents, terminal tabs
 and restarted agents receive it as `GH_TOKEN`, including the Git clone that prepares a fresh checkout.
 
-Farhelm-built snapshots include GitHub's `gh` command and Farhelm sets up its Git helper on the host. Reused images and
-snapshots built before this change need `gh` installed for private GitHub checkouts over HTTPS. If it is missing, the
-host stays usable and its details say private clones need gh. Older hosts also need **Update** so their Farhelm can
-deliver the token to new terminals; [old terminals](/docs/using/new-terminals/) do not receive it.
+Farhelm-built snapshots include GitHub's `gh` command and Farhelm sets up its Git helper on the host. Hosts created from
+old reused images, or older snapshots without `gh`, need it installed for private GitHub checkouts over HTTPS. If it is
+missing, the host stays usable and its details say private clones need gh. Older hosts also need **Update** so their
+Farhelm can deliver the token to new terminals; [old terminals](/docs/using/new-terminals/) do not receive it.
 
 Replacing the token in Credentials sends it to connected hosts; other hosts receive it when they next connect. Recipe
 selection changes wait for the next connection or setup. Existing programs keep their environment. Selecting **None**

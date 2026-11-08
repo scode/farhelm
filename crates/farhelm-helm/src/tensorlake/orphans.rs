@@ -291,7 +291,7 @@ mod tests {
     };
     use farhelm_proto::tensorlake::{
         SaveSettings,
-        recipes::{RecipeSave, RecipeSize, RecipeSource},
+        recipes::{RecipeBase, RecipeSave, RecipeSize},
     };
 
     /// A private, marked browser fake exercises the same ownership and
@@ -410,7 +410,8 @@ mod tests {
                         memory_gb: 1,
                         disk_gb: 10,
                     },
-                    source: RecipeSource::Packages { packages: vec![] },
+                    base: RecipeBase::TensorlakeUbuntu,
+                    packages: vec![],
                     claude: None,
                     codex: None,
                     github_token_credential: None,

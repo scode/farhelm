@@ -6143,12 +6143,15 @@ home, architecture and install paths cannot yet be inspected. The confirmation a
 setup on that sandbox; the run computes the inner plan after preparation and replaces its final placeholder with those
 concrete steps, without a second question. The existing executor runs those actions with a progress offset.
 
-Managed recipes call the snapshot builder's single-flight `ensure_snapshot`, which reports its watch progress and joins
-an existing build. A ready snapshot is reused (package edits still require explicit Rebuild). A build started by the add
-uses the confirmed definition. A snapshot whose recorded disk is larger than the confirmed host disk is refused. Reuse
-recipes skip the builder. Host creation looks up the pre-chosen name first and adopts an existing sandbox, including
-after a lost create response. It records the sandbox id before preparation and never replaces a recorded, deleted
-sandbox with a new one. Creates set `timeout_secs: 0`, `auto_resume: false` and `max_pending_secs: 900`.
+All recipes call the snapshot builder's single-flight `ensure_snapshot`, which reports its watch progress and joins an
+existing build. A ready snapshot is reused (base and package edits still require explicit Rebuild). A build started by
+the add uses the confirmed definition. A snapshot whose recorded disk is larger than the confirmed host disk is refused.
+Setup skips the build when the host's sandbox is visible, when its ID is recorded (a recorded, deleted sandbox is never
+replaced), or while a pending create is inside the settle window. Only a settled absence with no recorded ID builds. The
+rerun probe describes these steps from local records only. This keeps reruns of hosts created from old reuse recipes
+from starting a newly required build. Host creation looks up the pre-chosen name first and adopts an existing sandbox,
+including after a lost create response. It records the sandbox id before preparation and never replaces a recorded,
+deleted sandbox with a new one. Creates set `timeout_secs: 0`, `auto_resume: false` and `max_pending_secs: 900`.
 
 Schema 73 adds `hosts.tensorlake_pending_create_at` (unix seconds). Before sending create, the run records this
 outstanding request durably. An observed sandbox id settles it in the same write that saves the id; a definite API
@@ -6220,8 +6223,8 @@ Protected `/api/tensorlake/recipes` routes store recipes in the schema-71 `tenso
 with the user's definition in `spec_json` and the helm's snapshot-build bookkeeping in `state_json`. The two are
 separate columns because they have separate writers: a save replaces only `spec_json`, and builds write only
 `state_json`, so a recipe edit racing a build cannot drop a recorded snapshot or builder ID, each of which is the only
-record of a billed Tensorlake resource. The one save that touches the state is a switch away from packages, which moves
-the built snapshot to the retired list in the same immediate transaction. This is why recipes are not launch templates'
+record of a billed Tensorlake resource. Changing a base or packages keeps the current snapshot and its ownership record;
+only a successful build replaces it and moves it to the retired list. This is why recipes are not launch templates'
 last-write-wins "PUT creates or replaces": `POST` creates and answers 409 for an existing name, `PUT /{name}` updates
 and answers 404 for a missing one, and no route renames. `DELETE /{name}` checks host use inside its own transaction,
 counting the hosts rows whose `tensorlake_recipe` names the recipe. The store also refuses the delete while `state_json`
@@ -6229,29 +6232,37 @@ records a snapshot, a builder, a retired snapshot or a build start, so no path f
 cleans those up first (see below).
 
 The wire types and validation live in `farhelm_proto::tensorlake::recipes`, shared with the UI, which runs the same
-checks before sending. The name grammar is narrower than a template's because the name is embedded verbatim in the
-snapshot builder's sandbox name (`farhelm-build-<helm tag>-<recipe>`), so it must already be a valid part of a
-Tensorlake name, and mapping it without sanitizing keeps two recipes from sharing a builder. Package words must start
-with a lowercase letter or digit: the build shell-quotes them, but apt-get still reads a quoted `-o...` word as an
-option. Tunnel hosts are DNS names, IPv4 literals or bracketed IPv6 literals, the shape an ssh `-R` forward carries
-without quoting. Endpoint base URLs are http(s) without credentials, query or fragment. Endpoints name an optional
-endpoint-token credential; None is an explicit selection, and a URL change retains the named choice. Schema 76 removes
-the old `claude.token` and `codex.token` JSON fields without importing values or changing `state_json`, so users
-re-enter their endpoint tokens in Credentials. Request decoding rejects the old token fields. A request body that does
-not decode is refused with a fixed message, because serde's diagnostic can quote submitted text, and stored rows that do
-not decode fail the listing without quoting their content. Successful writes bump the invalidation feed, and the
-Settings list re-reads on each notice. Write bodies are capped at 64 KiB.
+checks before sending. `RecipeBase` is tagged by `kind`: `tensorlake_ubuntu`, `image` with `image`, or `snapshot` with
+`snapshot_id`. Save and view payloads carry this `base` separately from `packages`; the snapshot view records the base
+and packages actually built, so staleness compares both. Schema 78 converts old package sources to the Tensorlake Ubuntu
+base with their packages and current snapshot preserved. It leaves `state_json` byte-for-byte unchanged; an old built
+snapshot without `base` reads as Tensorlake Ubuntu, the only base old builds used. Old image and snapshot sources become
+the corresponding base with empty packages and no built snapshot. Their existing hosts are unchanged. The old source
+payload shape is not accepted by the recipe API after migration.
+
+The name grammar is narrower than a template's because the name is embedded verbatim in the snapshot builder's sandbox
+name (`farhelm-build-<helm tag>-<recipe>`), so it must already be a valid part of a Tensorlake name, and mapping it
+without sanitizing keeps two recipes from sharing a builder. Package words must start with a lowercase letter or digit:
+the build shell-quotes them, but apt-get still reads a quoted `-o...` word as an option. Tunnel hosts are DNS names,
+IPv4 literals or bracketed IPv6 literals, the shape an ssh `-R` forward carries without quoting. Endpoint base URLs are
+http(s) without credentials, query or fragment. Endpoints name an optional endpoint-token credential; None is an
+explicit selection, and a URL change retains the named choice. Schema 76 removes the old `claude.token` and
+`codex.token` JSON fields without importing values or changing `state_json`, so users re-enter their endpoint tokens in
+Credentials. Request decoding rejects the old token fields. A request body that does not decode is refused with a fixed
+message, because serde's diagnostic can quote submitted text, and stored rows that do not decode fail the listing
+without quoting their content. Successful writes bump the invalidation feed, and the Settings list re-reads on each
+notice. Write bodies are capped at 64 KiB.
 
 ## Tensorlake snapshot builds
 
-`crates/farhelm-helm/src/tensorlake/build.rs` builds a package recipe's snapshot;
+`crates/farhelm-helm/src/tensorlake/build.rs` builds every recipe's snapshot;
 `POST /api/tensorlake/recipes/{name}/build` starts a build or joins the running one and answers 202 with the recipe's
-view (400 for a reuse recipe, a missing API key or a missing ssh key; 409 while the recipe is being deleted).
-`RecipeBuilds` is an in-memory registry per helm: at most one build per recipe, each a task the registry owns rather
-than the request, publishing its step through a `watch` channel that the recipes GET reads and bumping the feed at every
-step. The GET reports `snapshot`, `build` (idle, building with its step, failed with step and message, or interrupted)
-and `cleanup_pending`. Interrupted is derived: `build_started_at` persisted with no live task, since nothing reconciles
-at helm start.
+view (400 for a missing API key or a missing ssh key; 409 while the recipe is being deleted). `RecipeBuilds` is an
+in-memory registry per helm: at most one build per recipe, each a task the registry owns rather than the request,
+publishing its step through a `watch` channel that the recipes GET reads and bumping the feed at every step. The GET
+reports `snapshot`, `build` (idle, building with its step, failed with step and message, or interrupted) and
+`cleanup_pending`. Interrupted is derived: `build_started_at` persisted with no live task, since nothing reconciles at
+helm start.
 
 `state_json` (`RecipeState`) is the record of everything the build bills for. `build_started_at` is written first.
 `pending_create_at` is written before the create request goes out and cleared in the same write that records the
@@ -6266,26 +6277,27 @@ after it was sent (the client's ten-minute create bound plus margin; Tensorlake 
 by name, before it waits for capacity), and until then the delete is refused with "try again in a few minutes". The new
 snapshot's ID is written in the same write that moves the old one to `retired_snapshots`, and a builder ID or retired
 snapshot is removed only once Tensorlake confirms the deletion or answers 404. The steps are: cleaning (reconcile, retry
-retired deletions, wait up to two minutes for the name to be free), creating (`tensorlake/ubuntu-systemd`, the one
-constant naming the base image; the recipe's CPUs, memory and disk; a 900-second idle timeout, so a builder a crashed
-helm left suspends and stops billing for compute; `auto_resume` off), starting (poll every 2 s for up to 15 minutes;
-terminated fails with Tensorlake's reason), connecting, packages, Claude Code, Codex, snapshotting (`filesystem`, polled
-until `completed`, not merely `local_ready`, for up to 30 minutes; `failed` fails the build) and finishing. Sweeping a
-builder terminates it, lists every snapshot and deletes those whose `sandbox_id` is the builder's, except any snapshot a
-recipe records as current; a failure leaves the builder recorded. After a failed step the builder, if its ID is
-recorded, is swept, bounded to two minutes; a builder whose ID could not be recorded is left running under the pending
-create, for the next build or the delete to find by name and record before terminating it. The failure is recorded with
-its step, and the previous snapshot is untouched. A recipe that stopped being a package recipe while its build ran gets
-the new snapshot retired at once. Deleting a recipe marks it as being deleted (no build may start), cancels a running
-build and waits for its task, reconciles, deletes the snapshot and retired snapshots, and only then deletes the row.
-Cancellation is cooperative: only waits on Tensorlake, the sandbox and poll sleeps are cancelled, never the create or a
-state write, so everything a cancelled build created is recorded before the delete reads the state. A recipe cannot
-reuse, as its image or snapshot source, a snapshot Farhelm built (any recipe's current or retired one): Farhelm deletes
-those when their recipe moves on, so the save is refused naming the owning recipe. Not covered: a snapshot a builder
-took that no recipe records yet (the helm stopped between taking it and recording it) can be named as a reuse source,
-and the next sweep of that builder then deletes it; finding its ID takes listing the account's snapshots by hand. The
-list shows a running or interrupted build and pending cleanup for every recipe, whatever its source is now; only the
-build actions need a package recipe.
+retired deletions, wait up to two minutes for the name to be free), creating (the recipe's image or snapshot base, with
+Tensorlake Ubuntu resolved through the one `tensorlake/ubuntu-systemd` constant; the recipe's CPUs, memory and disk; a
+900-second idle timeout, so a builder a crashed helm left suspends and stops billing for compute; `auto_resume` off),
+starting (poll every 2 s for up to 15 minutes; terminated fails with Tensorlake's reason), connecting and checking the
+base (`Connecting`, step 4 of 9), packages, Claude Code, Codex, snapshotting (`filesystem`, polled until `completed`,
+not merely `local_ready`, for up to 30 minutes; `failed` fails the build) and finishing. Sweeping a builder terminates
+it, lists every snapshot and deletes those whose `sandbox_id` is the builder's, except any snapshot a recipe records as
+current; a failure leaves the builder recorded. After a failed step the builder, if its ID is recorded, is swept,
+bounded to two minutes; a builder whose ID could not be recorded is left running under the pending create, for the next
+build or the delete to find by name and record before terminating it. The failure is recorded with its step, and the
+previous snapshot is untouched. A build records the frozen base and packages it used even if the recipe was edited while
+it ran; the row then warns that the current definition differs. Deleting a recipe marks it as being deleted (no build
+may start), cancels a running build and waits for its task, reconciles, deletes the snapshot and retired snapshots, and
+only then deletes the row. Cancellation is cooperative: only waits on Tensorlake, the sandbox and poll sleeps are
+cancelled, never the create or a state write, so everything a cancelled build created is recorded before the delete
+reads the state. A recipe cannot select as its snapshot base a snapshot Farhelm built (any recipe's current or retired
+one): Farhelm deletes those when their recipe moves on, so the save is refused naming the owning recipe. Not covered: a
+snapshot a builder took that no recipe records yet (the helm stopped between taking it and recording it) can be named as
+a snapshot base, and the next sweep of that builder then deletes it; finding its ID takes listing the account's
+snapshots by hand. The list shows a running or interrupted build and pending cleanup for every recipe. Build, Rebuild
+and Retry are available for every base.
 
 The build's scripts (`build_script.rs`) run as the sandbox user under `sh -c`, through the narrow `SandboxShell` trait.
 Its production implementation runs `ssh` with `ssh_oneshot_args` (the connection overrides, `BatchMode=yes`,
@@ -6307,8 +6319,10 @@ stripped of presentation-unsafe characters. Exit 255 with OpenSSH's `Permission 
 fails at once with the registration hint; any other 255 is unreachable, retried for up to 60 seconds while connecting,
 since sshd can lag the sandbox's running state. The readiness script refuses a PID 1 other than systemd, polls
 `systemctl is-system-running` every 2 seconds for up to 180 until it says (right after boot it answers nothing, even
-with `--wait`) `running` or `degraded`, and requires `sudo -n`. The package script runs `dpkg --configure -a`,
-`apt-get update` and `apt-get install ca-certificates curl gh <packages>` through
+with `--wait`) `running` or `degraded`, and requires passwordless `sudo -n`, apt, bash, curl and git before any
+installation. It stops at the first missing requirement with a message naming it, reported through the existing build
+failure line. The package script runs `dpkg --configure -a`, `apt-get update` and
+`apt-get install ca-certificates curl gh <packages>` through
 `sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a` with `DPkg::Lock::Timeout=600` and `confdef`/`confold`,
 each package shell-quoted. Each agent script downloads its installer with `curl --proto '=https' --tlsv1.2 -fsSL` into a
 file and runs that file (`bash` for `https://claude.ai/install.sh`, `CODEX_NON_INTERACTIVE=1 sh` for
