@@ -24,6 +24,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Remove the duplicate "Not encrypted on disk" warning in Settings → Credentials.** The page shows the red notice
+  twice, stacked directly above the Tensorlake API key field: first the page-level notice that covers every secret
+  ("Farhelm stores these in plain text…"), then the reused Tensorlake key form's own singular one ("Farhelm stores this
+  key…"). The intent was one warning per surface, so an agent likely wired both into the same panel:
+  `CredentialsSettings` renders `StorageWarning { multiple: true }` and then `TensorlakeKey`, which renders its own
+  warning, and `e2e/tests/credentials-settings.spec.ts` asserts the text appears twice, which locks the duplicate in.
+  Decide whether the key form drops its warning where the page already shows one (keeping it only inside editors) or the
+  two collapse into a single notice, then fix that test.
+
 - **Generally rethink the session filtering experience.** The list now names its active filters and shows a removable
   host chip; revisit the broader filtering experience.
 
