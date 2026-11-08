@@ -41,6 +41,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Let a remote Mac's uninstall work when a volume name contains " (" or " on ".** Before removing Farhelm's
+  directories from a remote Mac, uninstall reads the Mac's mount table to make sure nothing is mounted inside them, both
+  when planning and again at the final directory removal, after the supervisor's job is already gone. The parser refuses
+  the whole table when any line is ambiguous, so one unrelated volume whose name contains " (" or " on " (say
+  `/Volumes/Backup (old)`) makes uninstall refuse: before anything changes, or partway through. It fails safe, but the
+  user cannot uninstall while that volume is mounted. Only an ambiguous line that could name a path at or below the
+  directory being removed should refuse. Found by the landing review of the macos-remote-hosts plan on 2026-11-08.
+
 - **Fix the misleading message when Stop interrupts a starting agent.** A Stop pressed while the agent is still starting
   is recorded as a launch that never started, and its message wrongly blames the host's systemd user manager. The
   message should say what happened: the user stopped the session before its agent finished starting. Found while
