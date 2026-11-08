@@ -4338,3 +4338,35 @@ evidence, which expires with cleanup.
 Class: readiness
 
 Cause: hypothesis
+
+## 2026-11-07 — the desktop launch lock's brief-holder test checks its release signal too early (crates/farhelm-ui/src/desktop.rs)
+
+`desktop::tests::the_launch_lock_refuses_beside_an_open_app_and_waits_out_a_brief_holder` failed once in the x86_64
+Linux job of release-gate rehearsal run `42434794872` (job `128591313779`) on 2026-11-07, in the "Test the native
+desktop seams" step; the other 1,093 farhelm-ui desktop-feature unit tests in that run passed. It failed after 0.508 s,
+as long as a pass takes (0.506 to 0.608 s in the five other gate runs whose logs were read: the v0.36.0 tag build and
+four rehearsals on 2026-11-07, all of which passed it), on its last assertion and not on a timeout. The tested commit
+was a throwaway rehearsal commit on top of the release-speed PR stack (#3150 to #3156), which does not touch this test
+or the launch lock; the job ran on an 8 vCPU Ubicloud runner, the runner that stack introduces, and the earlier passes
+were on 8 and 16 vCPU Ubicloud runners and on GitHub's 4 vCPU hosted runner. Hypothesis, read from the test and not
+reproduced: the holder thread drops the lock guard and only then sends on its release channel, so the main thread can
+take the freed lock and call `try_recv` before the send happens. That is a race in the test's own observation, not in
+the lock. Sending before the drop would remove it and still catch a lock that does not wait, since the main thread would
+then return before the holder's 200 ms sleep ends. Open; excluded from deflake sweeps; no fix attempted.
+
+```text
+thread 'desktop::tests::the_launch_lock_refuses_beside_an_open_app_and_waits_out_a_brief_holder' panicked at crates/farhelm-ui/src/desktop.rs:2813:14:
+the lock was taken only after the holder let go: Empty
+```
+
+Evidence: a hosted rehearsal job on `ubicloud-standard-8` (x86_64 Linux, 8 vCPU). The step averaged 4.3 busy cores,
+mostly the compile before the tests ran; the resource sampler's five-second interval cannot isolate the test's own
+second, so load at the moment of failure is unavailable. The recorder ran
+`--runner nextest --kind release --selection 'Linux desktop unit tests' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-ui --features desktop`;
+tmux is not used by this selection. The tested tree was a clean CI checkout; locale unavailable; the recorder scrubbed
+ambient `FARHELM_*` and set `FARHELM_TEST_TRACE_DIR`. The job log stays with the run on GitHub; its test-run failure
+artifact expires with GitHub's artifact retention. The test was last changed in #2873 (2026-11-03); it was not re-run.
+
+Class: ambiguous-observable
+
+Cause: hypothesis

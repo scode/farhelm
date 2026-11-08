@@ -33,3 +33,4 @@ playwright provisioning.spec.ts incarnation churn keeps a followed run while a t
 playwright modal-layout.spec.ts host-settings scrollports stay reachable while saving  # host-settings-scrollport-held-save
 playwright provisioning.spec.ts a progress read failure during an update recovers on retry demand alone  # update-progress-step-name-late
 playwright provisioning.spec.ts changed-host advice while following: destination  # update-progress-step-name-late
+nextest farhelm-ui desktop::tests::the_launch_lock_refuses_beside_an_open_app_and_waits_out_a_brief_holder  # launch-lock-release-signal-race
