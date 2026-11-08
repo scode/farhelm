@@ -21784,7 +21784,9 @@
   `startup-probe-false-tmux-absence.md`: old-terminal findings are discarded unless very serious, since support for old
   terminals is about to be removed.
 - Completion criteria: remove the feedback file and its index entry. No code or spec change.
-- Execution: planned in `plans/queue/triage-misc-nov7.md`.
+- Execution: implemented in change `yowmrvnovrzyousmonnsnqxlwsuvuwqr`, bookmark
+  `plan/triage-misc-nov7/07-discard-unusable-tmux-delete`,
+  [PR #3180](https://github.com/scode/farhelm/pull/3180/changes).
 
 ## tmux-client-loss-latches-absence.md
 

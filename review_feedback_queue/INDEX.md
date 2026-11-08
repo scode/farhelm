@@ -39,10 +39,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Orphan cleanup can use an old ownership snapshot to terminate a sandbox after Add has adopted it and ordinary user
   work has begun.
 
-- [`unusable-tmux-delete-consent.md`](unusable-tmux-delete-consent.md) — When tmux cannot be used, a Delete presented as
-  stopping nothing alive can still kill either an old agent or live old-tab work beside a migrated, exited host agent.
-  The old-agent variant later refuses; the migrated-host variant can complete.
-
 - [`tmux-client-loss-latches-absence.md`](tmux-client-loss-latches-absence.md) — A temporary allocation failure in one
   tmux query process can make Farhelm treat a still-running old server as empty. During startup it can then destroy that
   server's terminal sessions without a Delete request. During later listings it can hide live work and let guarded
