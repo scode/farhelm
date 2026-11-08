@@ -117,6 +117,8 @@ pub(crate) enum Content {
 /// container fits the budget. After crossing it, both large buffers are
 /// empty but their exact lengths and history costs still describe the whole
 /// paint. Cursor and REP metadata survive so the container can finish sizing.
+/// The stream allocation includes room for its header and suffix because it
+/// becomes the final blob; that capacity does not enlarge the payload budget.
 /// Cell fixups are kept encoded, as the blob holds them: a hostile state has
 /// hundreds of thousands, and as records in memory they would take about
 /// twice their encoded size beside the blob.
@@ -856,7 +858,13 @@ impl Writer {
         self.stream_len += text.len();
         if self.keep() {
             let needed = self.out.len() + text.len();
-            Self::reserve(&mut self.out, needed, self.payload_budget);
+            // This allocation becomes the container. Reserve its header and
+            // minimum suffix too, without granting those bytes to the payload.
+            Self::reserve(
+                &mut self.out,
+                needed,
+                self.payload_budget + HEADER_BYTES + 9,
+            );
             self.out.extend_from_slice(text.as_bytes());
         }
     }
@@ -1474,6 +1482,40 @@ mod budget_tests {
         assert_eq!(w.fixups.cells.buf.len(), w.cell_fixup_bytes);
         assert!(w.out.capacity() <= EAGER_BUFFER_BYTES);
         assert!(w.fixups.cells.buf.capacity() <= EAGER_BUFFER_BYTES);
+    }
+
+    /// A payload at its exact limit must already have room to become the
+    /// container. The header and suffix are reservation overhead, not extra
+    /// payload allowance; both stream-only and cell-fixup paints retain it.
+    #[test]
+    fn the_stream_reservation_includes_the_exact_container_limit() {
+        let max_bytes = HEADER_BYTES + 9 + 192;
+        let emulator = crate::Emulator::new(
+            crate::Size {
+                columns: 200,
+                lines: 1,
+            },
+            0,
+        );
+        for with_cell in [false, true] {
+            let mut painter = Painter::new(200, 1, true, max_bytes, Cancel::never());
+            if with_cell {
+                painter.w.fix_cell(GridSel::Active, 0, 0, &Cell::default());
+            }
+            let stream_len = painter.w.payload_budget - painter.w.cell_fixup_bytes;
+            painter.w.raw(&"x".repeat(stream_len));
+            assert!(painter.w.keeping, "premise: the payload fits exactly");
+            assert_eq!(painter.w.out.capacity(), max_bytes);
+            let encoded =
+                super::super::container(&emulator.term, 0, 0, 0, painter.finish(), max_bytes);
+            assert_eq!(encoded.len, max_bytes);
+            assert_eq!(encoded.blob.len(), max_bytes);
+            assert_eq!(encoded.blob.capacity(), max_bytes);
+            assert_eq!(
+                &encoded.blob[HEADER_BYTES..HEADER_BYTES + stream_len],
+                vec![b'x'; stream_len]
+            );
+        }
     }
 
     /// Every write choke point must discard both allocations at the crossing

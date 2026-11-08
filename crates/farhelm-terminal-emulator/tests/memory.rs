@@ -43,8 +43,9 @@ const TYPICAL_BUDGET_MIB: usize = 80;
 /// 190 MiB); each case here does one thing.
 const HOSTILE_BUDGET_MIB: usize = 128;
 /// The most taking a snapshot may raise the process's peak: about twice
-/// the 16 MiB blob (the stream and the fixups it is laid out from, then the
-/// blob), plus 4 MiB for the allocator and the measuring passes' buffers.
+/// the 16 MiB blob (when encoded cell fixups remain beside the final blob),
+/// plus 4 MiB for the allocator and the measuring passes' buffers. Ordinary
+/// stream-heavy output has its own tighter relative bound below.
 const SNAPSHOT_PEAK_MIB: usize = 36;
 
 /// This process's resident set, in bytes.
@@ -76,6 +77,17 @@ fn status_kib(field: &str) -> usize {
 /// resident growth and, when it ends clean, its snapshot and how far taking
 /// it raised the process's peak. Returns the growth in bytes.
 fn measure(name: &str, line: impl Fn(usize) -> String) -> Measured {
+    measure_with_snapshot_premise(name, line, || {})
+}
+
+/// Check a case's measurement premise immediately before taking its snapshot.
+/// Most hostile cases need only the broad budget; the tighter ordinary-output
+/// bound must first prove that an earlier peak cannot hide a second blob.
+fn measure_with_snapshot_premise(
+    name: &str,
+    line: impl Fn(usize) -> String,
+    before_snapshot: impl FnOnce(),
+) -> Measured {
     // Resident growth means something only for a process that runs this test
     // alone, as nextest's process per test does; under libtest the tests
     // share a process and each other's allocations.
@@ -118,6 +130,7 @@ fn measure(name: &str, line: impl Fn(usize) -> String) -> Measured {
 
     let titles = emulator.term().title_stack().len();
     let clean = emulator.is_clean();
+    before_snapshot();
     let peak_before = peak_resident().max(resident());
     let started = Instant::now();
     let mut snapshot_peak = None;
@@ -191,25 +204,48 @@ struct Measured {
 /// Why: this is what the per-terminal budget for real use rests on: about
 /// 24 bytes per cell (12,060 x 200 cells, about 58 MB) plus per-line
 /// overhead. Spec: crate docs, "Memory budget".
+/// The snapshot is mostly stream bytes, so a second full-sized copy must
+/// exceed the relative peak bound even though it fits the hostile budget.
 #[test]
 #[ignore = "measures the process; run alone, in release"]
 fn typical_output_at_full_scrollback() {
     let Measured {
         growth,
         snapshot_peak,
+        shape,
         ..
-    } = measure("typical", |n| {
-        let words = "the quick brown fox jumps over the lazy dog ".repeat(5);
-        format!(
-            "\x1b[3{}m{n:06}\x1b[0m {}\x1b[1m中文\x1b[0m{}",
-            n % 8,
-            &words[..150],
-            &words[..36]
-        )
-    });
+    } = measure_with_snapshot_premise(
+        "typical",
+        |n| {
+            let words = "the quick brown fox jumps over the lazy dog ".repeat(5);
+            format!(
+                "\x1b[3{}m{n:06}\x1b[0m {}\x1b[1m中文\x1b[0m{}",
+                n % 8,
+                &words[..150],
+                &words[..36]
+            )
+        },
+        || {
+            let headroom = peak_resident().saturating_sub(resident());
+            assert!(
+                headroom <= MIB,
+                "{headroom} bytes of headroom below the peak"
+            );
+        },
+    );
     assert!(growth < TYPICAL_BUDGET_MIB * MIB, "{} MiB", growth / MIB);
     let peak = snapshot_peak.expect("a clean boundary");
-    assert!(peak <= SNAPSHOT_PEAK_MIB * MIB, "{} MiB", peak / MIB);
+    let shape = shape.expect("a clean boundary");
+    assert_eq!(shape.dropped_history_lines, 0);
+    assert!(
+        shape.blob - shape.stream < shape.blob / 100,
+        "mostly stream bytes"
+    );
+    assert!(
+        peak <= shape.blob + shape.blob / 2,
+        "{peak} bytes of snapshot peak for a {}-byte blob",
+        shape.blob
+    );
 }
 
 /// Hostile: sixteen combining marks (the vendored cap) on every cell, and a

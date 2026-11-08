@@ -326,13 +326,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (cache the encoded bytes of history rows and re-encode only the screen and new rows, producing the same v1 blob as
   today). The repository records no reason for the original choice of whole snapshots.
 
-- **Paint a terminal snapshot straight into its final blob.** The snapshot encoder in
-  `crates/farhelm-terminal-emulator/src/snapshot/` paints the escape-sequence stream into its own buffer and then copies
-  it, with the fixups, into the blob it returns (`container` in `snapshot/v1/mod.rs`), so a snapshot's peak memory is
-  about twice the blob, up to 32 MiB at the 16 MiB limit. Painting straight into the blob's buffer after a placeholder
-  header, then patching the stream length (the header's last field), would bring that to about one blob plus fixups with
-  byte-identical output. Left out of `faster-snapshot-encoder`, which is about speed; `tests/memory.rs` is the arbiter
-  of the memory claim. Plan: `plans/queue/snapshot-in-place-paint.md`.
 - **Jittery/jiggling characters when switching between sessions.** Switching between sessions makes characters jitter or
   jiggle: something is being re-drawn or laid out for no reason. Find what triggers the needless re-draw/re-layout on
   session switch. Plan: `plans/queue/session-switch-jiggle.md`.
@@ -698,6 +691,11 @@ are not.
   does not stop them. Tags have no protection at all (the repository has no rulesets), though the release procedure says
   a tag is never deleted or reused. Work out what GitHub rulesets, bypass lists or a separate agent identity can enforce
   without blocking the PR flow.
+
+- **Reduce the peak memory of snapshots made mostly of cell fixups.** The terminal snapshot encoder still builds cell
+  fixups in their own buffer and copies them after the stream, so a fixup-heavy snapshot peaks near twice its size.
+  Painting those bytes in place too needs a separate design; the ordinary stream-heavy case already reuses its final
+  blob's allocation.
 
 - **Crappy model warning.** Let the user pick a list of models they never want to run. Warn when an agent's TUI
   indicates that one of those models is being used anyway.

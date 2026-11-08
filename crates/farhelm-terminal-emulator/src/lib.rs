@@ -81,15 +81,19 @@
 //!   synchronized update. That is 34 MiB of buffers; the rest is the
 //!   allocator's overhead on 4096 separate titles.
 //! - A snapshot while it is taken: at most about twice its size limit, 32 MiB at
-//!   the host's 16 MiB limit (31.8 MiB measured for a blob of fixups). Sizes
+//!   the host's 16 MiB limit (32.2 MiB measured for a blob of fixups). Sizes
 //!   are counted while painting: the stream and encoded cell fixups share a
 //!   byte allowance within the limit, and are freed as soon as their
 //!   combined length cannot fit. The paint finishes counting to choose the
 //!   history cut, so a hostile state is never retained whole. A fitting paint
-//!   reserves each buffer independently without initializing unused bytes;
-//!   each source is compacted once before being laid out into a blob reserved
-//!   to its exact size. The resident peak is checked by `tests/memory.rs`;
-//!   reserved address space can be higher. Ordinary output's takes about 7 MiB.
+//!   reserves each buffer independently without initializing unused bytes.
+//!   The stream's allocation becomes the blob, with its bytes shifted in
+//!   place to make room for the header; cell fixups are still copied from
+//!   their own buffer, so a blob made mostly of fixups keeps the same worst
+//!   case. Final compaction leaves no spare capacity with the returned blob.
+//!   The resident peak is checked by `tests/memory.rs`; reserved address
+//!   space can be higher. Ordinary output's 3.55 MiB blob takes about 4 MiB
+//!   of peak growth (3.7 MiB measured, down from 6.9 MiB with a separate blob).
 //!
 //! 56 + 64 + 38 + 32 is 190 MiB. Each terminal host process is bounded on
 //! its own, by its journal cap and `MAX_SNAPSHOT`
