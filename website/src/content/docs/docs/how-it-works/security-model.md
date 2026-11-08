@@ -19,8 +19,11 @@ page from another local port cannot open, and no Farhelm relay or account. Addin
 [Tensorlake sandboxes](/docs/using/tensorlake-sandboxes/) use passwordless sudo to prepare user services and need a
 Tensorlake account. Also how much the helm is trusted with on each host, since it can run commands there, and what an
 agent on one host can do to sessions on others through Farhelm, with your approval or a host's **Run farhelm commands
-without asking**, and the host changes (adding, editing or removing a host) that always need your approval
-([Approve what agents do](/docs/using/approve-agent-requests/)). The SSH prerequisite for adding a host is in
+without asking**. The narrower **Manage sessions on this host without asking** covers session actions only on that same
+host, including a copy's source; it grants no authority over other hosts or templates. Both choices still need the helm,
+the program that shows your hosts' sessions and serves the UI, to be reachable
+([The pieces](/docs/how-it-works/the-pieces/)). Host changes (adding, editing or removing a host) always need your
+approval ([Approve what agents do](/docs/using/approve-agent-requests/)). The SSH prerequisite for adding a host is in
 [Add a remote host](/docs/get-started/add-a-remote-host/). It will also cover the connections that leave your machines:
 setting up or updating a host, including the automatic updates you can turn on, downloads Farhelm's release files from
 get.farhelm.io, which hands them over from GitHub, feedback you choose to send goes over HTTPS to a feedback service the

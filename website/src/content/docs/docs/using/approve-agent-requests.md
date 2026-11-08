@@ -12,9 +12,10 @@ sessions, start new sessions on any host, in an existing directory or a new
 another, rename, stop, restart, or delete sessions, change your [launch templates](/docs/using/launch-templates/), and
 [add, edit or remove hosts](/docs/using/approve-agent-requests/#host-changes). It can also ask to open a web link in
 your browser ([Open links from a remote session](#open-links-from-a-remote-session)). Farhelm asks you before any of
-those changes happens, whoever typed the command; a command you type yourself in a session's terminal is asked about the
-same way. Looking never asks. An agent in a [containerized session](/docs/agents/containerized-sessions/) cannot make
-any of these requests.
+those changes happens by default, whoever typed the command; a command you type yourself in a session's terminal is
+asked about the same way. You can [stop asking for a host](/docs/using/approve-agent-requests/#stop-asking-for-a-host).
+Looking never asks. An agent in a [containerized session](/docs/agents/containerized-sessions/) cannot make any of these
+requests.
 
 An agent starting another session can supply its first message with `--prompt` or `--prompt-file` (`-` reads stdin). The
 approval card shows the full message. It is sent once when the new agent starts; restarting, copying or replacing that
@@ -46,7 +47,7 @@ that matter:
 Most of what a card shows was written by the agent: session titles, directories, commands. Read those as the agent's
 words, not Farhelm's; each one sits under its own label.
 
-Most cards offer three buttons:
+Cards normally offer three buttons:
 
 - **Allow** lets this one request go ahead.
 - **Always allow from** the host lets this request go ahead and turns on that host's **Run farhelm commands without
@@ -54,11 +55,16 @@ Most cards offer three buttons:
   that link's permission instead. Other cards from that host that are already waiting stay up until you answer them.
 - **Deny** refuses it, and the agent is told you declined.
 
+For a session request that stays on the requesting host (including the source when copying a session), the card also
+offers **Always allow on &lt;host&gt; only**, with that host's name. It turns on **Manage sessions on this host without
+asking** and allows this request. The existing **Always allow from &lt;host&gt;** remains beside it and grants the
+broader permission to act across your hosts and change templates. Other cards already waiting still need an answer.
+
 An agent-supplied [wrapper prefix](/docs/agents/agent-wrappers/) on a host that asks before YOLO is a special case: its
-launch card offers **Allow** and **Deny** only, even if you turned on **Run farhelm commands without asking** for that
-host. The prefix is the agent's own command text, which Farhelm cannot check; allowing one request does not approve
-later prefixes. An agent that creates or edits a template so that it carries a wrapper prefix gets the same **Allow**
-and **Deny** card on every host, because launches from that template later treat the prefix as yours.
+launch card offers **Allow** and **Deny** only, even if you turned on either command permission for that host. The
+prefix is the agent's own command text, which Farhelm cannot check; allowing one request does not approve later
+prefixes. An agent that creates or edits a template so that it carries a wrapper prefix gets the same **Allow** and
+**Deny** card on every host, because launches from that template later treat the prefix as yours.
 
 The oldest waiting request opens first. Other requests appear as headers below it; click one to read and answer that
 request instead. The card shows how many requests are waiting, and the request you chose stays open until it is answered
@@ -73,8 +79,8 @@ double-click cannot answer a request you have not read.
 ## Host changes
 
 An agent can ask to add an SSH host, edit a host's appearance or remove an SSH host. Each request needs your approval,
-every time. **Run farhelm commands without asking** never covers host changes, and they never offer **Always allow
-from**.
+every time. Neither **Manage sessions on this host without asking** nor **Run farhelm commands without asking** covers
+host changes, and these cards offer no **Always allow** choice.
 
 Agents cannot request new [Tensorlake sandboxes](/docs/using/tensorlake-sandboxes/) or delete Tensorlake hosts. Create
 those from **Add host**, and use **Delete sandbox** in the host's menu yourself.
@@ -116,14 +122,25 @@ agent and leave the session listed.
 
 ## Stop asking for a host
 
-Each host has a **Run farhelm commands without asking** setting, in its settings next to the YOLO one
-([Manage hosts](/docs/using/manage-hosts/#host-settings)). Every host starts with it off. Turning it on means agents in
-that host's sessions start, stop, restart, delete, rename, and copy sessions on any of your hosts, and change or delete
-templates, without asking you, except for the [wrapper prefixes](#the-card) described above. It never covers
-[host changes](/docs/using/approve-agent-requests/#host-changes). Turn it on only for a host whose agents you would let
-do that unsupervised.
+In [host settings](/docs/using/manage-hosts/#host-settings), **Manage sessions on this host without asking** lets agents
+in that host's sessions create, spawn, copy, rename, stop, restart and delete sessions on the same host without a card.
+A copy's source session must be on that host too. This includes creating a session with an initial message. Requests for
+other hosts, template changes, [host changes](/docs/using/approve-agent-requests/#host-changes) and links stay outside
+this permission. Sending messages to agents in existing sessions is unavailable.
 
-If you **Adopt** a host that was reinstalled or replaced at the same address, the setting goes back to off, like the
+It starts off on every host, including Tensorlake sandboxes and hosts you added before the update. Turn it on in host
+settings or choose **Always allow on &lt;host&gt; only** on a qualifying card. The
+[helm, the program that shows all your hosts' sessions and serves the UI](/docs/how-it-works/the-pieces/), must still be
+reachable to handle these requests.
+
+**Run farhelm commands without asking** is broader: agents in that host's sessions can act on sessions on any of your
+hosts and change or delete templates without asking. It starts off too. Turn it on only for a host whose agents you
+would let do that unsupervised. Changing one switch does not change the other; you can change either while the other is
+on. Both still ask about the [wrapper prefixes](/docs/using/approve-agent-requests/#the-card) described above and
+[host changes](/docs/using/approve-agent-requests/#host-changes), and neither covers links. The
+[YOLO launch rules](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands) still apply.
+
+If you **Adopt** a host that was reinstalled or replaced at the same address, both settings go back to off, like the
 YOLO setting and both link settings: you have not decided about the new installation yet.
 
 ## Open links from a remote session
@@ -136,9 +153,9 @@ session except a [containerized](/docs/agents/containerized-sessions/) one, incl
 
 The host settings have two separate permissions, both off initially. **Open links without asking** covers public
 addresses. **Open local-network links without asking** covers addresses on your own machine or private network; those
-cards explain why they ask separately. **Always allow from** turns on only the permission that link needs. The commands
-permission above covers neither. Farhelm decides which permission a link needs from the address as written, without
-looking up where a name points, so a public-looking name can still lead to your private network.
+cards explain why they ask separately. **Always allow from** turns on only the permission that link needs. Neither
+command permission above covers links. Farhelm decides which permission a link needs from the address as written,
+without looking up where a name points, so a public-looking name can still lead to your private network.
 
 With the matching permission on, the Mac app opens the link immediately. Farhelm's web UI still shows an **Open** button
 because your browser requires a click; **Dismiss** refuses the request. Turning on the local-network permission lets
@@ -169,7 +186,8 @@ start a YOLO session at all, with or without your approval. That includes a laun
 runs a [custom command](/docs/agents/custom-commands/) there either, because Farhelm never reads a command to check
 whether it runs in YOLO mode, and an agent's word on that is not enough. The same goes for copying a session that an
 older version of Farhelm started, whose command line may not be the one Farhelm would put together today. To let agents
-do any of these on a host, turn on its **Start YOLO sessions without asking** setting.
+do any of these on a host, turn on its **Start YOLO sessions without asking** setting. Neither command permission waives
+this requirement for creating, spawning or copying a session.
 
 An agent can use a prefix already saved in a launch template; you approved the template when it was written. If it
 supplies `--wrapper` itself, copies a session with a prefix, or inherits one from its own session, Farhelm asks you to
@@ -177,7 +195,8 @@ approve that prefix before starting a non-YOLO agent launch on a host that asks 
 start a YOLO launch there.
 
 [Restarting](/docs/using/stop-restart-resume/) a session that already exists is not affected: a restart resumes the
-session with the settings it has saved, and is asked about like any other request.
+session with the settings it has saved, including a YOLO session. It gets the ordinary approval card unless one of the
+two command permissions covers it.
 
 ## Next
 
