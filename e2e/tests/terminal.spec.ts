@@ -3195,7 +3195,9 @@ test("stop and delete failures surface in the row's own error line, without dist
     await openRowMenu(row);
     await row.locator(".session-row-delete").click();
     await row.locator(".confirm-delete").click();
-    await expect(row.locator(".action-error")).toContainText(
+    // The menu retains the refusal beside the hidden row banner after the
+    // confirmation ends. Select its visible error, not both retained copies.
+    await expect(row.locator(".session-row-menu-panel .action-error")).toContainText(
       "delete-failure-sentinel",
     );
     // A failed delete must not vanish the row.
