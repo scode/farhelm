@@ -269,7 +269,8 @@ pub(super) fn encode_history(
 
 /// Finish sizing with cursor and REP fixups, retaining a blob only if it fits.
 /// The painter reserves their minimum overhead; their exact final cost can
-/// still turn a retained paint into a measurement here.
+/// still turn a retained paint into a measurement here. A fitting stream's
+/// allocation becomes the blob, so ordinary output never needs a second copy.
 fn container(
     term: &Term<Listener>,
     flags: u8,
@@ -313,13 +314,18 @@ fn container(
         };
     }
 
-    // Compact each source once, after painting is complete. Their written
-    // bytes share one budget; unused reservations must not accompany the
-    // final blob, which is allocated only after these compactions finish.
-    let stream = painted.stream.into_boxed_slice();
+    // Keep the stream's reservation: it already allows room for the container.
+    // Shift its bytes in place rather than holding both a stream and a blob.
+    // Cell fixups still need their own buffer until the suffix is appended.
+    let mut blob = painted.stream;
     let cells = fixups.cells.buf.into_boxed_slice();
+    blob.reserve_exact(len - blob.len());
+    blob.resize(HEADER_BYTES + painted.stream_len, 0);
+    blob.copy_within(..painted.stream_len, HEADER_BYTES);
+    // The header is small and uses the same wire helpers as before. Keeping
+    // it separate avoids making the painter know the container's fields.
     let mut w = Writer::default();
-    w.buf.reserve_exact(len);
+    w.buf.reserve_exact(HEADER_BYTES);
     w.buf.extend_from_slice(&MAGIC);
     w.u16(VERSION);
     w.u8(flags);
@@ -335,8 +341,9 @@ fn container(
     w.u8(update);
     w.u64(widths.fingerprint);
     w.len(painted.stream_len);
-    w.buf.extend_from_slice(&stream);
-    drop(stream);
+    debug_assert_eq!(w.buf.len(), HEADER_BYTES);
+    blob[..HEADER_BYTES].copy_from_slice(&w.buf);
+    w.buf = blob;
     w.len(painted.cell_fixup_count);
     w.buf.extend_from_slice(&cells);
     drop(cells);
@@ -352,7 +359,9 @@ fn container(
     }
     debug_assert_eq!(w.buf.len(), len);
     Encoded {
-        blob: w.buf,
+        // The eager reservation is address space, not retained snapshot data.
+        // Drop its spare capacity before handing the blob to the host.
+        blob: w.buf.into_boxed_slice().into_vec(),
         len,
         history_costs: painted.history_costs,
         cancelled: false,
