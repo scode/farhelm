@@ -3,7 +3,6 @@
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
 - [`stop-closes-tabs`](reports/stop-closes-tabs.report.md) landed 2026-11-08 in #3132, #3133: Stop closes the session's terminal tabs, asking first when tabs are open (skippable), with a precondition when it did not ask; Restart keeps tabs
-- [`tensorlake-credentials-polish`](reports/tensorlake-credentials-polish.report.md) landed 2026-11-08 in #3165: Settings → Credentials shows one plain-text storage warning for the whole section and labels its key field "Tensorlake API key"
 - [`openssh-state-path-refusal`](reports/openssh-state-path-refusal.report.md) landed 2026-11-08 in #3168, #3170: Tensorlake: refuse helm state paths containing characters older OpenSSH cannot carry
 - [`agent-settings-compare-replace`](reports/agent-settings-compare-replace.report.md) landed 2026-11-08 in #3173: Tensorlake hosts: credential delivery never overwrites an agent settings file that changed after it was read
 - [`maintainer-tool-safety`](reports/maintainer-tool-safety.report.md) landed 2026-11-08 in #3169, #3172: maintainer tools: agent-tui stop deletes nothing it cannot identify; fixture scrubber catches userinfo URLs
