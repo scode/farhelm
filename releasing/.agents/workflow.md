@@ -11,11 +11,11 @@ config (or `.github/dist-build-setup.yml`) and run `dist init --yes && dprint fm
 only (`pr-run-mode = "skip"`, D19), so a PR exercises none of it: the release path is validated when a tag is cut, by
 the gate `.github/dist-build-setup.yml` puts at the top of every build job — the tag-shape assertion, the changelog
 format and announcement checks, then the retained Rust targets, pinned shutdown regression, JS harness, CentOS
-provisioning, desktop unit test, and desktop smoke on the x86_64 Linux one; an Apple CLI compile, standalone uninstall
-validation and desktop unit test on macOS. The tmux-driven e2e suite remains out of the Linux gate until its
-load-sensitive tests are deflaked; TODO.md lists the condition for putting it back. That gate lives inside the build
-jobs rather than in a `plan-jobs` workflow because dist 0.32 lets a failed plan job SKIP the build jobs, and its `host`
-job accepts a skip; a failure inside a build job is the only kind it refuses.
+provisioning, desktop unit test, and desktop smoke on the x86_64 Linux one; standalone uninstall validation and desktop
+unit test on macOS. The tmux-driven e2e suite remains out of the Linux gate until its load-sensitive tests are deflaked;
+TODO.md lists the condition for putting it back. That gate lives inside the build jobs rather than in a `plan-jobs`
+workflow because dist 0.32 lets a failed plan job SKIP the build jobs, and its `host` job accepts a skip; a failure
+inside a build job is the only kind it refuses.
 
 What a change to release plumbing CAN be checked locally is `dist plan` (the config parses and the asset list is what
 you expect), `dist generate --check` (the generated workflow is current), the release scripts' own `--self-test` modes
