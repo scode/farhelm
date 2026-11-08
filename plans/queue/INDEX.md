@@ -9,6 +9,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight db591c] `settings-dialog-fixed-size.md` — The Settings dialog keeps one fixed height across sections (about 640px, capped by the window), its body scrolling for taller sections
 - [pending] `upgrade-epochs.md` — Upgrade epochs as an upgrade floor: installations and hosts below the floor are told to uninstall and reinstall; the SPEC.md freeze becomes the floor rule
 - [complete] `pin-rust-toolchain.md` — Pin Rust to the newest stable in rust-toolchain.toml so local checks, CI and release builds agree; bumps are manual PRs
-- [in-flight da1c60] `xhigh-effort-label.md` — The extra-high effort level reads "xhigh" instead of "Xhigh" wherever effort labels show
+- [complete] `xhigh-effort-label.md` — The extra-high effort level reads "xhigh" instead of "Xhigh" wherever effort labels show
 - [pending] `scoped-stop-without-sweep.md` — Where a launch or tab runs in a systemd scope, Stop, tab close and Delete end the scope and skip the machine-wide process sweep; SPEC.md states what is no longer caught
 - [pending] `session-switch-jiggle.md` — Find and fix what makes rightmost-column text and full-width rules jiggle in new terminals when switching sessions, with a browser test
