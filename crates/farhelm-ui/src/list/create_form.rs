@@ -928,6 +928,41 @@ fn checkout_preview_authority(
     })
 }
 
+/// Bind deferred submission to the agent choices, including unfinished Custom text.
+/// Field memos retain the preview's subscriptions; raw seeds come from its live owner.
+fn preview_agent_identity(draft: LaunchDraftState) -> String {
+    let f = draft.fields();
+    let current = draft.snapshot();
+    format!(
+        "{:?}",
+        (
+            (
+                (f.launch_tab)(),
+                (f.structured_harness)(),
+                (f.structured_model)()
+            ),
+            ((f.structured_effort)(), (f.structured_permissions)()),
+            ((f.structured_permission_flags)(), (f.structured_wrapper)()),
+            (f.container)(),
+            submitted_field(
+                &(f.invocation)(),
+                (f.invocation_edited)(),
+                current.invocation_raw_seed().as_deref(),
+            ),
+            (
+                (f.command_yolo)(),
+                (f.command_agent)(),
+                (f.command_resume_on)()
+            ),
+            submitted_field(
+                &(f.command_resume)(),
+                (f.command_resume_edited)(),
+                current.command_resume_raw_seed().as_deref(),
+            ),
+        )
+    )
+}
+
 /// One accepted submission waiting only for its refreshed checkout preview.
 ///
 /// Permissions participate in preview authority, so changing YOLO to guarded
@@ -3686,33 +3721,7 @@ pub(super) fn CreateSessionForm(
             .command_resume_raw_seed()
             .is_some_and(|raw| raw.chars().any(farhelm_proto::text::is_presentation_unsafe));
 
-    let preview_agent_now = move || {
-        format!(
-            "{:?}:{:?}:{:?}:{:?}:{:?}:{:?}:{}",
-            launch_tab(),
-            structured_harness(),
-            structured_model(),
-            structured_effort(),
-            structured_permissions(),
-            structured_wrapper(),
-            submitted_field(
-                &invocation(),
-                invocation_edited(),
-                draft.snapshot().invocation_raw_seed().as_deref()
-            ),
-        ) + &format!(":{:?}", container())
-            + &format!(
-                ":{:?}:{:?}:{}:{}",
-                command_yolo(),
-                command_agent(),
-                command_resume_on(),
-                submitted_field(
-                    &command_resume(),
-                    command_resume_edited(),
-                    draft.snapshot().command_resume_raw_seed().as_deref()
-                )
-            )
-    };
+    let preview_agent_now = move || preview_agent_identity(draft);
     // Configuration epochs are global and monotonic. Retain the highest
     // observed value while a history refresh is pending or fails; falling
     // back to zero would authorize a preview we already know is obsolete.

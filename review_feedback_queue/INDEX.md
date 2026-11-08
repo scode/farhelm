@@ -51,12 +51,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   wrapping disabled, zero-width terminal output at the right edge can attach to the preceding cell and change retained
   text order.
 
-- [`launcher-live-draft-submission-source-gap.md`](launcher-live-draft-submission-source-gap.md) — While a resumed
-  host's checkout preview loads, editing Custom permission words can automatically launch the edited agent without a new
-  Launch press. Supported edits can change guarded vendor settings into permission bypass. This specific
-  source-confirmed route makes the item highest priority; the older generic target/container concerns below remain
-  unverified after investigation.
-
 - [`startup-probe-false-tmux-absence.md`](startup-probe-false-tmux-absence.md) — A temporary resource/connection failure
   at startup can make a live old session appear ended; its normal guarded Delete can then stop that live work without
   authorizing it. This is a source-established conditional failure, not a measured incident.
@@ -2210,3 +2204,7 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`ambiguous-codex-seed-renewal.md`](ambiguous-codex-seed-renewal.md) — Unverified after investigation: an uncertain
   Codex login upload can replay after renewal. Whether restoring the saved seed makes authentication or later refresh
   unusable remains unestablished; explicit exactly-once ambiguity coverage is partial.
+
+- [`launcher-live-draft-submission-source-gap.md`](launcher-live-draft-submission-source-gap.md) — The launcher reads
+  live choices at submission, but no complete supported sequence establishes a contradictory accepted launch for the
+  remaining generic concern. Other priority; unverified after investigation.
