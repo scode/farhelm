@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`no-gc-at-launch`](reports/no-gc-at-launch.report.md) landed 2026-11-07 in #3130: No automatic git cleanup on any git command a launch waits on; the repository cache consolidates in the background after every launch, spares on or off
 - [`instant-trash-delete`](reports/instant-trash-delete.report.md) landed 2026-11-07 in #3131, #3134: Trash deletes answer at once and hosts remove the files in the background; the dialog closes on a confirmed bulk delete and the trash icon animates until the space is freed
 - [`macos-tunnel-exit`](reports/macos-tunnel-exit.report.md) landed 2026-11-07 in #3135, #3138: Recipe tunnels end when the helm dies (a stdin pipe the sandbox side waits on) or goes silent (30 s heartbeat, 120 s timeout), verified on macOS CI and real sandboxes
 - [`cut-path-links`](reports/cut-path-links.report.md) landed 2026-11-07 in #3129: A printed path that a program broke across two lines links to the whole path from both halves, specced as a deliberate exception to conservative recognition
