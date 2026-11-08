@@ -1,4 +1,4 @@
-# Browser tests on Tensorlake sandboxes
+# Browser and Rust tests on Tensorlake sandboxes
 
 NOTE: This is not the default way to run tests. Use it only when the maintainer asks for Tensorlake in the task at hand
 (for example "use tensorlake for the landing checks"). Without that, run checks locally as `.agents/validation.md`
@@ -14,8 +14,9 @@ agent needs to run them, and to rebuild the sandbox template from scratch when t
 
 ## When and how much
 
-- Only on request, and only for browser specs. The Rust workspace stays local: its container tests need rootless Podman,
-  which the sandboxes do not have, and it takes ten to twenty minutes anyway.
+- Only on request. Browser specs run through `sandbox-tests.ts`, Rust tests through `rust-tests.ts` (below). The
+  template carries rootless Podman and its offline image, so the containerized e2e tests run there too. Builds, lints,
+  doctests and the UI's desktop tests stay local: the sandboxes have no Rust toolchain and no WebKitGTK.
 - The maintainer's request states a budget: how many sandboxes may exist at once. Stay at or below it (`--shards`).
 - Name owned sandboxes `farhelm-sbx-<checkout>-<n>` (`--prefix farhelm-sbx-<checkout>-`), where `<checkout>` is the
   checkout directory's name lowercased with everything outside `[a-z0-9]` turned into `-`. A sandbox with that prefix
@@ -60,6 +61,37 @@ The shard runner uses the recorder's generic mode (`--kind development` without 
 Playwright mode accepts only spec files and grep selectors and always runs both engines; engine-specific shards need
 `--project`. Say so when reporting.
 
+## Running the Rust tests on sandboxes
+
+`scripts/tensorlake/rust-tests.ts` runs a nextest archive built here across sandboxes, one hash partition each, and
+`run-rust-shard.sh` is its sandbox side. On its first use (2026-11-08), the helm, protocol, supervisor, terminal
+emulator and farhelm crates' 4,660-odd tests ran on ten sandboxes in about a minute and a half each, once the archive
+was there.
+
+1. With the pinned nextest on `PATH` (`docs/test-run-evidence.md`) and an empty working copy of the revision under test,
+   `cargo build` (the e2e harness needs `target/debug/farhelm-fixtures`, which nextest's setup script would otherwise
+   build), then `cargo nextest archive --locked -p <package> ... --archive-file <file>`. If a browser run on the same
+   build is also wanted, start it first and wait until it has packed: the test build relinks `target/debug/farhelm` with
+   test features.
+2. `scripts/tensorlake/rust-tests.ts run --scratch <dir> --template <snapshot> --prefix <name-prefix> --shards <n> --archive <file> --out <dir> [-- <nextest filter arguments>]`.
+   It uploads the archive (about a gigabyte) once, to a staging sandbox, snapshots that, and clones the snapshot for
+   every shard. The staging snapshot is kept, so rerunning the same archive (a narrower filter, say) passes
+   `--staged <snapshot>` and uploads nothing; `sandbox-tests.ts sweep` removes it with the rest.
+3. Read each shard's `summary.txt` like a recorded run: the user manager's state, Podman and its image, self-ssh, then
+   nextest's summary, failures and any runtime `SKIPPED` lines. A failed shard's run directories come back as
+   `runs.tar.gz`; keep them as evidence. Shards run through the recorder's generic mode, because its nextest mode does
+   not take an archive; say so when reporting, with every shard's run ID.
+
+How it works, and why: the test binaries have absolute paths compiled in (fixture directories, `CARGO_BIN_EXE_*`, the
+target directory), so the staging sandbox unpacks the checkout at this checkout's own absolute path and each shard
+extracts the archive over it, with nothing remapped. Nextest's e2e setup script runs `cargo build -p farhelm-fixtures`,
+which cannot run there, so a shard uses a copy of `.config/nextest.toml` without it. A test that passes locally and
+fails there is still a finding: the sandboxes are less loaded than the shared development machine, so races that the
+slow machine hides show up (on first use, three e2e tests that stopped a session soon after creating it).
+
+Give concurrent browser and Rust runs separate `--scratch` directories and name prefixes: each run's sweep terminates
+every live sandbox in its own ledger.
+
 ## What the image gives you, and what it does not
 
 Observed on fresh sandboxes in October 2026; verify rather than assume, since Tensorlake changes it without notice.
@@ -77,6 +109,13 @@ Observed on fresh sandboxes in October 2026; verify rather than assume, since Te
   `farhelm-fixtures`, and the pinned tmux in `.ci-tmux/`, run there unchanged. Pushing them saves a Rust toolchain and a
   half-hour build on every sandbox. If the development machine moves to a newer Ubuntu, this stops being true: build on
   the sandbox instead, or pick a matching image.
+- Rootless Podman is not in the stock image; the template installs it with the image the containerized tests use
+  (`docker.io/library/ubuntu:24.04`). On clones, `/dev/net/tun` comes up readable by root only and no udevd runs to
+  apply a rule, so `run-rust-shard.sh` opens it up before the tests (without that, Podman's networking fails with
+  "open(/dev/net/tun): Permission denied").
+- On clones, systemd-resolved owns `/etc/resolv.conf` and was seen with no upstream server, so nothing resolved; the
+  gateway does not answer DNS either. The template gives resolved public servers. The tests need no DNS; diagnosing on a
+  clone often does.
 - Sizes: create with `-c 4 -m 8192`; three stacks fit in 8 GiB. Disk is chosen at creation and a clone cannot be smaller
   than its snapshot, so the template stays at 10 GiB (it uses about 4) and clones get 30 GiB for retained traces and
   screenshots.
@@ -90,25 +129,28 @@ exists:
 1. Create a named sandbox (`tl sbx create --timeout 60 -c 4 -m 8192 --disk_mb 10240 <name>`). Named, because an unnamed
    one is destroyed at its idle timeout. The 60-second idle timeout cannot be changed later.
 2. Install packages:
-   `build-essential ca-certificates curl git rsync systemd dbus dbus-user-session openssh-server python3`. Before
-   running apt, make sure `/run/systemd/system` does not exist and run `dpkg --configure -a`: when that directory
-   exists, libc6's install script believes systemd is running, calls it, and fails with "Failed to connect to bus",
-   leaving dpkg half-configured. On a sandbox without systemd as PID 1 (the template sandbox), the shard runner creates
-   that directory, so one that has run a shard needs it removed before any later apt run. On a clone, where PID 1 is
-   systemd, the directory is systemd's own: leave it, and package scripts reach the running manager.
+   `build-essential ca-certificates curl git rsync systemd dbus dbus-user-session openssh-server python3`, plus
+   `podman uidmap passt slirp4netns fuse-overlayfs` for the Rust tests, and a resolved drop-in naming public DNS servers
+   (see above). Before running apt, make sure `/run/systemd/system` does not exist and run `dpkg --configure -a`: when
+   that directory exists, libc6's install script believes systemd is running, calls it, and fails with "Failed to
+   connect to bus", leaving dpkg half-configured. On a sandbox without systemd as PID 1 (the template sandbox), the
+   shard runner creates that directory, so one that has run a shard needs it removed before any later apt run. On a
+   clone, where PID 1 is systemd, the directory is systemd's own: leave it, and package scripts reach the running
+   manager.
 3. Push and unpack the source tree, binaries and web bundle, and a one-commit Git checkout (the script's `pack`). The
    recorder identifies the tested commit through Git and finds the pinned tmux through the checkout; without `.git` it
    refuses with "Git checkout unavailable" and "repository pinned tmux path is unavailable". The checkout is a shallow
    clone of the local checkout's HEAD, so the sandbox never contacts the repository's remote.
 4. In `e2e/`, `npm ci`, then `sudo -n env PATH=<path> npx playwright install-deps chromium webkit` and
    `npx playwright install chromium webkit`. `install-deps` needs root and the caller's PATH to find npx.
-5. Give `tl-user` passwordless SSH to itself: an ed25519 key, the public key in `authorized_keys`, and `ssh-keygen -A`
+5. As `tl-user`, `podman pull docker.io/library/ubuntu:24.04`: the containerized tests never pull images.
+6. Give `tl-user` passwordless SSH to itself: an ed25519 key, the public key in `authorized_keys`, and `ssh-keygen -A`
    for host keys. The harness registers its second supervisor as an ssh-to-localhost host; without self-ssh the
    multi-host specs skip. Also create the empty file `/var/lib/systemd/linger/tl-user` (what `loginctl enable-linger`
    records), so that logind on a clone starts `tl-user`'s user manager at boot (`bootstrap.sh` does it right after apt).
-6. Run one small shard as a probe (a couple of quick specs on both engines) and check that `summary.txt` says the user
+7. Run one small shard as a probe (a couple of quick specs on both engines) and check that `summary.txt` says the user
    manager is `running` and self-ssh is `ok`.
-7. Remove the probe's output, `tl sbx checkpoint <name>`, wait until `tl sbx checkpoint ls` shows the snapshot
+8. Remove the probe's output, `tl sbx checkpoint <name>`, wait until `tl sbx checkpoint ls` shows the snapshot
    completed, then terminate the sandbox and delete its automatic suspend snapshot. Record the template's snapshot ID.
 
 ## What every shard does first
@@ -150,6 +192,9 @@ failing with "ssh fixture must be connected", so a run with it is not evidence.
 ## Tensorlake CLI traps
 
 - `tl sbx cp` copies one file; directories fail with a misleading "file not found". Move trees as tarballs.
+- One `tl sbx cp` moved about 0.7 MiB/s from the development machine however fast its link was (2026-11-08), and eleven
+  at once about 8 MiB/s in total: the cap is per transfer. `uploadChunked` in `sandbox-tests.ts` sends large files as
+  parallel 100 MiB chunks, which took a 1.1 GB archive from about 25 minutes to under three.
 - `tl sbx exec` forwards no stdin, and its own options (`-t`, `-e`, `-w`) go before the sandbox name; everything after
   the name is the command. `tl` also parses options after the name as its own, so `tl sbx exec NAME df -h` prints `tl`'s
   help: wrap such commands in `sh -c '...'`.

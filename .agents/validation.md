@@ -852,12 +852,13 @@ that its required systemd or SSH substrate ran.
 - `deno test -A scripts/serve-page.ts` — the legacy standalone static server (agent pages use the `interactive-artifact`
   skill): that it answers with `Cache-Control: no-store` and moves past a taken port. Run it, with `deno check` on the
   same file, when the script changes; seconds. Needs Deno, and fetches `jsr:@std/http` the first time.
-- `deno test -A scripts/tensorlake/sandbox-tests.ts` and
-  `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-shard.sh` — the Tensorlake browser-test harness's
-  own checks: how projects are balanced into shards, how the snapshot listing is read, which projects each run of the
-  suite has (the ordinary one, or the old-terminal set's), loading the set's account from the tested checkout, and how
-  an old-terminal run's shard summary is checked. Run them, with `deno check`, when the harness changes; seconds, no
-  sandbox. Using the harness itself is described in `.agents/tensorlake.md`.
+- `deno test -A scripts/tensorlake/sandbox-tests.ts`, `deno check scripts/tensorlake/rust-tests.ts` and
+  `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-shard.sh scripts/tensorlake/run-rust-shard.sh` —
+  the Tensorlake harness's own checks (browser and Rust runners): how projects are balanced into shards, how the
+  snapshot listing is read, which projects each run of the suite has (the ordinary one, or the old-terminal set's),
+  loading the set's account from the tested checkout, and how an old-terminal run's shard summary is checked. Run them,
+  with `deno check`, when the harness changes; seconds, no sandbox. Using the harness itself is described in
+  `.agents/tensorlake.md`.
 - `python3 scripts/record-test-run.py --kind development --selection 'portable brick-test harness' --concurrency 'one unittest process' --tmux none -- python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v`
   — validates owned Tart lifecycle, signed-input planning, guest execution, fixed command operations, durable handoffs,
   compiled checkpoint contracts, fresh-versus-update installer entrypoints, fixed command-only execution and provenance,

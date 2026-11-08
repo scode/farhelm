@@ -31,7 +31,7 @@ import { assertEquals } from "jsr:@std/assert@1.0.19";
 const HERE = import.meta.dirname!;
 // The checkout this script lives in; `--repo` overrides it for a copy run from elsewhere.
 let REPO = `${HERE}/../..`;
-const HOME = "/home/tl-user";
+export const HOME = "/home/tl-user";
 const CLONE_DISK_MB = "30720"; // room for several shards' retained traces; a clone cannot be smaller than the template
 const TEMPLATE_DISK_MB = "10240"; // the platform minimum; the bootstrapped image uses about 4 GiB
 
@@ -60,7 +60,7 @@ async function pack(scratch: string) {
 
 // --- sandboxes and the ledger
 
-async function create(scratch: string, name: string, disk: string, template?: string) {
+export async function create(scratch: string, name: string, disk: string, template?: string) {
   const fromSnapshot = template ? ["-s", template] : ["-c", "4", "-m", "8192"];
   const id = (await $`tl sbx create ${fromSnapshot} --timeout 60 --disk_mb ${disk} ${name}`.text()).trim().split(/\s+/)
     .pop()!;
@@ -81,7 +81,7 @@ async function ledger(scratch: string): Promise<LedgerRow[]> {
 async function provision(name: string, pack: string) {
   await $`tl sbx exec ${name} mkdir -p ${HOME}/stage ${HOME}/farhelm`;
   for (const f of ["src.tar.gz", "bin.tar.gz", "git.tar.gz"]) {
-    await $`tl sbx cp ${pack}/${f} ${name}:${HOME}/stage/${f}`.quiet();
+    await uploadChunked(name, `${pack}/${f}`, `${HOME}/stage/${f}`);
   }
   for (const f of ["bootstrap.sh", "run-shard.sh"]) {
     await $`tl sbx cp ${HERE}/${f} ${name}:${HOME}/stage/${f}`.quiet();
@@ -91,6 +91,34 @@ async function provision(name: string, pack: string) {
   await $`tl sbx exec ${name} sh -c ${unpack}`;
 }
 
+/** Uploads a file to a sandbox as 100 MiB chunks over up to 12 parallel `tl sbx cp` calls, then reassembles it and
+ * checks its size. Measured from a development host on 2026-11-08, one `tl sbx cp` moved about 0.7 MiB/s however fast
+ * the link was, and eleven at once moved about 8 MiB/s in total: the cap is per transfer, so a 1 GiB file takes minutes
+ * this way instead of half an hour. Files of one chunk or less go in a single call. */
+export async function uploadChunked(name: string, file: string, dest: string) {
+  const size = Deno.statSync(file).size;
+  const chunk = 100 * 1024 * 1024;
+  if (size <= chunk) {
+    await $`tl sbx cp ${file} ${name}:${dest}`.quiet();
+    return;
+  }
+  const dir = await Deno.makeTempDir({ prefix: "tl-upload-" });
+  try {
+    await $`split -b ${String(chunk)} -d -a 3 ${file} ${dir}/part.`;
+    const parts = [...Deno.readDirSync(dir)].map((e) => e.name).sort();
+    await $`tl sbx exec ${name} mkdir -p ${dest}.parts`;
+    const queue = [...parts];
+    await Promise.all(Array.from({ length: Math.min(12, parts.length) }, async () => {
+      for (let p = queue.shift(); p; p = queue.shift()) await $`tl sbx cp ${dir}/${p} ${name}:${dest}.parts/${p}`.quiet();
+    }));
+    await $`tl sbx exec ${name} sh -c ${`cat ${dest}.parts/part.* > ${dest} && rm -rf ${dest}.parts`}`;
+    const got = Number((await $`tl sbx exec ${name} stat -c %s ${dest}`.text()).trim());
+    if (got !== size) throw new Error(`${dest} on ${name}: reassembled ${got} bytes, expected ${size}`);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+}
+
 /** Snapshot table rows as [snapshot ID, source sandbox ID, status]. The CLI prints a box-drawn table. */
 export function snapshotRows(listing: string): [string, string, string][] {
   return listing.split("\n").filter((l) => l.includes("┆")).map((l) => l.replace(/^[│\s]+|[│\s]+$/g, "").split("┆"))
@@ -98,7 +126,7 @@ export function snapshotRows(listing: string): [string, string, string][] {
     .map((c) => [c[0], c[4], c[1]]);
 }
 
-async function sweep(scratch: string, keep: string[]) {
+export async function sweep(scratch: string, keep: string[]) {
   const rows = (await ledger(scratch)).filter((r) => r.id); // template rows record a snapshot, not a sandbox
   const alive = await $`tl sbx ls`.text();
   for (const r of rows) if (alive.includes(r.id)) await $`tl sbx terminate ${r.name}`.noThrow();
@@ -199,7 +227,7 @@ export function summaryNamesSuiteTerminals(summary: string, kind: string): boole
   return summary.split("\n").some((line) => line.trim() === `suite terminals: ${kind}`);
 }
 
-async function freeNames(prefix: string, n: number) {
+export async function freeNames(prefix: string, n: number) {
   const taken = new Set((await $`tl sbx ls`.text()).split(/\s+/));
   const names: string[] = [];
   for (let i = 1; names.length < n; i++) if (!taken.has(`${prefix}${i}`)) names.push(`${prefix}${i}`);
