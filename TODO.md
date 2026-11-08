@@ -39,37 +39,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   to the preparation sandbox. Recipe snapshots already keep a base's content the same way. The alternative was to refuse
   a base that holds credentials in known locations, naming what its author must remove, which can still be added later.
 
-- **Revisit letting the agent settings overwrite fix grow to about 280 lines.** Decided on the maintainer's behalf on
-  2026-11-08 when agent-settings-compare-replace blocked: the fix that keeps Farhelm's credential delivery to a
-  Tensorlake host from overwriting a Claude Code or Codex settings edit saved after Farhelm read the file (check the
-  file right before replacing it, merge once on a change, keep the amber warning on a second conflict) was estimated at
-  180-280 changed lines against the plan's 100-line limit, because the shared file installer has to carry the expected
-  old content to its final replacement. The limit was raised to about 280 lines with the same scope. The alternative was
-  to keep the 100-line limit and defer the fix, leaving the overwrite possible.
-
-- **Revisit exact Ghostty matching for emoji variation selectors.** Decided by the maintainer on 2026-11-04, answering
-  the vs16-emoji-width plan's block: new terminals follow Ghostty's widths for U+FE0F and U+FE0E except in two cases,
-  pinned in tests. At the last column with autowrap off, Farhelm cannot tell an empty cell from a space the program
-  printed (its saved snapshots store both the same way), so it treats a printed space as empty and a selector can widen
-  a character Ghostty leaves narrow. On a terminal one column wide, today's wide-character handling stays, so after a
-  too-wide character and a pending wrap the cursor can end on a different row than Ghostty's. Matching Ghostty exactly
-  needs new saved cell state, a new snapshot format with a fallback for existing snapshots, and changed one-column
-  handling.
-
-- **Revisit keeping full durability for the host identity under WAL.** Decided on the maintainer's behalf on 2026-10-30
-  when the sqlite-wal landing was blocked: SPEC.md's rule that lasting damage is never accepted, however unlikely the
-  trigger, was read as taking precedence over the plan's decision that no write keeps full durability. The plan went
-  back to make writes whose loss could leave lasting damage fully durable, at least the supervisor's first creation of
-  the host identity: under synchronous NORMAL a power loss right after a host's first start could keep the helm's record
-  of that identity and lose the supervisor's, leaving the desktop app refusing to start with nothing to restore. The
-  other option was to keep NORMAL for every write and amend SPEC.md to allow that window.
-
-- **Revisit deferring Muse question recognition.** Decided on the maintainer's behalf on 2026-10-29 for the Muse
-  session-tracking plan: it ships conversation resume and working, idle and trust status for Muse, but not recognizing
-  questions or approval dialogs during a conversation, because no provider usable without the maintainer's credentials
-  could make Muse ask a real question. Until then a waiting Muse session can look idle. The alternative is to supply an
-  authenticated test provider (or a documented fixture protocol) so the executor can capture those screens.
-
 ## Near term
 
 - **Let a host's sessions manage sessions on that same host without asking.** A new host permission, off by default,
@@ -80,14 +49,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Fix the misleading message when Stop interrupts a starting agent.** A Stop pressed while the agent is still starting
   is recorded as a launch that never started, and its message wrongly blames the host's systemd user manager. The
   message should say what happened: the user stopped the session before its agent finished starting. Found while
-  reviewing the stop-closes-tabs plan on 2026-11-08; the behavior predates that plan.
+  reviewing the stop-closes-tabs plan on 2026-11-08; the behavior predates that plan. Plan:
+  `plans/queue/stop-start-message.md`.
 
 - **Stop the Settings dialog resizing when the section changes.** The dialog takes the height of whichever section is
   showing, so moving between Sessions, Appearance, Credentials and the rest makes the whole modal jump and the footer's
   Close button move with it. Fix is TBD; keep the dialog one size across sections.
-
-- **Generally rethink the session filtering experience.** The list now names its active filters and shows a removable
-  host chip; revisit the broader filtering experience.
 
 - **Overhaul the grid stream's encoding and the grid client's history storage.** Grid terminals (terminals in a terminal
   host) get their screen and history from the supervisor as JSON messages, and the page keeps every history line
@@ -117,6 +84,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the trash at once and the host removes its files in the background, retrying after restarts when it cannot (files
   owned by a container's root user, say). Decided on 2026-11-07 while planning it: for now such a folder only gets a
   logged warning, and nothing may get stuck or break because of it. Consider improving how visible this is to the user.
+  Plan: `plans/queue/rail-notification-bell.md`.
 
 - **Upgrade epochs.** Give every release an upgrade epoch, and only promise clean upgrades across one epoch: an
   installation on epoch N updates normally while the latest release is on N+1, and one whose latest release is N+2 is
@@ -382,7 +350,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   about twice the blob, up to 32 MiB at the 16 MiB limit. Painting straight into the blob's buffer after a placeholder
   header, then patching the stream length (the header's last field), would bring that to about one blob plus fixups with
   byte-identical output. Left out of `faster-snapshot-encoder`, which is about speed; `tests/memory.rs` is the arbiter
-  of the memory claim.
+  of the memory claim. Plan: `plans/queue/snapshot-in-place-paint.md`.
 - **Jittery/jiggling characters when switching between sessions.** Switching between sessions makes characters jitter or
   jiggle: something is being re-drawn or laid out for no reason. Find what triggers the needless re-draw/re-layout on
   session switch.
@@ -632,7 +600,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   npm or npx process never shows the command line Farhelm's OMP process-chain check expects, and that recognition cannot
   match anywhere in the chain; it is only covered by shape tests built on the expected command line. Found while landing
   `omp-pane-guard-all-launches`, where a live `npx` run on Linux confirmed the rewrite. Say what actually works for npx
-  launches, or make the recognition match what live npm shows.
+  launches, or make the recognition match what live npm shows. Plan: `plans/queue/omp-npx-docs.md`.
 
 ## Tricky bugs
 
