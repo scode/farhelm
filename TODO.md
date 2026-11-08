@@ -31,13 +31,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `CredentialsSettings` renders `StorageWarning { multiple: true }` and then `TensorlakeKey`, which renders its own
   warning, and `e2e/tests/credentials-settings.spec.ts` asserts the text appears twice, which locks the duplicate in.
   Decide whether the key form drops its warning where the page already shows one (keeping it only inside editors) or the
-  two collapse into a single notice, then fix that test.
+  two collapse into a single notice, then fix that test. Plan: `plans/queue/tensorlake-credentials-polish.md`.
 
 - **Name the Tensorlake API key in Settings → Credentials.** The key form's visible heading is just "API key", carried
   over from the Tensorlake page, where the surrounding section supplies the product name; inside Credentials it reads
   like one of the named secrets and only the help text below says Tensorlake. The shared `TensorlakeKey` component
   renders `span { "API key" }` for both pages, so label it "Tensorlake API key" at least where `credentials_location` is
-  set, the way its `aria_label` already does.
+  set, the way its `aria_label` already does. Plan: `plans/queue/tensorlake-credentials-polish.md`.
 
 - **Stop the Settings dialog resizing when the section changes.** The dialog takes the height of whichever section is
   showing, so moving between Sessions, Appearance, Credentials and the rest makes the whole modal jump and the footer's
@@ -482,6 +482,23 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   - Possibly: live resize (boot small, grow on demand), shared scratch volumes, and forking a warm sandbox from a memory
     checkpoint or live copy (restores running processes with the same boot ID, which is also a trap: a forked supervisor
     keeps its identity).
+
+  Plans: `plans/queue/recipe-bases.md`, `plans/queue/prepared-snapshots.md`, `plans/queue/sandbox-sessions.md`.
+
+- **Let agents in sandbox sessions ask Farhelm to act.** The first version of sandbox sessions (a session in a
+  Tensorlake sandbox of its own, `plans/queue/sandbox-sessions.md`) refuses every agent request from such a session:
+  `farhelm spawn` and every `farhelm agent …` verb, with a quiet notification on the session. The maintainer chose that
+  on 2026-11-08 to keep the trust question out of the first version. Decide what an agent in a disposable sandbox may
+  ask for. It should not reach the user's other hosts any further than it could from anywhere else (the trust questions
+  in `lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md` and SPEC.md's "Local authority and trust between
+  hosts"). Then allow that much. Spawning another sandbox session from the same recipe is the obvious first candidate.
+
+- **Auto-suspend forgotten sandbox sessions.** A sandbox session bills its CPU and memory for as long as its sandbox
+  runs. While the helm is connected, Tensorlake's idle timeout never fires, because the helm's connection counts as
+  activity. A session the user forgot about therefore keeps billing until they suspend or delete it. The maintainer
+  accepted that for the first version on 2026-11-08 and wants an automatic suspend later, for example after the agent
+  has been idle for a while. The rule and its default are to be decided when this is picked up.
+
 - **`gh:owner/repo` launches can land in a session in the wrong repository.** When launching a GitHub managed checkout
   by typing `gh:owner/repo`, the string is sometimes treated as a session name instead, so the launch lands in a session
   in the wrong repo. Keeps happening to the maintainer. The fingerprint: the session's title is literally the typed
