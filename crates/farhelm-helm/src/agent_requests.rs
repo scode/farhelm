@@ -470,7 +470,15 @@ impl AgentRequestHandler for HelmAgentRequests {
                     .await,
                     title: title.clone(),
                 };
-                match approved(&state, origin, session_id, action).await {
+                match approved(
+                    &state,
+                    origin,
+                    session_id,
+                    target.host == origin.host,
+                    action,
+                )
+                .await
+                {
                     Ok(()) => crate::sessions::do_rename_session(
                         &state,
                         &target,
@@ -505,7 +513,15 @@ impl AgentRequestHandler for HelmAgentRequests {
                     )
                     .await,
                 };
-                match approved(&state, origin, session_id, action).await {
+                match approved(
+                    &state,
+                    origin,
+                    session_id,
+                    target.host == origin.host,
+                    action,
+                )
+                .await
+                {
                     Ok(()) => crate::sessions::do_stop_session(&state, &target, false, false)
                         .await
                         .and_then(|outcome| {
@@ -628,7 +644,15 @@ impl AgentRequestHandler for HelmAgentRequests {
                 // the clearer message; the supervisor then holds the restart
                 // to `shown` under its lifecycle claim, which catches one
                 // landing after this check (`expected_launch`).
-                let approval = match approved(&state, origin, session_id, action).await {
+                let approval = match approved(
+                    &state,
+                    origin,
+                    session_id,
+                    target.host == origin.host,
+                    action,
+                )
+                .await
+                {
                     Ok(()) if cached_launch(&state, &target).await.as_ref() != Some(&shown) => {
                         Err(anyhow::Error::new(crate::SupervisorError::helm(
                             ErrorKind::Conflict,
@@ -1869,6 +1893,7 @@ async fn create_for_agent(
             verb,
             prompt: resolved.resolution.prompt.clone(),
             host: resolved.host,
+            source_on_origin_host: true,
             host_name: resolved.host_name.clone(),
             cwd: resolved.resolution.cwd.clone(),
             repo: None,
@@ -1994,6 +2019,7 @@ async fn create_checkout_for_agent(
                         verb: LaunchVerb::Create,
                         prompt: recovery.prompt.clone(),
                         host: claim.host,
+                        source_on_origin_host: true,
                         host_name: resolved.host_name.clone(),
                         cwd: recovery.cwd.clone(),
                         repo: Some(format!("{}/{}", recovery.repo.owner, recovery.repo.name)),
@@ -2090,6 +2116,7 @@ async fn create_checkout_for_agent(
             verb: LaunchVerb::Create,
             prompt: resolution.prompt.clone(),
             host: claim.host,
+            source_on_origin_host: true,
             host_name: resolved.host_name.clone(),
             cwd: preview.binding.cwd.clone(),
             repo: Some(repo.clone()),
@@ -2273,6 +2300,9 @@ struct LaunchApproval {
     prompt: Option<String>,
     verb: LaunchVerb,
     host: HostId,
+    /// Every source stays on the origin too. Creates have no source; clone
+    /// resolves its source host separately from its destination before asking.
+    source_on_origin_host: bool,
     host_name: String,
     cwd: String,
     /// GitHub repository for the source-qualified card row; absent for folders and clones.
@@ -2313,6 +2343,7 @@ async fn approve_launch(
         crate::yolo_guard::AgentVerdict::ApprovalRequired
     );
     let host = approval.host;
+    let own_host_session_action = host == origin.host && approval.source_on_origin_host;
     let launch = approval.launch.clone();
     let agent_wrapper_supplied = approval.agent_wrapper_supplied;
     // The target as the card names it: the connection serving its registry
@@ -2364,7 +2395,14 @@ async fn approve_launch(
             },
         }
     };
-    approved(state, origin, asking_session, action).await?;
+    approved(
+        state,
+        origin,
+        asking_session,
+        own_host_session_action,
+        action,
+    )
+    .await?;
     if state.manager.status(host).map(|status| status.incarnation) != target_before {
         return Err(anyhow::Error::new(crate::SupervisorError::helm(
             ErrorKind::Unavailable,
@@ -2427,7 +2465,8 @@ async fn agent_prompt(
         attached,
         prompt: prompt.to_string(),
     };
-    approved(state, origin, asking, action).await?;
+    // Prompt is deliberately outside the own-host grant, even if re-enabled.
+    approved(state, origin, asking, false, action).await?;
     let (current_claim, current_client) = crate::sessions::route_session(state, target).await?;
     if current_claim.host != claim.host
         || current_claim.incarnation != claim.incarnation
@@ -2470,7 +2509,7 @@ async fn agent_delete(
         target: crate::approvals::describe_session(state, target, &claim.entry_uuid).await,
         guard,
     };
-    approved(state, origin, asking, action).await?;
+    approved(state, origin, asking, target.host == origin.host, action).await?;
     crate::sessions::do_delete_session(state, target, guard, Some(client.connection_id()))
         .await
         .map(|outcome| AgentReply::Deleted { outcome })
@@ -2502,13 +2541,23 @@ fn agent_delete_guard(
 /// replaced or re-identified the host while the user took their time
 /// (SPEC.md: an approval holds only for the connection the request arrived
 /// on). It is the same check `handle` makes on the way in.
+/// Only covered session verbs may pass a same-host fact; template and host
+/// mutations and the dormant prompt path must always pass false.
 async fn approved(
     state: &AppState,
     origin: AgentOrigin,
     asking_session: &str,
+    own_host_session_action: bool,
     action: ApprovalAction,
 ) -> anyhow::Result<()> {
-    crate::approvals::ask(state, origin, asking_session, action).await?;
+    crate::approvals::ask(
+        state,
+        origin,
+        asking_session,
+        own_host_session_action,
+        action,
+    )
+    .await?;
     if !origin_is_live(state, origin) {
         return Err(anyhow::Error::new(crate::SupervisorError::helm(
             ErrorKind::Unavailable,
@@ -2897,7 +2946,7 @@ async fn write_template_for_agent(
             host_name: shown_host.clone(),
         }
     };
-    approved(state, origin, asking_session, action).await?;
+    approved(state, origin, asking_session, false, action).await?;
     info!(
         asking = escape_for_log(asking_session).as_str(),
         template = escape_for_log(&template.name).as_str(),
@@ -2962,6 +3011,7 @@ async fn delete_template_for_agent(
         state,
         origin,
         asking_session,
+        false,
         ApprovalAction::TemplateDelete {
             name: name.clone(),
             fields: existing.fields.clone(),
@@ -3011,6 +3061,7 @@ async fn host_add_for_agent(
         state,
         origin,
         asking_session,
+        false,
         ApprovalAction::HostAdd { destination, alias },
     )
     .await?;
@@ -3105,6 +3156,7 @@ async fn edit_host_for_agent(
         state,
         origin,
         asking_session,
+        false,
         ApprovalAction::HostEdit {
             host_name,
             destination: row.destination.clone(),
@@ -3193,6 +3245,7 @@ async fn remove_host_for_agent(
         state,
         origin,
         asking_session,
+        false,
         ApprovalAction::HostRemove {
             host_name,
             destination: destination.clone(),
@@ -3535,6 +3588,7 @@ async fn clone_for_agent(
             verb: LaunchVerb::Clone,
             prompt: None,
             host,
+            source_on_origin_host: source_key.host == origin.host,
             host_name: host_name.clone(),
             cwd: cwd.clone(),
             repo: None,
@@ -4483,6 +4537,7 @@ mod tests {
             remote_state_dir: None,
             yolo_without_asking: false,
             commands_without_asking: false,
+            own_sessions_without_asking: false,
             links_without_asking: false,
             local_links_without_asking: false,
             icon: Default::default(),
@@ -13918,5 +13973,1136 @@ mod tests {
             host_row(&h, remote).await.unwrap().alias.as_deref(),
             Some("gui")
         );
+    }
+    /// The covered verbs have separate resolution paths even when they share
+    /// an approval kind. In particular, a first message changes a create's card
+    /// kind, and spawn obtains its host from the authenticated origin.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum OwnHostMatrixVerb {
+        Create,
+        CreateWithPrompt,
+        Spawn,
+        Clone,
+        Rename,
+        Stop,
+        Restart,
+        Delete,
+    }
+
+    /// Answer mutations on one destination while retaining the actual wire
+    /// requests. A successful handler reply then proves which operation crossed
+    /// the supervisor boundary, rather than merely proving approval returned.
+    ///
+    /// Listings and connection setup belong to the fleet splice. Directory
+    /// membership is answered here because structured agent creates can ask it
+    /// while composing their launch. The stop channel keeps the peer alive
+    /// through assertions that a waiting card dispatched nothing.
+    fn own_host_matrix_peer(
+        peer: tokio::io::DuplexStream,
+        target: SessionInfo,
+    ) -> (
+        Arc<std::sync::Mutex<Vec<farhelm_proto::ControlMsg>>>,
+        tokio::sync::oneshot::Sender<()>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&observed);
+        let (stop, mut stopped) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("matrix peer handshake");
+            loop {
+                let frame = tokio::select! {
+                    _ = &mut stopped => break,
+                    frame = reader.read_frame() => frame.expect("matrix peer frame"),
+                };
+                let Some(frame) = frame else { break };
+                let request = parse_control(&frame).expect("matrix peer control frame");
+                if let ControlMsg::BrowseDirectory {
+                    req_id,
+                    cwd,
+                    membership_only,
+                } = &request
+                {
+                    assert!(*membership_only, "launch composition only needs ownership");
+                    writer
+                        .write_control(&ControlMsg::DirectoryListing {
+                            req_id: *req_id,
+                            cwd: cwd.clone(),
+                            parent: Some("/".into()),
+                            children: vec![],
+                            truncated: false,
+                            managed_checkout: false,
+                        })
+                        .await
+                        .unwrap();
+                    continue;
+                }
+                recorded.lock().unwrap().push(request.clone());
+                let reply = match request {
+                    ControlMsg::CreateSession {
+                        req_id,
+                        cwd,
+                        title,
+                        launch,
+                        ..
+                    } => {
+                        let launch = launch.expect("the helm resolves a launch before dispatch");
+                        ControlMsg::SessionCreated {
+                            req_id,
+                            session: SessionInfo {
+                                cwd,
+                                title: title.unwrap_or_default(),
+                                invocation: launch.display_command(),
+                                launch,
+                                ..session("created", 100)
+                            },
+                        }
+                    }
+                    ControlMsg::RenameSession { req_id, title, .. } => ControlMsg::SessionRenamed {
+                        req_id,
+                        session: SessionInfo {
+                            title,
+                            ..target.clone()
+                        },
+                    },
+                    ControlMsg::StopSession { req_id, .. } => ControlMsg::SessionStopped {
+                        req_id,
+                        notice: None,
+                    },
+                    ControlMsg::RestartSession { req_id, .. } => ControlMsg::SessionRestarted {
+                        req_id,
+                        session: target.clone(),
+                    },
+                    ControlMsg::DeleteSession { req_id, .. } => ControlMsg::SessionDeleted {
+                        req_id,
+                        notice: None,
+                        archived: true,
+                    },
+                    other => panic!("unexpected matrix peer operation: {other:?}"),
+                };
+                writer
+                    .write_control(&reply)
+                    .await
+                    .expect("matrix peer reply");
+            }
+        });
+        (observed, stop, task)
+    }
+
+    /// Keep the destination fixed while varying the authenticated asking host.
+    /// The remote needs cached source and target rows as well as the mutation
+    /// peer; a standalone local source is enough because the splice owns lists.
+    /// Every permission is assigned explicitly so a convenience fixture cannot
+    /// silently turn the fleet-wide bypass into evidence for the narrow grant.
+    async fn own_host_matrix_fleet(
+        client: tokio::io::DuplexStream,
+        target: SessionInfo,
+        source: SessionInfo,
+    ) -> (Harness, HostId, HostId) {
+        let (builder, remote) = FleetBuilder::new()
+            .await
+            .local(HostScript {
+                identity: Some("identity-local".into()),
+                sessions: vec![session("asker", 1), source.clone()],
+                ..HostScript::default()
+            })
+            .await
+            .ssh(
+                "user@builder",
+                HostScript {
+                    identity: Some("identity-builder".into()),
+                    sessions: vec![session("asker", 1), target, source],
+                    peer: Some(client),
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let h = builder.start().await;
+        let local = local_id(&h.store).await;
+        h.await_refreshed(local).await;
+        h.await_refreshed(remote).await;
+        for host in [local, remote] {
+            h.store
+                .set_commands_without_asking(host, false)
+                .await
+                .unwrap();
+            h.store
+                .set_own_sessions_without_asking(host, false)
+                .await
+                .unwrap();
+            h.store.set_yolo_without_asking(host, true).await.unwrap();
+        }
+        (h, local, remote)
+    }
+
+    /// Every covered handler must use helm-resolved host ownership for the
+    /// narrow grant, while the default and fleet-wide permissions keep their
+    /// existing behavior. Cards are answered with Allow, so asked cases also
+    /// prove dispatch and the specific acknowledgement after approval.
+    ///
+    /// Clone varies its source independently of its destination: importing a
+    /// foreign session must still ask even when the copy lands on the asking
+    /// host. The two hosts deliberately list the same bare source ID, making
+    /// the host-qualified reference load-bearing. Spawn has no foreign-target
+    /// case because its destination is always its authenticated asking host.
+    #[farhelm_testtrace::test]
+    async fn own_host_permission_covers_each_resolved_session_verb() {
+        use OwnHostMatrixVerb as Verb;
+        use farhelm_proto::ControlMsg;
+
+        const PROMPT: &str = "matrix first message\n--literal {farhelm_args}";
+        let verbs = [
+            Verb::Create,
+            Verb::CreateWithPrompt,
+            Verb::Spawn,
+            Verb::Clone,
+            Verb::Rename,
+            Verb::Stop,
+            Verb::Restart,
+            Verb::Delete,
+        ];
+        for (mode, narrow, fleet) in [
+            ("default", false, false),
+            ("narrow", true, false),
+            ("fleet", false, true),
+        ] {
+            for verb in verbs {
+                for same_target in [true, false] {
+                    if verb == Verb::Spawn && !same_target {
+                        continue;
+                    }
+                    for foreign_source in [false, true] {
+                        if foreign_source && (verb != Verb::Clone || !same_target) {
+                            continue;
+                        }
+                        let case = format!(
+                            "mode={mode}, verb={verb:?}, same_target={same_target}, foreign_source={foreign_source}"
+                        );
+                        let mut target =
+                            session_info("target", SessionStatus::Exited { exit_code: Some(0) });
+                        if verb == Verb::Restart {
+                            target.launch = farhelm_proto::SessionLaunch::Command(
+                                farhelm_proto::CommandLaunch {
+                                    command: "matrix-agent {farhelm_args}".into(),
+                                    yolo: false,
+                                    agent: Some(farhelm_proto::LaunchHarness::Claude),
+                                    resume: Some(
+                                        "matrix-agent --resume {conversation} {farhelm_args}"
+                                            .into(),
+                                    ),
+                                },
+                            );
+                            target.invocation = target.launch.display_command();
+                            target.restart_offer = RestartOffer::Resume;
+                            assert!(
+                                target.restart_offer.can_restart(),
+                                "premise: a valid restart target"
+                            );
+                        }
+                        let source = SessionInfo {
+                            cwd: "/matrix/source".into(),
+                            invocation: "echo matrix-source".into(),
+                            launch: farhelm_proto::SessionLaunch::plain_command(
+                                "echo matrix-source",
+                            ),
+                            ..session("source", 3)
+                        };
+                        let (client, peer) = tokio::io::duplex(64 * 1024);
+                        // The responder must exist before the fleet crosses its hello.
+                        let (observed, stop, responder) =
+                            own_host_matrix_peer(peer, target.clone());
+                        let (h, local, destination) =
+                            own_host_matrix_fleet(client, target.clone(), source.clone()).await;
+                        let asking_host = if same_target { destination } else { local };
+                        let source_host = if foreign_source { local } else { asking_host };
+                        h.store
+                            .set_own_sessions_without_asking(asking_host, narrow)
+                            .await
+                            .unwrap();
+                        h.store
+                            .set_commands_without_asking(asking_host, fleet)
+                            .await
+                            .unwrap();
+                        let asking_row = host_row(&h, asking_host).await.unwrap();
+                        assert_eq!(asking_row.own_sessions_without_asking, narrow, "{case}");
+                        assert_eq!(asking_row.commands_without_asking, fleet, "{case}");
+                        assert!(observed.lock().unwrap().is_empty(), "{case}");
+                        assert!(h.state.approvals.list().is_empty(), "{case}");
+                        assert!(
+                            h.store
+                                .has_cached_session(&SessionKey::new(destination, "target"))
+                                .await
+                                .unwrap(),
+                            "{case}"
+                        );
+                        assert!(
+                            h.store
+                                .has_cached_session(&SessionKey::new(source_host, "source"))
+                                .await
+                                .unwrap(),
+                            "{case}"
+                        );
+
+                        let target_id = full_id(&h, destination, "target");
+                        let source_id = full_id(&h, source_host, "source");
+                        let request = match verb {
+                            Verb::Create => command_create(
+                                "user@builder",
+                                "/matrix/create",
+                                "echo matrix-create",
+                                Some("matrix title"),
+                                None,
+                            ),
+                            Verb::CreateWithPrompt => AgentVerb::Create {
+                                host: Some("user@builder".into()),
+                                templates: vec![],
+                                edits: farhelm_proto::launcher::TemplateFields {
+                                    agent: Some(farhelm_proto::LaunchHarness::Codex),
+                                    prompt: Some(PROMPT.into()),
+                                    destination: Some(
+                                        farhelm_proto::launcher::TemplateDestination::Folder(
+                                            "/matrix/create".into(),
+                                        ),
+                                    ),
+                                    ..Default::default()
+                                },
+                                intent_key: None,
+                                confirm_yolo: false,
+                                spawn: None,
+                            },
+                            Verb::Spawn => AgentVerb::Create {
+                                host: None,
+                                templates: vec![],
+                                edits: command_template("echo matrix-create"),
+                                intent_key: None,
+                                confirm_yolo: false,
+                                spawn: Some(farhelm_proto::SpawnPlacement {
+                                    parent: Some("asker".into()),
+                                    ..Default::default()
+                                }),
+                            },
+                            Verb::Clone => AgentVerb::Clone {
+                                source_session_id: Some(source_id.clone()),
+                                host: Some("user@builder".into()),
+                                cwd: None,
+                                title: None,
+                                intent_key: None,
+                                confirm_yolo: false,
+                            },
+                            Verb::Rename => AgentVerb::Rename {
+                                session_id: Some(target_id.clone()),
+                                expected_title: Some(target.title.clone()),
+                                title: "matrix renamed".into(),
+                            },
+                            Verb::Stop => AgentVerb::Stop {
+                                session_id: Some(target_id.clone()),
+                            },
+                            Verb::Restart => AgentVerb::Restart {
+                                session_id: Some(target_id.clone()),
+                                stop_if_running: false,
+                            },
+                            Verb::Delete => AgentVerb::Delete {
+                                session_id: Some(target_id.clone()),
+                                stop_if_running: false,
+                            },
+                        };
+                        let _gui = h.manager.events().admit(1).unwrap();
+                        let handler = HelmAgentRequests::for_state(&h.state);
+                        let origin = origin_of(&h, asking_host);
+                        let task =
+                            tokio::spawn(
+                                async move { handler.handle(origin, "asker", request).await },
+                            );
+                        let automatic = fleet || (narrow && same_target && !foreign_source);
+                        if !automatic {
+                            let card = await_card(&h, &task).await;
+                            assert_eq!(
+                                card.session.id,
+                                full_id(&h, asking_host, "asker"),
+                                "{case}"
+                            );
+                            match (verb, &card.action) {
+                                (
+                                    Verb::Create | Verb::Spawn | Verb::Clone,
+                                    ApprovalAction::Launch {
+                                        verb: shown,
+                                        host_name,
+                                        source: shown_source,
+                                        ..
+                                    },
+                                ) => {
+                                    let expected = match verb {
+                                        Verb::Create => LaunchVerb::Create,
+                                        Verb::Spawn => LaunchVerb::Spawn,
+                                        Verb::Clone => LaunchVerb::Clone,
+                                        _ => unreachable!(),
+                                    };
+                                    assert_eq!(*shown, expected, "{case}");
+                                    assert_eq!(host_name, "user@builder", "{case}");
+                                    assert_eq!(
+                                        shown_source.as_ref().map(|source| source.id.as_str()),
+                                        (verb == Verb::Clone).then_some(source_id.as_str()),
+                                        "{case}"
+                                    );
+                                }
+                                (
+                                    Verb::CreateWithPrompt,
+                                    ApprovalAction::LaunchWithPrompt {
+                                        verb: shown,
+                                        prompt,
+                                        host_name,
+                                        ..
+                                    },
+                                ) => {
+                                    assert_eq!(*shown, LaunchVerb::Create, "{case}");
+                                    assert_eq!(prompt, PROMPT, "{case}");
+                                    assert_eq!(host_name, "user@builder", "{case}");
+                                }
+                                (
+                                    Verb::Rename,
+                                    ApprovalAction::Rename {
+                                        target: shown,
+                                        title,
+                                    },
+                                ) => {
+                                    assert_eq!(shown.id, target_id, "{case}");
+                                    assert_eq!(title, "matrix renamed", "{case}");
+                                }
+                                (Verb::Stop, ApprovalAction::Stop { target: shown })
+                                | (Verb::Delete, ApprovalAction::Delete { target: shown, .. }) => {
+                                    assert_eq!(shown.id, target_id, "{case}");
+                                }
+                                (
+                                    Verb::Restart,
+                                    ApprovalAction::Restart {
+                                        target: shown,
+                                        launch,
+                                        stop_if_running,
+                                    },
+                                ) => {
+                                    assert_eq!(shown.id, target_id, "{case}");
+                                    assert_eq!(launch.as_ref(), Some(&target.launch), "{case}");
+                                    assert!(!*stop_if_running, "{case}");
+                                }
+                                (_, other) => panic!("wrong approval card for {case}: {other:?}"),
+                            }
+                            assert!(
+                                observed.lock().unwrap().is_empty(),
+                                "no mutation before Allow: {case}"
+                            );
+                            assert_eq!(
+                                answer_card(&h, "allow").await,
+                                axum::http::StatusCode::NO_CONTENT,
+                                "{case}"
+                            );
+                        }
+                        let outcome = tokio::time::timeout(RESPONDER_JOIN_BUDGET, task)
+                            .await
+                            .unwrap_or_else(|_| panic!("handler did not finish: {case}"))
+                            .unwrap();
+                        assert!(h.state.approvals.list().is_empty(), "{case}");
+                        let seen = observed.lock().unwrap().clone();
+                        assert_eq!(seen.len(), 1, "one mutation: {case}; {seen:?}");
+                        match (verb, &seen[0], &outcome) {
+                            (
+                                Verb::Create | Verb::CreateWithPrompt | Verb::Spawn | Verb::Clone,
+                                ControlMsg::CreateSession {
+                                    cwd,
+                                    launch,
+                                    prompt,
+                                    parent,
+                                    ..
+                                },
+                                AgentOutcome::Ok {
+                                    reply: AgentReply::Created { session: created },
+                                },
+                            ) => {
+                                assert_eq!(
+                                    created.id,
+                                    full_id(&h, destination, "created"),
+                                    "{case}"
+                                );
+                                assert!(!created.current, "{case}");
+                                assert_eq!(
+                                    prompt.as_deref(),
+                                    (verb == Verb::CreateWithPrompt).then_some(PROMPT),
+                                    "{case}"
+                                );
+                                assert_eq!(
+                                    parent.as_deref(),
+                                    (verb == Verb::Spawn).then_some("asker"),
+                                    "{case}"
+                                );
+                                let expected_cwd = match verb {
+                                    Verb::Spawn => "/srv/t",
+                                    Verb::Clone => source.cwd.as_str(),
+                                    _ => "/matrix/create",
+                                };
+                                assert_eq!(cwd, expected_cwd, "{case}");
+                                if verb == Verb::Clone {
+                                    assert_eq!(launch.as_ref(), Some(&source.launch), "{case}");
+                                    assert_eq!(created.title, source.title, "{case}");
+                                } else if verb != Verb::CreateWithPrompt {
+                                    assert_eq!(
+                                        launch.as_ref().unwrap().display_command(),
+                                        "echo matrix-create",
+                                        "{case}"
+                                    );
+                                } else {
+                                    assert!(
+                                        !serde_json::to_string(launch)
+                                            .unwrap()
+                                            .contains("matrix first message"),
+                                        "prompt must not enter the reusable launch: {case}"
+                                    );
+                                }
+                            }
+                            (
+                                Verb::Rename,
+                                ControlMsg::RenameSession {
+                                    session_id,
+                                    title,
+                                    expected_title,
+                                    ..
+                                },
+                                AgentOutcome::Ok {
+                                    reply: AgentReply::Session { session: renamed },
+                                },
+                            ) => {
+                                assert_eq!(session_id, "target", "{case}");
+                                assert_eq!(title, "matrix renamed", "{case}");
+                                assert_eq!(expected_title.as_ref(), Some(&target.title), "{case}");
+                                assert_eq!(renamed.id, target_id, "{case}");
+                                assert_eq!(renamed.title, "matrix renamed", "{case}");
+                            }
+                            (
+                                Verb::Stop,
+                                ControlMsg::StopSession {
+                                    session_id,
+                                    refuse_if_tabs_open,
+                                    refuse_if_agent_running,
+                                    ..
+                                },
+                                AgentOutcome::Ok {
+                                    reply: AgentReply::Stopped {},
+                                },
+                            ) => {
+                                assert_eq!(session_id, "target", "{case}");
+                                assert!(
+                                    !*refuse_if_tabs_open && !*refuse_if_agent_running,
+                                    "{case}"
+                                );
+                            }
+                            (
+                                Verb::Restart,
+                                ControlMsg::RestartSession {
+                                    session_id,
+                                    expected_launch,
+                                    with,
+                                    stop_if_running,
+                                    ..
+                                },
+                                AgentOutcome::Ok {
+                                    reply: AgentReply::Restarted { session: restarted },
+                                },
+                            ) => {
+                                assert_eq!(session_id, "target", "{case}");
+                                assert_eq!(
+                                    expected_launch.as_ref(),
+                                    Some(&target.launch),
+                                    "{case}"
+                                );
+                                assert!(with.is_none() && !*stop_if_running, "{case}");
+                                assert_eq!(restarted.id, target_id, "{case}");
+                            }
+                            (
+                                Verb::Delete,
+                                ControlMsg::DeleteSession {
+                                    session_id,
+                                    only_if_nothing_alive,
+                                    refuse_if_agent_request_in_flight,
+                                    ..
+                                },
+                                AgentOutcome::Ok {
+                                    reply: AgentReply::Deleted { outcome: deleted },
+                                },
+                            ) => {
+                                assert_eq!(session_id, "target", "{case}");
+                                assert!(
+                                    *only_if_nothing_alive && *refuse_if_agent_request_in_flight,
+                                    "{case}"
+                                );
+                                assert!(deleted.archived && deleted.notice.is_none(), "{case}");
+                            }
+                            (_, request, reply) => panic!(
+                                "wrong dispatch or result for {case}: {request:?}; {reply:?}"
+                            ),
+                        }
+                        stop.send(())
+                            .expect("peer remains alive through assertions");
+                        join_responder(responder, &outcome).await;
+                    }
+                }
+            }
+        }
+    }
+
+    /// The host-local permission cannot authorize edits to fleet configuration.
+    /// Each valid write must still produce its own card, and denying it must
+    /// leave both the templates and registry unchanged. Seeded definitions and
+    /// actual field changes keep pre-validation from satisfying this test.
+    #[farhelm_testtrace::test]
+    async fn own_host_permission_keeps_template_and_host_changes_carded() {
+        use farhelm_proto::host_appearance::HostIcon;
+
+        let (h, local, remote) = host_fleet().await;
+        h.store
+            .set_commands_without_asking(local, false)
+            .await
+            .unwrap();
+        h.store
+            .set_own_sessions_without_asking(local, true)
+            .await
+            .unwrap();
+        put_template(&h, "existing", template_fields("matrix existing command")).await;
+        let before_templates = h.store.launch_templates().await.unwrap();
+        let before_hosts = h.store.list_hosts().await.unwrap();
+        let before_remote = host_row(&h, remote).await.unwrap();
+        let origin_row = host_row(&h, local).await.unwrap();
+        assert!(origin_row.own_sessions_without_asking);
+        assert!(!origin_row.commands_without_asking);
+        assert!(before_remote.alias.is_none());
+        assert_eq!(before_remote.icon, HostIcon::Cloud);
+        let _gui = h.manager.events().admit(1).unwrap();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        for (label, request) in [
+            (
+                "template create",
+                AgentVerb::TemplateCreate {
+                    shortcuts: Default::default(),
+                    name: "matrix-new-template".into(),
+                    fields: template_fields("matrix new command"),
+                    host: Some("this machine".into()),
+                },
+            ),
+            (
+                "template edit",
+                AgentVerb::TemplateEdit {
+                    shortcuts: Default::default(),
+                    name: "existing".into(),
+                    fields: farhelm_proto::launcher::TemplateFields {
+                        name: Some("matrix changed title".into()),
+                        ..Default::default()
+                    },
+                    host: None,
+                },
+            ),
+            (
+                "template delete",
+                AgentVerb::TemplateDelete {
+                    name: "existing".into(),
+                },
+            ),
+            (
+                "host add",
+                AgentVerb::HostAdd {
+                    destination: "user@new-host".into(),
+                    alias: None,
+                },
+            ),
+            (
+                "host edit",
+                AgentVerb::HostEdit {
+                    host: "user@builder".into(),
+                    alias: None,
+                    icon: Some(HostIcon::Rocket),
+                    color: None,
+                },
+            ),
+            (
+                "host remove",
+                AgentVerb::HostRemove {
+                    host: "user@builder".into(),
+                },
+            ),
+        ] {
+            assert!(h.state.approvals.list().is_empty(), "premise: {label}");
+            let asking = Arc::clone(&handler);
+            let task =
+                tokio::spawn(async move { asking.handle(origin, "local-live", request).await });
+            let card = await_card(&h, &task).await;
+            assert_eq!(card.session.id, full_id(&h, local, "local-live"), "{label}");
+            match (label, &card.action) {
+                (
+                    "template create",
+                    ApprovalAction::TemplateWrite {
+                        name,
+                        replaces_existing,
+                        ..
+                    },
+                ) => {
+                    assert_eq!(name, "matrix-new-template");
+                    assert!(!*replaces_existing);
+                }
+                (
+                    "template edit",
+                    ApprovalAction::TemplateWrite {
+                        name,
+                        replaces_existing,
+                        ..
+                    },
+                ) => {
+                    assert_eq!(name, "existing");
+                    assert!(*replaces_existing);
+                }
+                ("template delete", ApprovalAction::TemplateDelete { name, .. }) => {
+                    assert_eq!(name, "existing");
+                }
+                ("host add", ApprovalAction::HostAdd { destination, .. }) => {
+                    assert_eq!(destination, "user@new-host");
+                    assert!(card.action.requires_direct_allow());
+                }
+                ("host edit", ApprovalAction::HostEdit { host_name, .. })
+                | ("host remove", ApprovalAction::HostRemove { host_name, .. }) => {
+                    assert_eq!(host_name, "user@builder");
+                    assert!(card.action.requires_direct_allow());
+                }
+                (_, other) => panic!("wrong card for {label}: {other:?}"),
+            }
+            assert_eq!(
+                answer_card(&h, "deny").await,
+                axum::http::StatusCode::NO_CONTENT,
+                "{label}"
+            );
+            let outcome = tokio::time::timeout(RESPONDER_JOIN_BUDGET, task)
+                .await
+                .unwrap_or_else(|_| panic!("denied request did not finish: {label}"))
+                .unwrap();
+            assert!(
+                matches!(outcome, AgentOutcome::Err { kind: ErrorKind::Unauthorized, ref message } if message.contains("declined")),
+                "{label}: {outcome:?}"
+            );
+            assert_eq!(
+                h.store.launch_templates().await.unwrap(),
+                before_templates,
+                "{label}"
+            );
+            let after_hosts = h.store.list_hosts().await.unwrap();
+            assert_eq!(after_hosts.len(), before_hosts.len(), "{label}");
+            let after_remote = host_row(&h, remote).await.expect("denial keeps the host");
+            assert_eq!(after_remote.alias, before_remote.alias, "{label}");
+            assert_eq!(after_remote.icon, before_remote.icon, "{label}");
+            assert_eq!(after_remote.color, before_remote.color, "{label}");
+            assert_eq!(
+                after_remote.destination, before_remote.destination,
+                "{label}"
+            );
+        }
+    }
+
+    /// The production prompt switch still refuses before any target contact.
+    /// Even the dormant enabled path must ask under the host-local grant, so
+    /// re-enabling prompts cannot accidentally inherit session-management
+    /// authority. The peer distinguishes preflight from actual message input.
+    #[farhelm_testtrace::test]
+    async fn own_host_permission_does_not_authorize_agent_prompts() {
+        use farhelm_proto::ControlMsg;
+
+        for enabled in [false, true] {
+            let target = session_info("target", SessionStatus::Running);
+            let (client, peer, mut received, stop) = prompt_peer(target.clone(), false);
+            let (h, local) = spliced_local_fleet(client, vec![session("asker", 1), target]).await;
+            h.store
+                .set_commands_without_asking(local, false)
+                .await
+                .unwrap();
+            h.store
+                .set_own_sessions_without_asking(local, true)
+                .await
+                .unwrap();
+            let row = host_row(&h, local).await.unwrap();
+            assert!(row.own_sessions_without_asking && !row.commands_without_asking);
+            assert!(!peer.is_finished(), "premise: the prompt peer is connected");
+            assert!(
+                received.try_recv().is_err(),
+                "premise: no target contact yet"
+            );
+            let _gui = h.manager.events().admit(1).unwrap();
+            let handler = if enabled {
+                HelmAgentRequests::with_prompts_enabled(&h.state)
+            } else {
+                HelmAgentRequests::for_state(&h.state)
+            };
+            let origin = origin_of(&h, local);
+            let target_id = full_id(&h, local, "target");
+            let task = tokio::spawn(async move {
+                handler
+                    .handle(
+                        origin,
+                        "asker",
+                        AgentVerb::Prompt {
+                            session_id: Some(target_id),
+                            prompt: "matrix prompt".into(),
+                        },
+                    )
+                    .await
+            });
+            if enabled {
+                let card = await_card(&h, &task).await;
+                assert!(
+                    matches!(&card.action, ApprovalAction::Prompt { target, prompt, .. } if target.id == full_id(&h, local, "target") && prompt == "matrix prompt")
+                );
+                assert!(
+                    matches!(received.try_recv(), Ok(ControlMsg::PromptTargetInfo { session_id, .. }) if session_id == "target")
+                );
+                assert!(
+                    received.try_recv().is_err(),
+                    "no message input before an answer"
+                );
+                assert_eq!(
+                    answer_card(&h, "deny").await,
+                    axum::http::StatusCode::NO_CONTENT
+                );
+            }
+            let outcome = tokio::time::timeout(RESPONDER_JOIN_BUDGET, task)
+                .await
+                .unwrap()
+                .unwrap();
+            if enabled {
+                assert!(
+                    matches!(outcome, AgentOutcome::Err { kind: ErrorKind::Unauthorized, ref message } if message.contains("declined")),
+                    "{outcome:?}"
+                );
+            } else {
+                assert!(
+                    matches!(outcome, AgentOutcome::Err { kind: ErrorKind::Unauthorized, ref message } if message == AGENT_PROMPTS_OFF_REFUSAL),
+                    "{outcome:?}"
+                );
+            }
+            assert!(h.state.approvals.list().is_empty());
+            assert!(
+                received.try_recv().is_err(),
+                "neither path delivered a prompt"
+            );
+            stop.send(())
+                .expect("peer stayed connected through the refusal");
+            join_responder(peer, &outcome).await;
+        }
+    }
+
+    /// Even an otherwise eligible same-host clone needs a direct Allow for
+    /// its agent-supplied wrapper. Keeping the target's YOLO permission off
+    /// selects the wrapper-specific card instead of a broad launch permission.
+    #[farhelm_testtrace::test]
+    async fn own_host_permission_cannot_approve_an_agent_supplied_wrapper() {
+        use farhelm_proto::ControlMsg;
+
+        let launch = copied_wrapped_claude_launch();
+        let source = SessionInfo {
+            cwd: "/srv/project".into(),
+            invocation: launch.display_command(),
+            launch: launch.clone(),
+            ..session("source", 3)
+        };
+        let target = session_info("target", SessionStatus::Exited { exit_code: Some(0) });
+        let (client, peer) = tokio::io::duplex(64 * 1024);
+        let (observed, stop, responder) = own_host_matrix_peer(peer, target.clone());
+        let (h, _local, host) = own_host_matrix_fleet(client, target, source).await;
+        h.store
+            .set_own_sessions_without_asking(host, true)
+            .await
+            .unwrap();
+        h.store
+            .set_commands_without_asking(host, false)
+            .await
+            .unwrap();
+        h.store.set_yolo_without_asking(host, false).await.unwrap();
+        let row = host_row(&h, host).await.unwrap();
+        assert!(
+            row.own_sessions_without_asking
+                && !row.commands_without_asking
+                && !row.yolo_without_asking
+        );
+        let _gui = h.manager.events().admit(1).unwrap();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, host);
+        let source_id = full_id(&h, host, "source");
+        let requested_source = source_id.clone();
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "asker",
+                    AgentVerb::Clone {
+                        source_session_id: Some(requested_source),
+                        host: Some("user@builder".into()),
+                        cwd: None,
+                        title: None,
+                        intent_key: None,
+                        confirm_yolo: false,
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        assert!(card.action.requires_direct_allow());
+        assert!(
+            matches!(&card.action, ApprovalAction::LaunchWithAgentWrapper { verb: LaunchVerb::Clone, launch: shown, source: Some(source), .. } if shown == &launch && source.id == source_id)
+        );
+        assert!(
+            observed.lock().unwrap().is_empty(),
+            "no create before direct Allow"
+        );
+        assert_eq!(
+            answer_card(&h, "always_allow").await,
+            axum::http::StatusCode::CONFLICT
+        );
+        assert_eq!(
+            h.state.approvals.list().first().map(|waiting| &waiting.id),
+            Some(&card.id)
+        );
+        assert!(!host_row(&h, host).await.unwrap().commands_without_asking);
+        assert!(
+            observed.lock().unwrap().is_empty(),
+            "a rejected shortcut sends nothing"
+        );
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let outcome = tokio::time::timeout(RESPONDER_JOIN_BUDGET, task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(&outcome, AgentOutcome::Ok { reply: AgentReply::Created { session } } if session.id == full_id(&h, host, "created")),
+            "{outcome:?}"
+        );
+        let seen = observed.lock().unwrap().clone();
+        assert_eq!(seen.len(), 1);
+        assert!(
+            matches!(&seen[0], ControlMsg::CreateSession { launch: Some(sent), .. } if sent == &launch)
+        );
+        stop.send(())
+            .expect("peer stayed connected through direct approval");
+        join_responder(responder, &outcome).await;
+    }
+
+    /// Host-local session authority never waives a destination's YOLO guard.
+    /// Commands, explicit YOLO agents, copied launches and both spawn paths
+    /// must refuse before a card or CreateSession. Plain Restart instead
+    /// resumes an already chosen launch and remains exempt from that guard.
+    #[farhelm_testtrace::test]
+    async fn own_host_permission_preserves_yolo_refusals_and_plain_restart() {
+        use farhelm_proto::ControlMsg;
+
+        let launch = farhelm_proto::SessionLaunch::Command(farhelm_proto::CommandLaunch {
+            command: "matrix-yolo {farhelm_args}".into(),
+            yolo: true,
+            agent: Some(farhelm_proto::LaunchHarness::Claude),
+            resume: Some("matrix-yolo --resume {conversation} {farhelm_args}".into()),
+        });
+        let target = SessionInfo {
+            invocation: launch.display_command(),
+            launch: launch.clone(),
+            restart_offer: RestartOffer::Resume,
+            ..session_info("target", SessionStatus::Exited { exit_code: Some(0) })
+        };
+        let source = SessionInfo {
+            invocation: launch.display_command(),
+            launch: launch.clone(),
+            ..session("source", 3)
+        };
+        assert_eq!(
+            target.launch.yolo(),
+            Some(true),
+            "premise: restart is of a YOLO launch"
+        );
+        assert_eq!(target.restart_offer, RestartOffer::Resume);
+        assert!(
+            matches!(&target.launch, farhelm_proto::SessionLaunch::Command(command) if command.agent == Some(farhelm_proto::LaunchHarness::Claude) && command.resume.as_ref().is_some_and(|resume| resume.contains("{conversation}"))),
+            "premise: the YOLO launch has an explicit resumable conversation command"
+        );
+        let (client, peer) = tokio::io::duplex(64 * 1024);
+        let (observed, stop, responder) = own_host_matrix_peer(peer, target.clone());
+        let (h, _local, host) = own_host_matrix_fleet(client, target, source).await;
+        h.store
+            .set_own_sessions_without_asking(host, true)
+            .await
+            .unwrap();
+        h.store
+            .set_commands_without_asking(host, false)
+            .await
+            .unwrap();
+        h.store.set_yolo_without_asking(host, false).await.unwrap();
+        assert_eq!(
+            cached_launch(&h.state, &SessionKey::new(host, "target")).await,
+            Some(launch.clone()),
+            "premise: the cached restart target holds that resumable YOLO launch"
+        );
+        let row = host_row(&h, host).await.unwrap();
+        assert!(
+            row.own_sessions_without_asking
+                && !row.commands_without_asking
+                && !row.yolo_without_asking
+        );
+        let _gui = h.manager.events().admit(1).unwrap();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, host);
+        let source_id = full_id(&h, host, "source");
+        let mut command_override =
+            command_create("user@builder", "/srv/project", "matrix command", None, None);
+        if let AgentVerb::Create { confirm_yolo, .. } = &mut command_override {
+            *confirm_yolo = true;
+        }
+        for (label, request) in [
+            (
+                "command create",
+                command_create("user@builder", "/srv/project", "matrix command", None, None),
+            ),
+            ("command override", command_override),
+            (
+                "YOLO create",
+                AgentVerb::Create {
+                    host: Some("user@builder".into()),
+                    templates: vec![],
+                    edits: farhelm_proto::launcher::TemplateFields {
+                        agent: Some(farhelm_proto::LaunchHarness::Claude),
+                        permissions: Some(Some(farhelm_proto::LaunchPermission::Yolo)),
+                        destination: Some(farhelm_proto::launcher::TemplateDestination::Folder(
+                            "/srv/project".into(),
+                        )),
+                        ..Default::default()
+                    },
+                    intent_key: None,
+                    confirm_yolo: true,
+                    spawn: None,
+                },
+            ),
+            (
+                "clone",
+                AgentVerb::Clone {
+                    source_session_id: Some(source_id),
+                    host: Some("user@builder".into()),
+                    cwd: None,
+                    title: None,
+                    intent_key: None,
+                    confirm_yolo: true,
+                },
+            ),
+            (
+                "ordinary spawn",
+                AgentVerb::Create {
+                    host: None,
+                    templates: vec![],
+                    edits: command_template("matrix command"),
+                    intent_key: None,
+                    confirm_yolo: true,
+                    spawn: Some(farhelm_proto::SpawnPlacement {
+                        parent: Some("asker".into()),
+                        ..Default::default()
+                    }),
+                },
+            ),
+            (
+                "inherited spawn",
+                AgentVerb::Create {
+                    host: None,
+                    templates: vec![],
+                    edits: farhelm_proto::launcher::TemplateFields {
+                        destination: Some(farhelm_proto::launcher::TemplateDestination::Folder(
+                            "/srv/project".into(),
+                        )),
+                        ..Default::default()
+                    },
+                    intent_key: None,
+                    confirm_yolo: true,
+                    spawn: Some(farhelm_proto::SpawnPlacement {
+                        parent: Some("asker".into()),
+                        inherit_agent: true,
+                        inherited_launch: Some(Box::new(launch.clone())),
+                    }),
+                },
+            ),
+        ] {
+            assert!(observed.lock().unwrap().is_empty(), "premise: {label}");
+            let outcome = tokio::time::timeout(
+                RESPONDER_JOIN_BUDGET,
+                handler.handle(origin, "asker", request),
+            )
+            .await
+            .unwrap_or_else(|_| panic!("YOLO refusal did not finish: {label}"));
+            assert!(
+                matches!(outcome, AgentOutcome::Err { kind: ErrorKind::Unauthorized, ref message } if message.contains("may not start a YOLO launch") && message.contains("user@builder")),
+                "{label}: {outcome:?}"
+            );
+            assert!(
+                h.state.approvals.list().is_empty(),
+                "refusal must precede a card: {label}"
+            );
+            assert!(
+                observed.lock().unwrap().is_empty(),
+                "no refused launch reaches the peer: {label}"
+            );
+        }
+        let outcome = tokio::time::timeout(
+            RESPONDER_JOIN_BUDGET,
+            handler.handle(
+                origin,
+                "asker",
+                AgentVerb::Restart {
+                    session_id: Some(full_id(&h, host, "target")),
+                    stop_if_running: false,
+                },
+            ),
+        )
+        .await
+        .expect("plain Restart must not wait for a card");
+        assert!(
+            matches!(&outcome, AgentOutcome::Ok { reply: AgentReply::Restarted { session } } if session.id == full_id(&h, host, "target")),
+            "{outcome:?}"
+        );
+        assert!(h.state.approvals.list().is_empty());
+        let seen = observed.lock().unwrap().clone();
+        assert_eq!(seen.len(), 1);
+        assert!(
+            matches!(&seen[0], ControlMsg::RestartSession { session_id, expected_launch: Some(shown), with: None, .. } if session_id == "target" && shown == &launch)
+        );
+
+        // Turning on only the separate YOLO permission makes the refused
+        // command admissible, proving the earlier boundary was its guard.
+        h.store.set_yolo_without_asking(host, true).await.unwrap();
+        let created = tokio::time::timeout(
+            RESPONDER_JOIN_BUDGET,
+            handler.handle(
+                origin,
+                "asker",
+                command_create("user@builder", "/srv/project", "matrix command", None, None),
+            ),
+        )
+        .await
+        .expect("narrow permission releases this same-host command once YOLO is allowed");
+        assert!(
+            matches!(&created, AgentOutcome::Ok { reply: AgentReply::Created { session } } if session.id == full_id(&h, host, "created")),
+            "{created:?}"
+        );
+        let seen = observed.lock().unwrap().clone();
+        assert_eq!(seen.len(), 2);
+        assert!(
+            matches!(&seen[1], ControlMsg::CreateSession { launch: Some(sent), .. } if sent.display_command() == "matrix command")
+        );
+        assert!(h.state.approvals.list().is_empty());
+        stop.send(())
+            .expect("peer stayed connected through the positive controls");
+        join_responder(responder, &created).await;
     }
 }

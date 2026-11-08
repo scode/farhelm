@@ -91,6 +91,8 @@ pub(crate) struct HostView {
     /// without asking the user; `false` (ask first) until the user changes it. A row missing
     /// from the registry read reports that asking is required, like the YOLO setting.
     pub(crate) commands_without_asking: bool,
+    /// Default-off authority for session actions confined to the requesting host.
+    pub(crate) own_sessions_without_asking: bool,
     /// Browser permissions are independent of command authority and each other.
     pub(crate) links_without_asking: bool,
     pub(crate) local_links_without_asking: bool,
@@ -526,6 +528,8 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                 remote_state_dir: registry.and_then(|row| row.remote_state_dir.clone()),
                 yolo_without_asking: registry.is_some_and(|row| row.yolo_without_asking),
                 commands_without_asking: registry.is_some_and(|row| row.commands_without_asking),
+                own_sessions_without_asking: registry
+                    .is_some_and(|row| row.own_sessions_without_asking),
                 links_without_asking: registry.is_some_and(|row| row.links_without_asking),
                 local_links_without_asking: registry
                     .is_some_and(|row| row.local_links_without_asking),
@@ -789,6 +793,64 @@ pub(crate) async fn set_commands_without_asking_for(
         host,
         commands_without_asking,
         "host commands-without-asking setting changed"
+    );
+    Ok(())
+}
+
+/// The body of `POST /api/hosts/{id}/own-sessions-without-asking`: the new setting, required.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct OwnSessionsWithoutAskingSpec {
+    pub(crate) own_sessions_without_asking: bool,
+}
+
+/// Save the grant for agents to manage sessions on their own host, returning
+/// the updated host view. This route changes no fleet-wide permission.
+///
+/// The sibling of [`set_yolo_without_asking`], with the same locking and announcement
+/// rules for the same reasons. The HTTP router owns the save through its announcement
+/// and the updated host view; the shared write helper does not create a task itself.
+pub(crate) async fn set_own_sessions_without_asking(
+    State(state): State<Arc<AppState>>,
+    AxPath(host): AxPath<HostId>,
+    axum::Json(spec): axum::Json<OwnSessionsWithoutAskingSpec>,
+) -> impl IntoResponse {
+    if let Err(error) =
+        set_own_sessions_without_asking_for(&state, host, spec.own_sessions_without_asking).await
+    {
+        return http_error(error);
+    }
+    match host_view(&state, host).await {
+        Ok(view) => axum::Json(view).into_response(),
+        Err(error) => http_error(error),
+    }
+}
+
+/// Store a host's "manage sessions on this host without asking" setting under the host write
+/// lock and announce a real change on the event feed.
+///
+/// The caller must supply ownership: the HTTP handler inherits it from the router,
+/// while any non-HTTP caller must run this within its own owned operation. This helper
+/// does not spawn a task. Dropping it between the save and the bump would leave other
+/// clients showing the old value, for the same reason as [`set_yolo_without_asking`].
+pub(crate) async fn set_own_sessions_without_asking_for(
+    state: &AppState,
+    host: HostId,
+    own_sessions_without_asking: bool,
+) -> anyhow::Result<()> {
+    let serialized = state.manager.host_write_lock(host).await;
+    let changed = state
+        .store
+        .set_own_sessions_without_asking(host, own_sessions_without_asking)
+        .await?;
+    if changed {
+        state.manager.events().bump();
+    }
+    drop(serialized);
+    tracing::info!(
+        host,
+        own_sessions_without_asking,
+        "host own-sessions-without-asking setting changed"
     );
     Ok(())
 }
@@ -1518,6 +1580,7 @@ mod tests {
             cache_truncated: false,
             yolo_without_asking: true,
             commands_without_asking: false,
+            own_sessions_without_asking: false,
             links_without_asking: false,
             local_links_without_asking: false,
             icon: Default::default(),
@@ -2525,6 +2588,42 @@ mod tests {
         )
         .await;
         assert_eq!(events.revision(), after_set, "a repeat must not bump again");
+    }
+
+    /// Own-host settings writes preserve fleet-wide authority and publish real changes.
+    /// A missing or misspelled value must fail rather than silently revoke a grant;
+    /// repeated saves must not wake every client when the stored value is unchanged.
+    #[farhelm_testtrace::test]
+    async fn own_session_permission_route_is_independent_and_requires_an_explicit_value() {
+        let harness = lone_local_helm().await;
+        let host = rest_harness::local_id(&harness.store).await;
+        harness
+            .store
+            .set_commands_without_asking(host, true)
+            .await
+            .unwrap();
+        let route = format!("/api/hosts/{host}/own-sessions-without-asking");
+        for body in [serde_json::json!({}), serde_json::json!({"allowed": true})] {
+            let (status, _, _) = call(&harness, "POST", &route, Some(body)).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        }
+        let events = Arc::clone(harness.manager.events());
+        for allowed in [true, false] {
+            let before = events.revision();
+            let body = serde_json::json!({"own_sessions_without_asking": allowed});
+            let (status, view, _) = call(&harness, "POST", &route, Some(body.clone())).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(view["own_sessions_without_asking"], allowed);
+            assert_eq!(view["commands_without_asking"], true);
+            assert_eq!(view["yolo_without_asking"], false);
+            let after = events.revision();
+            assert!(after > before);
+            assert_eq!(
+                call(&harness, "POST", &route, Some(body)).await.0,
+                StatusCode::OK
+            );
+            assert_eq!(events.revision(), after);
+        }
     }
 
     /// The local row accepts an alias through the REST route too — the

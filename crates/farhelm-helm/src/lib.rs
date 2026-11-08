@@ -800,6 +800,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::post(hosts::set_yolo_without_asking),
         )
         .route(
+            "/api/hosts/{id}/own-sessions-without-asking",
+            axum::routing::post(hosts::set_own_sessions_without_asking),
+        )
+        .route(
             "/api/hosts/{id}/commands-without-asking",
             axum::routing::post(hosts::set_commands_without_asking),
         )

@@ -998,6 +998,7 @@ async fn a_tensorlake_host_decodes_with_its_binding() {
         "D17: new Tensorlake hosts start YOLO without asking"
     );
     assert!(!planted.commands_without_asking);
+    assert!(!planted.own_sessions_without_asking);
     assert!(!planted.links_without_asking);
     assert!(!planted.local_links_without_asking);
 

@@ -336,7 +336,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 79;
+pub(crate) const SCHEMA_VERSION: i64 = 80;
 
 /// Named secrets have their own table so list responses never need to decode a
 /// secret-bearing configuration object. The monotonically increasing revision
@@ -944,6 +944,9 @@ pub struct HostRow {
     /// without asking the user (SPEC.md, Agent-spawned sessions). `false` (asks first) for
     /// every host until [`HelmStore::set_commands_without_asking`] says otherwise.
     pub commands_without_asking: bool,
+    /// Permit session actions only when every resolved session host is this host.
+    /// This independent, default-off grant never authorizes fleet-wide commands.
+    pub own_sessions_without_asking: bool,
     /// Permission for sessions on this host to open public web addresses without a full approval.
     /// Local-network addresses have their own permission; neither grants command authority.
     pub links_without_asking: bool,
@@ -996,6 +999,7 @@ type RawHostRow = (
     Option<i64>,
     // Schema 73: an unresolved create must survive a helm restart.
     Option<i64>,
+    bool,
 );
 
 /// The independent browser permissions a host may receive.
@@ -2498,6 +2502,7 @@ pub struct HelmStore {
 /// - 78: recipe bases and optional package layers, preserving build ownership.
 /// - 79: transient install facts for a host created from a prepared snapshot,
 ///   retained across an interrupted create without opening connection admission.
+/// - 80: default-off authority for agents to manage sessions on their own host.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2603,6 +2608,8 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
                  tensorlake_pending_create_at INTEGER,
                  tensorlake_credential_delivery TEXT,
                  tensorlake_prepared_install_json TEXT,
+                 -- Appended like the upgrade's ADD COLUMN; existing hosts receive no grant.
+                 own_sessions_without_asking INTEGER NOT NULL DEFAULT 0 CHECK (own_sessions_without_asking IN (0, 1)),
                  CHECK (
                      (kind = 'local' AND destination IS NULL AND remote_farhelm IS NULL
                           AND remote_state_dir IS NULL)
@@ -2822,7 +2829,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 79;",
+              PRAGMA user_version = 80;",
             announcement_schema = crate::announcements::SCHEMA,
         ))
         .context("creating schema")?;
@@ -4560,6 +4567,20 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         tx.execute_batch("PRAGMA user_version = 79;")
             .context("migrating helm.db to schema version 79")?;
         version = 79;
+    }
+    if version == 79 {
+        // Version-only historical fixtures may already carry the column. Preserve
+        // explicit grants there; real upgrades add it off for every existing host.
+        let exists: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM pragma_table_info('hosts') WHERE name = 'own_sessions_without_asking'",
+            [], |row| row.get(0),
+        )?;
+        if !exists {
+            tx.execute_batch("ALTER TABLE hosts ADD COLUMN own_sessions_without_asking INTEGER NOT NULL DEFAULT 0 CHECK (own_sessions_without_asking IN (0, 1));")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 80;")
+            .context("migrating helm.db to schema version 80")?;
+        version = 80;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -6423,7 +6444,7 @@ impl HelmStore {
                      host_identity, cache_truncated, yolo_without_asking, commands_without_asking, icon, color, \
                      links_without_asking, local_links_without_asking, entry_uuid, \
                      tensorlake_sandbox, tensorlake_sandbox_id, tensorlake_recipe, \
-                     tensorlake_resources, tensorlake_suspended_at, tensorlake_pending_create_at \
+                     tensorlake_resources, tensorlake_suspended_at, tensorlake_pending_create_at, own_sessions_without_asking \
                      FROM hosts ORDER BY id ASC",
                 )
                 .context("preparing host list query")?;
@@ -6451,6 +6472,7 @@ impl HelmStore {
                                 r.get(18)?,
                                 r.get(19)?,
                                 r.get(20)?,
+                                r.get(21)?,
                             ))
                         })
                         .context("querying hosts")?
@@ -6480,6 +6502,7 @@ impl HelmStore {
                                 tensorlake_resources,
                                 tensorlake_suspended_at,
                                 tensorlake_pending_create_at,
+                                own_sessions_without_asking,
                             )| {
                                 let host_kind =
                                     HostKind::from_columns(&kind, tensorlake_sandbox.as_deref())?;
@@ -6505,6 +6528,7 @@ impl HelmStore {
                                     cache_truncated,
                                     yolo_without_asking,
                                     commands_without_asking,
+                                    own_sessions_without_asking,
                                     links_without_asking,
                                     local_links_without_asking,
                                     icon: icon.as_deref().unwrap_or(default_icon).parse()
@@ -6693,7 +6717,7 @@ impl HelmStore {
     /// name another host displays as ([`new_entry_conflict`], the same
     /// refusals as an ssh add from the dialog), then inserts the row with a
     /// fresh entry UUID. New Tensorlake hosts start YOLO sessions without
-    /// asking (D17, a user decision); the other three permissions start
+    /// asking (D17, a user decision); the other four permissions start
     /// asking, as on every host.
     pub(crate) async fn register_tensorlake_host(
         &self,
@@ -7402,6 +7426,51 @@ impl HelmStore {
             .await
     }
 
+    /// Set the independent grant for agents to manage sessions on their own host.
+    /// Returns whether the value changed; unknown hosts fail. Full sync preserves
+    /// an acknowledged revocation after power loss, as for fleet-wide authority.
+    pub async fn set_own_sessions_without_asking(
+        &self,
+        host: HostId,
+        own_sessions_without_asking: bool,
+    ) -> anyhow::Result<bool> {
+        self.conn
+            .call_full_sync_if(
+                true,
+                "set own-sessions-without-asking task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning set own-sessions-without-asking transaction")?;
+                    let current: Option<bool> = tx
+                        .query_row(
+                            "SELECT own_sessions_without_asking FROM hosts WHERE id = ?1",
+                            rusqlite::params![host],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .context("looking up host before setting own-sessions-without-asking")?;
+                    let Some(current) = current else {
+                        return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
+                    };
+                    if current == own_sessions_without_asking {
+                        tx.commit()
+                            .context("committing unchanged own-sessions-without-asking")?;
+                        return Ok(false);
+                    }
+                    tx.execute(
+                        "UPDATE hosts SET own_sessions_without_asking = ?2 WHERE id = ?1",
+                        rusqlite::params![host, own_sessions_without_asking],
+                    )
+                    .context("updating own-sessions-without-asking")?;
+                    tx.commit()
+                        .context("committing own-sessions-without-asking")?;
+                    Ok(true)
+                },
+            )
+            .await
+    }
+
     /// Save any host's decorative identity atomically, returning whether it changed.
     ///
     /// Defaults use null columns so an untouched host and an explicitly reset
@@ -7838,8 +7907,8 @@ impl HelmStore {
     /// The host's "start YOLO sessions without asking" setting
     /// (`yolo_without_asking`) is cleared in the same statement, so the adopted
     /// install asks before YOLO launches again, and so is its "run farhelm
-    /// commands without asking" setting (`commands_without_asking`) and both browser
-    /// permissions, for the same reason. These grants belong to one install, and a
+    /// commands without asking" setting (`commands_without_asking`), both browser
+    /// permissions and its own-host session grant. These grants belong to one install, and a
     /// new identity at this destination means a different machine or a fresh
     /// install the user has not judged yet (SPEC.md: the host settings
     /// paragraph). Only adoption resets it; a stale settings dialog, and a
@@ -7909,12 +7978,12 @@ impl HelmStore {
                     // purged below, and an empty successor cache marked incomplete
                     // would show the notice indefinitely if the first refresh under
                     // the new identity failed. `yolo_without_asking` and
-                    // `commands_without_asking` and both browser permissions are reset too: the user's "without
-                    // asking" choices were judgments about the install being replaced,
-                    // not this one.
+                    // Both command grants and both browser permissions reset too:
+                    // the user's "without asking" choices judged the install being
+                    // replaced, not its successor.
                     tx.execute(
                         "UPDATE hosts SET host_identity = ?2, cache_truncated = 0, yolo_without_asking = 0, \
-                         commands_without_asking = 0, links_without_asking = 0, \
+                         commands_without_asking = 0, own_sessions_without_asking = 0, links_without_asking = 0, \
                          local_links_without_asking = 0 WHERE id = ?1",
                         rusqlite::params![host, new],
                     )
@@ -9861,6 +9930,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
+                 ALTER TABLE hosts DROP COLUMN own_sessions_without_asking;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  -- Future columns must leave this rewind too: otherwise older
@@ -12051,6 +12121,10 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "adopt@commands", "old-identity").await;
         store
+            .set_own_sessions_without_asking(host, true)
+            .await
+            .unwrap();
+        store
             .set_commands_without_asking(host, true)
             .await
             .expect("allow without asking");
@@ -12059,6 +12133,7 @@ mod tests {
             row(store.list_hosts().await.unwrap()).commands_without_asking,
             "premise: the host runs farhelm commands without asking"
         );
+        assert!(row(store.list_hosts().await.unwrap()).own_sessions_without_asking);
 
         store
             .adopt_identity(
@@ -12072,6 +12147,113 @@ mod tests {
         assert!(
             !row(store.list_hosts().await.unwrap()).commands_without_asking,
             "the adopted install must ask before farhelm commands again"
+        );
+        assert!(!row(store.list_hosts().await.unwrap()).own_sessions_without_asking);
+    }
+
+    /// The own-host grant is opt-in and independent of every broader permission.
+    /// Settings saves distinguish real changes from repeats and reject missing hosts;
+    /// revoking this grant must not alter the fleet-wide permission beside it.
+    #[farhelm_testtrace::test]
+    async fn own_sessions_without_asking_is_independent_and_default_off() {
+        let (_dir, store) = fresh_store().await;
+        let ssh = store
+            .add_ssh_host("sessions@fixture", None, None)
+            .await
+            .unwrap();
+        let rows = store.list_hosts().await.unwrap();
+        assert!(rows.iter().all(|row| !row.own_sessions_without_asking));
+        let local = rows
+            .iter()
+            .find(|row| row.kind.is_reserved_local())
+            .unwrap()
+            .id;
+        for host in [local, ssh] {
+            assert!(
+                store
+                    .set_own_sessions_without_asking(host, true)
+                    .await
+                    .unwrap()
+            );
+            assert!(
+                !store
+                    .set_own_sessions_without_asking(host, true)
+                    .await
+                    .unwrap()
+            );
+            let rows = store.list_hosts().await.unwrap();
+            let row = rows.iter().find(|row| row.id == host).unwrap();
+            assert!(row.own_sessions_without_asking);
+            assert!(!row.commands_without_asking && !row.yolo_without_asking);
+            store.set_commands_without_asking(host, true).await.unwrap();
+            assert!(
+                store
+                    .set_own_sessions_without_asking(host, false)
+                    .await
+                    .unwrap()
+            );
+            assert!(
+                !store
+                    .set_own_sessions_without_asking(host, false)
+                    .await
+                    .unwrap()
+            );
+            let rows = store.list_hosts().await.unwrap();
+            let row = rows.iter().find(|row| row.id == host).unwrap();
+            assert!(row.commands_without_asking && !row.own_sessions_without_asking);
+        }
+        let missing = store
+            .set_own_sessions_without_asking(9_999, true)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            missing.downcast_ref::<HostStoreError>(),
+            Some(HostStoreError::HostNotFound(9_999))
+        ));
+    }
+
+    /// Upgrades do not infer own-host authority from a pre-existing fleet grant.
+    /// Remove the column to exercise the real schema-79 path, then rewind only
+    /// the version to prove the idempotent migration preserves an explicit grant.
+    #[farhelm_testtrace::test]
+    async fn schema_80_adds_default_off_own_session_permission_and_preserves_rewinds() {
+        let (dir, store) = fresh_store().await;
+        let path = dir.path().join("helm.db");
+        let host = host_with_identity(&store, "sessions@migration", "identity").await;
+        store.set_commands_without_asking(host, true).await.unwrap();
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE hosts DROP COLUMN own_sessions_without_asking; PRAGMA user_version = 79;",
+        )
+        .unwrap();
+        let count: i64 = conn.query_row("SELECT count(*) FROM pragma_table_info('hosts') WHERE name = 'own_sessions_without_asking'", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0, "premise: the old schema has no new permission");
+        drop(conn);
+        let store = HelmStore::open(&path).await.unwrap();
+        let rows = store.list_hosts().await.unwrap();
+        assert!(rows.iter().all(|row| !row.own_sessions_without_asking));
+        assert!(
+            rows.iter()
+                .find(|row| row.id == host)
+                .unwrap()
+                .commands_without_asking
+        );
+        store
+            .set_own_sessions_without_asking(host, true)
+            .await
+            .unwrap();
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("PRAGMA user_version = 79;").unwrap();
+        drop(conn);
+        let store = HelmStore::open(&path).await.unwrap();
+        let rows = store.list_hosts().await.unwrap();
+        assert!(
+            rows.iter()
+                .find(|row| row.id == host)
+                .unwrap()
+                .own_sessions_without_asking
         );
     }
 
@@ -15815,6 +15997,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
+                 ALTER TABLE hosts DROP COLUMN own_sessions_without_asking;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
@@ -16716,7 +16899,7 @@ mod tests {
     }
 
     /// Revocations must reach FULL before acknowledgement, while unrelated preferences keep NORMAL.
-    /// Triggers witness all four host permissions, tunnel consent and host removal inside their real writes;
+    /// Triggers witness all five host permissions, tunnel consent and host removal inside their real writes;
     /// SQLite cannot change synchronous within a transaction, so the commit keeps that barrier.
     #[farhelm_testtrace::test]
     async fn trust_revocations_commit_with_full_sync() {
@@ -16732,7 +16915,7 @@ mod tests {
             assert_eq!(mode, "wal-1", "premise: ordinary writes use WAL/NORMAL");
             conn.execute_batch(
                 "CREATE TEMP TRIGGER observe_host_trust BEFORE UPDATE OF yolo_without_asking,
-                   commands_without_asking, links_without_asking, local_links_without_asking ON main.hosts
+                   commands_without_asking, own_sessions_without_asking, links_without_asking, local_links_without_asking ON main.hosts
                  WHEN (SELECT synchronous FROM pragma_synchronous) != 2
                  BEGIN SELECT RAISE(ABORT, 'host trust write needs FULL'); END;
                  CREATE TEMP TRIGGER observe_host_removal BEFORE DELETE ON main.hosts
@@ -16746,6 +16929,12 @@ mod tests {
         }
         for allowed in [true, false] {
             assert!(store.set_yolo_without_asking(host, allowed).await.unwrap());
+            assert!(
+                store
+                    .set_own_sessions_without_asking(host, allowed)
+                    .await
+                    .unwrap()
+            );
             let changed = store
                 .set_commands_without_asking(host, allowed)
                 .await

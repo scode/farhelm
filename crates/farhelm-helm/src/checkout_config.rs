@@ -2991,6 +2991,8 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN tensorlake_credential_delivery;
                  -- Schema 79 added the prepared-snapshot installation facts.
                  ALTER TABLE hosts DROP COLUMN tensorlake_prepared_install_json;
+                 -- Schema 80 added the own-host session grant.
+                 ALTER TABLE hosts DROP COLUMN own_sessions_without_asking;
                  -- Schema 62 added host entry UUIDs, which v26 did not have.
                  DROP INDEX hosts_entry_uuid;
                  ALTER TABLE hosts DROP COLUMN entry_uuid;

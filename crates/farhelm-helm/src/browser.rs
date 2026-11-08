@@ -147,6 +147,7 @@ pub(crate) async fn open_url(
         state,
         origin,
         session,
+        false,
         ApprovalAction::OpenUrl {
             url: url.clone(),
             local_network: permission == BrowserPermission::LocalNetwork,
