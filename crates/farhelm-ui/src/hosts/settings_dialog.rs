@@ -77,6 +77,7 @@ pub(super) enum SettingsField {
     Destination,
     Alias,
     YoloWithoutAsking,
+    OwnSessionsWithoutAsking,
     CommandsWithoutAsking,
     LinksWithoutAsking,
     LocalLinksWithoutAsking,
@@ -189,7 +190,7 @@ pub(crate) fn focus_remove_refusal() {
 /// `reset_checkbox` is set after a refused checkbox toggle. That leaves the
 /// box showing the user's click while the setting never changed, and since
 /// the rendered value did not change either, nothing would redraw it; the
-/// reset puts both boxes back to the settings the page currently renders (see
+/// reset puts every box back to the settings the page currently renders (see
 /// [`reset_checkboxes_js`]).
 fn refocus_after_write(reset_checkbox: bool) {
     let dialog = serde_json::to_string(DIALOG_SELECTOR).expect("a string always serializes");
@@ -248,6 +249,8 @@ fn focus_edit_button(field: EditField) {
 fn reset_checkboxes_js() -> String {
     "const yolo = dialog.querySelector('.host-yolo-without-asking-toggle'); \
      if (yolo) yolo.checked = yolo.dataset.yoloWithoutAsking === 'true'; \
+     const ownSessions = dialog.querySelector('.host-own-sessions-without-asking-toggle'); \
+     if (ownSessions) ownSessions.checked = ownSessions.dataset.ownSessionsWithoutAsking === 'true'; \
      const commands = dialog.querySelector('.host-commands-without-asking-toggle'); \
      if (commands) commands.checked = commands.dataset.commandsWithoutAsking === 'true'; \
      for (const input of dialog.querySelectorAll('[data-browser-permission]')) \
@@ -284,18 +287,49 @@ fn yolo_help(yolo_without_asking: bool) -> &'static str {
     }
 }
 
+/// Explain the same-host grant without implying that it can revoke a broader grant.
+///
+/// Its stored choice remains editable under fleet-wide authority. Name that overlap and
+/// the excluded requests explicitly so turning this switch off cannot promise a card
+/// that another permission already waived.
+fn own_sessions_help(own_sessions_without_asking: bool, commands_without_asking: bool) -> String {
+    let choice = if own_sessions_without_asking {
+        "Agents in this host's sessions start, stop, restart, rename, clone and delete sessions on \
+         this same host without asking you. Clones must also come from this host."
+    } else {
+        "This setting does not let agents in this host's sessions start, stop, restart, rename, \
+         clone or delete sessions on this same host without asking you."
+    };
+    let scope = "Requests for other hosts and template changes still ask unless Run farhelm commands \
+                 without asking covers them. Host changes always need your approval for each request.";
+    let overlap = if commands_without_asking {
+        "Run farhelm commands without asking already covers these session actions; this switch \
+         keeps its own saved value."
+    } else {
+        "Run farhelm commands without asking also includes these session actions."
+    };
+    format!("{choice} {scope} {overlap}")
+}
+
 /// The explanation under the "run farhelm commands" checkbox, for its current
 /// state.
 ///
 /// Says what the commands do (an agent in one of this host's sessions acting on
 /// the fleet) because the label alone does not, and the "on" text names what
 /// turning it on gives away. Host changes remain a per-request decision in
-/// either state; this setting cannot grant an agent control over hosts.
-fn commands_help(commands_without_asking: bool) -> &'static str {
+/// either state; this setting cannot grant an agent control over hosts. The off
+/// text accounts for the independent same-host grant rather than promising that
+/// every session action will ask.
+fn commands_help(commands_without_asking: bool, own_sessions_without_asking: bool) -> &'static str {
     if commands_without_asking {
         "Agents in this host's sessions start, stop, restart, rename, clone and delete sessions on any \
          host, and edit and delete launch templates, without asking you. Changes to hosts always need \
          your approval for each request."
+    } else if own_sessions_without_asking {
+        "Agents in this host's sessions can manage sessions on this same host under Manage sessions \
+         on this host without asking. Requests for other hosts, clones from other hosts, and edits \
+         or deletes of launch templates still ask. Changes to hosts always need your approval for \
+         each request."
     } else {
         "When an agent in one of this host's sessions asks Farhelm to start, stop, restart, rename, \
          clone or delete a session, or to edit or delete a launch template, Farhelm asks you first. \
@@ -405,6 +439,8 @@ pub(super) fn HostSettingsDialog(
     on_edit_submit: EventHandler<(HostId, EditField, String)>,
     on_edit_cancel: EventHandler<()>,
     on_yolo_without_asking: EventHandler<(HostId, bool)>,
+    /// Changes the stored same-host grant even while fleet-wide authority covers it.
+    on_own_sessions_without_asking: EventHandler<(HostId, bool)>,
     on_commands_without_asking: EventHandler<(HostId, bool)>,
     /// Category and value travel together; the handler attributes failures to that exact toggle.
     on_browser_permission: EventHandler<(HostId, bool, bool)>,
@@ -428,6 +464,7 @@ pub(super) fn HostSettingsDialog(
         &outcome,
         Some((
             SettingsField::YoloWithoutAsking
+                | SettingsField::OwnSessionsWithoutAsking
                 | SettingsField::CommandsWithoutAsking
                 | SettingsField::LinksWithoutAsking
                 | SettingsField::LocalLinksWithoutAsking,
@@ -651,7 +688,24 @@ pub(super) fn HostSettingsDialog(
                     {outcome_for(SettingsField::YoloWithoutAsking)}
                 }
                 div { class: "host-settings-commands",
-                    div { class: "setting-group",
+                    div { class: "host-settings-own-sessions setting-group",
+                        label { class: "host-own-sessions-without-asking setting-row",
+                            "data-tooltip": "Let agents in this host's sessions manage sessions on this same host without asking first",
+                            span { "Manage sessions on this host without asking" }
+                            input {
+                                r#type: "checkbox",
+                                class: "host-own-sessions-without-asking-toggle control-switch",
+                                checked: host.own_sessions_without_asking,
+                                "data-own-sessions-without-asking": "{host.own_sessions_without_asking}",
+                                // Broader authority does not disable this independent stored choice.
+                                disabled: busy || editing.is_some(),
+                                onchange: move |event| on_own_sessions_without_asking.call((id, event.checked())),
+                            }
+                        }
+                        p { class: "host-settings-help", "{own_sessions_help(host.own_sessions_without_asking, host.commands_without_asking)}" }
+                        {outcome_for(SettingsField::OwnSessionsWithoutAsking)}
+                    }
+                    div { class: "host-settings-fleet-commands setting-group",
                         label { class: "host-commands-without-asking setting-row",
                             "data-tooltip": "Let agents in this host's sessions start, stop, change and delete sessions and templates without asking first",
                             span { "Run farhelm commands without asking" }
@@ -665,7 +719,7 @@ pub(super) fn HostSettingsDialog(
                                 onchange: move |event| on_commands_without_asking.call((id, event.checked())),
                             }
                         }
-                        p { class: "host-settings-help", "{commands_help(host.commands_without_asking)}" }
+                        p { class: "host-settings-help", "{commands_help(host.commands_without_asking, host.own_sessions_without_asking)}" }
                         {outcome_for(SettingsField::CommandsWithoutAsking)}
                     }
                     for (local_network, allowed, label, help, field) in [
@@ -914,6 +968,219 @@ impl RemoveCopy {
 mod tests {
     use super::*;
 
+    /// Mount the real dialog with independent stored grants and the ordinary write gates.
+    /// The listing-shaped fixture avoids a second host model while keeping a real alias
+    /// editor available for the case that must disable adjacent permission switches.
+    fn settings_fixture(
+        (own, commands, busy, editing): (bool, bool, bool, Option<EditField>),
+    ) -> Element {
+        let host: Host = serde_json::from_value(serde_json::json!({
+            "id": 7,
+            "kind": "ssh",
+            "name": "a host",
+            "destination": "host.example",
+            "alias": null,
+            "state": {"phase": "connecting", "attempt": 1},
+            "own_sessions_without_asking": own,
+            "commands_without_asking": commands,
+        }))
+        .expect("a current host listing decodes");
+        let draft = use_signal(String::new);
+        rsx! {
+            HostSettingsDialog {
+                host,
+                busy,
+                editing,
+                outcome: None,
+                draft,
+                on_edit_start: |_| {},
+                on_edit_submit: |_| {},
+                on_edit_cancel: |_| {},
+                on_yolo_without_asking: |_| {},
+                on_own_sessions_without_asking: |_| {},
+                on_commands_without_asking: |_| {},
+                on_browser_permission: |_| {},
+                on_appearance: |_| {},
+                on_close: |_| {},
+            }
+        }
+    }
+
+    /// Read mounted permission inputs rather than testing a parallel model of their props.
+    /// Static classes and labels live in templates, while checked/disabled live in dynamic
+    /// attribute groups; walking child scopes keeps the assertions tied to the actual dialog.
+    fn settings_controls(
+        dom: &VirtualDom,
+        vnode: &VNode,
+        controls: &mut Vec<(&'static str, bool, bool)>,
+        labels: &mut Vec<&'static str>,
+    ) {
+        use dioxus::core::{AttributeValue, DynamicNode, TemplateAttribute, TemplateNode};
+
+        /// Fixed labels do not appear in the renderer's mutation stream.
+        fn fixed_text(node: &TemplateNode, labels: &mut Vec<&'static str>) {
+            match node {
+                TemplateNode::Text { text } => labels.push(text),
+                TemplateNode::Element { children, .. } => {
+                    for child in *children {
+                        fixed_text(child, labels);
+                    }
+                }
+                TemplateNode::Dynamic { .. } => {}
+            }
+        }
+        for root in vnode.template.roots {
+            fixed_text(root, labels);
+        }
+        for (index, attrs) in vnode.dynamic_attrs.iter().enumerate() {
+            if !attrs.iter().any(|attr| attr.name == "onchange") {
+                continue;
+            }
+            let path = vnode.template.attr_paths[index];
+            let mut node = &vnode.template.roots[usize::from(path[0])];
+            for &step in &path[1..] {
+                let TemplateNode::Element { children, .. } = node else {
+                    panic!("input path crosses a non-element");
+                };
+                node = &children[usize::from(step)];
+            }
+            let TemplateNode::Element {
+                tag: "input",
+                attrs,
+                ..
+            } = node
+            else {
+                continue;
+            };
+            let class = attrs.iter().find_map(|attr| match attr {
+                TemplateAttribute::Static {
+                    name: "class",
+                    value,
+                    ..
+                } if value
+                    .split_whitespace()
+                    .any(|word| word == "control-switch") =>
+                {
+                    Some(*value)
+                }
+                _ => None,
+            });
+            let Some(class) = class else { continue };
+            // One input can have separate listener and value groups.
+            let flag = |name| {
+                vnode
+                    .dynamic_attrs
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| vnode.template.attr_paths[*index] == path)
+                    .flat_map(|(_, attrs)| attrs.iter())
+                    .any(|attr| {
+                        attr.name == name && matches!(attr.value, AttributeValue::Bool(true))
+                    })
+            };
+            controls.push((class, flag("checked"), flag("disabled")));
+        }
+        for (index, node) in vnode.dynamic_nodes.iter().enumerate() {
+            match node {
+                DynamicNode::Fragment(children) => {
+                    for child in children {
+                        settings_controls(dom, child, controls, labels);
+                    }
+                }
+                DynamicNode::Component(component) => {
+                    if let Some(scope) = component.mounted_scope(index, vnode, dom) {
+                        settings_controls(dom, scope.root_node(), controls, labels);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Fleet-wide authority must neither overwrite nor disable the narrower saved choice.
+    /// Inspect the production input for both values and both busy/editor gates, and keep
+    /// its placement between YOLO and fleet-wide commands explicit for keyboard users.
+    #[farhelm_testtrace::test]
+    fn own_session_switch_keeps_its_value_and_obeys_the_settings_write_gates() {
+        let own_class = "host-own-sessions-without-asking-toggle control-switch";
+        for commands in [false, true] {
+            for own in [false, true] {
+                for (busy, editing, disabled) in [
+                    (false, None, false),
+                    (true, None, true),
+                    (false, Some(EditField::Alias), true),
+                ] {
+                    let mut dom = VirtualDom::new_with_props(
+                        settings_fixture,
+                        (own, commands, busy, editing),
+                    );
+                    dom.rebuild_in_place();
+                    let mut controls = Vec::new();
+                    let mut labels = Vec::new();
+                    settings_controls(
+                        &dom,
+                        dom.get_scope(ScopeId::APP)
+                            .expect("fixture mounted")
+                            .root_node(),
+                        &mut controls,
+                        &mut labels,
+                    );
+                    assert!(labels.contains(&"Manage sessions on this host without asking"));
+                    let position = controls
+                        .iter()
+                        .position(|(class, _, _)| *class == own_class)
+                        .expect("the same-host permission is always visible");
+                    assert_eq!(
+                        controls[position],
+                        (own_class, own, disabled),
+                        "the stored value and existing operation/editor gates win independently of fleet-wide authority"
+                    );
+                    assert!(
+                        position > 0 && position + 1 < controls.len(),
+                        "permission has both neighbors"
+                    );
+                    assert_eq!(
+                        controls[position - 1].0,
+                        "host-yolo-without-asking-toggle control-switch"
+                    );
+                    assert_eq!(
+                        controls[position + 1].0,
+                        "host-commands-without-asking-toggle control-switch"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Explain the scope in every stored state without promising a card that fleet-wide
+    /// authority waived. Other permission controls keep their own explanations.
+    #[test]
+    fn own_session_help_names_its_scope_and_independent_fleet_wide_overlap() {
+        for own in [false, true] {
+            for commands in [false, true] {
+                let help = own_sessions_help(own, commands);
+                for words in [
+                    "start, stop, restart, rename, clone",
+                    "delete sessions on this same host",
+                    "Requests for other hosts and template changes still ask unless",
+                    "Host changes always need your approval for each request",
+                ] {
+                    assert!(help.contains(words), "missing {words:?} in {help:?}");
+                }
+                assert_eq!(help.contains("already covers"), commands);
+                assert_eq!(help.contains("This setting does not let"), !own);
+            }
+        }
+        let help = commands_help(false, true);
+        assert!(help.contains("can manage sessions on this same host"));
+        assert!(help.contains("clones from other hosts"));
+        assert!(
+            !help.contains("Farhelm asks you first"),
+            "the own-host grant is already on"
+        );
+        assert!(commands_help(false, false).contains("Farhelm asks you first"));
+    }
+
     /// A host's line must show in the dialog while the dialog hides the row
     /// that would otherwise carry it, and under the right setting: a leftover
     /// host-action refusal shown under a setting the user never touched
@@ -953,5 +1220,23 @@ mod tests {
             )),
             "a committed-but-unreadable reply is shown as a warning, not an error"
         );
+        for outcome in [
+            FieldOutcome::Error("refused".into()),
+            FieldOutcome::Warning("unreadable reply".into()),
+        ] {
+            let (error, warning) = match &outcome {
+                FieldOutcome::Error(text) => (Some(text.clone()), None),
+                FieldOutcome::Warning(text) => (None, Some(text.clone())),
+            };
+            assert_eq!(
+                field_outcome(
+                    Some(SettingsField::OwnSessionsWithoutAsking),
+                    error,
+                    warning
+                ),
+                Some((SettingsField::OwnSessionsWithoutAsking, outcome)),
+                "a same-host settings write cannot blame the fleet-wide switch"
+            );
+        }
     }
 }
