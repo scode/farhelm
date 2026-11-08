@@ -5339,15 +5339,15 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   loss without weakening database consistency; process crashes preserve commits. Web-token rotation temporarily uses
   FULL for its token replacement and device-credential deletion transaction, so a power loss cannot restore credentials
   whose revocation was acknowledged (EXTRA if the file still uses a rollback journal). It restores the connection's
-  prior sync setting afterwards. Host command, YOLO and both browser-link permission setters, and patches that set or
-  clear tunnel consent, use the same barrier so a power loss cannot restore acknowledged trust revocations. Unrelated
-  preference patches remain NORMAL. On macOS, FULL and EXTRA make these writes durable only up to the drive's cache:
-  SQLite does not request `F_FULLFSYNC`. The maintainer accepted this limit, judging the additional protection marginal
-  and expecting most Macs running Farhelm to have batteries. First-contact identity recording can remain NORMAL: a
-  forgotten consumer copy is learned again from the supervisor's durable source identity. Schema and local-row setup are
-  atomic or repeatable database-only work. The separate checkout-config CLI opener is unchanged and keeps FULL. Backup
-  and restore must keep each database with the `-wal` and `-shm` files its backup includes and remove current sidecars
-  absent from that backup before restoring, so unrelated journal data is not replayed.
+  prior sync setting afterwards. Host removal, host command, YOLO and both browser-link permission setters, and patches
+  that set or clear tunnel consent, use the same barrier so a power loss cannot restore acknowledged trust revocations.
+  Unrelated preference patches remain NORMAL. On macOS, FULL and EXTRA make these writes durable only up to the drive's
+  cache: SQLite does not request `F_FULLFSYNC`. The maintainer accepted this limit, judging the additional protection
+  marginal and expecting most Macs running Farhelm to have batteries. First-contact identity recording can remain
+  NORMAL: a forgotten consumer copy is learned again from the supervisor's durable source identity. Schema and local-row
+  setup are atomic or repeatable database-only work. The separate checkout-config CLI opener is unchanged and keeps
+  FULL. Backup and restore must keep each database with the `-wal` and `-shm` files its backup includes and remove
+  current sidecars absent from that backup before restoring, so unrelated journal data is not replayed.
 - Helm schema 36 drops the `profiles` catalog and its remembered default with no conversion (SPEC.md, the launch-kinds
   upgrade paragraph). Cached session rows may still carry the removed `source_profile` member; serde ignores it, so they
   keep listing without a rewrite. Helm schema 37 converts every cached session for launch kinds (see "Launch kinds: one

@@ -21597,7 +21597,10 @@
   test (`trust_revocations_commit_with_full_sync`) covers removal. Identity adoption's permission reset is not in scope.
   Size gate: about 100 lines of diff (estimated 25), as above; over it, block and bring it back. Remove the feedback
   file and its index entry.
-- Execution: planned in `plans/queue/triage-misc-nov7.md`.
+- Execution: implemented in jj change `vtnrkpnryommxnrxoqrzzrnlopvpuoqm`, bookmark
+  `plan/triage-misc-nov7/01-host-removal-full-sync`, [PR #3171](https://github.com/scode/farhelm/pull/3171/changes).
+  Host removal uses the existing full-sync barrier, with removal named in the specification and covered by the
+  trust-revocation durability test.
 
 ## openssh-floor-percent-path-disables-stable-host-pin.md
 
