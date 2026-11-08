@@ -72,6 +72,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Let a host's sessions manage sessions on that same host without asking.** A new host permission, off by default,
+  lets agents in a host's sessions create, spawn, clone, rename, stop, restart and delete sessions on that same host
+  without an approval card, while requests aimed at other hosts still ask. The approval card for such a request offers
+  "Always allow on <host> only" to turn it on. Plan: `plans/queue/own-host-sessions-without-asking.md`.
+
 - **Fix the misleading message when Stop interrupts a starting agent.** A Stop pressed while the agent is still starting
   is recorded as a launch that never started, and its message wrongly blames the host's systemd user manager. The
   message should say what happened: the user stopped the session before its agent finished starting. Found while
