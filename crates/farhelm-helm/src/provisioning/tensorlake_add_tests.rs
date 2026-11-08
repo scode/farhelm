@@ -5,7 +5,10 @@
 use super::*;
 use crate::rest_harness::{FleetBuilder, Harness};
 use crate::tensorlake::e2e::{E2eTensorlake, FakeModel};
-use farhelm_proto::tensorlake::{SaveSettings, recipes::RecipeSave};
+use farhelm_proto::tensorlake::{
+    SaveSettings,
+    recipes::{RecipeBase, RecipeSave},
+};
 
 /// Own all fake paths alongside the helm fixture. Supplying these explicitly
 /// keeps concurrent tests isolated without changing process environment.
@@ -17,8 +20,9 @@ struct Fixture {
 }
 
 /// Assemble a real provisioning service over the repository's two controlled
-/// fakes; managed fixtures additionally exercise the snapshot build engine.
-async fn fixture(managed: bool) -> Fixture {
+/// fakes. Ubuntu fixtures build on add; image fixtures start with a recorded
+/// snapshot so tests of later setup phases need no unrelated builder lifecycle.
+async fn fixture(build_on_add: bool) -> Fixture {
     let harness = FleetBuilder::new().await.start().await;
     let root = tempfile::tempdir().unwrap();
     let api_dir = root.path().join("api");
@@ -32,9 +36,11 @@ async fn fixture(managed: bool) -> Fixture {
         std::fs::write(path.join("config.json"), "{}").unwrap();
     }
     let api = Arc::new(E2eTensorlake::new(api_dir, root.path()).unwrap());
+    let mut model = FakeModel::default();
+    let existing_snapshot = (!build_on_add).then(|| model.plant_snapshot("earlierbuilder"));
     std::fs::write(
         root.path().join("api/state.json"),
-        serde_json::to_vec(&FakeModel::default()).unwrap(),
+        serde_json::to_vec(&model).unwrap(),
     )
     .unwrap();
     let tensorlake = Tensorlake::production(harness.store.clone(), root.path())
@@ -51,8 +57,8 @@ async fn fixture(managed: bool) -> Fixture {
         .ok()
         .unwrap();
     let mut recipe: RecipeSave = crate::tensorlake::recipes::tests_support::save();
-    if !managed {
-        recipe.source = RecipeSource::Image {
+    if !build_on_add {
+        recipe.base = RecipeBase::Image {
             image: "example/systemd".into(),
         };
     }
@@ -64,6 +70,22 @@ async fn fixture(managed: bool) -> Fixture {
             .unwrap()
             .is_ok()
     );
+    if let Some(id) = existing_snapshot {
+        harness
+            .store
+            .update_tensorlake_recipe_state("test-recipe", move |spec, state| {
+                state.snapshot = Some(crate::tensorlake::build::BuiltSnapshot {
+                    id,
+                    base: spec.base.clone(),
+                    disk_gb: spec.size.disk_gb,
+                    packages: spec.packages.clone(),
+                    ..Default::default()
+                });
+            })
+            .await
+            .unwrap()
+            .unwrap();
+    }
     let service = ProvisioningService::injected(
         harness.store.clone(),
         Arc::clone(&harness.manager),
@@ -154,7 +176,7 @@ async fn credential_delivery_warning_does_not_abort_tensorlake_setup() {
         .await
         .unwrap();
     let mut recipe = crate::tensorlake::recipes::tests_support::save();
-    recipe.source = RecipeSource::Image {
+    recipe.base = RecipeBase::Image {
         image: "example/systemd".into(),
     };
     recipe.claude = Some(farhelm_proto::tensorlake::recipes::EndpointSave {
@@ -230,7 +252,7 @@ async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
     for subscription in [true, false] {
         let f = fixture(false).await;
         let mut recipe = crate::tensorlake::recipes::tests_support::save();
-        recipe.source = RecipeSource::Image {
+        recipe.base = RecipeBase::Image {
             image: "example/systemd".into(),
         };
         if subscription {
@@ -317,7 +339,7 @@ async fn claude_subscription_setup_delivers_before_supervisor_startup() {
     use farhelm_proto::credentials::{CreateCredential, CredentialKind};
     let f = fixture(false).await;
     let mut recipe = crate::tensorlake::recipes::tests_support::save();
-    recipe.source = RecipeSource::Image {
+    recipe.base = RecipeBase::Image {
         image: "example/systemd".into(),
     };
     f.harness
@@ -376,7 +398,7 @@ async fn claude_subscription_setup_delivers_before_supervisor_startup() {
 }
 
 /// GitHub-only recipes must enter setup's credential step without an agent
-/// endpoint to trigger it. Reused images without gh still finish installing
+/// endpoint to trigger it. Hosts without gh still finish installing
 /// Farhelm after the token upload, keeping the unsuccessful slot retryable.
 #[farhelm_testtrace::test]
 async fn github_only_setup_delivers_before_starting_the_supervisor() {
@@ -393,7 +415,7 @@ async fn github_only_setup_delivers_before_starting_the_supervisor() {
             .await
             .unwrap();
         let mut recipe = crate::tensorlake::recipes::tests_support::save();
-        recipe.source = RecipeSource::Image {
+        recipe.base = RecipeBase::Image {
             image: "example/systemd".into(),
         };
         recipe.github_token_credential = Some("github".into());
@@ -602,8 +624,312 @@ async fn managed_add_splices_setup_and_rerun_adopts_the_same_sandbox() {
     );
 }
 
+/// Migrated image and snapshot recipes have no built snapshot, but their old
+/// hosts already own a sandbox. Rerun must skip the builder by durable ID and
+/// by name after a lost ID write, regardless of that empty recipe build state.
+#[farhelm_testtrace::test]
+async fn rerun_of_an_existing_sandbox_skips_building_even_without_a_recipe_snapshot() {
+    for lost_id in [false, true] {
+        let f = fixture(false).await;
+        let host = f.add().await.host_id;
+        assert_eq!(f.finish(host).await.status, RunStatus::Completed);
+        let before = f.model();
+        assert_eq!(before.live_sandboxes().len(), 1);
+        let sandbox = before.live_sandboxes()[0].id.clone();
+        let mut recipe = crate::tensorlake::recipes::tests_support::save();
+        recipe.packages.clear();
+        recipe.base = if lost_id {
+            RecipeBase::Snapshot {
+                snapshot_id: "oldusersnapshot".into(),
+            }
+        } else {
+            RecipeBase::Image {
+                image: "old/base".into(),
+            }
+        };
+        f.harness
+            .store
+            .update_tensorlake_recipe("test-recipe".into(), recipe)
+            .await
+            .unwrap()
+            .unwrap();
+        f.harness
+            .store
+            .update_tensorlake_recipe_state("test-recipe", |_, state| *state = Default::default())
+            .await
+            .unwrap()
+            .unwrap();
+        if lost_id {
+            f.harness
+                .store
+                .conn()
+                .call("forget fixture sandbox id", move |conn| {
+                    conn.execute(
+                        "UPDATE hosts SET tensorlake_sandbox_id = NULL WHERE id = ?1",
+                        [host],
+                    )?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+        assert!(
+            f.harness
+                .store
+                .tensorlake_recipe_row("test-recipe")
+                .await
+                .unwrap()
+                .unwrap()
+                .1
+                .snapshot
+                .is_none()
+        );
+        let events_before_probe = std::fs::read(f.root.path().join("api/events.jsonl")).unwrap();
+        let ProbeResponse::TensorlakeProvisionable {
+            probe_id,
+            steps,
+            confirmation,
+            ..
+        } = f.probe(ProbeDestination::TensorlakeHost { host }).await
+        else {
+            panic!("rerun plan")
+        };
+        assert_eq!(
+            std::fs::read(f.root.path().join("api/events.jsonl")).unwrap(),
+            events_before_probe,
+            "rerun probing must remain local"
+        );
+        if lost_id {
+            assert!(
+                steps.steps[0].name.contains("only if"),
+                "a lookup by name may still need a settled create: {confirmation}"
+            );
+        } else {
+            assert_eq!(
+                steps.steps[0].name,
+                "Use the host's recorded sandbox (no snapshot build)"
+            );
+            assert!(
+                !confirmation.contains("Build the snapshot"),
+                "{confirmation}"
+            );
+            assert!(steps.steps[1].name.starts_with("Use the recorded sandbox"));
+        }
+        f.service
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .unwrap();
+        let view = f.finish(host).await;
+        assert_eq!(view.status, RunStatus::Completed, "{:?}", view.message);
+        assert_eq!(view.steps[0].step, "build-snapshot");
+        assert_eq!(view.steps[0].status, StepStatus::Skipped);
+        let after = f.model();
+        assert_eq!(after.sandboxes.len(), before.sandboxes.len());
+        assert_eq!(after.live_sandboxes()[0].id, sandbox);
+        assert!(
+            f.harness
+                .store
+                .tensorlake_recipe_row("test-recipe")
+                .await
+                .unwrap()
+                .unwrap()
+                .1
+                .snapshot
+                .is_none()
+        );
+    }
+}
+
+/// A 404 is not permission to build while a host create may still settle, and
+/// a recorded sandbox is never replaced even when it is gone. Empty migrated
+/// recipe state must not turn either rerun into a billed builder request.
+#[farhelm_testtrace::test]
+async fn rerun_does_not_build_while_a_sandbox_is_unsettled_or_recorded_gone() {
+    for recorded in [false, true] {
+        let f = fixture(false).await;
+        let host = f.add().await.host_id;
+        assert_eq!(f.finish(host).await.status, RunStatus::Completed);
+        let mut model = f.model();
+        model.sandboxes.clear();
+        std::fs::write(
+            f.root.path().join("api/state.json"),
+            serde_json::to_vec(&model).unwrap(),
+        )
+        .unwrap();
+        f.harness
+            .store
+            .update_tensorlake_recipe_state("test-recipe", |_, state| *state = Default::default())
+            .await
+            .unwrap()
+            .unwrap();
+        if !recorded {
+            f.harness.store.conn().call("plant unsettled fixture create", move |conn| {
+                conn.execute("UPDATE hosts SET tensorlake_sandbox_id = NULL, tensorlake_pending_create_at = ?2 WHERE id = ?1", rusqlite::params![host, crate::tensorlake::recipes::now_secs()])?;
+                Ok(())
+            }).await.unwrap();
+        }
+        let row = f
+            .harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        let binding = row.tensorlake.unwrap();
+        assert_eq!(binding.sandbox_id.is_some(), recorded);
+        assert_eq!(binding.pending_create_at.is_some(), !recorded);
+        assert!(
+            f.model().live_sandboxes().is_empty(),
+            "premise: sandbox lookup is 404"
+        );
+        assert!(
+            f.harness
+                .store
+                .tensorlake_recipe_row("test-recipe")
+                .await
+                .unwrap()
+                .unwrap()
+                .1
+                .snapshot
+                .is_none(),
+            "premise: a migrated recipe has no snapshot to reuse"
+        );
+        let before = std::fs::read_to_string(f.root.path().join("api/events.jsonl")).unwrap();
+        let creates_before = before
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .filter(|event| event["op"] == "create_sandbox")
+            .count();
+        assert_eq!(
+            creates_before, 1,
+            "premise: only the original host was created"
+        );
+        let ProbeResponse::TensorlakeProvisionable { probe_id, .. } =
+            f.probe(ProbeDestination::TensorlakeHost { host }).await
+        else {
+            panic!("rerun plan")
+        };
+        f.service
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .unwrap();
+        let view = f.finish(host).await;
+        assert_eq!(view.status, RunStatus::Failed);
+        assert_eq!(view.steps[0].status, StepStatus::Skipped);
+        let skip = view.steps[0].message.as_deref().unwrap();
+        if recorded {
+            assert!(skip.contains("recorded sandbox"), "{skip}");
+            assert!(!skip.contains("already exists"), "{skip}");
+        } else {
+            assert!(skip.contains("may still be starting"), "{skip}");
+            assert!(
+                view.message
+                    .as_deref()
+                    .unwrap()
+                    .contains("may still be starting")
+            );
+        }
+        assert_eq!(view.steps[1].step, "create-sandbox");
+        assert_eq!(view.steps[1].status, StepStatus::Failed);
+        let after = std::fs::read_to_string(f.root.path().join("api/events.jsonl")).unwrap();
+        let creates_after = after
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .filter(|event| event["op"] == "create_sandbox")
+            .count();
+        assert_eq!(
+            creates_after, creates_before,
+            "neither a host nor a builder create may be sent"
+        );
+        assert!(f.model().sandboxes.is_empty());
+        let state = f
+            .harness
+            .store
+            .tensorlake_recipe_row("test-recipe")
+            .await
+            .unwrap()
+            .unwrap()
+            .1;
+        assert!(
+            state.snapshot.is_none()
+                && state.builder_sandbox_id.is_none()
+                && state.build_started_at.is_none()
+        );
+    }
+}
+
+/// New hosts from a migrated image or snapshot definition need the same built
+/// snapshot as Ubuntu recipes. The base starts the builder; only its result
+/// starts the host, so agents and package layers cannot be bypassed.
+#[farhelm_testtrace::test]
+async fn new_hosts_from_image_and_snapshot_bases_build_before_create() {
+    for snapshot_base in [false, true] {
+        let f = fixture(false).await;
+        let mut model = f.model();
+        let users_snapshot = model.plant_snapshot("usersbuilder");
+        std::fs::write(
+            f.root.path().join("api/state.json"),
+            serde_json::to_vec(&model).unwrap(),
+        )
+        .unwrap();
+        let mut recipe = crate::tensorlake::recipes::tests_support::save();
+        recipe.base = if snapshot_base {
+            RecipeBase::Snapshot {
+                snapshot_id: users_snapshot.clone(),
+            }
+        } else {
+            RecipeBase::Image {
+                image: "team/base".into(),
+            }
+        };
+        f.harness
+            .store
+            .update_tensorlake_recipe("test-recipe".into(), recipe)
+            .await
+            .unwrap()
+            .unwrap();
+        f.harness
+            .store
+            .update_tensorlake_recipe_state("test-recipe", |_, state| *state = Default::default())
+            .await
+            .unwrap()
+            .unwrap();
+        let host = f.add().await.host_id;
+        let view = f.finish(host).await;
+        assert_eq!(view.status, RunStatus::Completed, "{:?}", view.message);
+        assert_eq!(view.steps[0].status, StepStatus::Completed);
+        let state = f
+            .harness
+            .store
+            .tensorlake_recipe_row("test-recipe")
+            .await
+            .unwrap()
+            .unwrap()
+            .1;
+        let built = state.snapshot.unwrap();
+        let model = f.model();
+        assert_eq!(model.sandboxes.len(), 2, "one builder, then one host");
+        let builder = &model.sandboxes[0];
+        assert_eq!(builder.status, "terminated");
+        if snapshot_base {
+            assert_eq!(
+                builder.snapshot_id.as_deref(),
+                Some(users_snapshot.as_str())
+            );
+        } else {
+            assert_eq!(builder.image.as_deref(), Some("team/base"));
+        }
+        assert_eq!(
+            model.sandboxes[1].snapshot_id.as_deref(),
+            Some(built.id.as_str())
+        );
+    }
+}
+
 /// Failure after create must preserve the row and sandbox id, so Delete
-/// sandbox can clean up and Rerun can continue. A reuse recipe builds nothing.
+/// sandbox can clean up and Rerun can continue without rebuilding its snapshot.
 #[farhelm_testtrace::test]
 async fn failed_prepare_keeps_ownership_and_rerun_continues_without_recreate() {
     let f = fixture(false).await;

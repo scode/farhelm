@@ -1,6 +1,6 @@
 //! The Tensorlake recipe list, for Settings → Tensorlake.
 //!
-//! One row per recipe: its name, a one-line summary of size, software and
+//! One row per recipe: its name, a one-line summary of size, base, packages and
 //! tunnels, a status line, and Edit. "New recipe" and Edit swap the list for
 //! the [`RecipeEditor`] in place (one focus owner inside the Settings modal,
 //! like the templates dialog's list/editor swap), and the editor's Back
@@ -13,14 +13,14 @@
 //! without the error and the button a stale list would stay stale, silently,
 //! until some unrelated change bumped the feed again.
 //!
-//! Each managed recipe's status line reports its snapshot: when it was built
+//! Each recipe's status line reports its snapshot: when it was built
 //! and with which agent versions, a build in progress with its step, a failed
-//! or interrupted build with Retry, and staleness (packages changed, or a
+//! or interrupted build with Retry, and staleness (base or packages changed, or a
 //! disk now smaller than the snapshot's). Build, Rebuild and Retry are one
 //! request to the helm, which starts the build or joins the running one;
-//! progress then arrives through the same feed-driven re-read. A recipe that
-//! reuses an image or snapshot is used as is and offers no build. The word is
-//! always "snapshot", never "template", which means launch templates.
+//! progress then arrives through the same feed-driven re-read. Every base goes
+//! through that build before hosts can use it. The word is always "snapshot",
+//! never "template", which means launch templates.
 
 use std::{
     cell::Cell,
@@ -29,7 +29,7 @@ use std::{
 };
 
 use dioxus::prelude::*;
-use farhelm_proto::tensorlake::recipes::{BuildStep, BuildView, RecipeSource, RecipeView};
+use farhelm_proto::tensorlake::recipes::{BuildStep, BuildView, RecipeBase, RecipeView};
 
 use super::recipe_editor::RecipeEditor;
 use crate::ApiBase;
@@ -44,8 +44,8 @@ enum Editing {
     Existing(Box<RecipeView>),
 }
 
-/// The one-line summary under a recipe's name, e.g. `4 CPU · 8 GB · 50 GB ·
-/// 12 packages · 1 tunnel` or `2 CPU · 4 GB · 20 GB · uses image team-base`.
+/// The shared Settings and Add host summary names size, base, packages and
+/// tunnels, so choosing a recipe exposes what its next build will contain.
 /// The tunnel count is left out when there are none.
 pub(crate) fn recipe_summary(view: &RecipeView) -> String {
     let plural = |count: usize, one: &str, many: &str| {
@@ -56,11 +56,12 @@ pub(crate) fn recipe_summary(view: &RecipeView) -> String {
         format!("{} GB", view.size.memory_gb),
         format!("{} GB", view.size.disk_gb),
     ];
-    parts.push(match &view.source {
-        RecipeSource::Packages { packages } => plural(packages.len(), "package", "packages"),
-        RecipeSource::Image { image } => format!("uses image {image}"),
-        RecipeSource::Snapshot { snapshot_id } => format!("uses snapshot {snapshot_id}"),
+    parts.push(match &view.base {
+        RecipeBase::TensorlakeUbuntu => "base: Tensorlake Ubuntu".into(),
+        RecipeBase::Image { image } => format!("base: your image {image}"),
+        RecipeBase::Snapshot { snapshot_id } => format!("base: your snapshot {snapshot_id}"),
     });
+    parts.push(plural(view.packages.len(), "package", "packages"));
     if !view.tunnels.is_empty() {
         parts.push(plural(view.tunnels.len(), "tunnel", "tunnels"));
     }
@@ -88,6 +89,7 @@ enum BuildAction {
 }
 
 impl BuildAction {
+    /// The same build operation is named for the recovery state the user sees.
     fn label(self) -> &'static str {
         match self {
             BuildAction::Build => "Build snapshot",
@@ -96,6 +98,7 @@ impl BuildAction {
         }
     }
 
+    /// Make the billed work and snapshot replacement visible before a click.
     fn tooltip(self) -> &'static str {
         match self {
             BuildAction::Build => {
@@ -140,24 +143,11 @@ fn step_of(step: BuildStep) -> String {
 /// A built snapshot stays visible while a rebuild runs or after one failed,
 /// because hosts keep starting from it until a new one replaces it. A build
 /// that runs or was interrupted, and anything that still awaits deletion,
-/// show whatever the recipe's source is now: a recipe switched to reusing an
-/// image mid-build, or after a deletion failed, still has a builder or
-/// snapshot that bills. Only the build actions depend on the source, since
-/// the helm builds nothing for a reuse recipe.
+/// show even after a base change. A save never replaces the current snapshot;
+/// base and package differences warn until a successful build records them.
 fn snapshot_status(view: &RecipeView) -> SnapshotStatus {
     let mut lines = Vec::new();
-    let packages = match &view.source {
-        RecipeSource::Image { .. } => {
-            lines.push(StatusLine::Plain("Uses the image as is".into()));
-            None
-        }
-        RecipeSource::Snapshot { .. } => {
-            lines.push(StatusLine::Plain("Uses the snapshot as is".into()));
-            None
-        }
-        RecipeSource::Packages { packages } => Some(packages),
-    };
-    if let (Some(packages), Some(snapshot)) = (packages, &view.snapshot) {
+    if let Some(snapshot) = &view.snapshot {
         let mut built = format!("Snapshot built {}", utc_minute(snapshot.built_at));
         for version in [&snapshot.claude_version, &snapshot.codex_version]
             .into_iter()
@@ -167,7 +157,12 @@ fn snapshot_status(view: &RecipeView) -> SnapshotStatus {
             built.push_str(version);
         }
         lines.push(StatusLine::Plain(built));
-        let mut wanted = packages.clone();
+        if view.base != snapshot.base {
+            lines.push(StatusLine::Warning(
+                "Base changed since this snapshot was built; rebuild it to apply the change".into(),
+            ));
+        }
+        let mut wanted = view.packages.clone();
         let mut had = snapshot.packages.clone();
         wanted.sort();
         had.sort();
@@ -194,8 +189,9 @@ fn snapshot_status(view: &RecipeView) -> SnapshotStatus {
         }
         BuildView::Failed { step, message, .. } => {
             lines.push(StatusLine::Error(format!(
-                "Snapshot build failed while {}: {message}",
-                step.label()
+                "Snapshot build failed while {} ({}): {message}",
+                step.label(),
+                step_of(*step)
             )));
             (false, Some(BuildAction::Retry))
         }
@@ -206,11 +202,10 @@ fn snapshot_status(view: &RecipeView) -> SnapshotStatus {
             (false, Some(BuildAction::Retry))
         }
         BuildView::Idle if view.snapshot.is_some() => (false, Some(BuildAction::Rebuild)),
-        BuildView::Idle if packages.is_some() => {
+        BuildView::Idle => {
             lines.push(StatusLine::Plain("No snapshot yet".into()));
             (false, Some(BuildAction::Build))
         }
-        BuildView::Idle => (false, None),
     };
     if view.cleanup_pending {
         lines.push(StatusLine::Muted(
@@ -221,7 +216,7 @@ fn snapshot_status(view: &RecipeView) -> SnapshotStatus {
     SnapshotStatus {
         lines,
         building,
-        action: action.filter(|_| packages.is_some()),
+        action,
     }
 }
 
@@ -407,9 +402,9 @@ mod tests {
     use super::*;
     use farhelm_proto::tensorlake::recipes::{RecipeSize, SnapshotView, Tunnel};
 
-    /// A 4 CPU / 8 GB / 50 GB recipe with `source` and `tunnels` tunnels, the
-    /// mockup's first row.
-    fn view(source: RecipeSource, tunnels: usize) -> RecipeView {
+    /// A recipe with a selectable base and tunnel count, so list and Add host
+    /// wording can be checked without mounting either dialog.
+    fn view(base: RecipeBase, tunnels: usize) -> RecipeView {
         RecipeView {
             name: "rust-dev".into(),
             size: RecipeSize {
@@ -417,7 +412,8 @@ mod tests {
                 memory_gb: 8,
                 disk_gb: 50,
             },
-            source,
+            base,
+            packages: Vec::new(),
             claude: None,
             codex: None,
             github_token_credential: None,
@@ -436,57 +432,55 @@ mod tests {
         }
     }
 
-    /// Spec: the summary reads size, then package count or the reused image or
-    /// snapshot, then the tunnel count only when there are tunnels, with
-    /// singular and plural counts.
+    /// Spec: the summary reads size, base and package count, then the tunnel
+    /// count only when there are tunnels, with singular and plural counts.
     ///
     /// Why: this one line is how the list tells recipes apart at a glance; the
     /// mockup's wording is the contract the browser spec also checks.
     #[test]
     fn summaries_follow_the_mockup() {
-        let packages = |n: usize| RecipeSource::Packages {
+        let packages = |n: usize| RecipeView {
             packages: (0..n).map(|n| format!("pkg{n}")).collect(),
+            ..view(RecipeBase::TensorlakeUbuntu, 1)
         };
         assert_eq!(
-            recipe_summary(&view(packages(12), 1)),
-            "4 CPU · 8 GB · 50 GB · 12 packages · 1 tunnel"
+            recipe_summary(&packages(12)),
+            "4 CPU · 8 GB · 50 GB · base: Tensorlake Ubuntu · 12 packages · 1 tunnel"
         );
+        let mut one_package = packages(1);
+        one_package.tunnels = view(RecipeBase::TensorlakeUbuntu, 2).tunnels;
         assert_eq!(
-            recipe_summary(&view(packages(1), 2)),
-            "4 CPU · 8 GB · 50 GB · 1 package · 2 tunnels"
+            recipe_summary(&one_package),
+            "4 CPU · 8 GB · 50 GB · base: Tensorlake Ubuntu · 1 package · 2 tunnels"
         );
         assert_eq!(
             recipe_summary(&view(
-                RecipeSource::Image {
+                RecipeBase::Image {
                     image: "team-base".into()
                 },
                 0
             )),
-            "4 CPU · 8 GB · 50 GB · uses image team-base"
+            "4 CPU · 8 GB · 50 GB · base: your image team-base · 0 packages"
         );
         assert_eq!(
             recipe_summary(&view(
-                RecipeSource::Snapshot {
+                RecipeBase::Snapshot {
                     snapshot_id: "abc123".into()
                 },
                 0
             )),
-            "4 CPU · 8 GB · 50 GB · uses snapshot abc123"
+            "4 CPU · 8 GB · 50 GB · base: your snapshot abc123 · 0 packages"
         );
     }
 
-    /// A managed recipe with packages `git ripgrep`, 50 GB of disk, and the
-    /// given snapshot and build.
+    /// A Tensorlake Ubuntu recipe whose current build inputs match the normal
+    /// snapshot fixture. Individual tests change one input to expose staleness.
     fn managed(snapshot: Option<SnapshotView>, build: BuildView) -> RecipeView {
         RecipeView {
             snapshot,
             build,
-            ..view(
-                RecipeSource::Packages {
-                    packages: vec!["git".into(), "ripgrep".into()],
-                },
-                0,
-            )
+            packages: vec!["git".into(), "ripgrep".into()],
+            ..view(RecipeBase::TensorlakeUbuntu, 0)
         }
     }
 
@@ -495,7 +489,7 @@ mod tests {
         SnapshotView {
             id: "snap1".into(),
             built_at: 1_793_714_525,
-            base_image: "tensorlake/ubuntu-systemd".into(),
+            base: RecipeBase::TensorlakeUbuntu,
             disk_gb: 50,
             packages: packages.iter().map(|p| p.to_string()).collect(),
             claude_version: Some("2.0.1 (Claude Code)".into()),
@@ -503,17 +497,18 @@ mod tests {
         }
     }
 
+    /// Keep expected ordinary status text readable beside typed warning lines.
     fn plain(text: &str) -> StatusLine {
         StatusLine::Plain(text.into())
     }
 
-    /// Spec: a managed recipe without a snapshot offers Build; a built one
+    /// Spec: a recipe without a snapshot offers Build; a built one
     /// says when and with which agents, and offers Rebuild; a running build
     /// shows its step as "step n of 9" with no action and keeps the built
     /// line; a failed one shows the step's phrase and the message with
     /// Retry; an interrupted one offers Retry; changed packages (in any
     /// order counts as unchanged) and a smaller disk warn; pending cleanup
-    /// adds a muted line; a reused image or snapshot offers nothing.
+    /// adds a muted line. The same actions apply to every base.
     ///
     /// Why: this is the whole status vocabulary of the list, settled with the
     /// user; each state must offer exactly the action the helm accepts.
@@ -568,7 +563,7 @@ mod tests {
             (failed.lines, failed.action),
             (
                 vec![StatusLine::Error(
-                    "Snapshot build failed while installing packages: E: Unable to locate package nope".into()
+                    "Snapshot build failed while installing packages (step 5 of 9): E: Unable to locate package nope".into()
                 )],
                 Some(BuildAction::Retry)
             )
@@ -589,64 +584,92 @@ mod tests {
         );
         assert!(matches!(&stale.lines[3], StatusLine::Muted(_)));
 
-        for (source, text) in [
-            (
-                RecipeSource::Image {
-                    image: "team-base".into(),
-                },
-                "Uses the image as is",
-            ),
-            (
-                RecipeSource::Snapshot {
-                    snapshot_id: "abc".into(),
-                },
-                "Uses the snapshot as is",
-            ),
+        for base in [
+            RecipeBase::Image {
+                image: "team-base".into(),
+            },
+            RecipeBase::Snapshot {
+                snapshot_id: "abc".into(),
+            },
         ] {
-            let reuse = snapshot_status(&view(source, 0));
-            assert_eq!((reuse.lines, reuse.action), (vec![plain(text)], None));
+            let status = snapshot_status(&view(base, 0));
+            assert_eq!(
+                (status.lines, status.action),
+                (vec![plain("No snapshot yet")], Some(BuildAction::Build))
+            );
         }
     }
 
-    /// Spec: a reuse recipe shows a running or interrupted build and pending
-    /// cleanup, but never offers a build action and never shows a snapshot
-    /// line (its snapshot was retired when the source changed).
-    ///
-    /// Why: switching a recipe to an image mid-build, or after its old
-    /// snapshot's deletion failed, leaves a builder or snapshot billing; the
-    /// row is the only place the user can see that.
+    /// Base edits preserve the previous snapshot and its build activity. The
+    /// warning must distinguish a changed base from changed packages, and a
+    /// failed or interrupted custom-base build must remain retryable.
     #[test]
-    fn a_reuse_recipe_still_shows_billing_build_activity_and_cleanup() {
-        let image = || RecipeSource::Image {
-            image: "team-base".into(),
-        };
-        let mut building = view(image(), 0);
-        building.build = BuildView::Building {
-            step: BuildStep::Codex,
-            started_at: 1,
-        };
-        let status = snapshot_status(&building);
-        assert_eq!(
-            (status.lines, status.building, status.action),
-            (
-                vec![
-                    plain("Uses the image as is"),
-                    plain("Building snapshot: installing Codex (step 7 of 9)")
-                ],
-                true,
-                None
-            )
-        );
-        let mut interrupted = view(image(), 0);
-        interrupted.build = BuildView::Interrupted { started_at: 1 };
-        interrupted.cleanup_pending = true;
-        interrupted.snapshot = Some(built(&["git"]));
-        let status = snapshot_status(&interrupted);
-        assert_eq!(status.action, None);
-        assert_eq!(status.lines.len(), 3, "{:?}", status.lines);
-        assert!(
-            matches!(&status.lines[1], StatusLine::Warning(text) if text.starts_with("The last snapshot build stopped"))
-        );
-        assert!(matches!(&status.lines[2], StatusLine::Muted(_)));
+    fn base_changes_keep_the_snapshot_and_build_actions() {
+        for base in [
+            RecipeBase::TensorlakeUbuntu,
+            RecipeBase::Image {
+                image: "team-base".into(),
+            },
+            RecipeBase::Snapshot {
+                snapshot_id: "snapshot-1".into(),
+            },
+        ] {
+            let mut recipe = managed(Some(built(&["git", "ripgrep"])), BuildView::Idle);
+            recipe.base = base.clone();
+            recipe.snapshot.as_mut().unwrap().base = base.clone();
+            let status = snapshot_status(&recipe);
+            assert_eq!(status.action, Some(BuildAction::Rebuild));
+            assert_eq!(
+                status.lines.len(),
+                1,
+                "matching build inputs need no warning"
+            );
+
+            // Changing the identifier within one base kind matters too: an
+            // image or snapshot choice cannot be compared by its kind alone.
+            recipe.base = match &base {
+                RecipeBase::TensorlakeUbuntu => RecipeBase::Image {
+                    image: "another-base".into(),
+                },
+                RecipeBase::Image { .. } => RecipeBase::Image {
+                    image: "another-base".into(),
+                },
+                RecipeBase::Snapshot { .. } => RecipeBase::Snapshot {
+                    snapshot_id: "another-snapshot".into(),
+                },
+            };
+            let status = snapshot_status(&recipe);
+            assert!(
+                matches!(&status.lines[0], StatusLine::Plain(text) if text.starts_with("Snapshot built"))
+            );
+            assert!(
+                matches!(&status.lines[1], StatusLine::Warning(text) if text.starts_with("Base changed"))
+            );
+            assert_eq!(status.action, Some(BuildAction::Rebuild));
+
+            recipe.build = BuildView::Building {
+                step: BuildStep::Codex,
+                started_at: 1,
+            };
+            let status = snapshot_status(&recipe);
+            assert!(status.building);
+            assert_eq!(status.action, None);
+            assert_eq!(
+                status.lines.last(),
+                Some(&plain("Building snapshot: installing Codex (step 7 of 9)"))
+            );
+
+            recipe.build = BuildView::Failed {
+                step: BuildStep::Codex,
+                message: "installer failed".into(),
+                at: 1,
+            };
+            assert_eq!(snapshot_status(&recipe).action, Some(BuildAction::Retry));
+            recipe.build = BuildView::Interrupted { started_at: 1 };
+            recipe.cleanup_pending = true;
+            let status = snapshot_status(&recipe);
+            assert_eq!(status.action, Some(BuildAction::Retry));
+            assert!(matches!(status.lines.last(), Some(StatusLine::Muted(_))));
+        }
     }
 }

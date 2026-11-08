@@ -373,7 +373,8 @@ for (const palette of ["dark", "light"] as const) {
       ).sort();
       const definition = {
         size: { cpus: 4, memory_gb: 16, disk_gb: 50 },
-        source: { kind: "packages", packages: ["git", "ripgrep"] },
+        base: { kind: "tensorlake_ubuntu" },
+        packages: ["git", "ripgrep"],
         claude: null,
         codex: null,
         tunnels: [{ sandbox_port: 8080, host: "127.0.0.1", port: 9090 }],
@@ -501,7 +502,7 @@ for (const palette of ["dark", "light"] as const) {
         await select.selectOption(recipe);
         const summary = dialog.locator(".add-tensorlake-recipe-summary");
         await expect(summary).toHaveText(
-          "4 CPU · 16 GB · 50 GB · 2 packages · 1 tunnel",
+          "4 CPU · 16 GB · 50 GB · base: Tensorlake Ubuntu · 2 packages · 1 tunnel",
         );
         await page.evaluate(() => document.fonts.ready);
         const nameStyle = await name.evaluate((element) => {
@@ -685,7 +686,7 @@ for (const palette of ["dark", "light"] as const) {
         await expect(name).toHaveValue(hostName);
         await expect(select).toHaveValue(recipe);
         await expect(summary).toHaveText(
-          "4 CPU · 16 GB · 50 GB · 2 packages · 1 tunnel",
+          "4 CPU · 16 GB · 50 GB · base: Tensorlake Ubuntu · 2 packages · 1 tunnel",
         );
         expect(submissions, "Back submits no creation request").toBe(0);
         await name.fill(`${hostName}-revised`);
@@ -776,7 +777,8 @@ test("adding a Tensorlake host confirms billing and keeps setup progress", async
         name: recipe,
         recipe: {
           size: { cpus: 2, memory_gb: 4, disk_gb: 20 },
-          source: { kind: "packages", packages: [] },
+          base: { kind: "tensorlake_ubuntu" },
+          packages: [],
           claude: null,
           codex: null,
           tunnels: [],
@@ -921,18 +923,25 @@ test("the Tensorlake form links Settings and protects an inline recipe draft", a
   await request.put("/api/tensorlake", { data: { clear_api_key: true } });
 });
 
-/** Spec: saving an inline reuse recipe selects it, and only the acknowledged
- * Tensorlake preference skips creation's confirmation. Why: this covers the
- * second add path without a managed build and keeps the two preferences apart. */
-test("an inline reuse recipe can create without asking through the Tensorlake preference", async ({ page, request }) => {
+/** Spec: saving an inline image-base recipe selects it, and only the acknowledged
+ * Tensorlake preference skips creation's confirmation. The new host still builds
+ * its snapshot first, and the host starts from that completed result. Why: the
+ * step exists even when skipped, so its status and the fake's creation source
+ * must distinguish an actual build from merely listing the normal steps. The
+ * two setup preferences must remain independent. */
+test("an inline image-base recipe builds before creating through the Tensorlake preference", async ({ page, request }) => {
   const name = "e2e-inline-sandbox";
-  const recipe = "e2e-inline-reuse";
+  const recipe = "e2e-inline-base";
+  const fake = await controls("tensorlake_fake", { snapshot_polls: 0 });
   await controls("provisioning_backend", {});
   await request.put("/api/tensorlake", {
     data: { api_key: "test-key", create_without_asking: true },
   });
   let host: any;
   try {
+    expect((await hosts(request)).some((h) => h.alias === name)).toBe(false);
+    const listed = await (await request.get("/api/tensorlake/recipes")).json();
+    expect(listed.recipes.some((r: any) => r.name === recipe)).toBe(false);
     await page.goto("/");
     await openHostsPanel(page);
     await page.getByRole("button", { name: "Add host", exact: true }).last()
@@ -953,17 +962,23 @@ test("an inline reuse recipe can create without asking through the Tensorlake pr
       recipe,
     );
     await editor.getByRole("button", {
-      name: /^Use an existing image or snapshot/,
+      name: /^Your image/,
     }).click();
     await editor.getByRole("textbox", { name: "Image", exact: true }).fill(
       "example/systemd",
     );
+    await expect(editor.locator(".recipe-base-requirements"))
+      .toContainText("sudo without a password");
+    await editor.getByRole("textbox", { name: "Ubuntu packages", exact: true })
+      .fill("jq");
     await dialog.locator(":scope > .recipe-editor-footer").getByRole("button", {
       name: "Save",
       exact: true,
     }).click();
     await expect(dialog.getByRole("combobox", { name: "Recipe", exact: true }))
       .toHaveValue(recipe);
+    await expect(dialog.locator(".add-tensorlake-recipe-summary"))
+      .toContainText("base: your image example/systemd · 1 package");
     await dialog.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect.poll(async () => {
@@ -976,9 +991,18 @@ test("an inline reuse recipe can create without asking through the Tensorlake pr
     ).toBe("completed");
     const progress =
       await (await request.get(`/api/hosts/${host.id}/provisioning`)).json();
-    expect(progress.steps.some((s: any) => s.step === "build-snapshot")).toBe(
-      false,
-    );
+    expect(progress.steps.find((s: any) => s.step === "build-snapshot")?.status)
+      .toBe("completed");
+    const built = (await (await request.get("/api/tensorlake/recipes")).json())
+      .recipes.find((r: any) => r.name === recipe).snapshot;
+    expect(built, "the inline recipe recorded a built snapshot").toBeTruthy();
+    expect(built.base).toEqual({ kind: "image", image: "example/systemd" });
+    expect(built.packages).toEqual(["jq"]);
+    const model = JSON.parse(await readFile(path.join(fake, "state.json"), "utf8"));
+    const sandbox = model.sandboxes.find((s: any) => s.name === host.tensorlake.sandbox);
+    expect(sandbox, "the registered host has its own sandbox in the fake").toBeTruthy();
+    expect(sandbox.status).toBe("running");
+    expect(sandbox.snapshot_id).toBe(built.id);
   } finally {
     if (host) await request.delete(`/api/hosts/${host.id}`);
     await request.delete(`/api/tensorlake/recipes/${recipe}`);
@@ -1002,7 +1026,8 @@ test("a recipe deleted during confirmation refuses without registering a host", 
           name: recipe,
           recipe: {
             size: { cpus: 2, memory_gb: 4, disk_gb: 20 },
-            source: { kind: "image", image: "example/systemd" },
+            base: { kind: "image", image: "example/systemd" },
+            packages: [],
             claude: null,
             codex: null,
             tunnels: [],
@@ -1045,7 +1070,8 @@ test("cancel retires a Tensorlake creation before a queued answer", async ({ pag
         name: recipe,
         recipe: {
           size: { cpus: 2, memory_gb: 4, disk_gb: 20 },
-          source: { kind: "image", image: "example/systemd" },
+          base: { kind: "image", image: "example/systemd" },
+          packages: [],
           claude: null,
           codex: null,
           tunnels: [],
@@ -1101,15 +1127,15 @@ test("cancel retires a Tensorlake creation before a queued answer", async ({ pag
 });
 
 for (const skipTensorlake of [false, true]) {
-  /** A failed run may not yet have created anything. Rerun must use only
-   * Tensorlake's billing preference, with no answer that changes SSH's. */
+  /** A failed host create leaves a registered host with no sandbox. Build its
+   * recipe first so the injected create refusal cannot hit a builder instead.
+   * Rerun must use only Tensorlake's billing preference, with no answer that
+   * changes SSH's, and create that host from the same recorded snapshot. */
   test(`rerun before first create uses Tensorlake skip=${skipTensorlake}`, async ({ page, request }) => {
     const name = `e2e-rerun-policy-${skipTensorlake}`;
     const recipe = `e2e-rerun-recipe-${skipTensorlake}`;
     let host: any;
-    const fake = await controls("tensorlake_fake", {
-      fail: { create_sandbox: { status: 401, message: "key refused" } },
-    });
+    const fake = await controls("tensorlake_fake", { snapshot_polls: 0 });
     await controls("provisioning_backend", {});
     expect(
       (await request.put("/api/tensorlake", {
@@ -1119,13 +1145,17 @@ for (const skipTensorlake of [false, true]) {
     await patchPreferences(request, {
       skip_host_setup_confirmation: !skipTensorlake,
     });
+    expect((await hosts(request)).some((h) => h.alias === name)).toBe(false);
+    const existingRecipes = await (await request.get("/api/tensorlake/recipes")).json();
+    expect(existingRecipes.recipes.some((r: any) => r.name === recipe)).toBe(false);
     expect(
       (await request.post("/api/tensorlake/recipes", {
         data: {
           name: recipe,
           recipe: {
             size: { cpus: 2, memory_gb: 4, disk_gb: 20 },
-            source: { kind: "image", image: "example/systemd" },
+            base: { kind: "image", image: "example/systemd" },
+            packages: [],
             claude: null,
             codex: null,
             tunnels: [],
@@ -1134,6 +1164,35 @@ for (const skipTensorlake of [false, true]) {
       })).ok(),
     ).toBe(true);
     try {
+      const key = await request.post("/api/tensorlake/ssh-key");
+      expect(key.ok(), await key.text()).toBe(true);
+      const build = await request.post(`/api/tensorlake/recipes/${recipe}/build`);
+      expect(build.status(), await build.text()).toBe(202);
+      let built: any;
+      await expect.poll(async () => {
+        const view = (await (await request.get("/api/tensorlake/recipes")).json())
+          .recipes.find((r: any) => r.name === recipe);
+        built = view.snapshot;
+        return [view.build.state, view.cleanup_pending, Boolean(built)];
+      }, { message: "the recipe build must finish cleanup before host-create failure injection" })
+        .toEqual(["idle", false, true]);
+      expect(built.base).toEqual({ kind: "image", image: "example/systemd" });
+      expect(built.packages).toEqual([]);
+      const beforeCreate = JSON.parse(await readFile(path.join(fake, "state.json"), "utf8"));
+      const snapshot = beforeCreate.snapshots.find((s: any) => s.id === built.id);
+      expect(snapshot, "the fixture owns a completed snapshot").toBeTruthy();
+      expect(snapshot.status).toBe("completed");
+      // Terminated builders retain their reused names across projects. Only
+      // the snapshot's recorded source ID identifies this particular build.
+      const builder = beforeCreate.sandboxes.find((s: any) => s.id === snapshot.sandbox_id);
+      expect(builder, "the fixture's snapshot came from its own builder").toBeTruthy();
+      expect(builder.name).toMatch(/^farhelm-build-/);
+      expect(builder.name.endsWith(`-${recipe}`)).toBe(true);
+      expect(builder.status).toBe("terminated");
+      const priorSandboxIds = beforeCreate.sandboxes.map((s: any) => s.id);
+      await controls("tensorlake_fake", {
+        fail: { create_sandbox: { status: 401, message: "key refused" } },
+      });
       const probe = await (await request.post("/api/hosts/probe", {
         data: { target: { kind: "tensorlake", name, recipe } },
       })).json();
@@ -1145,13 +1204,17 @@ for (const skipTensorlake of [false, true]) {
         (await (await request.get(`/api/hosts/${host.id}/provisioning`)).json())
           .status
       ).toBe("failed");
+      const failed = await (await request.get(`/api/hosts/${host.id}/provisioning`)).json();
+      expect(failed.steps.find((s: any) => s.step === "build-snapshot")?.status)
+        .toBe("skipped");
+      expect(failed.steps.find((s: any) => s.step === "create-sandbox")?.status)
+        .toBe("failed");
       const model = JSON.parse(
-        await readFile(path.join(fake, "state.json"), "utf8").catch(() =>
-          '{"sandboxes":[]}'
-        ),
+        await readFile(path.join(fake, "state.json"), "utf8"),
       );
-      expect(model.sandboxes.filter((s: any) => s.status !== "terminated"))
-        .toHaveLength(0);
+      expect(model.sandboxes.map((s: any) => s.id), "the failed host create leaves the prebuilt fixture unchanged")
+        .toEqual(priorSandboxIds);
+      expect(model.snapshots.some((s: any) => s.id === built.id)).toBe(true);
       await controls("tensorlake_fake", {});
       await page.goto("/");
       await openHostsPanel(page);
@@ -1210,6 +1273,17 @@ for (const skipTensorlake of [false, true]) {
           .status
       ).toBe("completed");
       await expect(confirmation).toHaveCount(0);
+      const completed = await (await request.get(`/api/hosts/${host.id}/provisioning`)).json();
+      expect(completed.steps.find((s: any) => s.step === "build-snapshot")?.status)
+        .toBe("skipped");
+      expect(completed.steps.find((s: any) => s.step === "create-sandbox")?.status)
+        .toBe("completed");
+      const afterRerun = JSON.parse(await readFile(path.join(fake, "state.json"), "utf8"));
+      const newSandboxes = afterRerun.sandboxes.filter((s: any) => !priorSandboxIds.includes(s.id));
+      expect(newSandboxes, "the retry creates one host and no new builder").toHaveLength(1);
+      expect(newSandboxes[0].name).toMatch(/^farhelm-host-/);
+      expect(newSandboxes[0].status).toBe("running");
+      expect(newSandboxes[0].snapshot_id).toBe(built.id);
       const prefs = await (await request.get("/api/preferences")).json();
       expect(prefs.skip_host_setup_confirmation).toBe(!skipTensorlake);
     } finally {

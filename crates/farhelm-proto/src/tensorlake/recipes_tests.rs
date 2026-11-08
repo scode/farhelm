@@ -11,9 +11,8 @@ fn recipe() -> RecipeSave {
             memory_gb: 4,
             disk_gb: 20,
         },
-        source: RecipeSource::Packages {
-            packages: vec!["ripgrep".into()],
-        },
+        base: RecipeBase::TensorlakeUbuntu,
+        packages: vec!["ripgrep".into()],
         claude: None,
         codex: None,
         github_token_credential: None,
@@ -84,9 +83,7 @@ fn package_words_are_debian_names_only() {
         "0ad",
     ] {
         let mut save = recipe();
-        save.source = RecipeSource::Packages {
-            packages: vec![good.into()],
-        };
+        save.packages = vec![good.into()];
         assert_eq!(check_recipe(&save), Ok(()), "{good:?}");
     }
     for bad in [
@@ -103,15 +100,11 @@ fn package_words_are_debian_names_only() {
         &"a".repeat(129),
     ] {
         let mut save = recipe();
-        save.source = RecipeSource::Packages {
-            packages: vec![bad.into()],
-        };
+        save.packages = vec![bad.into()];
         assert!(check_recipe(&save).is_err(), "{bad:?}");
     }
     let mut save = recipe();
-    save.source = RecipeSource::Packages {
-        packages: (0..=PACKAGES_CAP).map(|n| format!("pkg{n}")).collect(),
-    };
+    save.packages = (0..=PACKAGES_CAP).map(|n| format!("pkg{n}")).collect();
     assert!(check_recipe(&save).is_err(), "more than the cap");
 }
 
@@ -153,38 +146,63 @@ fn sizes_are_bounded_and_non_zero() {
 /// early gives a clearer message than a create failure minutes later.
 #[test]
 fn reused_images_and_snapshots_have_narrow_shapes() {
-    let check = |source: RecipeSource| {
+    let check = |base: RecipeBase| {
         let mut save = recipe();
-        save.source = source;
+        save.base = base;
         check_recipe(&save)
     };
     for good in ["team-base", "tensorlake/ubuntu-systemd", "org/img:v1.2_3"] {
         assert_eq!(
-            check(RecipeSource::Image { image: good.into() }),
+            check(RecipeBase::Image { image: good.into() }),
             Ok(()),
             "{good:?}"
         );
     }
     for bad in ["", "-x", "a b", "a;b", &"a".repeat(201)] {
         assert!(
-            check(RecipeSource::Image { image: bad.into() }).is_err(),
+            check(RecipeBase::Image { image: bad.into() }).is_err(),
             "{bad:?}"
         );
     }
     assert_eq!(
-        check(RecipeSource::Snapshot {
+        check(RecipeBase::Snapshot {
             snapshot_id: "ov8u0zj19vjgt1n66pnid".into()
         }),
         Ok(())
     );
     for bad in ["", "ABC", "a-b", &"a".repeat(65)] {
         assert!(
-            check(RecipeSource::Snapshot {
+            check(RecipeBase::Snapshot {
                 snapshot_id: bad.into()
             })
             .is_err(),
             "{bad:?}"
         );
+    }
+}
+
+/// Optional packages have the same apt argument boundary for every base.
+/// Image and snapshot choices must not bypass package validation, including an
+/// option-looking package word that shell quoting alone would not make safe.
+#[test]
+fn every_base_accepts_optional_packages_and_refuses_apt_options() {
+    for base in [
+        RecipeBase::TensorlakeUbuntu,
+        RecipeBase::Image {
+            image: "team/base".into(),
+        },
+        RecipeBase::Snapshot {
+            snapshot_id: "usersnapshot".into(),
+        },
+    ] {
+        let mut save = recipe();
+        save.base = base;
+        save.packages = vec![];
+        assert!(check_recipe(&save).is_ok());
+        save.packages = vec!["jq".into()];
+        assert!(check_recipe(&save).is_ok());
+        save.packages = vec!["-oAPT::Get::foo".into()];
+        assert!(check_recipe(&save).is_err());
     }
 }
 
@@ -316,7 +334,7 @@ fn tunnels_are_checked() {
 #[test]
 fn wire_shapes_are_tagged_and_saves_are_strict() {
     assert_eq!(
-        serde_json::to_value(RecipeSource::Snapshot {
+        serde_json::to_value(RecipeBase::Snapshot {
             snapshot_id: "abc".into()
         })
         .unwrap(),
@@ -343,9 +361,22 @@ fn wire_shapes_are_tagged_and_saves_are_strict() {
         "size"
     );
     assert!(
-        strict(&|save| save["source"]["base_image"] = serde_json::json!("team-base")),
-        "source"
+        strict(&|save| save["base"]["base_image"] = serde_json::json!("team-base")),
+        "base"
     );
+    assert!(
+        strict(&|save| save["source"] = serde_json::json!({"kind":"packages", "packages":[]})),
+        "legacy source is never silently accepted on save"
+    );
+    for base in [
+        serde_json::json!({"kind":"image", "image":"team/base", "later":true}),
+        serde_json::json!({"kind":"snapshot", "snapshot_id":"usersnapshot", "later":true}),
+    ] {
+        assert!(
+            strict(&|save| save["base"] = base.clone()),
+            "each base variant refuses unknown fields"
+        );
+    }
     assert!(
         strict(&|save| save["tunnels"][0]["bind"] = serde_json::json!("0.0.0.0")),
         "tunnel"
@@ -366,7 +397,7 @@ fn wire_shapes_are_tagged_and_saves_are_strict() {
     );
     let view = serde_json::json!({
         "name": "a", "size": {"cpus": 1, "memory_gb": 1, "disk_gb": 1},
-        "source": {"kind": "image", "image": "x", "later": 1}, "claude": null, "codex": null,
+        "base": {"kind": "image", "image": "x", "later": 1}, "packages": [], "claude": null, "codex": null,
         "tunnels": [{"sandbox_port": 1, "host": "h", "port": 2, "later": 1}],
         "snapshot": {"id": "s1", "built_at": 1, "base_image": "b", "disk_gb": 1, "packages": [],
             "claude_version": null, "codex_version": null, "later": 1},
@@ -374,6 +405,11 @@ fn wire_shapes_are_tagged_and_saves_are_strict() {
         "cleanup_pending": false, "added_later": {"id": "later"}
     });
     let view = serde_json::from_value::<RecipeView>(view).expect("unknown fields are tolerated");
+    assert_eq!(
+        view.snapshot.as_ref().unwrap().base,
+        RecipeBase::TensorlakeUbuntu,
+        "older snapshot metadata describes the standard base"
+    );
     assert_eq!(
         view.snapshot.map(|snapshot| snapshot.id).as_deref(),
         Some("s1")
@@ -387,7 +423,7 @@ fn wire_shapes_are_tagged_and_saves_are_strict() {
     );
     let older = serde_json::json!({
         "name": "a", "size": {"cpus": 1, "memory_gb": 1, "disk_gb": 1},
-        "source": {"kind": "image", "image": "x"}, "claude": null, "codex": null, "tunnels": []
+        "base": {"kind": "image", "image": "x"}, "packages": [], "claude": null, "codex": null, "tunnels": []
     });
     let older = serde_json::from_value::<RecipeView>(older).expect("build fields may be absent");
     assert_eq!(

@@ -1737,7 +1737,7 @@ async fn lifecycle_holds_end_tunnels_and_resume_reads_the_recipe_again() {
     use crate::tensorlake::e2e::E2eTensorlake;
     use farhelm_proto::tensorlake::{
         TunnelState,
-        recipes::{RecipeSave, RecipeSize, RecipeSource, Tunnel},
+        recipes::{RecipeBase, RecipeSave, RecipeSize, Tunnel},
     };
     let api = FakeApi::default().with_sandbox(
         "sbx-1",
@@ -1767,7 +1767,8 @@ async fn lifecycle_holds_end_tunnels_and_resume_reads_the_recipe_again() {
             memory_gb: 4,
             disk_gb: 20,
         },
-        source: RecipeSource::Image {
+        packages: vec![],
+        base: RecipeBase::Image {
             image: "tensorlake/ubuntu-systemd".into(),
         },
         claude: None,

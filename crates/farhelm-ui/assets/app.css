@@ -4130,7 +4130,7 @@ a:any-link,
 .recipe-editor textarea { font-family: var(--font-mono); line-height: 1.5; padding: 8px 12px; resize: vertical; }
 .recipe-size { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .recipe-hint { color: var(--fg-1); font-size: 12px; }
-.recipe-source-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.recipe-source-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .recipe-source-card {
   display: flex; flex-direction: column; gap: 4px; padding: 10px; text-align: left; cursor: pointer;
   background: var(--well); border: 1.5px solid var(--border); border-radius: var(--radius-sm); color: var(--fg-0);

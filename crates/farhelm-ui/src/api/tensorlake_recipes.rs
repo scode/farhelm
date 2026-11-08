@@ -126,7 +126,8 @@ pub(crate) fn delete_recipe(
 /// running; Build, Rebuild and Retry all send this. The helm answers as soon
 /// as the build is running; its progress then arrives through the
 /// invalidation feed and [`fetch_recipes`]. A refusal (no API key, no ssh
-/// key, a recipe that reuses an image) comes back as the helm's own text.
+/// key, or a recipe being deleted) comes back as the helm's own text. Every
+/// base uses this same build path before it can supply a host's snapshot.
 pub(crate) async fn build_recipe(base: &str, name: &str) -> Result<(), String> {
     let url = format!(
         "{base}/api/tensorlake/recipes/{}/build",

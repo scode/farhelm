@@ -2,7 +2,7 @@
 //! routes.
 //!
 //! A recipe is a named description of the sandboxes Farhelm creates for
-//! Tensorlake hosts (size, software source, agent endpoints, outbound
+//! Tensorlake hosts (size, base, packages, agent endpoints, outbound
 //! tunnels); the wire shapes and their validation live in
 //! `farhelm_proto::tensorlake::recipes`. This module stores recipes in the
 //! `tensorlake_recipes` table and serves them:
@@ -24,9 +24,8 @@
 //! replaces": names are immutable and create versus update are distinct
 //! operations, and the row carries helm-owned build state beside the user's
 //! spec (see `TENSORLAKE_RECIPES_SCHEMA` in `store.rs`). A save writes only
-//! `spec_json`, with one exception: switching a recipe away from packages
-//! retires its built snapshot in the same transaction. Everything else in
-//! `state_json` is the build engine's.
+//! `spec_json`. A base or package edit keeps the built snapshot until the next
+//! build replaces it; `state_json` remains the build engine's.
 //!
 //! Endpoints store credential names, never values. Because an outdated client
 //! can still submit an embedded token, a body that does not
@@ -36,8 +35,8 @@
 //! endpoint tokens; each agent selects exactly one authentication mode.
 //!
 //! Saving never builds: a build bills, so only the explicit build route starts
-//! one. The routes call Tensorlake only for a delete's cleanup and a retired
-//! snapshot's deletion, both through the build engine.
+//! one. Apart from an explicit build, the routes call Tensorlake only for a
+//! delete's cleanup, through the build engine.
 
 use std::sync::Arc;
 
@@ -49,7 +48,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use farhelm_proto::tensorlake::recipes::{
-    BuildView, CreateRecipe, EndpointSave, EndpointView, RecipeSave, RecipeSize, RecipeSource,
+    BuildView, CreateRecipe, EndpointSave, EndpointView, RecipeBase, RecipeSave, RecipeSize,
     RecipeView, RecipesView, Tunnel, check_recipe, check_recipe_name,
 };
 use rusqlite::{Connection, OptionalExtension as _};
@@ -94,7 +93,8 @@ pub(crate) struct ResolvedEndpoint {
 #[derive(Clone, Deserialize, Serialize)]
 pub(crate) struct StoredRecipe {
     pub(crate) size: RecipeSize,
-    pub(crate) source: RecipeSource,
+    pub(crate) base: RecipeBase,
+    pub(crate) packages: Vec<String>,
     pub(crate) claude: Option<StoredEndpoint>,
     pub(crate) codex: Option<StoredEndpoint>,
     pub(crate) claude_login_credential: Option<String>,
@@ -109,16 +109,15 @@ impl StoredRecipe {
     /// their given order with exact duplicates removed.
     fn saved(mut save: RecipeSave) -> Result<Self, String> {
         check_recipe(&save)?;
-        if let RecipeSource::Packages { packages } = &mut save.source {
-            let mut seen = std::collections::HashSet::new();
-            packages.retain(|package| seen.insert(package.clone()));
-        }
+        let mut seen = std::collections::HashSet::new();
+        save.packages.retain(|package| seen.insert(package.clone()));
         let claude =
             resolve_endpoint(save.claude).map_err(|reason| format!("Claude Code: {reason}"))?;
         let codex = resolve_endpoint(save.codex).map_err(|reason| format!("Codex: {reason}"))?;
         Ok(Self {
             size: save.size,
-            source: save.source,
+            base: save.base,
+            packages: save.packages,
             claude,
             codex,
             claude_login_credential: save.claude_login_credential,
@@ -139,7 +138,8 @@ impl StoredRecipe {
         RecipeView {
             name: name.to_string(),
             size: self.size,
-            source: self.source.clone(),
+            base: self.base.clone(),
+            packages: self.packages.clone(),
             claude: endpoint(&self.claude),
             codex: endpoint(&self.codex),
             claude_login_credential: self.claude_login_credential.clone(),
@@ -253,19 +253,15 @@ fn hosts_using_recipe(conn: &Connection, name: &str) -> anyhow::Result<u32> {
     .context("counting the hosts that use a Tensorlake recipe")
 }
 
-/// Refuse a reuse source that is a snapshot Farhelm built for a recipe
+/// Refuse a base that is a snapshot Farhelm built for a recipe
 /// (current or retired), inside the caller's transaction.
 ///
 /// Farhelm deletes those snapshots on its own: when their recipe is
-/// rebuilt, deleted or switched to another source. A recipe reusing one
-/// would be left pointing at nothing, and saving a recipe that reuses its
-/// own snapshot would retire, and so delete, its new source in the same
-/// save. Until snapshots can have several owners, reusing one is refused.
-fn refuse_owned_snapshot(
-    conn: &Connection,
-    source: &RecipeSource,
-) -> anyhow::Result<Option<Refusal>> {
-    let RecipeSource::Snapshot { snapshot_id } = source else {
+/// rebuilt or deleted. A recipe built on one would lose its base when the
+/// owning recipe moves on. Until snapshots can have several owners, using
+/// one as a base is refused, including a recipe's own snapshot.
+fn refuse_owned_snapshot(conn: &Connection, base: &RecipeBase) -> anyhow::Result<Option<Refusal>> {
+    let RecipeBase::Snapshot { snapshot_id } = base else {
         return Ok(None);
     };
     let mut stmt = conn
@@ -286,34 +282,11 @@ fn refuse_owned_snapshot(
             .is_some_and(|built| &built.id == snapshot_id);
         if current || state.retired_snapshots.contains(snapshot_id) {
             return Ok(Some(Refusal::Invalid(format!(
-                "snapshot {snapshot_id} is the one Farhelm built for recipe {owner}, and Farhelm deletes it when that recipe is rebuilt, changed to another source or deleted; use recipe {owner} for these hosts, or a snapshot of your own"
+                "snapshot {snapshot_id} is the one Farhelm built for recipe {owner}, and Farhelm deletes it when that recipe is rebuilt or deleted; use recipe {owner} for these hosts, or a snapshot of your own"
             ))));
         }
     }
     Ok(None)
-}
-
-/// Move the recipe's current snapshot, if it has one, to its retired list,
-/// inside the caller's transaction. Writes `state_json` only.
-fn retire_snapshot(conn: &Connection, name: &str) -> anyhow::Result<()> {
-    let json: String = conn
-        .query_row(
-            "SELECT state_json FROM tensorlake_recipes WHERE name = ?1",
-            [name],
-            |row| row.get(0),
-        )
-        .context("reading Tensorlake build state")?;
-    let mut state = decode_state(name, &json)?;
-    let Some(snapshot) = state.snapshot.take() else {
-        return Ok(());
-    };
-    state.retired_snapshots.push(snapshot.id);
-    conn.execute(
-        "UPDATE tensorlake_recipes SET state_json = ?2 WHERE name = ?1",
-        rusqlite::params![name, serde_json::to_string(&state)?],
-    )
-    .context("storing Tensorlake build state")?;
-    Ok(())
 }
 
 /// Seconds since the epoch for recipe timestamps and durable create settle
@@ -390,7 +363,7 @@ impl HelmStore {
                 if let Some(refusal) = check_credentials(&tx, &spec)? {
                     return Ok(Err(refusal));
                 }
-                if let Some(refusal) = refuse_owned_snapshot(&tx, &spec.source)? {
+                if let Some(refusal) = refuse_owned_snapshot(&tx, &spec.base)? {
                     return Ok(Err(refusal));
                 }
                 let inserted = tx
@@ -447,7 +420,7 @@ impl HelmStore {
                 if let Some(refusal) = check_credentials(&tx, &spec)? {
                     return Ok(Err(refusal));
                 }
-                if let Some(refusal) = refuse_owned_snapshot(&tx, &spec.source)? {
+                if let Some(refusal) = refuse_owned_snapshot(&tx, &spec.base)? {
                     return Ok(Err(refusal));
                 }
                 let json = serde_json::to_string(&spec).context("encoding a Tensorlake recipe")?;
@@ -456,14 +429,6 @@ impl HelmStore {
                     rusqlite::params![name, json, now],
                 )
                 .context("storing a Tensorlake recipe")?;
-                // A recipe that stops installing packages stops using its
-                // built snapshot. It is retired in the same transaction, so
-                // no moment exists where the spec says "reuse" and the state
-                // still records a snapshot as current; the route deletes it
-                // after the commit.
-                if !matches!(spec.source, RecipeSource::Packages { .. }) {
-                    retire_snapshot(&tx, &name)?;
-                }
                 tx.commit()
                     .context("committing the Tensorlake recipe update")?;
                 Ok(Ok(spec))
@@ -678,12 +643,9 @@ pub(crate) async fn create_recipe(
 /// `PUT /api/tensorlake/recipes/{name}`: replace an existing recipe's
 /// definition. 404 when no recipe has the name; a PUT never creates.
 ///
-/// A save that switches the recipe from installing packages to reusing an
-/// image or snapshot retires its built snapshot (in the store's
-/// transaction); the snapshot is then deleted in the background, best
-/// effort, because keeping it for a switch back would bill storage the user
-/// cannot see. A deletion that fails stays recorded and is retried when the
-/// recipe is deleted.
+/// Saves only change the definition. Current snapshots remain usable until
+/// their replacement build succeeds, and already-retired snapshots wait for
+/// the next build or recipe deletion to retry cleanup.
 pub(crate) async fn update_recipe(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
@@ -699,43 +661,11 @@ pub(crate) async fn update_recipe(
     {
         Ok(Ok(_)) => {
             state.manager.events().bump();
-            delete_retired_in_background(&state, &name).await;
             view_response(&state, &name, StatusCode::OK).await
         }
         Ok(Err(refusal)) => refusal_response(&name, refusal),
         Err(error) => storage_failure("save the Tensorlake recipe", error),
     }
-}
-
-/// Start deleting the recipe's retired snapshots, if it has any and a key is
-/// saved, without holding up the reply. A build running for the recipe
-/// retries them itself, so nothing starts then.
-async fn delete_retired_in_background(state: &Arc<AppState>, name: &str) {
-    let builds = Arc::clone(state.tensorlake.builds());
-    if builds.is_building(name) {
-        return;
-    }
-    let has_retired = matches!(
-        state.store.tensorlake_recipe_row(name).await,
-        Ok(Some((_, build))) if !build.retired_snapshots.is_empty()
-    );
-    let key = state
-        .store
-        .tensorlake_config()
-        .await
-        .ok()
-        .and_then(|config| config.api_key());
-    let (true, Some(key)) = (has_retired, key) else {
-        return;
-    };
-    let events = Arc::clone(state.manager.events());
-    let name = name.to_string();
-    tokio::spawn(async move {
-        if let Err(error) = builds.delete_retired(&name, &key).await {
-            tracing::warn!(recipe = %name, "could not delete a retired Tensorlake snapshot: {error}");
-        }
-        events.bump();
-    });
 }
 
 /// `DELETE /api/tensorlake/recipes/{name}`: remove a recipe and everything
@@ -822,11 +752,6 @@ pub(crate) async fn build_recipe(
             view_response(&state, &name, StatusCode::ACCEPTED).await
         }
         Err(StartRefusal::Missing) => refusal_response(&name, Refusal::Missing),
-        Err(StartRefusal::NotManaged) => (
-            StatusCode::BAD_REQUEST,
-            "this recipe uses an existing image or snapshot; Farhelm builds nothing for it",
-        )
-            .into_response(),
         Err(StartRefusal::NoApiKey) => (
             StatusCode::BAD_REQUEST,
             "save a Tensorlake API key in Settings first",
@@ -847,7 +772,7 @@ pub(crate) async fn build_recipe(
 pub(crate) mod tests_support {
     use super::*;
 
-    /// A small valid managed recipe, as a save.
+    /// A small valid Ubuntu recipe, with packages to witness layer preservation.
     pub(crate) fn save() -> RecipeSave {
         RecipeSave {
             size: RecipeSize {
@@ -855,9 +780,8 @@ pub(crate) mod tests_support {
                 memory_gb: 4,
                 disk_gb: 20,
             },
-            source: RecipeSource::Packages {
-                packages: vec!["git".into(), "ripgrep".into()],
-            },
+            base: RecipeBase::TensorlakeUbuntu,
+            packages: vec!["git".into(), "ripgrep".into()],
             claude: None,
             codex: None,
             github_token_credential: None,

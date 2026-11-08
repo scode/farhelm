@@ -15,7 +15,7 @@ use crate::tensorlake::{
     config::helm_tag,
     recipes::StoredRecipe,
 };
-use farhelm_proto::tensorlake::recipes::{RecipeSize, RecipeSource};
+use farhelm_proto::tensorlake::recipes::RecipeSize;
 
 /// A confirmed recipe and the name chosen before any request can create a
 /// sandbox. `host` distinguishes a rerun from a new registry entry.
@@ -57,18 +57,52 @@ fn sandbox_name(tag: &str, display: &str) -> String {
     )
 }
 
-/// Reuse the same description in confirmation and progress. A managed
-/// recipe always has a snapshot step: a ready snapshot reports a useful skip.
-fn steps(sandbox: &str, name: &str, recipe: &StoredRecipe, ready: bool) -> PlanSteps {
+/// Describe only what the local ownership record establishes. Probing does no
+/// network work, so a rerun without a recorded ID must make any billed build
+/// conditional on later settling the sandbox lookup and pending create.
+fn steps(
+    sandbox: &str,
+    name: &str,
+    recipe: &StoredRecipe,
+    ready: bool,
+    rerun: bool,
+    recorded_sandbox: bool,
+) -> PlanSteps {
     let mut descriptions = vec![];
-    if matches!(recipe.source, RecipeSource::Packages { .. }) {
-        descriptions.push(("build-snapshot", if ready { format!("Use the snapshot for recipe {name}") } else { format!("Build the snapshot for recipe {name} (packages, Claude Code and Codex; takes a few minutes)") }));
-    }
+    let snapshot = if recorded_sandbox {
+        "Use the host's recorded sandbox (no snapshot build)".into()
+    } else if rerun {
+        if ready {
+            format!(
+                "Find the host's sandbox; use the snapshot for recipe {name} only if a new sandbox is needed"
+            )
+        } else {
+            format!(
+                "Find the host's sandbox; build the snapshot for recipe {name} only if the sandbox is absent and any pending create has settled"
+            )
+        }
+    } else if ready {
+        format!("Use the snapshot for recipe {name}")
+    } else {
+        format!(
+            "Build the snapshot for recipe {name} (packages, Claude Code and Codex; takes a few minutes)"
+        )
+    };
+    descriptions.push(("build-snapshot", snapshot));
     descriptions.push((
         "create-sandbox",
         format!(
-            "Create sandbox {sandbox} with {} CPUs, {} GB memory and {} GB disk",
-            recipe.size.cpus, recipe.size.memory_gb, recipe.size.disk_gb
+            "{} sandbox {sandbox} with {} CPUs, {} GB memory and {} GB disk",
+            if recorded_sandbox {
+                "Use the recorded"
+            } else if rerun {
+                "Find or create"
+            } else {
+                "Create"
+            },
+            recipe.size.cpus,
+            recipe.size.memory_gb,
+            recipe.size.disk_gb
         ),
     ));
     descriptions.push((
@@ -93,7 +127,12 @@ fn steps(sandbox: &str, name: &str, recipe: &StoredRecipe, ready: bool) -> PlanS
         },
     ));
     PlanSteps {
-        lead: "Create a Tensorlake sandbox and set it up as a host".into(),
+        lead: if rerun {
+            "Continue setting up the Tensorlake sandbox as a host"
+        } else {
+            "Create a Tensorlake sandbox and set it up as a host"
+        }
+        .into(),
         kept: None,
         steps: descriptions
             .into_iter()
@@ -171,10 +210,17 @@ impl ProvisioningService {
             .api_key()
             .await
             .map_err(|_| refused("Save a Tensorlake API key in Settings → Tensorlake first"))?;
-        let (host, name, recipe_name, sandbox, size) = match request.target {
+        let (host, name, recipe_name, sandbox, size, recorded_sandbox) = match request.target {
             ProbeDestination::Tensorlake { name, recipe } => {
                 let tag = helm_tag(&self.store.registry_namespace().await?);
-                (None, name.clone(), recipe, sandbox_name(&tag, &name), None)
+                (
+                    None,
+                    name.clone(),
+                    recipe,
+                    sandbox_name(&tag, &name),
+                    None,
+                    false,
+                )
             }
             ProbeDestination::TensorlakeHost { host } => {
                 if self.memory.lock().await.busy.contains(&host) {
@@ -190,6 +236,7 @@ impl ProvisioningService {
                     binding.recipe,
                     binding.sandbox,
                     binding.resources,
+                    binding.sandbox_id.is_some(),
                 )
             }
             _ => return Err(refused("this is not a Tensorlake probe")),
@@ -213,7 +260,14 @@ impl ProvisioningService {
             recipe.size = size;
         }
         tensorlake.ensure_host_key().await.map_err(refused)?;
-        let steps = steps(&sandbox, &recipe_name, &recipe, state.snapshot.is_some());
+        let steps = steps(
+            &sandbox,
+            &recipe_name,
+            &recipe,
+            state.snapshot.is_some(),
+            host.is_some(),
+            recorded_sandbox,
+        );
         let confirmation = format!(
             "{}\n{}\nThis sandbox bills while running. See https://www.tensorlake.ai/pricing. On Usage Credits, Tensorlake suspends it after 24 hours without a connection. Farhelm never resumes it on its own.",
             steps.lead,
@@ -390,40 +444,81 @@ impl ProvisioningService {
         index: &mut usize,
     ) -> anyhow::Result<()> {
         let key = plan.tensorlake.api_key().await.map_err(refused)?;
-        let source = match &plan.recipe.source {
-            RecipeSource::Packages { .. } => {
-                self.set_step(host, *index, StepStatus::Running, None).await;
-                let builds = plan.tensorlake.builds();
-                let ready = self
-                    .store
-                    .tensorlake_recipe_row(&plan.recipe_name)
-                    .await?
-                    .is_some_and(|(_, state)| state.snapshot.is_some())
-                    && !builds.is_building(&plan.recipe_name);
-                let snapshot = builds
-                    .ensure_snapshot(
-                        &plan.recipe_name,
-                        &plan.recipe,
-                        Arc::clone(self.manager.events()),
-                        |line| self.set_step(host, *index, StepStatus::Running, Some(line)),
-                    )
-                    .await?;
-                self.set_step(
-                    host,
-                    *index,
-                    if ready {
-                        StepStatus::Skipped
-                    } else {
-                        StepStatus::Completed
-                    },
-                    ready.then(|| "the snapshot was already built".into()),
+        // Old reuse recipes now need a build for new hosts, but rerunning setup
+        // must continue against the sandbox already created. Check the durable
+        // ID or pre-chosen name before consulting recipe snapshot state. A
+        // lookup failure is not permission to start billed work.
+        let row = self.host_row(host).await?;
+        let binding = row
+            .tensorlake
+            .as_ref()
+            .ok_or_else(|| refused("the host is no longer a Tensorlake sandbox"))?;
+        let sandbox_exists = match plan
+            .tensorlake
+            .api()
+            .get_sandbox(&key, binding.sandbox_id.as_deref().unwrap_or(&plan.sandbox))
+            .await
+        {
+            Ok(_) => true,
+            Err(TensorlakeError::NotFound { .. }) => false,
+            Err(error) => return Err(error.into()),
+        };
+        // A pending create's 404 does not yet prove absence. Keep the same
+        // settle window as creation/deletion, before starting any billed build.
+        let pending_create = binding.pending_create_at.is_some_and(|sent| {
+            crate::tensorlake::recipes::now_secs()
+                < sent + crate::tensorlake::build::CREATE_SETTLE_SECS
+        });
+        let needs_snapshot = !sandbox_exists && binding.sandbox_id.is_none() && !pending_create;
+        let source = if needs_snapshot {
+            self.set_step(host, *index, StepStatus::Running, None).await;
+            let builds = plan.tensorlake.builds();
+            let ready = self
+                .store
+                .tensorlake_recipe_row(&plan.recipe_name)
+                .await?
+                .is_some_and(|(_, state)| state.snapshot.is_some())
+                && !builds.is_building(&plan.recipe_name);
+            let snapshot = builds
+                .ensure_snapshot(
+                    &plan.recipe_name,
+                    &plan.recipe,
+                    Arc::clone(self.manager.events()),
+                    |line| self.set_step(host, *index, StepStatus::Running, Some(line)),
                 )
-                .await;
-                *index += 1;
-                SandboxSource::Snapshot(snapshot)
-            }
-            RecipeSource::Image { image } => SandboxSource::Image(image.clone()),
-            RecipeSource::Snapshot { snapshot_id } => SandboxSource::Snapshot(snapshot_id.clone()),
+                .await?;
+            self.set_step(
+                host,
+                *index,
+                if ready {
+                    StepStatus::Skipped
+                } else {
+                    StepStatus::Completed
+                },
+                ready.then(|| "the snapshot was already built".into()),
+            )
+            .await;
+            *index += 1;
+            Some(SandboxSource::Snapshot(snapshot))
+        } else {
+            self.set_step(
+                host,
+                *index,
+                StepStatus::Skipped,
+                Some(
+                    if sandbox_exists {
+                        "the host's sandbox already exists; no snapshot build is needed"
+                    } else if binding.sandbox_id.is_some() {
+                        "the host has a recorded sandbox; no snapshot build is needed"
+                    } else {
+                        "the host's sandbox may still be starting; no snapshot build is needed"
+                    }
+                    .into(),
+                ),
+            )
+            .await;
+            *index += 1;
+            None
         };
         self.set_step(host, *index, StepStatus::Running, None).await;
         let created = self
@@ -527,12 +622,15 @@ impl ProvisioningService {
 
     /// Look up the pre-chosen name before create and adopt after an ambiguous
     /// answer. The row remains the ownership record even if no reply arrives.
+    /// `source` is absent only when setup already observed the sandbox and
+    /// skipped its build; if that sandbox disappears before this second lookup,
+    /// refuse rather than create a replacement from an unbuilt base.
     async fn create_host_sandbox(
         &self,
         host: HostId,
         plan: &TensorlakeAddPlan,
         key: &crate::tensorlake::api::ApiKey,
-        source: SandboxSource,
+        source: Option<SandboxSource>,
         step_index: usize,
     ) -> anyhow::Result<bool> {
         let api = plan.tensorlake.api();
@@ -564,7 +662,9 @@ impl ProvisioningService {
                 } = plan.recipe.size;
                 let request = CreateSandbox {
                     name: plan.sandbox.clone(),
-                    source,
+                    source: source.ok_or_else(|| {
+                        refused("the sandbox disappeared before setup; run setup again")
+                    })?,
                     resources: Resources {
                         cpus: cpus.into(),
                         memory_mb: u64::from(memory_gb) * 1024,

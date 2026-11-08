@@ -709,6 +709,103 @@ async fn schema_75_drops_embedded_tokens_and_preserves_recipe_and_build_state() 
     );
 }
 
+/// Upgrade separates the base from packages without rewriting ownership or
+/// timestamps. Old package snapshots remain current (with Ubuntu provenance),
+/// while old image and snapshot recipes still have nothing built.
+#[farhelm_testtrace::test]
+async fn schema_78_migrates_all_recipe_sources_without_changing_build_state() {
+    let (dir, store) = store().await;
+    let sources = [
+        (
+            "packages",
+            serde_json::json!({"kind":"packages", "packages":["git", "ripgrep"]}),
+        ),
+        (
+            "image",
+            serde_json::json!({"kind":"image", "image":"team/base"}),
+        ),
+        (
+            "snapshot",
+            serde_json::json!({"kind":"snapshot", "snapshot_id":"usersnapshot"}),
+        ),
+    ];
+    let package_state = r#"{ "snapshot": {"id":"built1", "built_at":11, "base_image":"tensorlake/ubuntu-systemd", "disk_gb":20, "packages":["git","ripgrep"], "claude_version":"claude old", "codex_version":"codex old"}, "builder_sandbox_id":"pendingbuilder", "pending_create_at":12, "build_started_at":10, "retired_snapshots":["retired1"], "last_failure":{"step":"packages", "message":"old failure", "at":9} }"#;
+    for (name, source) in sources {
+        let mut spec = serde_json::to_value(save()).unwrap();
+        spec.as_object_mut().unwrap().remove("base");
+        spec.as_object_mut().unwrap().remove("packages");
+        spec["source"] = source;
+        spec["future_setting"] = serde_json::json!({"preserve":true});
+        let state = if name == "packages" {
+            package_state
+        } else {
+            "{}"
+        };
+        store.conn().call("plant old recipe source", move |conn| {
+            conn.execute("INSERT INTO tensorlake_recipes (name, spec_json, state_json, created_at, updated_at) VALUES (?1, ?2, ?3, 7, 8)", rusqlite::params![name, spec.to_string(), state])?;
+            Ok(())
+        }).await.unwrap();
+    }
+    store
+        .conn()
+        .call("rewind base migration", |conn| {
+            conn.execute_batch("PRAGMA user_version = 77;")?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(store);
+    let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+    for (name, base, packages) in [
+        (
+            "packages",
+            RecipeBase::TensorlakeUbuntu,
+            vec!["git", "ripgrep"],
+        ),
+        (
+            "image",
+            RecipeBase::Image {
+                image: "team/base".into(),
+            },
+            vec![],
+        ),
+        (
+            "snapshot",
+            RecipeBase::Snapshot {
+                snapshot_id: "usersnapshot".into(),
+            },
+            vec![],
+        ),
+    ] {
+        let (json, state_json, created) = raw_row(&store, name).await;
+        let spec: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(spec.get("source").is_none());
+        assert_eq!(spec["future_setting"], serde_json::json!({"preserve":true}));
+        assert_eq!(created, 7);
+        assert_eq!(
+            state_json,
+            if name == "packages" {
+                package_state
+            } else {
+                "{}"
+            }
+        );
+        let (recipe, state) = store.tensorlake_recipe_row(name).await.unwrap().unwrap();
+        assert_eq!(recipe.base, base);
+        assert_eq!(recipe.packages, packages);
+        if name == "packages" {
+            let snapshot = state.snapshot.unwrap();
+            assert_eq!(snapshot.id, "built1");
+            assert_eq!(snapshot.base, RecipeBase::TensorlakeUbuntu);
+            assert_eq!(snapshot.packages, vec!["git", "ripgrep"]);
+            assert_eq!(snapshot.claude_version.as_deref(), Some("claude old"));
+            assert_eq!(snapshot.codex_version.as_deref(), Some("codex old"));
+        } else {
+            assert!(state.snapshot.is_none());
+        }
+    }
+}
+
 /// Spec: a stored row that does not decode makes the listing an error naming
 /// the recipe, and the error does not quote the stored text.
 ///
@@ -734,6 +831,58 @@ async fn an_unreadable_row_fails_the_listing_without_quoting_it() {
     let error = format!(
         "{:#}",
         store.tensorlake_recipes().await.err().expect("refused")
+    );
+    assert!(error.contains("broken"), "{error}");
+    assert!(!error.contains(TOKEN), "{error}");
+}
+
+/// One poisoned recipe must not stop schema upgrade or erase its billed state.
+/// Healthy rows still migrate; the later listing remains a safe refusal naming
+/// the bad row without quoting its malformed, potentially secret-bearing bytes.
+#[farhelm_testtrace::test]
+async fn schema_78_preserves_malformed_recipe_json_for_safe_listing_refusal() {
+    let (dir, store) = store().await;
+    let poisoned = format!("{{{TOKEN}: not JSON");
+    let original = poisoned.clone();
+    let state = r#"{ "builder_sandbox_id":"stillowned" }"#;
+    let mut healthy = serde_json::to_value(save()).unwrap();
+    healthy.as_object_mut().unwrap().remove("base");
+    healthy.as_object_mut().unwrap().remove("packages");
+    healthy["source"] = serde_json::json!({"kind":"image", "image":"team/base"});
+    store.conn().call("plant schema77 poison and healthy recipe", move |conn| {
+        conn.execute("INSERT INTO tensorlake_recipes (name, spec_json, state_json, created_at, updated_at) VALUES ('broken', ?1, ?2, 7, 8)", rusqlite::params![poisoned, state])?;
+        conn.execute("INSERT INTO tensorlake_recipes (name, spec_json, state_json, created_at, updated_at) VALUES ('healthy', ?1, '{}', 9, 10)", [healthy.to_string()])?;
+        conn.execute_batch("PRAGMA user_version = 77;")?;
+        Ok(())
+    }).await.unwrap();
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&original).is_err(),
+        "premise: the planted row is malformed JSON"
+    );
+    drop(store);
+    let store = HelmStore::open(&dir.path().join("helm.db"))
+        .await
+        .expect("poisoned row does not abort upgrade");
+    assert_eq!(raw_row(&store, "broken").await, (original, state.into(), 7));
+    let (healthy, _) = store
+        .tensorlake_recipe_row("healthy")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        healthy.base,
+        RecipeBase::Image {
+            image: "team/base".into()
+        }
+    );
+    assert!(healthy.packages.is_empty());
+    let error = format!(
+        "{:#}",
+        store
+            .tensorlake_recipes()
+            .await
+            .err()
+            .expect("listing refuses poison")
     );
     assert!(error.contains("broken"), "{error}");
     assert!(!error.contains(TOKEN), "{error}");
@@ -801,12 +950,8 @@ async fn routes_create_update_and_delete_with_distinct_refusals() {
     assert_eq!(status, StatusCode::OK, "{body}");
     let view: RecipeView = serde_json::from_str(&body).unwrap();
     assert_eq!(view.name, "rust-dev");
-    assert_eq!(
-        view.source,
-        RecipeSource::Packages {
-            packages: vec!["git".into(), "ripgrep".into()]
-        }
-    );
+    assert_eq!(view.base, RecipeBase::TensorlakeUbuntu);
+    assert_eq!(view.packages, vec!["git", "ripgrep"]);
 
     let (status, body) = call(
         &harness,

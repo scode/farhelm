@@ -141,7 +141,7 @@ test("recipe references refresh deletion guards and preserve unavailable picker 
   const owned: string[] = [];
   let ownsRecipe = false;
   const definition = {
-    size: { cpus: 2, memory_gb: 4, disk_gb: 20 }, source: { kind: "image", image: "example/systemd" },
+    size: { cpus: 2, memory_gb: 4, disk_gb: 20 }, base: { kind: "image", image: "example/systemd" }, packages: [],
     claude: { base_url: "https://proxy.example/v1", token_credential: endpoint as string | null }, codex: null, tunnels: [],
   };
   try {
