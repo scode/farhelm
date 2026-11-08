@@ -1732,6 +1732,88 @@ def release_child_tmp(child_tmp: ChildTmp) -> dict[str, object]:
     return record
 
 
+# Retention in the default evidence root.
+#
+# The default root lives in /tmp, which the shared Linux host empties only at
+# boot or after 30 days, and agents there record about 250 runs a day: by
+# 2026-11 the root held 18 GB, two fifths of it from runs that passed, whose
+# raw traces and Playwright artifacts nobody reads. A passing run in the
+# default root therefore drops those bulky parts as soon as it ends (its
+# manifest, output, reports and counts stay), and a later invocation removes
+# whole passing runs once they are a few days old. Failed, refused,
+# interrupted and still-running runs are never touched: they are the
+# evidence `.agents/test-evidence.md` says to keep. An explicit
+# `--output-root` opts out of both, since its owner chose to keep everything.
+
+PASSED_RUN_BULK = ("traces.tar", "test-traces", test_run_playwright.ARTIFACTS)
+PASSED_RUN_RETENTION_SECONDS = 3 * 24 * 60 * 60
+PRUNE_MANIFEST_LIMIT = 4 * 1024 * 1024
+
+
+def is_passed_manifest(data: object) -> bool:
+    """True only for a run whose command completed and whose recorder exit was 0."""
+
+    if not isinstance(data, dict) or data.get("outcome") != "completed":
+        return False
+    recorder = data.get("recorder")
+    return isinstance(recorder, dict) and recorder.get("exit_code") == 0
+
+
+def slim_passed_run(run_dir: pathlib.Path) -> list[str]:
+    """Delete a passing run's raw traces and browser artifacts; return what went."""
+
+    removed = []
+    for name in PASSED_RUN_BULK:
+        path = run_dir / name
+        try:
+            if path.is_symlink() or not path.is_dir():
+                path.unlink()
+            else:
+                shutil.rmtree(path)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            continue
+        removed.append(name)
+    return removed
+
+
+def prune_passed_runs(root: pathlib.Path, now: float, keep: str) -> int:
+    """Remove whole passing runs older than the retention period from `root`.
+
+    Only UUID-named directories with a readable, passing manifest qualify;
+    batch directories, other names and anything unreadable are left alone.
+    The directory's own mtime is a cheap first filter, so a root of
+    thousands of runs costs one stat each and a manifest read only for old
+    ones. Best-effort: a failure skips that entry and never fails the run.
+    """
+
+    removed = 0
+    cutoff = now - PASSED_RUN_RETENTION_SECONDS
+    try:
+        entries = list(os.scandir(root))
+    except OSError:
+        return 0
+    for entry in entries:
+        if entry.name == keep:
+            continue
+        try:
+            uuid.UUID(entry.name)
+            if not entry.is_dir(follow_symlinks=False) or entry.stat(follow_symlinks=False).st_mtime > cutoff:
+                continue
+            manifest_path = pathlib.Path(entry.path) / "manifest.json"
+            if manifest_path.stat().st_size > PRUNE_MANIFEST_LIMIT:
+                continue
+            data = json.loads(manifest_path.read_bytes())
+            if not is_passed_manifest(data):
+                continue
+            shutil.rmtree(entry.path)
+            removed += 1
+        except (ValueError, OSError):
+            continue
+    return removed
+
+
 def initial_manifest(
     run_id: str,
     args: argparse.Namespace,
@@ -1843,6 +1925,8 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
         run_dir = root / run_id
         run_dir.mkdir(mode=0o700)
         os.chmod(run_dir, 0o700)
+        if args.output_root is None:
+            prune_passed_runs(root, time.time(), keep=run_id)
         data = initial_manifest(
             run_id,
             args,
@@ -2054,6 +2138,8 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
         manifest.data["test_traces"]["collection"] = collected
         manifest.data["child_tmp"] = {**manifest.data["child_tmp"], **release_child_tmp(child_tmp)}
         child_tmp = None
+        if args.output_root is None and final_exit == 0 and is_passed_manifest(manifest.data):
+            manifest.data["retention"] = {"slimmed": slim_passed_run(run_dir)}
         manifest.data["duration_seconds"] = time.monotonic() - total_started
         manifest.data["finished_at"] = utc_now()
         try:

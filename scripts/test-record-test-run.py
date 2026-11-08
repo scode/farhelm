@@ -21,6 +21,7 @@ import tempfile
 import threading
 import time
 import unittest
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
@@ -1517,6 +1518,63 @@ class RecorderTest(unittest.TestCase):
                 os.close(fd)
         finally:
             shutil.rmtree(path, ignore_errors=True)
+
+    def write_run(self, root: pathlib.Path, manifest: dict[str, object], age_days: float) -> pathlib.Path:
+        """Plant a run directory with a manifest and bulky parts, backdated by `age_days`."""
+
+        run_dir = root / str(uuid.uuid4())
+        (run_dir / "test-traces" / "slot-000").mkdir(parents=True)
+        (run_dir / "playwright-artifacts").mkdir()
+        (run_dir / "traces.tar").write_bytes(b"tar")
+        (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        stamp = time.time() - age_days * 24 * 60 * 60
+        os.utime(run_dir, (stamp, stamp))
+        return run_dir
+
+    def test_passing_runs_shed_bulk_and_age_out_while_failures_stay(self) -> None:
+        """In the default root, passing runs are slimmed and later pruned; nothing else is.
+
+        Why: the default root sat in /tmp growing about 1 GB a day, two fifths
+        of it from passing runs whose raw traces and browser artifacts nobody
+        reads, while failures are the evidence agents are told to keep. Spec:
+        slimming a passing run removes exactly its traces archive, raw trace
+        root and Playwright artifacts; pruning removes passing runs older than
+        the retention period and leaves young passing runs, old failed,
+        interrupted or still-running runs, the current run, and directories
+        that are not UUID-named runs.
+        """
+
+        root = self.base / "default-root"
+        root.mkdir()
+        passed = {"outcome": "completed", "recorder": {"exit_code": 0}}
+        failed = {"outcome": "completed", "recorder": {"exit_code": 1}}
+        running = {"outcome": "running", "recorder": {"exit_code": None}}
+        interrupted = {"outcome": "interrupted", "recorder": {"exit_code": 130}}
+
+        fresh = self.write_run(root, passed, age_days=0)
+        self.assertEqual(sorted(RECORDER.slim_passed_run(fresh)),
+                         sorted(["traces.tar", "test-traces", "playwright-artifacts"]))
+        self.assertEqual(sorted(path.name for path in fresh.iterdir()), ["manifest.json"])
+
+        old_passed = self.write_run(root, passed, age_days=4)
+        current = self.write_run(root, passed, age_days=4)
+        kept = [
+            self.write_run(root, failed, age_days=4),
+            self.write_run(root, running, age_days=4),
+            self.write_run(root, interrupted, age_days=4),
+            fresh,
+            current,
+        ]
+        batch = root / "batch-not-a-run"
+        batch.mkdir()
+        (batch / "manifest.json").write_text(json.dumps(passed), encoding="utf-8")
+        stamp = time.time() - 4 * 24 * 60 * 60
+        os.utime(batch, (stamp, stamp))
+
+        self.assertEqual(RECORDER.prune_passed_runs(root, time.time(), keep=current.name), 1)
+        self.assertFalse(old_passed.exists())
+        for run_dir in kept + [batch]:
+            self.assertTrue(run_dir.exists(), run_dir)
 
     def test_local_helper_import_leaves_committed_source_unchanged(self) -> None:
         """The observer must not fingerprint bytecode that its own import just created.
