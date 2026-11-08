@@ -377,6 +377,18 @@ run tmux. Before the command starts, the recorder sets `FARHELM_TEST_TRACE_DIR` 
 directory. This name is reserved: even an explicit `--keep-farhelm-env FARHELM_TEST_TRACE_DIR` cannot redirect capture
 to an ambient location. Metadata probes run before this override.
 
+The command also gets its own `TMPDIR`, overriding any ambient value: a fresh mode-0700 directory `/tmp/fh-tmp.XXXXXX`,
+in farhelm-teststate's sweep family. The recorder holds the family's liveness lock (`fh-run.lock` inside it) while the
+command runs and removes the directory once the command's processes and trace collection are done, so what tests leave
+in their temporary directory (plain `tempfile` directories of killed or failed tests, nested builds, Playwright's
+browser profiles and transform cache) no longer accumulates loose in `/tmp`. A directory that still holds a unix socket
+when the run ends is left in place with its lock released, because the socket may be a terminal host or tmux server the
+command left running; the sweep ends those before reaping it, as it does for the directory of a recorder that was itself
+killed. It sits directly under `/tmp` rather than under the evidence root because tests bind sockets below it and socket
+paths are limited to about 104 bytes. The manifest's `child_tmp` records the directory's name, whether an ambient
+`TMPDIR` was overridden (not its value), and whether it was removed or left for the sweep and why. One consequence:
+Playwright's transform cache no longer carries over between recorded runs.
+
 The manifest records only FARHELM variable names: `ambient_names`, `requested_names`, `retained_names`, `removed_names`,
 `requested_but_absent_names`, `overridden_names`, `recorder_owned_names`, and the resulting `child_names`. It never
 records ambient FARHELM values or hashes of them. The recorder-owned trace location is recorded relative to the run.
