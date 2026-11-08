@@ -74,9 +74,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Delete kill the live agent without its required warning. These are source-confirmed conditional routes, with no
   measured allocation failure or incident.
 
-- [`invalid-capture-run-recursive-removal.md`](invalid-capture-run-recursive-removal.md) — A mistaken directory supplied
-  to the screen-capture stop command can cause silent recursive deletion of unrelated user work.
-
 - [`fixture-url-userinfo-credentials.md`](fixture-url-userinfo-credentials.md) — The capture tool can accept and write a
   screen containing proxy credentials in a configured local URL. Those bytes can reach the fixture tree intended for
   public commits. This review has not observed an actual credential-bearing capture or public credential leak.

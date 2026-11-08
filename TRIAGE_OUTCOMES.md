@@ -21675,7 +21675,9 @@
 - Completion criteria: on a path that is not a run, `stop` exits non-zero and deletes nothing, as before #3088; the
   tool's self-test (or a test) shows a non-run directory surviving. Size gate: about 100 lines of diff (estimated 5), as
   above. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/maintainer-tool-safety.md`.
+- Execution: implemented in change `qnqklnpqvkwmoxryprspymvzwpvrkrqz` on bookmark
+  `plan/maintainer-tool-safety/01-tui-stop-refuses-non-run`;
+  [draft PR #3169](https://github.com/scode/farhelm/pull/3169/changes).
 
 ## fixture-url-userinfo-credentials.md
 
