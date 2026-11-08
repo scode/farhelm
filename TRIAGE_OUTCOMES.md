@@ -21799,7 +21799,8 @@
 - Decision: the user picked "Discard all three" on the triage page, 2026-11-07, under the comment quoted in
   `startup-probe-false-tmux-absence.md`.
 - Completion criteria: remove the feedback file and its index entry. No code or spec change.
-- Execution: planned in `plans/queue/triage-misc-nov7.md`.
+- Execution: implemented in change `tnpowvmtkzyupnuuzurwnmyxlpkvqurq`, bookmark
+  `plan/triage-misc-nov7/08-discard-client-loss`, [PR #3181](https://github.com/scode/farhelm/pull/3181/changes).
 
 ## generated-host-name-collision-adopts-unrelated-sandbox.md
 
