@@ -155,9 +155,28 @@ if [ -n "${DESKTOP_SMOKE_DIR:-}" ]; then
 else
   OLD_UMASK="$(umask)"
   umask 077
-  X="$(mktemp -d /tmp/fhm-smoke.XXXXXX)" || { echo "FAIL: mktemp failed" >&2; exit 1; }
+  # The name is in farhelm-teststate's sweep family (`fh-smoke.` plus six
+  # random characters, directly under /tmp because the supervisors' sockets
+  # live inside it), so the sweep every Rust test process and browser stack
+  # runs reclaims a run that was killed, and a kept failure once its keep
+  # marker (written by the teardown below) is two days old. The old
+  # `fhm-smoke.` name was outside the family, and its kept failures, each
+  # carrying a copy of the debug binary, piled up with nothing to remove
+  # them.
+  X="$(mktemp -d /tmp/fh-smoke.XXXXXX)" || { echo "FAIL: mktemp failed" >&2; exit 1; }
   umask "$OLD_UMASK"
 fi
+# The run's liveness lock (farhelm-teststate's protocol), held while this
+# script runs so the sweep never reaps a live run however long it takes.
+# A separate holder process takes it, not a descriptor of this shell: every
+# child this script starts would inherit such a descriptor, the supervisor
+# deliberately outlives the app, and a supervisor holding the lock would make
+# a dead run look alive forever. `flock -o` closes the lock descriptor before
+# running `tail`, so only flock itself holds it, and `tail --pid` ends when
+# this shell does, even by SIGKILL. The sweep's five-minute grace on a fresh
+# lock file covers the moment before the holder has the lock. Its output goes
+# to /dev/null so it never holds a pipe the test recorder waits on.
+flock -o -w 10 "$X/fh-run.lock" tail --pid=$$ -f /dev/null </dev/null >/dev/null 2>&1 &
 mkdir -p "$X/state" "$X/work"
 DESKTOP_READY="$X/desktop-ready.json"
 
@@ -601,7 +620,13 @@ teardown() {
       awk '{print $1}' | xargs -r -n1 systemctl --user stop 2>/dev/null
   fi
 
+  # Every branch that keeps the directory writes farhelm-teststate's keep
+  # marker first. The lock above is released when this script exits, and
+  # without the marker the next sweep would reap the evidence minutes later;
+  # with it, the sweep leaves the directory for two days and then reclaims it
+  # (ending any terminal hosts still running in it).
   if [ "${#HOSTS_NOT_STOPPED[@]}" -gt 0 ]; then
+    : >"$X/fh-keep"
     echo "state kept at $X: terminal hosts may still run in ${HOSTS_NOT_STOPPED[*]}" >&2
   elif [ -n "$PASS" ] && [ -n "$APPEARANCE_MODE" ]; then
     # The profile is disposable fixture state; the retained images and JSON are
@@ -610,20 +635,22 @@ teardown() {
       rm -r -- "$state"
     done
     rm -f -- "$CURL_AUTH_CONFIG" "$DESKTOP_READY"
-    echo "appearance evidence kept at $X" >&2
+    : >"$X/fh-keep"
+    echo "appearance evidence kept at $X for two days" >&2
   elif [ -n "$PASS" ]; then
     rm -r -- "$X"
   else
-    echo "state kept at $X" >&2
+    : >"$X/fh-keep"
+    echo "state kept at $X for two days" >&2
   fi
 }
 trap teardown EXIT
 trap 'exit 143' INT TERM
 
 # Honor CARGO_TARGET_DIR the way cargo does, resolved ONCE to an absolute
-# path and exported. The repo's own dev loop runs out of jj workspaces that
-# share one target directory, so this script has to follow it; CI leaves it
-# unset, where this is exactly the old `$REPO/target`.
+# path and exported. A checkout or the release gate's job may point it at a
+# target directory outside the tree, so this script has to follow it; CI
+# leaves it unset, where this is exactly the old `$REPO/target`.
 #
 # The normalization is not tidiness. A relative value is legal, and cargo
 # resolves it per process working directory — while this script runs cargo
@@ -1372,6 +1399,10 @@ with open(stderr_path) as stderr:
     message = stderr.read()
 assert "another process owns token control" in message, message
 PY_SECOND
+# The copy is a whole debug binary (about 460 MB), needed only for the
+# launch above. Removing it now keeps it out of the directory a failure
+# further down leaves behind.
+rm -f -- "$X/other-farhelm"
 kill -0 "$OPEN_SUPERVISOR_PID" 2>/dev/null || fail "the other-program launch stopped the open app's supervisor"
 curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null || fail "the other-program launch disturbed the incumbent helm"
 [ -s "$X/tmux-override-used" ] || fail "the desktop's tmux preflight did not run the tmux named by FARHELM_TMUX"

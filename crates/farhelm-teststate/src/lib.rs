@@ -1,8 +1,9 @@
 //! Shared /tmp discipline for Farhelm's test harnesses: one naming scheme,
 //! one liveness protocol, one sweep.
 //!
-//! Every harness that builds state under /tmp — the Playwright stack script
-//! and the Rust integration tests — leaks that state when it is killed
+//! Every harness that builds state under /tmp — the Playwright stack script,
+//! the desktop smoke and the Rust integration tests — leaks that state when
+//! it is killed
 //! without running its cleanup (SIGKILL, OOM, a crashed shell). One long day
 //! of killed runs accumulated 423 orphans (~22 GB) and hit disk-full. The
 //! old defense was a shell `find` in e2e/start-stack.sh that matched only
@@ -77,12 +78,20 @@ const PLAYWRIGHT_PREFIX: &str = "fh-e2e.";
 /// Prefix used by [`tempdir`] for the Rust integration tests' dirs.
 const RUST_HARNESS_PREFIX: &str = "fh-it.";
 
+/// The desktop smoke's prefix (scripts/desktop-smoke.sh's `mktemp`). The
+/// smoke keeps its directory when it fails, and it used to do so under a
+/// name outside the family, where nothing ever removed it: 23 such
+/// directories of up to 470 MB each had piled up on the shared host by
+/// 2026-11. In the family, a kept directory carries a [`KEEP_FILE_NAME`]
+/// marker and is reaped once [`SweepPolicy::kept`] has passed.
+const DESKTOP_SMOKE_PREFIX: &str = "fh-smoke.";
+
 /// The prefix family: the complete set of prefixes the sweep considers
 /// its own, built from the per-creator constants above so a creator
 /// prefix cannot drift away from the sweep's view of the family. This is
 /// the single authority — there is deliberately no parallel list in
 /// shell.
-pub const PREFIXES: &[&str] = &[PLAYWRIGHT_PREFIX, RUST_HARNESS_PREFIX];
+pub const PREFIXES: &[&str] = &[PLAYWRIGHT_PREFIX, RUST_HARNESS_PREFIX, DESKTOP_SMOKE_PREFIX];
 
 /// Length of the random suffix both creators append (`mktemp`'s XXXXXX
 /// and tempfile's default are both six alphanumerics). The sweep requires
@@ -100,6 +109,16 @@ const RANDOM_SUFFIX_LEN: usize = 6;
 /// lock file at all predates the protocol (or its creator died between
 /// mkdir and lock creation) and falls back to [`SweepPolicy::backstop`].
 pub const LOCK_FILE_NAME: &str = "fh-run.lock";
+
+/// A marker a run writes into its state dir when it ends and deliberately
+/// leaves the dir behind as evidence for someone to read (the desktop smoke
+/// does this when it fails). The lock protocol alone would let the next
+/// sweep reap that evidence minutes after its creator exits; the marker
+/// holds the dir for [`SweepPolicy::kept`], measured from the marker's own
+/// mtime, after which the dir is judged like any other. It postpones a reap
+/// and never prevents one: a run that wants its state kept forever moves it
+/// out of /tmp.
+pub const KEEP_FILE_NAME: &str = "fh-keep";
 
 /// How deep [`reap`] looks for orphaned `tmux.sock` sockets inside a dead
 /// dir. Depth 3 covers everything the harnesses build today (the stack
@@ -148,6 +167,11 @@ pub struct SweepPolicy {
     /// must stay comfortably above any legitimate mkdir-to-lock window
     /// and above suspicion of racing a concurrent run mid-setup.
     pub backstop: Duration,
+    /// Minimum age (marker mtime) before a dir carrying a
+    /// [`KEEP_FILE_NAME`] marker becomes a candidate at all. Long enough
+    /// for whoever saw the run fail to read its evidence, short enough that
+    /// failed runs do not accumulate until the disk fills.
+    pub kept: Duration,
 }
 
 impl Default for SweepPolicy {
@@ -155,6 +179,7 @@ impl Default for SweepPolicy {
         Self {
             grace: Duration::from_secs(5 * 60),
             backstop: Duration::from_secs(60 * 60),
+            kept: Duration::from_secs(2 * 24 * 60 * 60),
         }
     }
 }
@@ -206,6 +231,11 @@ pub struct SweepOutcome {
 ///   users' dirs are not ours to judge.
 /// - The liveness protocol above must say dead — held flock means live,
 ///   no matter how old.
+///
+/// A dir whose [`KEEP_FILE_NAME`] marker is younger than
+/// [`SweepPolicy::kept`] is skipped before the liveness check, so its
+/// creator's evidence survives the creator's exit; an older marker changes
+/// nothing.
 pub fn sweep(root: &Path, policy: &SweepPolicy) -> SweepOutcome {
     // SAFETY: geteuid has no preconditions and cannot fail.
     sweep_as_owner(root, policy, unsafe { libc::geteuid() })
@@ -262,6 +292,16 @@ fn sweep_as_owner(root: &Path, policy: &SweepPolicy, owner: libc::uid_t) -> Swee
             }
         };
         if !meta.is_dir() || meta.uid() != owner {
+            continue;
+        }
+        // Kept evidence first: its creator has exited, so the lock below
+        // would read as dead and the dir would go within minutes. lstat,
+        // not stat, so a symlink planted at the marker name keeps nothing;
+        // an unreadable mtime counts as young, like every other age gate.
+        if let Ok(marker) = fs::symlink_metadata(path.join(KEEP_FILE_NAME))
+            && marker.is_file()
+            && is_younger_than(now, marker.modified().ok(), policy.kept)
+        {
             continue;
         }
         match open_lock_file(&path.join(LOCK_FILE_NAME)) {
@@ -828,6 +868,7 @@ mod tests {
         SweepPolicy {
             grace: Duration::ZERO,
             backstop: Duration::ZERO,
+            kept: Duration::ZERO,
         }
     }
 
@@ -858,6 +899,7 @@ mod tests {
             dead_dir(root.path(), "fh-it.dead01"),
             dead_dir(root.path(), "fh-it.dead02"),
             dead_dir(root.path(), "fh-e2e.dead03"),
+            dead_dir(root.path(), "fh-smoke.dead04"),
         ];
         let mut outcome = sweep(root.path(), &instant_policy());
         dead.sort();
@@ -902,6 +944,7 @@ mod tests {
         let policy = SweepPolicy {
             grace: Duration::from_secs(3600),
             backstop: Duration::ZERO,
+            kept: Duration::ZERO,
         };
         let outcome = sweep(root.path(), &policy);
         assert!(outcome.reaped.is_empty());
@@ -919,12 +962,60 @@ mod tests {
         let protective = SweepPolicy {
             grace: Duration::ZERO,
             backstop: Duration::from_secs(3600),
+            kept: Duration::ZERO,
         };
         assert!(sweep(root.path(), &protective).reaped.is_empty());
         assert!(lockless.exists());
         let outcome = sweep(root.path(), &instant_policy());
         assert_eq!(outcome.reaped, vec![lockless.clone()]);
         assert!(!lockless.exists());
+    }
+
+    /// A run that ends and leaves its dir as evidence (the desktop smoke's
+    /// failure path) writes the keep marker and releases its lock. Without
+    /// the marker's window the very next sweep would reap that evidence
+    /// minutes later; without the window's end, failed runs would pile up
+    /// until the disk fills, which is how the smoke's old out-of-family
+    /// dirs behaved. Spec: a dead dir with a marker younger than `kept`
+    /// survives, and the same dir is reaped once `kept` no longer covers
+    /// the marker's age.
+    #[test]
+    fn a_keep_marker_holds_a_dead_dir_for_the_kept_window() {
+        let root = tempfile::tempdir().unwrap();
+        let kept = dead_dir(root.path(), "fh-smoke.kept01");
+        File::create(kept.join(KEEP_FILE_NAME)).unwrap();
+        let holding = SweepPolicy {
+            grace: Duration::ZERO,
+            backstop: Duration::ZERO,
+            kept: Duration::from_secs(3600),
+        };
+        let outcome = sweep(root.path(), &holding);
+        assert!(outcome.reaped.is_empty());
+        assert!(kept.exists());
+        let outcome = sweep(root.path(), &instant_policy());
+        assert_eq!(outcome.reaped, vec![kept.clone()]);
+        assert!(!kept.exists());
+    }
+
+    /// The marker is honored only as a regular file. A symlink planted at
+    /// its name (pointing at a fresh file, so following it would read as
+    /// young) must not keep a dead dir, or anyone able to write into it
+    /// could pin its state against the sweep.
+    #[test]
+    fn a_symlinked_keep_marker_keeps_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let fresh = root.path().join("fresh");
+        File::create(&fresh).unwrap();
+        let dead = dead_dir(root.path(), "fh-smoke.plant2");
+        std::os::unix::fs::symlink(&fresh, dead.join(KEEP_FILE_NAME)).unwrap();
+        let holding = SweepPolicy {
+            grace: Duration::ZERO,
+            backstop: Duration::ZERO,
+            kept: Duration::from_secs(3600),
+        };
+        let outcome = sweep(root.path(), &holding);
+        assert_eq!(outcome.reaped, vec![dead.clone()]);
+        assert!(fresh.exists());
     }
 
     /// The sweep must never touch names outside the family — that
@@ -948,6 +1039,9 @@ mod tests {
             // regressed to prefix-plus-length would wrongly claim it.
             "fh-it.ab-c12",
             "fh-e2e.a_bc12",
+            // The desktop smoke's pre-family prefix: dirs from before the
+            // smoke joined the family stay out of bounds.
+            "fhm-smoke.abc123",
         ];
         for name in foreign {
             fs::create_dir(root.path().join(name)).unwrap();
