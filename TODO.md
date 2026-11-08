@@ -614,6 +614,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **The desktop launch lock's brief-holder test checks its release signal too early.**
+  `desktop::tests::the_launch_lock_refuses_beside_an_open_app_and_waits_out_a_brief_holder` in
+  `crates/farhelm-ui/src/desktop.rs` failed once with "the lock was taken only after the holder let go: Empty" in the
+  x86_64 Linux job of release-gate rehearsal run `42434794872` (8 vCPU Ubicloud runner); it passed in five other gate
+  runs. Hypothesis: the holder thread drops the lock before it sends on its release channel, so the waiter can take the
+  lock and check the channel first; sending before the drop keeps the check meaningful. Not reproduced or re-run
+  (FLAKES.md, 2026-11-07).
+
 - **A full browser report exceeded the recorder's inspection bound.** Browser sweep run
   `b0269440-1711-4470-8e18-f6f7ef88bec3` on clean main `2146e607ea9227579740704f2e120ee6192c2525` retained a
   33,090,209-byte `playwright.json`, above `scripts/test_run_playwright.py`'s 16 MiB report limit. Its metadata
