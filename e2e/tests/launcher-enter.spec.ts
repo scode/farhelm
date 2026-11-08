@@ -473,7 +473,7 @@ test("launcher effort dropdown keyboard edits submit the new value exactly once"
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "OMP", exact: true }).click();
   const effort = form.getByRole("combobox", { name: "Effort", exact: true });
   await expect(effort).toBeVisible();
-  await expect(effort.locator("option")).toHaveText(["Default", ...levels.map(level => level[0].toUpperCase() + level.slice(1))]);
+  await expect(effort.locator("option")).toHaveText(["Default", "Off", "Minimal", "Low", "Medium", "High", "xhigh", "Max"]);
   await expect(effort).toHaveValue("default");
   await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "false");
   for (const flags of [{ repeat: true }, { isComposing: true }]) {

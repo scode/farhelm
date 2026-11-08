@@ -88,6 +88,8 @@ pub(crate) const fn effort_search_word(effort: Option<LaunchEffort>) -> &'static
 ///
 /// `None` is the explicit Default action. Callers must use [`effort_value`]
 /// for native option values and [`effort_search_word`] for query matching.
+/// The extra-high level keeps its `xhigh` spelling while other labels use
+/// sentence case; deriving labels by capitalizing their wire values is wrong.
 pub(crate) const fn effort_label(effort: Option<LaunchEffort>) -> &'static str {
     match effort {
         Some(LaunchEffort::Off) => "Off",
@@ -95,7 +97,7 @@ pub(crate) const fn effort_label(effort: Option<LaunchEffort>) -> &'static str {
         Some(LaunchEffort::Low) => "Low",
         Some(LaunchEffort::Medium) => "Medium",
         Some(LaunchEffort::High) => "High",
-        Some(LaunchEffort::Xhigh) => "Xhigh",
+        Some(LaunchEffort::Xhigh) => "xhigh",
         Some(LaunchEffort::Max) => "Max",
         Some(LaunchEffort::Ultra) => "Ultra",
         None => "Default",

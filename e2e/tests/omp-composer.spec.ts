@@ -61,7 +61,7 @@ test("the OMP composer offers OMP's own vocabulary and the row shows the effecti
   await expect(effort).toBeVisible();
   await expect(effort).toHaveValue("default");
   const levels = ["default", "off", "minimal", "low", "medium", "high", "xhigh", "max"];
-  await expect(effort.locator("option")).toHaveText(levels.map(level => level[0].toUpperCase() + level.slice(1)));
+  await expect(effort.locator("option")).toHaveText(["Default", "Off", "Minimal", "Low", "Medium", "High", "xhigh", "Max"]);
   expect(await effort.locator("option").evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value)))
     .toEqual(levels);
 
