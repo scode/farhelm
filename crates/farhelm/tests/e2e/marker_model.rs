@@ -3,7 +3,7 @@
 
 use crate::harness::*;
 
-use crate::terminal_tabs::{run_in_shell, wait_for_shell, window_rows};
+use crate::terminal_tabs::{listed_tabs, wait_for_shell, window_rows};
 
 // ---------------------------------------------------------------------------
 // The marker model (PLAN_M4.md item 2, positive selection)
@@ -11,7 +11,7 @@ use crate::terminal_tabs::{run_in_shell, wait_for_shell, window_rows};
 
 /// An agent launched by a supervisor that is ITSELF running inside
 /// somebody's farhelm tab must still be reaped by its own session's stop —
-/// and a genuine tab of that same session must still survive it.
+/// and a genuine tab of that same session must close through its own reap.
 ///
 /// This is the dogfooding hole positive marking exists to close. A
 /// supervisor started inside a tab inherits that tab's `FARHELM_TAB_ID`,
@@ -21,11 +21,10 @@ use crate::terminal_tabs::{run_in_shell, wait_for_shell, window_rows};
 /// `launch_env` reproduces exactly that inheritance — it injects into
 /// tmux, which is the same route the real ambient value would take.
 ///
-/// Both halves are asserted in one run on purpose: a stop that reaped the
-/// agent by simply ignoring tab markers altogether would pass the first
-/// assertion and fail the second.
+/// Both process kinds must be handled despite the inherited outer marker;
+/// neither the agent nor its own tab can be mistaken for the outer tab.
 #[farhelm_testtrace::test]
-async fn an_agent_wearing_an_ambient_tab_marker_is_still_reaped_while_a_real_tab_survives() {
+async fn an_agent_wearing_an_ambient_tab_marker_and_its_own_tab_are_stopped() {
     // A plausible outer-tab id: minted-shaped, so it is the value a real
     // ambient marker would carry rather than something the parse would
     // reject for its shape alone.
@@ -81,17 +80,11 @@ async fn an_agent_wearing_an_ambient_tab_marker_is_still_reaped_while_a_real_tab
     // (or having inherited into their window) an outer tab's marker.
     wait_until_pid_gone(agent_pid, 15).await;
     wait_until_pid_gone(agent_daemon, 15).await;
-    // The session's OWN tab is untouched.
-    run_in_shell(
-        &h.client,
-        tab_chan,
-        &mut tab_rx,
-        &mut tab_seen,
-        "printf 'STILL%sHERE\\n' -",
-        "STILL-HERE",
-        20,
-    )
-    .await;
+    assert!(listed_tabs(&h.client, &session.id).await.is_empty());
+    assert_eq!(
+        expect_detached(&mut tab_rx, 10).await.code,
+        farhelm_proto::DetachCode::TabClosed,
+    );
 }
 
 /// A daemon left behind by a session launched BEFORE either kind marker

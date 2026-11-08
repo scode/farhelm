@@ -26,8 +26,10 @@
 //! stepped backwards cannot reorder them). A tab has no stored row: the tag is what a tab host is
 //! recognized by, and the session's runtimes for its tab hosts live in its
 //! session cells ([`HostTab`], `SessionCells::host_tabs`), where the tab
-//! strip, lookup, the reap and Delete read them. Beside the tag, every tab
-//! host start writes a launch record (`<state>/launch/<id>.tab-<tab id>.host`,
+//! strip, lookup, the reap, Stop and Delete read them.
+//! Stop closes them through the same per-tab close after reaping its agent;
+//! Restart shares the cell and keeps them running.
+//! Beside the tag, every tab host start writes a launch record (`<state>/launch/<id>.tab-<tab id>.host`,
 //! the agent launch's record under a tab's name, `host_launch`'s "The launch
 //! record"), before its first stage is given the spec, under the supervisor's
 //! `host_scan` fence as an agent start holds it; the record is removed only
@@ -55,7 +57,7 @@
 //!
 //! ## Closing and reaping
 //!
-//! [`Supervisor::close_host_tab_claimed`] is the tmux close's counterpart: a
+//! [`Supervisor::close_host_tab_under_claim`] is the tmux close's counterpart: a
 //! tab in a host is never the agent (the cell holds only hosts tagged as
 //! tabs, and the agent's own runtime is checked against it), an automatic
 //! close goes ahead only while the runtime says the child exited, the
@@ -916,8 +918,8 @@ async fn remove_tab_record(record: &Path) {
 impl Supervisor {
     /// Close the host tab `tab_id` of `entry`'s session, whose runtime
     /// `resolve_terminal_for_close` found as `host`, under the lifecycle
-    /// claim `lifecycle`, which moves onto the supervisor-owned task the
-    /// close runs on (`Supervisor::close_tab_claimed`, whose `only_if_dead`
+    /// claim `lifecycle`, borrowed from the supervisor-owned close or Stop
+    /// mutation (`Supervisor::close_tab_under_claim`, whose `only_if_dead`
     /// marks the ticker's reap).
     ///
     /// The tmux close's steps, each from the host's side (module docs,
@@ -943,9 +945,9 @@ impl Supervisor {
     ///   ([`HostTab::end_failed`]) so that the reap closes it again.
     /// - **The attachment** is detached unconditionally, as for a tmux tab,
     ///   but before the host is ended rather than after (see the body).
-    pub(super) async fn close_host_tab_claimed(
+    pub(super) async fn close_host_tab_under_claim(
         self: &Arc<Self>,
-        lifecycle: KeyedGuard,
+        _lifecycle: &KeyedGuard,
         entry: &Arc<SessionEntry>,
         tab_id: &str,
         host: HostTerminal,
@@ -980,30 +982,14 @@ impl Supervisor {
                 ),
             ));
         }
-        let sup = Arc::clone(self);
-        let entry = Arc::clone(entry);
-        let tab_id = tab_id.to_string();
-        let task = tokio::spawn(async move {
-            let _lifecycle = lifecycle;
-            let closed = sup.close_host_tab(&entry, &tab, only_if_dead).await;
-            if closed.is_ok() {
-                sup.hint_sessions_changed();
-            }
-            closed
-        });
-        match task.await {
-            Ok(result) => result,
-            Err(join) => Err(RequestError::new(
-                ErrorKind::Internal,
-                format!(
-                    "the terminal-tab close task failed for {}: {join}",
-                    truncate_for_error(&tab_id)
-                ),
-            )),
+        let closed = self.close_host_tab(entry, &tab, only_if_dead).await;
+        if closed.is_ok() {
+            self.hint_sessions_changed();
         }
+        closed
     }
 
-    /// [`Self::close_host_tab_claimed`]'s side-effecting half, on the
+    /// [`Self::close_host_tab_under_claim`]'s side-effecting half, on the
     /// supervisor-owned task.
     async fn close_host_tab(
         &self,

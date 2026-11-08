@@ -44,7 +44,7 @@
 mod bell;
 mod create_form;
 mod host_picker;
-/// Paced row lifecycle completions and the snapshot-bound bulk Delete question.
+/// Paced row lifecycle completions and snapshot-bound bulk questions.
 mod lifecycle;
 /// Page-local marks and toolbar controls, independent of the open session.
 mod marking;

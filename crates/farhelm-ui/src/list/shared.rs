@@ -13,23 +13,13 @@ use crate::{Host, HostId, Session, SessionStatus};
 use dioxus::prelude::*;
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 
-/// The subset of `Session` `view::ListView`'s `on_delete` actually needs:
-/// the id the API call targets, plus `status` to decide whether this click
-/// deletes immediately or opens the inline confirm prompt. No `title` —
-/// since the old eval-based `window.confirm()` was replaced with
-/// `row::SessionRow`'s in-page prompt, the row derives its wording from the
-/// live `session.title` and `session.status` on every render. `on_delete`
-/// never builds that wording, so a title never needs to travel through this
-/// type at all. Deliberately narrower than the whole `Session` — `on_delete`
-/// has no legitimate reason to depend on `cwd` or `invocation` either, and a
-/// dedicated type is what makes that impossible rather than merely
-/// unlikely, unlike `on_open` (which keeps taking the whole `Session`: it
-/// needs every field to populate `SessionView`).
+/// The rendered facts that authorize a row's Stop or Delete click.
 ///
-/// `tabs` is the number of terminal tabs the listing shows for the session.
-/// Deleting tears those down too, and unlike an ended agent's stray
-/// descendants the UI can see them, so they decide the confirmation as much
-/// as the agent's status does (see [`DeleteTarget::needs_confirmation`]).
+/// Delete considers both agent status and tab count; Stop asks only when
+/// tabs are displayed. Each request derives its precondition from these facts,
+/// never from a fresh listing after the click. The prompt's wording stays in
+/// the row, which can reword an open question from its next render without
+/// carrying unrelated launch settings through the action callback.
 #[derive(Debug, Clone)]
 pub(super) struct DeleteTarget {
     pub(super) id: String,
@@ -38,7 +28,7 @@ pub(super) struct DeleteTarget {
 }
 
 impl DeleteTarget {
-    /// The fields `on_delete` decides from, taken from the row's session.
+    /// The fields lifecycle clicks decide from, taken from the row's session.
     /// The local operation target keeps the exact raw reference for routing;
     /// a visible spelling would address a different session.
     pub(super) fn for_session(session: &Session) -> Self {
@@ -54,8 +44,8 @@ impl DeleteTarget {
     ///
     /// SPEC.md's Delete rule: confirmation "that says so when anything is
     /// still alive". An agent that has not ended is alive; so is any listed
-    /// terminal tab, even after the agent has exited, because Stop and an
-    /// agent's own exit both leave tabs running (a dev server, a build).
+    /// terminal tab, even after the agent has exited on its own or a new
+    /// tab was opened after Stop (a dev server, a build).
     /// With session confirmations enabled, only an ended agent with no tabs
     /// deletes unconfirmed. That can still kill process-tree leftovers the UI
     /// cannot see, a residual
@@ -94,9 +84,11 @@ pub(super) enum DeleteClick {
 /// A row asks at most one at a time; `ListView`'s handlers refuse to open
 /// one question while the row holds the other. The kind is part of the key
 /// so the row can tell which prompt to draw from the token alone, and so a
-/// Delete answer can never be mistaken for a Replace answer.
+/// Stop, Delete and Replace answers can never be mistaken for one another.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RowQuestion {
+    /// Stop closes the tabs named by the current prompt.
+    Stop,
     /// "confirm delete?": the row's Delete of a session that may be alive.
     Delete,
     /// The row's Replace confirmation.

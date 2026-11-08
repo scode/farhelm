@@ -984,6 +984,7 @@ test("bulk Stop paces nine rows on one host while another host progresses", asyn
       const host = hostById.get(id);
       if (host === undefined) return route.fallback();
       expect(route.request().method()).toBe("POST");
+      expect(route.request().postDataJSON()).toEqual({ refuse_if_tabs_open: true, refuse_if_agent_running: false });
       started.push(id);
       active.set(host, (active.get(host) ?? 0) + 1);
       maximum.set(host, Math.max(maximum.get(host) ?? 0, active.get(host)!));

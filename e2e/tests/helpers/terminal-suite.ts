@@ -344,13 +344,16 @@ export async function openTerminal(page: Page) {
  * Plural on purpose: these tests exist because a duplicate is possible, so
  * their cleanup must not assume the thing they are testing for. A
  * single-session cleanup would leave a stray agent running for the rest of
- * the suite exactly when the test failed.
+ * the suite exactly when the test failed. Cleanup explicitly authorizes Stop
+ * of any agent and tabs belonging to the matched fixture session.
  */
 export async function cleanUpSessionsTitled(request: APIRequestContext, title: string) {
   const listing = await (await request.get("/api/sessions")).json().catch(() => null);
   for (const session of listing?.sessions ?? []) {
     if (session.title !== title) continue;
-    await request.post(`/api/sessions/${encodeURIComponent(session.id)}/stop`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(session.id)}/stop`, {
+      data: { refuse_if_tabs_open: false, refuse_if_agent_running: false },
+    }).catch(() => {});
     await request.delete(`/api/sessions/${encodeURIComponent(session.id)}`).catch(() => {});
   }
 }

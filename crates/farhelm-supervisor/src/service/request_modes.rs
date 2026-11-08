@@ -252,7 +252,10 @@ declare_execution_classes! {
             root: Some(c.cwd.into()),
         };
         StopSession => OwnedMutation => |c| ControlMsg::StopSession {
-            req_id: c.req_id, session_id: c.session_id.into(),
+            req_id: c.req_id,
+            session_id: c.session_id.into(),
+            refuse_if_tabs_open: false,
+            refuse_if_agent_running: false,
         };
         DeleteSession => OwnedDelete => |c| ControlMsg::DeleteSession {
             req_id: c.req_id,

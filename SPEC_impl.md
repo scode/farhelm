@@ -671,13 +671,13 @@ zero-specificity rule in app.css makes them inherit `font-family`, and a control
 platform sans-serif the way most of the launch composer's buttons once did. The rule leaves font size alone, and it
 excludes xterm.js's own helper textarea, which belongs to the vendored widget.
 
-The open session's chrome has one top row with terminal tabs on the left and fixed text-size controls, split Restart and
-Replace buttons, Clone and Delete on the right, and a slim details bar below the terminal. The bottom bar is ordered
-status, title, host, age, managed-checkout branch mark when present, copyable `{cwd}`, and copyable invocation. The host
-uses the same label component as the session list in its full-name mode, reading the shared `Signal<HostsRead>` context
-rather than starting another host request; its name remains visible when locality is unknown, and only a missing name
-omits it. Identity moved below the terminal to make the active session and host easier to see while keeping the bottom
-bar small and leaving room for the tabs and actions together at the top. The terminal keeps at least its previous
+The open session's chrome has one top row with terminal tabs on the left and fixed text-size controls, Stop, split
+Restart and Replace buttons, Clone and Delete on the right, and a slim details bar below the terminal. The bottom bar is
+ordered status, title, host, age, managed-checkout branch mark when present, copyable `{cwd}`, and copyable invocation.
+The host uses the same label component as the session list in its full-name mode, reading the shared `Signal<HostsRead>`
+context rather than starting another host request; its name remains visible when locality is unknown, and only a missing
+name omits it. Identity moved below the terminal to make the active session and host easier to see while keeping the
+bottom bar small and leaving room for the tabs and actions together at the top. The terminal keeps at least its previous
 steady-state height. Earlier, four stacked bands cost roughly 170px before the terminal started, on a surface whose
 entire point is the terminal; they were consolidated into one roughly 40px header above the tabs before this split. Two
 of those bands had to go somewhere rather than merely shrink. The restart offer's explanation became the restart
@@ -693,10 +693,10 @@ Copy feedback snapshots that warning from the copied value alongside its click i
 and its existing expiry unchanged; an older click's timer cannot clear newer feedback.
 
 The action group remains fully visible and in DOM order from a 650px main pane: zoom out, the display-only point size,
-zoom in, Restart and its caret, Replace and its caret, Clone, Delete. Text size does not scroll with tabs; it retains
-the tab surface's stale/inert condition. The two split menus use the shared menu anatomy, focus queue, keyboard handling
-and outside-pointer relay, with one open family per session view. Their absolute below-caret placement follows toolbar
-layout without a separate async measurement lifecycle. Main halves and repeated plain menu choices call the same
+zoom in, Stop, Restart and its caret, Replace and its caret, Clone, Delete. Text size does not scroll with tabs; it
+retains the tab surface's stale/inert condition. The two split menus use the shared menu anatomy, focus queue, keyboard
+handling and outside-pointer relay, with one open family per session view. Their absolute below-caret placement follows
+toolbar layout without a separate async measurement lifecycle. Main halves and repeated plain menu choices call the same
 lifecycle-admission callbacks; opening a menu takes no claim. Restart with keeps its independent availability and
 accessible explanation. The launcher returns to the persistent caret rather than its unmounted menu entry. The native
 tunnel pill has a bounded width beside the tabs, outside their terminal-presence condition and stale/inert subtree;
@@ -1072,11 +1072,12 @@ button mounted by a later confirmation or disabled during a request keeps its ow
 only the gap rule. Modal dialog containers have no focus ring; controls and the nonmodal notification panel retain their
 keyboard rings.
 
-Mark read/unread and stop close the menu as soon as the handler accepts the choice. Their asynchronous failures still
-appear in the row's error line; completion does not close a subsequently opened menu or reclaim focus. In-place
-confirmations retain their panel so the user can finish the interaction. Rename does not: opening it closes the menu and
-mounts the list-owned dialog SPEC.md specifies, whose lifetime belongs to the list rather than to the popup — the edit
-survives the panel, the row, and listing failures.
+Mark read/unread and an admitted Stop close the menu as soon as the handler accepts the choice. A Stop that needs a
+terminal-tab confirmation retains the panel until the answer. Their asynchronous failures still appear in the row's
+error line; completion does not close a subsequently opened menu or reclaim focus. In-place confirmations retain their
+panel so the user can finish the interaction. Rename does not: opening it closes the menu and mounts the list-owned
+dialog SPEC.md specifies, whose lifetime belongs to the list rather than to the popup — the edit survives the panel, the
+row, and listing failures.
 
 `ListView` owns page-local marked session keys beside its row-question slots. The displayed held-order projection
 defines counts and drawn targets; only the same authoritative absence boundary that prunes questions prunes marks.
@@ -1096,11 +1097,12 @@ before another request proceeds.
 The combined `ConfirmSlot` freezes original identities and consequence-bearing displayed facts, including the status
 annotation and displayed rename overlay. Reconciliation does not reset consent for unrelated activity or notification
 changes. Changed drawn facts mint a replacement opening; authoritative absence permanently drops a target from that
-question. Every handler carries its rendered token, and every `DeleteGuard` comes from its answered snapshot. Live
-admission can shrink visibility or mark membership but never retarget a question or strengthen its guard from a newer
-read. The modal uses the existing dialog frame, focus and scrolling facilities. Confirming-close focus targets the
-nonsequential marked count while action buttons are locked; cancellation uses the enabled toolbar menu button. Batch
-completion uses the ordinary conditional header handback before clearing marks, preserving independently moved focus.
+question. Every handler carries its rendered token, and every `DeleteGuard` and Stop no-tabs guard comes from its
+answered snapshot. Live admission can shrink visibility or mark membership but never retarget a question or strengthen
+its guard from a newer read. The modal uses the existing dialog frame, focus and scrolling facilities. Confirming-close
+focus targets the nonsequential marked count while action buttons are locked; cancellation uses the enabled toolbar menu
+button. Batch completion uses the ordinary conditional header handback before clearing marks, preserving independently
+moved focus.
 
 Clone reuses the create form rather than a second submit path: the click builds a `CreatePrefill` snapshot of the row's
 `Session` and hands it to the SAME `CreateSessionForm`, tagged with a monotonic generation the list view mints per
@@ -2244,32 +2246,32 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   same `host_scan` fence until the tab is published; the record is removed only once its host is confirmed ended. It is
   not a registry of tabs (a tab's kind is still known from where it was found): it is how Delete finds a tab host no
   runtime holds, and how a restarted supervisor knows which socket to ask, cross-checked against the host's tag. The
-  session's tab runtimes live in its session cells, which a Restart shares, so tabs keep running across Restart and Stop
-  as tmux tabs do. The open waits up to 250 ms for the shell to die, from the runtime's view of the child rather than a
-  poll of tmux, and a shell dead by then refuses the open with the emulator's screen as its last words once the host's
-  exit record has been processed (two seconds at most); the `host_scan` fence is let go as soon as the shell is seen not
-  alive, so that wait holds up no other host's spawn or socket removal. Any failure after the host started ends the host
-  (its `Shutdown`, else the verified signal), sweeps the tab's scope and marker (rooted at the child only when a runtime
-  pinned it, so a failure before the runtime adopted the host sweeps with no root, never one read from an unverified
-  pid) and removes its record, so a failed open leaves nothing; a host that cannot be confirmed ended keeps its record,
-  which its session's Delete finds it by, and whatever could not be confirmed cleaned up is in the refusal. The tab
-  strip and every tab lookup merge the two kinds: tmux tabs first, in window order, then host tabs by their tags'
-  creation times; a host tab whose shell exited, or whose host ended under it, is hidden at once, as a dead window is.
-  Closing a host tab: the session's cell holds only hosts whose tag names one of its tabs (the open wrote it, a reload
-  checked it), and the agent's own runtime is refused; the reap's "only if dead" is the runtime's processed exit record,
-  checked again under the session's lifecycle claim; the scope is the tag's; the sweep roots at the child only while it
-  runs; then the attached viewer is told the tab closed (before the host ends, since a grid stream would otherwise
-  report its terminal ended first), the host is ended as above (for a runtime that judged its host gone from its socket
-  alone, the process it adopted is confirmed gone first, by the verified signal), a marker-only sweep catches what
-  outlived the hangup, and the record goes once the end is confirmed. A close that cannot confirm the end keeps the tab
-  and its record and marks it, and since its stopped runtime announces nothing, the reap closes it again until one does:
-  a second after the failure, then doubling to at most a minute between tries, so an end that keeps failing holds the
-  session's lifecycle claim and a reap slot only that often. A host tab that cannot be read refuses to close; its
-  session's Delete ends it. The automatic reap is driven by the host's exit event: the runtime announces its processed
-  exit record on the supervisor's liveness notifier, which wakes the ticker's reap pass at once, with no poll; the tick
-  runs it too, for a close a busy session put off. A takeover displaces the previous client's attachments to every
-  terminal of the session, tmux and host alike, and a grid attach to a host tab goes through the grid stream as an
-  agent's does.
+  session's tab runtimes live in its session cells, which a Restart shares, so tabs keep running across Restart as tmux
+  tabs do. Stop closes both kinds after stopping the agent. The open waits up to 250 ms for the shell to die, from the
+  runtime's view of the child rather than a poll of tmux, and a shell dead by then refuses the open with the emulator's
+  screen as its last words once the host's exit record has been processed (two seconds at most); the `host_scan` fence
+  is let go as soon as the shell is seen not alive, so that wait holds up no other host's spawn or socket removal. Any
+  failure after the host started ends the host (its `Shutdown`, else the verified signal), sweeps the tab's scope and
+  marker (rooted at the child only when a runtime pinned it, so a failure before the runtime adopted the host sweeps
+  with no root, never one read from an unverified pid) and removes its record, so a failed open leaves nothing; a host
+  that cannot be confirmed ended keeps its record, which its session's Delete finds it by, and whatever could not be
+  confirmed cleaned up is in the refusal. The tab strip and every tab lookup merge the two kinds: tmux tabs first, in
+  window order, then host tabs by their tags' creation times; a host tab whose shell exited, or whose host ended under
+  it, is hidden at once, as a dead window is. Closing a host tab: the session's cell holds only hosts whose tag names
+  one of its tabs (the open wrote it, a reload checked it), and the agent's own runtime is refused; the reap's "only if
+  dead" is the runtime's processed exit record, checked again under the session's lifecycle claim; the scope is the
+  tag's; the sweep roots at the child only while it runs; then the attached viewer is told the tab closed (before the
+  host ends, since a grid stream would otherwise report its terminal ended first), the host is ended as above (for a
+  runtime that judged its host gone from its socket alone, the process it adopted is confirmed gone first, by the
+  verified signal), a marker-only sweep catches what outlived the hangup, and the record goes once the end is confirmed.
+  A close that cannot confirm the end keeps the tab and its record and marks it, and since its stopped runtime announces
+  nothing, the reap closes it again until one does: a second after the failure, then doubling to at most a minute
+  between tries, so an end that keeps failing holds the session's lifecycle claim and a reap slot only that often. A
+  host tab that cannot be read refuses to close; its session's Delete ends it. The automatic reap is driven by the
+  host's exit event: the runtime announces its processed exit record on the supervisor's liveness notifier, which wakes
+  the ticker's reap pass at once, with no poll; the tick runs it too, for a close a busy session put off. A takeover
+  displaces the previous client's attachments to every terminal of the session, tmux and host alike, and a grid attach
+  to a host tab goes through the grid stream as an agent's does.
 - **Restarting a host agent** (`service/core/host_restart.rs`): a host runs one child for its whole life, so a Restart
   of an agent in a host (or of a host row whose session holds no terminal) never reuses the host. Under the session's
   lifecycle claim, once the consent a working agent needs has been checked (so a refusal touches nothing) and before
@@ -4966,14 +4968,35 @@ Web Animations with reduced-motion refusal. No global geometry cache or new asse
 - Process-tree ownership (SPEC.md's stop/reap promises): killing the tmux pane is not enough — tmux signals the
   foreground process group, and daemonized descendants escape it. The portable sweep combines the pane's descendant tree
   with environment-marker selection through the platform process API. Every marker selection requires the matching
-  `FARHELM_SESSION_ID`. Stop and restart select the agent's `FARHELM_AGENT_ID`; delete selects the whole session,
-  including tabs; closing one tab selects its exact `FARHELM_TAB_ID`. Agent selection also retains the existing legacy
-  case with neither kind marker. These are process-ownership hints, not authenticated credentials; across versions they
-  follow "What running sessions hold across versions", and nothing older than the markers themselves is promised beyond
-  the legacy case above. Launch boundaries scrub the opposite kind's marker so nested supervisors do not misclassify a
-  new agent as an outer tab's process. On both platforms the marker is read from the memory where the kernel placed the
-  environment at exec (`/proc/<pid>/environ` on Linux, `KERN_PROCARGS2` on macOS), which is live: a program that
-  rewrites its process title can overwrite it, and SPEC.md accepts that such a detached process escapes the sweep.
+  `FARHELM_SESSION_ID`. The agent reap shared by Stop and Restart selects the agent's `FARHELM_AGENT_ID`; Stop then
+  closes the terminal tabs under its existing lifecycle claim, while Restart keeps them. Delete selects the whole
+  session, including tabs; closing one tab selects its exact `FARHELM_TAB_ID`. Agent selection also retains the existing
+  legacy case with neither kind marker. These are process-ownership hints, not authenticated credentials; across
+  versions they follow "What running sessions hold across versions", and nothing older than the markers themselves is
+  promised beyond the legacy case above. Launch boundaries scrub the opposite kind's marker so nested supervisors do not
+  misclassify a new agent as an outer tab's process. On both platforms the marker is read from the memory where the
+  kernel placed the environment at exec (`/proc/<pid>/environ` on Linux, `KERN_PROCARGS2` on macOS), which is live: a
+  program that rewrites its process title can overwrite it, and SPEC.md accepts that such a detached process escapes the
+  sweep.
+
+  Stop keeps its existing supervisor-owned mutation and lifecycle claim through the agent reap and every tab close. Its
+  tab close borrows that claim instead of acquiring another one; explicit and automatic closes still own their cleanup
+  task so caller cancellation cannot strand a sweep. Stop includes dead-but-unreaped tabs, attempts the other tabs after
+  a close failure, and returns the unresolved cleanup in `SessionStopped.notice`. A failed tmux discovery still permits
+  closing known host tabs. The GUI shows that notice through its ordinary per-session action result.
+
+  `StopSession.refuse_if_tabs_open` and `refuse_if_agent_running` are default-false fields omitted when false. Before
+  recording intent or signalling anything, the tab guard requires a successful listing with no open tabs, and the agent
+  guard requires authoritative evidence that the agent has ended, including for an entry without a terminal. Failed
+  discovery or uncertain agent liveness refuses too. UI row, header and bulk Stop derive both guards from the same
+  displayed snapshot: no tabs guards tabs, an ended agent guards the agent, independently, whether a question was
+  answered or skipped. Agent-approved Stop is unrestricted. At the HTTP edge, an omitted tab guard defaults true, so an
+  old browser's bodyless or empty-object Stop can still stop the agent but cannot newly close tabs it never warned
+  about. An omitted agent guard retains legacy agent-stop authority; the new UI always sends both explicitly. The HTTP
+  result is `SessionStopOutcome`, an optional notice with an empty object for complete cleanup. Protocol 70 gates the
+  helm-to-supervisor behavior: although the fields have decode defaults and preserve the empty success shape, an older
+  helm would send unrestricted Stop without asking about tabs. Treating the change as additive would let that old client
+  close tabs it never received permission to close.
 
   Automatic tab cleanup rechecks the whole tab window under its lifecycle claim before signalling: an old ticker death
   observation does not authorize ending a shell that is live now. Its log names the tab, pane and tmux death report.

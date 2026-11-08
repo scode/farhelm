@@ -1968,9 +1968,9 @@ pub(crate) async fn stop_live_agent(
     if let Some(container) = &container {
         container.revoke().map_err(StopFailure::Sweep)?;
     }
-    // `AgentOnly`, shared verbatim by `StopSession` and the restart's
-    // pre-relaunch reap — the two operations SPEC.md says leave a
-    // ordinary session's terminal tabs running (PLAN_M4.md item 2's marker split).
+    // Restart shares this agent reap and must keep tabs running. Stop's
+    // handler closes tabs separately under its lifecycle claim, through
+    // their own close paths, so their live roots remain available to sweep.
     // A containerized Stop then ends the whole container below, after this exec
     // client and its helpers are gone; its keeper must survive this first sweep.
     reap_process_tree(
@@ -2438,18 +2438,18 @@ mod tests {
         // own agent marker AND an ambient outer tab marker.
         let inner_agent_with_ambient_tab = markers(true, true, true, false);
 
-        let stop = SweepTarget::AgentOnly;
-        assert!(stop.claims(&agent_launch));
+        let agent_reap = SweepTarget::AgentOnly;
+        assert!(agent_reap.claims(&agent_launch));
         assert!(
-            stop.claims(&legacy),
+            agent_reap.claims(&legacy),
             "a pre-marker daemon must stay reachable, or stop silently weakens on upgrade"
         );
         assert!(
-            !stop.claims(&tab_launch) && !stop.claims(&other_tab),
-            "SPEC.md: stopping the agent leaves the session's tabs running"
+            !agent_reap.claims(&tab_launch) && !agent_reap.claims(&other_tab),
+            "Restart keeps tabs; Stop closes them through their own rooted reap afterwards"
         );
         assert!(
-            stop.claims(&inner_agent_with_ambient_tab),
+            agent_reap.claims(&inner_agent_with_ambient_tab),
             "a positive agent marker outranks an ambient tab marker — the dogfooding hole \
              exclusion-only selection left open"
         );
@@ -2478,7 +2478,7 @@ mod tests {
             any_tab: true,
             tab: true,
         };
-        for target in [stop, delete, close] {
+        for target in [agent_reap, delete, close] {
             assert!(
                 !target.claims(&foreign),
                 "{target:?} claimed a process carrying no session marker"

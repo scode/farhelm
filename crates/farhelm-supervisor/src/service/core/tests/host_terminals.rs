@@ -671,6 +671,8 @@ async fn a_stop_before_the_exit_record_records_no_launch_failure() {
         ControlMsg::StopSession {
             req_id: 1,
             session_id: "s1".to_string(),
+            refuse_if_tabs_open: false,
+            refuse_if_agent_running: false,
         },
     )
     .await;
@@ -745,6 +747,8 @@ async fn a_stop_classifies_a_host_launch_from_its_exit_record() {
                 ControlMsg::StopSession {
                     req_id: 1,
                     session_id: "s1".to_string(),
+                    refuse_if_tabs_open: false,
+                    refuse_if_agent_running: false,
                 },
             )
             .await
@@ -858,6 +862,8 @@ async fn a_stop_before_the_exit_record_still_records_the_shims_report() {
         ControlMsg::StopSession {
             req_id: 1,
             session_id: "s1".to_string(),
+            refuse_if_tabs_open: false,
+            refuse_if_agent_running: false,
         },
     )
     .await;
@@ -2816,7 +2822,7 @@ async fn readoption_of_a_gone_tab_leaves_its_record_for_the_reaps_close() {
         "re-adoption leaves record removal to close"
     );
     let lifecycle = sup.lifecycle_locks.claim("s1").await;
-    sup.close_host_tab_claimed(lifecycle, &entry, "t1", gone.host, true)
+    sup.close_host_tab_under_claim(&lifecycle, &entry, "t1", gone.host, true)
         .await
         .expect("reap closes the gone tab");
     assert!(entry.session.host_tabs.lock().unwrap().is_empty());

@@ -404,7 +404,7 @@ pub(crate) fn SettingsDialog(
                             div { class: "setting-group",
                                 label {
                                     class: "app-settings-choice setting-row",
-                                    "data-tooltip": "Delete, replace, restart and close terminal tabs on the first click",
+                                    "data-tooltip": "Stop, delete, replace, restart and close terminal tabs on the first click",
                                     span { "Skip session confirmations" }
                                     input {
                                         r#type: "checkbox",
@@ -434,7 +434,7 @@ pub(crate) fn SettingsDialog(
                                 p {
                                     id: "session-confirmations-help",
                                     class: "host-settings-help",
-                                    "Delete, replace, restart and close terminal tabs on the first click. YOLO, host and trash confirmations still follow their own rules. This choice applies to this helm; other open clients pick it up when they reload."
+                                    "Stop, delete, replace, restart and close terminal tabs on the first click. YOLO, host and trash confirmations still follow their own rules. This choice applies to this helm; other open clients pick it up when they reload."
                                 }
                                 if session_error() {
                                     p {

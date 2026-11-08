@@ -268,7 +268,7 @@ fn launch_shell(path: &Path, body: &str) -> PathBuf {
 }
 
 /// Whether process `pid` ignores SIGHUP, from `/proc/<pid>/status`.
-fn ignores_hangup(pid: u32) -> bool {
+pub(crate) fn ignores_hangup(pid: u32) -> bool {
     std::fs::read_to_string(format!("/proc/{pid}/status"))
         .ok()
         .and_then(|status| {
@@ -422,11 +422,11 @@ async fn a_host_tab_beside_a_host_agent_opens_attaches_and_closes() {
 /// and the switch now on, which is the mixed session the client's migration
 /// band asks to reopen its old tab. A takeover by a client attaching one host tab displaces a client
 /// holding the tmux agent and the other host tab, both. Another session has
-/// a host tab of its own. Once the agent is stopped, a Delete guarded on
-/// nothing alive is refused for 3 open tabs and ends nothing; an
-/// unconditional one succeeds, after which both tab hosts' processes,
-/// sockets and records are gone and the tmux session is gone, while the
-/// other session's tab host runs on.
+/// a host tab of its own. Once the agent exits on its own (a Stop would now
+/// close the tabs first), a Delete guarded on nothing alive is refused for
+/// 3 open tabs and ends nothing; an unconditional one succeeds, after which
+/// both tab hosts' processes, sockets and records are gone and the tmux
+/// session is gone, while the other session's tab host runs on.
 #[farhelm_testtrace::test]
 async fn a_mixed_session_lists_tmux_tabs_first_and_its_delete_ends_its_tab_hosts() {
     let stack = Stack::new().await;
@@ -549,7 +549,13 @@ async fn a_mixed_session_lists_tmux_tabs_first_and_its_delete_ends_its_tab_hosts
         tab_record(stack.state.path(), &session.id, &first.id),
         tab_record(stack.state.path(), &session.id, &second.id),
     ];
-    client.stop_session(&session.id).await.expect("stop");
+    let (channel, mut seen, mut stream) = client
+        .attach_live(&session.id, COLS, ROWS)
+        .await
+        .expect("attach agent");
+    wait_for(&mut stream, &mut seen, "FAKE-AGENT READY", WAIT_SECS).await;
+    client.send_keys(channel, b"quit\r".to_vec()).await;
+    wait_for_exit_code(&client, &session.id, 0, WAIT_SECS).await;
     let refused = client
         .delete_session_with(&session.id, farhelm_proto::DeleteGuard::NothingAlive)
         .await
@@ -1362,7 +1368,7 @@ async fn serve_keeps_held_tab_runtimes_without_contacting_their_hosts() {
     retire(stack.state.path(), sup, client).await;
 }
 
-/// Closing a host tab and deleting its session each kill a process under
+/// Closing a host tab, Stop and Delete each kill a process under
 /// the tab's shell that ignores SIGHUP and carries no marker.
 ///
 /// Why: only a sweep rooted at the tab's child reaches such a process: the
@@ -1373,10 +1379,10 @@ async fn serve_keeps_held_tab_runtimes_without_contacting_their_hosts() {
 /// background job under `env -i` that ignores SIGHUP and records its pid
 /// per tab (premise: running, ignoring SIGHUP, no `FARHELM_` variable),
 /// two tabs open; closing the first leaves its job gone when the close
-/// returns, and an unconditional Delete leaves the second's gone when it
-/// returns.
+/// returns, Stop leaves the second's gone, and an unconditional Delete
+/// leaves a tab opened after Stop's job gone when it returns.
 #[farhelm_testtrace::test]
-async fn close_and_delete_kill_a_hangup_immune_unmarked_job_of_a_tab() {
+async fn close_stop_and_delete_kill_a_hangup_immune_unmarked_job_of_a_tab() {
     let home = farhelm_teststate::tempdir().expect("home");
     let jobs = home.path().join("jobs");
     std::fs::create_dir(&jobs).expect("the jobs directory");
@@ -1415,10 +1421,25 @@ async fn close_and_delete_kill_a_hangup_immune_unmarked_job_of_a_tab() {
         .expect("close the first tab");
     assert!(process_is_gone(first_job), "the closed tab's job is gone");
     assert!(!process_is_gone(second_job), "the other tab's job runs on");
-    h.client.delete_session(&session.id).await.expect("delete");
+    h.client.stop_session(&session.id).await.expect("stop");
     assert!(
         process_is_gone(second_job),
-        "Delete killed the other tab's job"
+        "Stop killed the other tab's job"
+    );
+    let third = h
+        .client
+        .open_tab(&session.id)
+        .await
+        .expect("a tab after Stop");
+    let third_job = job(&third.id).await;
+    assert!(
+        !process_is_gone(third_job) && ignores_hangup(third_job) && !carries_markers(third_job),
+        "premise: the post-Stop tab's job runs, ignores SIGHUP and carries no marker"
+    );
+    h.client.delete_session(&session.id).await.expect("delete");
+    assert!(
+        process_is_gone(third_job),
+        "Delete killed the post-Stop tab's job"
     );
 }
 
@@ -1471,9 +1492,37 @@ async fn an_unreadable_tab_host_at_restart_is_listed_refused_and_deleted() {
             .map(SupervisorError::kind),
         Some(ErrorKind::Conflict)
     );
-    // The guard asks about the agent before the tabs; Stop ends the agent
-    // and leaves every tab open (SPEC.md), so the tab is what is left.
-    client.stop_session(&session.id).await.expect("stop");
+    // Stop leaves only the unreadable tab, reports it, and still closes a
+    // healthy sibling. One host's refusal must not short-circuit the loop.
+    let healthy = client
+        .open_tab(&session.id)
+        .await
+        .expect("a healthy sibling");
+    let healthy_host = tab_host(&sup, &session.id, &healthy.id).await;
+    let healthy_pid = host_process(healthy_host.socket()).expect("the healthy host runs");
+    let stopped_outcome = client
+        .stop_session_guarded(&session.id, false, false)
+        .await
+        .expect("stop the agent and readable tabs");
+    let notice = stopped_outcome
+        .notice
+        .expect("the unreadable tab must be reported");
+    assert!(
+        notice.contains(&tab.id) && notice.contains("cannot be read"),
+        "{notice}"
+    );
+    assert!(
+        process_is_gone(healthy_pid),
+        "the healthy sibling closed despite the refusal"
+    );
+    assert!(
+        !process_is_gone(tab_pid),
+        "the unreadable tab is left alone"
+    );
+    assert_eq!(
+        listed_tabs(&client, &session.id).await,
+        vec![tab.id.clone()]
+    );
     let guarded = client
         .delete_session_with(&session.id, farhelm_proto::DeleteGuard::NothingAlive)
         .await
@@ -1550,7 +1599,16 @@ async fn a_tab_runtime_that_becomes_unreadable_is_untold_and_deleted() {
         Some(ErrorKind::Conflict),
         "{refused:#}"
     );
-    h.client.stop_session(&session.id).await.expect("stop");
+    let stopped = h
+        .client
+        .stop_session_guarded(&session.id, false, false)
+        .await
+        .expect("stop");
+    let notice = stopped.notice.expect("Stop must report the unreadable tab");
+    assert!(
+        notice.contains(&tab.id) && notice.contains("cannot be read"),
+        "{notice}"
+    );
     let guarded = h
         .client
         .delete_session_with(&session.id, farhelm_proto::DeleteGuard::NothingAlive)

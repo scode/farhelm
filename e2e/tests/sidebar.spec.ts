@@ -4775,11 +4775,12 @@ test("opening the last visible row's menu in a scrolled list stays inside the vi
   const marker = `clip-${Date.now()}`;
   const created = await fillSidebarPastOneScreen(request, marker);
   try {
-    // A modest viewport, set before navigation: fewer fixture sessions are
-    // needed to force a scroll, and the height is exactly what the
-    // "bottom edge inside the viewport" assertion below is measured
-    // against.
-    await page.setViewportSize({ width: 900, height: 500 });
+    // Keep enough height for the described menu to remain shorter than its
+    // placement reserve. At 500px, Stop's longer tab-closing description
+    // leaves the row-aimed pointer inside the panel, so that viewport cannot
+    // distinguish a panel clamp from a viewport-only clamp. The owned rows
+    // must still force scrolling, as asserted below.
+    await page.setViewportSize({ width: 900, height: 650 });
     // The fixture keeps a fixed action count: an extra seen-state action
     // would make the panel's height depend on the classifier's timing.
     // The height reserve must fit the described menu at this viewport size.
@@ -4950,9 +4951,10 @@ test("a retained refusal stays inside a bottom-row menu's scrolling panel", asyn
   const marker = `refusal-${Date.now()}`;
   const created = await fillSidebarPastOneScreen(request, marker);
   try {
-    // Same geometry as the scrolled-list test above: a short viewport, a
-    // fixed seven-item menu, settled rows, and a settled host list.
-    await page.setViewportSize({ width: 900, height: 500 });
+    // Match the scrolled-list fixture's room for the taller Stop description.
+    // The initial pointer premise and the refusal's independent overflow
+    // premise below must both hold; a taller viewport cannot replace either.
+    await page.setViewportSize({ width: 900, height: 650 });
     await hideSeenState(page);
     await waitForFixtureStates(request, created, "idle");
     await page.goto("/");

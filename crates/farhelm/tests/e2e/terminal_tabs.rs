@@ -24,7 +24,7 @@ use std::sync::Arc;
 // login shell, rediscovered from a window marker rather than stored. The
 // tests below are grouped by the promise each one pins: the launch
 // contract, the refusals, close's reap, rediscovery, the marker split that
-// keeps stop and restart off tabs, and the per-terminal properties that
+// keeps the shared agent reap off tabs, and the per-terminal properties that
 // only become observable once a session has a second terminal at all.
 // ---------------------------------------------------------------------------
 
@@ -533,8 +533,9 @@ pub(crate) async fn listed_tabs(client: &SupervisorClient, session_id: &str) -> 
 /// The `( … & )` subshell is a deliberate double fork: the intermediate
 /// subshell exits immediately, so the `sleep` reparents to init and no
 /// PPID closure from the tab's pane can reach it. `setsid` puts it in its
-/// own session so the pty hangup that follows `kill-window` cannot reach
-/// it either — without that, a survivor could die from the window's own
+/// own session and ignores SIGHUP before publishing its pid, so the pty
+/// hangup that follows `kill-window` cannot reach it either — without that,
+/// a survivor could die from the window's own
 /// teardown and prove nothing about the reap that is supposed to have
 /// killed it.
 ///
@@ -553,7 +554,7 @@ pub(crate) fn write_daemon_script(
     std::fs::write(
         &path,
         format!(
-            "( setsid {scrub}/bin/sh -c 'echo $$ > {pid}; exec sleep 120' \
+            "( setsid {scrub}/bin/sh -c 'trap \"\" HUP; echo $$ > {pid}; exec sleep 120' \
              </dev/null >/dev/null 2>&1 & )\n",
             pid = pid_file.display()
         ),
@@ -1290,23 +1291,25 @@ async fn tabs_are_rediscovered_across_a_supervisor_restart_and_unmarked_windows_
     drop(slot);
 }
 
-/// Stopping the agent leaves a tab's shell AND its daemonized child
-/// running (PLAN_M4.md acceptance 3, SPEC.md's "terminal tabs keep
-/// running").
-///
-/// This is the marker split's whole reason to exist. Tab processes carry
-/// the session marker the stop sweep is keyed on, so a stop that did not
-/// subtract them would reap the very terminals SPEC.md promises survive
-/// it. The daemonized child is what makes the assertion sharp: the tab's
-/// shell might survive by luck of ancestry, but a reparented daemon is
-/// reachable ONLY by the marker scan, so its survival is a statement about
-/// the marker rule and nothing else.
-///
-/// The agent's own daemonized child is asserted dead in the same run, so a
-/// stop that had simply stopped sweeping at all could not pass.
+/// Stop ends a host tab's shell and its SIGHUP-immune daemon, as well as
+/// the agent's descendants. Killing only the host or its pty would leave
+/// the daemon alive, so this pins the tab's own sweep as part of Stop.
 #[farhelm_testtrace::test]
-async fn stopping_the_agent_leaves_a_tabs_shell_and_its_daemonized_child_running() {
-    let h = harness().await;
+async fn stopping_the_agent_closes_a_host_tab_and_its_daemonized_child() {
+    assert_stop_closes_tab_tree(harness().await).await;
+}
+
+/// Old terminals: Stop must run the same tab reap before removing a tmux
+/// window; terminal hangup alone cannot end this tab's detached daemon.
+#[farhelm_testtrace::test]
+async fn stopping_the_agent_closes_a_tmux_tab_and_its_daemonized_child() {
+    assert_stop_closes_tab_tree(harness_tmux().await).await;
+}
+
+/// Exercise the shared Stop contract against either terminal substrate.
+/// The daemon reparents before Stop and ignores hangup, distinguishing
+/// explicit process cleanup from the shell dying with its terminal.
+async fn assert_stop_closes_tab_tree(h: Harness) {
     let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
@@ -1345,6 +1348,17 @@ async fn stopping_the_agent_leaves_a_tabs_shell_and_its_daemonized_child_running
         .expect("attach the tab");
     let mut tab_seen = initial_replay;
     wait_for_shell(&h.client, tab_chan, &mut tab_rx, &mut tab_seen, "READY").await;
+    run_in_shell(
+        &h.client,
+        tab_chan,
+        &mut tab_rx,
+        &mut tab_seen,
+        "printf 'TAB-%s:%s\\n' SHELL \"$$\"",
+        "TAB-SHELL:",
+        20,
+    )
+    .await;
+    let tab_shell = extract_pid(&tab_seen, "TAB-SHELL:");
 
     let tab_pid_file = work.path().join("tab-daemon.pid");
     let script = write_daemon_script(work.path(), "tab-daemon.sh", &tab_pid_file, false);
@@ -1362,8 +1376,11 @@ async fn stopping_the_agent_leaves_a_tabs_shell_and_its_daemonized_child_running
     let _tab_daemon_cleanup = PidKillGuard::arm(tab_daemon);
     assert!(
         marked_pids(&session.id).contains(&tab_daemon),
-        "test setup: the tab's daemon must carry the SESSION marker — surviving without it \
-         would prove nothing about the exclusion rule"
+        "premise: the tab's reparented daemon carries the session marker"
+    );
+    assert!(
+        crate::host_tabs::ignores_hangup(tab_daemon),
+        "premise: the tab daemon ignores SIGHUP"
     );
 
     h.client.stop_session(&session.id).await.expect("stop");
@@ -1372,21 +1389,255 @@ async fn stopping_the_agent_leaves_a_tabs_shell_and_its_daemonized_child_running
     wait_until_pid_gone(agent_pid, 15).await;
     wait_until_pid_gone(agent_daemon, 15).await;
 
-    // The tab's shell is still answering, and its daemon is still alive.
-    run_in_shell(
-        &h.client,
-        tab_chan,
-        &mut tab_rx,
-        &mut tab_seen,
-        "printf 'AFTER%sTOP\\n' S",
-        "AFTERSTOP",
-        20,
-    )
-    .await;
-    assert!(
-        !process_is_gone(tab_daemon),
-        "stop must not reach a tab's daemonized child (pid {tab_daemon})"
+    wait_until_pid_gone(tab_shell, 15).await;
+    wait_until_pid_gone(tab_daemon, 15).await;
+    assert!(listed_tabs(&h.client, &session.id).await.is_empty());
+    assert_eq!(
+        expect_detached(&mut tab_rx, 10).await.code,
+        farhelm_proto::DetachCode::TabClosed
     );
+}
+
+/// A Stop clicked with no host tabs cannot kill a tab opened while the
+/// request was in flight. A confirmed Stop covers later tabs too, and a
+/// second Stop must close a tab opened after the agent has already ended.
+#[farhelm_testtrace::test]
+async fn stop_tab_consent_is_checked_for_host_tabs_and_for_an_ended_agent() {
+    assert_stop_tab_consent(harness().await).await;
+}
+
+/// Old terminals: the displayed no-tabs guard and confirmed Stop have the
+/// same meaning for tmux windows as for tabs in terminal hosts.
+#[farhelm_testtrace::test]
+async fn stop_tab_consent_is_checked_for_tmux_tabs_and_for_an_ended_agent() {
+    assert_stop_tab_consent(harness_tmux().await).await;
+}
+
+/// Pin consent at the request boundary rather than merely testing a tab
+/// count helper. A refused Stop leaves both the live agent and tab intact.
+async fn assert_stop_tab_consent(h: Harness) {
+    let (session, _work) = basic_session(&h).await;
+    let (channel, mut seen, mut stream) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    wait_for(&mut stream, &mut seen, "FAKE-AGENT READY", 20).await;
+    assert!(
+        listed_tabs(&h.client, &session.id).await.is_empty(),
+        "premise: the first click displayed no tabs"
+    );
+    let first = h
+        .client
+        .open_tab(&session.id)
+        .await
+        .expect("tab opened after the display");
+    let refused = h
+        .client
+        .stop_session_guarded(&session.id, true, false)
+        .await
+        .expect_err("a no-tabs click cannot close a new tab");
+    assert_eq!(
+        refused
+            .downcast_ref::<SupervisorError>()
+            .map(SupervisorError::kind),
+        Some(ErrorKind::Conflict)
+    );
+    seen.clear();
+    h.client
+        .send_keys(channel, b"NO-TABS-GUARD-ALIVE\r".to_vec())
+        .await;
+    wait_for_after(&mut stream, &mut seen, "echo:", "NO-TABS-GUARD-ALIVE", 20).await;
+    assert_eq!(
+        listed_tabs(&h.client, &session.id).await,
+        vec![first.id.clone()]
+    );
+    // The confirmation now names tabs. A second tab opened after that
+    // display is covered by the same consent, as for session Delete.
+    let second = h
+        .client
+        .open_tab(&session.id)
+        .await
+        .expect("tab after the confirmation display");
+    assert_eq!(
+        listed_tabs(&h.client, &session.id).await,
+        vec![first.id, second.id]
+    );
+    let stopped = h
+        .client
+        .stop_session_guarded(&session.id, false, false)
+        .await
+        .expect("confirmed Stop");
+    assert_eq!(stopped.notice, None);
+    assert!(matches!(
+        listed(&h.client, &session.id).await.status,
+        SessionStatus::Exited { .. }
+    ));
+    assert!(listed_tabs(&h.client, &session.id).await.is_empty());
+    let reopened = h
+        .client
+        .open_tab(&session.id)
+        .await
+        .expect("tabs can open after Stop");
+    assert_eq!(listed_tabs(&h.client, &session.id).await, vec![reopened.id]);
+    let stopped_again = h
+        .client
+        .stop_session_guarded(&session.id, false, false)
+        .await
+        .expect("Stop an ended agent's tab");
+    assert_eq!(stopped_again.notice, None);
+    assert!(listed_tabs(&h.client, &session.id).await.is_empty());
+}
+
+/// An ended-agent Stop display cannot authorize killing a host agent that
+/// another client restarted, whether the display named tabs or was tabless.
+/// The unchanged tab ID and live shell round trip distinguish a refusal
+/// from a Stop that killed only the agent or only its tabs.
+#[farhelm_testtrace::test]
+async fn ended_agent_stop_consent_refuses_a_restarted_host_agent() {
+    assert_ended_agent_stop_consent(harness().await).await;
+}
+
+/// Old terminals: the same competing Restart must preserve the new agent
+/// and old tmux tab when Stop carries consent from an ended-agent display.
+#[farhelm_testtrace::test]
+async fn ended_agent_stop_consent_refuses_a_restarted_tmux_agent() {
+    assert_ended_agent_stop_consent(harness_tmux().await).await;
+}
+
+/// Exercise both ended-agent consent states across an actual Restart, then
+/// prove the same guards succeed once the agent really ends. Live echoes
+/// use this test's post-replay attachments, never old Ready text carried
+/// into the restarted terminal's scrollback.
+async fn assert_ended_agent_stop_consent(h: Harness) {
+    for with_tab in [false, true] {
+        let work = farhelm_teststate::tempdir().expect("workdir");
+        let session = create_resumable_session(
+            &h,
+            &work.path().to_string_lossy(),
+            &fixture_cmd("fake-agent --script basic"),
+            80,
+            24,
+        )
+        .await;
+        let (channel, mut seen, mut stream) = h
+            .client
+            .attach_terminal_live(
+                &session.id,
+                80,
+                24,
+                TerminalSelector::Agent,
+                "stop-agent-consent",
+            )
+            .await
+            .expect("attach initial agent");
+        wait_for(&mut stream, &mut seen, "FAKE-AGENT READY", 20).await;
+        let tab = if with_tab {
+            Some(h.client.open_tab(&session.id).await.expect("open tab"))
+        } else {
+            None
+        };
+        h.client.send_keys(channel, b"quit\r".to_vec()).await;
+        wait_for_exit_code(&h.client, &session.id, 0, 20).await;
+        let expected_tabs: Vec<String> = tab.iter().map(|tab| tab.id.clone()).collect();
+        assert_eq!(
+            listed_tabs(&h.client, &session.id).await,
+            expected_tabs,
+            "premise: the ended-agent display either named this tab or showed no tabs"
+        );
+        let competing = connect_client(&h.sup).await;
+        competing
+            .restart_session(&session.id, true)
+            .await
+            .expect("another client restarts the ended agent");
+        let (restarted_channel, mut live, mut restarted_stream) = h
+            .client
+            .attach_terminal_live(
+                &session.id,
+                80,
+                24,
+                TerminalSelector::Agent,
+                "stop-agent-consent",
+            )
+            .await
+            .expect("attach restarted agent");
+        live.clear();
+        h.client
+            .send_keys(restarted_channel, b"AGENT-CONSENT-PREMISE\r".to_vec())
+            .await;
+        wait_for_after(
+            &mut restarted_stream,
+            &mut live,
+            "echo:",
+            "AGENT-CONSENT-PREMISE",
+            20,
+        )
+        .await;
+        let refused = h
+            .client
+            .stop_session_guarded(&session.id, !with_tab, true)
+            .await
+            .expect_err("ended-agent consent cannot stop the restarted agent");
+        assert_eq!(
+            refused
+                .downcast_ref::<SupervisorError>()
+                .map(SupervisorError::kind),
+            Some(ErrorKind::Conflict)
+        );
+        assert!(
+            format!("{refused:#}").contains("agent is running again"),
+            "{refused:#}"
+        );
+        live.clear();
+        h.client
+            .send_keys(restarted_channel, b"AGENT-CONSENT-PRESERVED\r".to_vec())
+            .await;
+        wait_for_after(
+            &mut restarted_stream,
+            &mut live,
+            "echo:",
+            "AGENT-CONSENT-PRESERVED",
+            20,
+        )
+        .await;
+        assert_eq!(listed_tabs(&h.client, &session.id).await, expected_tabs);
+        if let Some(tab) = tab {
+            let (tab_channel, mut tab_seen, mut tab_stream) = h
+                .client
+                .attach_terminal_live(
+                    &session.id,
+                    80,
+                    24,
+                    TerminalSelector::Tab { id: tab.id },
+                    "stop-agent-consent",
+                )
+                .await
+                .expect("the refused Stop kept the original tab");
+            wait_for_shell(
+                &h.client,
+                tab_channel,
+                &mut tab_stream,
+                &mut tab_seen,
+                "CONSENT-PRESERVED",
+            )
+            .await;
+        }
+        h.client
+            .send_keys(restarted_channel, b"quit\r".to_vec())
+            .await;
+        wait_for_exit_code(&h.client, &session.id, 0, 20).await;
+        let stopped = h
+            .client
+            .stop_session_guarded(&session.id, !with_tab, true)
+            .await
+            .expect("the same consent is valid once the agent has really ended");
+        assert_eq!(stopped.notice, None);
+        assert!(listed_tabs(&h.client, &session.id).await.is_empty());
+        h.client
+            .delete_session(&session.id)
+            .await
+            .expect("delete stopped fixture");
+    }
 }
 
 /// Restarting the agent touches the agent terminal alone: its attachment
@@ -1552,7 +1803,7 @@ async fn restart_restores_and_notifies_while_output_cleanup_is_pending() {
 /// descendants (PLAN_M4.md acceptance 3).
 ///
 /// The other side of the marker split: delete sweeps the session marker
-/// INCLUSIVELY, so the exclusion that protects tabs from stop must not
+/// INCLUSIVELY, so the exclusion that protects tabs from the agent reap must not
 /// leak into this path. A daemonized child of the tab is what proves it
 /// reached past the tmux teardown, which would have killed the shell
 /// regardless.
