@@ -42,22 +42,25 @@ const TERMINATION_WAIT: Duration = Duration::from_secs(30);
 /// How often a removal asks whether the sandbox has terminated.
 const TERMINATION_POLL: Duration = Duration::from_secs(1);
 
-/// Proof that a Tensorlake host's sandbox is gone: terminated (or never
-/// found) and its snapshots deleted.
-/// [`crate::store::HelmStore::remove_host_row`] forgets a Tensorlake row
-/// only when handed one for that very row, so no code path can forget a
-/// sandbox host while its sandbox may still bill (D6). The field and the
-/// teardown constructor are private to this module. The only other
-/// constructor, [`Self::never_created`], is reserved for registration
-/// rollback before any create request can have reached Tensorlake.
+/// Permission to forget this row under Farhelm's recorded-ownership policy.
+/// A recorded sandbox must be terminated (or conclusively absent) and its
+/// snapshots deleted before teardown issues this proof. Without either a
+/// recorded ID or an outstanding create, [`Self::never_created`] permits
+/// forgetting the entry without touching a same-name sandbox. A legacy row
+/// or power loss that lost both records can therefore leave a billed
+/// resource for explicit cleanup; this is not an account-wide absence proof.
+/// [`crate::store::HelmStore::remove_host_row`] accepts it only for this row.
+/// The field and teardown constructor remain private to this module.
 #[derive(Debug)]
 pub(crate) struct SandboxDeleted {
     host: HostId,
 }
 
 impl SandboxDeleted {
-    /// Roll back a newly registered row before its first create request.
-    /// Callers must not use this once Tensorlake may have received a create.
+    /// Forget a row with no recorded create, including registration rollback.
+    /// Callers must establish that neither a sandbox ID nor an outstanding
+    /// create is recorded. Missing records are not proof of vendor absence:
+    /// legacy or power-loss leftovers are deliberately left for explicit cleanup.
     pub(crate) fn never_created(host: HostId) -> Self {
         Self { host }
     }
@@ -155,10 +158,14 @@ impl Tensorlake {
         let api = self.0.api.as_ref();
         let sandbox = binding.sandbox.as_str();
         // The id is what finds the snapshots once the sandbox is gone. The
-        // row has it once a create answered; before that, the name still
-        // resolves, unless the sandbox never came to exist at all.
+        // row has it once a create answered. Before that, only an outstanding
+        // create permits recovery by name: a never-sent row may collide with
+        // another helm's sandbox, which removing this entry must leave alone.
         let id = match &binding.sandbox_id {
             Some(id) => id.clone(),
+            None if binding.pending_create_at.is_none() => {
+                return Ok(SandboxDeleted::never_created(row.id));
+            }
             None => match bounded(api.get_sandbox(&key, sandbox)).await {
                 Ok(info) => {
                     // Saved before anything is terminated: a terminated

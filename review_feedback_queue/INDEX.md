@@ -23,10 +23,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   sharing a Tensorlake project can collide in their short ownership tag; a build can then terminate the other's builder
   and delete its snapshots.
 
-- [`generated-host-name-collision-adopts-unrelated-sandbox.md`](generated-host-name-collision-adopts-unrelated-sandbox.md)
-  — A generated host-name collision can make first-time Add adopt an unrelated sandbox and replace its endpoint
-  credentials before later copied-state checks can refuse it.
-
 - [`orphan-cleanup-uses-pre-adoption-ownership-snapshot.md`](orphan-cleanup-uses-pre-adoption-ownership-snapshot.md) —
   Orphan cleanup can use an old ownership snapshot to terminate a sandbox after Add has adopted it and ordinary user
   work has begun.
