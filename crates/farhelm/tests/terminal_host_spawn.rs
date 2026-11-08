@@ -82,6 +82,7 @@ fn instant_policy() -> farhelm_teststate::SweepPolicy {
     farhelm_teststate::SweepPolicy {
         grace: Duration::ZERO,
         backstop: Duration::ZERO,
+        kept: Duration::ZERO,
     }
 }
 

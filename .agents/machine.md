@@ -27,9 +27,9 @@ What is NOT isolated, and what follows from it:
   next to the ssh config, are the exception the fixed-path rule allows: a lock exists to be shared, and it names no
   state.)
 - Processes you did not start are someone else's. A helm or supervisor answering on a port you did not choose, a
-  `farhelm-<uuid>-*.scope` unit whose UUID no run of yours minted, an `fh-it.*` or `fh-e2e.*` directory holding a live
-  flock, or a docker container from the CentOS script: leave them alone. The teststate sweep already reaps dead runs
-  from any checkout, guarded by the flock, so nothing needs killing by hand.
+  `farhelm-<uuid>-*.scope` unit whose UUID no run of yours minted, an `fh-it.*`, `fh-e2e.*` or `fh-smoke.*` directory
+  holding a live flock, or a docker container from the CentOS script: leave them alone. The teststate sweep already
+  reaps dead runs from any checkout, guarded by the flock, so nothing needs killing by hand.
 - The `systemd --user` manager and the CPU are shared. Timing budgets, the transient-scope availability probe, and the
   RSS measurement in `terminal_backpressure` assume a quiet machine, and another agent's battery is exactly the load
   FLAKES.md records as tripping them. A failure under that load is an environment event: keep the retained run, re-run
@@ -93,10 +93,10 @@ Leave these where they already go:
   it.
 - Shared caches of standard tools: cargo's registry, rustup toolchains, npm and bun caches, Playwright's browsers in
   `~/.cache/ms-playwright`, dprint's plugins. Use them the way the tools do by default; do not redirect them.
-- State created by the repo's harnesses and scripts: the `fh-it.*` and `fh-e2e.*` test directories, and the desktop
-  smoke, CentOS, and installer-test directories. Supervisor and tmux sockets live inside the test directories, unix
-  socket paths are limited to about 108 bytes, and the teststate sweep only looks directly under `/tmp`. For the same
-  reason, do not point `TMPDIR` at your scratch directory when running tests or repo scripts: plain
+- State created by the repo's harnesses and scripts: the `fh-it.*`, `fh-e2e.*` and `fh-smoke.*` test directories (the
+  last the desktop smoke's), and the CentOS and installer-test directories. Supervisor and tmux sockets live inside the
+  test directories, unix socket paths are limited to about 108 bytes, and the teststate sweep only looks directly under
+  `/tmp`. For the same reason, do not point `TMPDIR` at your scratch directory when running tests or repo scripts: plain
   `tempfile::tempdir()` tests honor it, and some of them bind sockets.
 - The test recorder's durable browser timing records in `~/.local/state/farhelm-e2e-timings/`
   (`docs/test-run-evidence.md`), the maintainer's chosen exception to "nothing in `$HOME`": a few kilobytes per run,

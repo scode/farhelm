@@ -80,8 +80,8 @@ fixed port is deliberate and is not a harness that the fixed-port rule applies t
 - One agent per checkout or workspace. Sibling checkouts and `jj workspace` directories are the supported shape; a
   shared `CARGO_TARGET_DIR` across workspaces is fine for cargo (it locks) but not for the dx and tmux-asset builds.
 - Processes you did not start are someone else's. A helm or supervisor answering on a port you did not choose, a
-  `farhelm-<uuid>-*.scope` unit whose UUID no run of yours minted, an `fh-it.*` or `fh-e2e.*` directory holding a live
-  flock, or a docker container from the CentOS script: leave them alone. The one exception is
+  `farhelm-<uuid>-*.scope` unit whose UUID no run of yours minted, an `fh-it.*`, `fh-e2e.*` or `fh-smoke.*` directory
+  holding a live flock, or a docker container from the CentOS script: leave them alone. The one exception is
   `website/scripts/preview.sh` stopping another checkout's preview server when it takes its port
   (`website/.agents/previewing.md`).
 - The `systemd --user` manager and the CPU are shared. A failure under that load is an environment event: keep the
