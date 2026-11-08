@@ -15,7 +15,14 @@ source "$pins"
 target=${1:?usage: build-private-tmux.sh TARGET OUTPUT}
 output=${2:?usage: build-private-tmux.sh TARGET OUTPUT}
 zig=${ZIG:-zig}
-work=$(mktemp -d "${TMPDIR:-/tmp}/farhelm-tmux.XXXXXX")
+# The build directory sits beside the output, which every caller keeps in
+# its checkout (`.ci-tmux/` for the pinned test tmux, `target/` for the
+# release assets). The trap removes it on any ordinary exit; a SIGKILLed
+# build leaves its few hundred megabytes in that checkout, where
+# build-pinned-tmux-ci.sh or `cargo clean` reclaims them, rather than loose
+# in /tmp, where nothing would.
+mkdir -p "$(dirname "$output")"
+work=$(mktemp -d "$(dirname "$output")/.tmux-build.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 # Keep zig's caches inside this build's own directory so they go away with it.
 # zig's default global cache (~/.cache/zig) never got a hit from these builds
