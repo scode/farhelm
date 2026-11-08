@@ -480,13 +480,26 @@ test("a compact card follows the main pane and keeps the answer buttons visible"
   }).toBeLessThan(1);
 
   // A flex row can wrap whole buttons while leaving a long host token wider
-  // than the card. The peer text must wrap inside the permanent-allow button.
-  const longHost = `remote-${"x".repeat(80)}`;
-  await staged.replace([launchRequest("long-host", longHost)]);
+  // than the card. Both permanent-allow choices must contain the complete
+  // escaped host token inside their buttons, even with four actions present.
+  const longHost = `remote-${"x".repeat(80)}\u202e`;
+  const shownHost = `remote-${"x".repeat(80)}<U+202E>`;
+  await staged.replace([{ ...launchRequest("long-host", longHost), own_host_session_action: true }]);
   await expect(page.locator(".approval-card")).toHaveAttribute("data-approval-id", "long-host");
-  await expect(page.locator(".approval-always-allow")).toContainText(longHost);
+  await expect(page.locator(".approval-card-actions > button")).toHaveCount(4);
+  for (const selector of [".approval-always-allow-own-host", ".approval-always-allow"]) {
+    const button = page.locator(selector);
+    await expect(button).toContainText(shownHost);
+    await expect(button.locator(".peer-value")).toHaveText(shownHost);
+    await expect(button.locator(".peer-value")).toHaveAttribute("dir", "ltr");
+    await expect.poll(() => button.evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
+  }
+  await expect(page.locator(".approval-always-allow-own-host")).toHaveText(`Always allow on ${shownHost} only`);
+  await expect(page.locator(".approval-always-allow-own-host")).toHaveAttribute(
+    "data-tooltip",
+    `Always allow: let agents in ${shownHost}'s sessions start, stop, restart, rename and delete sessions on ${shownHost} without asking. Requests for other hosts still ask.`,
+  );
   await expect.poll(() => page.locator(".approval-cards").evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
-  await expect.poll(() => page.locator(".approval-always-allow").evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
   await page.screenshot({ path: info.outputPath("approval-narrow-long-host.png") });
 });
 

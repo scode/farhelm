@@ -323,6 +323,9 @@ export interface HostRow {
   /** Whether the host runs agents' `farhelm` commands without asking; every host starts
    * asking (`false`). Read back by `setLocalCommandsWithoutAsking` to prove its write. */
   commands_without_asking: boolean;
+  /** Independent authority to manage sessions on this same host. The approval
+   * helper reads this back to distinguish a narrow grant from fleet-wide trust. */
+  own_sessions_without_asking: boolean;
   /** The registry's recorded install identity, which a launch template
    * names its host by; absent until the host's first contact. */
   identity?: string | null;

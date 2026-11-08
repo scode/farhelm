@@ -4,8 +4,9 @@
 // second page as the observer. The observer never reloads or navigates while
 // the terminal creates children, so a row appearing there proves the normal
 // drain and invalidation feed carry spawn visibility end to end. Every spawn
-// asks the user first (SPEC.md, Agent-spawned sessions), so the observer is
-// also where the spec answers each approval card, exactly as a user would.
+// asks unless the host has the applicable permission (SPEC.md, Agent-spawned
+// sessions), so the observer answers required cards and observes remembered
+// same-host authority through a later spawn that needs no answer.
 //
 // The final leg repeats the product contract with real Claude. It is gated on
 // FARHELM_REAL_AGENT=1 because vendor credentials and network access are
@@ -23,11 +24,14 @@ import { execFileSync } from "node:child_process";
 import {
   cleanupSession,
   createSession,
+  listHosts,
   listSessions,
   setLocalYoloWithoutAsking,
   type SessionRow,
+  type HostRow,
 } from "./helpers/fleet";
-import { answerCard, setLocalCommandsWithoutAsking } from "./helpers/approvals";
+import { answerCard, setLocalCommandsWithoutAsking, setLocalOwnSessionsWithoutAsking } from "./helpers/approvals";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import {
   CLAUDE_CODE_MARKERS,
   submitPrompt,
@@ -163,6 +167,117 @@ test("a fake agent spawns children that appear without refreshing the observer",
     if (root) fs.rmSync(root, { recursive: true, force: true });
     await setLocalCommandsWithoutAsking(request, false);
     await setLocalYoloWithoutAsking(request, false);
+  }
+});
+
+/** A real card grants only same-host session authority, and a later spawn
+ * uses that stored permission without a second answer. Distinct reply markers
+ * and child directories prevent the first success from satisfying the second.
+ * Cleanup settles the parent before finding any children whose replies were
+ * lost, and restores each original policy independently of cleanup failures. */
+test("a host-only grant lets the next same-host spawn proceed without another card", async ({ page, context, request }) => {
+  const stamp = `${Date.now()}-${process.pid}`;
+  const parentTitle = `spawn-own-host-parent-${stamp}`;
+  let original: HostRow | undefined;
+  let root: string | undefined;
+  let firstTitle: string | undefined;
+  let secondTitle: string | undefined;
+  let parent: SessionRow | undefined;
+  let first: SessionRow | undefined;
+  let second: SessionRow | undefined;
+  let driver: Page | undefined;
+  let bodyFailed = false;
+  try {
+    await requireProductPageAuth(context);
+    original = (await listHosts(request)).find((host) => host.kind === "local");
+    if (!original) throw new Error("the fixture needs the reserved local host");
+    expect(typeof original.own_sessions_without_asking).toBe("boolean");
+    expect(typeof original.commands_without_asking).toBe("boolean");
+    expect(typeof original.yolo_without_asking).toBe("boolean");
+    await setLocalCommandsWithoutAsking(request, false);
+    await setLocalOwnSessionsWithoutAsking(request, false);
+    // The fake agent inherits a command launch. Its separate YOLO guard
+    // must permit that launch before this test can exercise an approval.
+    await setLocalYoloWithoutAsking(request, true);
+    expect((await listHosts(request)).find((host) => host.id === original!.id)).toMatchObject({
+      commands_without_asking: false,
+      own_sessions_without_asking: false,
+      yolo_without_asking: true,
+    });
+    root = stackScratchDir(`farhelm-spawn-own-host-${stamp}-`);
+    firstTitle = `own-host-first-${stamp}`;
+    secondTitle = `own-host-second-${stamp}`;
+    const firstDir = path.join(root, firstTitle);
+    const secondDir = path.join(root, secondTitle);
+    fs.mkdirSync(firstDir);
+    fs.mkdirSync(secondDir);
+    parent = await createSession(request, { title: parentTitle, cwd: root, invocation: SPAWN_AGENT });
+    driver = await context.newPage();
+    await page.goto("/");
+    await expect(row(page, parent.id)).toBeVisible({ timeout: 20_000 });
+    const observerUrl = page.url();
+    await openReadyTerminal(driver, parent.id, {
+      trustDialogMarkers: [],
+      readyMarker: "FAKE-AGENT READY",
+    });
+
+    await submitPrompt(driver, `spawn ${firstDir}`, 100);
+    await answerCard(page, "always-allow-own-host", [
+      "Start a new session running the asking session's own launch",
+      firstDir,
+      "fake-agent --script spawn",
+      "Always allow on ",
+    ]);
+    await waitForReplyMarker(driver, "SPAWNED:");
+    first = await childByTitle(request, firstTitle);
+    expect(first.invocation).toBe(SPAWN_AGENT);
+    await expect(row(page, first.id)).toBeVisible({ timeout: 20_000 });
+    expect((await listHosts(request)).find((host) => host.id === original!.id)).toMatchObject({
+      own_sessions_without_asking: true,
+      commands_without_asking: false,
+      yolo_without_asking: true,
+    });
+    expect(page.url(), "the observer discovers the first child in place").toBe(observerUrl);
+
+    await submitPrompt(driver, `spawn-parented ${secondDir}`, 100);
+    await waitForReplyMarker(driver, "SPAWNED-PARENTED:");
+    second = await childByTitle(request, secondTitle);
+    expect(second.id).not.toBe(first.id);
+    expect(second.invocation).toBe(SPAWN_AGENT);
+    await expect(row(page, second.id)).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".approval-card"), "the second successful spawn needed no card answer").toHaveCount(0);
+    expect((await listHosts(request)).find((host) => host.id === original!.id)).toMatchObject({
+      own_sessions_without_asking: true,
+      commands_without_asking: false,
+    });
+    expect(page.url(), "remembered same-host authority must not navigate the observer").toBe(observerUrl);
+    const listing = await listSessions(request, `parent=${encodeURIComponent(parent.id)}`);
+    expect(listing.sessions.some((session) => session.id === second!.id)).toBe(true);
+    expect(listing.sessions.some((session) => session.id === first!.id)).toBe(false);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["driver page", () => driver?.close()],
+      ["observer page", () => page.close()],
+      ["parent session and any unfinished spawn", async () => {
+        const owned = parent ?? (await listSessions(request)).sessions.find((session) => session.title === parentTitle);
+        if (owned) await cleanupSession(request, owned.id);
+      }],
+      ["second child, including a lost reply", async () => {
+        const owned = second ?? (secondTitle && (await listSessions(request)).sessions.find((session) => session.title === secondTitle));
+        if (owned) await cleanupSession(request, owned.id);
+      }],
+      ["first child, including a lost reply", async () => {
+        const owned = first ?? (firstTitle && (await listSessions(request)).sessions.find((session) => session.title === firstTitle));
+        if (owned) await cleanupSession(request, owned.id);
+      }],
+      ["owned scratch", () => { if (root) fs.rmSync(root, { recursive: true, force: true }); }],
+      ["original same-host permission", () => original && setLocalOwnSessionsWithoutAsking(request, original.own_sessions_without_asking)],
+      ["original fleet-wide permission", () => original && setLocalCommandsWithoutAsking(request, original.commands_without_asking)],
+      ["original YOLO permission", () => original && setLocalYoloWithoutAsking(request, original.yolo_without_asking)],
+    ]);
   }
 });
 

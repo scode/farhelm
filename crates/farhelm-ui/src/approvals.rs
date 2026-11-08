@@ -347,7 +347,7 @@ pub(crate) fn ApprovalCards() -> Element {
                                         errors.write().remove(&id);
                                         answered.write().insert(id.clone());
                                         if outcome == AnswerOutcome::Gone {
-                                            late.set(Some(answer == ApprovalAnswer::AlwaysAllow));
+                                            late.set(Some(matches!(answer, ApprovalAnswer::AlwaysAllow | ApprovalAnswer::AlwaysAllowOwnHost)));
                                         }
                                     }
                                     Err(error) => {
@@ -428,6 +428,16 @@ fn always_allow_tooltip(action: &ApprovalAction) -> &'static str {
         } => "Always allow: stop asking about public links from this host",
         _ => "Always allow: stop asking about farhelm commands from this host",
     }
+}
+
+/// Name the narrow grant without letting a host's controls rewrite the help.
+/// Host text uses the same visible escaping as the button's peer-value span;
+/// Dioxus keeps the resulting tooltip attribute as text, including markup.
+fn always_allow_own_host_tooltip(host: &str) -> String {
+    let host = display_peer(host);
+    format!(
+        "Always allow: let agents in {host}'s sessions start, stop, restart, rename and delete sessions on {host} without asking. Requests for other hosts still ask."
+    )
 }
 
 /// Preserve a chosen request by identity, falling back to the oldest waiting.
@@ -573,6 +583,18 @@ fn ApprovalCard(
                     else if tunnel_available { "Open" } else if preapproved { "Open" } else { "Allow" }
                 }
                 if !preapproved && !tunnel_available && !card.action.requires_direct_allow() {
+                if card.own_host_session_action {
+                button {
+                    r#type: "button",
+                    class: "btn btn-neutral approval-always-allow-own-host",
+                    "data-tooltip": always_allow_own_host_tooltip(&card.host_name),
+                    disabled: busy,
+                    onclick: answer(ApprovalAnswer::AlwaysAllowOwnHost),
+                    "Always allow on "
+                    span { class: "peer-value", dir: "ltr", "{display_peer(&card.host_name)}" }
+                    " only"
+                }
+                }
                 button {
                     r#type: "button",
                     class: "btn btn-neutral approval-always-allow",
@@ -1458,6 +1480,201 @@ mod tests {
             .to_string()
     }
 
+    /// The real card must offer the narrow grant only when the helm advertises
+    /// it, beside the fleet-wide choice and before it. Rendering direct-Allow
+    /// cards with an erroneous true offer also pins their existing UI veto.
+    #[test]
+    fn production_cards_offer_own_host_permission_only_when_eligible() {
+        /// Render the production action row without the asynchronous reader;
+        /// the helm's offer is fixture input, not a parallel UI eligibility rule.
+        fn render((action, eligible): (ApprovalAction, bool)) -> Element {
+            ApprovalCard(ApprovalCardProps {
+                card: PendingApproval {
+                    id: "card".into(),
+                    host_id: 1,
+                    host_name: "<builder>\u{202e}".into(),
+                    own_host_session_action: eligible,
+                    session: ApprovalSession {
+                        id: session_reference("asker"),
+                        title: None,
+                        host_name: None,
+                    },
+                    action,
+                    expires_at_ms: 1,
+                },
+                waiting: 1,
+                busy: false,
+                error: None,
+                on_answer: EventHandler::new(|_| {}),
+            })
+        }
+
+        /// Action buttons are static template elements inside conditional
+        /// fragments. Visit those fragments in their mounted order; scanning
+        /// mutation text alone cannot distinguish an absent static button.
+        fn buttons(
+            node: &dioxus::core::TemplateNode,
+            vnode: &VNode,
+            found: &mut Vec<&'static str>,
+        ) {
+            use dioxus::core::{DynamicNode, TemplateAttribute, TemplateNode};
+            match node {
+                TemplateNode::Element {
+                    tag,
+                    attrs,
+                    children,
+                    ..
+                } => {
+                    if *tag == "button" {
+                        for attr in *attrs {
+                            if let TemplateAttribute::Static {
+                                name: "class",
+                                value,
+                                ..
+                            } = attr
+                            {
+                                found.extend(
+                                    (*value)
+                                        .split_whitespace()
+                                        .filter(|word| word.starts_with("approval-")),
+                                );
+                            }
+                        }
+                    }
+                    for child in *children {
+                        buttons(child, vnode, found);
+                    }
+                }
+                TemplateNode::Dynamic { id } => {
+                    if let DynamicNode::Fragment(children) = &vnode.dynamic_nodes[*id] {
+                        for child in children {
+                            for root in child.template.roots {
+                                buttons(root, child, found);
+                            }
+                        }
+                    }
+                }
+                TemplateNode::Text { .. } => {}
+            }
+        }
+
+        let target = ApprovalSession {
+            id: session_reference("target"),
+            title: None,
+            host_name: None,
+        };
+        let launch = SessionLaunch::plain_command("matrix command");
+        for (action, eligible, expected) in [
+            (
+                ApprovalAction::Stop {
+                    target: target.clone(),
+                },
+                true,
+                true,
+            ),
+            (
+                ApprovalAction::Stop {
+                    target: target.clone(),
+                },
+                false,
+                false,
+            ),
+            (
+                ApprovalAction::LaunchWithPrompt {
+                    verb: LaunchVerb::Create,
+                    host_name: "target".into(),
+                    cwd: "/work".into(),
+                    repo: None,
+                    title: None,
+                    launch: launch.clone(),
+                    source: None,
+                    prompt: "first message".into(),
+                },
+                true,
+                true,
+            ),
+            (
+                ApprovalAction::LaunchWithAgentWrapper {
+                    verb: LaunchVerb::Clone,
+                    host_name: "target".into(),
+                    cwd: "/work".into(),
+                    repo: None,
+                    title: None,
+                    launch: launch.clone(),
+                    source: Some(target),
+                    prompt: None,
+                },
+                true,
+                false,
+            ),
+            (
+                ApprovalAction::HostRemove {
+                    host_name: "target".into(),
+                    destination: "user@target".into(),
+                },
+                true,
+                false,
+            ),
+            (
+                ApprovalAction::TemplateWrite {
+                    name: "template".into(),
+                    replaces_existing: false,
+                    fields: Default::default(),
+                    host_name: None,
+                },
+                false,
+                false,
+            ),
+            (
+                ApprovalAction::OpenUrl {
+                    url: "https://example.test/".into(),
+                    local_network: false,
+                    preapproved: false,
+                    tunnel_available: false,
+                },
+                false,
+                false,
+            ),
+        ] {
+            let kind = action_kind(&action);
+            let mut dom = VirtualDom::new_with_props(render, (action, eligible));
+            let edits = dom.rebuild_to_vec().edits;
+            let vnode = dom.get_scope(ScopeId::APP).unwrap().root_node();
+            let mut controls = Vec::new();
+            for root in vnode.template.roots {
+                buttons(root, vnode, &mut controls);
+            }
+            let own = controls
+                .iter()
+                .position(|class| *class == "approval-always-allow-own-host");
+            assert_eq!(own.is_some(), expected, "{kind}: {controls:?}");
+            if let Some(own) = own {
+                let fleet = controls
+                    .iter()
+                    .position(|class| *class == "approval-always-allow")
+                    .expect("the independent fleet-wide choice stays visible");
+                assert!(
+                    own < fleet,
+                    "the narrow choice precedes the fleet-wide one: {controls:?}"
+                );
+                assert!(edits.iter().any(|edit| matches!(edit,
+                    dioxus::core::Mutation::SetAttribute { name: "data-tooltip", value: dioxus::core::AttributeValue::Text(text), .. }
+                    if text == &always_allow_own_host_tooltip("<builder>\u{202e}")
+                )), "the mounted button receives the escaped-host tooltip");
+            }
+        }
+    }
+
+    /// Help must state the exact scope while making formatting controls in
+    /// both host mentions visible. Markup stays literal attribute text.
+    #[test]
+    fn own_host_tooltip_keeps_host_controls_visible() {
+        assert_eq!(
+            always_allow_own_host_tooltip("<builder>\u{202e}\n"),
+            "Always allow: let agents in <builder><U+202E><U+000A>'s sessions start, stop, restart, rename and delete sessions on <builder><U+202E><U+000A> without asking. Requests for other hosts still ask."
+        );
+    }
+
     /// A host edit is approval for the shown changes, not for every setting on
     /// the host. Preserve the old/new distinction and keep names as peer data;
     /// icon and color spellings come from Farhelm's fixed vocabulary.
@@ -1677,6 +1894,7 @@ mod tests {
             id: approval_id.clone(),
             host_id: 7,
             host_name: "a host".into(),
+            own_host_session_action: false,
             expires_at_ms: 1,
             session: ApprovalSession {
                 id: asking_id.clone(),
