@@ -4,16 +4,17 @@ A running list of things the maintainer wants fixed or built. This is intent, no
 same PR that addresses it, so the file only ever describes what is still wanted. It is not a roadmap and carries no
 priorities unless an entry says so itself.
 
-Eleven buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove
+Twelve buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove
 — the decision is made, only the work remains; "planned" holds accepted work to implement later and suppresses duplicate
 review triage within each item's stated scope; "plan decisions to revisit" holds the calls made while a plan ran or
 landed, often on the maintainer's behalf when a plan blocked, each recording the alternative; "near term" is what should
-be picked up next; "doc todo" holds documentation work; "tricky bugs" retains unresolved bug reports and their
-investigation findings; "deflake" gathers test and harness reliability work, including CI execution and restoring gates;
-"broken tests" records tests that fail deterministically, with the failure and the evidence that it predates any
-in-flight work; "code cleanup" holds structural code smells from a whole-codebase assessment, grouped by kind with a
-suggested order; "maybe later" is wanted but not soon, and may never happen; "unbucketized" is everything not yet
-sorted, which carries no implication either way. Within a bucket, no order unless the bucket explicitly says so.
+be picked up next; "mid term" is wanted after the near-term work, sooner than "maybe later"; "doc todo" holds
+documentation work; "tricky bugs" retains unresolved bug reports and their investigation findings; "deflake" gathers
+test and harness reliability work, including CI execution and restoring gates; "broken tests" records tests that fail
+deterministically, with the failure and the evidence that it predates any in-flight work; "code cleanup" holds
+structural code smells from a whole-codebase assessment, grouped by kind with a suggested order; "maybe later" is wanted
+but not soon, and may never happen; "unbucketized" is everything not yet sorted, which carries no implication either
+way. Within a bucket, no order unless the bucket explicitly says so.
 
 Known product fixes stay in their product bucket. "Difficult deflake" retains unresolved failures and their
 investigation evidence within "Deflake"; that placement does not establish that the cause is test-only. Move a diagnosed
@@ -346,6 +347,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Support adding remote macOS hosts.** V1 provisioning targets Linux hosts with a usable systemd user manager
   (SPEC.md, Topology); a Mac can only be added today by running the supervisor binary by hand, and the remote
   provisioning and remote Update flows do not cover it. Make adding a macOS machine as a remote host a supported flow.
+  Plan: `plans/queue/macos-remote-hosts.md`.
+
+- **Run the desktop app's own supervisor as the same launchd job remote Macs get.** Asked for by the maintainer on
+  2026-11-08 while planning remote macOS hosts: once that plan has landed and remote Macs are validated as stable, move
+  the local Mac's supervisor from being started detached by the desktop app to the same per-user launchd job, so every
+  Mac uses one consistent mechanism. Related: "Let the Mac's supervisor outlive the desktop app" under Maybe later.
 
 - **Closing or starting terminals must not block other actions.** Closing a terminal or starting new ones should not
   disable doing other things, like switching to other sessions.
@@ -368,8 +375,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   header, then patching the stream length (the header's last field), would bring that to about one blob plus fixups with
   byte-identical output. Left out of `faster-snapshot-encoder`, which is about speed; `tests/memory.rs` is the arbiter
   of the memory claim.
-- **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
-  the user a structured question (multiple choice, say), presented like those artifacts rather than as plain text.
 - **Jittery/jiggling characters when switching between sessions.** Switching between sessions makes characters jitter or
   jiggle: something is being re-drawn or laid out for no reason. Find what triggers the needless re-draw/re-layout on
   session switch.
@@ -505,39 +510,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   accepted that for the first version on 2026-11-08 and wants an automatic suspend later, for example after the agent
   has been idle for a while. The rule and its default are to be decided when this is picked up.
 
-- **`gh:owner/repo` launches can land in a session in the wrong repository.** When launching a GitHub managed checkout
-  by typing `gh:owner/repo`, the string is sometimes treated as a session name instead, so the launch lands in a session
-  in the wrong repo. Keeps happening to the maintainer. The fingerprint: the session's title is literally the typed
-  `gh:owner/repo`, and it runs in a managed checkout of whatever was last launched (or the default). The maintainer
-  types blind and only notices afterwards, so what the screen showed at the time is unknown.
-
-  Findings from code inspection (2026-11-05, not reproduced): the New-session launcher (⌘N) does not appear able to do
-  this. Its search parses `gh:` as the GitHub scope, and that scope never offers "Set session name"; a name row is only
-  offered for unscoped text with no other matches. Enter there is guarded against stale rows and an empty box, and no
-  timing race turned up. The quick switcher (⌘K) does offer "New session named …" for any unmatched text, but the
-  maintainer is confident that is not the surface in use.
-
-  Speculation: the text goes into the "Rename session" prompt that opens after a quick launch, not into the launcher.
-  When "Name sessions on quick launch" is on (the default), any launch where the New-session form never appeared (⚡
-  quick launch ⌘P, a numbered template ⌘1–⌘0, a ⌘X sequence, or a template launched from Templates ⌘J or the quick
-  switcher) opens that prompt once the create succeeds, takes focus unconditionally, and selects the whole title. Typing
-  `gh:owner/repo` and Enter there renames the session to exactly that string while it stays in the template's
-  destination, which matches the fingerprint. For a managed checkout the create can take a moment, so the prompt may pop
-  up mid-typing. This only holds if the key pressed was not actually ⌘N; the maintainer will watch the next occurrence
-  to tell. Ways to confirm: look for the "Rename session" heading with the old name highlighted, or turn the setting off
-  for a while and see whether the wrong-repo sessions stop.
-
-  If confirmed, fix ideas: show the launched destination in the prompt and word it so it cannot pass for the launcher
-  ("Name the session you just launched"); warn when the text looks like a launcher query (`gh:`, `tl:`, `host:`) that
-  this only renames, and offer to open New session with it; possibly stop the prompt from stealing focus from typing
-  that is already under way elsewhere.
 - **A UI activity log that feedback can include.** Keep a timestamped log of what the UI did (dialogs, focus, shortcuts,
   requests to the helm and how long they took), and add an "Include application logs" checkbox to Send feedback. The
   point is general: whenever "I did X and something odd happened" or "I did X and it took about 5 seconds" comes up, the
   maintainer files feedback right after noticing, and the log says what actually happened and where the time went,
-  instead of an agent guessing from code. The `gh:owner/repo` entry above is the motivating example: a log reading
-  "shortcut ⌘P → quick launch; dialog opened: Rename session (after quick launch); focus → rename field; typed 11
-  characters; Enter → submitted" would have settled in one report what code reading could only speculate about.
+  instead of an agent guessing from code. The motivating example: a launch typed as `gh:owner/repo` sometimes ended up
+  as a session named exactly that in the wrong repository, and code reading could only speculate that the "Rename
+  session" prompt after a quick launch took the typing. A log reading "shortcut ⌘P → quick launch; dialog opened: Rename
+  session (after quick launch); focus → rename field; typed 11 characters; Enter → submitted" would have settled it in
+  one report.
 
   What to log: semantic events, not raw input. Which shortcut matched and which action it dispatched; dialogs opening
   and closing, with their kind and why they opened where that differs (the post-quick-launch naming prompt versus an
@@ -587,6 +568,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Show the effort level as "xhigh".** The sentence-case pass (steel-sentence-case) made the launcher and its summaries
   show the extra-high effort level as "Xhigh"; it should read "xhigh", lowercase.
+
+## Mid term
+
+- **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
+  the user a structured question (multiple choice, say), presented like those artifacts rather than as plain text.
 
 ## Doc todo
 
