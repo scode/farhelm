@@ -343,3 +343,38 @@ passed its review gate, and the last code PR makes the TODO.md changes the accep
 If a `## Decisions` section exists, its latest entry must also be satisfied. Then close the plan per
 `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write
 a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked while landing on 2026-11-08 (claim 9cc456).
+
+### Landing blocked: three end-to-end tests now fail when Stop comes early
+
+This plan fixes the misleading message a session showed when Stop interrupted its agent while it was still starting: it
+was recorded as a launch that never started and blamed the host's systemd user manager. Now such a Stop records "stopped
+before the agent finished starting" instead. The landing ran the farhelm crate's end-to-end tests, which the report did
+not run, on Tensorlake sandboxes at the maintainer's request (a nextest archive split into ten partitions). Three tests
+that stop a session soon after creating it, and then check that the stop was recorded as "stopped by user", failed
+there. Each got "stopped before the agent finished starting":
+
+- `restart_under_concurrency::stop_then_restart_then_natural_exit_carries_no_stale_annotation`
+- `restart_under_concurrency::a_repointed_working_directory_refuses_the_restart`
+- `restart_with_resume::a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotation`
+
+All three pass on the shared development machine. Its CPU is oversubscribed, so each step of a test runs slower there,
+and the agent has usually started by the time the test's Stop arrives; on the faster sandboxes the Stop came first. The
+new behavior is what the plan asked for; the tests' timing assumption is what broke. The plan already fixed the same
+race in the browser terminal spec, by waiting for the command's ready marker before stopping. These tests need the same
+treatment, and any other test that stops a session right after creating it and expects "stopped by user" should be
+checked the same way.
+
+Evidence: the three Tensorlake shards where these tests failed, runs `25816cb4-3917-4680-b757-fb6182ad8e5e`,
+`d741809b-1b88-40c0-ac62-98e6d14ebf75` and `7563abcc-a275-47b9-985c-fd0020968cb9` (recorder generic mode, pinned nextest
+0.9.148 from an archive, four slots, no retries); the narrow local reruns that passed are
+`91a3c710-394c-4c02-aade-0793f8416cd3` and `0574a2a8-1b27-4ba8-a72d-ffd21c8cc24c`.
+
+Nothing of this plan has merged. The other plans in this landing round landed without it; they do not depend on it.
+
+Options: fix the three tests (and any others with the same assumption) to wait until the agent has started before
+stopping, then deliver again; or change the product so an early Stop keeps the old annotation, which would undo what the
+plan was for. Recommendation: fix the tests.
