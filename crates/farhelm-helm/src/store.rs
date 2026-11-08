@@ -1002,6 +1002,24 @@ type RawHostRow = (
     bool,
 );
 
+/// Which command authority an approval grants to the requesting installation.
+/// The narrow grant must never write the fleet-wide permission as a side effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandPermission {
+    Fleet,
+    OwnHost,
+}
+
+impl CommandPermission {
+    /// Only these two fixed column names may enter the identity-bound UPDATE.
+    fn column(self) -> &'static str {
+        match self {
+            Self::Fleet => "commands_without_asking",
+            Self::OwnHost => "own_sessions_without_asking",
+        }
+    }
+}
+
 /// The independent browser permissions a host may receive.
 ///
 /// A public-link grant must never authorize a link to the user's local network, and neither
@@ -7525,12 +7543,11 @@ impl HelmStore {
             .await
     }
 
-    /// Turn on the "run farhelm commands without asking" setting for `host` only if the row
-    /// still holds `identity`, the install a request was made from. Returns whether the row
-    /// matched (and now has the setting on).
+    /// Grant one command permission only while `host` still holds the installation
+    /// identity that asked. Returns whether the row matched and holds that grant.
     ///
     /// An approval card's "Always allow" uses this rather than
-    /// [`Self::set_commands_without_asking`]: the card was raised by one install, and
+    /// a settings write: the card was raised by one install, and
     /// adopting a new identity resets the setting precisely so that a different install is
     /// judged afresh. Checking the identity in the same statement as the write closes the
     /// window in which an adoption lands between the card being answered and the setting
@@ -7539,15 +7556,19 @@ impl HelmStore {
         &self,
         host: HostId,
         identity: Option<String>,
+        permission: CommandPermission,
     ) -> anyhow::Result<bool> {
         self.conn
             .call(
                 "allow commands for identity task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let column = permission.column();
                     let changed = conn
                         .execute(
-                            "UPDATE hosts SET commands_without_asking = 1 \
-                             WHERE id = ?1 AND host_identity IS ?2",
+                            &format!(
+                                "UPDATE hosts SET {column} = 1 \
+                                      WHERE id = ?1 AND host_identity IS ?2"
+                            ),
                             rusqlite::params![host, identity],
                         )
                         .context("allowing farhelm commands for a host's identity")?;
@@ -12078,8 +12099,9 @@ mod tests {
         );
     }
 
-    /// Spec: `allow_commands_for_identity` turns the setting on only while the
-    /// row still holds the identity it is given, and reports whether it did.
+    /// Both command grants require the identity that asked, and writing one
+    /// permission must leave the other off. The card's choice cannot silently
+    /// broaden a host-local grant into authority over the fleet.
     ///
     /// Why: an approval card's "Always allow" was raised by one install. If
     /// the row adopted a new identity while the card waited, the write must
@@ -12088,24 +12110,37 @@ mod tests {
     /// window for an adoption to land in between.
     #[farhelm_testtrace::test]
     async fn allowing_commands_is_conditional_on_the_identity_that_asked() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "allow@commands", "asked-from").await;
-        let row = |rows: Vec<HostRow>| rows.into_iter().find(|r| r.id == host).unwrap();
-        assert!(
-            !store
-                .allow_commands_for_identity(host, Some("successor".to_string()))
-                .await
-                .unwrap(),
-            "a different install is not allowed"
-        );
-        assert!(!row(store.list_hosts().await.unwrap()).commands_without_asking);
-        assert!(
-            store
-                .allow_commands_for_identity(host, Some("asked-from".to_string()))
-                .await
-                .unwrap()
-        );
-        assert!(row(store.list_hosts().await.unwrap()).commands_without_asking);
+        for permission in [CommandPermission::Fleet, CommandPermission::OwnHost] {
+            let (_dir, store) = fresh_store().await;
+            let host = host_with_identity(&store, "allow@commands", "asked-from").await;
+            let row = |rows: Vec<HostRow>| rows.into_iter().find(|r| r.id == host).unwrap();
+            let before = row(store.list_hosts().await.unwrap());
+            assert!(!before.commands_without_asking && !before.own_sessions_without_asking);
+            assert!(
+                !store
+                    .allow_commands_for_identity(host, Some("successor".to_string()), permission)
+                    .await
+                    .unwrap(),
+                "a different install is not allowed"
+            );
+            let unchanged = row(store.list_hosts().await.unwrap());
+            assert!(!unchanged.commands_without_asking && !unchanged.own_sessions_without_asking);
+            assert!(
+                store
+                    .allow_commands_for_identity(host, Some("asked-from".to_string()), permission)
+                    .await
+                    .unwrap()
+            );
+            let granted = row(store.list_hosts().await.unwrap());
+            assert_eq!(
+                granted.commands_without_asking,
+                permission == CommandPermission::Fleet
+            );
+            assert_eq!(
+                granted.own_sessions_without_asking,
+                permission == CommandPermission::OwnHost
+            );
+        }
     }
 
     /// Adopting a new identity also resets the host to asking before

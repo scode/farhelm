@@ -52,6 +52,11 @@ pub struct PendingApproval {
     pub session: ApprovalSession,
     /// What it asked for.
     pub action: ApprovalAction,
+    /// The helm resolved this request entirely within the asking host's
+    /// session authority. Direct-Allow and browser requests never carry this offer.
+    /// Older helms omit it, so absence must not offer a new persistent grant.
+    #[serde(default)]
+    pub own_host_session_action: bool,
     /// Unix milliseconds, on the HELM's clock, at which the helm refuses the
     /// request as not answered. A GUI on another machine may disagree about
     /// the time by its clock skew, so this is for display, never a deadline
@@ -365,11 +370,78 @@ pub enum ApprovalAnswer {
     /// Turn on the requesting host's "run farhelm commands from this host
     /// without asking" setting, then allow this request.
     AlwaysAllow,
+    /// Grant only session management on the requesting host, then allow this
+    /// request. A distinct variant makes older helms reject this choice rather
+    /// than interpret an ignored payload field as the fleet-wide grant.
+    AlwaysAllowOwnHost,
     Deny,
 }
 
 #[cfg(test)]
 mod tests {
+    /// A card from an older helm offers no host-local grant. New metadata must
+    /// also remain ignorable by an older UI that already understands its action.
+    #[test]
+    fn own_host_card_metadata_is_optional_and_compatible() {
+        let mut wire = serde_json::json!({
+            "id": "approval",
+            "host_id": 1,
+            "host_name": "host",
+            "session": { "id": "asking", "title": null, "host_name": "host" },
+            "action": {
+                "kind": "stop",
+                "target": { "id": "target", "title": null, "host_name": "host" }
+            },
+            "expires_at_ms": 1
+        });
+        let older_card: super::PendingApproval = serde_json::from_value(wire.clone()).unwrap();
+        assert!(!older_card.own_host_session_action);
+        wire["own_host_session_action"] = serde_json::json!(true);
+        let new_card: super::PendingApproval = serde_json::from_value(wire.clone()).unwrap();
+        assert!(new_card.own_host_session_action);
+        assert_eq!(
+            serde_json::to_value(&new_card).unwrap()["own_host_session_action"],
+            true
+        );
+
+        #[derive(serde::Deserialize)]
+        struct OlderCard {
+            action: super::ApprovalAction,
+        }
+        let old_ui: OlderCard = serde_json::from_value(wire).unwrap();
+        assert_eq!(old_ui.action, new_card.action);
+    }
+
+    /// The host-local grant cannot be a flag on AlwaysAllow: old helms ignore
+    /// unknown fields, which would turn that spelling into fleet-wide trust.
+    /// A new enum variant instead fails an older answer decoder closed.
+    #[test]
+    fn own_host_answer_is_distinct_and_rejected_by_older_helms() {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        enum OlderAnswer {
+            Allow,
+            TunnelAndOpen,
+            AlwaysAllow,
+            Deny,
+        }
+        let own = serde_json::to_value(super::ApprovalAnswer::AlwaysAllowOwnHost).unwrap();
+        assert_eq!(own, "always_allow_own_host");
+        assert_eq!(
+            serde_json::to_value(super::ApprovalAnswer::AlwaysAllow).unwrap(),
+            "always_allow"
+        );
+        assert!(serde_json::from_value::<OlderAnswer>(own.clone()).is_err());
+        assert_eq!(
+            serde_json::from_value::<super::ApprovalAnswerRequest>(
+                serde_json::json!({ "answer": own })
+            )
+            .unwrap()
+            .answer,
+            super::ApprovalAnswer::AlwaysAllowOwnHost
+        );
+    }
+
     /// A direct wrapper answer must survive as a distinct card kind. Older
     /// clients cannot render its trust warning, so they must fail decoding.
     #[test]

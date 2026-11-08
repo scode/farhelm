@@ -7,7 +7,7 @@ import { type APIRequestContext, type Page } from "@playwright/test";
 import { listHosts, localHostId } from "./fleet";
 
 /** How a spec answers a card; each is the card's own button. */
-export type CardAnswer = "allow" | "always-allow" | "deny";
+export type CardAnswer = "allow" | "always-allow-own-host" | "always-allow" | "deny";
 
 /**
  * Wait for exactly one approval card on `page` that contains every string in
@@ -57,6 +57,30 @@ export async function setLocalCommandsWithoutAsking(
   if (local?.commands_without_asking !== commandsWithoutAsking) {
     throw new Error(
       `the local host's commands_without_asking reads ${local?.commands_without_asking}, not ${commandsWithoutAsking}`,
+    );
+  }
+}
+
+/**
+ * Set and read back only the local host's permission to manage its own sessions.
+ * This is independent of fleet-wide command authority; callers preserve and
+ * restore its original value so later specs still exercise their own premises.
+ */
+export async function setLocalOwnSessionsWithoutAsking(
+  request: APIRequestContext,
+  ownSessionsWithoutAsking: boolean,
+): Promise<void> {
+  const id = await localHostId(request);
+  const response = await request.post(`/api/hosts/${id}/own-sessions-without-asking`, {
+    data: { own_sessions_without_asking: ownSessionsWithoutAsking },
+  });
+  if (!response.ok()) {
+    throw new Error(`setting own_sessions_without_asking failed (${response.status()}): ${await response.text()}`);
+  }
+  const local = (await listHosts(request)).find((host) => host.id === id);
+  if (local?.own_sessions_without_asking !== ownSessionsWithoutAsking) {
+    throw new Error(
+      `the local host's own_sessions_without_asking reads ${local?.own_sessions_without_asking}, not ${ownSessionsWithoutAsking}`,
     );
   }
 }

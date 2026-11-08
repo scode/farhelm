@@ -12,6 +12,9 @@
 //! claims. The verb handlers call [`ask`] after they have resolved what they
 //! are about to do and before they do any of it, so the card shows exactly
 //! what an approval lets happen.
+//! The card's host-local grant offer is the same resolved fact used by the
+//! decision, with direct-Allow and browser actions excluded. Answers read that
+//! stored offer rather than reconstructing authority from the card's labels.
 //!
 //! # What a pending approval is
 //!
@@ -120,6 +123,17 @@ struct Entry {
     answer: oneshot::Sender<Verdict>,
 }
 
+/// A pending card's immutable grant context, copied without settling its wait.
+/// Eligibility comes from the stored view; the answer must not recover host
+/// ownership from display labels or maintain a second eligibility value.
+struct WaitingOrigin {
+    origin: AgentOrigin,
+    identity: Option<String>,
+    action: ApprovalAction,
+    asking_session: SessionKey,
+    own_host_session_action: bool,
+}
+
 /// The helm's table of requests waiting for the user. One per helm, in
 /// [`AppState`].
 pub(crate) struct Approvals {
@@ -213,23 +227,19 @@ impl Approvals {
         inner.pending.remove(&seq)
     }
 
-    /// The origin and recorded identity of the entry `id`, if it is still
-    /// waiting, without settling it.
-    fn origin_of(
-        &self,
-        id: &str,
-    ) -> Option<(AgentOrigin, Option<String>, ApprovalAction, SessionKey)> {
+    /// Read the recorded grant context of `id` without settling its wait.
+    /// The copied offer and identity remain those of the original request.
+    fn origin_of(&self, id: &str) -> Option<WaitingOrigin> {
         self.lock()
             .pending
             .values()
             .find(|entry| entry.view.id == id)
-            .map(|entry| {
-                (
-                    entry.origin,
-                    entry.identity.clone(),
-                    entry.view.action.clone(),
-                    entry.asking_session.clone(),
-                )
+            .map(|entry| WaitingOrigin {
+                origin: entry.origin,
+                identity: entry.identity.clone(),
+                action: entry.view.action.clone(),
+                asking_session: entry.asking_session.clone(),
+                own_host_session_action: entry.view.own_host_session_action,
             })
     }
 
@@ -427,6 +437,12 @@ pub(crate) async fn ask_with_answer(
     let asking_key = SessionKey::new(origin.host, asking_session);
     let asking_full_id = SessionRef::new(&row.entry_uuid, asking_session)?.to_string();
     let direct_allow = action.requires_direct_allow();
+    // Direct-Allow actions cannot offer a persistent shortcut. Browser
+    // actions keep their separate URL-category permissions, even if an
+    // internal caller ever passes a same-host fact for one of those cards.
+    let own_host_session_action = own_host_session_action
+        && !direct_allow
+        && !matches!(&action, ApprovalAction::OpenUrl { .. });
     match &mut action {
         ApprovalAction::OpenUrl {
             url,
@@ -495,6 +511,7 @@ pub(crate) async fn ask_with_answer(
                         host_name: Some(host_name),
                     },
                     action,
+                    own_host_session_action,
                     expires_at_ms,
                 },
                 origin,
@@ -668,8 +685,8 @@ pub(crate) async fn list_approvals(
 /// client answers by dropping the card. Gone has its own status so it cannot
 /// be confused with a refusal the client must show.
 ///
-/// "Always allow" turns the requesting host's setting on FIRST, and approves
-/// only once that is stored. It is refused (409, the card keeps waiting with
+/// Each "Always allow" choice first stores its selected host permission, then
+/// approves this request. It is refused (409, the card keeps waiting with
 /// the reason) when the request's connection is no longer live, or when the
 /// host row no longer holds the install the request came from: the card was
 /// raised by that install, and an adoption in between resets the setting so
@@ -687,7 +704,7 @@ pub(crate) async fn answer_approval(
     AxPath(id): AxPath<String>,
     axum::Json(request): axum::Json<ApprovalAnswerRequest>,
 ) -> impl IntoResponse {
-    let Some((_, _, action, _)) = state.approvals.origin_of(&id) else {
+    let Some(WaitingOrigin { action, .. }) = state.approvals.origin_of(&id) else {
         return gone(&id);
     };
     // Validate the edited payload before taking the sole pending entry. A
@@ -717,7 +734,13 @@ pub(crate) async fn answer_approval(
         },
         ApprovalAnswer::Deny => Verdict::Deny,
         ApprovalAnswer::TunnelAndOpen => {
-            let Some((origin, _, action, asking)) = state.approvals.origin_of(&id) else {
+            let Some(WaitingOrigin {
+                origin,
+                action,
+                asking_session: asking,
+                ..
+            }) = state.approvals.origin_of(&id)
+            else {
                 return gone(&id);
             };
             // Validate before taking the entry: an invalid answer must leave the
@@ -765,10 +788,18 @@ pub(crate) async fn answer_approval(
             }
             Verdict::TunnelAndOpen
         }
-        ApprovalAnswer::AlwaysAllow => {
-            let Some((origin, identity, action, _)) = state.approvals.origin_of(&id) else {
+        ApprovalAnswer::AlwaysAllow | ApprovalAnswer::AlwaysAllowOwnHost => {
+            let Some(WaitingOrigin {
+                origin,
+                identity,
+                action,
+                own_host_session_action,
+                ..
+            }) = state.approvals.origin_of(&id)
+            else {
                 return gone(&id);
             };
+            let own_host_only = request.answer == ApprovalAnswer::AlwaysAllowOwnHost;
             // Worded for every kind that needs a direct Allow (an agent's
             // wrapper, a host change), so no card is answered with a reason
             // that belongs to another kind.
@@ -778,6 +809,14 @@ pub(crate) async fn answer_approval(
                     "this request can only be approved with Allow, each time; Always allow \
                      cannot approve it"
                         .into(),
+                ));
+            }
+            // The stored fact is the offer shown on this card, including the
+            // exclusions applied before the pending view was published.
+            if own_host_only && !own_host_session_action {
+                return http_error(refusal(
+                    ErrorKind::Conflict,
+                    "this request cannot grant permission to manage sessions on the requesting host".into(),
                 ));
             }
             if !crate::agent_requests::origin_is_live(&state, origin) {
@@ -800,9 +839,14 @@ pub(crate) async fn answer_approval(
                         .await
                 }
                 _ => {
+                    let permission = if own_host_only {
+                        crate::store::CommandPermission::OwnHost
+                    } else {
+                        crate::store::CommandPermission::Fleet
+                    };
                     state
                         .store
-                        .allow_commands_for_identity(origin.host, identity)
+                        .allow_commands_for_identity(origin.host, identity, permission)
                         .await
                 }
             };
@@ -1101,9 +1145,24 @@ mod tests {
         asking: &str,
         action: ApprovalAction,
     ) -> (tokio::task::JoinHandle<anyhow::Result<()>>, String) {
+        waiting_for_scoped_action(harness, origin, asking, false, action).await
+    }
+
+    /// Exercise the ordinary wait with the same-host fact supplied by a verb
+    /// handler. Card observation and task ending keep their existing bounded
+    /// helpers; only the trusted fact differs from other approval tests.
+    async fn waiting_for_scoped_action(
+        harness: &rest_harness::Harness,
+        origin: AgentOrigin,
+        asking: &str,
+        own_host_session_action: bool,
+        action: ApprovalAction,
+    ) -> (tokio::task::JoinHandle<anyhow::Result<()>>, String) {
         let state = Arc::clone(&harness.state);
         let asker = asking.to_string();
-        let task = tokio::spawn(async move { ask(&state, origin, &asker, false, action).await });
+        let task = tokio::spawn(async move {
+            ask(&state, origin, &asker, own_host_session_action, action).await
+        });
         let mut changes = harness.state.manager.events().subscribe();
         let found = tokio::time::timeout(STEP, async {
             loop {
@@ -1840,6 +1899,214 @@ mod tests {
         assert_eq!(refused.message, NO_GUI_REFUSAL, "asks again once it is off");
     }
 
+    /// The host-local answer persists only the narrow permission and releases
+    /// only the selected card. Another already waiting request still needs its
+    /// own answer; a later covered request can use the newly stored grant.
+    #[farhelm_testtrace::test]
+    async fn own_host_answer_grants_only_local_session_authority() {
+        let harness = rest_harness::idle_helm().await;
+        let _gui = harness.state.manager.events().admit(1).unwrap();
+        let origin = local_origin(&harness).await;
+        let before = local_row(&harness).await;
+        assert!(!before.own_sessions_without_asking && !before.commands_without_asking);
+        let (first, first_id) =
+            waiting_for_scoped_action(&harness, origin, "first", true, stop_action()).await;
+        let (second, second_id) =
+            waiting_for_scoped_action(&harness, origin, "second", true, stop_action()).await;
+        let cards = harness.state.approvals.list();
+        assert_eq!(cards.len(), 2);
+        assert!(cards.iter().all(|card| card.own_host_session_action));
+        let (status, body) = answer(&harness, &first_id, "always_allow_own_host").await;
+        assert_eq!(status, axum::http::StatusCode::NO_CONTENT, "{body}");
+        ended(first)
+            .await
+            .expect("the selected request was approved");
+        let granted = local_row(&harness).await;
+        assert!(granted.own_sessions_without_asking);
+        assert!(!granted.commands_without_asking);
+        assert_eq!(granted.links_without_asking, before.links_without_asking);
+        assert_eq!(
+            granted.local_links_without_asking,
+            before.local_links_without_asking
+        );
+        assert_eq!(granted.yolo_without_asking, before.yolo_without_asking);
+        assert!(
+            !second.is_finished(),
+            "the other card has not been answered"
+        );
+        assert_eq!(
+            harness
+                .state
+                .approvals
+                .list()
+                .iter()
+                .map(|card| card.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![second_id.as_str()]
+        );
+        assert_eq!(
+            answer(&harness, &second_id, "deny").await.0,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            refusal_of(ended(second).await).kind,
+            ErrorKind::Unauthorized
+        );
+        tokio::time::timeout(
+            STEP,
+            ask(&harness.state, origin, "later", true, stop_action()),
+        )
+        .await
+        .expect("a later covered request must not wait for a card")
+        .expect("the new grant applies to the later request");
+        assert!(harness.state.approvals.list().is_empty());
+    }
+
+    /// An unchanged connection cannot grant trust to an adopted successor.
+    /// Identity is checked by the same SQL statement that writes the selected
+    /// permission, and a mismatch must leave the original card answerable.
+    #[farhelm_testtrace::test]
+    async fn own_host_answer_refuses_a_replaced_install_without_spending_the_card() {
+        let harness = rest_harness::idle_helm().await;
+        let _gui = harness.state.manager.events().admit(1).unwrap();
+        let origin = local_origin(&harness).await;
+        let before = local_row(&harness).await;
+        assert!(!before.own_sessions_without_asking && !before.commands_without_asking);
+        let (task, id) =
+            waiting_for_scoped_action(&harness, origin, "asker", true, stop_action()).await;
+        harness
+            .store
+            .adopt_identity(
+                origin.host,
+                &crate::store::DialedAs::of(&before),
+                before
+                    .host_identity
+                    .as_deref()
+                    .expect("premise: fixture identity"),
+                "replacement-identity",
+            )
+            .await
+            .unwrap();
+        assert!(
+            crate::agent_requests::origin_is_live(&harness.state, origin),
+            "premise: liveness alone would permit the stale grant"
+        );
+        let (status, body) = answer(&harness, &id, "always_allow_own_host").await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+        assert!(body.contains("different install"), "{body}");
+        let after = local_row(&harness).await;
+        assert_eq!(after.host_identity.as_deref(), Some("replacement-identity"));
+        assert!(!after.own_sessions_without_asking && !after.commands_without_asking);
+        assert!(
+            !task.is_finished(),
+            "a refused grant cannot answer the card"
+        );
+        assert_eq!(
+            harness.state.approvals.list().first().map(|card| &card.id),
+            Some(&id)
+        );
+        assert_eq!(
+            answer(&harness, &id, "deny").await.0,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        assert_eq!(refusal_of(ended(task).await).kind, ErrorKind::Unauthorized);
+    }
+
+    /// Metadata and answer validation must agree about a card's offer. A
+    /// nonqualifying action, a direct-Allow action or a browser action cannot
+    /// turn a forged host-local answer into a grant or consume its pending card.
+    #[farhelm_testtrace::test]
+    async fn own_host_answers_leave_ineligible_cards_pending() {
+        let harness = rest_harness::idle_helm().await;
+        let _gui = harness.state.manager.events().admit(1).unwrap();
+        let origin = local_origin(&harness).await;
+        for (own_action, action) in [
+            (false, stop_action()),
+            (
+                true,
+                ApprovalAction::HostAdd {
+                    destination: "user@new-host".into(),
+                    alias: None,
+                },
+            ),
+            (
+                true,
+                ApprovalAction::TemplateWrite {
+                    name: "wrapped".into(),
+                    replaces_existing: false,
+                    fields: farhelm_proto::launcher::TemplateFields {
+                        wrapper_prefix: Some(Some(vec!["with-endpoint".into(), "--".into()])),
+                        ..Default::default()
+                    },
+                    host_name: None,
+                },
+            ),
+            (
+                false,
+                ApprovalAction::OpenUrl {
+                    url: "https://example.test/".into(),
+                    local_network: false,
+                    preapproved: false,
+                    tunnel_available: false,
+                },
+            ),
+            // Browser authority stays separate even if an internal caller
+            // accidentally marks its own-host fact true.
+            (
+                true,
+                ApprovalAction::OpenUrl {
+                    url: "http://localhost/".into(),
+                    local_network: true,
+                    preapproved: false,
+                    tunnel_available: false,
+                },
+            ),
+        ] {
+            let direct_allow = action.requires_direct_allow();
+            let (task, id) =
+                waiting_for_scoped_action(&harness, origin, "asker", own_action, action).await;
+            let card = harness
+                .state
+                .approvals
+                .list()
+                .into_iter()
+                .find(|card| card.id == id)
+                .unwrap();
+            assert!(!card.own_host_session_action);
+            let (status, body) = answer(&harness, &id, "always_allow_own_host").await;
+            assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+            assert!(
+                body.contains(if direct_allow {
+                    "only be approved with Allow"
+                } else {
+                    "cannot grant permission"
+                }),
+                "{body}"
+            );
+            assert!(
+                !task.is_finished(),
+                "the invalid answer must not settle the wait"
+            );
+            assert_eq!(
+                harness
+                    .state
+                    .approvals
+                    .list()
+                    .first()
+                    .map(|waiting| &waiting.id),
+                Some(&id)
+            );
+            let row = local_row(&harness).await;
+            assert!(!row.own_sessions_without_asking && !row.commands_without_asking);
+            assert!(!row.links_without_asking && !row.local_links_without_asking);
+            assert_eq!(
+                answer(&harness, &id, "deny").await.0,
+                axum::http::StatusCode::NO_CONTENT
+            );
+            assert_eq!(refusal_of(ended(task).await).kind, ErrorKind::Unauthorized);
+        }
+    }
+
     /// Only the matching own-host fact may use the narrower stored permission.
     /// With no GUI, a missing grant/fact yields the no-window refusal, making
     /// this a direct observation of the bypass rather than a timed absence of cards.
@@ -2030,6 +2297,7 @@ mod tests {
         assert_eq!(status, axum::http::StatusCode::NO_CONTENT, "{body}");
         ended(task).await.expect("allowed");
         assert!(local_row(&harness).await.commands_without_asking);
+        assert!(!local_row(&harness).await.own_sessions_without_asking);
     }
 
     /// Spec: when the requesting host's connection goes away while a card
