@@ -82,12 +82,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Delete kill the live agent without its required warning. These are source-confirmed conditional routes, with no
   measured allocation failure or incident.
 
-- [`dead-host-report-anchor-identity-gap.md`](dead-host-report-anchor-identity-gap.md) — A report whose recorded
-  ancestry happens to contain the reused process number of a host's already-dead child may be accepted as belonging to
-  the current run. If it selects another run's conversation, a later Restart could resume and append user work there.
-  This original potential-highest route is unverified after source investigation; the prior complete exclusion was
-  ambiguous and is not retained.
-
 - [`invalid-capture-run-recursive-removal.md`](invalid-capture-run-recursive-removal.md) — A mistaken directory supplied
   to the screen-capture stop command can cause silent recursive deletion of unrelated user work.
 
