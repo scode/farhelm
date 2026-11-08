@@ -453,6 +453,10 @@ fi
 # --------------------------------------------------------------------------
 
 echo "== provisioning $ssh_alias from this workspace's helm"
+# The whole workspace narrowed by a filter, not `-p farhelm-helm`: it is the
+# selection the release gate's test suite step already built, and a `-p`
+# would resolve fewer features and recompile the helm and its dependencies
+# (.github/dist-build-setup.yml, "Run the test suite against the pinned tmux").
 output="$run_dir/nextest.log"
 set +e
 (
@@ -464,7 +468,8 @@ set +e
         --selection 'CentOS provisioning over ssh' --concurrency '4 nextest slots; one selected test' \
         --tmux none --keep-farhelm-env FARHELM_TEST_SSH_DESTINATION \
         --keep-farhelm-env FARHELM_TEST_BINARY --keep-farhelm-env FARHELM_TEST_TMUX \
-        -- cargo nextest run -p farhelm-helm --lib -E "test(=$test_filter)"
+        -- cargo nextest run --workspace --exclude farhelm-desktop \
+        -E "package(farhelm-helm) & kind(lib) & test(=$test_filter)"
 ) 2>&1 | tee "$output"
 test_status=${PIPESTATUS[0]}
 set -e

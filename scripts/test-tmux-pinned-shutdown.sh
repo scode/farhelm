@@ -39,26 +39,34 @@ export PATH="$binary_dir:$PATH"
 
 # Exact names plus nextest's no-tests failure make renames fail visibly,
 # rather than turning an empty substring selection into a successful gate.
+#
+# Each case selects the whole workspace and narrows with a filter instead of
+# `-p`, because that is the selection the release gate's test suite step
+# builds: cargo resolves features per command from the packages it selects,
+# so `-p farhelm-supervisor` would compile the supervisor and much of what it
+# depends on again with fewer features (.github/dist-build-setup.yml, "Run
+# the test suite against the pinned tmux"). `target` is a nextest filter
+# naming the test binary: `kind(lib)` or `binary(e2e)`.
 run_case() {
-  local package=$1 test_name=$2
-  shift 2
+  local package=$1 target=$2 test_name=$3
   python3 scripts/record-test-run.py --runner nextest "${record_args[@]}" \
     --selection "$package::$test_name" --concurrency '4 nextest slots; one selected test' --tmux required \
-    -- cargo nextest run -p "$package" "$@" -E "test(=$test_name)"
+    -- cargo nextest run --workspace --exclude farhelm-desktop \
+    -E "package($package) & $target & test(=$test_name)"
 }
 
-run_case farhelm-supervisor tmux::stream::tests::shutdown_acks_no_output_despite_unread_positional_replies --lib
-run_case farhelm-supervisor tmux::stream::tests::shutdown_survives_every_four_block_reply_boundary --lib
-run_case farhelm-supervisor tmux::stream::tests::an_abandoned_replay_candidate_is_reaped_after_no_output --lib
-run_case farhelm terminal_tabs::terminal_conformance_holds_for_the_agent_and_for_a_tab --test e2e
-run_case farhelm terminal_tabs::input_client_failure_safely_reaps_queued_output_before_reattach --test e2e
-run_case farhelm terminal_tabs::connection_loss_safely_reaps_queued_output_before_reattach --test e2e
-run_case farhelm terminal_tabs::takeover_reason_wins_over_a_gated_natural_detach --test e2e
-run_case farhelm terminal_tabs::close_notifies_and_removes_a_tab_while_output_cleanup_is_pending --test e2e
-run_case farhelm terminal_tabs::restart_restores_and_notifies_while_output_cleanup_is_pending --test e2e
+run_case farhelm-supervisor 'kind(lib)' tmux::stream::tests::shutdown_acks_no_output_despite_unread_positional_replies
+run_case farhelm-supervisor 'kind(lib)' tmux::stream::tests::shutdown_survives_every_four_block_reply_boundary
+run_case farhelm-supervisor 'kind(lib)' tmux::stream::tests::an_abandoned_replay_candidate_is_reaped_after_no_output
+run_case farhelm 'binary(e2e)' terminal_tabs::terminal_conformance_holds_for_the_agent_and_for_a_tab
+run_case farhelm 'binary(e2e)' terminal_tabs::input_client_failure_safely_reaps_queued_output_before_reattach
+run_case farhelm 'binary(e2e)' terminal_tabs::connection_loss_safely_reaps_queued_output_before_reattach
+run_case farhelm 'binary(e2e)' terminal_tabs::takeover_reason_wins_over_a_gated_natural_detach
+run_case farhelm 'binary(e2e)' terminal_tabs::close_notifies_and_removes_a_tab_while_output_cleanup_is_pending
+run_case farhelm 'binary(e2e)' terminal_tabs::restart_restores_and_notifies_while_output_cleanup_is_pending
 # The startup reap closes stale control clients that are carrying queued
 # output — exactly the shape whose unsafe teardown aborted tmux 3.7b (the
 # pin at the time; the suite follows the current pin) — so it must be
 # proven against the pinned binary, not only against whatever the distro
 # ships.
-run_case farhelm terminal_tabs::a_killed_supervisor_leaves_no_orphaned_sink_client --test e2e
+run_case farhelm 'binary(e2e)' terminal_tabs::a_killed_supervisor_leaves_no_orphaned_sink_client

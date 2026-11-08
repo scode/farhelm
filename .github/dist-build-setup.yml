@@ -236,26 +236,28 @@
   # that). The native desktop tests and smoke step below provide the desktop
   # coverage after the release-only dependencies are installed.
   #
-  # The farhelm crate is a binary with no library target, so its unit tests
-  # are selected with `--bins` ALONE: adding `--lib` makes cargo refuse the
-  # whole command ("no library targets found in package `farhelm`") before
-  # a single test runs, which is what failed the v0.3.0 tag build on
-  # 2026-09-03 — the first tag cut after this second command was added.
+  # ONE BUILD FOR EVERY RUST STEP. The farhelm integration tests are left out
+  # with a filter, not by excluding the package, and every later Rust test in
+  # this job (the doctests here, the teardown regressions, the CentOS leg)
+  # uses this same `--workspace --exclude farhelm-desktop` selection and picks
+  # its tests with a filter too. Cargo resolves features once per command from
+  # the packages that command selects, so a narrower `-p` or `--exclude` turns
+  # off features in shared crates (syn, serde, tracing and their like) and
+  # everything above them is compiled again: the old split into per-package
+  # commands spent about six minutes of every tag build recompiling crates
+  # this step had just built. Keep the selection identical when adding a
+  # step; narrow with `-E` instead.
   if: runner.os == 'Linux' && runner.arch == 'X64'
   run: |
     PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
-      --runner nextest --kind release --selection 'workspace except farhelm and farhelm-desktop' \
+      --runner nextest --kind release --selection 'workspace except farhelm integration tests and farhelm-desktop' \
       --concurrency '4 nextest slots across binaries; retries 0' --tmux required \
       --output-root "$RUNNER_TEMP/test-run-evidence" \
-      -- cargo nextest run --workspace --exclude farhelm --exclude farhelm-desktop
+      -- cargo nextest run --workspace --exclude farhelm-desktop -E 'not (package(farhelm) & kind(test))'
     PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
-      --runner nextest --kind release --selection 'farhelm binary unit tests' \
-      --concurrency '4 nextest slots; retries 0' --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" \
-      -- cargo nextest run -p farhelm --bins
-    PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
-      --kind release --selection 'workspace doctests except farhelm and farhelm-desktop' \
+      --kind release --selection 'workspace doctests except farhelm-desktop' \
       --concurrency '4 doctest threads' --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" \
-      -- cargo test --locked --doc --workspace --exclude farhelm --exclude farhelm-desktop -- --show-output --test-threads=4
+      -- cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4
 
 - name: Regress safe output-client teardown on the pinned tmux
   # Its own step after the full suite: each scenario gets a fresh test
