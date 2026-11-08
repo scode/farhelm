@@ -21751,7 +21751,8 @@
   card kind older pages cannot decode, as prompt-bearing and shortcut-moving cards already have, before or together with
   "Containerized sessions: `farhelm spawn` and CLI flags". No code change now. Remove the feedback file and its index
   entry in the same change.
-- Execution: planned in `plans/queue/triage-misc-nov7.md`.
+- Execution: implemented in change `mvtkvvruqzrovqwkppyxuvolyxnulyly`, bookmark
+  `plan/triage-misc-nov7/05-podman-todo-older-pages`, [PR #3177](https://github.com/scode/farhelm/pull/3177/changes).
 
 ## startup-probe-false-tmux-absence.md
 

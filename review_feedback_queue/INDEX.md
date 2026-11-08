@@ -39,10 +39,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Orphan cleanup can use an old ownership snapshot to terminate a sandbox after Add has adopted it and ordinary user
   work has begun.
 
-- [`older-browser-approves-undisclosed-container-options.md`](older-browser-approves-undisclosed-container-options.md) —
-  An already loaded older released browser page can refresh and approve container choices it cannot display, despite the
-  current renderer's disclosure repair.
-
 - [`startup-probe-false-tmux-absence.md`](startup-probe-false-tmux-absence.md) — A temporary resource/connection failure
   at startup can make a live old session appear ended; its normal guarded Delete can then stop that live work without
   authorizing it. This is a source-established conditional failure, not a measured incident.
