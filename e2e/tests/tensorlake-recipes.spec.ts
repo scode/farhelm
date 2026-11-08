@@ -13,6 +13,7 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { currentStackSlot } from "../stack-slots";
 import { openSettings, selectSettingsSection } from "./helpers/settings";
+import { drainedRoute } from "./helpers/drained-route";
 
 /** A token that must never appear in a reply or on the page once saved. */
 const TOKEN = "e2e-private-endpoint-token";
@@ -686,6 +687,8 @@ test("a managed recipe is created, edited and deleted without exposing its token
       tunnels: [{ sandbox_port: 8080, host: "127.0.0.1", port: 8080 }],
       snapshot: null,
       build: { state: "idle" },
+      prepared: null,
+      preparation: { state: "idle" },
       cleanup_pending: false,
     });
     expect(await page.content()).not.toContain(TOKEN);
@@ -1135,6 +1138,7 @@ async function resetFake(): Promise<void> {
 async function seedSnapshotBase(id: string): Promise<void> {
   const file = path.join(await fakeRoot(), "state.json");
   const model = JSON.parse(await readFile(file, "utf8"));
+  model.snapshots ??= [];
   model.snapshots.push({ id, sandbox_id: "user-base-sandbox", status: "completed", polls_left: 0 });
   await writeFile(file, `${JSON.stringify(model)}\n`, { mode: 0o600 });
 }
@@ -1165,6 +1169,196 @@ async function recipe(request: APIRequestContext, name: string): Promise<any> {
   const found = (await recipes(request)).find((r) => r.name === name);
   expect(found, `recipe ${name} is listed`).toBeTruthy();
   return found;
+}
+
+/** Preparation uses the provisioning fake rather than the recipe shell. Keep
+ * this control separate so a held install does not accidentally hold the build. */
+async function preparationBackend(config: unknown): Promise<void> {
+  const stack = JSON.parse(await readFile(currentStackSlot().stackInfoPath, "utf8"));
+  const root = stack.provisioning_backend as string;
+  const next = path.join(root, `config.${process.pid}.next`);
+  await writeFile(next, JSON.stringify(config));
+  await rename(next, path.join(root, "config.json"));
+}
+
+/** Drive lazy preparation through the same authorized Add routes as the form.
+ * The returned host can still be preparing; callers wait on their own boundary. */
+async function startPreparedHost(request: APIRequestContext, name: string, savedRecipe: string): Promise<number> {
+  const response = await request.post("/api/hosts/probe", {
+    data: { target: { kind: "tensorlake", name, recipe: savedRecipe } },
+  });
+  expect(response.ok(), await response.text()).toBe(true);
+  const probe = await response.json();
+  expect(probe.result).toBe("tensorlake-provisionable");
+  const started = await request.post("/api/hosts/provision", {
+    data: { probe_id: probe.probe_id },
+  });
+  expect(started.ok(), await started.text()).toBe(true);
+  return (await started.json()).host_id;
+}
+
+/** A named, bounded wait keeps cleanup from racing an unfinished Add. Terminal
+ * here means only the provisioning run, not real supervisor boot in this fake. */
+async function waitForHostSetup(request: APIRequestContext, host: number, status?: string): Promise<void> {
+  await expect.poll(async () => {
+    const response = await request.get(`/api/hosts/${host}/provisioning`);
+    expect(response.ok(), await response.text()).toBe(true);
+    const view = await response.json();
+    return status ? view.status === status : view.status !== "running";
+  }, { message: `host ${host} reaches ${status ?? "finished setup"}`, timeout: 15_000 }).toBe(true);
+}
+
+/** Settings observes lazy preparation through the real invalidation feed:
+ * waiting pulses, checkpoint refusal reports failure, and the next new host
+ * retries to ready. The model proves cleanup and source selection; it cannot
+ * prove filesystem safety, boot startup or independent clone identities. */
+test("recipe preparation reports lazy progress, failure and readiness", async ({ page, request }) => {
+  const name = "e2e-prepared-lifecycle";
+  const userBase = "e2eprepareduserbase";
+  const ownedHosts: number[] = [];
+  const original = await (await request.get("/api/tensorlake")).json();
+  expect(original.api_key_set, "the fixture owns the API key it will remove").toBe(false);
+  expect((await recipes(request)).some((entry) => entry.name === name)).toBe(false);
+  await resetFake();
+  await configureShell({});
+  await seedSnapshotBase(userBase);
+  await preparationBackend({ default: { hold_actions: true, fail_action: "finish-snapshot-install", message: "retained supervisor state" } });
+  try {
+    const settings = await request.put("/api/tensorlake", { data: { api_key: "e2e-prepared-key" } });
+    expect(settings.ok(), await settings.text()).toBe(true);
+    const created = await request.post("/api/tensorlake/recipes", {
+      data: {
+        name,
+        recipe: {
+          size: { cpus: 2, memory_gb: 4, disk_gb: 20 },
+          base: { kind: "snapshot", snapshot_id: userBase },
+          packages: [], claude: null, codex: null, tunnels: [],
+        },
+      },
+    });
+    expect(created.ok(), await created.text()).toBe(true);
+    await page.goto("/");
+    const list = await openRecipes(page);
+    const row = list.getByRole("listitem").filter({ hasText: name });
+    const builtStatus = row.getByRole("status", { name: `Snapshot of ${name}`, exact: true });
+    const preparedStatus = row.getByRole("status", { name: `Preparation of ${name}`, exact: true });
+    await expect(preparedStatus).toContainText("Not prepared yet; the first new host prepares it");
+    await expect(row.getByRole("button", { name: /Prepare now|Retry preparation/ })).toHaveCount(0);
+
+    const first = await startPreparedHost(request, `${name}-first`, name);
+    ownedHosts.push(first);
+    await expect(preparedStatus).toContainText("Preparing for new hosts: installing Farhelm (step 3 of 5)");
+    await expect(preparedStatus.locator(".delete-progress-dot")).toHaveCount(1);
+    await expect(builtStatus).toContainText("Snapshot built");
+    expect((await recipe(request, name)).prepared).toBeNull();
+    expect((await fakeModel()).sandboxes.some((sandbox) => sandbox.name.startsWith("farhelm-host-"))).toBe(false);
+    await preparationBackend({ default: { fail_action: "finish-snapshot-install", message: "retained supervisor state" } });
+    await waitForHostSetup(request, first, "failed");
+    await expect(preparedStatus).toContainText("Preparing failed while installing Farhelm (step 3 of 5)");
+    await expect(preparedStatus).toContainText("The next new host tries again.");
+    await expect(preparedStatus.locator(".delete-progress-dot")).toHaveCount(0);
+    expect((await recipe(request, name)).preparation.state).toBe("failed");
+    expect((await fakeModel()).sandboxes.every((sandbox) => sandbox.status === "terminated")).toBe(true);
+    expect((await fakeModel()).snapshots.map((snapshot) => snapshot.id).sort())
+      .toEqual([userBase, (await recipe(request, name)).snapshot.id].sort());
+
+    await preparationBackend({ default: { hold_actions: true } });
+    const second = await startPreparedHost(request, `${name}-second`, name);
+    ownedHosts.push(second);
+    await expect(preparedStatus).toContainText("Preparing for new hosts: installing Farhelm (step 3 of 5)");
+    await expect(preparedStatus.locator(".delete-progress-dot")).toHaveCount(1);
+    await preparationBackend({});
+    await waitForHostSetup(request, second, "completed");
+    await expect.poll(async () => {
+      const view = await recipe(request, name);
+      return [view.preparation.state, view.cleanup_pending, Boolean(view.prepared)];
+    }).toEqual(["idle", false, true]);
+    const ready = await recipe(request, name);
+    // An idle feed reports the last freshness check. It neither renews the
+    // snapshot nor promises that it remains eligible before its next use.
+    await expect(preparedStatus).toContainText("Ready for new hosts when last checked");
+    await expect(preparedStatus).toContainText(`for Farhelm ${ready.prepared.farhelm_version}`);
+    await expect(preparedStatus).toContainText("expires after 24 h; checked before use");
+    await expect(preparedStatus.locator(".recipe-row-status-positive")).toHaveCount(1);
+    await expect(preparedStatus.locator(".delete-progress-dot")).toHaveCount(0);
+    await expect(builtStatus).toContainText("Snapshot built");
+    await expect(row.getByRole("button", { name: /Prepare now|Retry preparation/ })).toHaveCount(0);
+    const model = await fakeModel();
+    const checkpoint = model.snapshots.find((snapshot) => snapshot.id === ready.prepared.id)!;
+    const preparer = model.sandboxes.find((sandbox) => sandbox.id === checkpoint.sandbox_id)!;
+    expect(preparer.snapshot_id).toBe(ready.snapshot.id);
+    expect(preparer.status).toBe("terminated");
+    const live = model.sandboxes.filter((sandbox) => sandbox.status === "running");
+    expect(live).toHaveLength(1);
+    expect(live[0].snapshot_id).toBe(ready.prepared.id);
+  } finally {
+    await preparationBackend({});
+    await configureShell({});
+    for (const host of ownedHosts) {
+      await waitForHostSetup(request, host);
+      const removed = await request.delete(`/api/hosts/${host}`);
+      expect([200, 404], await removed.text()).toContain(removed.status());
+    }
+    await removeRecipes(request, [name]);
+    const model = await fakeModel();
+    expect(model.snapshots.map((snapshot) => snapshot.id)).toEqual([userBase]);
+    expect(model.sandboxes.every((sandbox) => sandbox.status === "terminated")).toBe(true);
+    const cleared = await request.put("/api/tensorlake", {
+      data: { clear_api_key: true, create_without_asking: original.create_without_asking },
+    });
+    expect(cleared.ok(), await cleared.text()).toBe(true);
+    await resetFake();
+  }
+});
+
+/** These are display fixtures, not clock or engine invalidation tests. Every
+ * stale reason and an interrupted run must explain lazy recovery in its own
+ * accessible status region without inventing a preparation action. */
+for (const [state, wording] of [
+  ["expired", "Not prepared since it expired"],
+  ["farhelm_updated", "Not prepared since Farhelm updated"],
+  ["snapshot_rebuilt", "Not prepared since the snapshot was rebuilt"],
+  ["interrupted", "Preparation stopped when the helm stopped"],
+] as const) {
+  test(`recipe preparation explains ${state} without a Prepare now action`, async ({ page, request }) => {
+    const name = `e2e-preparation-${state.replaceAll("_", "-")}`;
+    expect((await recipes(request)).some((entry) => entry.name === name)).toBe(false);
+    const created = await request.post("/api/tensorlake/recipes", {
+      data: { name, recipe: {
+        size: { cpus: 2, memory_gb: 4, disk_gb: 20 },
+        base: { kind: "tensorlake_ubuntu" }, packages: [], claude: null, codex: null, tunnels: [],
+      } },
+    });
+    expect(created.ok(), await created.text()).toBe(true);
+    const stop = await drainedRoute(page, "**/api/tensorlake/recipes", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      const response = await route.fetch();
+      const body = await response.json();
+      body.recipes = body.recipes.map((entry: any) => entry.name !== name ? entry : {
+        ...entry,
+        prepared: {
+          id: "displayprepared", prepared_at: 1, farhelm_version: "0.1.0",
+          source_snapshot: "displaybuilt", stale_reason: state === "interrupted" ? null : state,
+        },
+        preparation: state === "interrupted" ? { state: "interrupted", started_at: 1 } : { state: "idle" },
+      });
+      await route.fulfill({ response, json: body });
+    });
+    try {
+      await page.goto("/");
+      const list = await openRecipes(page);
+      const row = list.getByRole("listitem").filter({ hasText: name });
+      await expect(row.getByRole("status", { name: `Snapshot of ${name}`, exact: true })).toContainText("No snapshot yet");
+      const status = row.getByRole("status", { name: `Preparation of ${name}`, exact: true });
+      await expect(status).toContainText(wording);
+      await expect(status).toContainText(state === "interrupted" ? "The next new host tries again." : "the next new host prepares it");
+      await expect(status.locator(".recipe-row-status-warning")).toHaveCount(1);
+      await expect(row.getByRole("button", { name: /Prepare now|Retry preparation/ })).toHaveCount(0);
+    } finally {
+      await stop();
+      await removeRecipes(request, [name]);
+    }
+  });
 }
 
 /** Spec: with a key saved, a recipe without a snapshot offers Build
@@ -1228,6 +1422,10 @@ test("a recipe's snapshot builds, rebuilds, recovers from a failed step and goes
     const list = await openRecipes(page);
     const row = list.getByRole("listitem").filter({ hasText: name });
     await expect(row).toContainText("No snapshot yet");
+    await expect(row.getByRole("status", { name: `Snapshot of ${name}`, exact: true }))
+      .toContainText("No snapshot yet");
+    await expect(row.getByRole("status", { name: `Preparation of ${name}`, exact: true }))
+      .toContainText("Not prepared yet; the first new host prepares it");
     await row.getByRole("button", {
       name: `Build snapshot for ${name}`,
       exact: true,

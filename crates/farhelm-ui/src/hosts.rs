@@ -4226,6 +4226,12 @@ fn UpdateProgressPopup(
                             "{display_peer(&step.name)}"
                         }
                         span { class: "provisioning-step-status", "{crate::provisioning::progress_step_status(&step.status)}" }
+                        if let Some(explanation) = step.explanation {
+                            PeerLine {
+                                class: "provisioning-step-message",
+                                parts: vec![DetailPart::peer(explanation)],
+                            }
+                        }
                         if matches!(step.status.as_str(), "degraded" | "failed") {
                             if let Some(message) = step.message {
                                 PeerLine {
@@ -6358,6 +6364,59 @@ mod tests {
             dioxus::html::geometry::euclid::point2(40.0, top),
             dioxus::html::geometry::euclid::size2(100.0, 16.0),
         )
+    }
+
+    /// A folded setup leaves its popup as the full waiting description.
+    /// Running-step explanations must survive folding, keep peer escaping,
+    /// and leave opaque executor handles out of visible text.
+    #[farhelm_testtrace::test]
+    fn folded_progress_renders_running_step_explanations_as_peer_text() {
+        /// Mount the production popup without mounted-element events: this
+        /// checks its words, not browser placement or physical scrolling.
+        fn render() -> Element {
+            rsx! {
+                UpdateProgressPopup {
+                    origin: PopupOrigin {
+                        label: label_rect_at(100.0),
+                        viewport_height: Some(800.0),
+                    },
+                    verb: "Setting up",
+                    done: 0,
+                    total: 1,
+                    elapsed: "0:41".to_owned(),
+                    steps: vec![UpdateStepLine {
+                        id: "opaque-executor-step".into(),
+                        name: "Prepare snapshot".into(),
+                        status: "running".into(),
+                        explanation: Some(
+                            "Only the first time, and then at most once every 24 hours or after Farhelm updates.\u{202e}".into()
+                        ),
+                        message: None,
+                        current: true,
+                    }],
+                }
+            }
+        }
+        let mut dom = VirtualDom::new(render);
+        let mutations = dom.rebuild_to_vec();
+        let texts = mutations
+            .edits
+            .iter()
+            .filter_map(|edit| match edit {
+                dioxus::core::Mutation::CreateTextNode { value, .. }
+                | dioxus::core::Mutation::SetText { value, .. } => Some(value.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&
+            "Only the first time, and then at most once every 24 hours or after Farhelm updates.<U+202E>"
+        ), "the running step must keep its explanation: {texts:?}");
+        assert!(
+            texts
+                .iter()
+                .all(|text| !text.contains("opaque-executor-step"))
+        );
+        assert!(texts.iter().all(|text| !text.contains('\u{202e}')));
     }
 
     /// Every placement's style names both vertical edges, the unused one as

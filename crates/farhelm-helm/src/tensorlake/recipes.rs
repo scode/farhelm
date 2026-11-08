@@ -8,7 +8,7 @@
 //! `tensorlake_recipes` table and serves them:
 //!
 //! - `GET /api/tensorlake/recipes` lists every recipe, without secrets, with
-//!   its snapshot and build status (`build.rs` owns those).
+//!   its built/prepared snapshots and their independent progress (`build.rs`).
 //! - `POST /api/tensorlake/recipes` creates one; an existing name is a 409,
 //!   never an overwrite, because "New recipe" in the editor must not replace a
 //!   recipe someone else created meanwhile.
@@ -48,8 +48,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use farhelm_proto::tensorlake::recipes::{
-    BuildView, CreateRecipe, EndpointSave, EndpointView, RecipeBase, RecipeSave, RecipeSize,
-    RecipeView, RecipesView, Tunnel, check_recipe, check_recipe_name,
+    BuildView, CreateRecipe, EndpointSave, EndpointView, PrepareView, RecipeBase, RecipeSave,
+    RecipeSize, RecipeView, RecipesView, Tunnel, check_recipe, check_recipe_name,
 };
 use rusqlite::{Connection, OptionalExtension as _};
 use serde::{Deserialize, Serialize};
@@ -148,6 +148,8 @@ impl StoredRecipe {
             tunnels: self.tunnels.clone(),
             snapshot: None,
             build: BuildView::Idle,
+            prepared: None,
+            preparation: PrepareView::Idle,
             cleanup_pending: false,
         }
     }
@@ -280,7 +282,11 @@ fn refuse_owned_snapshot(conn: &Connection, base: &RecipeBase) -> anyhow::Result
             .snapshot
             .as_ref()
             .is_some_and(|built| &built.id == snapshot_id);
-        if current || state.retired_snapshots.contains(snapshot_id) {
+        let prepared = state
+            .prepared
+            .as_ref()
+            .is_some_and(|prepared| &prepared.id == snapshot_id);
+        if current || prepared || state.retired_snapshots.contains(snapshot_id) {
             return Ok(Some(Refusal::Invalid(format!(
                 "snapshot {snapshot_id} is the one Farhelm built for recipe {owner}, and Farhelm deletes it when that recipe is rebuilt or deleted; use recipe {owner} for these hosts, or a snapshot of your own"
             ))));
@@ -576,13 +582,16 @@ fn malformed_body() -> Response {
     (StatusCode::BAD_REQUEST, "invalid recipe").into_response()
 }
 
-/// A recipe's full view: its definition plus its build fields.
+/// Project both snapshot layers without changing the user's recipe definition.
 fn full_view(state: &AppState, name: &str, spec: &StoredRecipe, build: &RecipeState) -> RecipeView {
+    let (prepared, preparation) = state.tensorlake.builds().preparation_view(name, build);
     let (snapshot, build, cleanup_pending) = state.tensorlake.builds().view(name, build);
     RecipeView {
         snapshot,
         build,
         cleanup_pending,
+        prepared,
+        preparation,
         ..spec.view(name)
     }
 }

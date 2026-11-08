@@ -841,11 +841,12 @@ async fn ordinary_ssh_convergence_requires_tensorlake_install_admission() {
 /// only a row Farhelm registers as a sandbox may become one.
 ///
 /// Spec: a database rewound to schema 71 without its Tensorlake columns (and
-/// with an ssh host in it) reopens at the current version with all seven
+/// with an ssh host in it) reopens at the current version with all eight
 /// present and null, and the ssh host still decodes as an ordinary ssh host
 /// with no binding. Reopening runs the schema-72 binding migration, the
 /// schema-73 pending-create migration and the schema-77 credential-delivery
-/// migration; the final version must include all three.
+/// migration and schema-79 prepared-create recovery; all remain null for an
+/// ordinary host, which must never gain inferred installation facts.
 #[farhelm_testtrace::test]
 async fn schema_72_leaves_every_existing_host_ordinary() {
     let dir = tempfile::tempdir().unwrap();
@@ -862,6 +863,7 @@ async fn schema_72_leaves_every_existing_host_ordinary() {
         "tensorlake_suspended_at",
         "tensorlake_pending_create_at",
         "tensorlake_credential_delivery",
+        "tensorlake_prepared_install_json",
     ] {
         conn.execute_batch(&format!("ALTER TABLE hosts DROP COLUMN {column};"))
             .unwrap();
@@ -889,7 +891,7 @@ async fn schema_72_leaves_every_existing_host_ordinary() {
     assert_eq!(ssh_row.tensorlake, None);
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
-    assert_eq!(columns(&conn), 7);
+    assert_eq!(columns(&conn), 8);
     assert_eq!(
         conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
@@ -902,7 +904,8 @@ async fn schema_72_leaves_every_existing_host_ordinary() {
              AND tensorlake_sandbox_id IS NULL AND tensorlake_recipe IS NULL \
              AND tensorlake_resources IS NULL AND tensorlake_suspended_at IS NULL \
              AND tensorlake_pending_create_at IS NULL \
-             AND tensorlake_credential_delivery IS NULL",
+             AND tensorlake_credential_delivery IS NULL \
+             AND tensorlake_prepared_install_json IS NULL",
             [],
             |row| row.get(0),
         )
@@ -1786,6 +1789,7 @@ async fn lifecycle_holds_end_tunnels_and_resume_reads_the_recipe_again() {
         crate::provisioning::credential_delivery::CredentialDelivery::detached(
             harness.store.clone(),
         ),
+        Arc::new(crate::tensorlake::prepared::UnavailablePreparer),
     )));
     let mut recipe = RecipeSave {
         size: RecipeSize {

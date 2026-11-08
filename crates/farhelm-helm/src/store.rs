@@ -336,7 +336,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 78;
+pub(crate) const SCHEMA_VERSION: i64 = 79;
 
 /// Named secrets have their own table so list responses never need to decode a
 /// secret-bearing configuration object. The monotonically increasing revision
@@ -2496,6 +2496,8 @@ pub struct HelmStore {
 /// - 76: drop recipe-embedded endpoint tokens; recipes now select credential names.
 /// - 77: per-host nonsecret credential delivery fingerprints and known home.
 /// - 78: recipe bases and optional package layers, preserving build ownership.
+/// - 79: transient install facts for a host created from a prepared snapshot,
+///   retained across an interrupted create without opening connection admission.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2600,6 +2602,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
                  tensorlake_suspended_at INTEGER,
                  tensorlake_pending_create_at INTEGER,
                  tensorlake_credential_delivery TEXT,
+                 tensorlake_prepared_install_json TEXT,
                  CHECK (
                      (kind = 'local' AND destination IS NULL AND remote_farhelm IS NULL
                           AND remote_state_dir IS NULL)
@@ -2819,7 +2822,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 78;",
+              PRAGMA user_version = 79;",
             announcement_schema = crate::announcements::SCHEMA,
         ))
         .context("creating schema")?;
@@ -4539,6 +4542,24 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         )
         .map_err(|_| anyhow::anyhow!("could not migrate Tensorlake recipe bases"))?;
         version = 78;
+    }
+    if version == 78 {
+        // Version-only historical fixtures can already carry this column.
+        // Existing hosts have no prepared create to recover, so no facts are
+        // inferred from their current recipe or installed supervisor.
+        let exists: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM pragma_table_info('hosts') WHERE name = 'tensorlake_prepared_install_json'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            tx.execute_batch(
+                "ALTER TABLE hosts ADD COLUMN tensorlake_prepared_install_json TEXT;",
+            )?;
+        }
+        tx.execute_batch("PRAGMA user_version = 79;")
+            .context("migrating helm.db to schema version 79")?;
+        version = 79;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -6758,9 +6779,53 @@ impl HelmStore {
     ) -> anyhow::Result<bool> {
         self.conn.call("set Tensorlake pending create task panicked", move |conn| {
             Ok(conn.execute(
-                "UPDATE hosts SET tensorlake_pending_create_at = ?2 WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL",
+                "UPDATE hosts SET tensorlake_pending_create_at = ?2, \
+                 tensorlake_prepared_install_json = CASE WHEN ?2 IS NULL THEN NULL ELSE tensorlake_prepared_install_json END \
+                 WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL",
                 rusqlite::params![host, sent],
             )? == 1)
+        }).await
+    }
+
+    /// Retain the selected snapshot's install facts before sending its create.
+    ///
+    /// These facts deliberately do not populate the admitted coordinates: a
+    /// pending or refused create must not let an actor dial a name collision.
+    /// Keeping them with the outstanding request lets a retry use the exact
+    /// installation it cloned, even if the recipe has since prepared another.
+    pub(crate) async fn set_tensorlake_prepared_create(
+        &self,
+        host: HostId,
+        sent: i64,
+        facts: &crate::tensorlake::prepared::PreparedInstallFacts,
+    ) -> anyhow::Result<bool> {
+        let json = serde_json::to_string(facts).context("encoding prepared installation facts")?;
+        self.conn.call("record prepared Tensorlake create task panicked", move |conn| {
+            Ok(conn.execute(
+                "UPDATE hosts SET tensorlake_pending_create_at = ?2, tensorlake_prepared_install_json = ?3 \
+                 WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL \
+                   AND tensorlake_sandbox_id IS NULL AND remote_farhelm IS NULL AND remote_state_dir IS NULL",
+                rusqlite::params![host, sent, json],
+            )? == 1)
+        }).await
+    }
+
+    /// Read only this host's interrupted prepared create, never the recipe's
+    /// latest snapshot. Admission clears the record so later Rerun uses the
+    /// ordinary inspection and installation path.
+    pub(crate) async fn tensorlake_prepared_install(
+        &self,
+        host: HostId,
+    ) -> anyhow::Result<Option<crate::tensorlake::prepared::PreparedInstallFacts>> {
+        self.conn.call("read prepared Tensorlake create task panicked", move |conn| {
+            let json: Option<String> = conn.query_row(
+                "SELECT tensorlake_prepared_install_json FROM hosts WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL",
+                [host],
+                |row| row.get(0),
+            ).optional()?.flatten();
+            json.map(|json| serde_json::from_str(&json)
+                .map_err(|_| anyhow::anyhow!("this host has prepared installation facts this build cannot read")))
+                .transpose()
         }).await
     }
 
@@ -6790,7 +6855,8 @@ impl HelmStore {
             .await
     }
 
-    /// Admit a Tensorlake install after its copied-supervisor check passed.
+    /// Admit a Tensorlake install after its copied-supervisor check, or after
+    /// its recorded prepared-snapshot clone has reached Running.
     ///
     /// Only the Tensorlake setup executor uses this write for initial
     /// admission. Both coordinates become durable together, opening the
@@ -6809,7 +6875,8 @@ impl HelmStore {
         let remote_state_dir = remote_state_dir.to_string();
         self.conn.call("admit Tensorlake install task panicked", move |conn| {
             Ok(conn.execute(
-                "UPDATE hosts SET remote_farhelm = ?2, remote_state_dir = ?3 WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL",
+                "UPDATE hosts SET remote_farhelm = ?2, remote_state_dir = ?3, tensorlake_prepared_install_json = NULL \
+                 WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL",
                 rusqlite::params![host, remote_farhelm, remote_state_dir],
             )? == 1)
         }).await
@@ -9808,6 +9875,8 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN tensorlake_suspended_at;
                  ALTER TABLE hosts DROP COLUMN tensorlake_pending_create_at;
                  ALTER TABLE hosts DROP COLUMN tensorlake_credential_delivery;
+                 -- Schema 79 added the prepared-snapshot installation facts.
+                 ALTER TABLE hosts DROP COLUMN tensorlake_prepared_install_json;
                  DROP INDEX hosts_entry_uuid;
                  ALTER TABLE hosts DROP COLUMN entry_uuid;
                  PRAGMA user_version = 27;",
@@ -15124,6 +15193,227 @@ mod tests {
         assert_eq!(store.launch_templates().await.unwrap(), vec![template]);
     }
 
+    /// A prepared create needs its own facts across restart, without admitting
+    /// a supervisor early. Recording the vendor ID settles ownership but must
+    /// retain those facts until the exact clone is admitted.
+    #[farhelm_testtrace::test]
+    async fn prepared_create_keeps_facts_until_its_clone_is_admitted() {
+        use crate::tensorlake::prepared::PreparedInstallFacts;
+        let (dir, store) = fresh_store().await;
+        let host = store
+            .register_tensorlake_host(NewTensorlakeHost {
+                destination: "prepared@prepared.sandbox.tensorlake.ai".into(),
+                entry: NewHostEntry::new(Some("Prepared host")).unwrap(),
+                sandbox: "prepared".into(),
+                recipe: "test-recipe".into(),
+                resources: farhelm_proto::tensorlake::recipes::RecipeSize {
+                    cpus: 1,
+                    memory_gb: 1,
+                    disk_gb: 10,
+                },
+            })
+            .await
+            .unwrap();
+        let facts = PreparedInstallFacts {
+            home: "/home/sandbox-user".into(),
+            farhelm_path: "/home/sandbox-user/.local/lib/farhelm/farhelm".into(),
+            state_dir: "/home/sandbox-user/.local/state/farhelm".into(),
+            farhelm_version: "1.2.3".into(),
+        };
+        assert!(
+            store
+                .tensorlake_prepared_install(host)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            store
+                .set_tensorlake_prepared_create(host, 42, &facts)
+                .await
+                .unwrap()
+        );
+        let row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        assert_eq!(row.tensorlake.unwrap().pending_create_at, Some(42));
+        assert!(row.remote_farhelm.is_none() && row.remote_state_dir.is_none());
+        assert!(
+            row.host_identity.is_none(),
+            "facts never import the preparer's identity"
+        );
+        drop(store);
+        let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        assert_eq!(
+            store.tensorlake_prepared_install(host).await.unwrap(),
+            Some(facts.clone())
+        );
+        assert!(
+            store
+                .set_tensorlake_sandbox_id(host, "owned-clone")
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store.tensorlake_prepared_install(host).await.unwrap(),
+            Some(facts.clone())
+        );
+        assert!(
+            store
+                .list_hosts()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|row| row.id == host)
+                .unwrap()
+                .remote_farhelm
+                .is_none()
+        );
+        assert!(
+            store
+                .admit_tensorlake_install(
+                    host,
+                    facts.farhelm_path.to_str().unwrap(),
+                    facts.state_dir.to_str().unwrap(),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .tensorlake_prepared_install(host)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            store
+                .list_hosts()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|row| row.id == host)
+                .unwrap()
+                .remote_farhelm
+                .is_some()
+        );
+        assert!(
+            !store
+                .set_tensorlake_prepared_create(host, 43, &facts)
+                .await
+                .unwrap(),
+            "a later Rerun cannot turn an admitted host into another initial create"
+        );
+    }
+
+    /// A definite refusal must not leave stale install facts for a future
+    /// request, and malformed facts must fail closed without quoting contents.
+    #[farhelm_testtrace::test]
+    async fn prepared_create_refusal_clears_facts_and_corruption_is_sanitized() {
+        let (_dir, store) = fresh_store().await;
+        let host = store
+            .register_tensorlake_host(NewTensorlakeHost {
+                destination: "refused@refused.sandbox.tensorlake.ai".into(),
+                entry: NewHostEntry::new(None).unwrap(),
+                sandbox: "refused".into(),
+                recipe: "test-recipe".into(),
+                resources: farhelm_proto::tensorlake::recipes::RecipeSize {
+                    cpus: 1,
+                    memory_gb: 1,
+                    disk_gb: 10,
+                },
+            })
+            .await
+            .unwrap();
+        store.conn.lock().execute(
+            "UPDATE hosts SET tensorlake_pending_create_at = 42, tensorlake_prepared_install_json = 'private-corrupt-payload' WHERE id = ?1",
+            [host],
+        ).unwrap();
+        let error = store
+            .tensorlake_prepared_install(host)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "this host has prepared installation facts this build cannot read"
+        );
+        assert!(
+            store
+                .set_tensorlake_pending_create(host, None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .tensorlake_prepared_install(host)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            store
+                .list_hosts()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|row| row.id == host)
+                .unwrap()
+                .tensorlake
+                .as_ref()
+                .unwrap()
+                .pending_create_at
+                .is_none()
+        );
+    }
+
+    /// A genuine schema-78 database acquires no inferred prepared facts.
+    /// Preserve existing host identity and ownership markers while adding the
+    /// nullable recovery record; a later reopen must not rerun the migration.
+    #[farhelm_testtrace::test]
+    async fn schema_79_preserves_hosts_without_inventing_prepared_installations() {
+        let (dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "old-host.example", "kept-identity").await;
+        drop(store);
+        let path = dir.path().join("helm.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("ALTER TABLE hosts DROP COLUMN tensorlake_prepared_install_json; PRAGMA user_version = 78;").unwrap();
+            assert_eq!(conn.query_row("SELECT count(*) FROM pragma_table_info('hosts') WHERE name = 'tensorlake_prepared_install_json'", [], |row| row.get::<_, i64>(0)).unwrap(), 0,
+                "premise: the previous schema has no prepared recovery column");
+        }
+        for _ in 0..2 {
+            let migrated = HelmStore::open(&path).await.unwrap();
+            let row = migrated
+                .list_hosts()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|row| row.id == host)
+                .unwrap();
+            assert_eq!(row.host_identity.as_deref(), Some("kept-identity"));
+            assert!(
+                migrated
+                    .tensorlake_prepared_install(host)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(
+                migrated
+                    .conn
+                    .lock()
+                    .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                SCHEMA_VERSION
+            );
+        }
+    }
+
     /// Spec: schema 71 adds the empty Tensorlake recipes table to a schema-70
     /// database, which then stores and lists recipes like a fresh one.
     ///
@@ -15543,6 +15833,8 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN tensorlake_suspended_at;
                  ALTER TABLE hosts DROP COLUMN tensorlake_pending_create_at;
                  ALTER TABLE hosts DROP COLUMN tensorlake_credential_delivery;
+                 -- Schema 79 added the prepared-snapshot installation facts.
+                 ALTER TABLE hosts DROP COLUMN tensorlake_prepared_install_json;
                  DROP INDEX hosts_entry_uuid;
                  ALTER TABLE hosts DROP COLUMN entry_uuid;
                  PRAGMA user_version = 22;",

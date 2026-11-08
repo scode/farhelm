@@ -26,10 +26,12 @@ mod backend;
 pub(crate) mod credential_delivery;
 mod e2e;
 mod http;
+mod installation;
 mod payloads;
 mod plan;
 mod release_payloads;
 mod service;
+mod snapshot_preparer;
 // What a test's stand-in for `ssh` must do with the helm's pipes; every ssh
 // launcher in these tests goes through it.
 #[cfg(test)]
@@ -358,6 +360,7 @@ mod tests {
             linger: LingerBehavior::Simulated(Ok(())),
             launcher: Arc::new(SystemLauncher),
             runtime_units: false,
+            one_shot: false,
             fail_before_rename: false,
         }
     }
@@ -3983,6 +3986,7 @@ mod tests {
             PlanLayout::production(root.path().to_path_buf()),
             "/fixture/farhelm".into(),
         );
+        let tensorlake = tensorlake.with_preparer(sandbox_service.snapshot_preparer());
         let ProbeResponse::TensorlakeProvisionable {
             probe_id,
             destination,
@@ -4053,8 +4057,8 @@ mod tests {
             .find(|row| row.id == accepted.host_id)
             .unwrap();
         assert!(
-            row.tensorlake.as_ref().unwrap().sandbox_id.is_some(),
-            "premise: the refused sandbox was created"
+            row.tensorlake.as_ref().unwrap().sandbox_id.is_none(),
+            "preparation refused copied state before creating the host clone"
         );
         assert!(
             row.remote_farhelm.is_none()
@@ -6656,6 +6660,7 @@ mod tests {
                 linger: LingerBehavior::Simulated(Ok(())),
                 launcher,
                 runtime_units: false,
+                one_shot: false,
                 fail_before_rename: false,
             };
             let result = backend.probe(&target).await;
@@ -6746,6 +6751,7 @@ mod tests {
             linger: LingerBehavior::Simulated(Ok(())),
             launcher: ScriptLauncher::new([script]),
             runtime_units: false,
+            one_shot: false,
             fail_before_rename: false,
         };
         match remote_backend.probe(&remote_target).await {
@@ -6813,6 +6819,7 @@ mod tests {
             linger: LingerBehavior::Simulated(Ok(())),
             launcher: launcher.clone(),
             runtime_units: false,
+            one_shot: false,
             fail_before_rename: false,
         };
         let target = ProbeTarget {
@@ -7135,6 +7142,7 @@ mod tests {
             linger: LingerBehavior::Simulated(Ok(())),
             launcher: launcher.clone(),
             runtime_units: false,
+            one_shot: false,
             fail_before_rename: false,
         };
         let destination = root.path().join("farhelm");
@@ -7221,6 +7229,7 @@ mod tests {
             linger: LingerBehavior::Simulated(Ok(())),
             launcher: launcher.clone(),
             runtime_units: false,
+            one_shot: false,
             fail_before_rename: false,
         };
         let task_temporary = temporary.clone();
@@ -7753,6 +7762,7 @@ mod tests {
                     edit: None,
                 }),
                 runtime_units: false,
+                one_shot: false,
                 fail_before_rename: false,
             };
             let shared_existing = root.path().join("home");
@@ -7822,6 +7832,7 @@ mod tests {
             linger: LingerBehavior::Simulated(Ok(())),
             launcher: Arc::new(FixtureHomeLauncher { home, bin }),
             runtime_units: false,
+            one_shot: false,
             fail_before_rename: false,
         };
         let target = ProbeTarget {
@@ -7936,6 +7947,7 @@ mod tests {
                 bin: bin.clone(),
             }),
             runtime_units: false,
+            one_shot: false,
             fail_before_rename: false,
         };
         let target = ProbeTarget {
@@ -8144,6 +8156,7 @@ mod tests {
                 bin: bin.clone(),
             }),
             runtime_units: false,
+            one_shot: false,
             fail_before_rename: false,
         };
         let target = ProvisioningTarget::ssh("scripted.example");
@@ -8315,6 +8328,7 @@ mod tests {
             linger: LingerBehavior::Simulated(Ok(())),
             launcher: Arc::new(FixtureHomeLauncher { home, bin }),
             runtime_units: false,
+            one_shot: false,
             fail_before_rename: false,
         };
         let target = ProvisioningTarget::ssh("scripted.example");
@@ -8643,6 +8657,7 @@ mod tests {
             linger: LingerBehavior::Simulated(Ok(())),
             launcher: Arc::new(FixtureHomeLauncher { home, bin }),
             runtime_units: false,
+            one_shot: false,
             fail_before_rename: false,
         };
         let target = ProvisioningTarget::ssh("scripted.example");
@@ -8765,6 +8780,7 @@ mod tests {
                     bin: bin.clone(),
                 }),
                 runtime_units: false,
+                one_shot: false,
                 fail_before_rename: false,
             });
             Self {
@@ -9330,6 +9346,7 @@ mod tests {
                 bin: bin.clone(),
             }),
             runtime_units,
+            one_shot: false,
             fail_before_rename: false,
         };
         // The stop step's state directory is the fixture root, which has no
@@ -9832,6 +9849,7 @@ mod tests {
                 edit: None,
             }),
             runtime_units: false,
+            one_shot: false,
             fail_before_rename: false,
         };
         let target = ProvisioningTarget::ssh("scripted.example");
@@ -9899,6 +9917,7 @@ mod tests {
                     edit: Some((path.clone(), "editor")),
                 }),
                 runtime_units: false,
+                one_shot: false,
                 fail_before_rename: false,
             };
             let remote = ProvisioningTarget::ssh("scripted.example");
@@ -11266,6 +11285,7 @@ mod tests {
             linger: LingerBehavior::Simulated(Ok(())),
             launcher: Arc::clone(&launcher) as Arc<dyn CommandLauncher>,
             runtime_units: false,
+            one_shot: false,
             fail_before_rename: false,
         };
         let error = backend
@@ -11329,6 +11349,7 @@ mod tests {
                     edit: None,
                 }),
                 runtime_units: false,
+                one_shot: false,
                 fail_before_rename: false,
             };
             let error = backend
@@ -11385,6 +11406,7 @@ mod tests {
                 edit: None,
             }),
             runtime_units: false,
+            one_shot: false,
             fail_before_rename: false,
         };
         let target = ProvisioningTarget::ssh("scripted.example");
@@ -11450,6 +11472,7 @@ mod tests {
                 edit: None,
             }),
             runtime_units: false,
+            one_shot: false,
             fail_before_rename: false,
         };
         let target = ProvisioningTarget::ssh("scripted.example");

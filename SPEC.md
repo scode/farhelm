@@ -162,10 +162,12 @@ Everything else — no usable systemd user manager, or an architecture with no p
 (run the binary yourself), which always remains available, on the best-effort basis described in
 [Supported host setup](#supported-host-setup).
 
-Tensorlake sandboxes get a preparation step before that inspection: Farhelm uses passwordless sudo to start the login
-manager and enable lingering for the sandbox user. Every recipe's snapshot build checks first that its base boots
-systemd as its init system. Setup still refuses, with an explanation, a sandbox where systemd is not running, such as
-one created from an image a recipe reused before recipes always built snapshots.
+Tensorlake's prepared snapshots include the login-manager and lingering preparation: Farhelm uses passwordless sudo to
+start the login manager and enable lingering for the sandbox user before installing its supervisor in the snapshot.
+Ordinary setup recovery on an existing sandbox still performs that preparation before inspection. Every recipe's
+snapshot build checks first that its base boots systemd as its init system. Setup refuses, with an explanation, a
+sandbox where systemd is not running, such as one created from an image a recipe reused before recipes always built
+snapshots.
 
 Provisioning is idempotent and doubles as recovery: re-running it against an already-provisioned host — including from a
 brand-new helm whose registry was lost — detects the existing supervisor and re-registers the host with all its sessions
@@ -324,20 +326,27 @@ or a sandbox is created, and shows progress in the usual setup view. Its details
 memory. New Tensorlake hosts start with **Start YOLO sessions without asking** on; the other three host permissions
 remain off.
 
-Setup builds the recipe's snapshot if missing (or joins a build already running), creates the named sandbox at the
-recipe's size with the plan's maximum idle timeout and automatic resume off, prepares its user manager, writes any
-recipe agent credentials, and installs Farhelm's supervisor. Every base uses this build path. Rerunning setup against a
-sandbox that already exists skips snapshot building, including for hosts created before recipes always built snapshots.
-Claude Code's authentication is merged into its settings' environment; Codex gets a Farhelm model provider or
-subscription login. Unrelated settings are preserved and malformed files are refused. None clears the managed
-authentication keys without creating an otherwise absent settings file. Credential delivery also runs before each
-connection becomes usable, and when a named token is replaced. Updates do not independently reapply these settings.
+Setup builds the recipe's snapshot if missing (or joins a build already running), ensures its prepared snapshot, and
+creates the named sandbox from it at the recipe's size with the plan's maximum idle timeout and automatic resume off.
+The supervisor starts on that sandbox's boot; setup connects to it and delivers the host's credentials without
+installing Farhelm again. **Prepare snapshot** appears only when preparation is needed, with the explanation **Only the
+first time, and then at most once every 24 hours or after Farhelm updates.** The explanation stays visible while
+waiting, including in folded progress. Every base uses this path for new hosts. Rerunning setup against an existing host
+keeps ordinary user-manager preparation, inspection and installation, and Update keeps its ordinary installation path.
+Rerunning an interrupted initial create first recovers that create's saved installation facts, rather than using the
+recipe's latest prepared snapshot. Hosts created before recipes always built snapshots still skip snapshot building on
+setup recovery. Claude Code's authentication is merged into its settings' environment; Codex gets a Farhelm model
+provider or subscription login. Unrelated settings are preserved and malformed files are refused. None clears the
+managed authentication keys without creating an otherwise absent settings file. Credential delivery also runs before
+each connection becomes usable, and when a named token is replaced. Updates do not independently reapply these settings.
 Token-bearing settings files are private from the start of upload. A sandbox that already contains Farhelm supervisor
-state is refused on first setup: it would copy another host's identity. Farhelm does not connect to that supervisor
-after refusing it, including after the helm restarts. Failed setup keeps the host and its sandbox listed; rerunning
-continues against the same sandbox. When a create's outcome is unknown and the sandbox is not yet visible, setup and
-Delete sandbox keep the host listed until that request settles. A later retry finds and cleans up a sandbox that
-appeared after the failed reply; absence settles only after 15 minutes from the create request.
+state in a user-supplied base is refused during preparation, where the recipe row shows the failure, or on first
+ordinary setup: it would copy another host's identity. Prepared snapshots carry no supervisor state, so each clone
+creates its own identity on boot. Farhelm does not connect to a supervisor whose copied state it refused, including
+after the helm restarts. Failed setup keeps the host and its sandbox listed; rerunning continues against the same
+sandbox. When a create's outcome is unknown and the sandbox is not yet visible, setup and Delete sandbox keep the host
+listed until that request settles. A later retry finds and cleans up a sandbox that appeared after the failed reply;
+absence settles only after 15 minutes from the create request.
 
 Confirmed 2026-10-10: a host entry is one logical host from the user's point of view. Correcting its destination, or
 adopting a new identity for it, changes the machine or installation behind the entry, not which host it is to the user;
@@ -442,39 +451,65 @@ unchanged Close footer. Switching Settings sections hides those actions with the
 use the dialog's pinned footer. Keyboard navigation reaches the answers after the fields. As with other framed dialogs,
 a very short window scrolls the whole card when its header and footer cannot fit.
 
-Settings also lists **Sandboxes not on this helm**: sandbox names beginning with `farhelm-host-` or `farhelm-build-`
-that no host or recipe build on this helm owns. Each shows its creation time when available, its state, and **from
-another helm** when its name carries another helm's tag. **Delete** asks plainly before terminating it and deleting its
-snapshots. Unfinished cleanup remains in the list with its error and **Retry cleanup**, even after closing and reopening
-Settings; running cleanup shows **Cleaning up…**. This operation state lasts until cleanup succeeds or the helm
-restarts. With a saved API key the section stays visible even when empty, with a small **Refresh** beside its heading. A
-read shows **Checking…**, then an empty success shows **None found · checked HH:MM** in the viewer's local time. A
-failed read shows its reason and keeps earlier rows rather than claiming an empty result. Farhelm never cleans it
-automatically. The browser-test namespace `farhelm-sbx-` and sandboxes without Farhelm's reserved prefixes never appear.
+Settings also lists **Sandboxes not on this helm**: sandbox names beginning with `farhelm-host-`, `farhelm-build-` or
+`farhelm-prepare-` that no host or recipe build or preparation on this helm owns. Each shows its creation time when
+available, its state, and **from another helm** when its name carries another helm's tag. **Delete** asks plainly before
+terminating it and deleting its snapshots. Unfinished cleanup remains in the list with its error and **Retry cleanup**,
+even after closing and reopening Settings; running cleanup shows **Cleaning up…**. This operation state lasts until
+cleanup succeeds or the helm restarts. With a saved API key the section stays visible even when empty, with a small
+**Refresh** beside its heading. A read shows **Checking…**, then an empty success shows **None found · checked HH:MM**
+in the viewer's local time. A failed read shows its reason and keeps earlier rows rather than claiming an empty result.
+Farhelm never cleans it automatically. The browser-test namespace `farhelm-sbx-` and sandboxes without Farhelm's
+reserved prefixes never appear.
 
-Every recipe's new hosts start from a snapshot Farhelm builds; the UI calls it a snapshot, never a template, which means
-launch templates. Saving a recipe never builds one, because a build bills: the list offers **Build snapshot** while a
-recipe has none, **Rebuild snapshot** once it has one, and **Retry** after a build failed or was cut short by the helm
-stopping, all three needing a saved API key and Farhelm's registered SSH key. One build per recipe runs at a time; a
-second click joins it, and different recipes build at once. A build creates a builder sandbox named
-`farhelm-build-<helm tag>-<recipe>` from the recipe's base at the recipe's size, which bills while it runs; refuses to
-go on unless systemd is the sandbox's init, passwordless sudo works, apt is available, and bash, curl and git exist,
-naming the first missing requirement; installs the recipe's packages with apt, then Claude Code and Codex with their
-official installers, each downloaded completely over HTTPS before it runs, and links both onto every default `PATH`;
-empties `/etc/machine-id` so each host gets its own; takes a filesystem snapshot and waits until Tensorlake reports it
-completed; records it; then terminates the builder and deletes the builder's other snapshots. While a build runs, the
-recipe's row names its step ("step 5 of 9"); afterwards it says when the snapshot was built and the agents' versions, or
-that the build failed, at which step and why, with **Retry**. The row warns when the recipe's base or packages changed
-since the build, and when its disk is now smaller than the snapshot's, which a host cannot start from. A rebuild
-replaces the snapshot only once the new one is recorded and then deletes the old one; hosts already started from it keep
-running. A failed build leaves the previous snapshot in use and deletes its builder and the builder's snapshots. Every
-builder and snapshot is recorded before anything else happens, so whatever a failed deletion or a helm stopping
-mid-build leaves is deleted by the next build or by deleting the recipe, and the row says when something still awaits
-deletion; nothing cleans up at helm start. Deleting a recipe cancels its running build and deletes its builder and
-snapshots first; if Tensorlake refuses any of that, or a build sandbox Farhelm asked for in the last 15 minutes may
-still appear, the recipe stays, with the reason, so a retry finishes the job. Changing a base keeps the built snapshot
-until a successful rebuild replaces it. A recipe cannot select a snapshot Farhelm built for a recipe as its base, its
-own included, because Farhelm deletes those when their recipe moves on; that save is refused.
+Every recipe supplies a built snapshot and, on first use, a prepared snapshot for new hosts. The UI calls these
+artifacts snapshots, never templates, a word reserved for launch templates. Saving a recipe never builds one, because a
+build bills: the list offers **Build snapshot** while a recipe has none, **Rebuild snapshot** once it has one, and
+**Retry** after a build failed or was cut short by the helm stopping, all three needing a saved API key and Farhelm's
+registered SSH key. One build per recipe runs at a time; a second click joins it, and different recipes build at once. A
+build creates a builder sandbox named `farhelm-build-<helm tag>-<recipe>` from the recipe's base at the recipe's size,
+which bills while it runs; refuses to go on unless systemd is the sandbox's init, passwordless sudo works, apt is
+available, and bash, curl and git exist, naming the first missing requirement; installs the recipe's packages with apt,
+then Claude Code and Codex with their official installers, each downloaded completely over HTTPS before it runs, and
+links both onto every default `PATH`; empties `/etc/machine-id` so each host gets its own; takes a filesystem snapshot
+and waits until Tensorlake reports it completed; records it; then terminates the builder and deletes the builder's other
+snapshots. While a build runs, the recipe's row names its step ("step 5 of 9"); afterwards it says when the snapshot was
+built and the agents' versions, or that the build failed, at which step and why, with **Retry**. The row warns when the
+recipe's base or packages changed since the build, and when its disk is now smaller than the snapshot's, which a host
+cannot start from. A rebuild replaces the snapshot only once the new one is recorded and then deletes the old one; hosts
+already started from it keep running. A failed build leaves the previous snapshot in use and deletes its builder and the
+builder's snapshots. Every builder and snapshot is recorded before anything else happens, so whatever a failed deletion
+or a helm stopping mid-build leaves is deleted by the next build or by deleting the recipe, and the row says when
+something still awaits deletion; nothing cleans up at helm start. Deleting a recipe cancels its running build and
+deletes its builder and snapshots first; if Tensorlake refuses any of that, or a build sandbox Farhelm asked for in the
+last 15 minutes may still appear, the recipe stays, with the reason, so a retry finishes the job. Changing a base keeps
+the built snapshot until a successful rebuild replaces it. A recipe cannot select a snapshot Farhelm built for a recipe
+as its base, its own included, because Farhelm deletes those when their recipe moves on; that save is refused.
+
+Preparation takes a second filesystem snapshot on top of that built snapshot, with Farhelm's supervisor installed and
+its user unit enabled to start at boot. A short-lived `farhelm-prepare-<helm tag>-<recipe>` sandbox uses the confirmed
+recipe's CPUs and memory and the built snapshot's own disk size. It bills while preparing and has a 15-minute idle
+timeout if the helm stops. Preparation stops the supervisor without disabling its unit, removes its whole state
+directory, verifies that no supervisor database or other state remains, and empties `/etc/machine-id` before taking the
+snapshot. Each host started from it therefore creates its own supervisor identity; copied supervisor state is never
+reset or accepted.
+
+One prepared snapshot is current per recipe. It becomes stale only when it is more than 24 hours old, the helm's Farhelm
+version differs, or the recipe's built snapshot changes. The first new host that needs a fresh one prepares it;
+concurrent requests join that preparation. Saving a recipe does not prepare anything, and there is no Prepare button or
+background renewal. Rebuild still rebuilds the recipe's software snapshot. Preparation records the new snapshot before
+retiring and deleting its predecessor, terminates its preparer and deletes its other snapshots. Failed or interrupted
+cleanup keeps ownership recorded for a later preparation or recipe deletion; deleting a recipe cancels and cleans both
+its build and preparation. A failed preparation retains the previous snapshot's record but never reuses a stale one.
+
+Farhelm delivers none of its own agent logins, endpoint credentials, GitHub tokens, gh Git configuration or tunnels to
+the preparer. A custom base's existing authentication is preserved and may be inherited by hosts created from it; its
+author is responsible for that content. Credentials and tunnels selected in Farhelm are applied separately to each host.
+
+The recipe row shows preparation below its built-snapshot status: readiness with age, Farhelm version and the 24-hour
+policy in the positive tone; a pulsing current phase and step count while preparing; the reason when stale; and the
+failed phase or an interrupted attempt with the next-new-host retry explanation. An idle row qualifies readiness as last
+checked, since age display can advance without a new helm read. The helm always checks freshness before reuse.
 
 A sandbox matching a recipe's build name is recovered only from an outstanding create request; a recorded sandbox ID
 permits cleaning up that sandbox alone. A build start without either record does not establish ownership. An unrelated
@@ -3919,11 +3954,11 @@ are configured, the helm also posts waiting alerts and explicit test alerts to t
 optional access token (see Status). This connection sends session titles and host display names; it follows no
 redirects. Settings allow HTTP for a private server, which sends those values and any token without TLS protection. When
 a Tensorlake API key is saved, the helm calls Tensorlake's REST API at `https://api.tensorlake.ai` with it as a bearer
-token, for the Tensorlake actions the user takes (Settings' **Test** lists the account's sandboxes; a snapshot build
-creates, snapshots and deletes sandboxes and snapshots). These requests follow no redirects and are not retried, and the
-key appears in no reply, error message or log. A snapshot build also reaches its builder sandbox with `ssh` through
-Tensorlake's gateway, with Farhelm's own key alone, and records the gateway's host key on first use in a known_hosts
-file in the helm's state directory, never in the user's own.
+token, for the Tensorlake actions the user takes (Settings' **Test** lists the account's sandboxes; a snapshot build or
+preparation creates, snapshots and deletes sandboxes and snapshots). These requests follow no redirects and are not
+retried, and the key appears in no reply, error message or log. A snapshot build or preparation also reaches its sandbox
+with `ssh` through Tensorlake's gateway, with Farhelm's own key alone, and records the gateway's host key on first use
+in a known_hosts file in the helm's state directory, never in the user's own.
 
 - **Client to helm**: a standalone helm serves its web UI over plain HTTP bound to loopback only, with a required token.
   The helm refuses to bind non-loopback addresses in v1; TLS serving is post-v1. Reaching the UI from another machine

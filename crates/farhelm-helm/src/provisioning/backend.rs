@@ -332,6 +332,19 @@ pub(super) trait ProvisioningBackend: Send + Sync {
             "",
         ))
     }
+    /// Wait for the gateway after the API reports Running, without changing
+    /// services or files. Prepared clones must be reachable before admission
+    /// and credential delivery; unsupported backends refuse that boundary.
+    async fn wait_tensorlake_ssh(
+        &self,
+        _target: &ProvisioningTarget,
+    ) -> Result<(), BackendFailure> {
+        Err(BackendFailure::new(
+            "this backend cannot wait for Tensorlake SSH",
+            "",
+        ))
+    }
+
     /// Prepare a newly created sandbox's user manager and return its home.
     /// Unsupported backends fail explicitly rather than skipping preparation.
     async fn prepare_tensorlake_sandbox(
@@ -369,6 +382,22 @@ pub(super) trait ProvisioningBackend: Send + Sync {
             "",
         ))
     }
+    /// Leave the installed supervisor enabled for clone boot, but stop all
+    /// of its processes and remove its entire planned state before capture.
+    /// Success also verifies state absence and clears machine-id. Injected
+    /// backends must opt in explicitly; ordinary setup never needs this proof.
+    async fn finish_snapshot_install(
+        &self,
+        _target: &ProvisioningTarget,
+        _unit: &str,
+        _state_dir: &Path,
+    ) -> Result<(), BackendFailure> {
+        Err(BackendFailure::new(
+            "this backend cannot verify a prepared snapshot installation",
+            "",
+        ))
+    }
+
     async fn probe(&self, target: &ProbeTarget) -> Result<ProbeObservation, BackendFailure>;
     async fn inspect(&self, target: &ProbeTarget) -> Result<ReachOutcome, BackendFailure>;
     async fn ensure_directories(
@@ -534,6 +563,8 @@ pub(super) struct SystemBackend {
     pub(super) linger: LingerBehavior,
     pub(super) launcher: Arc<dyn CommandLauncher>,
     pub(super) runtime_units: bool,
+    /// Reused preparer names must never ride a previous sandbox's SSH master.
+    pub(super) one_shot: bool,
     #[cfg(test)]
     pub(super) fail_before_rename: bool,
 }
@@ -666,8 +697,18 @@ impl SystemBackend {
             linger: LingerBehavior::Real,
             launcher: Arc::new(SystemLauncher),
             runtime_units: false,
+            one_shot: false,
             #[cfg(test)]
             fail_before_rename: false,
+        }
+    }
+
+    /// Use a new SSH transport for every preparer command, including inspect
+    /// and uploads. The normal host backend keeps its shared connection.
+    pub(super) fn one_shot(control_dir: PathBuf) -> Self {
+        Self {
+            one_shot: true,
+            ..Self::new(control_dir)
         }
     }
 
@@ -685,20 +726,21 @@ impl SystemBackend {
             linger: LingerBehavior::Simulated(result),
             launcher: Arc::new(SystemLauncher),
             runtime_units,
+            one_shot: false,
             fail_before_rename: false,
         }
     }
 
-    /// Build a remote shell command on the same option-safe prefix used by
-    /// steady-state supervisor connections, riding provisioning's own shared
-    /// connection rather than the supervisor connection's.
+    /// Build every remote operation with the selected SSH connection policy.
+    /// Ordinary host work rides provisioning's own shared connection;
+    /// preparation uses one-shot connections because its sandbox name recurs.
     ///
     /// The separate connection is what lets provisioning run while the helm
     /// is connected on a host whose sshd allows one session per connection:
     /// the supervisor connection's master spends that session on the
     /// long-lived proxy (see the `crate::ssh` module docs). Every caller in
-    /// this file goes through here, so no provisioning step can land on the
-    /// supervisor connection by accident.
+    /// this file goes through here, including inspect and uploads, so no
+    /// preparation step can accidentally reuse a previous sandbox's master.
     ///
     /// `access` is the target's: a Tensorlake sandbox is provisioned with
     /// Farhelm's own key, like every other connection to it, and the payload
@@ -710,12 +752,23 @@ impl SystemBackend {
         remote_command: String,
     ) -> anyhow::Result<tokio::process::Command> {
         let mut command = tokio::process::Command::new("ssh");
-        command.args(crate::ssh::ssh_base_args(
-            destination,
-            &self.control_dir,
-            crate::ssh::SharedConnection::Provisioning,
-            &crate::ssh::SshAccess::resolve(access, &self.control_dir)?,
-        )?);
+        let access = crate::ssh::SshAccess::resolve(access, &self.control_dir)?;
+        if self.one_shot {
+            let options = match &access {
+                crate::ssh::SshAccess::UserConfig => Vec::new(),
+                crate::ssh::SshAccess::Tensorlake(access) => {
+                    access.oneshot_options().map_err(anyhow::Error::msg)?
+                }
+            };
+            command.args(crate::ssh::ssh_oneshot_args(destination, &options));
+        } else {
+            command.args(crate::ssh::ssh_base_args(
+                destination,
+                &self.control_dir,
+                crate::ssh::SharedConnection::Provisioning,
+                &access,
+            )?);
+        }
         // ssh concatenates its trailing argv and reparses it remotely. Keep
         // the complete `sh -c` invocation in one shell-quoted string so the
         // script cannot absorb words from a destination or path.
@@ -2248,6 +2301,10 @@ impl ProvisioningBackend for SystemBackend {
         }
         Ok(home)
     }
+    async fn wait_tensorlake_ssh(&self, target: &ProvisioningTarget) -> Result<(), BackendFailure> {
+        self.wait_sandbox_ssh(target).await
+    }
+
     async fn prepare_tensorlake_sandbox(
         &self,
         target: &ProvisioningTarget,
@@ -2269,6 +2326,15 @@ impl ProvisioningBackend for SystemBackend {
         state_dir: &Path,
     ) -> Result<(), BackendFailure> {
         self.check_copied_state(target, state_dir).await
+    }
+
+    async fn finish_snapshot_install(
+        &self,
+        target: &ProvisioningTarget,
+        unit: &str,
+        state_dir: &Path,
+    ) -> Result<(), BackendFailure> {
+        self.finish_prepared_install(target, unit, state_dir).await
     }
     async fn probe(&self, target: &ProbeTarget) -> Result<ProbeObservation, BackendFailure> {
         let (mut child, remote) = self.spawn_probe(target).await?;
@@ -3758,6 +3824,7 @@ mod tests {
                 holder_pid: holder_pid.clone(),
             }),
             runtime_units: false,
+            one_shot: false,
             fail_before_rename: false,
         };
         let result = tokio::time::timeout(

@@ -419,6 +419,7 @@ mod tests {
             None,
             Some(fake),
             crate::provisioning::credential_delivery::CredentialDelivery::detached(store.clone()),
+            Arc::new(crate::tensorlake::prepared::UnavailablePreparer),
         )));
         let events = Arc::new(FleetEvents::new());
         let (client, _peer) = connected_client().await;

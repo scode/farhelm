@@ -18,6 +18,16 @@ import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { drainedRoute } from "./helpers/drained-route";
 import { requireHelmBuild } from "./helpers/helm-build";
 
+/** This explanation must survive changing preparation messages in live setup. */
+const PREPARATION_EXPLANATION =
+  "Only the first time, and then at most once every 24 hours or after Farhelm updates.";
+
+/** Action targets distinguish the temporary installer from the host it prepares. */
+async function backendEvents(root: string): Promise<{ event: string; target: string }[]> {
+  return (await readFile(path.join(root, "events.jsonl"), "utf8"))
+    .split("\n").filter(Boolean).map((line) => JSON.parse(line));
+}
+
 /** Atomic controls keep a running step from ever observing half a file. */
 async function controls(
   kind: "tensorlake_fake" | "provisioning_backend",
@@ -426,13 +436,14 @@ for (const palette of ["dark", "light"] as const) {
             const sandbox = `farhelm-host-test-${palette}-${round}`;
             const names = [
               `Build the snapshot for recipe ${recipe} (packages, Claude Code and Codex; takes a few minutes)`,
-              `Create sandbox ${sandbox} with 4 CPUs, 16 GB memory and 50 GB disk`,
-              "Start the sandbox's login manager and keep the user manager running",
-              "Install Farhelm's supervisor and open the recipe's tunnels when the host connects",
+              "Prepare snapshot",
+              `Create sandbox ${sandbox} with 4 CPUs, 16 GB memory and 50 GB disk from the prepared snapshot`,
+              "Configure the recipe's agent credentials",
+              "Connect to the supervisor that starts at boot and open the recipe's tunnels",
             ];
             const confirmation =
               `Create Tensorlake sandbox ${sandbox}\nSize: 4 CPUs,  16 GB memory, 50 GB disk\n${
-                names.join("\n")
+                names.map((name, index) => index === 1 ? `${name}\n${PREPARATION_EXPLANATION}` : name).join("\n")
               }\n`;
             plans.push({ confirmation, names });
             await route.fulfill({
@@ -452,7 +463,7 @@ for (const palette of ["dark", "light"] as const) {
                     id: `step-${index}`,
                     name,
                     paths: [],
-                    explanation: null,
+                    explanation: index === 1 ? PREPARATION_EXPLANATION : null,
                   })),
                 },
               },
@@ -577,13 +588,10 @@ for (const palette of ["dark", "light"] as const) {
           await expectInlineAnswerVisible(answer);
         }
         const steps = body.locator("ol.provisioning-plan-steps");
-        await expect(steps.getByRole("listitem")).toHaveCount(4);
-        await expect(steps.locator(".provisioning-plan-number")).toHaveText([
-          "1",
-          "2",
-          "3",
-          "4",
-        ]);
+        await expect(steps.getByRole("listitem")).toHaveCount(plans[0].names.length);
+        await expect(steps.locator(".provisioning-plan-number")).toHaveText(
+          plans[0].names.map((_, index) => String(index + 1)),
+        );
         await expect(steps.locator(".provisioning-plan-step-name")).toHaveText(
           plans[0].names,
         );
@@ -703,9 +711,9 @@ for (const palette of ["dark", "light"] as const) {
           plans[1].names,
         );
         expect(
-          plans[1].names[1],
+          plans[1].names[2],
           "Back followed by Continue displays the fresh plan",
-        ).not.toBe(plans[0].names[1]);
+        ).not.toBe(plans[0].names[2]);
         await footer.getByRole("button", { name: "Cancel", exact: true })
           .click();
         await expect(dialog).toHaveCount(0);
@@ -757,14 +765,14 @@ for (const palette of ["dark", "light"] as const) {
 }
 
 /** Spec: SSH's skip preference cannot authorize billed creation. The managed
- * recipe builds, progress grows into ordinary setup steps, and deleting the
- * host terminates its sandbox. Why: a dialog-only assertion would miss billed
- * resources left behind or a setup placeholder that never becomes real work. */
+ * recipe builds and prepares lazily, live progress explains the first wait,
+ * and a second host reuses that installation. Why: a completed dialog alone
+ * cannot show whether every new host still pays for installation. */
 test("adding a Tensorlake host confirms billing and keeps setup progress", async ({ page, request }) => {
   const name = "e2e-tensorlake-host";
   const recipe = "e2e-host-recipe";
   const fake = await controls("tensorlake_fake", { snapshot_polls: 0 });
-  await controls("provisioning_backend", { default: { hold_actions: true } });
+  const backend = await controls("provisioning_backend", { default: { hold_actions: true } });
   expect((await hosts(request)).some((h) => h.alias === name)).toBe(false);
   expect(
     (await request.put("/api/tensorlake", {
@@ -788,9 +796,13 @@ test("adding a Tensorlake host confirms billing and keeps setup progress", async
   ).toBe(true);
   await patchPreferences(request, { skip_host_setup_confirmation: true });
   let host: any;
+  let secondHost: any;
   try {
     await page.goto("/");
     await openHostsPanel(page);
+    // Global details deliberately suppresses the per-run Collapse control.
+    // Exercise the ordinary auto-expanded run before folding it below.
+    await page.locator(".host-details-toggle").uncheck();
     await page.getByRole("button", { name: "Add host", exact: true }).last()
       .click();
     const dialog = page.getByRole("dialog", { name: "Add host", exact: true });
@@ -817,6 +829,8 @@ test("adding a Tensorlake host confirms billing and keeps setup progress", async
     ).toHaveAttribute("href", "https://www.tensorlake.ai/pricing");
     await expect(dialog.getByText("On Usage Credits", { exact: false }))
       .toBeVisible();
+    await expect(dialog.getByText("Prepare snapshot", { exact: true })).toBeVisible();
+    await expect(dialog.getByText(PREPARATION_EXPLANATION, { exact: true })).toBeVisible();
     expect(
       (await hosts(request)).some((h) => h.alias === name),
       "confirmation alone creates nothing",
@@ -832,8 +846,18 @@ test("adding a Tensorlake host confirms billing and keeps setup progress", async
     expect(host.tensorlake.recipe).toBe(recipe);
     await expect.poll(async () =>
       (await (await request.get(`/api/hosts/${host.id}/provisioning`)).json())
-        .steps.map((s: any) => s.step)
-    ).toContain("prepare-sandbox");
+        .steps.find((s: any) => s.step === "prepare-snapshot")?.status
+    ).toBe("running");
+    await expect.poll(async () =>
+      (await backendEvents(backend)).some((event) => event.event === "prepare-sandbox")
+    ).toBe(true);
+    const row = hostRowByName(page, name);
+    const preparing = row.locator('.provisioning-step[data-step="prepare-snapshot"]');
+    await expect(preparing).toHaveAttribute("data-status", "running");
+    await expect(preparing.getByText(PREPARATION_EXPLANATION, { exact: true })).toBeVisible();
+    await row.locator(".provisioning-run-fold").click();
+    await row.locator(".host-update-verb").hover();
+    await expect(row.locator(".host-update-popup").getByText(PREPARATION_EXPLANATION, { exact: true })).toBeVisible();
     await controls("provisioning_backend", {});
     await expect.poll(async () =>
       (await (await request.get(`/api/hosts/${host.id}/provisioning`)).json())
@@ -847,6 +871,42 @@ test("adding a Tensorlake host confirms billing and keeps setup progress", async
     expect(progress.steps.map((s: any) => s.step)).not.toContain(
       "set-up-farhelm",
     );
+    const preparedRecipe = (await (await request.get("/api/tensorlake/recipes")).json())
+      .recipes.find((r: any) => r.name === recipe);
+    expect(preparedRecipe.prepared.source_snapshot).toBe(preparedRecipe.snapshot.id);
+    expect(preparedRecipe.preparation.state).toBe("idle");
+    const beforeSecond = JSON.parse(await readFile(path.join(fake, "state.json"), "utf8"));
+    const firstClone = beforeSecond.sandboxes.find((s: any) => s.name === host.tensorlake.sandbox);
+    expect(firstClone.snapshot_id).toBe(preparedRecipe.prepared.id);
+    const installerEvents = await backendEvents(backend);
+    expect(installerEvents.filter((event) => event.event === "finish-snapshot-install")).toHaveLength(1);
+    await page.getByRole("button", { name: "Add host", exact: true }).last().click();
+    await dialog.getByRole("button", { name: "Tensorlake sandbox", exact: true }).click();
+    await dialog.getByRole("textbox", { name: "Name", exact: true }).fill(`${name}-second`);
+    await dialog.getByRole("combobox", { name: "Recipe", exact: true }).selectOption(recipe);
+    await dialog.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "Create sandbox", exact: true })).toBeVisible();
+    await expect(dialog.getByText("Prepare snapshot", { exact: true })).toHaveCount(0);
+    await expect(dialog.getByText(PREPARATION_EXPLANATION, { exact: true })).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Create sandbox", exact: true }).click();
+    await expect.poll(async () => {
+      secondHost = (await hosts(request)).find((h) => h.alias === `${name}-second`);
+      return secondHost?.kind;
+    }).toBe("tensorlake");
+    await expect.poll(async () =>
+      (await (await request.get(`/api/hosts/${secondHost.id}/provisioning`)).json()).status
+    ).toBe("completed");
+    const secondProgress = await (await request.get(`/api/hosts/${secondHost.id}/provisioning`)).json();
+    expect(secondProgress.steps.map((s: any) => s.step)).not.toContain("prepare-snapshot");
+    const afterSecond = JSON.parse(await readFile(path.join(fake, "state.json"), "utf8"));
+    const newSandboxes = afterSecond.sandboxes.filter((s: any) => !beforeSecond.sandboxes.some((old: any) => old.id === s.id));
+    expect(newSandboxes, "fresh reuse allocates only the new host").toHaveLength(1);
+    expect(newSandboxes[0].snapshot_id).toBe(preparedRecipe.prepared.id);
+    expect((await backendEvents(backend)).slice(installerEvents.length).some((event) =>
+      ["prepare-sandbox", "install-farhelm", "enable-supervisor", "finish-snapshot-install"].includes(event.event)
+    )).toBe(false);
+    expect((await request.delete(`/api/hosts/${secondHost.id}`)).ok()).toBe(true);
+    secondHost = null;
     expect((await request.delete(`/api/hosts/${host.id}`)).ok()).toBe(true);
     host = null;
     const model = JSON.parse(
@@ -858,6 +918,7 @@ test("adding a Tensorlake host confirms billing and keeps setup progress", async
   } finally {
     await controls("provisioning_backend", {});
     if (host) await request.delete(`/api/hosts/${host.id}`);
+    if (secondHost) await request.delete(`/api/hosts/${secondHost.id}`);
     await request.delete(`/api/tensorlake/recipes/${recipe}`);
     await request.put("/api/tensorlake", {
       data: { clear_api_key: true, create_without_asking: false },
@@ -993,8 +1054,9 @@ test("an inline image-base recipe builds before creating through the Tensorlake 
       await (await request.get(`/api/hosts/${host.id}/provisioning`)).json();
     expect(progress.steps.find((s: any) => s.step === "build-snapshot")?.status)
       .toBe("completed");
-    const built = (await (await request.get("/api/tensorlake/recipes")).json())
-      .recipes.find((r: any) => r.name === recipe).snapshot;
+    const recipeView = (await (await request.get("/api/tensorlake/recipes")).json())
+      .recipes.find((r: any) => r.name === recipe);
+    const built = recipeView.snapshot;
     expect(built, "the inline recipe recorded a built snapshot").toBeTruthy();
     expect(built.base).toEqual({ kind: "image", image: "example/systemd" });
     expect(built.packages).toEqual(["jq"]);
@@ -1002,7 +1064,15 @@ test("an inline image-base recipe builds before creating through the Tensorlake 
     const sandbox = model.sandboxes.find((s: any) => s.name === host.tensorlake.sandbox);
     expect(sandbox, "the registered host has its own sandbox in the fake").toBeTruthy();
     expect(sandbox.status).toBe("running");
-    expect(sandbox.snapshot_id).toBe(built.id);
+    const prepared = recipeView.prepared;
+    expect(prepared, "the inline recipe also recorded Farhelm's installation").toBeTruthy();
+    expect(prepared.source_snapshot).toBe(built.id);
+    const checkpoint = model.snapshots.find((s: any) => s.id === prepared.id);
+    const preparer = model.sandboxes.find((s: any) => s.id === checkpoint.sandbox_id);
+    expect(preparer.name).toMatch(/^farhelm-prepare-/);
+    expect(preparer.snapshot_id).toBe(built.id);
+    expect(preparer.status).toBe("terminated");
+    expect(sandbox.snapshot_id).toBe(prepared.id);
   } finally {
     if (host) await request.delete(`/api/hosts/${host.id}`);
     await request.delete(`/api/tensorlake/recipes/${recipe}`);
@@ -1127,14 +1197,15 @@ test("cancel retires a Tensorlake creation before a queued answer", async ({ pag
 });
 
 for (const skipTensorlake of [false, true]) {
-  /** A failed host create leaves a registered host with no sandbox. Build its
-   * recipe first so the injected create refusal cannot hit a builder instead.
+  /** A failed host create leaves a registered host with no sandbox. Build and
+   * prepare first so the refusal cannot hit a builder or preparer instead.
    * Rerun must use only Tensorlake's billing preference, with no answer that
    * changes SSH's, and create that host from the same recorded snapshot. */
   test(`rerun before first create uses Tensorlake skip=${skipTensorlake}`, async ({ page, request }) => {
     const name = `e2e-rerun-policy-${skipTensorlake}`;
     const recipe = `e2e-rerun-recipe-${skipTensorlake}`;
     let host: any;
+    let primerHost: any;
     const fake = await controls("tensorlake_fake", { snapshot_polls: 0 });
     await controls("provisioning_backend", {});
     expect(
@@ -1178,6 +1249,28 @@ for (const skipTensorlake of [false, true]) {
         .toEqual(["idle", false, true]);
       expect(built.base).toEqual({ kind: "image", image: "example/systemd" });
       expect(built.packages).toEqual([]);
+      // Lazy preparation has no button. A short-lived first host establishes
+      // the real cache before the next create is deliberately refused.
+      const primerProbe = await (await request.post("/api/hosts/probe", {
+        data: { target: { kind: "tensorlake", name: `${name}-primer`, recipe } },
+      })).json();
+      const primerAccepted = await request.post("/api/hosts/provision", {
+        data: { probe_id: primerProbe.probe_id },
+      });
+      expect(primerAccepted.ok(), await primerAccepted.text()).toBe(true);
+      primerHost = { id: (await primerAccepted.json()).host_id };
+      await expect.poll(async () =>
+        (await (await request.get(`/api/hosts/${primerHost.id}/provisioning`)).json()).status,
+      ).toBe("completed");
+      const ready = (await (await request.get("/api/tensorlake/recipes")).json())
+        .recipes.find((r: any) => r.name === recipe);
+      const prepared = ready.prepared;
+      expect(prepared?.source_snapshot).toBe(built.id);
+      expect(prepared.stale_reason).toBeNull();
+      expect(ready.preparation.state).toBe("idle");
+      const removedPrimer = await request.delete(`/api/hosts/${primerHost.id}`);
+      expect(removedPrimer.ok(), await removedPrimer.text()).toBe(true);
+      primerHost = null;
       const beforeCreate = JSON.parse(await readFile(path.join(fake, "state.json"), "utf8"));
       const snapshot = beforeCreate.snapshots.find((s: any) => s.id === built.id);
       expect(snapshot, "the fixture owns a completed snapshot").toBeTruthy();
@@ -1209,6 +1302,7 @@ for (const skipTensorlake of [false, true]) {
         .toBe("skipped");
       expect(failed.steps.find((s: any) => s.step === "create-sandbox")?.status)
         .toBe("failed");
+      expect(failed.steps.some((s: any) => s.step === "prepare-snapshot")).toBe(false);
       const model = JSON.parse(
         await readFile(path.join(fake, "state.json"), "utf8"),
       );
@@ -1280,15 +1374,16 @@ for (const skipTensorlake of [false, true]) {
         .toBe("completed");
       const afterRerun = JSON.parse(await readFile(path.join(fake, "state.json"), "utf8"));
       const newSandboxes = afterRerun.sandboxes.filter((s: any) => !priorSandboxIds.includes(s.id));
-      expect(newSandboxes, "the retry creates one host and no new builder").toHaveLength(1);
+      expect(newSandboxes, "the retry creates one host and no new builder or preparer").toHaveLength(1);
       expect(newSandboxes[0].name).toMatch(/^farhelm-host-/);
       expect(newSandboxes[0].status).toBe("running");
-      expect(newSandboxes[0].snapshot_id).toBe(built.id);
+      expect(newSandboxes[0].snapshot_id).toBe(prepared.id);
       const prefs = await (await request.get("/api/preferences")).json();
       expect(prefs.skip_host_setup_confirmation).toBe(!skipTensorlake);
     } finally {
       await controls("tensorlake_fake", {});
       if (host) await request.delete(`/api/hosts/${host.id}`);
+      if (primerHost) await request.delete(`/api/hosts/${primerHost.id}`);
       await request.delete(`/api/tensorlake/recipes/${recipe}`);
       await request.put("/api/tensorlake", {
         data: { clear_api_key: true, create_without_asking: false },

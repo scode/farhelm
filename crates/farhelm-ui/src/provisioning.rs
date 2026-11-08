@@ -617,16 +617,18 @@ pub(crate) struct UpdateProgressSummary {
     pub(crate) started_at: Instant,
 }
 
-/// One run step in the hover popup, with the helm's warning or failure reason.
+/// One run step in the hover popup, with its policy and warning or failure reason.
 ///
 /// The id is a stable handle and the name is for people. A folded row can
 /// hide the expanded rail for this run, so the popup must retain a reason
-/// that changes what the host will do, such as lingering falling back to login.
+/// that changes what the host will do, such as lingering falling back to login,
+/// and explanations that qualify the work while the user waits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UpdateStepLine {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) status: String,
+    pub(crate) explanation: Option<String>,
     pub(crate) message: Option<String>,
     pub(crate) current: bool,
 }
@@ -642,6 +644,17 @@ fn progress_step_name(step: &crate::api::ProvisioningStep) -> &str {
         .map(crate::peer::PeerText::raw)
         .filter(|name| !name.is_empty())
         .unwrap_or(&step.step)
+}
+
+/// Preparation's waiting policy remains visible while phase messages change.
+/// Ordinary action explanations belong to confirmation only; displaying those
+/// here would change every SSH setup, Update and Uninstall progress rail.
+fn progress_step_explanation(step: &crate::api::ProvisioningStep) -> Option<&PeerText> {
+    if step.step == "prepare-snapshot" {
+        step.explanation.as_ref()
+    } else {
+        None
+    }
 }
 
 /// Use a result word that distinguishes no-op and degraded work from failure.
@@ -872,6 +885,8 @@ fn summarize_running_view(
             status: step.status.clone(),
             // The popup's local snapshot still owns raw strings and escapes
             // them through PeerLine. Do not cache a display spelling here.
+            explanation: progress_step_explanation(step)
+                .map(|explanation| explanation.raw().to_owned()),
             message: step
                 .message
                 .as_ref()
@@ -2697,18 +2712,23 @@ impl Eq for ExpandedRun {}
 /// Keep the original step attributes for CSS and browser handles. They do
 /// not add flow: the marker has fixed geometry, while the displayed status
 /// word owns an auto-sized column and can change its neighbor's wrapping.
+/// Explanations and messages both occupy rows and participate in movement.
 #[derive(Clone, Debug)]
 struct ExpandedStep {
     id: String,
     raw_status: String,
     name: String,
     status: String,
+    explanation: Option<FlowParts>,
     message: Option<FlowParts>,
 }
 
 impl PartialEq for ExpandedStep {
     fn eq(&self, other: &Self) -> bool {
-        self.name == other.name && self.status == other.status && self.message == other.message
+        self.name == other.name
+            && self.status == other.status
+            && self.explanation == other.explanation
+            && self.message == other.message
     }
 }
 
@@ -2814,6 +2834,7 @@ impl ProvisioningFlow {
                         raw_status: step.status.clone(),
                         name: display_peer(progress_step_name(step)),
                         status: progress_step_status(&step.status).to_owned(),
+                        explanation: progress_step_explanation(step).map(|text| line(text.raw())),
                         message: step.message.as_ref().map(|text| line(text.raw())),
                     })
                     .collect(),
@@ -4189,6 +4210,12 @@ pub(crate) fn ProvisioningPanel(
                                     span { class: "provisioning-step-marker", aria_hidden: "true" }
                                     span { class: "provisioning-step-name peer-value", dir: "ltr", "{step.name}" }
                                     span { class: "provisioning-step-status", "{step.status}" }
+                                    if let Some(explanation) = step.explanation {
+                                        PeerLine {
+                                            class: "provisioning-step-message",
+                                            parts: explanation.0,
+                                        }
+                                    }
                                     if let Some(message) = step.message {
                                         PeerLine {
                                             class: "provisioning-step-message",
@@ -4603,7 +4630,7 @@ mod tests {
     }
 
     /// An unchanged visible body must not capture on retained metadata churn.
-    /// A later wrapped-message change captures during the committed render,
+    /// A later explanation change captures during the committed render,
     /// before the shared continuation delivers to the admitted lower opening.
     #[farhelm_testtrace::test]
     fn provisioning_producer_ignores_metadata_and_defers_changed_body_delivery() {
@@ -4620,7 +4647,7 @@ mod tests {
         fixture.render(&mut dom, resolve(&view));
         view.run_id = Some("metadata-only-run".into());
         view.steps[0].step = "metadata-only-step".into();
-        view.steps[0].explanation = Some("hidden explanation".into());
+        view.steps[0].explanation = Some("hidden confirmation explanation".into());
         let edits = fixture.render(&mut dom, resolve(&view));
         assert!(
             edits.iter().any(|edit| matches!(edit,
@@ -4631,12 +4658,13 @@ mod tests {
         dom.process_events();
         assert!(fixture.captured_sources.borrow().is_empty());
         assert_eq!(fixture.closes.get(), 0);
-        view.steps[0].message = Some("a changed wrapped message".into());
+        view.steps[0].step = "prepare-snapshot".into();
+        view.steps[0].explanation = Some("a changed wrapped explanation".into());
         let edits = fixture.render(&mut dom, resolve(&view));
         assert!(
             edits.iter().any(|edit| matches!(edit,
             dioxus::core::Mutation::SetText { value, .. }
-                if value.contains("a changed wrapped message"))),
+                if value.contains("a changed wrapped explanation"))),
             "the changed body render committed"
         );
         assert_eq!(*fixture.captured_sources.borrow(), vec![41]);
@@ -4780,7 +4808,7 @@ mod tests {
     }
 
     /// Equality follows the expanded words and controls actually rendered.
-    /// Run identity, CSS/browser step handles, hidden explanation and paths
+    /// Run identity, CSS/browser step handles, confirmation explanations and hidden paths
     /// must not turn an unchanged row into a new movement cause.
     #[farhelm_testtrace::test]
     fn expanded_flow_compares_displayed_text_and_fold_presence() {
@@ -4808,8 +4836,21 @@ mod tests {
         );
         view.run_id = Some("run-b".into());
         view.steps[0].step = "different-id".into();
-        view.steps[0].explanation = Some("hover-only explanation".into());
+        view.steps[0].explanation = Some("hidden confirmation explanation".into());
         assert_eq!(original, resolve(&view, Some("run-b")));
+        view.steps[0].step = "prepare-snapshot".into();
+        view.steps[0].explanation = Some("visible explanation\u{202e}".into());
+        let explained = resolve(&view, Some("run-b"));
+        assert_ne!(original, explained);
+        let ProvisioningFlow::Body(body) = explained else {
+            panic!("expected expanded body")
+        };
+        assert_eq!(
+            body.run.unwrap().steps[0].explanation.as_ref().unwrap().0,
+            vec![DetailPart::peer("visible explanation\u{202e}")]
+        );
+        view.steps[0].explanation = None;
+        view.steps[0].step = "different-id".into();
         assert_ne!(original, resolve(&view, None));
         view.steps[0].status = "completed".into();
         assert_ne!(original, resolve(&view, Some("run-b")));
@@ -5076,6 +5117,23 @@ mod tests {
         assert_eq!(summary.steps[0].id, "upload-farhelm");
         assert_eq!(summary.steps[0].name, " \t ");
         assert_eq!(summary.steps[0].status, "future-status");
+        assert_eq!(
+            summary.steps[0].explanation, None,
+            "ordinary confirmation detail stays hidden"
+        );
+        let mut prepared = view.clone();
+        prepared.steps[0].step = "prepare-snapshot".into();
+        let prepared_summary = summarize_running_view(
+            &prepared,
+            "opaque-run".to_owned(),
+            Instant::now(),
+            ProvisioningOperation::Add,
+        );
+        assert_eq!(
+            prepared_summary.steps[0].explanation.as_deref(),
+            Some("reason\u{202e}"),
+            "folded preparation keeps its waiting policy"
+        );
         assert_eq!(
             summary.steps[0].message.as_deref(),
             Some("command\u{200b}\r\nfailed")

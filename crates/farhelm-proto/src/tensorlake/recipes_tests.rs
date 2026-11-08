@@ -426,11 +426,57 @@ fn wire_shapes_are_tagged_and_saves_are_strict() {
         "base": {"kind": "image", "image": "x"}, "packages": [], "claude": null, "codex": null, "tunnels": []
     });
     let older = serde_json::from_value::<RecipeView>(older).expect("build fields may be absent");
+    assert_eq!(older.prepared, None);
+    assert_eq!(older.preparation, PrepareView::Idle);
     assert_eq!(
         (older.snapshot, older.build, older.cleanup_pending),
         (None, BuildView::Idle, false),
         "a reply without build fields reads as nothing built and nothing running"
     );
+}
+
+/// Lazy preparation is separate from Build and preserves strict request shapes.
+/// Stable phase numbers let setup and recipe status use the same five-step text.
+#[test]
+fn preparation_status_is_tagged_and_steps_are_numbered() {
+    let phases = [
+        PrepareStep::Creating,
+        PrepareStep::Starting,
+        PrepareStep::Installing,
+        PrepareStep::Snapshotting,
+        PrepareStep::Finishing,
+    ];
+    assert_eq!(phases.len(), usize::from(PrepareStep::COUNT));
+    for (index, step) in phases.into_iter().enumerate() {
+        assert_eq!(usize::from(step.number()), index + 1);
+        assert!(!step.label().is_empty());
+        let view = PrepareView::Preparing {
+            step,
+            started_at: 42,
+        };
+        let wire = serde_json::to_value(&view).unwrap();
+        assert_eq!(wire["state"], "preparing");
+        assert_eq!(serde_json::from_value::<PrepareView>(wire).unwrap(), view);
+    }
+    for (reason, wire) in [
+        (PreparedStaleReason::Expired, "expired"),
+        (PreparedStaleReason::FarhelmUpdated, "farhelm_updated"),
+        (PreparedStaleReason::SnapshotRebuilt, "snapshot_rebuilt"),
+    ] {
+        assert_eq!(serde_json::to_value(reason).unwrap(), wire);
+    }
+    let failure = PrepareView::Failed {
+        step: PrepareStep::Installing,
+        message: "refused".into(),
+        at: 44,
+    };
+    assert_eq!(
+        serde_json::to_value(failure).unwrap(),
+        serde_json::json!({"state":"failed", "step":"installing", "message":"refused", "at":44})
+    );
+    let mut save = serde_json::to_value(recipe()).unwrap();
+    save["prepared"] = serde_json::json!({"id":"not-user-owned"});
+    assert!(serde_json::from_value::<RecipeSave>(save).is_err());
 }
 
 /// Codex has one active authentication choice. Older endpoint-only requests

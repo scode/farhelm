@@ -6138,10 +6138,11 @@ step descriptions later used for progress. Confirming through the existing provi
 starting billed work, then uses the ordinary host provisioning lock and fleet-wide run limit. A registry handoff failure
 rolls the new row back with `SandboxDeleted::never_created`; no create has been sent at that boundary.
 
-This is an explicit exception to provisioning's frozen-inner-plan rule. A sandbox does not exist at confirmation, so its
-home, architecture and install paths cannot yet be inspected. The confirmation authorizes creation and ordinary Farhelm
-setup on that sandbox; the run computes the inner plan after preparation and replaces its final placeholder with those
-concrete steps, without a second question. The existing executor runs those actions with a progress offset.
+Ordinary setup recovery is an explicit exception to provisioning's frozen-inner-plan rule. A sandbox does not exist at
+confirmation, so its home, architecture and install paths cannot yet be inspected. The confirmation authorizes creation
+and ordinary Farhelm setup on that sandbox; the run computes the inner plan after preparation and replaces its final
+placeholder with those concrete steps, without a second question. The existing executor runs those actions with a
+progress offset.
 
 All recipes call the snapshot builder's single-flight `ensure_snapshot`, which reports its watch progress and joins an
 existing build. A ready snapshot is reused (base and package edits still require explicit Rebuild). A build started by
@@ -6167,19 +6168,43 @@ an outstanding create is removed without looking up its name or deleting any san
 requirement still applies. A legacy row or a power loss that lost both records cannot recover by name: remove that host
 entry, then handle the leftover explicitly.
 
-The run holds the host connection during preparation and while it records install coordinates. Preparation waits for
-SSH, fails promptly with the key-registration hint on public-key refusal, checks PID 1, starts logind with passwordless
-sudo and enables linger for the actual login user, then waits for a usable user manager. Every host's provisioning SSH
-scripts also supply `XDG_RUNTIME_DIR=/run/user/<uid>` when unset and that directory exists; local scripts are unchanged.
-Before a first install, an existing `supervisor.db` at the planned state directory refuses setup, so copied identities
-cannot silently become Duplicate. Reruns with recorded install paths retain their own state. This deliberately refuses
-any pre-existing supervisor database, including one whose identity has not yet been minted; there is no identity reset.
-Connection actors refuse to dial a Tensorlake row until both install coordinates are present. Initial setup records them
-only after that copied-state check, so the gate survives a restart; an initial failure keeps the explicit hold too.
-Ordinary SSH discovery and Update refuse such unfinished rows. The store also checks this inside the ordinary SSH
-convergence transaction, before writing coordinates or identity, so a probe or plan started before the sandbox row
-existed cannot adopt copied state later. The Tensorlake executor instead uses an explicit admission write after its
-copied-state check; that write records both coordinates together and imports no discovered identity.
+For a genuinely new host, the run ensures a prepared snapshot after ensuring the built snapshot, then selects it again
+under the recipe's source-use exclusion before creating the host. It omits ordinary inspection and installation on the
+clone. Schema 79 adds nullable `hosts.tensorlake_prepared_install_json`, read on demand rather than included in the
+ordinary host view. The exact selected home, binary path, state directory and installed version are recorded atomically
+with the pending-create timestamp before sending create. They do not populate the admitted coordinates, so an actor
+cannot dial a name collision or an unfinished clone after restart. Recording the sandbox ID retains these facts;
+admission, once the sandbox is Running and answers over SSH, records both coordinates and clears them. A definite
+refusal clears them with the pending marker. An interrupted create recovers its own saved facts, not the recipe's latest
+prepared record. Later Rerun and Update retain ordinary installation, and the supervisor's hello remains the authority
+for observed host version and identity. The API's Running state can precede gateway readiness. Setup waits for SSH with
+the ordinary bounded transport retry, without starting logind or modifying the clone, before admitting paths or
+delivering credentials. This wait belongs to the admission portion of the debug spawn timings. Credentials are delivered
+with the saved home before the actor's hold is released, and the ordinary fresh-window attachment wait establishes the
+connection. A pending ordinary create that appears between lookups retains ordinary inspection/install recovery rather
+than assuming it used the newly selected prepared snapshot.
+
+The free probe omits **Prepare snapshot** when the local prepared record is fresh. Execution rechecks and inserts that
+step if preparation became necessary, retaining completed common steps. Its first-time/24-hour/update explanation is
+part of `PlanStep`, copied into plain confirmation and live progress; both expanded and folded views render it as peer
+text, and its displayed geometry participates in movement equality. Only the `prepare-snapshot` waiting explanation
+enters live progress; ordinary setup, Update and Uninstall explanations remain confirmation detail. No new approval is
+needed when freshness changes.
+
+The run holds the host connection during preparation and while it records install coordinates. Ordinary preparation
+waits for SSH, fails promptly with the key-registration hint on public-key refusal, checks PID 1, starts logind with
+passwordless sudo and enables linger for the actual login user, then waits for a usable user manager. Every host's
+provisioning SSH scripts also supply `XDG_RUNTIME_DIR=/run/user/<uid>` when unset and that directory exists; local
+scripts are unchanged. Before a first install, an existing `supervisor.db` at the planned state directory refuses setup,
+so copied identities cannot silently become Duplicate. Reruns with recorded install paths retain their own state. This
+deliberately refuses any pre-existing supervisor database, including one whose identity has not yet been minted; there
+is no identity reset of captured state. Prepared snapshots satisfy the rule by carrying no state at all. Connection
+actors refuse to dial a Tensorlake row until both install coordinates are present. Initial setup records them only after
+that copied-state check, so the gate survives a restart; an initial failure keeps the explicit hold too. Ordinary SSH
+discovery and Update refuse such unfinished rows. The store also checks this inside the ordinary SSH convergence
+transaction, before writing coordinates or identity, so a probe or plan started before the sandbox row existed cannot
+adopt copied state later. The Tensorlake executor instead uses an explicit admission write after its copied-state check;
+that write records both coordinates together and imports no discovered identity.
 
 Agent settings are read with a 1 MiB bound, merged on the helm, and streamed through backend stdin into mode-0600 atomic
 installs. Claude's JSON and any existing `env` must be objects; only `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and
@@ -6342,8 +6367,62 @@ file and runs that file (`bash` for `https://claude.ai/install.sh`, `CODEX_NON_I
 `https://chatgpt.com/codex/install.sh`), finds the command with `~/.local/bin` first on `PATH`, symlinks it into
 `/usr/local/bin` (on the default `PATH` of non-login ssh commands and the systemd user manager alike, and following the
 agent's updater when it re-points its own entry), and prints the bare command's `--version`, which the build records.
-The preparation script runs `apt-get clean`, truncates `/etc/machine-id` to empty (so each clone generates its own ID at
-boot) and removes the build logs. Logind and linger preparation is not part of the build; each host gets it at setup.
+The build's final script runs `apt-get clean`, truncates `/etc/machine-id` to empty (so each clone generates its own ID
+at boot) and removes the build logs. Logind, linger and Farhelm installation belong to the prepared layer below;
+ordinary setup recovery on an existing host still performs them directly.
+
+## Tensorlake prepared snapshots
+
+Preparation is a separate per-recipe single-flight task in the existing build registry, with its own watch progress,
+cancellation, durable preparer ID, pending-create time, start and failure records in `RecipeState`. An explicit Build or
+Rebuild starts or joins a build, never a preparation. No preparation endpoint, timer or startup reconciliation is added.
+`ensure_prepared_snapshot` is the shared entry point for Add and later consumers. It ensures the built layer, joins an
+existing preparation and rechecks freshness after completion. If Rebuild changed the built source during installation,
+the completed result records its actual lineage and a later preparation replaces that now-stale result before use.
+
+The current prepared record contains ID, preparation time, Farhelm build version, source built-snapshot ID, source disk
+size and installation facts (home, absolute binary and state paths, installed version). A record is stale exactly when
+its age is strictly greater than 86,400 seconds, its Farhelm version differs from the helm's, or its source
+built-snapshot ID differs from the recipe's current one. Display precedence when several apply is version, source, age.
+Recipe definition, size, credentials and tunnels do not add invalidation rules. The recipes view adds defaulted
+`prepared` and `preparation` fields alongside `snapshot` and `build`; the latter keep their existing meaning.
+Preparation reports Creating, Starting, Installing, Snapshotting and Finishing. The list uses the shared activity clock
+only for displayed ages, qualifying idle readiness as last checked. The helm decides reuse on every call.
+
+The preparer is `farhelm-prepare-<tag>-<recipe>`, with the confirmed recipe CPUs and memory, the built snapshot's
+recorded disk, a 900-second idle timeout and `auto_resume: false`. It follows the builder's recorded-before-acting
+ownership contract: only its own pending-create marker permits name recovery, observed IDs are saved before further
+work, create and durable writes are not cancelled, and absence settles only after the shared 15-minute window. Current
+built and prepared snapshot IDs are protected from sweeps and refused as recipe bases, as are retired IDs. The new
+prepared ID and retirement of the old one land in one state write. Cleanup terminates the preparer, deletes its other
+snapshots and retries retired deletions; failures retain ownership. Recipe deletion marks deleting, cancels and awaits
+both task kinds without holding their source mutex, cleans both resource roles, then lets the store forget the row.
+Orphan recognition and reserved names include preparers.
+
+One per-recipe async mutex excludes source selection/create through the first observed Running state from snapshot
+publication and deletion. Installation and supervisor attachment run outside that exclusion. Consumers reread freshness
+while holding it and release it before waiting for a build or preparation that needs to publish. This is live-process
+exclusion, not a durable dependency registry: an interrupted or ambiguous create overlapping retirement retains the
+ordinary vendor failure/retry behavior. Ownership recovery remains durable independently of the mutex.
+
+Production constructs a narrow `SnapshotPreparer` from the already selected provisioning backend, payload source and
+layout before starting the connection manager. It owns no manager, host row, delivery service or tunnel. A separate
+one-shot `SystemBackend` instance governs every preparer SSH operation, including inspection and uploads; ordinary host
+provisioning retains its shared connection. Preparation reuses ordinary payload resolution/staging and host-independent
+Add actions. Payload staging still awaits every sibling before returning an error, preserving blocking cache-writer
+ownership. Host attachment is expressly excluded. The preparer requires boot-capable linger and persistent unit
+enablement; ordinary degraded login-only setup is insufficient for a reusable snapshot.
+
+After installation, the preparer stops the supervisor while retaining its enabled unit, verifies that no unit processes
+can recreate state, removes the whole planned state directory using the existing symlink/mount refusal semantics, and
+verifies absence including `supervisor.db` and dangling links. It clears and verifies `/etc/machine-id` before returning
+facts to the engine; any failure prevents checkpointing. The engine takes a filesystem checkpoint and waits for
+Completed, never only LocalReady. Each clone therefore opens an empty supervisor state directory and mints its own
+identity through normal startup; no supervisor identity-reset operation is introduced.
+
+Preparation invokes no credential delivery or gh setup and creates no tunnels. Authentication inherited from a custom
+base is left intact, with the base author responsible for it; this is not a claim that prepared snapshots are free of
+inherited credentials. Farhelm's selected authentication and tunnels remain per-host connection/setup work.
 
 ## Tensorlake hosts
 

@@ -1,5 +1,5 @@
-//! Sandbox preparation and bounded agent-settings reads on the ordinary
-//! provisioning ssh connection. Secrets only travel through captured stdout
+//! Sandbox preparation and bounded agent-settings reads on the selected
+//! provisioning SSH transport. Secrets only travel through captured stdout
 //! and upload stdin; every read failure discards the capture's diagnostic.
 
 use super::*;
@@ -23,13 +23,40 @@ exit 5
 "#;
 
 impl SystemBackend {
-    /// Retry only ssh transport failures while the sandbox gateway catches up
-    /// with the API's Running state. A rejected key needs registration, not time.
-    pub(super) async fn prepare_sandbox(
+    /// Preserve the enabled boot installation while removing everything that
+    /// could give clones the preparer's identity. The recipe engine may take
+    /// its checkpoint only after this command succeeds; no host attachment or
+    /// session is ever created during preparation.
+    pub(super) async fn finish_prepared_install(
         &self,
         target: &ProvisioningTarget,
-    ) -> Result<PathBuf, BackendFailure> {
-        require_remote(target, "preparing a Tensorlake sandbox")?;
+        unit: &str,
+        state: &Path,
+    ) -> Result<(), BackendFailure> {
+        require_remote(target, "finishing the prepared snapshot installation")?;
+        let script = snapshot_cleanup_script(
+            unit,
+            state,
+            Path::new("/sys/fs/cgroup"),
+            Path::new("/etc/machine-id"),
+        )?;
+        self.require_shell_within(
+            target,
+            &script,
+            "stopping and clearing the prepared supervisor",
+            Duration::from_secs(150),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Retry only ssh transport failures while the sandbox gateway catches up
+    /// with the API's Running state. A rejected key needs registration, not time.
+    pub(super) async fn wait_sandbox_ssh(
+        &self,
+        target: &ProvisioningTarget,
+    ) -> Result<(), BackendFailure> {
+        require_remote(target, "reaching a Tensorlake sandbox")?;
         let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
         loop {
             let output = self
@@ -56,6 +83,16 @@ impl SystemBackend {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Ordinary installation needs logind and linger after transport is ready.
+    /// Prepared clones use the readiness wait alone, preserving their boot proof.
+    pub(super) async fn prepare_sandbox(
+        &self,
+        target: &ProvisioningTarget,
+    ) -> Result<PathBuf, BackendFailure> {
+        self.wait_sandbox_ssh(target).await?;
         let output = self
             .run_shell(target, PREPARE, Duration::from_secs(90))
             .await?;
@@ -159,10 +196,306 @@ impl SystemBackend {
     }
 }
 
+/// Build the final checkpoint guard with injectable platform paths for owned
+/// filesystem tests. State deletion follows ordinary uninstall's symlink and
+/// mount boundary; linked ancestors are allowed, but the state itself cannot
+/// be a link. A cgroup's populated flag covers descendants that MainPID alone
+/// misses under the installed unit's process-only stop policy.
+fn snapshot_cleanup_script(
+    unit: &str,
+    state: &Path,
+    cgroup_root: &Path,
+    machine_id: &Path,
+) -> Result<String, BackendFailure> {
+    Ok(format!(
+        r#"
+export LC_ALL=C
+unit={unit}
+data={data}
+cgroup_root={cgroup_root}
+machine_id={machine_id}
+{mounts}
+absent() {{
+    if detail=$(stat -c '%F' -- "$1" 2>&1); then
+        printf '%s\n' "prepared snapshot still contains $1" >&2
+        return 1
+    else
+        status=$?
+        case "$detail" in
+            {missing}) return 0 ;;
+            *) printf '%s\n' "$detail" >&2; return "$status" ;;
+        esac
+    fi
+}}
+cgroup_empty() {{
+    if detail=$(stat -c '%F' -- "$group" 2>&1); then
+        events=$(cat -- "$group/cgroup.events" 2>/dev/null) || return 2
+        printf '%s\n' "$events" | grep -qx 'populated 0' && return 0
+        printf '%s\n' "$events" | grep -qx 'populated 1' && return 1
+        return 2
+    else
+        case "$detail" in {missing}) return 0 ;; *) return 2 ;; esac
+    fi
+}}
+enabled=$(systemctl --user is-enabled -- "$unit") && [ "$enabled" = enabled ] || {{ echo 'the supervisor unit is not persistently enabled' >&2; exit 1; }}
+user=$(id -un) || exit 1
+linger=$(loginctl show-user -p Linger --value -- "$user") && [ "$linger" = yes ] || {{ echo 'the sandbox user does not have boot linger enabled' >&2; exit 1; }}
+active=$(systemctl --user show -p ActiveState --value -- "$unit") && [ "$active" = active ] || {{ echo 'the installed supervisor did not become active' >&2; exit 1; }}
+cg=$(systemctl --user show -p ControlGroup --value -- "$unit") || exit 1
+case "$cg" in /*) [ "$cg" != / ] || exit 1 ;; *) exit 1 ;; esac
+group=$cgroup_root$cg
+if cgroup_empty; then
+    echo 'the active supervisor has no populated service cgroup to verify' >&2; exit 1
+else
+    status=$?
+    [ "$status" = 1 ] || {{ echo 'cannot verify the supervisor service cgroup' >&2; exit 1; }}
+fi
+systemctl --user stop -- "$unit" || exit 1
+if cgroup_empty; then :; else
+    status=$?
+    [ "$status" = 1 ] || {{ echo 'cannot verify the supervisor service cgroup' >&2; exit 1; }}
+    systemctl --user kill --kill-who=all --signal=KILL -- "$unit" || exit 1
+fi
+i=0
+while :; do
+    active=$(systemctl --user show -p ActiveState --value -- "$unit") || exit 1
+    main=$(systemctl --user show -p MainPID --value -- "$unit") || exit 1
+    control=$(systemctl --user show -p ControlPID --value -- "$unit") || exit 1
+    empty=no
+    if cgroup_empty; then empty=yes; else
+        status=$?
+        [ "$status" = 1 ] || {{ echo 'cannot verify the supervisor service cgroup' >&2; exit 1; }}
+    fi
+    case "$active:$main:$control:$empty" in inactive:0:0:yes|failed:0:0:yes) break ;; esac
+    [ "$i" -lt 30 ] || {{ echo 'the prepared supervisor did not stop within 30 seconds' >&2; exit 1; }}
+    i=$((i + 1)); sleep 1
+done
+if [ -L "$data" ]; then
+    echo 'refusing to clear supervisor state through a symbolic link' >&2; exit 1
+fi
+if stat -c '%F' -- "$data" >/dev/null 2>&1; then
+    resolved=$(readlink -f -- "$data") && [ -n "$resolved" ] || exit 1
+    inside=$(mount_points "$resolved" '\n') || exit 1
+    [ -z "$inside" ] || {{ echo 'refusing to clear supervisor state with mounts on or inside it' >&2; exit 1; }}
+    rm -rf -- "$data" || exit 1
+else
+    absent "$data" || exit 1
+fi
+sudo -n truncate -s 0 -- "$machine_id" || exit 1
+size=$(stat -L -c '%s' -- "$machine_id") && [ "$size" = 0 ] || exit 1
+enabled=$(systemctl --user is-enabled -- "$unit") && [ "$enabled" = enabled ] || exit 1
+active=$(systemctl --user show -p ActiveState --value -- "$unit") || exit 1
+case "$active" in inactive|failed) ;; *) echo 'the prepared supervisor restarted' >&2; exit 1 ;; esac
+absent "$data/supervisor.db" && absent "$data" || exit 1
+"#,
+        unit = crate::ssh::shell_quote(unit),
+        data = shell_path(state)?,
+        cgroup_root = shell_path(cgroup_root)?,
+        machine_id = shell_path(machine_id)?,
+        mounts = MOUNT_POINTS_SH,
+        missing = STAT_MISSING_PATH_PATTERNS,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::{collections::VecDeque, sync::Mutex};
+
+    /// Execute the real cleanup script against owned files, with simulated
+    /// systemd/logind/sudo and explicit rm/stat fault injection. Unexpected
+    /// lifecycle verbs fail, so disabling the unit cannot look successful.
+    #[cfg(target_os = "linux")]
+    struct SnapshotFixture {
+        root: tempfile::TempDir,
+        state: PathBuf,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl SnapshotFixture {
+        /// Seed both identity and unrelated state; clearing selected known
+        /// files would leave the future-state sentinel and fail the test.
+        fn new() -> Self {
+            let root = tempfile::tempdir().unwrap();
+            let state = root.path().join("state with spaces");
+            std::fs::create_dir_all(state.join("future-state/nested")).unwrap();
+            std::fs::write(state.join("supervisor.db"), "copied identity").unwrap();
+            std::fs::write(state.join("future-state/nested/sentinel"), "state").unwrap();
+            std::fs::create_dir_all(root.path().join("cgroups/owned.service")).unwrap();
+            std::fs::write(
+                root.path().join("cgroups/owned.service/cgroup.events"),
+                "populated 1\n",
+            )
+            .unwrap();
+            std::fs::write(root.path().join("active"), "active").unwrap();
+            std::fs::write(root.path().join("machine-id"), "inherited machine identity").unwrap();
+            std::fs::write(root.path().join("unit"), "installed supervisor unit").unwrap();
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(root.path().join("unit"), root.path().join("enabled"))
+                .unwrap();
+            Self { root, state }
+        }
+
+        /// Arguments supply fixture state without changing the test process's
+        /// environment. Cgroup files model observed process ownership, while
+        /// state removal and all absence checks execute as real shell tools.
+        fn finish(&self, scenario: &str) -> std::process::Output {
+            let prelude = r#"
+fixture=$1
+scenario=$2
+systemctl() {
+    case "$2" in
+        is-enabled) [ -L "$fixture/enabled" ] && printf enabled ;;
+        show) case "$4" in
+            ActiveState) cat "$fixture/active" ;;
+            ControlGroup) printf /owned.service ;;
+            MainPID) if [ "$(cat "$fixture/active")" = active ]; then printf 123; else printf 0; fi ;;
+            ControlPID) printf 0 ;;
+            *) return 91 ;;
+        esac ;;
+        stop)
+            printf inactive > "$fixture/active"
+            printf stop >> "$fixture/events"
+            case "$scenario" in
+                residual) printf 'populated 1\n' > "$fixture/cgroups/owned.service/cgroup.events" ;;
+                unverifiable) printf 'unrecognized\n' > "$fixture/cgroups/owned.service/cgroup.events" ;;
+                *) printf 'populated 0\n' > "$fixture/cgroups/owned.service/cgroup.events" ;;
+            esac ;;
+        kill)
+            printf kill >> "$fixture/events"
+            printf 'populated 0\n' > "$fixture/cgroups/owned.service/cgroup.events" ;;
+        *) return 91 ;;
+    esac
+}
+loginctl() { if [ "$scenario" = no-linger ]; then printf no; else printf yes; fi; }
+sudo() { [ "$1" = -n ] || return 91; shift; "$@"; }
+rm() { if [ "$scenario" = retained ]; then return 0; else command rm "$@"; fi; }
+stat() {
+    if [ "$scenario" = inspection-failed ] && [ ! -e "$fixture/state with spaces" ]; then
+        printf 'stat: simulated I/O failure\n' >&2; return 1
+    fi
+    command stat "$@"
+}
+"#;
+            let script = snapshot_cleanup_script(
+                "owned.service",
+                &self.state,
+                &self.root.path().join("cgroups"),
+                &self.root.path().join("machine-id"),
+            )
+            .unwrap();
+            std::process::Command::new("sh")
+                .args(["-c", &format!("{prelude}\n{script}"), "snapshot-fixture"])
+                .arg(self.root.path())
+                .arg(scenario)
+                .output()
+                .unwrap()
+        }
+    }
+
+    /// The checkpoint must contain a boot installation and no identity or
+    /// future per-install files. A leftover child is killed even after the
+    /// supervisor's MainPID disappeared, without removing enablement.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn snapshot_cleanup_preserves_boot_install_and_removes_whole_state() {
+        for scenario in ["ordinary", "residual"] {
+            let fixture = SnapshotFixture::new();
+            assert!(fixture.state.join("supervisor.db").is_file());
+            assert!(fixture.root.path().join("enabled").is_symlink());
+            let output = fixture.finish(scenario);
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(std::fs::symlink_metadata(&fixture.state).is_err());
+            assert!(fixture.root.path().join("enabled").is_symlink());
+            assert_eq!(
+                std::fs::read_to_string(fixture.root.path().join("unit")).unwrap(),
+                "installed supervisor unit"
+            );
+            assert_eq!(
+                std::fs::read(fixture.root.path().join("machine-id")).unwrap(),
+                b""
+            );
+            assert_eq!(
+                std::fs::read_to_string(fixture.root.path().join("events")).unwrap(),
+                if scenario == "residual" {
+                    "stopkill"
+                } else {
+                    "stop"
+                }
+            );
+        }
+    }
+
+    /// A successful rm exit alone is no checkpoint proof. Retained state,
+    /// failed absence inspection, missing boot linger and unknown cgroup
+    /// evidence all make the real finalization command fail.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn snapshot_cleanup_refuses_unverified_state_or_boot() {
+        for scenario in ["retained", "inspection-failed", "no-linger", "unverifiable"] {
+            let fixture = SnapshotFixture::new();
+            let output = fixture.finish(scenario);
+            assert!(
+                !output.status.success(),
+                "{scenario} unexpectedly succeeded"
+            );
+            if scenario != "inspection-failed" {
+                assert!(fixture.state.join("supervisor.db").exists());
+            }
+        }
+    }
+
+    /// A dangling state link is still captured state; refusing it also
+    /// prevents treating its missing referent as proof that cleanup finished.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn snapshot_cleanup_refuses_dangling_state_link() {
+        let mut fixture = SnapshotFixture::new();
+        fixture.state = fixture.root.path().join("linked-state");
+        std::os::unix::fs::symlink(fixture.root.path().join("missing"), &fixture.state).unwrap();
+        assert!(
+            std::fs::symlink_metadata(&fixture.state)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        let output = fixture.finish("ordinary");
+        assert!(!output.status.success());
+        assert!(fixture.state.is_symlink());
+    }
+
+    /// A linked home is an accepted path alias, while an interior link must
+    /// be unlinked without erasing the unrelated tree it names. Both follow
+    /// the existing directory-removal contract rather than banning aliases.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn snapshot_cleanup_accepts_linked_ancestors_and_spares_link_targets() {
+        let mut fixture = SnapshotFixture::new();
+        let other = fixture.root.path().join("unrelated");
+        std::fs::create_dir(&other).unwrap();
+        std::fs::write(other.join("sentinel"), "keep").unwrap();
+        std::os::unix::fs::symlink(&other, fixture.state.join("linked-content")).unwrap();
+        let linked_home = fixture.root.path().join("linked-home");
+        std::os::unix::fs::symlink(fixture.root.path(), &linked_home).unwrap();
+        fixture.state = linked_home.join("state with spaces");
+        assert!(fixture.state.join("linked-content/sentinel").exists());
+        let output = fixture.finish("ordinary");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(std::fs::symlink_metadata(&fixture.state).is_err());
+        assert_eq!(
+            std::fs::read_to_string(other.join("sentinel")).unwrap(),
+            "keep"
+        );
+        assert!(linked_home.is_symlink());
+    }
 
     /// Replace only child execution, leaving ssh construction, bounded
     /// capture and preparation's status classification in production code.
@@ -214,6 +547,28 @@ mod tests {
             );
             assert!(scripts.0.lock().unwrap().is_empty());
         }
+    }
+
+    /// Running is an API state, not an SSH readiness guarantee. The clone's
+    /// transport wait retries a lagging gateway without running user-manager
+    /// preparation or any other remote setup script.
+    #[farhelm_testtrace::test]
+    async fn clone_readiness_retries_transport_without_preparing_the_user_manager() {
+        let root = tempfile::tempdir().unwrap();
+        let scripts = Arc::new(Scripts(Mutex::new(vec!["exit 255", "exit 0"].into())));
+        let mut backend = SystemBackend::new(root.path().to_path_buf());
+        backend.launcher = scripts.clone();
+        backend
+            .wait_sandbox_ssh(&ProvisioningTarget::Ssh {
+                destination: "clone@clone.sandbox.tensorlake.ai".into(),
+                access: crate::ssh::SshAccessKind::Tensorlake,
+            })
+            .await
+            .unwrap();
+        assert!(
+            scripts.0.lock().unwrap().is_empty(),
+            "both transport attempts ran"
+        );
     }
 
     /// Every remote script inherits the runtime fallback, while the script

@@ -2387,6 +2387,7 @@ async fn serve_with_ready(
         store.clone(),
         &state_dir,
         Arc::clone(&sources.delivery),
+        sources.snapshot_preparer(&state_dir),
     )?;
     let manager = manager::ConnectionManager::start_with_sandboxes(
         store.clone(),

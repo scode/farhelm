@@ -1479,15 +1479,14 @@ async fn actor_hold_cancels_the_real_hook_before_acknowledging_parking() {
     assert!(f.claude().await.contains(FIRST));
     assert_eq!(*f.delivery.entry(&f.row).active.borrow(), 1);
     let before = f.operations();
+    let previous_dials = harness.fleet.dials(f.row.id);
     harness.fleet.kill_connection(f.row.id);
+    // Connecting can begin and end between state polls. A new dial followed
+    // by Connected proves a replacement without requiring that transient view.
     harness
         .await_state(f.row.id, |state| {
-            !matches!(state, HostState::Connected { .. })
-        })
-        .await;
-    harness
-        .await_state(f.row.id, |state| {
-            matches!(state, HostState::Connected { .. })
+            harness.fleet.dials(f.row.id) > previous_dials
+                && matches!(state, HostState::Connected { .. })
         })
         .await;
     assert_eq!(f.operations(), before);

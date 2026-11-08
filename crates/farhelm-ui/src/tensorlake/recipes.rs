@@ -1,7 +1,7 @@
 //! The Tensorlake recipe list, for Settings → Tensorlake.
 //!
 //! One row per recipe: its name, a one-line summary of size, base, packages and
-//! tunnels, a status line, and Edit. "New recipe" and Edit swap the list for
+//! tunnels, built and prepared snapshot status, and Edit. "New recipe" and Edit swap the list for
 //! the [`RecipeEditor`] in place (one focus owner inside the Settings modal,
 //! like the templates dialog's list/editor swap), and the editor's Back
 //! returns here.
@@ -21,6 +21,11 @@
 //! progress then arrives through the same feed-driven re-read. Every base goes
 //! through that build before hosts can use it. The word is always "snapshot",
 //! never "template", which means launch templates.
+//!
+//! Preparation is separate from building: the first new host installs Farhelm
+//! into a reusable snapshot. The helm decides whether it is still fresh. An
+//! idle list receives no expiry event, so readiness is explicitly last-checked;
+//! the shared activity clock updates ages without deciding snapshot reuse.
 
 use std::{
     cell::Cell,
@@ -29,7 +34,9 @@ use std::{
 };
 
 use dioxus::prelude::*;
-use farhelm_proto::tensorlake::recipes::{BuildStep, BuildView, RecipeBase, RecipeView};
+use farhelm_proto::tensorlake::recipes::{
+    BuildStep, BuildView, PrepareStep, PrepareView, PreparedStaleReason, RecipeBase, RecipeView,
+};
 
 use super::recipe_editor::RecipeEditor;
 use crate::ApiBase;
@@ -72,9 +79,11 @@ pub(crate) fn recipe_summary(view: &RecipeView) -> String {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum StatusLine {
     Plain(String),
+    /// A prepared snapshot the helm found fresh at its last read.
+    Positive(String),
     /// Something the user may want to act on (a stale snapshot).
     Warning(String),
-    /// A failed build.
+    /// A failed build or preparation.
     Error(String),
     /// Background housekeeping the user need not act on.
     Muted(String),
@@ -209,7 +218,7 @@ fn snapshot_status(view: &RecipeView) -> SnapshotStatus {
     };
     if view.cleanup_pending {
         lines.push(StatusLine::Muted(
-            "Farhelm could not delete an old build sandbox or snapshot yet; it tries again at the next build and when the recipe is deleted"
+            "Farhelm could not delete an old build or preparation sandbox or snapshot yet; it tries again at the next build or preparation, whichever left it, and when the recipe is deleted"
                 .into(),
         ));
     }
@@ -217,6 +226,118 @@ fn snapshot_status(view: &RecipeView) -> SnapshotStatus {
         lines,
         building,
         action,
+    }
+}
+
+/// Lazy preparation has no action of its own; only an active attempt pulses.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PreparedStatus {
+    line: StatusLine,
+    preparing: bool,
+}
+
+/// Relative time is display-only and tolerates a client clock behind the helm.
+/// Saturation also keeps extreme wire timestamps from overflowing subtraction.
+fn preparation_age(now: i64, at: i64) -> String {
+    let seconds = now.saturating_sub(at).max(0);
+    if seconds < 60 {
+        format!("{seconds} s")
+    } else if seconds < 3600 {
+        format!("{} min", seconds / 60)
+    } else {
+        format!("{} h", seconds / 3600)
+    }
+}
+
+/// Describe the helm's latest preparation state without predicting cache reuse.
+///
+/// An active or unsuccessful attempt takes precedence over retained snapshot
+/// metadata. Only the helm's stale reason selects a stale warning: the browser
+/// clock controls ages, and an idle feed may retain a once-fresh read past expiry.
+fn prepared_status(view: &RecipeView, now: Option<i64>) -> PreparedStatus {
+    let step_of = |step: PrepareStep| format!("step {} of {}", step.number(), PrepareStep::COUNT);
+    let (line, preparing) = match &view.preparation {
+        PrepareView::Preparing { step, started_at } => {
+            let elapsed = now
+                .map(|now| format!(" · {}", preparation_age(now, *started_at)))
+                .unwrap_or_default();
+            (
+                StatusLine::Plain(format!(
+                    "Preparing for new hosts: {} ({}){elapsed}",
+                    step.label(),
+                    step_of(*step)
+                )),
+                true,
+            )
+        }
+        PrepareView::Failed { step, message, .. } => (
+            StatusLine::Error(format!(
+                "Preparing failed while {} ({}): {message}. The next new host tries again.",
+                step.label(),
+                step_of(*step)
+            )),
+            false,
+        ),
+        PrepareView::Interrupted { .. } => (
+            StatusLine::Warning(
+                "Preparation stopped when the helm stopped. The next new host tries again.".into(),
+            ),
+            false,
+        ),
+        PrepareView::Idle => {
+            let line = match &view.prepared {
+                None => StatusLine::Muted(
+                    "Not prepared yet; the first new host prepares it (about a minute).".into(),
+                ),
+                Some(prepared) => match prepared.stale_reason {
+                    Some(reason) => {
+                        let reason = match reason {
+                            PreparedStaleReason::Expired => "it expired",
+                            PreparedStaleReason::FarhelmUpdated => "Farhelm updated",
+                            PreparedStaleReason::SnapshotRebuilt => "the snapshot was rebuilt",
+                        };
+                        StatusLine::Warning(format!(
+                            "Not prepared since {reason}; the next new host prepares it (about a minute)."
+                        ))
+                    }
+                    None => {
+                        let when = now
+                            .map(|now| {
+                                format!("{} ago", preparation_age(now, prepared.prepared_at))
+                            })
+                            .unwrap_or_else(|| utc_minute(prepared.prepared_at));
+                        StatusLine::Positive(format!(
+                            "Ready for new hosts when last checked · prepared {when} for Farhelm {} · expires after 24 h; checked before use",
+                            prepared.farhelm_version
+                        ))
+                    }
+                },
+            };
+            (line, false)
+        }
+    };
+    PreparedStatus { line, preparing }
+}
+
+/// A distinct live region keeps lazy preparation separate from build actions.
+/// The pulse reuses the existing reduced-motion rule; no button starts preparation.
+fn prepared_status_region(name: &str, status: PreparedStatus) -> Element {
+    let (tone, text) = match status.line {
+        StatusLine::Plain(text) => ("", text),
+        StatusLine::Positive(text) => ("recipe-row-status-positive", text),
+        StatusLine::Warning(text) => ("recipe-row-status-warning", text),
+        StatusLine::Error(text) => ("recipe-row-status-error", text),
+        StatusLine::Muted(text) => ("recipe-row-status-muted", text),
+    };
+    rsx! {
+        div { class: "recipe-row-prepared", role: "status", aria_label: "Preparation of {name}",
+            span { class: "recipe-row-status {tone}",
+                if status.preparing {
+                    span { class: "delete-progress-dot", aria_hidden: "true" }
+                }
+                "{text}"
+            }
+        }
     }
 }
 
@@ -228,6 +349,7 @@ fn snapshot_status(view: &RecipeView) -> SnapshotStatus {
 #[component]
 pub(crate) fn RecipeList(api_key_set: bool) -> Element {
     let base = use_context::<ApiBase>().0;
+    let now = *crate::activity::ACTIVITY_NOW.read();
     let build_base = base.clone();
     // Per recipe: a build request in flight, and the helm's refusal of the
     // last one. A refusal stays until the next click or a re-read shows the
@@ -344,12 +466,14 @@ pub(crate) fn RecipeList(api_key_set: bool) -> Element {
                                                             }
                                                             "{text}"
                                                         } },
+                                                        StatusLine::Positive(text) => rsx! { span { key: "{index}", class: "recipe-row-status recipe-row-status-positive", "{text}" } },
                                                         StatusLine::Warning(text) => rsx! { span { key: "{index}", class: "recipe-row-status recipe-row-status-warning", "{text}" } },
                                                         StatusLine::Error(text) => rsx! { span { key: "{index}", class: "recipe-row-status recipe-row-status-error", "{text}" } },
                                                         StatusLine::Muted(text) => rsx! { span { key: "{index}", class: "recipe-row-status recipe-row-status-muted", "{text}" } },
                                                     }
                                                 }
                                             }
+                                            {prepared_status_region(&name, prepared_status(&recipe, now))}
                                             if let Some(action) = status.action {
                                                 div { class: "recipe-row-actions",
                                                     button { r#type: "button", class: "btn btn-neutral recipe-row-build",
@@ -400,7 +524,9 @@ pub(crate) fn RecipeList(api_key_set: bool) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use farhelm_proto::tensorlake::recipes::{RecipeSize, SnapshotView, Tunnel};
+    use farhelm_proto::tensorlake::recipes::{
+        PreparedSnapshotView, RecipeSize, SnapshotView, Tunnel,
+    };
 
     /// A recipe with a selectable base and tunnel count, so list and Add host
     /// wording can be checked without mounting either dialog.
@@ -428,6 +554,8 @@ mod tests {
                 .collect(),
             snapshot: None,
             build: BuildView::Idle,
+            prepared: None,
+            preparation: PrepareView::Idle,
             cleanup_pending: false,
         }
     }
@@ -500,6 +628,263 @@ mod tests {
     /// Keep expected ordinary status text readable beside typed warning lines.
     fn plain(text: &str) -> StatusLine {
         StatusLine::Plain(text.into())
+    }
+
+    /// A ready record carries deliberately opaque IDs: none belongs in the
+    /// user-facing preparation line, which needs only age, version and state.
+    fn prepared_recipe() -> RecipeView {
+        let mut recipe = view(RecipeBase::TensorlakeUbuntu, 0);
+        recipe.prepared = Some(PreparedSnapshotView {
+            id: "private-prepared-id".into(),
+            prepared_at: 100,
+            farhelm_version: "0.38.0".into(),
+            source_snapshot: "private-built-id".into(),
+            stale_reason: None,
+        });
+        recipe
+    }
+
+    /// Preparation has its own accessible region and no eager action. Its
+    /// positive tone and busy dot must reach markup, not only formatter data.
+    #[test]
+    fn prepared_region_is_named_and_renders_readiness_or_progress_without_actions() {
+        use dioxus::core::{AttributeValue, DynamicNode, ScopeId, TemplateAttribute, TemplateNode};
+
+        /// Mount the production region alone: API reads and the surrounding
+        /// recipe list are irrelevant to its accessibility and display contract.
+        fn render(recipe: RecipeView) -> Element {
+            prepared_status_region(&recipe.name, prepared_status(&recipe, Some(141)))
+        }
+
+        /// Conditional pulse markup lives in fragment templates. Looking
+        /// through those fragments observes actual elements rather than text
+        /// that merely happens to contain a class or tag name.
+        fn has_element(
+            node: &TemplateNode,
+            vnode: &VNode,
+            wanted: &str,
+            class: Option<&str>,
+        ) -> bool {
+            match node {
+                TemplateNode::Element {
+                    tag,
+                    attrs,
+                    children,
+                    ..
+                } => {
+                    let class_matches = class.is_none_or(|wanted| {
+                        attrs.iter().any(|attr| {
+                            matches!(
+                                attr,
+                                TemplateAttribute::Static { name: "class", value, .. }
+                                    if value.split_whitespace().any(|word| word == wanted)
+                            )
+                        })
+                    });
+                    (*tag == wanted && class_matches)
+                        || children
+                            .iter()
+                            .any(|child| has_element(child, vnode, wanted, class))
+                }
+                TemplateNode::Dynamic { id } => match &vnode.dynamic_nodes[*id] {
+                    DynamicNode::Fragment(children) => children.iter().any(|child| {
+                        child
+                            .template
+                            .roots
+                            .iter()
+                            .any(|root| has_element(root, child, wanted, class))
+                    }),
+                    _ => false,
+                },
+                _ => false,
+            }
+        }
+
+        let ready = prepared_recipe();
+        let mut busy = ready.clone();
+        busy.preparation = PrepareView::Preparing {
+            step: PrepareStep::Installing,
+            started_at: 100,
+        };
+        for (recipe, positive, pulse) in [(ready, true, false), (busy, false, true)] {
+            let mut dom = VirtualDom::new_with_props(render, recipe);
+            dom.rebuild_to_vec();
+            let vnode = dom.get_scope(ScopeId::APP).unwrap().root_node();
+            let TemplateNode::Element { attrs, .. } = vnode.template.roots[0] else {
+                panic!("preparation must render its own status region")
+            };
+            assert!(attrs.iter().any(|attr| matches!(
+                attr,
+                TemplateAttribute::Static {
+                    name: "role",
+                    value: "status",
+                    ..
+                }
+            )));
+            assert!(vnode.dynamic_attrs.iter().flatten().any(|attr| {
+                attr.name == "aria-label"
+                    && matches!(&attr.value, AttributeValue::Text(text) if text == "Preparation of rust-dev")
+            }));
+            assert_eq!(vnode.dynamic_attrs.iter().flatten().any(|attr| {
+                attr.name == "class"
+                    && matches!(&attr.value, AttributeValue::Text(text) if text.contains("recipe-row-status-positive"))
+            }), positive);
+            assert_eq!(
+                vnode
+                    .template
+                    .roots
+                    .iter()
+                    .any(|node| { has_element(node, vnode, "span", Some("delete-progress-dot")) }),
+                pulse
+            );
+            assert!(
+                !vnode
+                    .template
+                    .roots
+                    .iter()
+                    .any(|node| has_element(node, vnode, "button", None))
+            );
+        }
+    }
+
+    /// Lazy preparation must explain both first use and reuse without
+    /// claiming an idle client read is a current freshness decision. A clock
+    /// tick changes age, including after expiry, but only the helm marks stale.
+    #[test]
+    fn prepared_status_keeps_readiness_last_checked_and_ages_display_only() {
+        let missing = view(RecipeBase::TensorlakeUbuntu, 0);
+        assert_eq!(
+            prepared_status(&missing, Some(100)),
+            PreparedStatus {
+                line: StatusLine::Muted(
+                    "Not prepared yet; the first new host prepares it (about a minute).".into()
+                ),
+                preparing: false,
+            }
+        );
+        let recipe = prepared_recipe();
+        for (now, when) in [
+            (Some(99), "0 s ago"),
+            (Some(141), "41 s ago"),
+            (Some(160), "1 min ago"),
+            (Some(7300), "2 h ago"),
+            (Some(86_500), "24 h ago"),
+            (Some(86_501), "24 h ago"),
+            (None, "1970-01-01 00:01 UTC"),
+        ] {
+            assert_eq!(
+                prepared_status(&recipe, now),
+                PreparedStatus {
+                    line: StatusLine::Positive(format!(
+                        "Ready for new hosts when last checked · prepared {when} for Farhelm 0.38.0 · expires after 24 h; checked before use"
+                    )),
+                    preparing: false,
+                }
+            );
+        }
+        assert_eq!(preparation_age(i64::MIN, i64::MAX), "0 s");
+        assert_eq!(
+            preparation_age(i64::MAX, i64::MIN),
+            format!("{} h", i64::MAX / 3600)
+        );
+    }
+
+    /// Every authoritative stale reason tells users when work will happen;
+    /// neither a future timestamp nor a young age can override that reason.
+    #[test]
+    fn prepared_status_explains_each_helm_stale_reason() {
+        for (reason, phrase) in [
+            (PreparedStaleReason::Expired, "it expired"),
+            (PreparedStaleReason::FarhelmUpdated, "Farhelm updated"),
+            (
+                PreparedStaleReason::SnapshotRebuilt,
+                "the snapshot was rebuilt",
+            ),
+        ] {
+            let mut recipe = prepared_recipe();
+            recipe.prepared.as_mut().unwrap().stale_reason = Some(reason);
+            for now in [Some(0), Some(101), None] {
+                assert_eq!(
+                    prepared_status(&recipe, now),
+                    PreparedStatus {
+                        line: StatusLine::Warning(format!(
+                            "Not prepared since {phrase}; the next new host prepares it (about a minute)."
+                        )),
+                        preparing: false,
+                    }
+                );
+            }
+        }
+    }
+
+    /// A retained snapshot must not hide active or failed replacement work.
+    /// Phase numbering and recovery text remain visible for every preparation
+    /// step, while a future start time never produces negative elapsed time.
+    #[test]
+    fn prepared_status_reports_all_phases_and_lazy_recovery() {
+        for (index, (step, label)) in [
+            (PrepareStep::Creating, "creating the preparer sandbox"),
+            (PrepareStep::Starting, "starting the preparer sandbox"),
+            (PrepareStep::Installing, "installing Farhelm"),
+            (PrepareStep::Snapshotting, "taking the prepared snapshot"),
+            (PrepareStep::Finishing, "finishing up"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut recipe = prepared_recipe();
+            recipe.preparation = PrepareView::Preparing {
+                step,
+                started_at: 100,
+            };
+            for (now, elapsed) in [
+                (Some(99), " · 0 s"),
+                (Some(141), " · 41 s"),
+                (Some(160), " · 1 min"),
+                (Some(3700), " · 1 h"),
+                (None, ""),
+            ] {
+                assert_eq!(
+                    prepared_status(&recipe, now),
+                    PreparedStatus {
+                        line: plain(&format!(
+                            "Preparing for new hosts: {} (step {} of 5){elapsed}",
+                            label,
+                            index + 1
+                        )),
+                        preparing: true,
+                    }
+                );
+            }
+            recipe.preparation = PrepareView::Failed {
+                step,
+                message: "gateway refused".into(),
+                at: 200,
+            };
+            assert_eq!(
+                prepared_status(&recipe, Some(201)),
+                PreparedStatus {
+                    line: StatusLine::Error(format!(
+                        "Preparing failed while {} (step {} of 5): gateway refused. The next new host tries again.",
+                        label,
+                        index + 1
+                    )),
+                    preparing: false,
+                }
+            );
+        }
+        let mut recipe = prepared_recipe();
+        recipe.preparation = PrepareView::Interrupted { started_at: 100 };
+        assert_eq!(
+            prepared_status(&recipe, Some(201)),
+            PreparedStatus {
+                line: StatusLine::Warning(
+                    "Preparation stopped when the helm stopped. The next new host tries again."
+                        .into()
+                ),
+                preparing: false,
+            }
+        );
     }
 
     /// Spec: a recipe without a snapshot offers Build; a built one
