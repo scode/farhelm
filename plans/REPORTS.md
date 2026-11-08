@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`cut-path-links`](reports/cut-path-links.report.md) landed 2026-11-07 in #3129: A printed path that a program broke across two lines links to the whole path from both halves, specced as a deliberate exception to conservative recognition
 - [`stop-closes-tabs`](reports/stop-closes-tabs.report.md) landed 2026-11-08 in #3132, #3133: Stop closes the session's terminal tabs, asking first when tabs are open (skippable), with a precondition when it did not ask; Restart keeps tabs
 - [`tensorlake-credentials-polish`](reports/tensorlake-credentials-polish.report.md) landed 2026-11-08 in #3165: Settings → Credentials shows one plain-text storage warning for the whole section and labels its key field "Tensorlake API key"
 - [`openssh-state-path-refusal`](reports/openssh-state-path-refusal.report.md) landed 2026-11-08 in #3168, #3170: Tensorlake: refuse helm state paths containing characters older OpenSSH cannot carry
