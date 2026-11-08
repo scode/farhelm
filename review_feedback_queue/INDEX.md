@@ -74,10 +74,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Delete kill the live agent without its required warning. These are source-confirmed conditional routes, with no
   measured allocation failure or incident.
 
-- [`fixture-url-userinfo-credentials.md`](fixture-url-userinfo-credentials.md) — The capture tool can accept and write a
-  screen containing proxy credentials in a configured local URL. Those bytes can reach the fixture tree intended for
-  public commits. This review has not observed an actual credential-bearing capture or public credential leak.
-
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An

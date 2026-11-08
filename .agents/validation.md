@@ -838,6 +838,9 @@ that its required systemd or SSH substrate ran.
   (`scripts/todo-picker.py`): how TODO.md buckets and entries are read, that entries with a plan are left out, that a
   summaries file written against an older TODO.md is refused, and that summaries are escaped into the page. Run it when
   the script changes; seconds, no network.
+- `python3 -B scripts/test-capture-agent-screens.py` — the fixture scrubber's replacement and refusal of local proxy
+  URLs with userinfo, and public links containing `@` in a path or query. Run it when the scrubber changes; seconds, no
+  network or vendor turns. The recorded agent screen fixtures selection independently checks the Rust guard.
 - `deno test -A scripts/serve-page.ts` — the legacy standalone static server (agent pages use the `interactive-artifact`
   skill): that it answers with `Cache-Control: no-store` and moves past a taken port. Run it, with `deno check` on the
   same file, when the script changes; seconds. Needs Deno, and fetches `jsr:@std/http` the first time.

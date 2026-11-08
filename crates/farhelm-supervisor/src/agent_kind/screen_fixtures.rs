@@ -210,10 +210,15 @@ pub(super) fn contains_email(text: &str) -> bool {
 /// An agent shows such a URL when the capture host's configuration routes it
 /// through a local proxy (Codex warns that its base URL is overridden), which
 /// describes the capture machine's setup. Hand-rolled for the same reason as
-/// [`contains_email`].
+/// [`contains_email`]. Userinfo is skipped only inside the authority, so a
+/// password cannot hide a local host and a path's `@` cannot change the host.
 pub(super) fn contains_local_url(text: &str) -> bool {
     text.match_indices("://").any(|(at, _)| {
-        let rest = &text[at + 3..];
+        let authority = text[at + 3..]
+            .split(|c: char| "/?#".contains(c) || c.is_whitespace())
+            .next()
+            .unwrap_or("");
+        let rest = authority.rsplit('@').next().unwrap_or("");
         let host = match rest.strip_prefix('[') {
             Some(bracketed) => bracketed.split(']').next().unwrap_or(""),
             None => rest
@@ -318,7 +323,8 @@ fn screen_fixtures_carry_no_personal_data() {
 ///
 /// Why it matters: a detector that never fires would make the personal-data
 /// test pass vacuously, and one that fired on every URL would refuse
-/// ordinary agent screens (links to documentation).
+/// ordinary agent screens (links to documentation). Userinfo must not hide
+/// a local host, nor may an `@` in a public URL's path or query replace it.
 #[test]
 fn screen_fixtures_local_url_detector_matches_local_hosts_only() {
     for local in [
@@ -329,6 +335,12 @@ fn screen_fixtures_local_url_detector_matches_local_hosts_only() {
         "http://10.0.0.2:80",
         "http://172.20.1.1/",
         "http://host:8080/",
+        "http://user@localhost:8080/",
+        "http://user:pass@localhost:8080/",
+        "http://user@[::1]:8080/",
+        "http://user:pass@[::1]:8080/",
+        "http://user@localhost:8080?mode=proxy",
+        "http://user:pass@[::1]:8080#proxy",
     ] {
         assert!(contains_local_url(local), "{local}");
     }
@@ -337,6 +349,9 @@ fn screen_fixtures_local_url_detector_matches_local_hosts_only() {
         "http://172.32.0.1/",
         "https://hostname.example/",
         "http://proxy.invalid/backend-api/codex",
+        "https://user:pass@docs.example.com/x",
+        "https://docs.example.com/user@localhost",
+        "https://docs.example.com/?next=user@localhost",
         "no url at all",
     ] {
         assert!(!contains_local_url(public), "{public}");

@@ -21693,7 +21693,9 @@
 - Completion criteria: both the Python scrubber and the Rust check recognize `user@` and `user:pass@` before the host,
   including localhost and `[::1]`, so such a URL is replaced and a screen still holding one is refused; tests cover each
   form. Size gate: about 100 lines of diff (estimated 20-30), as above. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/maintainer-tool-safety.md`.
+- Execution: implemented in change `oxpwozrpqvqpmrsnsrxrlmlrmtpwzsyl` on bookmark
+  `plan/maintainer-tool-safety/02-scrub-userinfo-urls`;
+  [draft PR #3172](https://github.com/scode/farhelm/pull/3172/changes).
 
 ## right-edge-zero-width-sign-reorders-retained-text.md
 
