@@ -47,10 +47,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   An already loaded older released browser page can refresh and approve container choices it cannot display, despite the
   current renderer's disclosure repair.
 
-- [`right-edge-zero-width-sign-reorders-retained-text.md`](right-edge-zero-width-sign-reorders-retained-text.md) — With
-  wrapping disabled, zero-width terminal output at the right edge can attach to the preceding cell and change retained
-  text order.
-
 - [`startup-probe-false-tmux-absence.md`](startup-probe-false-tmux-absence.md) — A temporary resource/connection failure
   at startup can make a live old session appear ended; its normal guarded Delete can then stop that live work without
   authorizing it. This is a source-established conditional failure, not a measured incident.
