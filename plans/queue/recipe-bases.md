@@ -354,3 +354,35 @@ The plan is complete when a linear stack of draft PRs exists that together meets
 passed its code review gate, and the real-sandbox verification is recorded in the report. This plan does not change
 TODO.md. Open, not merged. If a `## Decisions` section exists, its latest entry must also be satisfied. Then close the
 plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12). Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-11-08 (claim ec23f9).
+
+### Real recipe builds need a project API key
+
+Recipes are changing from either installing software or reusing an image/snapshot unchanged to always building on the
+selected base. Every base gets the optional packages, Claude Code and Codex, then a snapshot for new hosts. Existing
+hosts keep their software, and rerunning their setup skips the build.
+
+The consistent implementation is in [draft PR #3178](https://github.com/scode/farhelm/pull/3178/changes), head
+`7074763e`, based on main `c0df0df4`. Code review found no remaining actionable findings. The required real-cloud
+verification is still outstanding: a build on Tensorlake Ubuntu must pass the new requirements check, and builders must
+work from an image name and a user snapshot. In particular, local tests cannot establish that Tensorlake's current
+Ubuntu image already contains curl and git.
+
+This executor has no usable project API key. Its signed-in Tensorlake CLI credential is refused by the production API
+used by Farhelm because that credential requires an organization header. Changing Farhelm's authentication model or
+borrowing the live installation's credentials would be outside this plan. No real sandbox, snapshot or SSH key was
+created; the owned resource ledger is empty.
+
+Can a usable project API key be made available to the executing session, or should this work stay parked? Supplying the
+key through the execution environment (`TENSORLAKE_API_KEY`) and returning the plan to pending lets the executor run the
+agreed checks with an isolated test helm and promptly clean up its resources. Leaving it blocked keeps the draft
+unlanded and delays the dependent prepared-snapshot and per-session sandbox work. I recommend providing that access and
+resuming; the live checks should remain required. Never put the key in this plan or its decision text.
+
+The working log is `farhelm-plan-recipe-bases-log.md` beside the checkouts. It records local validation, retained
+failures and the final rebase's evidence-reuse judgment; this block is not a completed validation report. Old reuse
+recipes with an earlier failed or interrupted build retain that history and show Retry; it runs the same build rather
+than erasing ownership history during upgrade.
