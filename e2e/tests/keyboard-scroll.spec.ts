@@ -295,6 +295,8 @@ for (const outcome of ["refused destination", "successful checkbox"] as const) {
         await expect(toggle).toBeChecked();
         await expect(toggle).toBeFocused();
         await page.keyboard.press("Tab");
+        await expect(dialog.locator(".host-own-sessions-without-asking-toggle")).toBeFocused();
+        await page.keyboard.press("Tab");
         await expect(dialog.locator(".host-commands-without-asking-toggle")).toBeFocused();
       }
     } finally {

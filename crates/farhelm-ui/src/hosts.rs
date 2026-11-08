@@ -73,7 +73,7 @@ use crate::api::{
     Commit, PlanSteps, PreferenceValue, ProbeResponse, ProvisioningOperation,
     ProvisioningSubmission, adopt_host, probe_ssh_host, provision_host, remove_host, retry_host,
     set_alias, set_commands_without_asking, set_host_appearance, set_host_destination,
-    set_yolo_without_asking, store_preference,
+    set_own_sessions_without_asking, set_yolo_without_asking, store_preference,
 };
 use crate::app_updater::use_app_updater;
 use crate::icons::HostMark;
@@ -2496,6 +2496,35 @@ pub(crate) fn HostsPanel(
         }
     };
 
+    // Keep this grant independent of fleet-wide command authority, including
+    // while that broader grant is on. The shared operation path and field key
+    // preserve refused-toggle recovery and place any outcome under this switch.
+    let own_sessions_base = base.clone();
+    let on_own_sessions_without_asking =
+        move |(host, own_sessions_without_asking): (HostId, bool)| {
+            let base = own_sessions_base.clone();
+            let started = run(
+                host,
+                Box::pin(async move {
+                    let outcome =
+                        set_own_sessions_without_asking(&base, host, own_sessions_without_asking)
+                            .await;
+                    if outcome.is_err() {
+                        settings_dialog::reset_checkboxes();
+                    }
+                    outcome
+                }),
+                HostRequestDisplay::Row,
+            );
+            if started {
+                dialog_write
+                    .write()
+                    .insert(host, SettingsField::OwnSessionsWithoutAsking);
+            } else {
+                settings_dialog::reset_checkboxes();
+            }
+        };
+
     // The same for whether the host's sessions run `farhelm` commands
     // without the user's approval (SPEC.md, Agent-spawned sessions).
     let commands_base = base.clone();
@@ -3338,6 +3367,7 @@ pub(crate) fn HostsPanel(
                     on_edit_submit: on_edit_submit.clone(),
                     on_edit_cancel,
                     on_yolo_without_asking: on_yolo_without_asking.clone(),
+                    on_own_sessions_without_asking: on_own_sessions_without_asking.clone(),
                     on_commands_without_asking: on_commands_without_asking.clone(),
                     on_browser_permission,
                     on_appearance,

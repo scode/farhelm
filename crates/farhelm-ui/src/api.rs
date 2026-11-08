@@ -5147,6 +5147,28 @@ pub(crate) async fn set_yolo_without_asking(
     Ok(commit_of::<Host>(resp, "the hosts list below").await)
 }
 
+/// Save the host's independent permission to manage its own sessions without asking.
+///
+/// This changes only the same-host grant, even when fleet-wide command authority already
+/// covers it. Preserve the ordinary host-write result contract: an accepted change with an
+/// unreadable response is a committed warning, not a refusal that invites a blind retry.
+pub(crate) async fn set_own_sessions_without_asking(
+    base: &str,
+    host: HostId,
+    own_sessions_without_asking: bool,
+) -> Result<Commit, String> {
+    let url = format!("{base}/api/hosts/{host}/own-sessions-without-asking");
+    let resp =
+        send(client().post(&url).json(
+            &serde_json::json!({ "own_sessions_without_asking": own_sessions_without_asking }),
+        ))
+        .await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    Ok(commit_of::<Host>(resp, "the hosts list below").await)
+}
+
 /// Set whether the helm carries out acting `farhelm` commands from a host's sessions
 /// without asking (`POST /api/hosts/{id}/commands-without-asking`).
 pub(crate) async fn set_commands_without_asking(

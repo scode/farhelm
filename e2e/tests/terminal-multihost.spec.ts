@@ -1744,9 +1744,9 @@ test.describe("multi-host", () => {
       await row.locator(".host-settings").click();
       const dialog = page.locator(".host-settings-dialog");
       const toggle = dialog.locator(".host-commands-without-asking-toggle");
-      // The section now also holds the browser-link permissions' help; the
-      // commands setting's own help is the first paragraph in it.
-      const help = dialog.locator(".host-settings-commands .host-settings-help").first();
+      // Each independent grant owns its help; adding a neighboring permission
+      // must not change which explanation this fleet-wide switch is tested against.
+      const help = dialog.locator(".host-settings-fleet-commands .host-settings-help");
       await expect(help).toContainText("Farhelm asks you first.");
       await expect(toggle).not.toBeChecked();
       await toggle.click();
@@ -1775,6 +1775,132 @@ test.describe("multi-host", () => {
       await request.post(`/api/hosts/${local.id}/commands-without-asking`, {
         data: { commands_without_asking: false },
       });
+    }
+  });
+
+  /**
+   * The narrower grant must save its own value while fleet-wide authority is
+   * both off and on. Drive the real helm, observe both stored booleans after
+   * each change, and reload with the grant on so a checked native input alone
+   * cannot impersonate a saved choice. Restore both original permissions even
+   * when one cleanup request fails, since later specs share this fleet.
+   */
+  test("host-settings-own-sessions-without-asking: the toggle stays independent of fleet-wide commands", async ({ page, request }) => {
+    const local = (await apiHosts(request)).find((host: any) => host.kind === "local");
+    expect(local, "the owned fleet has its reserved local host").toBeTruthy();
+    expect(typeof local.own_sessions_without_asking).toBe("boolean");
+    expect(typeof local.commands_without_asking).toBe("boolean");
+    const ownRoute = `/api/hosts/${local.id}/own-sessions-without-asking`;
+    const commandsRoute = `/api/hosts/${local.id}/commands-without-asking`;
+    let bodyFailed = false;
+    try {
+      const resetOwn = await request.post(ownRoute, { data: { own_sessions_without_asking: false } });
+      expect(resetOwn.ok(), "establish that same-host authority starts off").toBe(true);
+      const resetCommands = await request.post(commandsRoute, { data: { commands_without_asking: false } });
+      expect(resetCommands.ok(), "establish that fleet-wide authority starts off").toBe(true);
+      await expect.poll(async () => {
+        const host = (await apiHosts(request)).find((host: any) => host.id === local.id);
+        return [host.own_sessions_without_asking, host.commands_without_asking];
+      }).toEqual([false, false]);
+
+      await page.goto("/");
+      const row = page.locator(`.host-row[data-host-id="${local.id}"]`);
+      await openHostMenu(row);
+      await row.locator(".host-settings").click();
+      const dialog = page.locator(".host-settings-dialog");
+      const own = dialog.getByRole("checkbox", { name: "Manage sessions on this host without asking", exact: true });
+      const commands = dialog.locator(".host-commands-without-asking-toggle");
+      const help = dialog.locator(".host-settings-own-sessions .host-settings-help");
+      const commandsHelp = dialog.locator(".host-settings-fleet-commands .host-settings-help");
+      await expect(own).not.toBeChecked();
+      await expect(commands).not.toBeChecked();
+
+      for (const fleetWide of [false, true]) {
+        await commands.setChecked(fleetWide);
+        await expect(commands).toBeChecked({ checked: fleetWide });
+        await expect(own).toBeVisible();
+        await expect(own).toBeEnabled();
+        await expect(own).not.toBeChecked();
+        await expect.poll(async () => {
+          const host = (await apiHosts(request)).find((host: any) => host.id === local.id);
+          return [host.own_sessions_without_asking, host.commands_without_asking];
+        }).toEqual([false, fleetWide]);
+        if (fleetWide) {
+          await expect(help).toContainText("Run farhelm commands without asking already covers these session actions");
+          await expect(help).toContainText("this switch keeps its own saved value");
+        } else {
+          await expect(help).toContainText("Run farhelm commands without asking also includes these session actions");
+          await expect(help).not.toContainText("already covers");
+        }
+
+        for (const allowed of [true, false]) {
+          // Native keyboard interaction must start at this switch, including
+          // after the earlier write or reload recovered focus elsewhere.
+          await expect(own).toBeEnabled();
+          await expect(own).toBeChecked({ checked: !allowed });
+          await own.focus();
+          await expect(own).toBeFocused();
+          await page.keyboard.press("Space");
+          await expect(own).toBeChecked({ checked: allowed });
+          await expect(own).toBeEnabled();
+          await expect.poll(async () => {
+            const host = (await apiHosts(request)).find((host: any) => host.id === local.id);
+            return [host.own_sessions_without_asking, host.commands_without_asking];
+          }).toEqual([allowed, fleetWide]);
+          await expect(help).toContainText("start, stop, restart, rename, clone");
+          await expect(help).toContainText("delete sessions on this same host");
+          await expect(help).toContainText("Requests for other hosts and template changes still ask unless");
+          await expect(help).toContainText("Host changes always need your approval for each request");
+          if (allowed) {
+            await expect(help).toContainText("Clones must also come from this host");
+            if (!fleetWide) {
+              await expect(commandsHelp).toContainText("can manage sessions on this same host");
+              await expect(commandsHelp).not.toContainText("Farhelm asks you first");
+            }
+            await page.reload();
+            await openHostMenu(row);
+            await row.locator(".host-settings").click();
+            await expect(own).toBeChecked();
+            await expect(own).toBeEnabled();
+            await expect(commands).toBeChecked({ checked: fleetWide });
+            if (!fleetWide) {
+              // Neither enabling nor revoking broader authority may rewrite
+              // a narrower grant that was already saved as true.
+              for (const broader of [true, false]) {
+                await commands.setChecked(broader);
+                await expect(own).toBeEnabled();
+                await expect(own).toBeChecked();
+                await expect.poll(async () => {
+                  const host = (await apiHosts(request)).find((host: any) => host.id === local.id);
+                  return [host.own_sessions_without_asking, host.commands_without_asking];
+                }).toEqual([true, broader]);
+              }
+            }
+          } else {
+            await expect(help).toContainText("This setting does not let agents");
+          }
+        }
+      }
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["same-host session permission", async () => {
+          const reset = await request.post(ownRoute, {
+            data: { own_sessions_without_asking: local.own_sessions_without_asking },
+          });
+          expect(reset.ok(), "restore the original same-host permission").toBe(true);
+          expect((await reset.json()).own_sessions_without_asking).toBe(local.own_sessions_without_asking);
+        }],
+        ["fleet-wide command permission", async () => {
+          const reset = await request.post(commandsRoute, {
+            data: { commands_without_asking: local.commands_without_asking },
+          });
+          expect(reset.ok(), "restore the original fleet-wide permission").toBe(true);
+          expect((await reset.json()).commands_without_asking).toBe(local.commands_without_asking);
+        }],
+      ]);
     }
   });
 
