@@ -21635,7 +21635,11 @@
   as listed", 2026-11-07, as the triage page stated: the refusal covers quotes and backslashes too.
 - Completion criteria: settled by the refusal of `%`, `"` and `\` in that entry; remove this feedback file and its index
   entry in the same change.
-- Execution: planned in `plans/queue/openssh-state-path-refusal.md`.
+- Execution: settled in jj change `uknktpoqlmwvsunusllyvkstpotsqrwq`, bookmark
+  `plan/openssh-state-path-refusal/02-misparse-item-settled`,
+  [PR #3170](https://github.com/scode/farhelm/pull/3170/changes). The refusal in
+  [PR #3168](https://github.com/scode/farhelm/pull/3168/changes) covers quotes and backslashes for Tensorlake hosts and
+  builders. This change removes the sibling feedback item and its index entry.
 
 ## recipe-delete-warning-omits-newly-finished-snapshot.md
 
