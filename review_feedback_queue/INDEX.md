@@ -19,10 +19,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`claude-endpoint-change-retains-custom-headers.md`](claude-endpoint-change-retains-custom-headers.md) — Changing
   Claude's API endpoint can retain custom authorization headers and send their old secret to the new endpoint.
 
-- [`short-helm-tag-collision-destroys-other-builder.md`](short-helm-tag-collision-destroys-other-builder.md) — Two helms
-  sharing a Tensorlake project can collide in their short ownership tag; a build can then terminate the other's builder
-  and delete its snapshots.
-
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
