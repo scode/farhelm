@@ -29,13 +29,14 @@ concise form the default on 2026-10-23. Each report gets, in this order: its PRs
 on what was done, in product terms; then only the plausible leftover bugs and follow-ups that matter: real gaps, known
 wrong behavior, risky untested paths with a concrete consequence, and decisions the report or its Landing section says
 are still needed, each of those marked "Decision needed:". One short sentence per item, and a plan with nothing left
-says so. Leave out checks that ran, changelog and release bookkeeping, documentation polish, stale comments, test
-hygiene, screenshot refreshes, what the landing already fixed, flakes already recorded, caveats that are design choices
-the maintainer already made, and notes that something was not tried on a real Mac or in the real desktop app, unless the
-untried case is particular or risky. A leftover that a later commit verifiably resolved may say so beside it. Then the
-full report, collapsed; then a picker with an "approve" choice and a free-text field. Use the plan's slug as its stable
-picker id. The summary and the leftovers are the session's own reading of the report and its Landing section, never new
-claims. The skill's Submit and wait mechanism collects the choices, comments and suggestions.
+says so. Leave out checks that ran, a database schema version bump on its own, changelog and release bookkeeping,
+documentation polish, stale comments, test hygiene, screenshot refreshes, what the landing already fixed, flakes already
+recorded, caveats that are design choices the maintainer already made, and notes that something was not tried on a real
+Mac or in the real desktop app, unless the untried case is particular or risky. A leftover that a later commit
+verifiably resolved may say so beside it. Then the full report, collapsed; then a picker with an "approve" choice and a
+free-text field. Use the plan's slug as its stable picker id. The summary and the leftovers are the session's own
+reading of the report and its Landing section, never new claims. The skill's Submit and wait mechanism collects the
+choices, comments and suggestions.
 
 Write the body fragment as `page.html` in a private directory inside your scratch directory (`AGENTS.md`, "Agent scratch
 space"). Follow the skill for styling, serving, sharing the URL and any tunnel instructions, waiting for submissions,

@@ -22,6 +22,9 @@ terms, per `AGENTS.md`, "Talking to the user", state:
 A PR number may follow as a pointer, never in place of that context. Use `###` or deeper headings in a Blocked question;
 the script refuses `#` and `##`, which would break the plan file's sections.
 
+Do not raise the mere fact that a database schema version was bumped; the maintainer finds it unimportant (2026-11-08).
+Possible loss of data or state is still worth saying.
+
 A report has these sections, in this order: what this was about; things you should know; open questions and possible
 follow-ups; the PRs, one line each; checks run, reused and skipped, with the reason for each; the review gate's outcome.
 In a later round, a "since the last review" section comes first and names which PRs changed, were added, or were
