@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`codex-no-daemon`](reports/codex-no-daemon.report.md) landed 2026-10-30 in #2820: Pass `--no-daemon` on every Codex launch so sessions never attach to Codex's shared background server, and document why in SPEC_impl.md.
 - [`shortcuts-overview`](reports/shortcuts-overview.report.md) landed 2026-10-30 in #2827: A Keyboard shortcuts dialog on Cmd+/ (Ctrl+Shift+/ elsewhere) and in the ? menu lists every shortcut and the current template bindings, plus a docs page.
 - [`settings-gear-shape`](reports/settings-gear-shape.report.md) landed 2026-10-30 in #2826: Redraw the Settings gear as a round eight-tooth gear instead of the squashed six-tooth outline.
 - [`podman-local-image`](reports/podman-local-image.report.md) landed 2026-10-30 in #2825: Containerized launches name a local Podman image instead of an OCI archive file, so a new container starts in about half a second instead of about twelve; archive settings in old templates and sessions read as an empty image name.
