@@ -709,7 +709,8 @@ that its required systemd or SSH substrate ran.
   release validation preserves parity without a duplicate CI rebuild. `--self-test` also proves head CSS/classic JS
   remain product assets while only the body renderer module and WASM are excluded.
 - `PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" scripts/desktop-smoke.sh` — the x86_64 Linux release gate runs this
-  with an isolated `CARGO_TARGET_DIR`; before any of it needs Xvfb, four pre-display process legs drive
+  in the job's shared target tree with `DESKTOP_SMOKE_WEB_DIST` naming the release's own web bundle, so it embeds the
+  bundle that ships instead of building one; before any of it needs Xvfb, four pre-display process legs drive
   `farhelm-desktop`'s own entry point directly: a missing tmux and a below-floor tmux each refuse with one exact plain
   stderr line and exit status 1 (the app's own preflight, run before it would spawn its managed supervisor), and a
   non-tmux bootstrap failure (an unusable state directory) exits 1 through the ordinary fallback path with no panic. The

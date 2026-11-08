@@ -285,6 +285,24 @@ jobs:
         run: |
           dx_dir=$(python3 scripts/install-pinned-dx.py --output-root "$RUNNER_TEMP/dx-tools") || exit 1
           printf '%s\n' "$dx_dir" >> "$GITHUB_PATH"
+      - name: "Let the toolchain's rust-objcopy find libLLVM on macOS"
+        if: "runner.os == 'macOS'"
+        run: |
+          sysroot=$(rustc --print sysroot)
+          for target_dir in "$sysroot"/lib/rustlib/*-apple-darwin; do
+            if [ -x "$target_dir/bin/rust-objcopy" ] && [ ! -e "$target_dir/lib/libLLVM.dylib" ] && [ -e "$sysroot/lib/libLLVM.dylib" ]; then
+              mkdir -p "$target_dir/lib"
+              ln -s "$sysroot/lib/libLLVM.dylib" "$target_dir/lib/libLLVM.dylib"
+              echo "linked libLLVM.dylib into $target_dir/lib"
+            fi
+          done
+          "$sysroot"/lib/rustlib/aarch64-apple-darwin/bin/rust-objcopy --version
+      - name: "Build the web bundle"
+        run: |
+          rm -rf target/dx
+          (cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release)
+          (cd target/dx/farhelm-ui/release/web/public && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256) \
+            > "$RUNNER_TEMP/web-bundle.sha256"
       - name: "Install native desktop smoke dependencies"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
@@ -308,11 +326,10 @@ jobs:
           PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
             --kind release --selection 'native desktop smoke legs' --concurrency 'sequential smoke legs' \
             --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" -- scripts/desktop-smoke.sh
-          rm -rf -- "$CARGO_TARGET_DIR"
         env:
-          "CARGO_TARGET_DIR": "${{ runner.temp }}/desktop-smoke-target"
           "CI": true
           "DESKTOP_SMOKE_DIR": "${{ runner.temp }}/desktop-smoke"
+          "DESKTOP_SMOKE_WEB_DIST": "${{ github.workspace }}/target/dx/farhelm-ui/release/web/public"
       - name: "Collect native desktop smoke failure evidence"
         if: "failure() && runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
@@ -368,24 +385,16 @@ jobs:
           "if-no-files-found": "warn"
           "name": "test-run-failure-${{ github.run_id }}-${{ github.run_attempt }}-${{ strategy.job-index }}"
           "path": "${{ runner.temp }}/test-run-failure-evidence"
-      - name: "Let the toolchain's rust-objcopy find libLLVM on macOS"
-        if: "runner.os == 'macOS'"
-        run: |
-          sysroot=$(rustc --print sysroot)
-          for target_dir in "$sysroot"/lib/rustlib/*-apple-darwin; do
-            if [ -x "$target_dir/bin/rust-objcopy" ] && [ ! -e "$target_dir/lib/libLLVM.dylib" ] && [ -e "$sysroot/lib/libLLVM.dylib" ]; then
-              mkdir -p "$target_dir/lib"
-              ln -s "$sysroot/lib/libLLVM.dylib" "$target_dir/lib/libLLVM.dylib"
-              echo "linked libLLVM.dylib into $target_dir/lib"
-            fi
-          done
-          "$sysroot"/lib/rustlib/aarch64-apple-darwin/bin/rust-objcopy --version
-      - name: "Build the web bundle"
-        run: |
-          rm -rf target/dx
-          cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release
       - name: "Point the release build at the web bundle"
-        run: "echo \"FARHELM_UI_DIST=$GITHUB_WORKSPACE/target/dx/farhelm-ui/release/web/public\" >> \"$GITHUB_ENV\""
+        run: |
+          dist="$GITHUB_WORKSPACE/target/dx/farhelm-ui/release/web/public"
+          (cd "$dist" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256) > "$RUNNER_TEMP/web-bundle.now"
+          cmp "$RUNNER_TEMP/web-bundle.sha256" "$RUNNER_TEMP/web-bundle.now" || {
+            echo "the web bundle changed after it was built; refusing to embed it" >&2
+            diff "$RUNNER_TEMP/web-bundle.sha256" "$RUNNER_TEMP/web-bundle.now" >&2
+            exit 1
+          }
+          echo "FARHELM_UI_DIST=$dist" >> "$GITHUB_ENV"
       - name: Install dist
         run: ${{ matrix.install_dist.run }}
       # Get the dist-manifest
