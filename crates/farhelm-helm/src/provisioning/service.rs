@@ -1704,7 +1704,12 @@ impl ProvisioningService {
             .backend
             .inspect_uninstall(
                 &target.transport,
-                &self.layout.unit_name,
+                if reach.arch.is_macos() {
+                    self.layout.launchd_label()
+                } else {
+                    &self.layout.unit_name
+                },
+                reach.launchd_domain.as_deref(),
                 &asked,
                 &paths.lib_dir,
             )
@@ -1746,7 +1751,11 @@ impl ProvisioningService {
                 ),
             )));
         }
-        let unit = &self.layout.unit_name;
+        let unit = if reach.arch.is_macos() {
+            self.layout.launchd_label()
+        } else {
+            &self.layout.unit_name
+        };
         if client.is_none() && unit_file.exists {
             return Err(not_connected());
         }
@@ -1758,6 +1767,11 @@ impl ProvisioningService {
         // (such as `fh`) that no longer resolves reads as absent too. Without
         // a connection to list those sessions, a running unit refuses.
         if client.is_none() && inspection.unit_running() {
+            if reach.arch.is_macos() {
+                return Err(refused(format!(
+                    "Farhelm can't uninstall while this host isn't connected: launchd job {unit} is still loaded and may have sessions Farhelm can't check. Reconnect the host, then choose uninstall again"
+                )));
+            }
             return Err(refused(format!(
                 "Farhelm can't uninstall from this host while it isn't connected: its supervisor \
                  ({unit}) is still running there, so it may have sessions Farhelm can't check. \
@@ -2605,6 +2619,44 @@ impl ProvisioningService {
                     prepared,
                 )
                 .await
+            }
+            ProvisioningAction::WriteLaunchAgent {
+                content,
+                destination,
+                temporary,
+            } => {
+                self.backend
+                    .install_bytes(
+                        &plan.target,
+                        content.as_bytes(),
+                        destination,
+                        temporary,
+                        0o644,
+                    )
+                    .await
+            }
+            ProvisioningAction::StartLaunchAgent {
+                domain,
+                label,
+                plist,
+                refresh,
+            } => {
+                self.backend
+                    .launch_agent(&plan.target, domain, label, plist, *refresh)
+                    .await
+            }
+            ProvisioningAction::RemoveLaunchAgent { destination } => {
+                self.backend.remove_unit(&plan.target, destination).await
+            }
+            ProvisioningAction::StopLaunchAgent {
+                domain,
+                label,
+                farhelm_program,
+                state_dir,
+            } => {
+                self.backend
+                    .stop_launch_agent(&plan.target, domain, label, farhelm_program, state_dir)
+                    .await
             }
             ProvisioningAction::RestartSupervisor { unit } => {
                 self.backend.restart(&plan.target, unit).await

@@ -54,7 +54,7 @@
 
 use super::assets;
 use super::payloads::{PayloadSource, copy_executable, extract_single_member};
-use super::plan::{PayloadArch, PayloadKind};
+use super::plan::{PayloadKind, PayloadTarget};
 use anyhow::{Context as _, anyhow, bail};
 use async_trait::async_trait;
 use futures_util::StreamExt as _;
@@ -802,17 +802,17 @@ impl ReleasePayloadSource {
 
 #[async_trait]
 impl PayloadSource for ReleasePayloadSource {
-    async fn path(&self, payload: PayloadKind, arch: PayloadArch) -> anyhow::Result<PathBuf> {
+    async fn path(&self, payload: PayloadKind, target: PayloadTarget) -> anyhow::Result<PathBuf> {
         // One match for the whole payload-format decision: the published
         // name, and the archive member to extract — `None` for the one kind
         // D5 ships unarchived. Deriving both here keeps the name and the
         // shape from drifting apart in separate matches.
         let (asset, member) = match payload {
             PayloadKind::Farhelm => {
-                let archive = assets::farhelm_archive_for(arch);
+                let archive = assets::farhelm_archive_for(target);
                 (assets::archive_name(archive), Some(archive.member))
             }
-            PayloadKind::Tmux => (assets::tmux_name(arch).to_string(), None),
+            PayloadKind::Tmux => (assets::tmux_name(target)?.to_string(), None),
         };
         self.housekeep().await?;
 
@@ -1887,8 +1887,8 @@ mod tests {
         (source, attempts)
     }
 
-    /// Spec: every payload kind and architecture the provisioner can ask for
-    /// is downloaded, checksum-verified, unpacked to a single executable
+    /// Every supported payload/target pair is downloaded, checksum-verified
+    /// and unpacked to a single executable
     /// binary, and returned — a `farhelm` archive through the extractor, a
     /// bare `tmux` through the verbatim copy.
     ///
@@ -1896,14 +1896,14 @@ mod tests {
     /// signed bytes over a real socket: a stubbed verifier here would leave
     /// the one security-relevant path in provisioning untested.
     #[farhelm_testtrace::test]
-    async fn downloads_verifies_and_extracts_every_payload_kind_and_arch() {
+    async fn downloads_verifies_and_extracts_every_supported_payload_target() {
         let release = FixtureRelease::start(Vec::new()).await;
         let cache = tempfile::tempdir().unwrap();
         let source = release.source(cache.path());
 
         for (arch, target) in [
-            (PayloadArch::X86_64, "x86_64-unknown-linux-musl"),
-            (PayloadArch::Aarch64, "aarch64-unknown-linux-musl"),
+            (PayloadTarget::LinuxX86_64, "x86_64-unknown-linux-musl"),
+            (PayloadTarget::LinuxAarch64, "aarch64-unknown-linux-musl"),
         ] {
             let farhelm = source.path(PayloadKind::Farhelm, arch).await.unwrap();
             assert_eq!(
@@ -1920,8 +1920,18 @@ mod tests {
             assert_eq!(mode(&tmux), 0o755, "a host payload must be executable");
         }
 
+        let mac = source
+            .path(PayloadKind::Farhelm, PayloadTarget::MacosAarch64)
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read(&mac).unwrap(),
+            expected_member("farhelm", "aarch64-apple-darwin")
+        );
+        assert_eq!(mode(&mac), 0o755, "a host payload must be executable");
+
         // `SHA256SUMS` and its signature are fetched once for the whole
-        // process, not once per asset: four assets, six requests.
+        // process, not once per asset: five assets, seven requests.
         let requests = release.requests();
         assert_eq!(
             requests
@@ -1931,7 +1941,29 @@ mod tests {
             2,
             "the checksum file is fetched once per process: {requests:?}"
         );
-        assert_eq!(requests.len(), 6, "{requests:?}");
+        assert_eq!(requests.len(), 7, "{requests:?}");
+    }
+
+    /// Remote Macs have no tmux payload. Refusal must precede any transport
+    /// attempt or cache creation rather than downloading the Linux arm64 file.
+    #[farhelm_testtrace::test]
+    async fn macos_tmux_is_refused_without_download_or_materialization() {
+        let root = tempfile::tempdir().unwrap();
+        let cache = root.path().join("absent-cache");
+        let (source, attempts) = scripted_source(&cache, vec![]);
+        assert_eq!(attempts.load(Ordering::SeqCst), 0);
+        assert!(!cache.exists());
+
+        assert_eq!(
+            source
+                .path(PayloadKind::Tmux, PayloadTarget::MacosAarch64)
+                .await
+                .unwrap_err()
+                .to_string(),
+            "remote macOS hosts do not support tmux payloads"
+        );
+        assert_eq!(attempts.load(Ordering::SeqCst), 0);
+        assert!(!cache.exists());
     }
 
     /// Spec: the committed fixture set really is the six-asset release the
@@ -1940,10 +1972,9 @@ mod tests {
     /// file on disk, and all four archives hold exactly one REGULAR member
     /// at dist's nesting with the documented bytes.
     ///
-    /// Without this the macOS and desktop archives are never opened by any
-    /// test, so they could rot, drift, or be silently truncated while the
-    /// suite stayed green and the comments went on calling this a complete
-    /// release.
+    /// The desktop archive is outside provisioning's request set. Checking
+    /// the whole inventory keeps it, and every signed asset, from silently
+    /// drifting while the source's supported-request tests remain green.
     #[farhelm_testtrace::test]
     fn the_committed_fixture_release_is_internally_consistent() {
         let sums_bytes = fixture_bytes("SHA256SUMS");
@@ -2007,14 +2038,14 @@ mod tests {
         let cache = tempfile::tempdir().unwrap();
         let first = release
             .source(cache.path())
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
         let after_warmup = release.requests().len();
 
         let second = release
             .source(cache.path())
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
 
@@ -2045,7 +2076,7 @@ mod tests {
         let cache = tempfile::tempdir().unwrap();
         let binary = release
             .source(cache.path())
-            .path(PayloadKind::Tmux, PayloadArch::X86_64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
         let after_warmup = release.requests().len();
@@ -2057,7 +2088,7 @@ mod tests {
 
         let recovered = release
             .source(cache.path())
-            .path(PayloadKind::Tmux, PayloadArch::X86_64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
         assert_eq!(recovered, binary);
@@ -2085,12 +2116,12 @@ mod tests {
         let source = release.source(cache.path());
 
         let (first, second) = tokio::join!(
-            source.path(PayloadKind::Tmux, PayloadArch::X86_64),
-            source.path(PayloadKind::Tmux, PayloadArch::X86_64),
+            source.path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64),
+            source.path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64),
         );
 
         assert_eq!(first.unwrap(), second.unwrap());
-        let asset = assets::tmux_name(PayloadArch::X86_64);
+        let asset = assets::tmux_name(PayloadTarget::LinuxX86_64).unwrap();
         let requests = release.requests();
         let downloads = requests.iter().filter(|name| *name == asset).count();
         assert_eq!(downloads, 1, "{requests:?}");
@@ -2106,8 +2137,9 @@ mod tests {
     /// ARRIVED before either is released — no sleeps, no timing guesses.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn requests_for_different_assets_overlap() {
-        let farhelm_asset = assets::archive_name(assets::farhelm_archive_for(PayloadArch::X86_64));
-        let tmux_asset = assets::tmux_name(PayloadArch::X86_64);
+        let farhelm_asset =
+            assets::archive_name(assets::farhelm_archive_for(PayloadTarget::LinuxX86_64));
+        let tmux_asset = assets::tmux_name(PayloadTarget::LinuxX86_64).unwrap();
         let gates: Vec<_> = (0..2)
             .map(|_| {
                 (
@@ -2138,11 +2170,19 @@ mod tests {
 
         let farhelm = tokio::spawn({
             let source = Arc::clone(&source);
-            async move { source.path(PayloadKind::Farhelm, PayloadArch::X86_64).await }
+            async move {
+                source
+                    .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
+                    .await
+            }
         });
         let tmux = tokio::spawn({
             let source = Arc::clone(&source);
-            async move { source.path(PayloadKind::Tmux, PayloadArch::X86_64).await }
+            async move {
+                source
+                    .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
+                    .await
+            }
         });
 
         // Both must be in flight at the server before either is answered.
@@ -2176,7 +2216,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn a_connect_failure_is_retried_once_and_then_succeeds() {
         let cache = tempfile::tempdir().unwrap();
-        let asset = assets::tmux_name(PayloadArch::X86_64);
+        let asset = assets::tmux_name(PayloadTarget::LinuxX86_64).unwrap();
         let (source, attempts) = scripted_source(
             cache.path(),
             vec![
@@ -2188,7 +2228,7 @@ mod tests {
         );
 
         let binary = source
-            .path(PayloadKind::Tmux, PayloadArch::X86_64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
         assert_eq!(
@@ -2217,7 +2257,7 @@ mod tests {
             let cache = tempfile::tempdir().unwrap();
             let (source, attempts) = scripted_source(cache.path(), script);
             let error = source
-                .path(PayloadKind::Tmux, PayloadArch::X86_64)
+                .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
                 .await
                 .unwrap_err();
             assert!(
@@ -2263,7 +2303,7 @@ mod tests {
 
         let error = tokio::time::timeout(
             std::time::Duration::from_secs(30),
-            source.path(PayloadKind::Farhelm, PayloadArch::X86_64),
+            source.path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64),
         )
         .await
         .expect("a hung-up connection must fail promptly, not wait out a timeout")
@@ -2288,7 +2328,7 @@ mod tests {
         let cache = tempfile::tempdir().unwrap();
         let error = release
             .source(cache.path())
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
         assert_eq!(
@@ -2319,13 +2359,13 @@ mod tests {
         let source = release.source(cache.path());
 
         let error = source
-            .path(PayloadKind::Tmux, PayloadArch::Aarch64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxAarch64)
             .await
             .unwrap_err();
         assert!(format!("{error:#}").contains("HTTP 500"), "{error:#}");
 
         let binary = source
-            .path(PayloadKind::Tmux, PayloadArch::Aarch64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxAarch64)
             .await
             .unwrap();
         assert_eq!(
@@ -2354,7 +2394,7 @@ mod tests {
 
         let error = release
             .source(cache.path())
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
         assert_eq!(
@@ -2387,7 +2427,7 @@ mod tests {
 
         let error = release
             .source(cache.path())
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
         assert_eq!(
@@ -2425,7 +2465,7 @@ mod tests {
 
         let error = release
             .source(cache.path())
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
         assert_eq!(
@@ -2450,7 +2490,7 @@ mod tests {
         let cache = tempfile::tempdir().unwrap();
         release
             .source(cache.path())
-            .path(PayloadKind::Tmux, PayloadArch::X86_64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
 
@@ -2469,7 +2509,7 @@ mod tests {
 
         release
             .source(cache.path())
-            .path(PayloadKind::Tmux, PayloadArch::X86_64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
         let requests = release.requests();
@@ -2486,7 +2526,7 @@ mod tests {
     /// behind it.
     #[farhelm_testtrace::test]
     async fn an_asset_whose_bytes_do_not_match_sha256sums_is_refused() {
-        let asset = assets::archive_name(assets::farhelm_archive_for(PayloadArch::X86_64));
+        let asset = assets::archive_name(assets::farhelm_archive_for(PayloadTarget::LinuxX86_64));
         let tampered = b"not the release archive".to_vec();
         let release =
             FixtureRelease::start(vec![(asset.as_str(), Override::Body(tampered.clone()))]).await;
@@ -2494,7 +2534,7 @@ mod tests {
 
         let error = release
             .source(cache.path())
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
         let mut hasher = Sha256::new();
@@ -2539,14 +2579,14 @@ mod tests {
 
         let error = release
             .source(cache.path())
-            .path(PayloadKind::Tmux, PayloadArch::Aarch64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxAarch64)
             .await
             .unwrap_err();
         assert_eq!(
             format!("{error:#}"),
             format!(
                 "SHA256SUMS for v{FIXTURE_VERSION} has no entry for {}",
-                assets::tmux_name(PayloadArch::Aarch64)
+                assets::tmux_name(PayloadTarget::LinuxAarch64).unwrap()
             )
         );
     }
@@ -2557,13 +2597,13 @@ mod tests {
     /// an unpublished one.
     #[farhelm_testtrace::test]
     async fn a_missing_release_asset_names_the_asset() {
-        let asset = assets::archive_name(assets::farhelm_archive_for(PayloadArch::Aarch64));
+        let asset = assets::archive_name(assets::farhelm_archive_for(PayloadTarget::LinuxAarch64));
         let release = FixtureRelease::start(vec![(asset.as_str(), Override::NotFound)]).await;
         let cache = tempfile::tempdir().unwrap();
 
         let error = release
             .source(cache.path())
-            .path(PayloadKind::Farhelm, PayloadArch::Aarch64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxAarch64)
             .await
             .unwrap_err();
         assert_eq!(
@@ -2577,14 +2617,14 @@ mod tests {
     /// is created.
     #[farhelm_testtrace::test]
     async fn an_oversized_asset_content_length_is_refused_before_reading() {
-        let asset = assets::archive_name(assets::farhelm_archive_for(PayloadArch::X86_64));
+        let asset = assets::archive_name(assets::farhelm_archive_for(PayloadTarget::LinuxX86_64));
         let release =
             FixtureRelease::start(vec![(asset.as_str(), Override::DeclaredLength(17))]).await;
         let cache = tempfile::tempdir().unwrap();
         let source = release.source(cache.path()).with_asset_max_bytes(16);
 
         let error = source
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
         let rendered = format!("{error:#}");
@@ -2601,7 +2641,7 @@ mod tests {
     /// removed before the refusal is returned.
     #[farhelm_testtrace::test]
     async fn an_oversized_asset_stream_is_removed_at_the_cap() {
-        let asset = assets::archive_name(assets::farhelm_archive_for(PayloadArch::X86_64));
+        let asset = assets::archive_name(assets::farhelm_archive_for(PayloadTarget::LinuxX86_64));
         let release = FixtureRelease::start(vec![(
             asset.as_str(),
             Override::Gated {
@@ -2617,7 +2657,7 @@ mod tests {
 
         let error = tokio::time::timeout(
             std::time::Duration::from_secs(30),
-            source.path(PayloadKind::Farhelm, PayloadArch::X86_64),
+            source.path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64),
         )
         .await
         .expect("the asset cap must stop the stream without waiting for EOF")
@@ -2675,16 +2715,17 @@ mod tests {
     /// in the cache.
     #[farhelm_testtrace::test]
     async fn a_download_broken_mid_stream_leaves_no_partial_file() {
-        let asset = assets::archive_name(assets::farhelm_archive_for(PayloadArch::X86_64));
+        let asset = assets::archive_name(assets::farhelm_archive_for(PayloadTarget::LinuxX86_64));
         let (broken, close) = connection_dropped_mid_body().await;
         let release =
             FixtureRelease::start(vec![(asset.as_str(), Override::Redirect(broken))]).await;
         let cache = tempfile::tempdir().unwrap();
         let source = release.source(cache.path());
-        let download =
-            tokio::spawn(
-                async move { source.path(PayloadKind::Farhelm, PayloadArch::X86_64).await },
-            );
+        let download = tokio::spawn(async move {
+            source
+                .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
+                .await
+        });
 
         // The premise, observed rather than assumed: the partial file exists
         // and holds some of the body before the connection breaks.
@@ -2726,7 +2767,7 @@ mod tests {
     /// direct-response test in this file.
     #[farhelm_testtrace::test]
     async fn a_redirected_asset_is_followed_and_still_verified() {
-        let asset = assets::tmux_name(PayloadArch::Aarch64);
+        let asset = assets::tmux_name(PayloadTarget::LinuxAarch64).unwrap();
         let release = FixtureRelease::start(vec![
             (asset, Override::Redirect("/object-store-copy".to_string())),
             ("object-store-copy", Override::Body(fixture_bytes(asset))),
@@ -2736,7 +2777,7 @@ mod tests {
 
         let binary = release
             .source(cache.path())
-            .path(PayloadKind::Tmux, PayloadArch::Aarch64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxAarch64)
             .await
             .unwrap();
         assert_eq!(
@@ -2762,7 +2803,7 @@ mod tests {
     /// before anything opened it.
     #[farhelm_testtrace::test]
     async fn an_archive_without_exactly_one_matching_member_is_refused() {
-        let asset = assets::archive_name(assets::farhelm_archive_for(PayloadArch::X86_64));
+        let asset = assets::archive_name(assets::farhelm_archive_for(PayloadTarget::LinuxX86_64));
         let release = FixtureRelease::start(vec![
             (
                 "SHA256SUMS",
@@ -2784,7 +2825,7 @@ mod tests {
 
         let error = release
             .source(cache.path())
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
         assert_eq!(
@@ -2811,7 +2852,7 @@ mod tests {
 
         let error = release
             .source(cache.path())
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
         assert_eq!(
@@ -2857,7 +2898,7 @@ mod tests {
         let source = release.source(cache.path());
         let error = tokio::time::timeout(
             std::time::Duration::from_secs(30),
-            source.path(PayloadKind::Farhelm, PayloadArch::X86_64),
+            source.path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64),
         )
         .await
         .expect("the cap must be enforced mid-stream, not after end-of-file")
@@ -2915,12 +2956,12 @@ mod tests {
         let cache = tempfile::tempdir().unwrap();
         let source = release.source(cache.path());
         let binary = source
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
         let after_warmup = release.requests().len();
 
-        let asset = assets::archive_name(assets::farhelm_archive_for(PayloadArch::X86_64));
+        let asset = assets::archive_name(assets::farhelm_archive_for(PayloadTarget::LinuxX86_64));
         std::fs::write(
             generation(cache.path(), &release.base_url).join(format!("{asset}.bin.sha256")),
             "not a digest\n",
@@ -2928,7 +2969,7 @@ mod tests {
         .unwrap();
 
         let recovered = source
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
         assert_eq!(recovered, binary);
@@ -2957,7 +2998,7 @@ mod tests {
         let cache = tempfile::tempdir().unwrap();
         let source = release.source(cache.path());
         let binary = source
-            .path(PayloadKind::Tmux, PayloadArch::X86_64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
 
@@ -2966,7 +3007,7 @@ mod tests {
         std::fs::write(binary.join("planted"), b"debris").unwrap();
 
         let recovered = source
-            .path(PayloadKind::Tmux, PayloadArch::X86_64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
         assert_eq!(recovered, binary);
@@ -2990,7 +3031,7 @@ mod tests {
         let cache = tempfile::tempdir().unwrap();
         let generation = generation(cache.path(), &release.base_url);
         std::fs::create_dir_all(&generation).unwrap();
-        let asset = assets::tmux_name(PayloadArch::X86_64);
+        let asset = assets::tmux_name(PayloadTarget::LinuxX86_64).unwrap();
         let orphans = [
             generation.join(format!("{asset}.part")),
             generation.join(format!("{asset}.bin.part")),
@@ -3004,7 +3045,7 @@ mod tests {
 
         release
             .source(cache.path())
-            .path(PayloadKind::Tmux, PayloadArch::X86_64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
 
@@ -3056,7 +3097,7 @@ mod tests {
 
         release
             .source(cache.path())
-            .path(PayloadKind::Tmux, PayloadArch::X86_64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
 
@@ -3096,7 +3137,7 @@ mod tests {
         let cache_root = tempfile::tempdir().unwrap();
         release
             .source(cache_root.path())
-            .path(PayloadKind::Tmux, PayloadArch::X86_64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
 
@@ -3637,7 +3678,7 @@ mod tests {
         let source = release.source(cache.path());
         // Warm the in-memory manifest with one asset.
         source
-            .path(PayloadKind::Tmux, PayloadArch::X86_64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
         let after_warmup = release.requests().len();
@@ -3648,7 +3689,7 @@ mod tests {
         // A DIFFERENT asset, so this is a genuine miss for its own reasons:
         // exactly one request, for the asset itself.
         let binary = source
-            .path(PayloadKind::Tmux, PayloadArch::Aarch64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxAarch64)
             .await
             .unwrap();
         assert_eq!(
@@ -3664,7 +3705,7 @@ mod tests {
 
         // The repair is what makes this a hit.
         let again = source
-            .path(PayloadKind::Tmux, PayloadArch::Aarch64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxAarch64)
             .await
             .unwrap();
         assert_eq!(again, binary);
@@ -3691,7 +3732,7 @@ mod tests {
             let cache = tempfile::tempdir().unwrap();
             let source = release.source(cache.path());
             let binary = source
-                .path(PayloadKind::Tmux, PayloadArch::X86_64)
+                .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
                 .await
                 .unwrap();
 
@@ -3711,7 +3752,7 @@ mod tests {
 
             let recovered = tokio::time::timeout(
                 std::time::Duration::from_secs(30),
-                source.path(PayloadKind::Tmux, PayloadArch::X86_64),
+                source.path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64),
             )
             .await
             .unwrap_or_else(|_| panic!("{plant}: hashing must never be attempted on it"))
@@ -3734,13 +3775,13 @@ mod tests {
     /// is never worth ending an "add host" over.
     #[farhelm_testtrace::test]
     async fn oversized_cached_control_files_and_markers_are_a_miss() {
-        let asset = assets::tmux_name(PayloadArch::X86_64);
+        let asset = assets::tmux_name(PayloadTarget::LinuxX86_64).unwrap();
         for oversized in ["SHA256SUMS", "SHA256SUMS.minisig", "marker"] {
             let release = FixtureRelease::start(Vec::new()).await;
             let cache = tempfile::tempdir().unwrap();
             release
                 .source(cache.path())
-                .path(PayloadKind::Tmux, PayloadArch::X86_64)
+                .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
                 .await
                 .unwrap();
             let after_warmup = release.requests().len();
@@ -3757,7 +3798,7 @@ mod tests {
 
             let recovered = release
                 .source(cache.path())
-                .path(PayloadKind::Tmux, PayloadArch::X86_64)
+                .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
                 .await
                 .unwrap();
             assert_eq!(
@@ -3878,7 +3919,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn a_failing_redirect_never_renders_its_target_url() {
         let dead = ClosingListener::start().await;
-        let asset = assets::tmux_name(PayloadArch::X86_64);
+        let asset = assets::tmux_name(PayloadTarget::LinuxX86_64).unwrap();
         let target = format!("{}leak?token=sentinel-token", dead.base_url());
         let release =
             FixtureRelease::start(vec![(asset, Override::Redirect(target.clone()))]).await;
@@ -3887,7 +3928,7 @@ mod tests {
         let source = release.source(cache.path());
         let error = tokio::time::timeout(
             std::time::Duration::from_secs(30),
-            source.path(PayloadKind::Tmux, PayloadArch::X86_64),
+            source.path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64),
         )
         .await
         .expect("a hung-up redirect target must fail promptly")

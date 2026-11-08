@@ -16,7 +16,7 @@
 //! or package changes; the parity tests are what catch the other two falling
 //! behind.
 
-use super::plan::PayloadArch;
+use super::plan::PayloadTarget;
 
 /// One `.tar.gz` release archive: a cargo-dist package built for one target
 /// triple, holding one bare binary (`member`) nested under
@@ -38,9 +38,8 @@ pub struct ReleaseArchive {
 
 /// Every archive a release publishes (D1, D4, D6): the CLI/helm/supervisor
 /// binary for the three shipped targets, plus the macOS desktop shell.
-/// `farhelm_archive_for` narrows this to the two Linux entries provisioning
-/// actually installs on a host; the macOS entries exist only for
-/// `install.sh` and never travel over SSH.
+/// Provisioning selects the `farhelm` archive for its inspected host target;
+/// the desktop-shell archive is used only by the app's installer and updater.
 pub const RELEASE_ARCHIVES: [ReleaseArchive; 4] = [
     ReleaseArchive {
         package: "farhelm",
@@ -71,30 +70,33 @@ pub fn archive_name(archive: &ReleaseArchive) -> String {
     format!("{}-{}.tar.gz", archive.package, archive.target)
 }
 
-/// The bare (unarchived) static tmux build published for one Linux payload
-/// architecture (D5) — the one payload kind released without a `.tar.gz`
-/// wrapper, so it needs no [`ReleaseArchive`] entry of its own.
-pub fn tmux_name(arch: PayloadArch) -> &'static str {
-    match arch {
-        PayloadArch::X86_64 => "tmux-x86_64-unknown-linux-musl",
-        PayloadArch::Aarch64 => "tmux-aarch64-unknown-linux-musl",
+/// Name the bare static tmux build for a Linux host, refusing a Mac target.
+/// Remote Macs use terminal hosts exclusively and have no tmux payload. A
+/// caller must handle that unsupported request before doing any source I/O,
+/// rather than falling back to the Linux build for the same architecture.
+pub fn tmux_name(target: PayloadTarget) -> anyhow::Result<&'static str> {
+    match target {
+        PayloadTarget::LinuxX86_64 => Ok("tmux-x86_64-unknown-linux-musl"),
+        PayloadTarget::LinuxAarch64 => Ok("tmux-aarch64-unknown-linux-musl"),
+        PayloadTarget::MacosAarch64 => {
+            anyhow::bail!("remote macOS hosts do not support tmux payloads")
+        }
     }
 }
 
-/// The Linux host payload archive for `arch`: provisioning only ever
-/// installs the `farhelm` package (never `farhelm-desktop`) onto a remote
-/// host, and only onto a musl Linux target (D4) — so despite
-/// [`RELEASE_ARCHIVES`] carrying entries `PayloadArch` cannot name (macOS,
-/// the desktop shell), this lookup is total over every `PayloadArch`.
-pub fn farhelm_archive_for(arch: PayloadArch) -> &'static ReleaseArchive {
-    let target = match arch {
-        PayloadArch::X86_64 => "x86_64-unknown-linux-musl",
-        PayloadArch::Aarch64 => "aarch64-unknown-linux-musl",
+/// Select the CLI/supervisor archive for every supported provisioning target.
+/// The desktop shell is never installed over SSH. This lookup reuses the
+/// release inventory, including the Mac archive already used by the installer.
+pub fn farhelm_archive_for(target: PayloadTarget) -> &'static ReleaseArchive {
+    let triple = match target {
+        PayloadTarget::LinuxX86_64 => "x86_64-unknown-linux-musl",
+        PayloadTarget::LinuxAarch64 => "aarch64-unknown-linux-musl",
+        PayloadTarget::MacosAarch64 => "aarch64-apple-darwin",
     };
     RELEASE_ARCHIVES
         .iter()
-        .find(|archive| archive.package == "farhelm" && archive.target == target)
-        .expect("RELEASE_ARCHIVES carries a farhelm archive for every PayloadArch target")
+        .find(|archive| archive.package == "farhelm" && archive.target == triple)
+        .expect("RELEASE_ARCHIVES carries a farhelm archive for every PayloadTarget target")
 }
 
 /// The six payload names `SHA256SUMS` lists, sorted — every
@@ -116,8 +118,13 @@ pub fn farhelm_archive_for(arch: PayloadArch) -> &'static ReleaseArchive {
 #[allow(dead_code)]
 pub fn sums_members() -> Vec<String> {
     let mut members: Vec<String> = RELEASE_ARCHIVES.iter().map(archive_name).collect();
-    members.push(tmux_name(PayloadArch::X86_64).to_string());
-    members.push(tmux_name(PayloadArch::Aarch64).to_string());
+    for target in [PayloadTarget::LinuxX86_64, PayloadTarget::LinuxAarch64] {
+        members.push(
+            tmux_name(target)
+                .expect("Linux has a released tmux payload")
+                .to_string(),
+        );
+    }
     members.sort();
     members
 }
@@ -147,29 +154,41 @@ mod tests {
     #[farhelm_testtrace::test]
     fn tmux_name_covers_both_linux_architectures() {
         assert_eq!(
-            tmux_name(PayloadArch::X86_64),
+            tmux_name(PayloadTarget::LinuxX86_64).unwrap(),
             "tmux-x86_64-unknown-linux-musl"
         );
         assert_eq!(
-            tmux_name(PayloadArch::Aarch64),
+            tmux_name(PayloadTarget::LinuxAarch64).unwrap(),
             "tmux-aarch64-unknown-linux-musl"
         );
     }
 
-    /// Spec: both provisioning architectures resolve to a musl Linux
-    /// `farhelm` archive (D4) — never the macOS or desktop-shell entries
-    /// [`RELEASE_ARCHIVES`] also carries.
+    /// The OS is part of payload selection: arm64 Linux and macOS must not
+    /// share an archive merely because their machine architecture matches.
     #[farhelm_testtrace::test]
-    fn farhelm_archive_for_maps_both_arches_to_musl_archives() {
+    fn farhelm_archive_for_maps_each_host_target_to_its_archive() {
         for (arch, target) in [
-            (PayloadArch::X86_64, "x86_64-unknown-linux-musl"),
-            (PayloadArch::Aarch64, "aarch64-unknown-linux-musl"),
+            (PayloadTarget::LinuxX86_64, "x86_64-unknown-linux-musl"),
+            (PayloadTarget::LinuxAarch64, "aarch64-unknown-linux-musl"),
+            (PayloadTarget::MacosAarch64, "aarch64-apple-darwin"),
         ] {
             let archive = farhelm_archive_for(arch);
             assert_eq!(archive.package, "farhelm");
             assert_eq!(archive.target, target);
             assert_eq!(archive.member, "farhelm");
         }
+    }
+
+    /// No Mac tmux asset exists; rejecting the pair here keeps both source
+    /// implementations from selecting a Linux executable by architecture.
+    #[farhelm_testtrace::test]
+    fn tmux_name_refuses_macos() {
+        assert_eq!(
+            tmux_name(PayloadTarget::MacosAarch64)
+                .unwrap_err()
+                .to_string(),
+            "remote macOS hosts do not support tmux payloads"
+        );
     }
 
     /// Spec: `sums_members` is exactly the six published names — four
