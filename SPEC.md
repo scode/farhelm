@@ -4301,17 +4301,18 @@ the user to retry after preparation finishes. Once Stop or Delete revokes creati
 recreate the container. After a host reboot the session terminal is gone and Restart remains unavailable, so the session
 can only be replaced or deleted.
 
-This isolates host filesystem capabilities, not memory or CPU use, and it does not protect the checkout itself: the
-agent can write anything there, including Git hooks and Git configuration under `.git` and an agent's own project
-settings, which can run with the host account's full access when Git or an agent later runs in that checkout outside the
-container (from a terminal or a shell prompt that shows Git status, an editor, or a later ordinary session reusing the
-checkout). Internet access, LAN and tailnet addresses, and cloud metadata remain reachable. A localhost tunnel reaches
-the selected host's port, not an in-container port. The host's `containers.conf` still applies. Podman's ordinary
-privileges, including working sudo inside an appropriately prepared image, remain available. Keep-id maps the host
-account onto the chosen container account's uid and gid, so files it writes in the checkout belong to the host user;
-container-root files belong to a subordinate host uid. The user may need `podman unshare` to edit or remove them. A
-container-root-owned folder can likewise prevent Empty Trash until removed with `podman unshare rm -rf`. Delete removes
-the container and leaves images in the user's Podman storage alone.
+This isolates host filesystem capabilities, not memory or CPU use. The checkout is deliberately outside that isolation:
+it is the session's work, shared read-write with the host, and what the agent changes there reaching the host is
+intended behavior, not a gap to close. The agent can write anything in it, including Git hooks and Git configuration
+under `.git` and an agent's own project settings, which can run with the host account's full access when Git or an agent
+later runs in that checkout outside the container (from a terminal or a shell prompt that shows Git status, an editor,
+or a later ordinary session reusing the checkout). Internet access, LAN and tailnet addresses, and cloud metadata remain
+reachable. A localhost tunnel reaches the selected host's port, not an in-container port. The host's `containers.conf`
+still applies. Podman's ordinary privileges, including working sudo inside an appropriately prepared image, remain
+available. Keep-id maps the host account onto the chosen container account's uid and gid, so files it writes in the
+checkout belong to the host user; container-root files belong to a subordinate host uid. The user may need
+`podman unshare` to edit or remove them. A container-root-owned folder can likewise prevent Empty Trash until removed
+with `podman unshare rm -rf`. Delete removes the container and leaves images in the user's Podman storage alone.
 
 ### Local authority and trust between hosts
 
