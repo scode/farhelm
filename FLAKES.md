@@ -4310,3 +4310,31 @@ evidence, which expires with cleanup.
 Class: readiness
 
 Cause: hypothesis
+
+## 2026-11-07 — an update's progress label shows no step name in a sixth provisioning test (e2e/tests/provisioning.spec.ts)
+
+`changed-host advice while following: destination` failed on Chromium in the plans landing monitor's full browser run
+`29358e1b-1c83-4089-a665-b589f9ada509` on Tensorlake sandboxes on 2026-11-07 (tested commit `d6e394f8`, a Stop change
+that does not touch provisioning), with the signature recorded for five sibling tests on 2026-11-05, 2026-11-06 and
+earlier on 2026-11-07, its own "identity" variant among them: right after the update starts, the row's label held
+"Updating: 0/9 0:04", the count and timer with no step name, for the whole five-second wait. It was the only failure in
+its shard. It was not re-run; it passed in the five other full browser runs the monitor made that day. Hypothesis: as
+for the siblings, the first step's name reaches the label later than five seconds under a loaded full-suite shard. Open;
+excluded from deflake sweeps with its siblings; no fix attempted.
+
+```text
+Expected pattern: /Updating: \d+\/\d+ .+ \d+:\d{2}/
+Received string:  "Updating: 0/9 0:04"
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. The pinned tmux 3.7c the shard runner installs;
+its executable SHA256 was not copied into this entry. Locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` after the recorder
+scrubbed ambient `FARHELM_*`; tracked-tree status was not checked for this entry. Run UUIDs address retained temporary
+evidence, which expires with cleanup.
+
+Class: readiness
+
+Cause: hypothesis
