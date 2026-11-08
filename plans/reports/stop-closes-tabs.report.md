@@ -1,181 +1,159 @@
 ## Since the last review
 
-Both existing drafts remain in the stack. #3132 corrects the session-row rendering regression, restores the two
-bottom-row menu tests' geometric premise, and removes the requested protocol-comment rationale. #3133 is unchanged apart
-from its rebase. No new PR was added.
+Both drafts remain. #3132 corrects the Delete tests' setup and waits for the exact tab opened after Stop to appear in
+the session listing. #3133 was rebased without changing its own patch. No PR was added or dropped.
 
-The unchanged rendering tests reproduced both failures before the correction and passed afterwards. The new Stop
-confirmation callbacks had unstable identities: omitted no-op defaults were recreated on parent refresh, and the
-production confirm/cancel closures lacked the stable handles used by neighboring actions. Omitted callbacks now remain
-absent, and production callbacks retain their identity while receiving current state.
+The unmodified whole Delete spec reproduced the reported Error status once in 40 WebKit executions. That failure
+happened before any tab opened or Delete ran. The retained trace shows a live terminal followed by a launch failure: the
+scope wrapper ended before the agent started. A Running listing does not establish that the agent has started. The trace
+does not distinguish Stop interrupting the wrapper from an independent systemd refusal. It does establish that the
+test's expectation of an ordinary started-agent exit lacked its required setup.
 
-The menu legitimately grew with Stop's tab-closing description. At the old 500-pixel fixture height, the row-aimed
-pointer was already inside the menu, so the fixture could no longer distinguish the clamp it checks. Only those two
-fixture heights changed to 650 pixels. Their scrolling, pointer, containment, overflow and last-action assertions and
-their timeouts are unchanged; both engines independently established the required geometry and passed.
+All four Delete cases now observe the fresh fake agent's readiness output before Stop. That happens before installing
+the controlled feed or opening the Delete question, preserving the intentionally stale display and behind-question state
+changes. Both post-Stop tab branches wait for the returned tab ID. Exited, exact tab counts, Delete refusals, retained
+rows, refreshes and changed-consent assertions remain intact. No product behavior changed in this correction. The whole
+spec then passed ten repetitions on each engine: 40 Chromium and 40 WebKit executions, with no skips or retries.
 
-The reported Stop process-cleanup failure did not recur in three fresh runs on both engines, or in the required broader
-browser run. Its cause remains unconfirmed, and no speculative cleanup change was made. All 280 browser cases passed.
+The earlier row-rendering correction and bottom-row menu fixtures remain. Unchanged rows keep stable confirmation
+callbacks; the two menu tests use a taller fixture to exercise their original viewport-clamp assertions after the menu
+grew. The landing's restored mixed-session Delete coverage, confirmation-setting specification, supervisor comment and
+protocol version 70 are preserved.
 
 ## What this was about
 
-Stop used to leave ordinary sessions' terminal tabs and their work running, while a containerized Stop ended them. The
-maintainer chose consistent behavior and a confirmation when tabs are shown.
+Stop left ordinary sessions' terminal tabs and their work running, while a containerized Stop ended them. The maintainer
+chose consistent behavior and a confirmation when tabs are shown.
 
-Stop now ends the agent and closes its terminal tabs, including their processes, while keeping the session and agent
-terminal viewable. The row, the buttons above the terminal, and bulk Stop ask about visible tabs unless session
-confirmations are skipped. Restart and an agent exiting on its own still leave tabs running. Tabs opened after Stop
-close with the next Stop.
+Stop now ends the agent and closes its tabs and their processes, keeping the session and agent terminal viewable. The
+session row, the buttons above the terminal and bulk Stop ask about visible tabs unless session confirmations are
+skipped. Restart and an agent exiting on its own leave tabs running. A tab opened after Stop closes with the next Stop
+or Delete. An approved agent-requested Stop has the same tab-closing behavior.
 
 ## Things you should know
 
-A tab whose host cannot be read stays open and is named in a notice; healthy siblings still close. The GUI shows that
-notice, and agent-requested Stop reports partial cleanup through its existing error response. Its approval card
+A tab whose host cannot be read stays open and is named in a notice; healthy siblings still close. The GUI displays the
+notice. Agent-requested Stop reports partial cleanup through its existing error response, and its approval card
 explicitly authorizes closing tabs.
 
-Consent protects both resources independently: a screen showing no tabs cannot authorize a new tab's closure, and a
-screen showing an ended agent cannot authorize stopping an agent restarted elsewhere. This also applies when
-confirmations are skipped and separately to every bulk target. A refusal stops nothing and refreshes the display without
-opening a question automatically.
+Consent protects the agent and tabs separately. A screen showing no tabs cannot authorize closing a newly opened tab; a
+screen showing an ended agent cannot authorize stopping an agent restarted elsewhere. The guards also apply with
+confirmations skipped and separately to every bulk target. A refusal stops nothing and refreshes the display without
+automatically opening a question.
 
-Remote supervisors need updating because the protocol version increases from 68 to 69. An older helm otherwise could
-close tabs without asking. An old browser's bodyless or empty-object Stop refuses open tabs; reloading obtains the new
-confirmation flow. Stop adds no database migration.
+Remote supervisors need updating: this plan takes protocol 70 after the tunnel change took 69. The compatibility
+boundary prevents an older helm's Stop from gaining permission to close tabs without asking. An old browser's bodyless
+or empty-object Stop refuses open tabs; reloading obtains the new confirmation flow. No database migration is added.
 
-The row above the terminal gained a Stop button. With a desktop tunnel pill present, persistent action labels and
-spacing are slightly tighter to preserve the supported 650-pixel pane width; icons, labels, tab readability and both
-port numbers remain. The documentation covers Stop/restart/resume, working in a session, the session list, containerized
-sessions, agent wrappers, host management and uninstall. No preview was started for this unattended documentation work.
+The row above the terminal gains a Stop button. With the desktop tunnel pill present, action labels and spacing are
+tighter to preserve the supported 650-pixel pane width; labels, icons, readable tabs and both port numbers remain. The
+seven changed documentation pages cover Stop/restart/resume, working in a session, the session list, containerized
+sessions, agent wrappers, host management and uninstall. This unattended run started no preview server.
 
 ## Open questions and possible follow-ups
 
-No required work remains. The two frozen documentation-shot specs still describe the old header/Stop behavior, as the
-latest Decision explicitly leaves them to the next screenshot refresh. Process cleanup retains the existing limits for
-detached processes on hosts without a usable systemd user manager. The previously observed cleanup timeout remains an
-unexplained observation; successful repetitions do not establish that it cannot recur.
+No required work remains. The two frozen documentation-shot scenarios still describe the old header and Stop behavior;
+the first return Decision leaves them to the next screenshot refresh.
+
+The earlier process-cleanup timeout did not recur in its three fresh both-engine attempts or the broader 280-case run.
+Its cause remains unconfirmed; those passes do not establish that it cannot recur. Existing cleanup limits for detached
+processes on hosts without a usable systemd user manager remain. This round found no evidence that Stop misclassifies an
+ordinary started-agent stop, and made no speculative teardown or status change.
 
 ## PRs
 
 - [#3132](https://github.com/scode/farhelm/pull/3132/changes): Stop behavior, consent, notices, UI, tests,
-  specifications and changelog; draft head `e788059ae517`.
+  specifications and changelog; draft head `84768a8dec68e9804f37b6968796c7132f3515c5`, based on main.
 - [#3133](https://github.com/scode/farhelm/pull/3133/changes): CLI help, agent instructions, seven docs pages and the
-  addressed TODO removal; draft head `bdb93a6f56f3`, based on #3132.
+  addressed TODO removal; draft head `d6342068473cdff110d543c5794d7f06057ab61f`, based on #3132.
 
 ## Checks run, reused and skipped
 
-The stack was carefully rebased onto main `d0ba1d49939d`, including instant trash deletion, old-terminal warnings and
-their resolution, notification docs links, and release announcement data. Every upstream diff was read. Both original PR
-units and the correction had empty interdiffs after rebase. New warnings persist while old tabs run, which agrees with
-Restart preserving tabs; Stop closes them. No lifecycle-lock, consent or protocol conflict was found.
+Both units were carefully rebased onto main `4804aede8523`. The complete upstream diff was inspected: release and
+documentation updates, flake bookkeeping and a trash-recovery test wait do not alter Stop's contracts. The original
+units had empty interdiffs after rebase. A final fetch found no newer main.
 
-The final integration tests captured head `9abbc7dac889` plus the correction, fingerprint
-`bc746204357116bab6e4c5d531571be1cc5857697bdc2d543bf9624cebe976ed`. Folding the correction into #3132 changed history
-only: the complete working-tree diff between that tested source and the published stack is empty.
+Current tests captured head `582b0564388a` plus the final one-file correction, with complete source fingerprint
+`9ea8f6b886bbcf1433f9874aac160d9bbbe424c9628dd9b90bd8a21c81c4b934`. Folding it into #3132 and restacking #3133 changed
+history only: the full tree comparison with that tested source is empty.
 
-- Post-rebase `cargo nextest run -p farhelm-ui` passed all 908 tests, with zero skips, in
-  `ab78c17d-82dd-493f-a2c9-0b67f84d7554`. This includes the new bell/migration cases alongside the unchanged
-  rendering-regression tests.
-- The exact real-host warning tests passed in `17fc53c8-f6f5-4e68-89f5-2e94b618df1f`:
-  `host_migrations::a_restart_with_an_old_tab_open_keeps_one_old_terminal_warning` and
-  `host_processes::an_old_session_after_the_switch_to_hosts_is_reported_as_one_to_move`. They establish that Restart
-  preserves an old tab and its one unresolved warning, and that closing the old tab then stopping its agent resolves
-  that warning. The complete JUnit report counts two behavioral passes and successful fixture setup separately; 543
-  selected-out tests are not passes. Pinned tmux 3.7c and nextest 0.9.148 ran with four slots and zero retries; complete
-  output has no runtime SKIPPED marker.
+Checks run for this return:
 
-The current correction was tested above rebased head `611b6e192e57`. The final correction's recorder fingerprint is
-`bc35bf03fa0c9a2be65e54e84adf6cae581f0869edfd74a4d47ec6a6824421e6`. Earlier products and UI execution used
-`90f7837a09181ffb92e7b0e3a72bbbdc269094912413ce6286d5ccf67f0aa4b0`; only the equivalent Rust tuple alias and the two
-browser fixture heights/comments changed afterwards. Compilation/lint checked the final alias. Browser tests used the
-matching CLI/fixtures build `83690e33-fea7-4606-9c6674eeaeac` and Dioxus 0.7.10 web build
-`95bf539e-6541-4b59-a739-62fca7ba6382`, both successful and identified by that earlier fingerprint.
+- Matching CLI/fixture and Dioxus 0.7.10 web builds passed in `1b365eb5-3a95-4216-8fa7-5a3541858b46` and
+  `90135c50-7a89-477f-98ec-83ed261f939f`. They captured the rebased source before the test-only correction, fingerprint
+  `3f677d7567ca331cf1f322d500df4314d1e469134fb819d65a6723c8f0132806`; production inputs stayed unchanged.
+- `npx playwright test 'delete-precondition\.spec\.ts' --repeat-each=10 --retries=0` passed all 80 executions in
+  `c62f9f59-6462-4633-91d3-1a43ad96ea6b`, using three workers and three owned stacks. Its actual JSON report was
+  inspected: 40 Chromium and 40 WebKit passes, zero skips, failures, flaky outcomes or global errors. This used generic
+  recording because strict browser mode refuses `--repeat-each`; these are directly inspected results, not a claim of
+  strict recorder policy validation. The corrected exact WebKit case also passed five repetitions in
+  `a325652a-29f9-40c1-88ef-ec8d558aec9c`.
+- The focused `cargo nextest run -p farhelm-proto -p farhelm-supervisor -p farhelm --lib --test e2e` Stop/tab selection
+  passed 40 behavioral tests plus fixture setup in `f7231549-fb03-4d29-be7d-8898cb91b5ee`. It covers consent,
+  startup/exit classification, cancellation, partial cleanup, real host and tmux tab process trees, Restart preserving
+  tabs, mixed-session Delete coverage and the protocol-70 pin. Pinned nextest 0.9.148 used four slots and zero retries;
+  pinned tmux 3.7c and the required systemd substrate ran. JUnit's 41 passes include setup; 2,529 selected-out tests are
+  not passes. Complete output has no runtime SKIPPED marker.
+- The isolated source sleep checker passed: 423 delays, zero missing rationales. Whitespace checks passed. The attempted
+  dprint check of TypeScript found no matching configured plugin; it is not counted as a formatting pass.
 
-- `cargo nextest run -p farhelm-ui` passed all 905 tests in `4432bff8-a5f3-44b3-b1b9-0cf4461e0c48`, with no skipped
-  tests. Before the correction, the exact two rendering tests failed in `81f4c414-b9d8-4900-9e61-2bb1a6f41574` (65
-  versus one unchanged-row renders, and six versus five total selection renders). Their unchanged assertions passed in
-  the exact retry `3b21aa21-7ef4-4f75-b9fa-8417d6155a0d`.
-- `npx playwright test` selecting the complete sidebar, session-confirmations and header specs, plus the two row Stop
-  confirmation/cancel/later-tab cases per engine, passed all 280 cases in `2a5b7a15-9b65-44ce-a9f6-0038ff64bf9b`: 140
-  each on Chromium and WebKit. The original scope-cleanup failure did not recur. Both-engine validated reports are
-  complete, with no failures, skips, interruptions, unstarted cases or global errors. This run precedes the final
-  rebase: the new old-terminal warnings are inactive for its default new-terminal fixtures, and the Stop controls,
-  callbacks, menu placement, consent and tested CSS are unchanged.
-- The two menu cases passed on Chromium and WebKit, four cases total, in `fd6f4a49-ce8c-402e-8209-284b021455d9`. The
-  prior Chromium run `a51d9866-16ec-4489-903c-72e0ac6d726c` failed both fixture pointer premises. Measured menu bottoms
-  were 465.09375 pixels against a 460-pixel aim before, and 579.09375 against a 610-pixel aim afterwards. The refusal
-  still exceeded its own scrollport on both engines. Its original assertions all passed.
-- The exact skipped-confirmations case passed in three fresh both-engine attempts:
-  `448436d2-e24f-4069-8bfb-9a39daec628c`, `15317a8a-6e8a-4337-b681-a77d1e60929c`, and
-  `837a7da4-bb67-4aa2-bb45-c175e87306c9`, retained in batch `ddff328e-4743-42ed-b8aa-cdd15180df47`. Each passed one case
-  per engine. A preceding single-engine generic run `0aa3fb44-4c97-4391-a46d-035a46bffdd4` also passed.
-- `cargo clippy -j4 -p farhelm-ui --all-targets -- -D warnings` passed in `4ec7b584-ebad-457d-98f1-0f01a25337de`. The
-  preceding attempt `173bac89-ee85-49c6-a5bb-40a74141b796` failed only the new callback's type-complexity lint; naming
-  its identical tuple payload corrected that failure without a lint exemption or behavior change. Formatting,
-  whitespace, fragment format and the source sleep checker passed; the latter inspected 420 delays with zero missing
-  rationales. After rebase, formatting, whitespace and fragment format passed again; the source sleep checker inspected
-  421 delays with zero missing rationales.
+The unmodified exact WebKit case first passed five repetitions in `4b7d0fb3-0eea-4d20-8be6-b63197c0018b`. The wider
+unmodified run `a258a94b-25c5-466b-b314-510d7a1ac8ba` then failed one of 40 executions, with 39 passes. Its trace,
+screenshot, status evidence and complete output remain retained separately. Later passes do not turn that aggregate into
+a pass or identify the underlying wrapper failure more precisely than described above.
 
-All completed runs above retain complete output with stream EOF, no omitted bytes, and no forced cleanup or cleanup
-limitation. Validated browser runs used three workers, zero retries and three owned stacks; their complete reports show
-no skips, interrupted or unstarted cases, or global errors. All owned stacks finished cleanup. Rust execution used
-pinned nextest 0.9.148 with four slots and zero retries; the UI-only selections did not need tmux.
+Earlier checks reused per command:
 
-Original Stop acceptance coverage is reused per command where this round leaves the tested path unchanged:
+- All 908 UI tests passed in `ab78c17d-82dd-493f-a2c9-0b67f84d7554`, at `9abbc7dac889` plus the callback correction,
+  fingerprint `bc746204357116bab6e4c5d531571be1cc5857697bdc2d543bf9624cebe976ed`. This includes the unchanged row
+  rendering guards. The current correction changes only the Delete browser fixture; UI callback and rendering inputs
+  remain unchanged.
+- The complete sidebar, header and session-confirmations specs, with the row Stop confirmation cases, passed 280 cases
+  in `2a5b7a15-9b65-44ce-a9f6-0038ff64bf9b`: 140 per engine, at `611b6e192e57`, fingerprint
+  `bc35bf03fa0c9a2be65e54e84adf6cae581f0869edfd74a4d47ec6a6824421e6`. Stop controls, callbacks, menu geometry, tested
+  CSS and consent paths are unchanged. Upstream old-terminal warnings are inactive in these new-terminal fixtures.
+- The original Stop and narrow tunnel-header selection passed 48 browser cases, 24 per engine, in
+  `31383bc4-062e-4d74-8ee0-0f02f505deaf`, at `2946e606f99a`, fingerprint
+  `f08de9a76f89ce6a579d8275b12f67bcde92ab645c4eb2c41e035cfbfcda4ab5`. Its guard, bulk, notice and header paths remain
+  unchanged; the wider 280-case run additionally covers the subsequent callback correction. Both reused browser runs
+  have complete strict-policy reports and zero failures, skips, interruptions, unstarted cases or global errors.
+- Original tab/consent/API/Podman acceptance passed ten behavioral cases plus setup in
+  `b814c010-b24b-4670-9c41-8b6a9fba9656`, at `18f698d46b24`, fingerprint
+  `e25a73f4b331c08b3316bc392c0c96cc53216c2a88cc53f5c64eeaa078cc55d3`. Real Podman coverage ran, with no runtime SKIPPED
+  marker. Four native-feature confirmation-token cases passed in `b154b933-ce94-4ec3-a4ae-3168859e37b6`, at
+  `8945c10a813c`, fingerprint `f3c33921ee23934df2de2102500d27f06d77da34c252c0c5c416341a7ef40ed9`. These unchanged
+  backend and mounted-token paths remain covered; native-feature execution on Linux does not establish macOS GUI
+  behavior.
+- UI all-target Clippy passed in `4ec7b584-ebad-457d-98f1-0f01a25337de`, at `611b6e192e57` and fingerprint
+  `bc35bf03fa0c9a2be65e54e84adf6cae581f0869edfd74a4d47ec6a6824421e6`. No Rust callback code changed afterwards.
+- `bun run build` passed with internal links valid in `8ac815a8-0c42-40de-9d88-6598f6548a7e`, at `18f698d46b24` and
+  fingerprint `e25a73f4b331c08b3316bc392c0c96cc53216c2a88cc53f5c64eeaa078cc55d3`. The Stop docs unit remains
+  byte-unchanged; upstream documentation additions affect other paragraphs and do not conflict with its links or
+  anchors.
 
-- `b814c010-b24b-4670-9c41-8b6a9fba9656` passed ten behavioral cases plus fixture setup at clean head `18f698d46b24`,
-  fingerprint `e25a73f4b331c08b3316bc392c0c96cc53216c2a88cc53f5c64eeaa078cc55d3`. The focused
-  `cargo nextest run -p farhelm -p farhelm-helm --lib --bin farhelm --test e2e` selection covers tab processes,
-  unreadable-tab partial cleanup, Restart preserving tabs, both consent guards, HTTP forwarding, credential injection
-  across launches, and real Podman tabs. Its output has no runtime SKIPPED marker. This round changes no backend
-  behavior; new upstream warning/lifecycle intersections receive the integration checks above.
-- Four native-feature UI cases passed in `b154b933-ce94-4ec3-a4ae-3168859e37b6`, including mounted Stop/Delete/Replace
-  callbacks retaining rendered confirmation tokens. Its fingerprint is
-  `f3c33921ee23934df2de2102500d27f06d77da34c252c0c5c416341a7ef40ed9`. The optional row payload and stable list handles
-  preserve that separate token contract; this round's browser row cases exercise their actual dispatch. This is Linux
-  native-feature coverage, not a macOS GUI claim.
-- `31383bc4-062e-4d74-8ee0-0f02f505deaf` passed all 48 selected browser cases, 24 per engine: the 23 new Stop cases plus
-  narrow native-tunnel header geometry. Its fingerprint is `f08de9a76f89ce6a`; this round's wider required specs cover
-  the changed row/menu behavior. `a1680181-af39-4fb3-a0a5-1fdd09e71b37` passed 12 credential-integration cases at
-  fingerprint `e25a73f4b331c08b`, six per engine. Those unchanged guard/API/bulk/launch paths remain covered.
-- The original 97-case Rust selection `caadbd16-5ebe-4654-be06-79d2f7665855` remains a failed aggregate: 96 passed, and
-  one nominal live-agent fixture incorrectly defaulted to Exited. That premise was corrected, and the exact test passed
-  in `a15d4112-1bcc-4624-8b20-47046230a28a`. Their fingerprints are `e85c6eb4b70c87e4` and `f3c33921ee23934d`. These
-  passes cover unchanged Stop backend/protocol/consent behavior.
-- Original targeted all-target desktop-feature Clippy `1ee9fe0c-07bb-4e3e-8ce1-b225fb39f574` and shipped-bin Clippy
-  `f734d510-552f-43b6-b9e1-ff6be2676c2f` passed. Their fingerprints are `87e719572775aca4` and `d870f927978c380a`. New
-  callback code has the current all-target UI lint above. Native compilation `a0c5b071-6752-421d-b6af-d943c11ecb58`
-  passed at the original integrated source.
-- `bun run build` passed in `8ac815a8-0c42-40de-9d88-6598f6548a7e`, with all internal links valid, at head
-  `18f698d46b24` and fingerprint `e25a73f4b331c08b`. The Stop docs unit is byte-unchanged after rebase. Main's new
-  warning paragraph on the session-list page and its independent new-terminals guide do not conflict with the Stop text,
-  links or anchors, so another website build was not needed for this unchanged unit.
+All cited completed runs have complete retained output with EOF, no omitted bytes, no forced cleanup and no cleanup
+limitation. Every owned browser stack completed cleanup. Earlier development failures remain retained, including the
+row-rendering reproduction, menu-fixture failures and initial type-complexity lint failure corrected in the preceding
+round. None is represented as a passed aggregate or erased by later success.
 
-Earlier private development failures remain retained: two failed compile attempts, one invocation of a different tool
-named dx, browser fixture readiness errors, and narrow-header overflow were corrected before original delivery. One
-WebKit header case timed out in cleanup after its assertions passed; its cause was unproven. Its unchanged-budget exact
-retry and the final 48-case run passed. No failed aggregate is represented as successful, and same-session failures were
-not recorded as latent flakes. This round separately preserves the rendering reproduction, menu fixture failures and
-initial lint failure above.
+The portable `summarize-test-runs.py --scan-output` inventory covers seven current command records and five explicitly
+reused records: eleven successful child commands and the one failed unmodified repetition. Discovery is complete with no
+coverage gaps or runtime SKIPPED markers. Generic repetitions supply command outcomes without recorder-validated case
+counts; their browser JSON supplies the execution counts above. This selected inventory excludes other historical runs
+and is not a count of distinct tests or a flake-rate measurement.
 
-The full workspace/browser batteries, installer/provisioning, release pipeline and live installation checks were
-skipped: targeted lifecycle, consent, rendering and launch evidence covers this change, and those operations did not
-change. No CI run was dispatched; CI is on demand and its browser job is disabled. No instruction, heading or path move
-requires the agent-instructions checker. The documentation-shot specs are deliberately outside this correction.
-
-The portable `summarize-test-runs.py --scan-output` inventory covers this round's 16 command records and three
-explicitly reused original records: 16 successful child commands and three failed child commands. Discovery completed
-with no invalid inputs or missing reports. One console-stream gap belongs to the pre-fix rendering reproduction: 264,622
-bytes were not forwarded, but its complete 4,292,752-byte raw output and failing JUnit report remain retained. No raw
-output was omitted. Generic single-engine attempts supply command outcomes without validated per-engine counts. This is
-a selected evidence inventory, not a count of distinct tests or all historical attempts.
+The full workspace and browser batteries, new installer/provisioning runs, release checks and macOS GUI checks were
+skipped: this correction changes one browser fixture, and the targeted and reused evidence covers its affected
+contracts. No CI run was dispatched; CI is on demand and its browser job is disabled. No live installation was changed.
+The frozen documentation-shot scenarios remain deferred by the Decision. No instruction, heading or path move requires
+the agent-instructions checker.
 
 ## Review gate
 
-The required single fresh-context gpt-6.1-sol reviewer at high effort re-reviewed #3132 and its final fixture/alias
-addenda. It found no actionable issue in the correction. #3133's original independent gate remains applicable because
-its own patch is unchanged. The original behavior gate's two consent findings were both fixed before first delivery; the
-documentation gate's grammar finding was corrected then too. No unresolved review finding remains.
+The required single fresh-context gpt-6.1-sol reviewer at high effort reviewed #3132 and the exact final correction and
+reported no actionable finding. #3133's original independent gate remains applicable because its own patch is unchanged.
+Earlier consent and wording findings were corrected before the original delivery; no unresolved review finding remains.
 
-Fresh same-model scope and resume checks passed. The correction uses existing optional callbacks and stable handles,
-without new state or cleanup machinery. Existing commit/PR messages and their successful cold reads were preserved. A
-separate documentation pass covered every corrected file and its callback/test contracts.
+Fresh native own-model resume and scope checks passed. The correction uses existing attachment, readiness and listing
+helpers without adding global waits or cleanup machinery. Existing approved commit/PR wording was preserved. A separate
+documentation pass covered the changed test and its setup, quiet-feed and prompt-drift contracts.
