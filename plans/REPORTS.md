@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`delete-unreadable-terminals`](reports/delete-unreadable-terminals.report.md) landed 2026-11-05 in #3024, #3040, #3032: Delete: keep warning about and reaping work after a terminal stops responding
 - [`triage-misc-nov4`](reports/triage-misc-nov4.report.md) landed 2026-11-05 in #3035, #3036, #3037, #3039: template card shows the container, escape host text in helm logs, paste-after-gap clause, one discard
 - [`terminal-text-drops`](reports/terminal-text-drops.report.md) landed 2026-11-05 in #3029, #3045: new terminals: state the invisible-formatting drop, print Kirat Rai vowel signs again
 - [`host-attention-list`](reports/host-attention-list.report.md) landed 2026-11-05 in #3044: A list above the sessions shows every host with a problem, an update, or setup/update in progress, with its action; it replaces the update banner and card
