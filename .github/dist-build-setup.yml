@@ -318,31 +318,42 @@
 # does not provide; these native checks do not require that substrate.
 # ---------------------------------------------------------------------------
 
-- name: Compile the CLI half of the Mac release
-  # `--locked` because a release must build from the committed lockfile and
-  # nothing else.
-  if: runner.os == 'macOS'
-  run: cargo build -p farhelm --locked
-
 - name: Validate standalone uninstall on macOS
   # Exercise the installed CLI headlessly; file removal needs no WebKit or tmux.
+  #
+  # The three nextest commands select the same packages and targets and pick
+  # their tests with a filter, so the first builds everything and the others
+  # reuse it. Separate `-p` selections resolved different features (the
+  # supervisor's `test-seams`, which farhelm's tests turn on) and recompiled
+  # the supervisor and everything above it; the same accident on the Linux
+  # leg is described under "Run the test suite against the pinned tmux".
+  #
+  # `--locked` because a release must build from the committed lockfile and
+  # nothing else. It used to sit on a separate `cargo build -p farhelm` step,
+  # removed because nothing ran its output: the integration-test build below
+  # replaces `target/debug/farhelm`, which is the binary the uninstall
+  # acceptance test exercises, and the release build compiles the CLI's
+  # shipped configuration again at the end of this job.
   if: runner.os == 'macOS'
   run: |
+    shared=(-p farhelm -p farhelm-supervisor --bin farhelm --lib --test session_hold --test version_lock_forwarder)
     python3 scripts/record-test-run.py \
       --runner nextest --kind release --selection 'macOS uninstall unit tests' --concurrency '4 nextest slots; retries 0' \
       --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
-      -- cargo nextest run -p farhelm --bin farhelm -E 'test(uninstall::)'
+      -- cargo nextest run --locked "${shared[@]}" -E 'package(farhelm) & kind(bin) & test(uninstall::)'
     # Version locks, the installation lock and the session keeper rest on
     # macOS behavior Linux only approximates (flock on an APFS folder,
     # extended attributes, RENAME_EXCL, F_FULLFSYNC, kqueue NOTE_EXIT).
     python3 scripts/record-test-run.py \
       --runner nextest --kind release --selection 'macOS version and installation lock tests' --concurrency '4 nextest slots; retries 0' \
       --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
-      -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/installation::|version_lock::|session_hold::/)'
+      -- cargo nextest run --locked "${shared[@]}" \
+      -E 'package(farhelm-supervisor) & kind(lib) & test(/installation::|version_lock::|session_hold::/)'
     python3 scripts/record-test-run.py \
       --runner nextest --kind release --selection 'macOS version-lock process tests' --concurrency '4 nextest slots; retries 0' \
       --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
-      -- cargo nextest run -p farhelm --test session_hold --test version_lock_forwarder
+      -- cargo nextest run --locked "${shared[@]}" \
+      -E 'package(farhelm) & (binary(session_hold) | binary(version_lock_forwarder))'
     python3 scripts/record-test-run.py \
       --kind release --selection 'macOS installed uninstall acceptance' --concurrency 'one fixture at a time' \
       --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
