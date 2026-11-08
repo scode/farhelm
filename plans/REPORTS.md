@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`stop-checkpoint-burst`](reports/stop-checkpoint-burst.report.md) landed 2026-11-04 in #2952, #2954: Gentler checkpoint burst at an orderly supervisor stop: skip small tails, half the cores, biggest first
 - [`faster-snapshot-encoder`](reports/faster-snapshot-encoder.report.md) landed 2026-11-04 in #2948, #2951, #2953, #2960, #2964, #2968: Make terminal checkpoint encoding faster with byte-identical output, measured by a new benchmark
 - [`colored-harness-marks`](reports/colored-harness-marks.report.md) landed 2026-11-04 in #2961: Color the sidebar's harness marks where brand terms allow, official colors first
 - [`discord-link-in-app`](reports/discord-link-in-app.report.md) landed 2026-11-04 in #2963: Add "Chat on Discord" to the ? menu and the feedback dialog
