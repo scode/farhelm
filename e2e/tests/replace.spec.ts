@@ -398,17 +398,14 @@ for (const surface of ["sidebar", "header"] as const) {
       expect(keys[1]).toBe(keys[0]);
       await confirmSidebarReplace(row(page, other.id));
       await expect(row(page, other.id).locator(".action-error").first()).toContainText("Replace:");
-      // Closing this errored menu moves its error back into the row and can
-      // shift the source below it. Settle that layout before the next pointer
-      // gesture; the older YOLO question and replacement intents must survive.
+      // Dismissing an errored menu must preserve its row's footprint: the
+      // source toggle is the same pointer target on press and release. An
+      // explicit Escape here would hide that race from this real click.
       const otherRow = row(page, other.id);
-      const otherToggle = otherRow.locator(".session-row-menu");
-      await expect(otherToggle).toHaveAttribute("aria-haspopup", "menu");
-      await otherToggle.press("Escape");
-      await expect(otherRow.locator(".session-row-menu-flyout")).toHaveCount(0);
-      await expect(otherToggle).toHaveAttribute("aria-expanded", "false");
-      await expect(question).toHaveCount(1);
+      const errorRowHeight = (await otherRow.boundingBox())!.height;
       await confirmSidebarReplace(sourceRow);
+      expect((await otherRow.boundingBox())!.height, "menu dismissal keeps the next pointer target in place")
+        .toBe(errorRowHeight);
       await expect(sourceRow.locator(".action-error").first()).toContainText("Replace:");
       expect(keys).toHaveLength(3);
       expect(keys[2]).not.toBe(keys[0]);

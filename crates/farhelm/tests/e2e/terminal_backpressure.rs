@@ -1702,9 +1702,24 @@ async fn a_deep_pause_ends_correctly_under_either_tmux_flow_control_behavior() {
 /// then has to reach a quiet interval while the burst is still outstanding,
 /// and the records delivered after resume must continue across that exact
 /// boundary. A finished retained tail cannot satisfy either premise.
+/// The observation ends after 1,000 new records beyond the quiet boundary:
+/// draining for ten seconds also includes later, legitimate tmux flow-control
+/// recoveries, which say nothing about this half-second pause.
 #[farhelm_testtrace::test]
 async fn shallow_pause_resumes_without_reset_or_replay() {
-    let h = harness_tmux().await;
+    // Keep the rare recovery decisions independently of the high-volume byte
+    // trace. This fixture has one connection, so its channel identifies the
+    // attachment; the cap bounds diagnostics even if recovery starts looping.
+    let recoveries = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut seams = SupervisorSeams::tmux_terminals();
+    let observed = recoveries.clone();
+    seams.faults.tmux_recovery_observer = Some(std::sync::Arc::new(move |channel, death| {
+        let mut observed = observed.lock().unwrap();
+        if observed.len() < 16 {
+            observed.push((channel, death, tokio::time::Instant::now()));
+        }
+    }));
+    let h = harness_with_seams(SupervisorTimeouts::default(), seams).await;
     let (session, _work) = gated_flood_session(&h, 80).await;
 
     let (chan, mut seen, mut rx) = h
@@ -1734,11 +1749,51 @@ async fn shallow_pause_resumes_without_reset_or_replay() {
         "shallow-pause boundary",
     )
     .await;
+    let continuation = flood_records(&seen)
+        .last()
+        .copied()
+        .expect("the live flood reached the quiet boundary")
+        + 1_000;
+    assert!(
+        continuation < FLOOD_RECORDS,
+        "premise: the flood has another 1,000 records beyond the quiet boundary"
+    );
+    assert!(
+        pause_started.elapsed()
+            < Duration::from_secs(farhelm_supervisor::tmux::TMUX_PAUSE_AFTER_SECS),
+        "premise: the client pause is still inside tmux's shallow window"
+    );
     h.client.resume_output(chan).await;
-    let detached = drain_for(&mut rx, &mut seen, Duration::from_secs(10)).await;
-    assert_eq!(
-        detached, None,
-        "a shallow pause must not end the attachment"
+    // A named live-output boundary keeps the seam check independent of how
+    // much unrelated flow-control recovery a long flood needs afterwards.
+    // The shared waiter also fails on a detach before that boundary arrives.
+    wait_for_bytes(
+        &mut rx,
+        &mut seen,
+        format!("FLOOD-{continuation:08}").as_bytes(),
+        30,
+    )
+    .await;
+    eprintln!(
+        "recovery causes, capped at 16 (channel, death-requested, time after pause; None predates it): {:?}",
+        recoveries
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(channel, death, at)| (
+                *channel,
+                *death,
+                at.checked_duration_since(pause_started)
+            ))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        recoveries
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|(channel, _, at)| *channel != chan || *at < pause_started),
+        "the shallow-pause continuation must not request recovery, even before its reset arrives"
     );
 
     assert!(

@@ -200,6 +200,9 @@ through the recorder with `--keep-farhelm-env FARHELM_E2E_SUITE_TERMINALS`, or o
 
 ## 4. Release gate and CI in GitHub
 
+The Linux release gate includes the full farhelm integration selection as well as the other workspace targets. Its setup
+prepares rootless Podman and the offline Ubuntu image, alongside loopback SSH and the pinned tmux.
+
 Only once the static checks pass and the sweep has finished with every failure fixed or recorded. On top of the stack
 (or of `main` when all fixes have already landed):
 

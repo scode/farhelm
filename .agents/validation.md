@@ -74,9 +74,9 @@ that its required systemd or SSH substrate ran.
   — executes applicable unit and integration targets, including the support crates omitted from default-members. Nextest
   starts a process per test and bounds concurrency across binaries; the e2e group has four slots, supervisor tmux
   modules share two, the two-host fixture reserves two, and RSS reserves all four. The release gate runs this same
-  selection with the farhelm integration tests filtered out (`-E 'not (package(farhelm) & kind(test))'`), and narrows
-  every later Rust step with a filter rather than `-p`, so those steps share one build; ordinary CI does not run this
-  suite. Do not also run the old full libtest battery. The e2e suite's in-process harness and its real supervisor
+  selection, including the farhelm integration targets, after preparing rootless Podman and its offline Ubuntu image. It
+  narrows every later Rust step with a filter rather than `-p`, so those steps share one build; ordinary CI does not run
+  this suite. Do not also run the old full libtest battery. The e2e suite's in-process harness and its real supervisor
   process fixture create new terminals unless a test asks for old ones by name (`harness_tmux`,
   `supervisor_process_tmux`, `SupervisorSeams::tmux_terminals()`), as the supervisor's own unit tests that need a real
   terminal do; those, and the tests of tmux itself, are what the pinned tmux is for. On Linux it needs Python 3 at
@@ -86,9 +86,9 @@ that its required systemd or SSH substrate ran.
   — preserves doctest coverage separately because nextest does not execute it.
 - `scripts/test-tmux-pinned-shutdown.sh` — the x86_64 Linux release gate builds the exact checksummed release named by
   `.github/release/source-pins.env` on cache miss, then runs every focused output-client teardown regression in its own
-  test process with its own recorded nextest report. Keep this explicit release subset while the full e2e target remains
-  excluded there. A successful local workspace nextest run already covers these tests on the same pinned substrate; do
-  not duplicate them merely because this script is listed. A distro tmux loses the affected-version coverage.
+  test process with its own recorded nextest report. This explicit release subset remains beside the full workspace
+  selection. A successful local workspace nextest run already covers these tests on the same pinned substrate; do not
+  duplicate them merely because this script is listed. A distro tmux loses the affected-version coverage.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p terminal-host`
   — the terminal host crate (`crates/terminal-host/`, contract in its `SPEC.md`): real-pty tests of the built
   `terminal-host` binary (lifecycle, input, resizes, busy and takeover, shutdown, SIGTERM and SIGKILL, the exit while a

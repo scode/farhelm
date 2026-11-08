@@ -867,6 +867,11 @@ fault_hooks! {
     /// arm this only after observing live readiness to model tmux's silent EOF
     /// loss deterministically. The immediate-exit producer remains unchanged.
     suppress_live_output: Arc<std::sync::atomic::AtomicBool>,
+    /// Observe a byte-stream recovery before its reset is sent. The channel
+    /// belongs to this connection; true means the pump requested a death
+    /// recovery, false means tmux flow control. Tests retain bounded evidence
+    /// here because a flood can evict the corresponding tracing event.
+    tmux_recovery_observer: Arc<dyn Fn(u32, bool) + Send + Sync>,
     /// See [`ForwarderCleanupGate`]. `None` in production.
     forwarder_cleanup_gate: ForwarderCleanupGate,
     /// See [`AgentAuthGate`]. `None` in production.

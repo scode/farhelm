@@ -11,10 +11,6 @@
 # Seeded on 2026-09-12 from the TODO.md Deflake bucket as it stood then.
 
 playwright sidebar.spec.ts visit history chooses and remembers the next session after row deletion  # visit-history-stopped-session-error
-nextest farhelm::e2e terminal_backpressure::shallow_pause_resumes_without_reset_or_replay  # shallow-pause-resets-under-load
-playwright terminal-reconnect.spec.ts view-changes-do-not-postpone-a-recovery  # reconnect-recovery-misses-its-window-under-load
-playwright replace.spec.ts plain Replace keeps a newer same-source key after old header YOLO cancellation  # same-source-replace-menu-after-yolo-cancellation
-playwright terminal-restart.spec.ts don't ask again on a refused YOLO replace marks the host, then replaces with the override  # interrupted-card-replace-click-lost
 playwright header.spec.ts native tunnel preview keeps ports and actions inside a 650px pane  # native-tunnel-preview-webkit-budget
 playwright trash-dialog.spec.ts trash header and global confirmation remain reachable at width 1000  # trash-dialog-pagedown
 playwright trash-dialog.spec.ts trash header and global confirmation remain reachable at width 360  # trash-dialog-pagedown
@@ -27,10 +23,6 @@ playwright provisioning.spec.ts a first identity learned while following: comple
 playwright quick-launch.spec.ts a sequence refused at its prefix leaves later sequences their own bindings  # quick-launch-body-focus-chromium
 playwright quick-launch.spec.ts typed page refusals are atomic and empty Enter leaves later bindings paired  # quick-launch-body-focus-chromium
 playwright provisioning.spec.ts expanded setup failure closes the menu below it  # expanded-setup-failure-menu-absent
-playwright settings.spec.ts post-clone commands with carriage returns refuse edits but can be cleared  # settings-save-cleanup-request-finished
-playwright settings.spec.ts a pending checkout folder save survives closing settings  # settings-save-cleanup-request-finished
 playwright provisioning.spec.ts incarnation churn keeps a followed run while a target change detaches it  # update-progress-step-name-late
-playwright modal-layout.spec.ts host-settings scrollports stay reachable while saving  # host-settings-scrollport-held-save
 playwright provisioning.spec.ts a progress read failure during an update recovers on retry demand alone  # update-progress-step-name-late
 playwright provisioning.spec.ts changed-host advice while following: destination  # update-progress-step-name-late
-nextest farhelm-ui desktop::tests::the_launch_lock_refuses_beside_an_open_app_and_waits_out_a_brief_holder  # launch-lock-release-signal-race

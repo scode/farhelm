@@ -1826,6 +1826,9 @@ impl Forwarder {
         &mut self,
         death_requested: bool,
     ) -> Result<(), ForwarderEnd> {
+        if let Some(observe) = self.sup.seams.faults.tmux_recovery_observer() {
+            observe(self.channel, death_requested);
+        }
         info!(
             channel = self.channel,
             session = %self.session_id,
