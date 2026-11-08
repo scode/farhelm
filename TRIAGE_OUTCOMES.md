@@ -21525,7 +21525,9 @@
   queue removal or a changelog fragment); over it, block and bring it back. Narrow the feedback file to the generic
   live-draft remainder ("Earlier generic live-draft investigation" and the d6645f77 addition) and move its index entry
   to the other bucket, since that remainder's own assessment is other priority and unverified.
-- Execution: planned in `plans/queue/triage-misc-nov7.md`.
+- Execution: implemented in change `vrqywnkunkukukvvzvqxskwuysxpowxp`, bookmark
+  `plan/triage-misc-nov7/02-custom-words-cancel-pending-launch`,
+  [PR #3174](https://github.com/scode/farhelm/pull/3174/changes).
 
 ## dead-host-report-anchor-identity-gap.md
 

@@ -5863,6 +5863,7 @@ mod tests {
     /// A queued callback must reject before it claims text or promotes history.
     /// Every concrete ordinary entry uses the real held token in this turn;
     /// equal admitted choices still complete, while a real change retires K.
+    /// A Custom edit while Resume waits must also cancel its accepted submit.
     #[farhelm_testtrace::test]
     fn ordinary_owner_gates_all_entries_and_keeps_equal_choice_completion() {
         ORDINARY_FIXTURE.with(|slot| slot.set(None));
@@ -5885,6 +5886,41 @@ mod tests {
                     ..Default::default()
                 },
             );
+            // Resume released admission but has not delivered a Ready preview.
+            // Use the production identity so omitting Custom text fails this oracle.
+            assert!(!owner.ops.busy_now());
+            assert_eq!(
+                owner.snapshot().permissions(),
+                Some(LaunchPermission::Custom)
+            );
+            let mut authority = PreviewAuthority {
+                generation: 2,
+                config_revision: 7,
+                host: "1".into(),
+                incarnation: 4,
+                installation_identity: "install-a".into(),
+                repo: GithubRepo::parse("acme/repo").unwrap(),
+                title: Some(owner.snapshot().effective_title()),
+                agent: super::super::preview_agent_identity(owner),
+            };
+            let pending = super::super::GuardedSubmitStamp::new(
+                3,
+                authority.clone(),
+                None,
+                String::new(),
+                crate::DeleteGuard::NothingAlive,
+            )
+            .after_resume(6, None);
+            authority.incarnation = 6;
+            let accepted = |authority| pending.guard_if_current(3, authority, &None, "", None);
+            assert!(accepted(authority.clone()).is_some());
+            let original_flags = owner.snapshot().permission_flags();
+            assert!(
+                owner.edit_permission_flags("--dangerously-bypass-approvals-and-sandbox".into())
+            );
+            authority.agent = super::super::preview_agent_identity(owner);
+            assert!(accepted(authority).is_none());
+            assert!(owner.edit_permission_flags(original_flags));
             choices.partial_template_hint.set(true);
             choices.offered_history.set(Some((
                 CreateTarget::new(1, "install-a".into()),
