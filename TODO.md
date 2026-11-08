@@ -33,6 +33,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Decide whether the key form drops its warning where the page already shows one (keeping it only inside editors) or the
   two collapse into a single notice, then fix that test.
 
+- **Name the Tensorlake API key in Settings → Credentials.** The key form's visible heading is just "API key", carried
+  over from the Tensorlake page, where the surrounding section supplies the product name; inside Credentials it reads
+  like one of the named secrets and only the help text below says Tensorlake. The shared `TensorlakeKey` component
+  renders `span { "API key" }` for both pages, so label it "Tensorlake API key" at least where `credentials_location` is
+  set, the way its `aria_label` already does.
+
 - **Generally rethink the session filtering experience.** The list now names its active filters and shows a removable
   host chip; revisit the broader filtering experience.
 
