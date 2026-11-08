@@ -21572,7 +21572,9 @@
   for an existing file and for an absent one. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment; estimated 50-90); over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/agent-settings-compare-replace.md`.
+- Execution: implemented in change `yqxoupsu`, bookmark `plan/agent-settings-compare-replace/01-compare-before-replace`;
+  [PR #3173](https://github.com/scode/farhelm/pull/3173/changes). The plan's 2026-11-08 Decision raises the approximate
+  code/test/doc size gate to 280 lines.
 
 ## removed-ssh-host-can-reappear-with-old-grants.md
 

@@ -27,10 +27,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   sharing a Tensorlake project can collide in their short ownership tag; a build can then terminate the other's builder
   and delete its snapshots.
 
-- [`agent-settings-save-overwrites-concurrent-editor.md`](agent-settings-save-overwrites-concurrent-editor.md) — Saving
-  agent settings can overwrite a benign concurrent edit, including a first settings file created while Farhelm was
-  preparing its save.
-
 - [`recipe-delete-warning-omits-newly-finished-snapshot.md`](recipe-delete-warning-omits-newly-finished-snapshot.md) — A
   recipe Delete question opened before its build finishes can omit the resulting snapshot even though deletion
   subsequently removes it.

@@ -6181,7 +6181,9 @@ failures omit contents and parser details so tokens cannot enter progress. The s
 connection and credential replacement; Update does not independently reapply settings. Failures become warnings and do
 not abort supervisor installation or connection. The shared SSH uploader sets `umask 077` before creating its temporary,
 so even an existing mode-0755 agent directory cannot expose tokens during upload or after interruption. Its finishing
-command applies the requested final mode.
+command applies the requested final mode. Before replacing agent settings it compares the destination with the bytes
+read (or expected absence); a mismatch re-reads and merges once, then warns without recording delivery if it conflicts
+again, leaving the latest file for the next connection's retry.
 
 The add dialog embeds the full recipe editor with deletion disabled and a `DialogCloseGuard` for Escape and Close. It
 selects the editor outside its own body wrapper: the editor supplies a body and `DialogFooter` as direct siblings of the

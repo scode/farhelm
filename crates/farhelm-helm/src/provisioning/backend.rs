@@ -270,6 +270,9 @@ pub(crate) struct BackendFailure {
     stderr: String,
 }
 
+/// Internal refusal identity, assigned from the final guard rather than peer text.
+pub(super) const DESTINATION_CHANGED: &str = "destination changed before replacement";
+
 impl std::fmt::Display for BackendFailure {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.rendered())
@@ -392,6 +395,8 @@ pub(super) trait ProvisioningBackend: Send + Sync {
         temporary: &Path,
         mode: u32,
     ) -> Result<ActionOutcome, BackendFailure>;
+    /// Install bytes without an old-generation condition, retaining ordinary
+    /// provisioning convergence and mode repair for non-settings callers.
     async fn install_bytes(
         &self,
         target: &ProvisioningTarget,
@@ -399,6 +404,20 @@ pub(super) trait ProvisioningBackend: Send + Sync {
         destination: &Path,
         temporary: &Path,
         mode: u32,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        self.install_bytes_checked(target, content, destination, temporary, mode, None)
+            .await
+    }
+    /// `None` is unconditional; `Some(None)` requires absence, and `Some(Some(hash))`
+    /// requires those old bytes at the final rename boundary. A refusal preserves the file.
+    async fn install_bytes_checked(
+        &self,
+        target: &ProvisioningTarget,
+        content: &[u8],
+        destination: &Path,
+        temporary: &Path,
+        mode: u32,
+        expected: Option<Option<&str>>,
     ) -> Result<ActionOutcome, BackendFailure>;
     async fn daemon_reload(
         &self,
@@ -1001,10 +1020,12 @@ impl SystemBackend {
             mode,
             description,
             refuse_setup_managed,
+            expected,
         } = install;
         self.cleanup_orphaned_temporaries(target, destination)
             .await?;
-        if let Some(installed) = self.metadata_on_target(target, destination).await?
+        if expected.is_none()
+            && let Some(installed) = self.metadata_on_target(target, destination).await?
             && installed.hash == source_hash
         {
             let repaired = installed.mode != mode;
@@ -1067,6 +1088,26 @@ impl SystemBackend {
                             "",
                         ));
                     }
+                    if let Some(expected) = expected {
+                        // Absence includes symlinks: a dangling link is still an editor's
+                        // destination, while unreadable metadata remains an ordinary error.
+                        let present = match tokio::fs::symlink_metadata(destination).await {
+                            Ok(_) => true,
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                            Err(error) => {
+                                return Err(BackendFailure::new(
+                                    "inspecting settings destination",
+                                    error.to_string(),
+                                ));
+                            }
+                        };
+                        let current = self.metadata_on_target(target, destination).await?;
+                        if current.as_ref().map(|file| file.hash.as_str()) != expected
+                            || (expected.is_none() && present)
+                        {
+                            return Err(BackendFailure::new(DESTINATION_CHANGED, ""));
+                        }
+                    }
                     tokio::fs::rename(temporary, destination)
                         .await
                         .map_err(|error| {
@@ -1106,25 +1147,44 @@ impl SystemBackend {
                     } else {
                         String::new()
                     };
+                    // Status 79 is reserved for a generation mismatch. Hash/read failures
+                    // use 78 so delivery never retries an ordinary transport or I/O error.
+                    let generation_guard = match expected {
+                        None => String::new(),
+                        Some(None) => format!("[ ! -e {dest} ] && [ ! -L {dest} ] || exit 79; ", dest = shell_path(destination)?),
+                        Some(Some(hash)) => format!(
+                            "if [ ! -e {dest} ] && [ ! -L {dest} ]; then exit 79; fi; \
+                             old=$({sha}) || exit 78; [ \"${{old%% *}}\" = {hash} ] || exit 79; ",
+                            dest = shell_path(destination)?, sha = remote_sha256sum(&shell_path(destination)?),
+                            hash = crate::ssh::shell_quote(hash)),
+                    };
                     // Keep the checksum input on stdin. GNU coreutils escapes
                     // backslashes and newlines in argument-based output; the
                     // stdin form follows install.sh's sha256_of convention.
-                    self.require_shell(
+                    let output = self.run_shell(
                         target,
                         &format!(
                             "{ownership_guard}actual=$({}) || exit; \
                              [ \"${{actual%% *}}\" = {} ] || {{ \
                                printf '%s\\n' 'uploaded payload digest mismatch' >&2; exit 76; \
-                             }}; chmod {mode:o} -- {} && mv -f -- {} {}",
+                             }}; {generation_guard}chmod {mode:o} -- {} && mv -f -- {} {}",
                             remote_sha256sum(&shell_path(temporary)?),
                             crate::ssh::shell_quote(source_hash),
                             shell_path(temporary)?,
                             shell_path(temporary)?,
                             shell_path(destination)?
                         ),
-                        &format!("finishing the atomic {description} install"),
+                        COMMAND_TIMEOUT,
                     )
                     .await?;
+                    if output.code != Some(0) {
+                        return Err(BackendFailure::new(
+                            if output.code == Some(79) && expected.is_some() {
+                                DESTINATION_CHANGED.to_owned()
+                            } else {
+                                format!("finishing the atomic {description} install: {}", output.failure_status())
+                            }, output.stderr));
+                    }
                     Ok(())
                 }
                 .await
@@ -1591,6 +1651,8 @@ struct InstallDestination<'a> {
     /// The local branch has no such check because production never installs
     /// units locally (the panel hands the helm's own machine to setup).
     refuse_setup_managed: bool,
+    /// Same three-state contract as `ProvisioningBackend::install_bytes_checked`.
+    expected: Option<Option<&'a str>>,
 }
 
 /// Why a child stream stopped before EOF. The retained prefix is bounded and
@@ -2634,6 +2696,7 @@ impl ProvisioningBackend for SystemBackend {
                         mode,
                         description: "payload",
                         refuse_setup_managed: false,
+                        expected: None,
                     },
                 )
                 .await
@@ -2645,13 +2708,14 @@ impl ProvisioningBackend for SystemBackend {
         }
     }
 
-    async fn install_bytes(
+    async fn install_bytes_checked(
         &self,
         target: &ProvisioningTarget,
         content: &[u8],
         destination: &Path,
         temporary: &Path,
         mode: u32,
+        expected: Option<Option<&str>>,
     ) -> Result<ActionOutcome, BackendFailure> {
         use std::io::Write;
         let mut file = tempfile::NamedTempFile::new().map_err(|error| {
@@ -2670,6 +2734,7 @@ impl ProvisioningBackend for SystemBackend {
                 mode,
                 description: "unit content",
                 refuse_setup_managed: true,
+                expected,
             },
         )
         .await
