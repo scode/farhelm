@@ -103,3 +103,99 @@ The required single Opus 5.5 reviewer at high effort found no remaining actionab
 the accepted corrections. Its final code clearance is reused across the unchanged patch. The reviewer explicitly left
 real Ubuntu/image/snapshot verification outstanding; those checks have now passed rather than being waived. The required
 independent resume check passed, and the existing commit and PR wording retains its accepted cold read.
+
+### Landing
+
+Landed with three wording fixes made at landing, two in SPEC.md and one in the changelog entry. Every Tensorlake recipe
+now chooses a base (Tensorlake Ubuntu, your image or your snapshot). Farhelm checks the base, installs any optional
+Ubuntu packages and both Claude Code and Codex on it, and builds the snapshot that new hosts start from. Existing
+recipes are migrated, and hosts already created from them keep working as before.
+
+- #3178: the change, its migration, the base requirements check, the shared recipe editor in Settings and Add host, its
+  tests, the specification, the user guide's Tensorlake page and the changelog entry.
+
+#### What landed since the stack was based, and whether it interacted
+
+Only plan bookkeeping reached main after this PR's base until the landing, and this round landed no other plan. While it
+landed, main gained #3184, which makes the grid terminal component's own browser tests wait for bold fonts; it changes
+only that test file, so main differs from the tested tree there and nowhere else, with nothing shared. Before
+delivering, the executor rebased twice, across the recent landings: durable host removal (#3171), the launcher's
+Custom-words fix (#3174, a pending launch is cancelled when the Custom permission words change), the agent settings
+overwrite fix for Tensorlake hosts (#3173), the Tensorlake state-path refusal (#3168, #3170), the Settings → Credentials
+wording (#3165) and safety fixes in two maintainer scripts (#3169, #3172). The landing monitor and, independently, a
+fresh-context review read those diffs against this one and found no interaction, and its verdict was to land:
+
+- every implementation-specification sentence they added survives this PR's rewrites of the same paragraphs;
+- this PR's only change to the helm's saved data is its recipe migration, which nothing else touched;
+- it adds no new way of installing files on a host, so a custom base that ships its own agent settings is handled by the
+  settings overwrite fix like any other host.
+
+The review also checked the migration for data loss and found none. Old image and snapshot recipes are stored in the
+same shape as the new bases, their build history is kept as it was, and a stored recipe the helm cannot read survives
+the upgrade untouched, with listing recipes refused the same way as before rather than that recipe silently dropped.
+
+#### Fixes made at landing
+
+- SPEC.md's Tensorlake setup paragraph still said "a reused image must have systemd", but new recipes no longer reuse an
+  image unchanged. It now says that every recipe's build checks first that its base boots systemd, and that host setup
+  still refuses a sandbox where systemd is not running. That refusal is not new: it applies to rerunning setup on a host
+  made from an image an old recipe reused, and those hosts are otherwise unchanged.
+- SPEC.md said migrated image and snapshot recipes show **No snapshot yet**. As the report and the code have it, a
+  migrated recipe whose earlier build failed or was cut short instead keeps that failure and offers **Retry**. The
+  sentence now says so.
+- The changelog entry gains a paragraph for the release curator with the caveats an upgrading user can hit. A custom
+  base must boot systemd, allow passwordless sudo, be Ubuntu or Debian with apt, and include bash, curl and git, so an
+  image that served hosts before can now be refused for new ones. Building also bills a temporary build sandbox, and
+  Farhelm installs its own Claude Code and Codex even when the base already has them. Per `AGENTS.md`, "Changelog
+  fragments", such caveats go in the entry.
+
+#### Things you should know
+
+- The real Tensorlake checks the plan required ran with the project API key you supplied on 2026-11-08 when you answered
+  its block. The executor's report describes the three snapshot builds and confirms that every sandbox, snapshot, image
+  and SSH key they created was removed.
+- The review noted three possible follow-ups, none of them a change in what this plan intended:
+  - A helm whose state folder path holds `%`, `"` or `\` is refused for Tensorlake connections, but a recipe build
+    creates (and pays for) its build sandbox before that refusal. Recipes that installed packages already built a
+    snapshot this way; now every recipe does. A check before the builder is created would avoid the charge.
+  - A base snapshot taken of an existing Farhelm host carries that host's supervisor, so setup refuses every host made
+    from it, as before. It now goes through a whole paid build first; the build's requirements check could refuse such a
+    base instead.
+  - A queued review feedback item still calls a snapshot recipe by its old internal name. Its caveat still holds: a
+    snapshot taken by an interrupted build can be chosen as a base and later deleted when that build is cleaned up (the
+    report's open questions say the same). Only the name is out of date, and triage of that item can correct it.
+
+#### Checks
+
+These ran on the PR rebased onto main `7b9d4e3d` (its base plus plan bookkeeping only), before the landing fixes:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the UI's web-target clippy
+  (`cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`),
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the check that every
+  test delay states its reason (`python -B scripts/check-test-sleeps.py`, 423 delays, none without a reason),
+  `dprint check`, `python3 releasing/check-changelog.py format`, the docs website build
+  (`cd website && bun install --frozen-lockfile && bun run build`, since the user guide's Tensorlake page changed),
+  `cargo build` and the UI's release web build (`dx build --package farhelm-ui --platform web --release`): all passed.
+- Through the test recorder (`python3 scripts/record-test-run.py --kind development ...`), with pinned nextest 0.9.148,
+  four parallel test slots and no retries:
+  - the protocol and helm crates' tests, `cargo nextest run -p farhelm-proto -p farhelm-helm`, with the pinned tmux 3.7c
+    required, run `41c2e3cc-9b6b-4ab8-a2f3-a330e7bee063`: all 1810 passed;
+  - the UI crate's tests in its desktop build, `cargo nextest run -p farhelm-ui --features desktop`, with no tmux, run
+    `964d8a90-2687-455f-8cf9-ccd909245bd4`: all 1098 passed.
+- Every browser spec that drives recipes: `credential-delivery`, `credentials-settings`, `tensorlake-recipes`,
+  `tensorlake-lifecycle`, `tensorlake-hosts` and `tensorlake-tunnels`, on Chromium and WebKit (`--runner playwright`,
+  `npx playwright test` with those six files, the pinned tmux 3.7c required, three workers, no retries), run
+  `f0818466-3890-4c71-9acd-bfe2e0a642a5`: all 112 passed.
+- After the landing fixes, `dprint check` and `python3 releasing/check-changelog.py format` passed. The fixes change
+  only SPEC.md prose and the changelog fragment, so the runs above still apply to the code that landed.
+- Reused: the executor's real Tensorlake builds (recorder runs `9fe30eb3-4cbf-42a3-a4d8-92000f26cb25` and, for its
+  cleanup audit, `f4c44984-db04-4e2f-8f17-088123d4a572`), which ran on its final head after both of its rebases. Since
+  then the landing's rebase changed nothing outside `plans/` and the landing fixes changed only prose, so they still
+  cover the code that landed. None of its local test runs were reused.
+- Not run: the rest of the browser suite and the other Rust crates, the UI's JavaScript tests, a real Tensorlake sandbox
+  and the native Mac app. The change is confined to Tensorlake recipes in the protocol, helm and UI crates (the helm
+  runs the base check, the agent install and the snapshot build on the build sandbox), which the runs above cover, and
+  the real-cloud builds are reused as above.
+
+Nothing in the executor's report became untrue at landing, beyond the PR's draft state and head: the landing fixes
+changed the head, and the PR is merged.
