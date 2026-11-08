@@ -8,6 +8,8 @@ import { openSettings, selectSettingsSection } from "./helpers/settings";
  * secret, keeps its identity fixed, and survives normal Settings navigation.
  * The JSON file picker must fill the same explicit draft as paste; cancelling
  * that draft must not accidentally create a catalog entry.
+ * Each view carries one visible storage notice: the mounted but hidden
+ * overview must neither duplicate the editor's notice nor lose its own.
  */
 test("credentials keep fixed names, replace write-only values and discard login drafts", async ({ page, request }, testInfo) => {
   const name = `catalog-${testInfo.workerIndex}`;
@@ -21,10 +23,15 @@ test("credentials keep fixed names, replace write-only values and discard login 
     await page.goto("/");
     const dialog = await openSettings(page, "credentials");
     const panel = dialog.locator("#settings-credentials");
-    await expect(panel.getByText("Not encrypted on disk", { exact: true })).toHaveCount(2);
+    const notices = panel.locator(".credential-storage-warning:visible");
+    await expect(notices).toHaveCount(1);
+    await expect(notices).toContainText("including the Tensorlake API key");
+    await expect(panel.getByText("Tensorlake API key", { exact: true })).toBeVisible();
     await panel.getByRole("button", { name: "Add GitHub token", exact: true }).click();
     const editor = panel.locator(".credential-editor");
     await expect(editor.getByRole("heading", { name: "New GitHub token", exact: true })).toBeFocused();
+    await expect(notices).toHaveCount(1);
+    await expect(editor.getByText("Not encrypted on disk", { exact: true })).toBeVisible();
     await editor.getByLabel("Name", { exact: true }).fill(name);
     await editor.getByLabel("Token", { exact: true }).fill(token);
     await selectSettingsSection(page, "tensorlake");
@@ -33,6 +40,8 @@ test("credentials keep fixed names, replace write-only values and discard login 
     await editor.getByRole("button", { name: "Save", exact: true }).click();
     const row = panel.locator(".credential-row").filter({ hasText: name });
     await expect(row).toContainText("Saved");
+    await expect(notices).toHaveCount(1);
+    await expect(notices).toContainText("including the Tensorlake API key");
     let response = await request.get("/api/credentials");
     expect(await response.text()).not.toContain(token);
     await row.getByRole("button", { name: `Edit ${name}`, exact: true }).click();
@@ -50,6 +59,8 @@ test("credentials keep fixed names, replace write-only values and discard login 
     await page.setViewportSize({ width: 390, height: 700 });
     await panel.getByRole("button", { name: "Add agent login", exact: true }).click();
     await expect(editor.getByRole("heading", { name: "New agent login", exact: true })).toBeFocused();
+    await expect(notices).toHaveCount(1);
+    await expect(editor.getByText("Not encrypted on disk", { exact: true })).toBeVisible();
     await editor.getByRole("radio", { name: "Codex", exact: true }).click();
     await expect(editor).toContainText("when one copy renews it, other copies cannot renew and need a fresh sign-in");
     await expect(editor).toContainText("prefer a proxy or load balancer through an API endpoint");
@@ -96,8 +107,8 @@ test("the two Tensorlake key forms share acknowledged metadata and separate draf
     const dialog = await openSettings(page, "credentials");
     let panel = dialog.locator("#settings-credentials");
     const key = panel.getByRole("region", { name: "Tensorlake API key", exact: true });
-    await expect(key.getByLabel("API key", { exact: true })).toBeEditable();
-    await key.getByLabel("API key", { exact: true }).fill("fictional-tensorlake-key");
+    await expect(key.getByLabel("Tensorlake API key", { exact: true })).toBeEditable();
+    await key.getByLabel("Tensorlake API key", { exact: true }).fill("fictional-tensorlake-key");
     await key.getByRole("button", { name: "Save", exact: true }).click();
     await expect(key.getByText("API key saved", { exact: true })).toBeVisible();
     panel = await selectSettingsSection(page, "tensorlake");

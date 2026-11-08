@@ -123,6 +123,9 @@ pub(crate) fn provide_account() {
 
 /// The same write-only key form in both panels, with separate replacement drafts.
 /// Saved metadata and discovery revisions belong to the enclosing Settings dialog.
+/// In Credentials the overview's one notice already covers this key, and the
+/// label names Tensorlake to distinguish it from the named secrets. On the
+/// Tensorlake page the form shows its own notice and the page names the product.
 #[component]
 pub(crate) fn TensorlakeKey(#[props(default)] credentials_location: bool) -> Element {
     let base = use_context::<ApiBase>().0;
@@ -189,8 +192,11 @@ pub(crate) fn TensorlakeKey(#[props(default)] credentials_location: bool) -> Ele
                     "data-tooltip": "Load the saved Tensorlake settings again",
                     onclick: move |_| load.restart(), "Retry loading" }
             }
-            StorageWarning { multiple: false }
-            label { class: "checkout-root-label", span { "API key" }
+            if !credentials_location {
+                StorageWarning { multiple: false }
+            }
+            label { class: "checkout-root-label",
+                span { if credentials_location { "Tensorlake API key" } else { "API key" } }
                 // `new-password`, not `off`: browsers ignore `off` when they
                 // fill saved logins into a password field, and the helm's own
                 // web token is typically saved for this same origin. Filled in
@@ -251,13 +257,23 @@ pub(crate) fn TensorlakeKey(#[props(default)] credentials_location: bool) -> Ele
 }
 
 /// Plaintext storage is a deliberate policy the user sees before entering a secret.
+/// The Credentials overview names the Tensorlake key because its one notice
+/// covers that form too; individual credential editors cover only their values.
+/// `includes_tensorlake` applies only to the plural notice (`multiple: true`).
 #[component]
-pub(crate) fn StorageWarning(multiple: bool) -> Element {
+pub(crate) fn StorageWarning(
+    multiple: bool,
+    #[props(default)] includes_tensorlake: bool,
+) -> Element {
     rsx! {
         div { class: "credential-storage-warning", role: "note",
             strong { "Not encrypted on disk" }
             p {
-                if multiple { "Farhelm stores these in plain text in this helm's state, on the machine the helm runs on. Anyone who can read that folder can read them. Farhelm never shows a saved value again." }
+                if multiple {
+                    "Farhelm stores these"
+                    if includes_tensorlake { ", including the Tensorlake API key," }
+                    " in plain text in this helm's state, on the machine the helm runs on. Anyone who can read that folder can read them. Farhelm never shows a saved value again."
+                }
                 else { "Farhelm stores this key in plain text in this helm's state, on the machine the helm runs on. Anyone who can read that folder can read it. Farhelm never shows a saved value again." }
             }
         }
