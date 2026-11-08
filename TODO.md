@@ -24,6 +24,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Show the host dialog's detail on hover over the sidebar's progress for a running host.** The line shows the step
+  count and a truncated step name, and the host dialog shows the numbered steps and the run's own message (the failed
+  connection attempt's error, say). Hovering the line lists the steps but leaves out the run message, and the bar the
+  sidebar shows at the top while the hosts panel is closed has no hover detail at all. Both should give the same
+  information as the dialog: every step with its status, the step in progress, and the run's message.
+
 - **Revisit letting prepared snapshots keep a custom base's own logins.** Decided on the maintainer's behalf on
   2026-11-08 when prepared-snapshots blocked: preparing a snapshot keeps whatever authentication a recipe's custom image
   or snapshot already contains (agent logins, tokens, Git credentials), and hosts made from it inherit that, with the
