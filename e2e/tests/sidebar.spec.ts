@@ -4306,16 +4306,17 @@ for (const mode of ["row", "header with failed preference read", "external with 
       await forgetAutoSelect(page);
       expect((await readPreferences(request)).visit_history ?? []).toEqual([]);
       const stamp = Date.now();
-      const a = await createSession(request, { title: `visit-a-${stamp}`, invocation: "sleep 300" });
+      // Eligibility needs an ended agent, not Stop's startup boundary. A
+      // normal exit avoids stopping the scope wrapper before the agent starts.
+      const a = await createSession(request, { title: `visit-a-${stamp}`, invocation: "true" });
       owned.push(a.id);
       const b = await createSession(request, { title: `visit-b-${stamp}`, invocation: "sleep 300" });
       owned.push(b.id);
-      await stopSession(request, a.id);
       await expect.poll(async () => {
         const session = (await listSessions(request)).sessions.find((entry) => entry.id === a.id);
         // Preserve Error's detail before cleanup deletes the row. Sampling the
-        // same listing adds no request or reconciliation to the stop premise.
-        recordPage(page, "visit-history-stopped-session", [
+        // same listing adds no request or reconciliation to the exit premise.
+        recordPage(page, "visit-history-ended-session", [
           ["session", a.id], ["present", session !== undefined],
           ["status", session?.status?.state ?? "missing"],
           ["detail", session?.status?.detail ?? ""],

@@ -10,8 +10,6 @@
 #
 # Seeded on 2026-09-12 from the TODO.md Deflake bucket as it stood then.
 
-playwright sidebar.spec.ts visit history chooses and remembers the next session after row deletion  # visit-history-stopped-session-error
-playwright header.spec.ts native tunnel preview keeps ports and actions inside a 650px pane  # native-tunnel-preview-webkit-budget
 playwright trash-dialog.spec.ts trash header and global confirmation remain reachable at width 1000  # trash-dialog-pagedown
 playwright trash-dialog.spec.ts trash header and global confirmation remain reachable at width 360  # trash-dialog-pagedown
 playwright terminal-multihost.spec.ts create-intent-key-rebinds-on-host-change: a new target is a new intent  # launcher-yolo-question-webkit
