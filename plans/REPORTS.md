@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`settings-credentials`](reports/settings-credentials.report.md) landed 2026-11-07 in #3074, #3077, #3081, #3082, #3086, #3126: Settings → Credentials: named GitHub tokens, Claude Code and Codex subscription logins and endpoint tokens for Tensorlake recipes, delivered per host; GH_TOKEN with gh for private checkouts; "not encrypted on disk" warnings
 - [`row-hovers-beside-list`](reports/row-hovers-beside-list.report.md) landed 2026-11-07 in #3128: Every hover in a session row (and the bell) opens beside the list, centred on its target, with a pointer notch and an accent ring on the hovered mark; the summary card too
 - [`no-gc-at-launch`](reports/no-gc-at-launch.report.md) landed 2026-11-07 in #3130: No automatic git cleanup on any git command a launch waits on; the repository cache consolidates in the background after every launch, spares on or off
 - [`instant-trash-delete`](reports/instant-trash-delete.report.md) landed 2026-11-07 in #3131, #3134: Trash deletes answer at once and hosts remove the files in the background; the dialog closes on a confirmed bulk delete and the trash icon animates until the space is freed
