@@ -54,7 +54,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Stop the Settings dialog resizing when the section changes.** The dialog takes the height of whichever section is
   showing, so moving between Sessions, Appearance, Credentials and the rest makes the whole modal jump and the footer's
-  Close button move with it. Fix is TBD; keep the dialog one size across sections.
+  Close button move with it. Fix is TBD; keep the dialog one size across sections. Plan:
+  `plans/queue/settings-dialog-fixed-size.md`.
 
 - **Overhaul the grid stream's encoding and the grid client's history storage.** Grid terminals (terminals in a terminal
   host) get their screen and history from the supervisor as JSON messages, and the page keeps every history line
@@ -77,9 +78,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - Initial version of agent2agent comms.
 
-- **Restore deleted sessions.** Support undeleting a session that is in the trash. Consider supporting undelete for
-  sessions without a managed checkout too, by retaining their metadata.
-
 - **Show the user when the trash cannot finish freeing space.** With `instant-trash-delete`, a deleted checkout leaves
   the trash at once and the host removes its files in the background, retrying after restarts when it cannot (files
   owned by a container's root user, say). Decided on 2026-11-07 while planning it: for now such a folder only gets a
@@ -92,7 +90,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   release that starts a new epoch; once that release has been out long enough (a week, a month), the next epoch may rely
   on it. Covers the desktop app, the helm, and supervisors. Until this lands, SPEC.md's "Upgrade compatibility and
   client scale" forbids upgrade-breaking changes outright; replace that rule with the epoch rule here. The overall plan
-  is `lore/2026-10-05-release-brick-protection-plan.md`.
+  is `lore/2026-10-05-release-brick-protection-plan.md`. Plan: `plans/queue/upgrade-epochs.md`.
 
 - **Pin the Rust toolchain.** Nothing pins Rust today: there is no `rust-toolchain.toml`, CI's toolchain action installs
   whatever stable is current when the job runs, and a developer machine keeps whatever stable it last updated to. So
@@ -100,7 +98,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the local machine on 1.98.1, and CI's clippy failed on lints the local one did not have yet (fixed in #1742). Pin an
   exact version so local, CI and the release builds agree, and make toolchain bumps deliberate PRs. First check that the
   cargo-dist release build jobs honor the pin: they install Rust only when it is missing and otherwise use the runner's
-  own. Once pinned, drop the newest-stable clippy step from `.agents/run-all-tests.md`.
+  own. Once pinned, drop the newest-stable clippy step from `.agents/run-all-tests.md`. Plan:
+  `plans/queue/pin-rust-toolchain.md`.
 
 - **Restore automatic recovery from a withdrawn waiting update.** On 2026-10-14 the signed release advisories plan was
   narrowed to warning about a withdrawn running version and refusing to install a withdrawn release; a withdrawn release
@@ -117,14 +116,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and interrupted startups included, without treating old records as trustworthy retroactively), check how commands
   inside sessions select a binary under the new meaning of the record, and then restore the automatic replacement. Start
   with a focused review of supervisor startup and interruption before implementing.
-
-- **Protect the repository against force pushes and similar, while agents can still merge.** Guard main and the release
-  tags against force pushes, deletion and other history rewrites in a way that also binds agents, while still letting
-  them open, publish and merge PRs as they do today. Main's branch protection already disallows force pushes and
-  deletion, but it does not apply to administrators, and agents work through the maintainer's own GitHub account, so it
-  does not stop them. Tags have no protection at all (the repository has no rulesets), though the release procedure says
-  a tag is never deleted or reused. Work out what GitHub rulesets, bypass lists or a separate agent identity can enforce
-  without blocking the PR flow.
 
 - **Re-assess letting agents prompt running sessions.** `farhelm agent prompt` (an agent sending a message into another
   session's running Claude or Codex agent) landed and was turned off before any release: the helm refuses every such
@@ -262,7 +253,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   scope, selecting by the scope's `cgroup.procs` covers the same processes for a fraction of the cost. SPEC_impl.md
   calls the marker sweep the backstop that always runs, including where a scope exists, because a scope can be left by a
   process that runs `systemd-run --user --scope` itself; changing that is a SPEC decision, so weigh what the backstop
-  still catches against its cost before changing it. Hosts without a usable user manager keep the full sweep.
+  still catches against its cost before changing it. Hosts without a usable user manager keep the full sweep. Plan:
+  `plans/queue/scoped-stop-without-sweep.md`.
 
 - **Containerized sessions: localhost tunnels and file links.** Make localhost tunnels reach services listening inside a
   session's container, and make file links in terminal output work for container paths outside the checkout. Until then,
@@ -272,11 +264,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Containerized sessions: plain folders.** Consider allowing the Containerized option for "Where: folder" launches,
   which only managed checkouts get today. Git breaks inside the container for a folder that is a git worktree or a
   subfolder of a repository, since only the folder itself is mounted.
-
-- **Investigate how terminal content reaches the helm/UI.** Switching sessions often takes a visible delay. Consider
-  having the helm/UI receive terminal output from all sessions, or the recently used ones, so switching becomes instant
-  rather than reliant on remote round trips. Noted on 2026-11-07: it is unclear whether this is still a problem after
-  the switch to new terminals (TBD).
 
 - **Release stable from the approved RC without rebuilding.** When an RC has been built and declared correct, releasing
   stable should default to promoting that RC's artifacts, not rebuilding everything for the stable tag. Today a stable
@@ -353,7 +340,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   of the memory claim. Plan: `plans/queue/snapshot-in-place-paint.md`.
 - **Jittery/jiggling characters when switching between sessions.** Switching between sessions makes characters jitter or
   jiggle: something is being re-drawn or laid out for no reason. Find what triggers the needless re-draw/re-layout on
-  session switch.
+  session switch. Plan: `plans/queue/session-switch-jiggle.md`.
 - **Per-host checkout directory.** Settings → Checkouts has one global **Checkout folder** for every host, but one
   directory rarely suits every machine: an absolute path from one machine may not exist or be writable on another, and
   hosts can differ in where projects belong. Let the user set the checkout directory per host in the UI, with the global
@@ -557,7 +544,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 ### Trivial
 
 - **Show the effort level as "xhigh".** The sentence-case pass (steel-sentence-case) made the launcher and its summaries
-  show the extra-high effort level as "Xhigh"; it should read "xhigh", lowercase.
+  show the extra-high effort level as "Xhigh"; it should read "xhigh", lowercase. Plan:
+  `plans/queue/xhigh-effort-label.md`.
 
 ## Mid term
 
@@ -710,6 +698,17 @@ problem a refactor targets (making drifted copies consistent, say) is allowed in
 are not.
 
 ## Maybe later
+
+- **Restore deleted sessions.** Support undeleting a session that is in the trash. Consider supporting undelete for
+  sessions without a managed checkout too, by retaining their metadata.
+
+- **Protect the repository against force pushes and similar, while agents can still merge.** Guard main and the release
+  tags against force pushes, deletion and other history rewrites in a way that also binds agents, while still letting
+  them open, publish and merge PRs as they do today. Main's branch protection already disallows force pushes and
+  deletion, but it does not apply to administrators, and agents work through the maintainer's own GitHub account, so it
+  does not stop them. Tags have no protection at all (the repository has no rulesets), though the release procedure says
+  a tag is never deleted or reused. Work out what GitHub rulesets, bypass lists or a separate agent identity can enforce
+  without blocking the PR flow.
 
 - **Crappy model warning.** Let the user pick a list of models they never want to run. Warn when an agent's TUI
   indicates that one of those models is being used anyway.

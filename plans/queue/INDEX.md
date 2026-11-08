@@ -10,3 +10,9 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `rail-notification-bell.md` — A notification bell in the rail for notices that are not about one session, red with a count when unread; its first notice is a trashed checkout whose files could not be freed, with Retry now, and the Trash dialog keeps such folders listed
 - [complete] `omp-npx-docs.md` — The OMP docs page stops promising that npx launches are followed (where `sh` is dash, as on Debian and Ubuntu, they are not; elsewhere untested), and misleading code comments say the same
 - [complete] `snapshot-in-place-paint.md` — Paint a terminal snapshot straight into its blob, roughly halving peak memory for typical terminals with byte-identical output; the fixup-heavy worst case is recorded as a Maybe later entry
+- [held] `settings-dialog-fixed-size.md` — The Settings dialog keeps one fixed height across sections (about 640px, capped by the window), its body scrolling for taller sections
+- [held] `upgrade-epochs.md` — Upgrade epochs as an upgrade floor: installations and hosts below the floor are told to uninstall and reinstall; the SPEC.md freeze becomes the floor rule
+- [held] `pin-rust-toolchain.md` — Pin Rust to the newest stable in rust-toolchain.toml so local checks, CI and release builds agree; bumps are manual PRs
+- [held] `xhigh-effort-label.md` — The extra-high effort level reads "xhigh" instead of "Xhigh" wherever effort labels show
+- [held] `scoped-stop-without-sweep.md` — Where a launch or tab runs in a systemd scope, Stop, tab close and Delete end the scope and skip the machine-wide process sweep; SPEC.md states what is no longer caught
+- [held] `session-switch-jiggle.md` — Find and fix what makes rightmost-column text and full-width rules jiggle in new terminals when switching sessions, with a browser test
