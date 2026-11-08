@@ -126,3 +126,92 @@ power-loss records; it was corrected in both specs and the teardown proof commen
 remaining findings. Orphan bookkeeping and builder reviews had no actionable findings. Separate cold readers checked all
 commit/PR messages. The fresh native resume check reconciled the claim, goal, draft and retained test evidence after
 compaction. No review finding was rejected; no simplicity fallback was needed.
+
+### Landing
+
+Landed as delivered, with no fixes at landing. Farhelm no longer takes over or deletes a Tensorlake sandbox only because
+its name matches one Farhelm would generate. Adding a host now refuses a same-name sandbox unless Farhelm has a record
+that it asked for it (a saved sandbox ID or a create request still outstanding), and recipe builder cleanup looks a
+builder up by name only while such a create request is outstanding. Before, copied or restored helm state, or two helms
+whose generated names happened to match (Farhelm builds them from a short tag of the helm), could make one helm
+configure another's sandbox with its credentials, or terminate another's builder and delete its snapshots.
+
+- #3188: host setup refuses a name-only match, with its tests, specification and changelog entry.
+- #3189: bookkeeping only: the reported race between that adoption and deletion under **Sandboxes not on this helm** is
+  closed by #3188, and the triage record and review feedback queue say so.
+- #3190: builder cleanup works from the saved sandbox ID and recovers by name only for an outstanding create, with its
+  tests, specification and changelog entry.
+
+#### What landed since the stack was based, and whether it interacted
+
+Nothing landed on main after this stack's base, and this round landed no other plan. The landing monitor and,
+independently, a fresh-context review still read it against the recent landings it builds directly on, and found no
+interaction that needs a change:
+
+- recipe-bases (#3178), where every recipe now builds a snapshot: each way a build can end (interrupted, a failed step,
+  a rebuild, deleting the recipe) leaves either the record of an outstanding create request or the sandbox ID, which
+  cleanup still works from. Deleting a recipe whose build never asked for a sandbox makes no Tensorlake calls.
+- durable host removal (#3171): removal still takes the host's setup lock and still requires the API key, and the
+  removal write keeps its power-loss durability.
+- the leftover-sandbox fixes (#3186): a sandbox kept by a refused host stays hidden until that host entry is removed,
+  then appears under **Sandboxes not on this helm**, whose Delete checks again and deletes by sandbox ID. That list
+  shows every Farhelm-named sandbox in the Tensorlake project that this helm does not track, which can include another
+  helm's, as it always has; deleting one there is the user's explicit choice, behind its own question, never something
+  Farhelm does on its own.
+- credential delivery (#3173) and the refusal of a helm state folder whose path holds `%`, `"` or `\` (#3168, #3170):
+  the new refusal comes before either runs.
+
+The specification amendments agree with what those plans wrote. The one mismatch is between the new refusal message and
+the existing **Delete sandbox** question, the first item below.
+
+#### Things you should know
+
+- When adding a host is refused, the message tells the user to delete the failed host entry, and says that this leaves
+  the existing sandbox alone, which is what happens. But the only way the panel offers to remove that entry is **Delete
+  sandbox**, whose question says Farhelm will terminate the sandbox and its files and sessions will be gone. A cautious
+  user may say no and leave the name blocked. Fixing the question needs the host view to know whether a sandbox was ever
+  recorded for the host, so it was left as a possible follow-up rather than changed at landing.
+- As the report says, Suspend and Resume still fall back to the sandbox's name when no ID is saved. On a refused host
+  they can act on the other helm's same-name sandbox: Suspend pauses its sessions until its owner resumes them, and
+  Resume starts billing for it on the shared account. Nothing is deleted, it needs a name collision, and the user has to
+  press it on an entry they were told to delete. The review judged the risk low and the fix small (refuse when the host
+  has neither a saved ID nor an outstanding create). After this plan, deleting a host no longer falls back to the name,
+  which is what it set out to protect; Suspend and Resume were left out of its scope. A possible follow-up.
+- The records of an outstanding create request are saved without forcing them to disk. Before, a lookup by name healed
+  one lost in a power loss; now such a loss leaves the sandbox unrecognized: a lost host sandbox keeps billing until it
+  is deleted in Tensorlake or under **Sandboxes not on this helm**, and a lost builder blocks every rebuild of its
+  recipe while it exists. The plan allowed accepting this, and the specification says so. Saving that one record
+  durably, as host removal now is, would close it; a possible follow-up.
+- Builder cleanup does not wait for the builder to finish terminating, and the old second lookup by name happened to
+  catch a snapshot written in that window; such a late snapshot can now be left behind. Waiting for termination, as host
+  and leftover deletion do, would cover it; a possible follow-up.
+- After an ambiguous answer to a create request, the lookup by name can still find another helm's builder that has
+  terminated but still answers to that name, and cleanup could then delete that helm's current recipe snapshot. This
+  needs several unlikely things at once and predates this plan, which narrowed it. Ignoring terminated sandboxes in that
+  lookup would close it; a possible follow-up.
+
+#### Checks
+
+These ran once on the stack as delivered, on main `34943a25` (its own base), which is the tree that landed:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, the check that every test delay states its reason
+  (`python -B scripts/check-test-sleeps.py`, 423 delays, none without a reason), `dprint check`,
+  `python3 releasing/check-changelog.py format`, `cargo build` and the UI's release web build
+  (`dx build --package farhelm-ui --platform web --release`): all passed.
+- The helm crate's tests, through the test recorder
+  (`python3 scripts/record-test-run.py --runner nextest --kind development --tmux required ...`,
+  `cargo nextest run -p farhelm-helm`, pinned nextest 0.9.148 and tmux 3.7c, four parallel test slots, no retries), run
+  `aa7f0273-b229-434c-8b6c-95e5a226e55e`: all 1583 passed.
+- The browser specs that add, remove and build Tensorlake hosts and recipes and list leftover sandboxes
+  (`tensorlake-hosts`, `tensorlake-lifecycle`, `tensorlake-recipes`, `tensorlake-settings`, `tensorlake-tunnels`), on
+  Chromium and WebKit (`--runner playwright`, `npx playwright test` with those five files, the pinned tmux required,
+  three workers, no retries), run `a2e0ec58-452b-4ff8-bfa7-382813b7ee80`: all 112 passed.
+- Reused: nothing from the executor's runs.
+- Not run: the rest of the browser suite and the other Rust crates, the UI's Rust and JavaScript tests, a real
+  Tensorlake sandbox and the native Mac app. The code changes are in the helm's Tensorlake handling, which the helm
+  tests and the browser specs above drive through the simulated Tensorlake backend; the UI did not change. A real
+  sandbox would add nothing here, because the change is about which records Farhelm trusts, not how Tensorlake behaves.
+
+Nothing in the executor's report became untrue at landing, beyond the PRs' draft state: all three are merged. The checks
+above also ran browser specs the report did not.
