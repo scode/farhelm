@@ -344,37 +344,54 @@ If a `## Decisions` section exists, its latest entry must also be satisfied. The
 `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write
 a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked while landing on 2026-11-08 (claim 9cc456).
+### 2026-11-08: answer to a blocked question
 
-### Landing blocked: three end-to-end tests now fail when Stop comes early
+The question, as the executor put it:
 
-This plan fixes the misleading message a session showed when Stop interrupted its agent while it was still starting: it
-was recorded as a launch that never started and blamed the host's systemd user manager. Now such a Stop records "stopped
-before the agent finished starting" instead. The landing ran the farhelm crate's end-to-end tests, which the report did
-not run, on Tensorlake sandboxes at the maintainer's request (a nextest archive split into ten partitions). Three tests
-that stop a session soon after creating it, and then check that the stop was recorded as "stopped by user", failed
-there. Each got "stopped before the agent finished starting":
+> Blocked while landing on 2026-11-08 (claim 9cc456).
+>
+> ### Landing blocked: three end-to-end tests now fail when Stop comes early
+>
+> This plan fixes the misleading message a session showed when Stop interrupted its agent while it was still starting:
+> it was recorded as a launch that never started and blamed the host's systemd user manager. Now such a Stop records
+> "stopped before the agent finished starting" instead. The landing ran the farhelm crate's end-to-end tests, which the
+> report did not run, on Tensorlake sandboxes at the maintainer's request (a nextest archive split into ten partitions).
+> Three tests that stop a session soon after creating it, and then check that the stop was recorded as "stopped by
+> user", failed there. Each got "stopped before the agent finished starting":
+>
+> - `restart_under_concurrency::stop_then_restart_then_natural_exit_carries_no_stale_annotation`
+> - `restart_under_concurrency::a_repointed_working_directory_refuses_the_restart`
+> - `restart_with_resume::a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotation`
+>
+> All three pass on the shared development machine. Its CPU is oversubscribed, so each step of a test runs slower there,
+> and the agent has usually started by the time the test's Stop arrives; on the faster sandboxes the Stop came first.
+> The new behavior is what the plan asked for; the tests' timing assumption is what broke. The plan already fixed the
+> same race in the browser terminal spec, by waiting for the command's ready marker before stopping. These tests need
+> the same treatment, and any other test that stops a session right after creating it and expects "stopped by user"
+> should be checked the same way.
+>
+> Evidence: the three Tensorlake shards where these tests failed, runs `25816cb4-3917-4680-b757-fb6182ad8e5e`,
+> `d741809b-1b88-40c0-ac62-98e6d14ebf75` and `7563abcc-a275-47b9-985c-fd0020968cb9` (recorder generic mode, pinned
+> nextest 0.9.148 from an archive, four slots, no retries); the narrow local reruns that passed are
+> `91a3c710-394c-4c02-aade-0793f8416cd3` and `0574a2a8-1b27-4ba8-a72d-ffd21c8cc24c`.
+>
+> Nothing of this plan has merged. The other plans in this landing round landed without it; they do not depend on it.
+>
+> Options: fix the three tests (and any others with the same assumption) to wait until the agent has started before
+> stopping, then deliver again; or change the product so an early Stop keeps the old annotation, which would undo what
+> the plan was for. Recommendation: fix the tests.
 
-- `restart_under_concurrency::stop_then_restart_then_natural_exit_carries_no_stale_annotation`
-- `restart_under_concurrency::a_repointed_working_directory_refuses_the_restart`
-- `restart_with_resume::a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotation`
+The maintainer's answer:
 
-All three pass on the shared development machine. Its CPU is oversubscribed, so each step of a test runs slower there,
-and the agent has usually started by the time the test's Stop arrives; on the faster sandboxes the Stop came first. The
-new behavior is what the plan asked for; the tests' timing assumption is what broke. The plan already fixed the same
-race in the browser terminal spec, by waiting for the command's ready marker before stopping. These tests need the same
-treatment, and any other test that stops a session right after creating it and expects "stopped by user" should be
-checked the same way.
+### Answered by the landing monitor: fix the tests
 
-Evidence: the three Tensorlake shards where these tests failed, runs `25816cb4-3917-4680-b757-fb6182ad8e5e`,
-`d741809b-1b88-40c0-ac62-98e6d14ebf75` and `7563abcc-a275-47b9-985c-fd0020968cb9` (recorder generic mode, pinned nextest
-0.9.148 from an archive, four slots, no retries); the narrow local reruns that passed are
-`91a3c710-394c-4c02-aade-0793f8416cd3` and `0574a2a8-1b27-4ba8-a72d-ffd21c8cc24c`.
-
-Nothing of this plan has merged. The other plans in this landing round landed without it; they do not depend on it.
-
-Options: fix the three tests (and any others with the same assumption) to wait until the agent has started before
-stopping, then deliver again; or change the product so an early Stop keeps the old annotation, which would undo what the
-plan was for. Recommendation: fix the tests.
+The landing monitor answered this on the maintainer's behalf, under its standing rule that a landing which failed mainly
+because tests fail goes back with an instruction to fix them. Keep the product change. Fix the three end-to-end tests
+the Blocked section names so they wait until the agent has started (the way the browser terminal spec now waits for its
+ready marker) before they Stop and expect "stopped by user". Also look for other tests that stop a session right after
+creating it and expect that annotation, and give them the same wait. Before delivering again, run the farhelm crate's
+end-to-end tests that touch Stop and Restart somewhere they can fail: the shared development machine passes them even
+unfixed, so use a less loaded machine (Tensorlake sandboxes, if available) or a repeated narrow run that first
+reproduces the failure without the fix. A later change of mind is a follow-up, not a reason to stop the plan.
