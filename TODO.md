@@ -24,6 +24,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Revisit letting prepared snapshots keep a custom base's own logins.** Decided on the maintainer's behalf on
+  2026-11-08 when prepared-snapshots blocked: preparing a snapshot keeps whatever authentication a recipe's custom image
+  or snapshot already contains (agent logins, tokens, Git credentials), and hosts made from it inherit that, with the
+  base's author responsible; Farhelm guarantees only that it adds none of its own and delivers no credentials or tunnels
+  to the preparation sandbox. Recipe snapshots already keep a base's content the same way. The alternative was to refuse
+  a base that holds credentials in known locations, naming what its author must remove, which can still be added later.
+
 - **Revisit letting the agent settings overwrite fix grow to about 280 lines.** Decided on the maintainer's behalf on
   2026-11-08 when agent-settings-compare-replace blocked: the fix that keeps Farhelm's credential delivery to a
   Tensorlake host from overwriting a Claude Code or Codex settings edit saved after Farhelm read the file (check the
