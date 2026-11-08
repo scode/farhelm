@@ -21734,7 +21734,8 @@
 - Completion criteria: add a line to TODO.md's near-term "Podman rigor" entry: launch approval cards show the container
   settings, reusing the template card's rows. No code change now. Remove the feedback file and its index entry in the
   same change.
-- Execution: planned in `plans/queue/triage-misc-nov7.md`.
+- Execution: implemented in change `qtswwkpqytpkkuyptsszvrnpvksryrqz`, bookmark
+  `plan/triage-misc-nov7/04-podman-todo-launch-card`, [PR #3176](https://github.com/scode/farhelm/pull/3176/changes).
 
 ## older-browser-approves-undisclosed-container-options.md
 
