@@ -242,24 +242,25 @@ predecessor's sessions are gone with the old install. Removing a host from the r
 supervisor and its sessions are untouched and reappear on re-registration. Registry entries are editable: an SSH
 destination can be corrected without touching the host's identity or its sessions. Every host, the local one included,
 has a settings dialog in the GUI that holds its destination (SSH hosts), its alias, a chosen icon and color, whether it
-starts YOLO sessions without asking, whether it runs `farhelm` commands from its sessions without asking, and separate
-permissions to open public and local-network links without asking (see Agent-spawned sessions). The header and footer,
-including the close controls and the note that changes save as you make them, stay visible while only the settings
-between them scroll. A remote host offers sixteen icons, with the cloud as the default, and the default foreground or
-one of seven identity colors: lavender, orchid, teal, steel, sand, copper and red. The local host starts with the laptop
-in red, but offers the same choices. The choice is kept by the helm and shared with every client. It tints the icon, and
-the host's terminal frames when **Color terminal frames by host** is on, never a status or the host name; red identifies
-a host and says nothing about its state. Every host except a new Tensorlake host asks before YOLO launches, and every
-host asks before carrying out an acting `farhelm` command from one of its sessions, and both link permissions start off,
-until the user explicitly turns them on, including hosts that existed before the settings did. Adopting a new identity
-for a host, described next, resets all four permissions to asking: each is a judgment about the install the user knew,
-and a new identity, whether a reinstall or a different machine, is one they have not judged. If a destination turns out
-to present a different identity than recorded (a wiped and reinstalled host, a recycled address), the helm says so and
-asks whether to adopt the new host or fix the destination — it never silently merges. An entry that reaches a machine
-another entry already holds connects nothing: it says which entry holds the machine, by name, and asks the user to
-remove that entry or change this one's destination and then press Retry. Farhelm never connects two entries to one
-machine and never resolves this on its own. Last-known sessions of a host that is permanently gone are disposed of by
-removing the host from the registry.
+starts YOLO sessions without asking, whether its sessions manage sessions on this same host without asking, whether it
+runs `farhelm` commands from its sessions without asking, and separate permissions to open public and local-network
+links without asking (see Agent-spawned sessions). The header and footer, including the close controls and the note that
+changes save as you make them, stay visible while only the settings between them scroll. A remote host offers sixteen
+icons, with the cloud as the default, and the default foreground or one of seven identity colors: lavender, orchid,
+teal, steel, sand, copper and red. The local host starts with the laptop in red, but offers the same choices. The choice
+is kept by the helm and shared with every client. It tints the icon, and the host's terminal frames when **Color
+terminal frames by host** is on, never a status or the host name; red identifies a host and says nothing about its
+state. Every host except a new Tensorlake host asks before YOLO launches, and every host asks before carrying out an
+acting `farhelm` command from one of its sessions. **Manage sessions on this host without asking** and both link
+permissions start off on every host, Tensorlake sandboxes included, until the user explicitly turns them on, including
+hosts that existed before the settings did. Adopting a new identity for a host, described next, resets all five
+permissions to asking: each is a judgment about the install the user knew, and a new identity, whether a reinstall or a
+different machine, is one they have not judged. If a destination turns out to present a different identity than recorded
+(a wiped and reinstalled host, a recycled address), the helm says so and asks whether to adopt the new host or fix the
+destination — it never silently merges. An entry that reaches a machine another entry already holds connects nothing: it
+says which entry holds the machine, by name, and asks the user to remove that entry or change this one's destination and
+then press Retry. Farhelm never connects two entries to one machine and never resolves this on its own. Last-known
+sessions of a host that is permanently gone are disposed of by removing the host from the registry.
 
 A host that is a Tensorlake sandbox Farhelm created is the exception to two of those rules, because Farhelm owns the
 machine and not only the entry: removing it is not merely forgetting it, and its destination cannot be corrected.
@@ -323,7 +324,7 @@ Credits. **Back** returns to Name and Recipe without creating anything; the next
 host-setup preference does not, and sandbox confirmation never changes that ordinary preference. Cancelling retires the
 displayed creation offer immediately. The host appears as soon as its setup run is accepted, before a snapshot is built
 or a sandbox is created, and shows progress in the usual setup view. Its details show the sandbox name, recipe, CPU and
-memory. New Tensorlake hosts start with **Start YOLO sessions without asking** on; the other three host permissions
+memory. New Tensorlake hosts start with **Start YOLO sessions without asking** on; the other four host permissions
 remain off.
 
 Setup builds the recipe's snapshot if missing (or joins a build already running), ensures its prepared snapshot, and
@@ -357,7 +358,7 @@ without asking, a confirmed uninstall) may be carried out against the entry's ne
 the installation identity to prevent that. Agent host edits and removals are narrower: their cards explicitly show the
 destination, so a destination changed during that wait is refused, as specified under Agent-spawned sessions. A
 destination change that does not adopt a new identity keeps the host's settings, including on a host that was never
-contacted. The identity rules above still hold: adopting a new identity resets all four permissions to asking, and the
+contacted. The identity rules above still hold: adopting a new identity resets all five permissions to asking, and the
 New dialog's default host and recent setups stay tied to the install the user saw.
 
 Exactly one helm runs at a time. Running several concurrently is unsupported in v1. The invariant supervisors enforce is
@@ -3500,6 +3501,20 @@ operations wait on, apart from the asking session's own next change, which is re
 waiting. A link request takes no session-change lock: it neither blocks another session command nor waits for one. While
 it is turned off, `prompt` is refused without asking.
 
+**Manage sessions on this host without asking** is a narrower, independent permission on the requesting host. It waives
+the card for create (with or without an initial prompt), spawn, clone, rename, stop, restart and delete only when the
+target is on that same host. Clone also requires its source session to be on that host. The helm compares the host IDs
+it resolved, never display names or an owner the requesting supervisor claims. Requests for other hosts, template writes
+and deletes, host changes, links and the dormant `prompt` verb are outside this permission. Actions requiring their own
+Allow still ask, and the separate YOLO rule for create, clone and spawn still applies. Plain restart is exempt from that
+YOLO rule, including a restart of a YOLO session. The helm must remain reachable to decide; the permission supplies no
+supervisor-side or offline authority.
+
+The host settings Permissions section places **Manage sessions on this host without asking** between **Start YOLO
+sessions without asking** and **Run farhelm commands without asking**. Its help explains the covered session actions,
+the requests that still ask, and that the fleet-wide permission already covers these actions. Both switches always show
+and change their own stored values, even when fleet-wide authority makes the narrower grant redundant.
+
 `farhelm agent open-url -- <url>` asks to open an absolute HTTP or HTTPS URL with a host, at most 4096 bytes long. Raw
 whitespace and control characters are refused before parsing, matching terminal links; the full original URL is shown as
 labelled data on the approval card. The command waits and exits zero after a web Open/Allow click or after the desktop's
@@ -3569,6 +3584,15 @@ session IDs occupy full-width identity rows: the complete entry-prefixed ID is s
 and literal escape notation spelled distinctly. Each row offers Copy for the complete raw ID, including characters shown
 as escapes. Answering the card still uses its approval ID.
 
+A qualifying session card offers Allow, **Always allow on <host> only**, **Always allow from <host>**, and Deny. The new
+button grants only **Manage sessions on this host without asking** to the requesting install and approves that request.
+It uses the requesting host's display name as peer text and explains that other-host requests still ask. It is absent on
+nonqualifying cards and on any card requiring a direct Allow. The helm refuses that answer on an ineligible card without
+settling it, and checks the requesting install's identity under the same host write lock as the fleet-wide grant.
+Failure to store the grant leaves the request answerable; already-waiting cards still need their own answers. An older
+UI ignores the new eligibility field and keeps its existing buttons. The new answer is a distinct variant so an older
+helm rejects it rather than interpreting it as a fleet-wide grant.
+
 If no Farhelm window is open to show the card (no GUI is connected to the helm), a request that needs approval is
 refused at once, with a message saying there is no Farhelm window to ask in and to open Farhelm and retry. Otherwise it
 waits for the user's answer for at most nine minutes, then is refused as not answered and its card disappears; nine
@@ -3597,11 +3621,12 @@ that rule again when the user approves, so a host whose setting changed during t
 refusal names the host and says that turning on "Start YOLO sessions here without asking" for it is how to let agents do
 this. A plain restart re-runs the session's own stored launch, which the user approved or a host setting allowed when
 the session was created (sessions agents created before these prompts existed included), so it is allowed and gets the
-ordinary card, and so do agent launches whose permission is not YOLO. An agent launch counts as one only when its
-command lines are exactly what this version of Farhelm composes for its choices: a clone copies its source's launch as
-the source's supervisor reports it, which the helm does not trust, and a session started by an older Farhelm may have
-been composed differently, so such a launch is refused like a command launch. There is no override an agent can pass:
-the command line has no `--confirm-yolo`, and the helm ignores one in any request from a session.
+ordinary card unless either applicable command permission waives it, and so do agent launches whose permission is not
+YOLO. An agent launch counts as one only when its command lines are exactly what this version of Farhelm composes for
+its choices: a clone copies its source's launch as the source's supervisor reports it, which the helm does not trust,
+and a session started by an older Farhelm may have been composed differently, so such a launch is refused like a command
+launch. There is no override an agent can pass: the command line has no `--confirm-yolo`, and the helm ignores one in
+any request from a session.
 
 A wrapper prefix is not tied to an agent type: whoever composes the launch, directly or through an agent, chooses both
 and is responsible for matching them. A named template's prefix remains user-configured if a later command-line flag
@@ -4438,7 +4463,11 @@ like one, so how long agent-originated retry records are kept is not a security 
 into a managed checkout: while its created session still exists, a retry with the same idempotency key returns, or
 finishes, the attempt the user already approved, without asking again. The replay can only complete that exact approved
 request, and only for the session, on the host, that asked. Delete removes that approval's retry record, so reusing the
-key then needs the approval any new request needs. None of this waives correctness of user-initiated GUI requests.
+key then needs the approval any new request needs. **Manage sessions on this host without asking** grants only the
+same-host session actions defined there: both the target and a clone's source must belong to the requesting host. It
+grants no cross-host or template authority and does not waive direct Allow or launch YOLO checks. Both permissions are
+helm decisions, independent of what the requesting supervisor asserts. None of this waives correctness of user-initiated
+GUI requests.
 
 That setting never covers changes to the hosts themselves. An agent's `farhelm agent host add`, `host edit` or
 `host remove` always needs the user's own Allow on its card (see Agent-spawned sessions), so turning the setting on for

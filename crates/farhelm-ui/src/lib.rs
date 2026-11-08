@@ -822,6 +822,10 @@ pub struct Host {
     /// card's "Always allow" turns it on.
     #[serde(default)]
     pub commands_without_asking: bool,
+    /// Independent authority for session actions confined to the requesting host.
+    /// Older helms report no grant; this must never inherit fleet-wide authority.
+    #[serde(default)]
+    pub own_sessions_without_asking: bool,
     /// Independent link grants; older host listings default to asking for both categories.
     #[serde(default)]
     pub links_without_asking: bool,

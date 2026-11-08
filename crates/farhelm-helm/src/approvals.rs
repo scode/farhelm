@@ -374,15 +374,24 @@ fn gui_connected(state: &AppState) -> bool {
 /// (wrapper-bearing agent launches and template writes, host additions, edits and
 /// removals) always waits for one visible answer, whatever the host's
 /// ordinary command setting says; that method's docs give each reason.
+/// `own_host_session_action` is a fact established by the verb handler from
+/// resolved host IDs, including a clone's source. Display labels cannot prove it.
 pub(crate) async fn ask(
     state: &AppState,
     origin: AgentOrigin,
     asking_session: &str,
+    own_host_session_action: bool,
     action: ApprovalAction,
 ) -> anyhow::Result<()> {
-    ask_with_answer(state, origin, asking_session, action)
-        .await
-        .map(|_| ())
+    ask_with_answer(
+        state,
+        origin,
+        asking_session,
+        own_host_session_action,
+        action,
+    )
+    .await
+    .map(|_| ())
 }
 
 /// Preserve action-specific consent through the shared approval wait.
@@ -406,6 +415,7 @@ pub(crate) async fn ask_with_answer(
     state: &AppState,
     origin: AgentOrigin,
     asking_session: &str,
+    own_host_session_action: bool,
     mut action: ApprovalAction,
 ) -> anyhow::Result<Allowed> {
     let hosts = state.store.list_hosts().await?;
@@ -439,7 +449,10 @@ pub(crate) async fn ask_with_answer(
             // reduced card waives the trust question, never the gesture needed to open.
             *preapproved = allowed;
         }
-        _ if row.commands_without_asking && !direct_allow => {
+        _ if !direct_allow
+            && (row.commands_without_asking
+                || (row.own_sessions_without_asking && own_host_session_action)) =>
+        {
             return Ok(Allowed::Raw);
         }
         _ => {}
@@ -1090,7 +1103,7 @@ mod tests {
     ) -> (tokio::task::JoinHandle<anyhow::Result<()>>, String) {
         let state = Arc::clone(&harness.state);
         let asker = asking.to_string();
-        let task = tokio::spawn(async move { ask(&state, origin, &asker, action).await });
+        let task = tokio::spawn(async move { ask(&state, origin, &asker, false, action).await });
         let mut changes = harness.state.manager.events().subscribe();
         let found = tokio::time::timeout(STEP, async {
             loop {
@@ -1517,7 +1530,7 @@ mod tests {
         let harness = rest_harness::idle_helm().await;
         assert_eq!(harness.state.manager.events().subscriber_count(), 0);
         let origin = local_origin(&harness).await;
-        let refused = refusal_of(ask(&harness.state, origin, "asker", stop_action()).await);
+        let refused = refusal_of(ask(&harness.state, origin, "asker", false, stop_action()).await);
         assert_eq!(refused.kind, ErrorKind::Unavailable);
         assert_eq!(refused.message, NO_GUI_REFUSAL);
         assert!(harness.state.approvals.list().is_empty());
@@ -1613,7 +1626,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            refusal_of(ask(&harness.state, origin, "sess-1", stop_action()).await).message,
+            refusal_of(ask(&harness.state, origin, "sess-1", false, stop_action()).await).message,
             NO_GUI_REFUSAL,
             "neither browser grant grants command authority"
         );
@@ -1814,7 +1827,7 @@ mod tests {
             .set_commands_without_asking(origin.host, true)
             .await
             .unwrap();
-        ask(&harness.state, origin, "asker", stop_action())
+        ask(&harness.state, origin, "asker", false, stop_action())
             .await
             .expect("allowed without asking");
         assert!(harness.state.approvals.list().is_empty());
@@ -1823,8 +1836,41 @@ mod tests {
             .set_commands_without_asking(origin.host, false)
             .await
             .unwrap();
-        let refused = refusal_of(ask(&harness.state, origin, "asker", stop_action()).await);
+        let refused = refusal_of(ask(&harness.state, origin, "asker", false, stop_action()).await);
         assert_eq!(refused.message, NO_GUI_REFUSAL, "asks again once it is off");
+    }
+
+    /// Only the matching own-host fact may use the narrower stored permission.
+    /// With no GUI, a missing grant/fact yields the no-window refusal, making
+    /// this a direct observation of the bypass rather than a timed absence of cards.
+    #[farhelm_testtrace::test]
+    async fn own_session_permission_requires_both_scope_and_grant() {
+        let harness = rest_harness::idle_helm().await;
+        let origin = local_origin(&harness).await;
+        for own_grant in [false, true] {
+            harness
+                .store
+                .set_own_sessions_without_asking(origin.host, own_grant)
+                .await
+                .unwrap();
+            for fleet_grant in [false, true] {
+                harness
+                    .store
+                    .set_commands_without_asking(origin.host, fleet_grant)
+                    .await
+                    .unwrap();
+                for own_action in [false, true] {
+                    let result =
+                        ask(&harness.state, origin, "asker", own_action, stop_action()).await;
+                    if fleet_grant || (own_grant && own_action) {
+                        result.expect("the applicable permission waived the card");
+                    } else {
+                        assert_eq!(refusal_of(result).message, NO_GUI_REFUSAL);
+                    }
+                    assert!(harness.state.approvals.list().is_empty());
+                }
+            }
+        }
     }
 
     /// An agent-written wrapper cannot become a trusted template through the
@@ -1849,7 +1895,7 @@ mod tests {
             },
             host_name: None,
         };
-        let refused = refusal_of(ask(&harness.state, origin, "asker", action()).await);
+        let refused = refusal_of(ask(&harness.state, origin, "asker", false, action()).await);
         assert_eq!(
             refused.message, NO_GUI_REFUSAL,
             "the shortcut did not approve it"
@@ -2038,7 +2084,7 @@ mod tests {
         harness.await_refreshed(local).await;
         let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
         let origin = live_origin(&harness, local);
-        let refused = refusal_of(ask(&harness.state, origin, "asker", stop_action()).await);
+        let refused = refusal_of(ask(&harness.state, origin, "asker", false, stop_action()).await);
         assert_eq!(refused.kind, ErrorKind::Unavailable);
         assert!(
             refused.message.contains("nobody answered"),
@@ -2071,7 +2117,7 @@ mod tests {
             .deny_session(&SessionKey::new(origin.host, "doomed"));
         let refused = refusal_of(ended(doomed).await);
         assert_eq!(refused.message, DELETING_REFUSAL);
-        let refused = refusal_of(ask(&harness.state, origin, "doomed", stop_action()).await);
+        let refused = refusal_of(ask(&harness.state, origin, "doomed", false, stop_action()).await);
         assert_eq!(refused.kind, ErrorKind::Unauthorized);
         assert_eq!(
             refused.message, DELETING_REFUSAL,

@@ -8642,6 +8642,22 @@ can race: when the request expires between the setting being stored and the requ
 the setting stays on, and the GUI's notice says the answer did not take effect and, after an "Always allow", that the
 host's setting may still have been turned on.
 
+The independent **Manage sessions on this host without asking** permission is `hosts.own_sessions_without_asking`
+(schema 80), default off for existing and new hosts, Tensorlake hosts included, and reset on identity adoption in the
+same write as the other permissions. Each covered verb passes the shared approval decision a fact computed from
+helm-resolved host IDs: the destination is the origin, and for clone its source also belongs to the origin. Prompt,
+templates, host changes and links pass false. A non-direct-Allow command bypasses its card when either fleet-wide
+command authority is on or this fact and the own-host permission are both true. The launch-only YOLO guard stays
+separate; plain restart does not acquire a YOLO check.
+
+The pending entry retains that eligibility, masked off for direct-Allow actions, and exposes it through a
+serde-defaulted card field. The GUI shows **Always allow on <host> only** beside the existing fleet-wide button only
+when eligible, using escaped peer text for the host. Its distinct answer variant cannot be mistaken for the existing
+fleet-wide answer by an older helm. The answer handler refuses an ineligible grant without taking the card, then checks
+the live origin and writes only for the recorded install identity under the host write lock before approving. The
+settings switch and fleet-wide switch write independent stored values through their own per-field routes; the own-host
+switch remains editable while the fleet-wide grant is on.
+
 Protocol 64 adds `AgentVerb::HostAdd` and `AgentReply::HostAddAccepted`, plus the distinct `host_add` approval tag,
 which requires direct Allow. Its answer carries only the edited destination; that payload is required on HostAdd Allow
 and refused on every other action or answer, with bounded nonempty text checked before the entry is taken. Alias stays
