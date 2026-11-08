@@ -42,3 +42,51 @@ The required fresh-context Opus 5.5 reviewer at high effort found no correctness
 criteria. Its wording and documentation findings were addressed. An optional enum replacement for the warning's two
 flags was declined in favor of the reviewer's smaller documentation alternative: the Tensorlake inclusion flag applies
 only to the plural notice. A separate cold reader checked the commit and PR wording.
+
+### Landing
+
+Landed as delivered, with no fixes at landing. Settings → Credentials now shows one **Not encrypted on disk** warning,
+which names the Tensorlake API key, and the key's field there is labelled **Tensorlake API key**; the Tensorlake page
+keeps its own warning and its **API key** label.
+
+- #3165: the change, its browser test updates, the SPEC.md paragraph, the two TODO entries' removal and the changelog
+  entry.
+
+#### What landed since the stack was based, and whether it interacted
+
+Nothing but plan bookkeeping landed on main after this plan's base, and it was the only plan landed in this round, so
+the stack applied unchanged. While it merged, a planning change that adds plans and touches only `plans/` and
+`TRIAGE_OUTCOMES.md` (#3166) also landed; main now differs from the tested tree by exactly that change. A fresh-context
+review checked this plan against the current tree. Every other place that relies on the plain **API key** label is about
+the Tensorlake page, which keeps it: the docs website's Tensorlake sandboxes page describes that page, and the v0.36.0
+release-notes screenshot script captures it. Only the Credentials test expected two warnings, and this change updates
+it. Each credential editor still shows its own warning, worded as before, and the amended SPEC.md paragraph matches what
+the page does. The review found nothing to fix.
+
+#### Checks
+
+These ran on the plan rebased onto main `9e54c1e4`:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings` (the UI built for the
+  browser), `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the check
+  that every test delay states its reason (`python -B scripts/check-test-sleeps.py`, 423 delays, none without a reason),
+  `dprint check`, `python3 releasing/check-changelog.py format`, `cargo build`, and the UI's release web build
+  (`dx build --package farhelm-ui --platform web --release`): all passed.
+- Four browser spec files on Chromium and WebKit, through the test recorder
+  (`python3 scripts/record-test-run.py --runner playwright --kind development --tmux required ...` running
+  `npx playwright test` with anchored filters for exactly `credentials-settings.spec.ts`, `tensorlake-settings.spec.ts`,
+  `credential-delivery.spec.ts` and `settings.spec.ts`, three workers, no retries): the two this plan changed, the one
+  other spec that opens the Credentials section, and the general Settings dialog spec. Run
+  `c6b2b3cc-148a-4536-b94d-a929c5cda68c`: all 96 tests passed.
+- The UI crate's Rust tests in its desktop build, `cargo nextest run -p farhelm-ui --features desktop`, run
+  `418a5634-5632-4f72-862b-a4eaf5112b0f`: all 1097 passed.
+- Reused: nothing. The executor's own browser run and lint results were not counted; everything above ran again on the
+  rebased tree.
+- Not run: the rest of the browser suite, the other crates' Rust tests, the UI's JavaScript unit tests and the docs
+  website build. The change touches only two Settings components in the UI crate, the browser tests above, SPEC.md,
+  TODO.md and a changelog entry; no supervisor, helm or terminal code, no file the JavaScript unit tests cover, and no
+  website page changed.
+
+Nothing in the executor's report became untrue at landing, beyond the PR's state and head commit, which the landing
+moved from the draft it lists to merged.
