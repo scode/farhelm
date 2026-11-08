@@ -97,3 +97,130 @@ linger correction and browser fixture fixes also passed that reviewer. Ready wor
 was last checked and that it expires after 24 hours; renewal remains lazy. No replacement reviewer or review swarm was
 used. The same reviewer checked the measurements and confirmed the rebase preserved the feature diff; its one minor
 document finding was fixed by removing an unreachable pre-rebase commit reference from the historical measurement note.
+
+### Landing
+
+Landed with fixes made at landing: one that the landing's checks required, and wording corrections from the landing
+review. What reached main is what the report describes: new Tensorlake hosts start from a recipe's prepared snapshot,
+with Farhelm already installed, instead of installing it on each host.
+
+- #3203: the whole change, one PR, with its tests, specification, a measurement note under `lore/` and a changelog
+  entry.
+
+#### The block answered on your behalf
+
+The plan blocked once, on whether a prepared snapshot may keep logins that a custom base already contains. The landing
+monitor answered it for you under your instruction to unblock minor, reversible questions: yes, the snapshot keeps
+whatever the custom base holds, Farhelm adds none of its own to it, and the base's author is responsible for that
+content. The alternative was to refuse such bases or clear their logins before taking the snapshot. Where the report
+calls this the "agreed" boundary, that agreement is this answer, not one you gave. TODO.md's "Plan decisions to revisit"
+has an entry for it.
+
+#### What landed since the stack was based, and whether it interacted
+
+Nothing but plan bookkeeping landed on main after this stack's base before the round started, and this round landed no
+other plan. Two planning PRs merged while it ran (#3204, a rail notification bell and three smaller follow-ups, and
+#3212, upgrade epochs and five smaller entries); they change only TODO.md and plan files, so they cannot interact.
+
+The landing monitor and, independently, a fresh-context review read the change against the earlier Tensorlake plans it
+builds on, and found nothing that needs changing:
+
+- recipe-bases (#3178), which made every recipe build a snapshot: preparation starts from that built snapshot, and
+  rebuilding it makes the prepared one stale, so the next new host prepares again. A prepared snapshot cannot be chosen
+  as a recipe's base, as built ones cannot.
+- the leftover-sandbox fixes (#3186, #3187): the preparation sandboxes, named `farhelm-prepare-...`, are recognized as
+  Farhelm's own, so a leftover one appears under **Sandboxes not on this helm** like a leftover builder.
+- name ownership (#3188 to #3190): a preparation sandbox is cleaned up from its own record, as builders now are, and an
+  interrupted host create from a prepared snapshot recovers from the installation details it saved itself.
+- credential delivery (#3173): preparation delivers no credentials or GitHub setup, opens no tunnels and never connects
+  to the prepared supervisor; each new host gets its credentials separately, as before.
+
+The whole supervisor state folder is removed and checked gone, and the machine ID is emptied, before the snapshot is
+taken, so each new host gets its own identity.
+
+#### Fixes made at landing
+
+- **Migration test fixtures.** The landing's full run of the helm crate's tests failed four migration tests, which the
+  executor's narrower selection had not included. They rebuild a current database as an older one through three shared
+  fixtures (two of the tests use the same fixture), and none of the three removed the plan's new column for prepared
+  installation details. All three now do, and all four tests pass. The product's own database upgrade code was right and
+  did not change.
+- **Recipe row cleanup message.** The recipe row's "could not delete" line promised that the next build would retry any
+  leftover. A build only retries what a build left; a leftover preparation sandbox is retried by the next preparation or
+  by deleting the recipe. The line now says the next build or preparation, whichever left it.
+- **Changelog entry.** It read as if the snapshot renews in the background, and it did not say what the first host
+  costs. It now says the first new host waits while the snapshot is prepared and briefly bills a preparation sandbox,
+  and that nothing renews it in the background.
+- **Specification wording.** SPEC.md said copied supervisor state in a custom base is refused before preparation; it is
+  refused during preparation, so the recipe row shows a preparation failure, and the text now says so. SPEC.md's
+  sentence about what the UI calls snapshots had become garbled ("templates means launch templates") and now reads that
+  the UI calls them snapshots, never templates, a word kept for launch templates. SPEC_impl.md introduced the conditions
+  that make a snapshot stale as the definition of "freshness"; they are now introduced as what makes it stale.
+  SPEC_impl.md also said a host is admitted once it reaches Running; it now says admission also waits until the host
+  answers over SSH, which is what the code does.
+- **A flake the report did not mention.** The plan also changed an older credential-delivery test,
+  `actor_hold_cancels_the_real_hook_before_acknowledging_parking`, and the report does not say why. It had failed once
+  in the executor's own run: it waited to see the connection drop, but the reconnect took well under a millisecond, so
+  it never saw that moment. The report says the run found no latent flake; the landing disagrees. This was a latent
+  flake that predates the plan, the plan's change fixes it, and it is now recorded in FLAKES.md as fixed. It passed in
+  the landing's run.
+
+#### Things you should know
+
+- **New hosts from one recipe wait for each other.** While a new host from a recipe is being created, up to the moment
+  Tensorlake reports it running, other new hosts from that recipe, a rebuild replacing its snapshot, and deleting the
+  recipe wait. Creation took under a second when measured. If Tensorlake keeps a sandbox waiting for capacity, though,
+  the others wait until that create succeeds or gives up, which happens after 15 minutes. Host setups are rare, so this
+  is acceptable for hosts. The dependent plan for sandbox sessions launches far more often and would inherit it; letting
+  creates that only read the snapshot run together is a possible follow-up there.
+- **For the sandbox sessions plan.** Asking for a prepared snapshot first builds the recipe's snapshot when it has none,
+  which session launch must not do. The waiting explanation shows only for the **Prepare snapshot** step, so session
+  launch progress needs its own wording.
+- **Recipe row wording.** The ready line reads "Ready for new hosts when last checked · prepared … for Farhelm … ·
+  expires after 24 h; checked before use", rather than the "renews after 24 h" in the plan's example wording.
+- **Deleted source snapshot.** After a rebuild deletes the old built snapshot, the prepared snapshot cloned from it
+  stays recorded, stale and unused, until the next preparation replaces it. That a clone does not depend on its deleted
+  source is the same assumption Farhelm already makes for built snapshots. The real two-host check did not test it.
+
+#### Checks
+
+These ran on the PR as delivered, rebased onto main `ef2eef28` (its base plus plan bookkeeping only):
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo clippy -p farhelm-ui --features desktop --all-targets -- -D warnings`, the check that every test delay states
+  its reason (`python -B scripts/check-test-sleeps.py`, 423 delays, none without a reason), `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (no errors; one older warning
+  about a citation in the triage record), `cargo build` and the UI's release web build
+  (`dx build --package farhelm-ui --platform web --release`): all passed.
+- The browser specs that add Tensorlake hosts, build and prepare recipe snapshots, deliver credentials, open recipe
+  tunnels, show setup progress and update hosts (`tensorlake-hosts`, `tensorlake-recipes`, `tensorlake-lifecycle`,
+  `tensorlake-tunnels`, `credential-delivery`, `provisioning`, `host-updates`), on Chromium and WebKit, through the test
+  recorder (`python3 scripts/record-test-run.py --runner playwright --kind development --tmux required ...`,
+  `npx playwright test` with those seven files, three workers, no retries), run `5d40e052-9ca2-4ac5-ba9b-97aabcca1401`:
+  all 316 passed.
+- The protocol and helm crates' tests (`cargo nextest run -p farhelm-proto -p farhelm-helm`, pinned nextest 0.9.148 and
+  tmux 3.7c, four parallel test slots, no retries), run `de3c2c8a-7885-42df-b5c0-c1714bb9ba80`: 1839 of 1843 passed. The
+  four failures were the migration fixtures fixed at landing; that run is kept as their evidence.
+- The UI crate's tests in its desktop build (`cargo nextest run -p farhelm-ui --features desktop`), run
+  `069b0592-a0bc-45e1-9f72-4055f6de76fd`: all 1104 passed.
+
+After the landing fixes, the landed tree:
+
+- `cargo fmt --all -- --check`, `dprint check`, the changelog check and
+  `cargo clippy -p farhelm-helm -p farhelm-ui --all-targets -- -D warnings`: all passed.
+- Every helm store and checkout-config test, including the four that had failed
+  (`cargo nextest run -p farhelm-helm --lib -E 'test(/^store::tests::/) | test(/^checkout_config::tests::/)'`), run
+  `9c82f649-c4e9-4c3b-8532-38d61a0447de`: all 212 passed.
+- The UI's Tensorlake recipe tests (`cargo nextest run -p farhelm-ui --lib -E 'test(/^tensorlake::/)'`), run
+  `11340499-e368-4545-951d-188b7ebd3697`: all 14 passed.
+- The merge rebased the PR onto the two planning PRs named above. After it, main outside `plans/` matches the tested
+  tree apart from their TODO.md entries.
+- Reused for the landed tree: the browser, the rest of the helm and the UI runs above. The fixes after them change only
+  test fixtures, one status line that no test or spec checks, and documentation.
+- Reused from the executor: its real two-host Tensorlake check, which the landing did not repeat. The landing fixes
+  change nothing it exercised.
+- Not run: the rest of the browser suite and the other Rust crates, and the native Mac app. Nothing else depends on the
+  code this changes beyond what the runs above cover.
+
+The executor's report is otherwise still accurate, apart from the PR's draft state; it is merged.

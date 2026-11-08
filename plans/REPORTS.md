@@ -4,3 +4,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 
 - [`stop-closes-tabs`](reports/stop-closes-tabs.report.md) landed 2026-11-08 in #3132, #3133: Stop closes the session's terminal tabs, asking first when tabs are open (skippable), with a precondition when it did not ask; Restart keeps tabs
 - [`agent-settings-compare-replace`](reports/agent-settings-compare-replace.report.md) landed 2026-11-08 in #3173: Tensorlake hosts: credential delivery never overwrites an agent settings file that changed after it was read
+- [`prepared-snapshots`](reports/prepared-snapshots.report.md) landed 2026-11-08 in #3203: Farhelm-managed prepared snapshots per recipe (supervisor installed, no identity or secrets, stale after 24 h or an update, prepared lazily); new Tensorlake hosts start from them
