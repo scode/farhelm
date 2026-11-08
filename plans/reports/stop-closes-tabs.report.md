@@ -157,3 +157,95 @@ Earlier consent and wording findings were corrected before the original delivery
 Fresh native own-model resume and scope checks passed. The correction uses existing attachment, readiness and listing
 helpers without adding global waits or cleanup machinery. Existing approved commit/PR wording was preserved. A separate
 documentation pass covered the changed test and its setup, quiet-feed and prompt-drift contracts.
+
+### Landing
+
+Landed after two returns to its executor, with fixes the landing made over its last two attempts. Stop now also closes a
+session's terminal tabs and their processes, asking first when tabs are showing, and the row above the terminal has a
+Stop button.
+
+- #3132: the change, its tests and the protocol change.
+- #3133: the guide pages and the TODO entry's removal.
+
+#### What landed since the stack was based, and whether it interacted
+
+The first attempt, earlier on 2026-11-07, sent the plan back because it slowed the session list (an unchanged row
+re-rendered on every refresh) and broke two sidebar menu tests; the second sent it back because a Delete test it had
+rewritten failed 4 of 12 repeated runs. Between them main landed recipe tunnels over the host's connection
+(macos-tunnel-exit), which also changed the protocol, path links split across rows (cut-path-links), three features for
+sessions still in old terminals, and the v0.37.1 release changes. This delivery is based on main `ac521332`, and the
+executor fixed the second return's failures in the test itself: it now waits for the agent to be running before stopping
+it, and for the tab it opens to be listed. A fresh-context review checked each attempt against what had landed and, this
+time, against the second return's instructions: all of them are met, and nothing that landed interacts with this plan
+beyond the protocol number below.
+
+#### Fixes made at landing
+
+- The protocol version: this plan and macos-tunnel-exit each moved it from 68 to 69, and macos-tunnel-exit landed first,
+  so this plan takes 70; its pinning test and its SPEC_impl.md sentence say 70 too (in #3132, made at the second attempt
+  and kept by the executor).
+- At the second attempt, also kept: an end-to-end test of Delete ending the processes behind a session's tabs had been
+  changed to Stop first, which left nothing testing Delete itself; its Delete assertions are back. SPEC.md's list of
+  questions the Skip session confirmations setting skips gained Stop, and a supervisor comment now says tabs stay open
+  across Restart only (all in #3132).
+- At this attempt: SPEC.md's sentence on what that setting's help names gained Stop, which the help text in this
+  delivery already starts with (in #3132); and two sub-bullets of the near-term "Podman rigor" TODO entry that this plan
+  resolves (Stop descriptions not saying tabs end, and the wrapper guide promising Stop keeps tabs) are removed (in
+  #3133).
+
+#### Things you should know
+
+- Every existing host shows **Needs update** until its supervisor is updated. The executor's report says the version
+  goes from 68 to 69; it goes from 69 to 70.
+- A possible follow-up the review found: a Stop pressed while an agent is still starting is recorded as a launch that
+  never started, with a message blaming the host's systemd user manager. That behavior predates this plan (main's own
+  test says Stop in that window "can correctly produce a startup error"), but it is what the second return's failures
+  were, and the message misleads. Whether such a Stop should read as an ordinary stop is a decision for you.
+- The scripts that capture the docs website's screenshots still describe the old Stop: one counts the buttons above the
+  terminal without the new Stop, and one says a stopped session's terminal stays without mentioning that tabs close. The
+  screenshot refresh procedure updates such scripts first, so they are left to the next refresh.
+
+#### Checks
+
+This attempt's checks ran on the plan stacked on main `ac521332`, after a clean build:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the lint of the UI's browser build,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the check that every
+  test delay states its reason (`python -B scripts/check-test-sleeps.py`, 423 delays, none without a reason),
+  `dprint check`, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (no errors; three
+  warnings about older text), the docs website build (`bun run build` in `website/`), the workspace debug build and the
+  UI's release web build: all passed.
+- The UI's JavaScript tests (`node --test` in `crates/farhelm-ui/js-tests`), run `b34a4ac0-de44-41a6-b125-86737f0e781a`:
+  all 530 passed. The workspace's Rust tests, all but the desktop app's own crate,
+  `cargo nextest run --workspace --exclude farhelm-desktop` (with rootless Podman and its offline image present), run
+  `741a9238-2169-4d79-90e1-39cff6409d18`: all 5791 passed, 69 skipped by their own design. The desktop-build tests,
+  `cargo nextest run -p farhelm-ui --features desktop`, run `985a00ee-7a9c-4cbb-8590-d2efeee39b94`: all 1097 passed.
+- The whole browser suite on Chromium and WebKit, on ten Tensorlake sandboxes at the maintainer's request (cloud virtual
+  machines; each ran its share of the suite's spec files through the test recorder,
+  `python3 scripts/record-test-run.py --kind development ...` running
+  `npx playwright test --project=<engine>-<spec> ... --retries=0`, built locally; the sandboxes run Node 24.16 rather
+  than the development machine's 24.20), runs `28af4f0a-840b-4b6e-b8ac-457a22f83e0f`,
+  `675fc1c5-e6b8-46cd-b2f1-8c8802ba2660`, `d32c9429-91cb-4c10-93d4-79d31bc5e93d`,
+  `8e380ca4-a6c6-4d7e-9d90-02f3e53623ff`, `4ac230f6-f29a-4fa1-a430-a8b22c8ee32f`,
+  `29358e1b-1c83-4089-a665-b589f9ada509`, `17c423fa-2ae8-4678-b563-25506666993d`,
+  `8bb6caea-c219-46e0-9344-efec5ae54838`, `edf78d5b-08e3-4941-bae2-42d2497ba5e8`,
+  `d3ab5629-d014-4352-a8ab-3a45d4cd5c61`: 3068 passed, 14 skipped by the specs' own design, 4 failed. Two are recorded
+  flakes on WebKit, the multi-host create-intent tests (run `8e380ca4`). One is "changed-host advice while following:
+  destination" (Chromium, run `29358e1b`) with the recorded update-progress-without-a-step-name signature, on a sibling
+  not yet listed; the landing monitor records it in a separate change after this landing. The last, "same-agent search
+  and chips preserve custom permission drafts byte for byte" (WebKit, run `28af4f0a`), found a model option missing from
+  the session launcher, a part of the app this plan does not touch; it passed three repeats on each engine, runs
+  `8038ece7-ff6e-4e22-8c4b-c08c3a77badd` (WebKit) and `9f7f4c60-653b-45f4-9591-e51e24906079` (Chromium), and with one
+  failure it is not recorded as a flake. Then the suite's old-terminal set (the tests that only apply to sessions still
+  in old terminals) on four sandboxes with the same build, runs `8d834b61-9375-49cb-862b-a2611dd92e85`,
+  `ac2e20e1-6ac2-4de2-a994-c9f4540b5568`, `e7ab17e0-168a-4b2e-a0dc-acb8a9431fe2`,
+  `4953ffd3-b48a-4f30-bf58-46ebb9010b02`: all passed. Then the Delete test the second return was about,
+  `e2e/tests/delete-precondition.spec.ts` (its four tests), ten times on each engine (`--repeat 10`), runs
+  `3365d677-3f2b-4e50-a077-e0201cd9b4c0` and `fdf0ea99-749c-48ce-bb3c-d09a40342caf`: all 80 passed.
+- After this attempt's fixes: `dprint check` on SPEC.md and TODO.md passed; the fixes change one SPEC.md sentence and
+  one TODO.md entry, so the runs above still apply.
+- Not run: the doctests (no doc examples changed), the grid terminal suite (no terminal code changed), the desktop smoke
+  tests and the installer tests (no desktop shell, packaging or installer code changed), the docs website preview (the
+  build above passed; no page was viewed), and the native Mac app (not runnable on Linux).
+
+Nothing else in the executor's report became untrue at landing.
