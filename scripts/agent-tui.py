@@ -132,12 +132,12 @@ def settle(args: argparse.Namespace) -> int:
 
 
 def stop(args: argparse.Namespace) -> int:
-    directory = pathlib.Path(args.run)
-    try:
-        HostRun(directory).stop()
-    except HostError:
-        # Not a run directory (or already stopped): there is nothing to end.
-        shutil.rmtree(directory, ignore_errors=True)
+    """End an identified run; leave an unrecognized directory and its contents alone.
+
+    HostRun's rejection must reach the CLI error handler: a missing run marker is no authority to delete a path.
+    """
+
+    HostRun(pathlib.Path(args.run)).stop()
     return 0
 
 
@@ -148,7 +148,8 @@ def self_test(args: argparse.Namespace) -> int:
     reach the live helm of the session running the test, one that leaked `TMUX` or an outer agent session's markers
     would show agents behaving as they do in no Farhelm terminal, and one that did not give the production terminal's
     environment would too. Each of those is set in the tool's own environment here, so the checks fail when the scrub
-    does not happen. And it proves that `stop` ends the program and its terminal host, not just the run directory.
+    does not happen. It also proves that `stop` ends the program and its terminal host, not just the run directory,
+    and refuses a non-run directory without removing its contents, including when an empty argument names the cwd.
     """
 
     script = pathlib.Path(__file__).resolve()
@@ -171,6 +172,15 @@ def self_test(args: argparse.Namespace) -> int:
 
     run_dir = ""
     try:
+        canary = scratch / "keep"
+        canary.write_text("unrelated work")
+        assert not (scratch / "farhelm").exists(), "premise: this directory is not a run"
+        for non_run in (str(scratch), ".", ""):
+            refused = subprocess.run(
+                [sys.executable, str(script), "stop", non_run], cwd=scratch, capture_output=True, text=True
+            )
+            assert refused.returncode != 0, "stop must refuse a non-run directory"
+            assert canary.read_text() == "unrelated work", "stop must preserve a non-run directory's contents"
         started = cli("start", "--cwd", str(scratch), "--", "sh", "-c", program)
         assert started.returncode == 0, started.stderr
         run_dir = started.stdout.strip()
