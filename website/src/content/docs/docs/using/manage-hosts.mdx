@@ -52,17 +52,25 @@ The destination is what you would type after `ssh`, such as `dev@build-box` or a
 alias is only for display: it changes how the host is shown everywhere in Farhelm, up to 64 characters, and nothing on
 the host itself. Without an alias, the navigation rail and the session list show a short name instead: the first part
 of the hostname, or the whole IP address. Your Mac's destination and a Tensorlake sandbox's destination cannot be changed. **Start YOLO sessions without asking** is the same choice the
-YOLO confirmation offers when you [start a session](/docs/using/start-a-session/#confirm-a-yolo-launch). **Run farhelm
-commands without asking** decides whether agents in this host's sessions ask you before they start, stop, change, or
-delete sessions, or edit or delete your launch templates; [Approve what agents do](/docs/using/approve-agent-requests/)
-explains it. An agent's request to add, edit or remove an SSH host always asks, whatever this switch says
-([Host changes](/docs/using/approve-agent-requests/#host-changes)).
+YOLO confirmation offers when you [start a session](/docs/using/start-a-session/#confirm-a-yolo-launch).
+
+**Manage sessions on this host without asking** lets agents in this host's sessions create, spawn, copy, rename, stop,
+restart and delete sessions on this same host. A copy's source must be here too. It starts off on every host, including
+Tensorlake sandboxes and hosts added before the update. Requests for other hosts, template changes, host changes and
+links are outside this permission. The helm, the program that shows all your hosts' sessions and serves the UI, must
+still be reachable ([The pieces](/docs/how-it-works/the-pieces/)).
+
+**Run farhelm commands without asking** also covers session actions on every other host and changes to your launch
+templates. Changing one switch does not change the other; you can change either while the broader permission is on.
+[Approve what agents do](/docs/using/approve-agent-requests/#stop-asking-for-a-host) explains their limits: wrapper
+prefixes can still need your own approval, host changes always do, and YOLO or custom-command launches still need the
+separate YOLO permission. A plain restart, including of a YOLO session, needs no YOLO permission.
 
 **Open links without asking** and **Open local-network links without asking** are separate permissions for opening this
 host's sessions' links in your browser. Both start off, and the second includes your machine and private network. [Open
 links from a remote session](/docs/using/approve-agent-requests/#open-links-from-a-remote-session) explains the cards,
 the web UI's one-click opening, and why allowing local-network links needs a separate choice. Adopting a reinstalled or
-replaced host turns all four permissions off again.
+replaced host turns all five permissions off again.
 
 For any host, choose an icon and a color under **Appearance** to tell its sessions apart at a glance. The mark
 appears on the navigation rail, beside its sessions, in the host list and quick switcher, and in the session launcher's
