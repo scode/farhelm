@@ -10,4 +10,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `openssh-state-path-refusal.md` — Tensorlake: refuse helm state paths containing characters older OpenSSH cannot carry
 - [in-flight 243c4d] `agent-settings-compare-replace.md` — Tensorlake hosts: credential delivery never overwrites an agent settings file that changed after it was read
 - [in-flight 46596c] `maintainer-tool-safety.md` — maintainer tools: agent-tui stop deletes nothing it cannot identify; fixture scrubber catches userinfo URLs
-- [pending] `triage-misc-nov7.md` — host removal written durably, Custom-words edit cancels a pending launch, a spec clause, two Podman TODO lines, three discards
+- [in-flight 59c150] `triage-misc-nov7.md` — host removal written durably, Custom-words edit cancels a pending launch, a spec clause, two Podman TODO lines, three discards
