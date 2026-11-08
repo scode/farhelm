@@ -16,6 +16,12 @@ by letting version control report conflicts.
 plans" is one round, then stop. Run either in its own checkout, and only one at a time: landing claims keep two monitors
 from landing the same plan, but each would review what it is about to land without seeing what the other lands.
 
+The mechanical steps in this file have commands in `scripts/plans-landing/`, whose `README.md` lists them in the order a
+round uses them: `landing.py` for the round's steps and the monitor log, `idle-watch.ts` for the wait between rounds,
+and `notify.sh` for notifications. They carry out this file's rules and change none of them; where the two disagree,
+this file wins. Every decision (conflict resolutions, the review, the checks, the notes' text, blocking) stays with the
+monitor.
+
 ### Starting and resuming
 
 Read the monitor log first (`plans/.agents/outside-files.md`, "Files outside the repository"). Check for the ntfy topic
@@ -44,7 +50,9 @@ Then write `running` to the Status section and start a round.
 
 ### A landing round
 
-Apply the clean-main boundary, then run `queue status` and record the main commit id it prints. Look at its flags:
+Apply the clean-main boundary, then run `queue status` and record the main commit id it prints
+(`scripts/plans-landing/landing.py round-start` runs it and records that commit and the round's `[complete]` plans in a
+new round directory). Look at its flags:
 
 - `possibly abandoned` on an executor's claim: the plan stays stuck until the maintainer releases it, and a dead
   executor cannot notify for itself, so notify.
@@ -92,13 +100,15 @@ SPEC_impl.md amendment that another change now contradicts. `.agents/careful-reb
 across the whole set, not one stack at a time. Have a fresh-context sub-agent do the same review independently and
 reconcile any disagreement. Fix what is obvious as part of the landing; a conflict that needs a design decision blocks
 the plan it concerns (the paragraph after the numbered list in this section), and the round goes on with the others.
+`landing.py bases`, `stack` and `diffs` (in `scripts/plans-landing/`) prepare the review's inputs: each plan's base and
+what main gained since, the round's plans stacked in queue order with their conflicts listed, and the diffs.
 
 Then, for each `[complete]` plan in queue order:
 
 1. Claim it. Generate a claim id (`python3 -c 'import secrets; print(secrets.token_hex(3))'`), write slug, id and
    `starting` to the monitor log, then `queue start-landing <slug> --claim <id>`. Exit 10 means it is no longer complete
    (the maintainer abandoned or released it): skip it. Exit 3 follows the rule under `plans/.agents/queue.md`, "States,
-   and the script that moves them".
+   and the script that moves them". `landing.py claim` does this step.
 2. Fetch, and rebase its stack onto `main@origin` as a careful rebase. Conflicts in the shared bookkeeping files listed
    under `plans/.agents/executing.md`, "Picking: "pick a plan to execute", "execute the next plan"" are mechanical: keep
    both sides. Main has moved since the review before step 1 if an earlier plan just landed; check what that plan
@@ -110,17 +120,20 @@ Then, for each `[complete]` plan in queue order:
    log. Before each merge, run `queue status` and confirm the line still carries your claim id; if it does not, the
    maintainer released it, so stop landing that plan and treat it as released (`plans/.agents/landing.md`, "Starting and
    resuming"). Bookkeeping commits make main move often, so a merge refused because the base branch changed means
-   re-read and retry, not stop.
+   re-read and retry, not stop. `landing.py land` does this step for a claimed plan, with that claim check and a head
+   guard before each merge, and then compares main with the tree the checks tested (`landing.py tested` records it when
+   they start).
 6. Write the landing notes. They become the report's `### Landing` section, which the maintainer reads after the fact,
    so follow `plans/.agents/maintainer-writing.md`, "Writing for the maintainer", and `plans/AGENTS.md`, "Public-repo
    hygiene", and use `####` or deeper headings if any. Say what else landed in the same round or since the stack was
    based and whether any of it interacted with this plan, which fixes the landing made and why, the checks run, reused
    and skipped (as redacted commands and recorder run ids, per `.agents/test-evidence.md`), and anything in the
-   executor's report that the landing made untrue.
+   executor's report that the landing made untrue. `landing.py assemble-notes` fills the round's shared checks into a
+   plan's notes and rewraps them.
 7. Write `recording` to the monitor log, then
    `queue landed <slug> --claim <id> --merged <every PR number that landed> --notes <file>`, which refuses while any of
    the plan's PRs is still open and checks that each named PR merged. Clear the claim from the monitor log, and return
-   to a clean `main` (`jj new main@origin`).
+   to a clean `main` (`jj new main@origin`). `landing.py record` does the log and `queue landed` parts.
 
 When a landing needs a decision only the maintainer can make (a conflict that needs a design choice, checks that fail
 without an obvious fix, a PR closed without merging), push nothing that is not consistent, then write the question per
@@ -175,7 +188,8 @@ Answer every other block:
    plan, and what the alternative was. Land the entries as a TODO-only PR per `jjstack`, on the latest main, with
    `dprint check TODO.md` as the only check; CI runs only on demand, so land without waiting for checks. Do it from a
    clean `main` in the monitor's checkout, never while a check run or a landing is using that checkout; until then, keep
-   the pending entries in the monitor log.
+   the pending entries in the monitor log. `landing.py land-docs-prs` opens and lands such a PR from a committed
+   bookmark and a message file.
 5. Do not notify: nothing waits on the maintainer. Record the answer and the TODO PR in the monitor log.
 
 ### Waiting between rounds
@@ -191,6 +205,13 @@ more than 50 GB, run `cargo clean` in the checkout and delete the one-off output
 `plans/.agents/close-reset.md`, "Pruning build leftovers", once nothing the round started is still building or testing,
 even though the next round's first build is then slower. The monitor builds and tests every plan it lands in this one
 checkout and, unlike an executor, prunes nothing between plans; its checkout reached 350 GB that way on 2026-10-18.
+`landing.py round-end` returns to a clean `main`, abandons the local copies of the round's merged PR heads, and prints
+the checkout's size and a `queue status` whose head is the watcher's baseline.
+
+`scripts/plans-landing/idle-watch.ts` runs the watcher below and handles its `idle` exit itself as the list says
+(`queue status`, the Status line, a restart with the same commit), waking the session only for a change, an actionable
+flag, a block it was not told to ignore, or an error that retrying cannot fix (HTTP 401, 403 or 404). Run it the way the
+watcher is run.
 
 - Start
   `scripts/plans-watch.sh --repo <OWNER/NAME> --baseline-from <commit> --wake-check <checkout>/scripts/plans-queue.py --wake-for lander --max-wait 6600`,

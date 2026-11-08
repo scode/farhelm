@@ -39,13 +39,16 @@ reading of the report and its Landing section, never new claims. The skill's Sub
 choices, comments and suggestions.
 
 Write the body fragment as `page.html` in a private directory inside your scratch directory (`AGENTS.md`, "Agent scratch
-space"). Follow the skill for styling, serving, sharing the URL and any tunnel instructions, waiting for submissions,
-status, replies and shutdown. Use its chosen port and tokenized URL. If the skill is unavailable or its server fails,
-stop and report why.
+space"). `scripts/plans-landing/landing.py review-page` builds it from your summaries, written as JSON
+(`scripts/plans-landing/README.md` gives the shape), and the reports in your checkout, escaping all report text. Follow
+the skill for styling, serving, sharing the URL and any tunnel instructions, waiting for submissions, status, replies
+and shutdown. Use its chosen port and tokenized URL. If the skill is unavailable or its server fails, stop and report
+why.
 
 Act on each submission:
 
-- an "approve" pick is an approval (`queue approve`, as the approve item in this section says);
+- an "approve" pick is an approval (`queue approve`, as the approve item in this section says;
+  `scripts/plans-landing/landing.py approve` runs it for several plans in a row from a plain git clone);
 - a comment with an instruction is that instruction, whether or not "approve" is selected: a follow-up, a TODO.md entry,
   a question to answer, or anything else it asks for;
 - an unselected report without a comment means the maintainer did not get to it. Leave it for later. It is never a
