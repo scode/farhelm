@@ -395,3 +395,40 @@ creating it and expect that annotation, and give them the same wait. Before deli
 end-to-end tests that touch Stop and Restart somewhere they can fail: the shared development machine passes them even
 unfixed, so use a less loaded machine (Tensorlake sandboxes, if available) or a repeated narrow run that first
 reproduces the failure without the fix. A later change of mind is a follow-up, not a reason to stop the plan.
+
+## Blocked
+
+Blocked on 2026-11-08 (claim 0646ff).
+
+### A fresh test worker is needed for the remaining validation
+
+This plan fixes the misleading systemd failure shown when a user stops an agent before it finishes starting. That case
+now says “stopped before the agent finished starting.” Landing found three tests that expected an ordinary “stopped by
+user” result without proving the agent had started. The recorded decision kept the product behavior and required those
+tests to wait for the agent's own readiness, then run on a substrate that exposes the original failure.
+
+The readiness corrections are authored for draft [PR #3210](https://github.com/scode/farhelm/pull/3210/changes). The
+required fresh gpt-6.1-sol/high review found no issues and independently confirmed the audit of similar tests. The
+explicit early-Stop tests still exercise startup and retain their new annotation assertions. All 28 targeted local tests
+passed, including those early-Stop controls: `cargo nextest run -p farhelm --test e2e` filtered to the two restart
+modules and scoped/unscoped startup Stop controls (recorder run `b4722603-cc87-48e3-a216-1d7578e4ea39`, pinned
+nextest/tmux, four slots, zero retries; one fixture setup also passed). `cargo fmt --all -- --check`,
+`python -B scripts/check-test-sleeps.py` with the isolated interpreter, and
+`cargo clippy -p farhelm --test e2e -- -D warnings` passed too.
+
+The remaining problem is the comparison: the original tests still pass locally. The final run used the preserved unfixed
+archive after the builds ended: `cargo nextest run --archive-file <unfixed archive>`, filtered to the three reported
+cases (generic recorder run `0fee8a85-a2c0-4330-9c0d-b8c9c89a2400`, pinned nextest/tmux, explicit four slots and zero
+retries), passed all three. That cannot show that the readiness correction removes the failure observed on the faster
+Tensorlake workers. The standard test images were deleted after the previous run; the remaining images belong to
+unrelated work and have been left alone. The unfixed test binary and its source commit have been retained privately so
+the next executor can run the actual comparison.
+
+May the executor create a fresh Tensorlake test image and run the unfixed and corrected tests there, using at most five
+sandboxes in total and at most one running at a time, with the existing runner's four-CPU/eight-GB size? This covers one
+image builder plus a staging sandbox and one test worker for each revision. Every owned sandbox and snapshot would be
+deleted after the checks.
+
+The alternative is to accept local checks and source review without the failure-sensitive comparison, which changes the
+recorded validation requirement. Recommendation: authorize the bounded worker comparison. No cloud resource has been
+created during this round, and the plan is not being claimed complete.
