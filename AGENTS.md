@@ -96,10 +96,12 @@ Anything you create outside the checkout at your own discretion goes under `/tmp
 output of one `uuidgen` you run the first time you need scratch space and reuse for the rest of the session. If you lose
 track of it (after compaction, say), mint a new one rather than guessing which existing directory is yours, unless your
 working log records it. Nothing bulky goes in `$HOME` (`~/.cache`, `~/.local`, the checkout's parent directory) or loose
-in `/tmp`. Size does not matter: small files go there too. A `mktemp -d` that a skill asks for goes inside your
-directory, not beside it. When you hand work to a delegate or subagent, give it a subdirectory of yours and tell it to
-use that instead of minting its own. When the task that needed something bulky is over, delete it; keep what the task
-still cites. Never delete another agent's directory.
+in `/tmp`. Size does not matter: small files go there too. A directory beside the checkouts is a long-lived checkout or
+a file a flow names there, never a clone, worktree, jj workspace or tool environment made for one task. A `mktemp -d`
+that a skill asks for goes inside your directory, not beside it. When you hand work to a delegate or subagent, give it a
+subdirectory of yours and tell it to use that instead of minting its own. When the task that needed something bulky is
+over, delete it, and remove any container or image you made; keep what the task still cites. `/tmp` is emptied only at
+boot or after 30 days unused, so nothing reclaims a leftover sooner. Never delete another agent's directory.
 
 Leave these where they already go: the checkout's own build output; shared caches of standard tools (use them the way
 the tools do by default; do not redirect them); state created by the repo's harnesses and scripts (do not point `TMPDIR`
@@ -107,8 +109,8 @@ at your scratch directory when running tests or repo scripts); anything of your 
 under `/tmp` with a random name); anything another rule tells you to keep somewhere specific, such as goal files and
 working logs.
 
-When about to create anything outside the checkout, install a tool environment, allocate a build directory, use docker,
-or clean up, read `.agents/machine.md` in full first.
+When about to create anything outside the checkout, install a tool environment, allocate a build directory, use docker
+or podman, or clean up, read `.agents/machine.md` in full first.
 
 ## Claude Code shell commands
 

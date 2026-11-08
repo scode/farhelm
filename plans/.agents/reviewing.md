@@ -11,10 +11,12 @@ reading the monitor's status (`plans/AGENTS.md`, "Flows and reading lists").
 NOTE: This is review after the fact. By the time a plan reaches this flow its work is already on main; approving it ends
 its tracking, and it does not gate anything. The one exception is a blocked plan, which waits for an answer.
 
-Do its work in a checkout of its own (a temporary one is fine), never in an executor's or the monitor's checkout. Any
-session may run it, the monitoring session included. It starts with the monitor's status, then works through every
-landed plan in `REPORTS.md`, oldest first, then every `[blocked]` plan in queue order. "Show blocked plans" and "check
-for blocked plans" are the same flow limited to blocked plans, still starting with the monitor's status.
+Do its work in a checkout of its own, never in an executor's or the monitor's checkout. A temporary one is fine; it goes
+in your scratch directory (`AGENTS.md`, "Agent scratch space"), not beside the other checkouts, and you delete it when
+the review ends. Any session may run it, the monitoring session included. It starts with the monitor's status, then
+works through every landed plan in `REPORTS.md`, oldest first, then every `[blocked]` plan in queue order. "Show blocked
+plans" and "check for blocked plans" are the same flow limited to blocked plans, still starting with the monitor's
+status.
 
 The monitor's status is one line, taken from the `## Status` section of `farhelm-plans-monitor-log.md` beside the
 checkouts: when it last checked, or when and why it stopped. An idle monitor checks in at least every 110 minutes, so a

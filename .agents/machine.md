@@ -45,11 +45,20 @@ requires digging through `/tmp` or asking what some directory is.
 
 More broadly, anything bulky that agent work leaves behind belongs in one of two places: the checkout, where the
 standard tools reclaim it (`cargo clean` for `target/`, deleting `node_modules`), or `/tmp/farhelm-tmp/`, which can be
-deleted wholesale and which the machine's temporary-file cleanup reclaims anyway. Nothing bulky goes in `$HOME`
-(`~/.cache`, `~/.local`, the checkout's parent directory) or loose in `/tmp`. Before this was enforced, test evidence,
-deflake worktrees, tool environments and compiler caches had piled up to about 15 GB under `~/.local` and `~/.cache`,
-with nothing that would ever remove them. When a procedure needs a tool environment that its own documentation leaves
-the location of to you, the location is your scratch directory.
+deleted wholesale. Nothing bulky goes in `$HOME` (`~/.cache`, `~/.local`, the checkout's parent directory) or loose in
+`/tmp`. Before this was enforced, test evidence, deflake worktrees, tool environments and compiler caches had piled up
+to about 15 GB under `~/.local` and `~/.cache`, with nothing that would ever remove them. When a procedure needs a tool
+environment that its own documentation leaves the location of to you, the location is your scratch directory.
+
+NOTE: Do not count on the machine's temporary-file cleanup. On the shared Linux host `/tmp` is on the same disk as the
+checkouts, and systemd-tmpfiles empties it only at boot and otherwise removes files unused for 30 days. A survey on
+2026-11-08, 20 days after the last boot, found that cleanup had not removed anything yet, while `/tmp/farhelm-tmp` had
+grown to about 70 GB. Deleting your own directory when the task ends is what actually frees the space.
+
+The checkouts' parent directory is the other place things pile up. A directory beside the checkouts is a long-lived
+checkout or a file a flow names there, never a clone, worktree, jj workspace or tool environment made for one task. The
+same survey found about 15 GB of such leftovers beside the checkouts (test-sleep checker environments, review and
+reproduction worktrees, a delegation run's writer trees), none of which any procedure would ever remove.
 
 That covers scratch clones and worktrees or jj workspaces made for a review or a reproduction, a separate
 `CARGO_TARGET_DIR`, Python venvs and other tool installs needed only for the task (the test-sleep checker's, for
@@ -58,9 +67,10 @@ prompt and result files, and experiment builds. Size does not matter: small file
 skill asks for goes inside your directory, not beside it. When you hand work to a delegate or subagent, give it a
 subdirectory of yours and tell it to use that instead of minting its own.
 
-When the task that needed something bulky is over, delete it: a scratch jj workspace's `target/` is routinely tens of
-gigabytes. Keep what the task still cites, such as a working log or a run you are about to record, until it no longer
-does. Never delete another agent's directory.
+When the task that needed something bulky is over, delete it, and remove any container or image you made: a scratch jj
+workspace's `target/` is routinely tens of gigabytes. Keep what the task still cites, such as a working log or a run you
+are about to record, until it no longer does. `/tmp` is emptied only at boot or after 30 days unused, so nothing
+reclaims a leftover sooner. Never delete another agent's directory.
 
 Two harness-owned trees live beside the agents' directories: the test recorder's evidence in
 `/tmp/farhelm-tmp/test-runs/` (`docs/test-run-evidence.md`) and the deflake driver's state in
@@ -68,9 +78,14 @@ Two harness-owned trees live beside the agents' directories: the test recorder's
 their tools, not to any one agent, and like everything under `/tmp` they do not outlive the machine's temporary-file
 cleanup: record what a failure showed, in a fix PR or a FLAKES.md entry, while its run directory still exists.
 
-Docker cannot put images and containers anywhere but its own storage. Give anything you build or start an image tag or
-container name that contains your `<id>`, and remove it (`docker rm`, `docker rmi`) when the task is over. The CentOS
-gate's `farhelm-centos-ci` image is a cache that script maintains; leave it.
+Docker and podman cannot put images and containers anywhere but their own storage (rootless podman's is under
+`~/.local/share/containers`, and plain `du` undercounts it). Give anything you build or start an image tag or container
+name that contains your `<id>`, and remove it (`docker rm`, `docker rmi`, or the podman equivalents) when the task is
+over; an exited container keeps its whole writable layer until then. What you hand those tools goes in your scratch
+directory: a build context and its `Containerfile`, and an image you export with `podman save` or `docker save`. Podman
+also stages image copies under `/var/tmp` unless `TMPDIR` says otherwise, so run its `build`, `save` and `load` with
+`TMPDIR` set to your scratch directory; a killed export otherwise leaves gigabytes there. The CentOS gate's
+`farhelm-centos-ci` image is a cache that script maintains; leave it.
 
 Leave these where they already go:
 
