@@ -21501,7 +21501,9 @@
   fifth stay-up exception). A headless test delivers Cancel then Delete in one burst and expects no delete request. Size
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/tensorlake-settings-prompts.md`.
+- Execution: implemented in change `nzwrlmsr`, bookmark
+  `plan/tensorlake-settings-prompts/01-orphan-delete-confirm-slot`; draft
+  [PR #3186](https://github.com/scode/farhelm/pull/3186/changes).
 
 ## launcher-live-draft-submission-source-gap.md
 

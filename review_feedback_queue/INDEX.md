@@ -12,10 +12,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
   same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.
 
-- [`cancelled-orphan-delete-accepts-queued-confirmation.md`](cancelled-orphan-delete-accepts-queued-confirmation.md) — A
-  queued Delete answer can still destroy orphaned cloud resources after Cancel was accepted in the same rendered
-  question.
-
 - [`codex-endpoint-change-retains-environment-key.md`](codex-endpoint-change-retains-environment-key.md) — Changing
   Codex's API endpoint can leave its old environment-key setting active and send that credential to the newly selected
   endpoint.
