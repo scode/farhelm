@@ -219,7 +219,9 @@ for (const surface of ["sidebar", "header", "interrupted card"] as const) {
       gate.release();
       await expect(rowProgress).toHaveCount(0);
       await expect(cardProgress).toHaveCount(0);
-      const error = surface === "sidebar" ? row.locator(".action-error") : page.locator(".replace-error");
+      // Sidebar refusals remain in the open menu and a duplicate row banner;
+      // only the menu copy belongs to the interaction under observation.
+      const error = surface === "sidebar" ? row.locator(".session-row-menu-panel .action-error") : page.locator(".replace-error");
       await expect(error).toContainText("Replace: the host refused this operation");
       await expect(error).not.toContainText("Still waiting");
     } finally {
@@ -240,8 +242,11 @@ test("a Replace deadline reports uncertainty and a cross-surface retry keeps its
     await submitReplace(page, row, "sidebar");
     await expect.poll(() => bodies.length, { message: "the first Replace POST is held" }).toBe(1);
     await page.clock.runFor(60_100);
-    await expect(row.locator(".action-error")).toContainText(`Still waiting on ${HOST_NAME}`);
-    await expect(row.locator(".action-error")).not.toContainText("Not launched.");
+    // The sidebar menu owns the visible uncertainty while its row retains
+    // another copy for display after the menu closes.
+    const error = row.locator(".session-row-menu-panel .action-error");
+    await expect(error).toContainText(`Still waiting on ${HOST_NAME}`);
+    await expect(error).not.toContainText("Not launched.");
     await expect(row.locator(".launch-progress")).toHaveCount(0);
     await submitReplace(page, row, "header");
     await expect.poll(() => bodies.length, { message: "the cross-surface retry POST is held" }).toBe(2);
