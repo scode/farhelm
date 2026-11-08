@@ -1078,7 +1078,9 @@ test("a committed delete shows its progress until the reply lands", async ({ pag
     await expect(overlay).toHaveText("Stopping agent…");
     await expect(page.locator(".restart-primary")).toBeHidden();
     release!("refuse");
-    await expect(target.locator(".action-error")).toContainText("Delete: held refusal");
+    // The open menu and the row banner retain the same refusal. Observe the
+    // menu's visible copy while this test keeps that interaction open.
+    await expect(target.locator(".session-row-menu-panel .action-error")).toContainText("Delete: held refusal");
     await expect(target).not.toHaveClass(/\bdeleting\b/);
     await expect(rowProgress).toHaveCount(0);
     await expect(headerProgress).toHaveCount(0);
