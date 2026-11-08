@@ -258,30 +258,61 @@ section exists, its latest entry must also be satisfied. Then close the plan per
 "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write a closing entry in its log,
 and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-11-08 (claim 6f519f).
+### 2026-11-08: answer to a blocked question
 
-### Credential delivery needs a larger fix than the agreed size limit
+The question, as the executor put it:
 
-When Farhelm delivers a recipe's credentials to a Tensorlake host, it can overwrite a Claude Code or Codex settings edit
-saved after Farhelm read that file. The agreed fix checks the destination immediately before replacing it, re-reads and
-merges once if it changed, and leaves the existing amber warning if that second attempt also conflicts. The plan
-requires blocking if code, tests and documentation exceed about 100 changed lines.
+> Blocked on 2026-11-08 (claim 6f519f).
+>
+> ### Credential delivery needs a larger fix than the agreed size limit
+>
+> When Farhelm delivers a recipe's credentials to a Tensorlake host, it can overwrite a Claude Code or Codex settings
+> edit saved after Farhelm read that file. The agreed fix checks the destination immediately before replacing it,
+> re-reads and merges once if it changed, and leaves the existing amber warning if that second attempt also conflicts.
+> The plan requires blocking if code, tests and documentation exceed about 100 changed lines.
+>
+> Source inspection and an independent scope review found that the existing installer has no old-content or
+> expected-absence input. It also serves supervisor units, Codex login files and GitHub tokens, through production and
+> test backends. The smallest complete change needs that input carried to the final replacement command, a distinct
+> changed-file result, the one-retry merge, and tests for an existing file changing and an absent file appearing. Tests
+> must also establish that a second conflict preserves the user's file and does not record delivery as complete.
+>
+> A smaller-looking check before uploading would leave the same overwrite window open. Removing the retry or its tests
+> would omit the agreed behavior. The bounded approach can reuse the installer, its temporary cleanup, existing warning
+> and successful-delivery records; it needs no new lock, protocol or background task. The source-based estimate is
+> 180–280 added plus removed lines, including tests and documentation, rather than the original 50–90. No exact diff has
+> been measured. No code has been changed, no PR opened and no runtime checks run while this gate is unresolved.
+>
+> Allow up to about 280 changed lines for this same implementation, retaining the one retry and the existing warning
+> behavior, or keep the 100-line limit and defer this fix? I recommend the larger allowance with the same scope and
+> required independent code review. Deferring leaves the concurrent-edit overwrite possible. An agent saving its own
+> stale settings after Farhelm's successful delivery is a separate direction of the race and remains outside this fix.
 
-Source inspection and an independent scope review found that the existing installer has no old-content or
-expected-absence input. It also serves supervisor units, Codex login files and GitHub tokens, through production and
-test backends. The smallest complete change needs that input carried to the final replacement command, a distinct
-changed-file result, the one-retry merge, and tests for an existing file changing and an absent file appearing. Tests
-must also establish that a second conflict preserves the user's file and does not record delivery as complete.
+The maintainer's answer:
 
-A smaller-looking check before uploading would leave the same overwrite window open. Removing the retry or its tests
-would omit the agreed behavior. The bounded approach can reuse the installer, its temporary cleanup, existing warning
-and successful-delivery records; it needs no new lock, protocol or background task. The source-based estimate is 180–280
-added plus removed lines, including tests and documentation, rather than the original 50–90. No exact diff has been
-measured. No code has been changed, no PR opened and no runtime checks run while this gate is unresolved.
+The landing monitor answered this block on the maintainer's behalf, under `plans/.agents/landing.md`, "Answering blocks"
+(the maintainer's standing instruction of 2026-10-28: "unless it's a HUGE issue, make a call and record the todo item").
+Raising a size gate set when the plan was written is not such an issue, and the maintainer was told about this answer on
+2026-11-08.
 
-Allow up to about 280 changed lines for this same implementation, retaining the one retry and the existing warning
-behavior, or keep the 100-line limit and defer this fix? I recommend the larger allowance with the same scope and
-required independent code review. Deferring leaves the concurrent-edit overwrite possible. An agent saving its own stale
-settings after Farhelm's successful delivery is a separate direction of the race and remains outside this fix.
+Decision: take the recommendation. The size gate rises from about 100 changed lines to about 280, counting code, tests
+and documentation, for the same implementation the block describes. When Farhelm writes an agent's settings file on a
+Tensorlake host, the final replacement first checks that the file still holds what Farhelm read (or is still absent). If
+it changed, Farhelm reads it again, merges once, and tries again. If that second try also finds a change, Farhelm leaves
+the user's file as it is, shows the existing amber warning, and does not record the delivery as done.
+
+The scope does not widen. Carry the expected content (or expected absence) through to the final replacement and add a
+distinct result for a changed file. Keep the other users of the same installer (supervisor units, Codex login files,
+GitHub tokens) behaving as they do now. Add no lock, no protocol change and no background task. The tests cover an
+existing file that changes and an absent file that appears between read and replace. They also show that a second
+conflict leaves the user's file intact and the delivery not recorded as done. The independent code review the plan
+requires still applies.
+
+If the measured change goes well past about 280 lines, or the work needs anything the plan's fallbacks list as needing a
+scope reassessment (file locking on the host, a new protocol), block again with the measured size and what pushed it
+over. The other direction of the race, where an agent saves its own stale settings after Farhelm's delivery succeeded,
+stays outside this fix, as the block says.
+
+A later change of mind about the size or the approach is a follow-up after landing, not a reason to stop this plan.
