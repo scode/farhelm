@@ -620,8 +620,9 @@ impl ProvisioningService {
         Ok(())
     }
 
-    /// Look up the pre-chosen name before create and adopt after an ambiguous
-    /// answer. The row remains the ownership record even if no reply arrives.
+    /// Recover by the pre-chosen name only while this row records an
+    /// outstanding create. A name collision alone grants no authority to
+    /// configure the sandbox or to remember its ID as this host's own.
     /// `source` is absent only when setup already observed the sandbox and
     /// skipped its build; if that sandbox disappears before this second lookup,
     /// refuse rather than create a replacement from an unbuilt base.
@@ -643,7 +644,14 @@ impl ProvisioningService {
             .get_sandbox(key, binding.sandbox_id.as_deref().unwrap_or(&plan.sandbox))
             .await;
         let (id, created) = match existing {
-            Ok(info) => (info.id, false),
+            Ok(info) => {
+                anyhow::ensure!(
+                    binding.sandbox_id.is_some() || binding.pending_create_at.is_some(),
+                    "a sandbox named {} already exists, but this host has no record of asking for it. Delete this host entry and add a new host; deleting this entry leaves the existing sandbox untouched",
+                    plan.sandbox
+                );
+                (info.id, false)
+            }
             Err(TensorlakeError::NotFound { .. }) if binding.sandbox_id.is_none() => {
                 use crate::tensorlake::{
                     build::{CREATE_SETTLE_SECS, create_was_refused},

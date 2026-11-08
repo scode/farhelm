@@ -6149,16 +6149,23 @@ the add uses the confirmed definition. A snapshot whose recorded disk is larger 
 Setup skips the build when the host's sandbox is visible, when its ID is recorded (a recorded, deleted sandbox is never
 replaced), or while a pending create is inside the settle window. Only a settled absence with no recorded ID builds. The
 rerun probe describes these steps from local records only. This keeps reruns of hosts created from old reuse recipes
-from starting a newly required build. Host creation looks up the pre-chosen name first and adopts an existing sandbox,
-including after a lost create response. It records the sandbox id before preparation and never replaces a recorded,
-deleted sandbox with a new one. Creates set `timeout_secs: 0`, `auto_resume: false` and `max_pending_secs: 900`.
+from starting a newly required build. Host creation adopts an existing sandbox by the pre-chosen name only when this row
+records an outstanding create, including after a lost create response; a saved sandbox ID is looked up directly. Without
+either record, a name collision refuses setup before preparation or credential delivery. The refusal names the sandbox
+and tells the user to delete this host entry first; that removal leaves the existing sandbox alone, and it then appears
+under Sandboxes not on this helm. Host rows reserve their names until removed. Creation records the sandbox id before
+preparation and never replaces a recorded, deleted sandbox with a new one. Creates set `timeout_secs: 0`,
+`auto_resume: false` and `max_pending_secs: 900`.
 
 Schema 73 adds `hosts.tensorlake_pending_create_at` (unix seconds). Before sending create, the run records this
 outstanding request durably. An observed sandbox id settles it in the same write that saves the id; a definite API
 refusal clears it. After an ambiguous failure or restart, setup and deletion reconcile by the pre-chosen name. A 404
 settles absence only after the snapshot builder's shared 15-minute create settle window, and before then both refuse
 without replacing the outstanding request or forgetting its ownership row. Deletion saves an observed id before
-terminating, so snapshot cleanup remains retryable even once the name stops resolving.
+terminating, so snapshot cleanup remains retryable even once the name stops resolving. A row with neither a saved ID nor
+an outstanding create is removed without looking up its name or deleting any sandbox or snapshots. The API-key
+requirement still applies. A legacy row or a power loss that lost both records cannot recover by name: remove that host
+entry, then handle the leftover explicitly.
 
 The run holds the host connection during preparation and while it records install coordinates. Preparation waits for
 SSH, fails promptly with the key-registration hint on public-key refusal, checks PID 1, starts logind with passwordless
@@ -6377,18 +6384,21 @@ every actor publication takes). A dead actor's replacement inherits the hold and
 lock before its start gate opens, including a hold acquired while Retry is reading the registry; its parking
 acknowledgement starts empty because it belongs to the new task. Release after a failure and stop after success address
 the current entry, so replacing the actor cannot end the host's hold. Only then does removal close the host's shared
-masters, which the actor can no longer reopen, and terminate the sandbox (resolving its id by name when the row has none
-and saving that id before terminating, so a retry still finds the sandbox's snapshots after its name stops resolving; a
-missing sandbox counts as terminated only once any outstanding create has settled). It then polls until Tensorlake
-reports it terminated (at most 30 seconds, so a snapshot a suspend was still writing exists before the sweep), lists the
-namespace's snapshots and deletes those whose `sandbox_id` is the sandbox's (a missing one counts as deleted), and only
-then forgets the row. Each API call is bounded at 20 seconds. Every step accepts that its work was done, so removing
-again after a failure finishes the job. The store enforces the order: `remove_host_row` forgets a Tensorlake row only
-when handed a `SandboxDeleted` proof for that row, which only the Tensorlake teardown constructs, and refuses otherwise;
-a retarget of such a row is refused the same way. The hold lasts until the actor stops with the row; a failed removal
-releases it with a fresh retry. Without an API key the removal is refused (409) rather than falling back to forgetting.
-The panel's uninstall is refused with a "delete the sandbox instead" remedy, and an agent's host remove is refused
-before any card.
+masters, which the actor can no longer reopen, and terminate a recorded sandbox. Without a saved id, an outstanding
+create permits recovery by name; the recovered id is saved before terminating, so a retry still finds snapshots after
+the name stops resolving. A missing sandbox counts as terminated only once that outstanding create has settled. With
+neither an id nor an outstanding create, removal forgets only the entry and makes no sandbox API calls. For a recorded
+sandbox it polls until Tensorlake reports it terminated (at most 30 seconds, so a snapshot a suspend was still writing
+exists before the sweep), lists the namespace's snapshots and deletes those whose `sandbox_id` is the sandbox's (a
+missing one counts as deleted), and only then forgets the row. Each API call is bounded at 20 seconds. Every step
+accepts that its work was done, so removing again after a failure finishes the job. The store enforces the order:
+`remove_host_row` forgets a Tensorlake row only when handed a `SandboxDeleted` proof for that row, and refuses
+otherwise. The proof establishes cleanup of recorded resources or absence of any create record; it does not establish
+that an account has no legacy or power-loss leftover. Teardown constructs it, as does registration rollback before a
+create request; a retarget of such a row is refused the same way. The hold lasts until the actor stops with the row; a
+failed removal releases it with a fresh retry. Without an API key the removal is refused (409) rather than falling back
+to forgetting. The panel's uninstall is refused with a "delete the sandbox instead" remedy, and an agent's host remove
+is refused before any card.
 
 Explicit Tensorlake Suspend and Resume use `POST /api/hosts/{id}/suspend` and `/resume`, on helm-owned tasks so a closed
 tab cannot strand a hold. Both take the host's provisioning lock before reading its binding, excluding setup, update and

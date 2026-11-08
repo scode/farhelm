@@ -554,6 +554,119 @@ async fn tensorlake_probe_is_free_and_validates_outer_fields() {
     assert!(error.to_string().contains("API key"));
 }
 
+/// A generated name is not proof that this helm created the sandbox. A
+/// collision must fail before any host preparation or credential work, and
+/// deleting the failed entry must reveal the untouched sandbox as a leftover.
+#[farhelm_testtrace::test]
+async fn an_unrequested_name_collision_refuses_setup_and_delete_leaves_it_alone() {
+    let f = fixture(false).await;
+    let ProbeResponse::TensorlakeProvisionable {
+        probe_id, sandbox, ..
+    } = f
+        .probe(ProbeDestination::Tensorlake {
+            name: "Test host".into(),
+            recipe: "test-recipe".into(),
+        })
+        .await
+    else {
+        panic!("expected a creation plan")
+    };
+    let mut foreign = f.model();
+    let created = foreign
+        .create(&CreateSandbox {
+            name: sandbox.clone(),
+            source: SandboxSource::Image("example/systemd".into()),
+            resources: Resources {
+                cpus: 2.0,
+                memory_mb: 4096,
+                disk_mb: 20480,
+            },
+            timeout_secs: 0,
+            auto_resume: false,
+            max_pending_secs: 900,
+        })
+        .unwrap();
+    foreign.plant_snapshot(&created.sandbox_id);
+    std::fs::write(
+        f.root.path().join("api/state.json"),
+        serde_json::to_vec(&foreign).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(foreign.get(&sandbox).unwrap().id, created.sandbox_id);
+    let backend_events = f.root.path().join("backend/events.jsonl");
+    assert!(!backend_events.exists(), "premise: no backend work ran");
+
+    let accepted = f
+        .service
+        .start_add(ProvisionRequest { probe_id })
+        .await
+        .unwrap();
+    let failed = f.finish(accepted.host_id).await;
+    assert_eq!(failed.status, RunStatus::Failed);
+    let message = failed.message.as_deref().unwrap();
+    assert!(
+        message.contains(&format!("a sandbox named {sandbox} already exists")),
+        "{message}"
+    );
+    assert!(message.contains("Delete this host entry"), "{message}");
+    assert!(
+        !backend_events.exists(),
+        "refusal precedes preparation and delivery"
+    );
+    let row = f
+        .harness
+        .store
+        .list_hosts()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == accepted.host_id)
+        .unwrap();
+    let binding = row.tensorlake.as_ref().unwrap();
+    assert!(binding.sandbox_id.is_none() && binding.pending_create_at.is_none());
+    assert!(row.remote_farhelm.is_none() && row.remote_state_dir.is_none());
+    assert_eq!(
+        f.model(),
+        foreign,
+        "setup leaves foreign resources unchanged"
+    );
+    assert!(
+        !f.tensorlake
+            .orphan_sandboxes()
+            .await
+            .unwrap()
+            .iter()
+            .any(|leftover| leftover.id == created.sandbox_id)
+    );
+
+    let api_events = f.root.path().join("api/events.jsonl");
+    let before_delete = std::fs::read(&api_events).unwrap();
+    let proof = f.tensorlake.delete_sandbox(&row).await.unwrap();
+    assert_eq!(
+        std::fs::read(&api_events).unwrap(),
+        before_delete,
+        "a never-requested row must not even look the name up during deletion"
+    );
+    f.harness
+        .store
+        .remove_host_row(row.id, Some(&proof))
+        .await
+        .unwrap();
+    assert_eq!(
+        f.model(),
+        foreign,
+        "deletion leaves the sandbox and snapshots intact"
+    );
+    assert!(
+        f.tensorlake
+            .orphan_sandboxes()
+            .await
+            .unwrap()
+            .iter()
+            .any(|leftover| leftover.id == created.sandbox_id)
+    );
+}
+
 /// The run builds once, records its host before work, splices the concrete
 /// install steps, and defaults only YOLO permission on. Rerun keeps the
 /// same sandbox rather than allocating another billed machine.
@@ -626,7 +739,8 @@ async fn managed_add_splices_setup_and_rerun_adopts_the_same_sandbox() {
 
 /// Migrated image and snapshot recipes have no built snapshot, but their old
 /// hosts already own a sandbox. Rerun must skip the builder by durable ID and
-/// by name after a lost ID write, regardless of that empty recipe build state.
+/// by name while the pending-create marker survives a lost ID write,
+/// regardless of that empty recipe build state.
 #[farhelm_testtrace::test]
 async fn rerun_of_an_existing_sandbox_skips_building_even_without_a_recipe_snapshot() {
     for lost_id in [false, true] {
@@ -665,8 +779,8 @@ async fn rerun_of_an_existing_sandbox_skips_building_even_without_a_recipe_snaps
                 .conn()
                 .call("forget fixture sandbox id", move |conn| {
                     conn.execute(
-                        "UPDATE hosts SET tensorlake_sandbox_id = NULL WHERE id = ?1",
-                        [host],
+                        "UPDATE hosts SET tensorlake_sandbox_id = NULL, tensorlake_pending_create_at = ?2 WHERE id = ?1",
+                        rusqlite::params![host, crate::tensorlake::recipes::now_secs()],
                     )?;
                     Ok(())
                 })
@@ -959,15 +1073,16 @@ async fn failed_prepare_keeps_ownership_and_rerun_continues_without_recreate() {
         .unwrap();
     assert!(row.tensorlake.as_ref().unwrap().sandbox_id.is_some());
     // Stand in for a create whose sandbox exists but whose ID write was
-    // lost. The pre-chosen name must recover that very sandbox on rerun.
+    // lost while the earlier pending marker survived. That outstanding
+    // request, rather than the name alone, authorizes recovery on rerun.
     let host = row.id;
     f.harness
         .store
         .conn()
         .call("clear fixture sandbox id", move |conn| {
             conn.execute(
-                "UPDATE hosts SET tensorlake_sandbox_id = NULL WHERE id = ?1",
-                [host],
+                "UPDATE hosts SET tensorlake_sandbox_id = NULL, tensorlake_pending_create_at = ?2 WHERE id = ?1",
+                rusqlite::params![host, crate::tensorlake::recipes::now_secs()],
             )?;
             Ok(())
         })

@@ -459,9 +459,8 @@ async fn removal_is_idempotent() {
 /// that never answered leaves a row with no recorded id; removing it must
 /// still work, and must find the sandbox by name if it did come up.
 ///
-/// Spec: without a recorded id, removal looks the sandbox up by name; when
-/// Tensorlake has none, it succeeds without terminating anything; when it
-/// has one, removal terminates and sweeps by the id the lookup returned.
+/// Spec: a never-sent row makes no API calls. An outstanding create permits
+/// recovery by name, followed by termination and a sweep of the returned ID.
 #[farhelm_testtrace::test]
 async fn removal_without_a_recorded_id_finds_the_sandbox_by_name() {
     let api = FakeApi::default();
@@ -471,7 +470,10 @@ async fn removal_without_a_recorded_id_finds_the_sandbox_by_name() {
         .delete_sandbox(&row(&store, host).await)
         .await
         .expect("a sandbox that never existed needs nothing deleted");
-    assert_eq!(api.calls(), ["get farhelm-host-k7q2-dev-m3x9"]);
+    assert!(
+        api.calls().is_empty(),
+        "a never-sent row grants no name lookup"
+    );
 
     let api = FakeApi::default()
         .with_sandbox(
@@ -482,6 +484,18 @@ async fn removal_without_a_recorded_id_finds_the_sandbox_by_name() {
         .with_snapshot("snap-a", "sbx-9");
     let (_dir, store, tensorlake) = service(&api).await;
     let host = plant(&store, "dev", "farhelm-host-k7q2-dev-m3x9", "rust", None).await;
+    store
+        .set_tensorlake_pending_create(host, Some(super::super::recipes::now_secs()))
+        .await
+        .unwrap();
+    assert!(
+        row(&store, host)
+            .await
+            .tensorlake
+            .unwrap()
+            .pending_create_at
+            .is_some()
+    );
     tensorlake
         .delete_sandbox(&row(&store, host).await)
         .await
@@ -503,7 +517,7 @@ async fn removal_without_a_recorded_id_finds_the_sandbox_by_name() {
 /// existed" and forget the host while the snapshots the first attempt did
 /// not sweep keep billing (goal criterion 5).
 ///
-/// Spec: a removal of a row with no recorded id saves the id it found by
+/// Spec: a removal with an outstanding create saves the id it found by
 /// name before terminating; when its snapshot listing then fails, the row
 /// keeps that id, and a retry after the name stops resolving terminates and
 /// sweeps by the saved id before issuing its proof.
@@ -525,6 +539,18 @@ async fn a_recovered_id_is_saved_before_terminating_so_a_retry_still_sweeps() {
         );
     let (_dir, store, tensorlake) = service(&api).await;
     let host = plant(&store, "dev", "farhelm-host-k7q2-dev-m3x9", "rust", None).await;
+    store
+        .set_tensorlake_pending_create(host, Some(super::super::recipes::now_secs()))
+        .await
+        .unwrap();
+    assert!(
+        row(&store, host)
+            .await
+            .tensorlake
+            .unwrap()
+            .pending_create_at
+            .is_some()
+    );
     tensorlake
         .delete_sandbox(&row(&store, host).await)
         .await

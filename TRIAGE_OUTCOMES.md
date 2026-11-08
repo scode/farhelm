@@ -21834,7 +21834,13 @@
   in SPEC.md that running more than one helm from the same state (including a copy) against one Tensorlake account is
   not supported, and that reserved-name collisions arising from it are accepted. Either way, remove the feedback file
   and its index entry.
-- Execution: planned in `plans/queue/tensorlake-name-ownership.md`.
+- Execution: complete; implemented in change `krvmworpounurvosqwkvnkyrprqpkxvx`, bookmark
+  `plan/tensorlake-name-ownership/01-host-adopt-own-record`;
+  [draft PR #3188](https://github.com/scode/farhelm/pull/3188/changes). Add refuses a name collision without a saved
+  sandbox ID or outstanding create, and removing that refused entry makes no sandbox API calls. Recovery with an
+  outstanding create and cleanup by a saved ID remain supported. The independent pre-code simplicity review passed; no
+  new ownership state is introduced. Ordinary write durability is retained: a legacy row or power loss that loses both
+  records requires removing the entry and explicitly handling the leftover.
 
 ## short-helm-tag-collision-destroys-other-builder.md
 
