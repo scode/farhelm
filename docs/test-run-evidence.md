@@ -113,13 +113,23 @@ The default root is `$TMPDIR/farhelm-tmp/test-runs` when `TMPDIR` is an absolute
 it to about ten gigabytes in a month. In a temporary directory it goes away with that directory's ordinary cleanup
 (often at boot, or after some weeks unused), so raw evidence is not durable there. Record what a failure showed (a fix
 PR or FLAKES.md entry) while the run is still present, or pass `--output-root` for evidence that must outlive the
-machine's temporary files. The recorder rejects roots equal to or below the tested Git checkout, the conventional
-`~/.local/state/farhelm` tree, or `$XDG_STATE_HOME/farhelm` when XDG state is configured. A newly created root and every
-run directory use mode `0700`; private files use mode `0600` for recorder-created files. Runner-created files may use
-their own file modes inside the private run directory. An existing root must have no group or other permission bits and
-must belong to the invoking user, and the directory holding it must belong to that user or to root, or be sticky like
-`/tmp`; otherwise another account that created the fixed-name directory first could swap or read the evidence. The
-recorder does not change an existing root's permissions.
+machine's temporary files.
+
+That cleanup alone did not keep up: on the shared Linux host it runs only at boot or after 30 days, and about 250
+recorded runs a day had grown the default root to 18 GB within three weeks, two fifths of it from runs that passed. So
+in the default root a run that passed (outcome `completed`, recorder exit 0) drops `traces.tar`, `test-traces/` and
+`playwright-artifacts/` as soon as it ends, keeping its manifest, output, reports and counts, and the manifest's
+`retention.slimmed` names what went. Each invocation also removes whole passing runs whose directories are more than
+three days old. Failed, refused, interrupted and still-running runs are never touched, and an explicit `--output-root`
+opts out of both.
+
+The recorder rejects roots equal to or below the tested Git checkout, the conventional `~/.local/state/farhelm` tree, or
+`$XDG_STATE_HOME/farhelm` when XDG state is configured. A newly created root and every run directory use mode `0700`;
+private files use mode `0600` for recorder-created files. Runner-created files may use their own file modes inside the
+private run directory. An existing root must have no group or other permission bits and must belong to the invoking
+user, and the directory holding it must belong to that user or to root, or be sticky like `/tmp`; otherwise another
+account that created the fixed-name directory first could swap or read the evidence. The recorder does not change an
+existing root's permissions.
 
 Every invocation gets a full UUID directory. A retry always creates another directory, so a later passing run cannot
 overwrite the failure that prompted it. The path is written to stderr as `test-run evidence: PATH` once the directory
