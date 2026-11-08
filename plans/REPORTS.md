@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`uninstall-identity-display`](reports/uninstall-identity-display.report.md) landed 2026-10-25 in #2708: Uninstall refusals for a changed host identity stop quoting the identities, which could look alike, and point to the host list instead
 - [`template-panel-escape`](reports/template-panel-escape.report.md) landed 2026-10-25 in #2709: Escape in the launcher's save-as-template panel closes only the panel even after focus was lost, and focus returns to the name field after a refused save
 - [`ssh-close-start-quoting`](reports/ssh-close-start-quoting.report.md) landed 2026-10-25 in #2706: Delete the helm's unreachable "closed before the handshake" start suggestion; real SSH connections already get the corrected start command
 - [`replace-yolo-cancel-race`](reports/replace-yolo-cancel-race.report.md) landed 2026-10-25 in #2707: Cancel on a session's Replace YOLO question is refused while "don't ask again" saves, so the outcome follows the first answer and a failed save shows its reason
