@@ -39,6 +39,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   renders `span { "API key" }` for both pages, so label it "Tensorlake API key" at least where `credentials_location` is
   set, the way its `aria_label` already does.
 
+- **Stop the Settings dialog resizing when the section changes.** The dialog takes the height of whichever section is
+  showing, so moving between Sessions, Appearance, Credentials and the rest makes the whole modal jump and the footer's
+  Close button move with it. Fix is TBD; keep the dialog one size across sections.
+
 - **Generally rethink the session filtering experience.** The list now names its active filters and shows a removable
   host chip; revisit the broader filtering experience.
 
