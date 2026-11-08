@@ -23,10 +23,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   sharing a Tensorlake project can collide in their short ownership tag; a build can then terminate the other's builder
   and delete its snapshots.
 
-- [`orphan-cleanup-uses-pre-adoption-ownership-snapshot.md`](orphan-cleanup-uses-pre-adoption-ownership-snapshot.md) —
-  Orphan cleanup can use an old ownership snapshot to terminate a sandbox after Add has adopted it and ordinary user
-  work has begun.
-
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
