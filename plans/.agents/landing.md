@@ -169,8 +169,8 @@ Answer every other block:
 3. Run `queue answer <slug> --decision <file>`, never with `--hold`, which is the maintainer's to ask for. A plan that
    blocked while on hold goes back on hold by itself; it still needs the answer. Exit 10 means someone else answered or
    changed the plan first: leave it.
-4. For every judgment call the answer makes (not for a plain instruction to fix failing tests), add a near-term TODO
-   entry: one entry per call, in TODO.md's `## Near term` section, never another bucket, starting with a bold
+4. For every judgment call the answer makes (not for a plain instruction to fix failing tests), add a TODO entry: one
+   entry per call, in TODO.md's `## Plan decisions to revisit` section, never another bucket, starting with a bold
    `**Revisit <the decision>.**` handle and saying what was decided on the maintainer's behalf, on which date, for which
    plan, and what the alternative was. Land the entries as a TODO-only PR per `jjstack`, on the latest main, with
    `dprint check TODO.md` as the only check; CI runs only on demand, so land without waiting for checks. Do it from a

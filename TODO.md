@@ -4,15 +4,16 @@ A running list of things the maintainer wants fixed or built. This is intent, no
 same PR that addresses it, so the file only ever describes what is still wanted. It is not a roadmap and carries no
 priorities unless an entry says so itself.
 
-Ten buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove —
-the decision is made, only the work remains; "planned" holds accepted work to implement later and suppresses duplicate
-review triage within each item's stated scope; "near term" is what should be picked up next; "doc todo" holds
-documentation work; "tricky bugs" retains unresolved bug reports and their investigation findings; "deflake" gathers
-test and harness reliability work, including CI execution and restoring gates; "broken tests" records tests that fail
-deterministically, with the failure and the evidence that it predates any in-flight work; "code cleanup" holds
-structural code smells from a whole-codebase assessment, grouped by kind with a suggested order; "maybe later" is wanted
-but not soon, and may never happen; "unbucketized" is everything not yet sorted, which carries no implication either
-way. Within a bucket, no order unless the bucket explicitly says so.
+Eleven buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove
+— the decision is made, only the work remains; "planned" holds accepted work to implement later and suppresses duplicate
+review triage within each item's stated scope; "plan decisions to revisit" holds the calls made while a plan ran or
+landed, often on the maintainer's behalf when a plan blocked, each recording the alternative; "near term" is what should
+be picked up next; "doc todo" holds documentation work; "tricky bugs" retains unresolved bug reports and their
+investigation findings; "deflake" gathers test and harness reliability work, including CI execution and restoring gates;
+"broken tests" records tests that fail deterministically, with the failure and the evidence that it predates any
+in-flight work; "code cleanup" holds structural code smells from a whole-codebase assessment, grouped by kind with a
+suggested order; "maybe later" is wanted but not soon, and may never happen; "unbucketized" is everything not yet
+sorted, which carries no implication either way. Within a bucket, no order unless the bucket explicitly says so.
 
 Known product fixes stay in their product bucket. "Difficult deflake" retains unresolved failures and their
 investigation evidence within "Deflake"; that placement does not establish that the cause is test-only. Move a diagnosed
@@ -22,7 +23,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Planned
 
-## Near term
+## Plan decisions to revisit
 
 - **Revisit letting prepared snapshots keep a custom base's own logins.** Decided on the maintainer's behalf on
   2026-11-08 when prepared-snapshots blocked: preparing a snapshot keeps whatever authentication a recipe's custom image
@@ -38,6 +39,37 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   180-280 changed lines against the plan's 100-line limit, because the shared file installer has to carry the expected
   old content to its final replacement. The limit was raised to about 280 lines with the same scope. The alternative was
   to keep the 100-line limit and defer the fix, leaving the overwrite possible.
+
+- **Revisit exact Ghostty matching for emoji variation selectors.** Decided by the maintainer on 2026-11-04, answering
+  the vs16-emoji-width plan's block: new terminals follow Ghostty's widths for U+FE0F and U+FE0E except in two cases,
+  pinned in tests. At the last column with autowrap off, Farhelm cannot tell an empty cell from a space the program
+  printed (its saved snapshots store both the same way), so it treats a printed space as empty and a selector can widen
+  a character Ghostty leaves narrow. On a terminal one column wide, today's wide-character handling stays, so after a
+  too-wide character and a pending wrap the cursor can end on a different row than Ghostty's. Matching Ghostty exactly
+  needs new saved cell state, a new snapshot format with a fallback for existing snapshots, and changed one-column
+  handling.
+
+- **Revisit keeping full durability for the host identity under WAL.** Decided on the maintainer's behalf on 2026-10-30
+  when the sqlite-wal landing was blocked: SPEC.md's rule that lasting damage is never accepted, however unlikely the
+  trigger, was read as taking precedence over the plan's decision that no write keeps full durability. The plan went
+  back to make writes whose loss could leave lasting damage fully durable, at least the supervisor's first creation of
+  the host identity: under synchronous NORMAL a power loss right after a host's first start could keep the helm's record
+  of that identity and lose the supervisor's, leaving the desktop app refusing to start with nothing to restore. The
+  other option was to keep NORMAL for every write and amend SPEC.md to allow that window.
+
+- **Revisit containerized sessions writing the checkout's Git hooks.** Decided on the maintainer's behalf on 2026-10-29
+  when landing the Podman sandbox plan: it landed with the gap documented (SPEC.md and the docs page's caution) instead
+  of closed. A containerized agent can write the checkout's `.git` hooks and configuration and an agent's project
+  settings, which can later run with full account access outside the container. The options: make those read-only inside
+  the container (recommended), or warn before an ordinary session uses a checkout a container has used.
+
+- **Revisit deferring Muse question recognition.** Decided on the maintainer's behalf on 2026-10-29 for the Muse
+  session-tracking plan: it ships conversation resume and working, idle and trust status for Muse, but not recognizing
+  questions or approval dialogs during a conversation, because no provider usable without the maintainer's credentials
+  could make Muse ask a real question. Until then a waiting Muse session can look idle. The alternative is to supply an
+  authenticated test provider (or a documented fixture protocol) so the executor can capture those screens.
+
+## Near term
 
 - **Stop the Settings dialog resizing when the section changes.** The dialog takes the height of whichever section is
   showing, so moving between Sessions, Appearance, Credentials and the rest makes the whole modal jump and the footer's
@@ -62,37 +94,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   hand-written binary decoder in the browser, the place where bounds would be easy to get wrong). Commit a benchmark
   that measures memory, attach size and attach time before and after.
 
-- **Revisit exact Ghostty matching for emoji variation selectors.** Decided by the maintainer on 2026-11-04, answering
-  the vs16-emoji-width plan's block: new terminals follow Ghostty's widths for U+FE0F and U+FE0E except in two cases,
-  pinned in tests. At the last column with autowrap off, Farhelm cannot tell an empty cell from a space the program
-  printed (its saved snapshots store both the same way), so it treats a printed space as empty and a selector can widen
-  a character Ghostty leaves narrow. On a terminal one column wide, today's wide-character handling stays, so after a
-  too-wide character and a pending wrap the cursor can end on a different row than Ghostty's. Matching Ghostty exactly
-  needs new saved cell state, a new snapshot format with a fallback for existing snapshots, and changed one-column
-  handling.
-
-- **Revisit keeping full durability for the host identity under WAL.** Decided on the maintainer's behalf on 2026-10-30
-  when the sqlite-wal landing was blocked: SPEC.md's rule that lasting damage is never accepted, however unlikely the
-  trigger, was read as taking precedence over the plan's decision that no write keeps full durability. The plan went
-  back to make writes whose loss could leave lasting damage fully durable, at least the supervisor's first creation of
-  the host identity: under synchronous NORMAL a power loss right after a host's first start could keep the helm's record
-  of that identity and lose the supervisor's, leaving the desktop app refusing to start with nothing to restore. The
-  other option was to keep NORMAL for every write and amend SPEC.md to allow that window.
-
 - **Bootstrap a Podman image on a remote host.** Automatically bootstrap a Podman image on a remote host, with some
   reasonable defaults, as a supported flow.
-
-- **Revisit containerized sessions writing the checkout's Git hooks.** Decided on the maintainer's behalf on 2026-10-29
-  when landing the Podman sandbox plan: it landed with the gap documented (SPEC.md and the docs page's caution) instead
-  of closed. A containerized agent can write the checkout's `.git` hooks and configuration and an agent's project
-  settings, which can later run with full account access outside the container. The options: make those read-only inside
-  the container (recommended), or warn before an ordinary session uses a checkout a container has used.
-
-- **Revisit deferring Muse question recognition.** Decided on the maintainer's behalf on 2026-10-29 for the Muse
-  session-tracking plan: it ships conversation resume and working, idle and trust status for Muse, but not recognizing
-  questions or approval dialogs during a conversation, because no provider usable without the maintainer's credentials
-  could make Muse ask a real question. Until then a waiting Muse session can look idle. The alternative is to supply an
-  authenticated test provider (or a documented fixture protocol) so the executor can capture those screens.
 
 - Initial version of agent2agent comms.
 
