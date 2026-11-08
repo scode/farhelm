@@ -39,10 +39,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Orphan cleanup can use an old ownership snapshot to terminate a sandbox after Add has adopted it and ordinary user
   work has begun.
 
-- [`guarded-container-launch-approval-omits-sensitive-options.md`](guarded-container-launch-approval-omits-sensitive-options.md)
-  — A guarded launch approval can omit the container image, ports, and token-file choice while authorizing the resulting
-  launch and credential access.
-
 - [`older-browser-approves-undisclosed-container-options.md`](older-browser-approves-undisclosed-container-options.md) —
   An already loaded older released browser page can refresh and approve container choices it cannot display, despite the
   current renderer's disclosure repair.

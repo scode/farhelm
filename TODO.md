@@ -198,6 +198,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Podman rigor: review findings for containerized sessions.** Future work for the experimental feature, from the
   2026-11-04 triage; these findings were assessed from source, not reproduced at runtime.
+  - Launch approval cards must show the container settings, reusing the template card's rows.
   - Podman's default detach keys (Ctrl-P then Ctrl-Q) can leave the agent running while Farhelm shows it as exited;
     later Delete can kill it without the live-agent warning, and tab detachment can end the tab's shell. Disable detach
     keys for agent and tab connections; first verify the accepted spelling on supported Podman versions.
