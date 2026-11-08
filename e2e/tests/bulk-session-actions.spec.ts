@@ -708,7 +708,9 @@ test("bulk Stop reports an engaged row without skipping its eligible sibling", a
       if (candidate.method() === "POST" && path.endsWith("/stop")) sent.push(decodeURIComponent(path.split("/")[3]));
     });
     await page.locator(".marked-stop").evaluate((button: HTMLButtonElement) => button.click());
-    await expect(row(page, ids[0]).locator(".action-error")).toContainText("Stop: not started");
+    // The open confirmation repeats the row's error. Name that owned surface
+    // so its copy cannot make this assertion ambiguous with the row banner.
+    await expect(row(page, ids[0]).getByRole("dialog").locator(".action-error")).toContainText("Stop: not started");
     await expect(page.locator(".marked-bar")).toHaveCount(0, { timeout: 30_000 });
     expect(sent).toEqual([ids[1]]);
     await expect(row(page, ids[1]).locator(".status-badge")).toContainText("Exited");
