@@ -217,15 +217,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   - An optional token file inside the writable checkout can be replaced with a symlink to a readable host file; a later
     agent start or tab open then receives it as GH_TOKEN. This needs an unusual token-path choice. Refuse paths inside
     the checkout and read regular files without following links.
-  - Podman inherits host proxy variables by default, potentially giving their credentials to the agent and tabs. This
-    needs proxy settings in the host's login environment; network access is already unisolated. Decide whether to
-    inherit them, and make the spec's environment list and code comment accurate either way.
-  - Opening a tab in a stopped retained container can run old, agent-edited shell startup files against a replacement
-    checkout. This needs a manual re-clone at the saved path while keeping the old session. Decide whether the accepted
-    rule that tabs follow their working-directory path covers containerized tabs, and state it explicitly.
+  - Podman inherits host proxy variables by default, including any credentials in them, so the agent and tabs receive
+    them. The maintainer decided on 2026-11-08 that containers should inherit the host's proxy settings; make the
+    environment lists in SPEC.md and SPEC_impl.md and the code comment say so.
   - A create retry after a crash and reboot can remove an already initialized container if writing its launch spec
     fails, losing in-container files rather than the checkout. Several rare conditions must coincide; recovery before
-    reboot was not ruled out. Decide whether that container counts as launch evidence, or explicitly accept the loss.
+    reboot was not ruled out. The maintainer decided on 2026-11-08 not to accept that loss: such a container counts as
+    launch evidence and is kept.
   - Account inspection of a checkpoint image may restore its old workload instead of inspecting an ordinary image. The
     route remains unverified in supported rootless use: restoration is root-only and requires a compatible
     checkpoint/runtime. Consider refusing checkpoint images and a root supervisor.
