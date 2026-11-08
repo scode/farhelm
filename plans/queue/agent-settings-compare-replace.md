@@ -257,3 +257,31 @@ bookmark and PR URL) and removing its feedback file and `review_feedback_queue/I
 section exists, its latest entry must also be satisfied. Then close the plan per `plans/.agents/executing.md`,
 "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write a closing entry in its log,
 and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-11-08 (claim 6f519f).
+
+### Credential delivery needs a larger fix than the agreed size limit
+
+When Farhelm delivers a recipe's credentials to a Tensorlake host, it can overwrite a Claude Code or Codex settings edit
+saved after Farhelm read that file. The agreed fix checks the destination immediately before replacing it, re-reads and
+merges once if it changed, and leaves the existing amber warning if that second attempt also conflicts. The plan
+requires blocking if code, tests and documentation exceed about 100 changed lines.
+
+Source inspection and an independent scope review found that the existing installer has no old-content or
+expected-absence input. It also serves supervisor units, Codex login files and GitHub tokens, through production and
+test backends. The smallest complete change needs that input carried to the final replacement command, a distinct
+changed-file result, the one-retry merge, and tests for an existing file changing and an absent file appearing. Tests
+must also establish that a second conflict preserves the user's file and does not record delivery as complete.
+
+A smaller-looking check before uploading would leave the same overwrite window open. Removing the retry or its tests
+would omit the agreed behavior. The bounded approach can reuse the installer, its temporary cleanup, existing warning
+and successful-delivery records; it needs no new lock, protocol or background task. The source-based estimate is 180–280
+added plus removed lines, including tests and documentation, rather than the original 50–90. No exact diff has been
+measured. No code has been changed, no PR opened and no runtime checks run while this gate is unresolved.
+
+Allow up to about 280 changed lines for this same implementation, retaining the one retry and the existing warning
+behavior, or keep the 100-line limit and defer this fix? I recommend the larger allowance with the same scope and
+required independent code review. Deferring leaves the concurrent-edit overwrite possible. An agent saving its own stale
+settings after Farhelm's successful delivery is a separate direction of the race and remains outside this fix.

@@ -8,6 +8,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `tensorlake-name-ownership.md` — Tensorlake: adopt or delete a sandbox by name only when this helm asked for it, or spec that shared state is unsupported
 - [pending] `tensorlake-settings-prompts.md` — Tensorlake settings: bind the leftover Delete question, word the recipe Delete question honestly
 - [in-flight af0f84] `openssh-state-path-refusal.md` — Tensorlake: refuse helm state paths containing characters older OpenSSH cannot carry
-- [in-flight 6f519f] `agent-settings-compare-replace.md` — Tensorlake hosts: credential delivery never overwrites an agent settings file that changed after it was read
+- [blocked] `agent-settings-compare-replace.md` — Tensorlake hosts: credential delivery never overwrites an agent settings file that changed after it was read
 - [in-flight 46596c] `maintainer-tool-safety.md` — maintainer tools: agent-tui stop deletes nothing it cannot identify; fixture scrubber catches userinfo URLs
 - [pending] `triage-misc-nov7.md` — host removal written durably, Custom-words edit cancels a pending launch, a spec clause, two Podman TODO lines, three discards
