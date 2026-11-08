@@ -8,8 +8,8 @@ sidebar:
 import Screenshot from '../../../../components/Screenshot.astro';
 
 The navigation rail, the column of icons down the left edge of the sidebar, shows every machine that runs your
-sessions: your Mac, captioned **Local**, and each Linux machine you added, each with its mark, a short name, and a dot
-that says whether Farhelm can reach that host right now. Point at a host's mark to see its full name. To keep every
+sessions: your Mac, captioned **Local**, and each remote Linux machine or Mac you added, each with its mark, a short name,
+and a dot that says whether Farhelm can reach that host right now. Point at a host's mark to see its full name. To keep every
 name in view, select **»** (Expand navigation rail) at the very bottom of the rail: the rail widens beside the session
 list, and **«** **Collapse** narrows it again. Each device remembers which you chose. Choosing a host
 there shows only its sessions, and **All** shows every host's again ([Read the session list](/docs/using/session-list/)).
@@ -45,13 +45,13 @@ actions.
 
 <Screenshot
   name="manage-hosts/host-settings"
-  alt="A host's settings dialog, with the destination and alias edit buttons, the icon choice, and its four permission switches explained."
+  alt="A host's settings dialog, with the destination and alias edit buttons, the icon choice, and its five permission switches explained."
 />
 
 The destination is what you would type after `ssh`, such as `dev@build-box` or a name from your ssh configuration. The
 alias is only for display: it changes how the host is shown everywhere in Farhelm, up to 64 characters, and nothing on
 the host itself. Without an alias, the navigation rail and the session list show a short name instead: the first part
-of the hostname, or the whole IP address. Your Mac's destination and a Tensorlake sandbox's destination cannot be changed. **Start YOLO sessions without asking** is the same choice the
+of the hostname, or the whole IP address. The local Mac's destination and a Tensorlake sandbox's destination cannot be changed. **Start YOLO sessions without asking** is the same choice the
 YOLO confirmation offers when you [start a session](/docs/using/start-a-session/#confirm-a-yolo-launch).
 
 **Manage sessions on this host without asking** lets agents in this host's sessions create, spawn, copy, rename, stop,
@@ -95,7 +95,9 @@ when updating is optional, red when the host cannot connect until it is updated.
 Clicking it updates the host straight away, without asking, and shows the progress in its place. **Update all** at the
 top of the full host list updates every remote host whose Update action is available.
 
-Updating a host does not interrupt its sessions: they keep running through the update.
+Updating a host does not interrupt its sessions: they keep running through the update. This includes remote Macs;
+**Update**, **Update all** and automatic updates use the same flow for them. A remote Mac with the Farhelm desktop app
+installed cannot be updated this way, even though you can use Farhelm already running there; update Farhelm from the desktop app on that Mac instead.
 If Farhelm cannot plan an update, a dialog shows the reason before anything changes. While the update runs, its progress
 appears above your sessions. A failed update appears there with **Details**, and the host's mark on the rail shows a
 warning until you open the host list, where its row shows what happened.
@@ -111,9 +113,10 @@ up when they reload.
 This applies to SSH hosts. A Tensorlake host has [Delete sandbox](#suspend-or-delete-a-tensorlake-sandbox) instead.
 
 **Uninstall** first shows what it will remove from the host: the [supervisor](/docs/how-it-works/the-pieces/)'s service
-and Farhelm's program files, each with its path there. It also names the directory that holds the host's Farhelm data,
-which it keeps. It also stops what keeps the host's session terminals running: the small Farhelm process behind each
-new terminal, and the tmux that sessions from before [new terminals](/docs/using/new-terminals/) run in. Nothing changes
+and Farhelm's program files, each with its path there. On a remote Mac this removes its background job and the job's
+file in `~/Library/LaunchAgents`. It also names the directory that holds the host's Farhelm data, which it keeps, and
+stops the small Farhelm processes that keep its terminals running. On Linux it also ends the tmux that sessions from
+before [new terminals](/docs/using/new-terminals/) run in. Nothing changes
 until you select **Uninstall** in that dialog. Once it is done, the host is gone from the list. A short line above it confirms the
 removal; hover over the line to see where the data remains, or use its Copy button to copy that directory's path. You
 can dismiss the line with ×. Delete the directory on the host yourself if you want the data gone too.
@@ -125,8 +128,9 @@ session on the host while the uninstall runs: one started then can end along wit
 to be connected to the host so it can check. If its row shows **Unreachable, retrying**, **Needs update**, **Too new**,
 **Identity mismatch**, **Identity unverified** or **Duplicate**, fix that first: the refusal says how, and so do the
 host's [details](#see-more-about-each-host). **Remove** still works. A few less common setups are
-refused too, with the reason shown in a dialog: a host where Farhelm was set up by running `farhelm helm setup` on the
-host itself (its own `farhelm uninstall` removes it), one whose Farhelm runs from somewhere unexpected, and one whose
+refused too, with the reason shown in a dialog: a remote Mac with the Farhelm desktop app installed, a Linux host where
+Farhelm was set up by running `farhelm helm setup` on the host itself (its own `farhelm uninstall` removes it), one whose
+Farhelm runs from somewhere unexpected, and one whose
 `~/.local/lib/farhelm` directory is a symbolic link or has something mounted on or inside it. **Remove** still works for all of them.
 
 If something goes wrong partway, the host stays in the list and its details show which steps finished. Choose
