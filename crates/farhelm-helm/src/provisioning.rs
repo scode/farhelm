@@ -194,6 +194,8 @@ mod tests {
         temporary: PathBuf,
         bytes: &'static str,
         exit_status: i32,
+        /// Plant an ordinary save during upload, after any preliminary inspection.
+        edit: Option<(PathBuf, &'static str)>,
     }
 
     impl CommandLauncher for ScriptedTransferLauncher {
@@ -223,6 +225,9 @@ mod tests {
                 .and_then(|script| script.strip_prefix(REMOTE_RUNTIME_PREFIX))
                 == Some(upload_script(&self.temporary).unwrap().as_str())
             {
+                if let Some((path, bytes)) = &self.edit {
+                    std::fs::write(path, bytes)?;
+                }
                 child.arg("-c").arg(format!(
                     "cat >/dev/null; printf '%s' {} > {}; exit {}",
                     shell_words::quote(self.bytes),
@@ -417,7 +422,7 @@ mod tests {
         /// "did" to the far side, for a test that needs the host to change
         /// at a specific point in the run (the new supervisor coming up at
         /// `restart-supervisor`, say) rather than before the run starts.
-        on_operation: Mutex<Option<OperationHook>>,
+        pub(super) on_operation: Mutex<Option<OperationHook>>,
         /// The paths an UNINSTALL inspection finds on the host; `None`
         /// means every path asked about exists, which is a fully installed
         /// host and what most uninstall tests start from.
@@ -741,18 +746,34 @@ mod tests {
             })
         }
 
-        async fn install_bytes(
+        async fn install_bytes_checked(
             &self,
             _target: &ProvisioningTarget,
             content: &[u8],
             destination: &Path,
             _temporary: &Path,
             mode: u32,
+            expected: Option<Option<&str>>,
         ) -> Result<ActionOutcome, BackendFailure> {
             // A refused install must leave the fixture's previous bytes intact,
             // just as an unsuccessful atomic replacement does on the host.
             let outcome = self.record("write-unit")?;
             if self.stateful.load(std::sync::atomic::Ordering::SeqCst) {
+                if let Some(expected) = expected {
+                    let current = match tokio::fs::read(destination).await {
+                        Ok(bytes) => Some(bytes),
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                        Err(error) => {
+                            return Err(BackendFailure::new(
+                                "reading fixture settings",
+                                error.to_string(),
+                            ));
+                        }
+                    };
+                    if current.as_deref().map(hex_sha256).as_deref() != expected {
+                        return Err(BackendFailure::new(super::backend::DESTINATION_CHANGED, ""));
+                    }
+                }
                 tokio::fs::write(destination, content)
                     .await
                     .map_err(|error| {
@@ -7728,6 +7749,7 @@ mod tests {
                     temporary: root.path().join("unused"),
                     bytes: "",
                     exit_status: 0,
+                    edit: None,
                 }),
                 runtime_units: false,
                 fail_before_rename: false,
@@ -9806,6 +9828,7 @@ mod tests {
                 temporary: temporary.clone(),
                 bytes: "provisioned unit",
                 exit_status: 0,
+                edit: None,
             }),
             runtime_units: false,
             fail_before_rename: false,
@@ -9850,6 +9873,64 @@ mod tests {
             tokio::fs::read_to_string(&unit).await.unwrap(),
             "provisioned unit"
         );
+    }
+
+    /// Exercise the real finishing command, with a save planted during upload:
+    /// checking before upload would miss both a changed file and newly created one.
+    #[farhelm_testtrace::test]
+    async fn conditional_settings_install_preserves_a_concurrent_save() {
+        for existing in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("settings.json");
+            let temporary = root.path().join(".settings.json.farhelm-tmp-run");
+            if existing {
+                tokio::fs::write(&path, "old").await.unwrap();
+            }
+            assert_eq!(path.exists(), existing);
+            let expected = existing.then(|| hex_sha256(b"old"));
+            let backend = SystemBackend {
+                control_dir: root.path().to_path_buf(),
+                linger: LingerBehavior::Simulated(Ok(())),
+                launcher: Arc::new(ScriptedTransferLauncher {
+                    temporary: temporary.clone(),
+                    bytes: "new",
+                    exit_status: 0,
+                    edit: Some((path.clone(), "editor")),
+                }),
+                runtime_units: false,
+                fail_before_rename: false,
+            };
+            let remote = ProvisioningTarget::ssh("scripted.example");
+            for target in [&remote, &ProvisioningTarget::Local] {
+                let error = backend
+                    .install_bytes_checked(
+                        target,
+                        b"new",
+                        &path,
+                        &temporary,
+                        0o600,
+                        Some(expected.as_deref()),
+                    )
+                    .await
+                    .unwrap_err();
+                assert_eq!(error.context, super::backend::DESTINATION_CHANGED);
+                assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), "editor");
+                assert!(!temporary.exists());
+            }
+            let current = hex_sha256(b"editor");
+            backend
+                .install_bytes_checked(
+                    &remote,
+                    b"new",
+                    &path,
+                    &temporary,
+                    0o600,
+                    Some(Some(&current)),
+                )
+                .await
+                .unwrap();
+            assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), "new");
+        }
     }
 
     /// A host needing private tmux receives that payload before the unit, and
@@ -11244,6 +11325,7 @@ mod tests {
                     temporary: temporary.clone(),
                     bytes,
                     exit_status,
+                    edit: None,
                 }),
                 runtime_units: false,
                 fail_before_rename: false,
@@ -11299,6 +11381,7 @@ mod tests {
                 temporary: temporary.clone(),
                 bytes: "new bytes",
                 exit_status: 0,
+                edit: None,
             }),
             runtime_units: false,
             fail_before_rename: false,
@@ -11363,6 +11446,7 @@ mod tests {
                 temporary: temporary.clone(),
                 bytes: "new bytes",
                 exit_status: 0,
+                edit: None,
             }),
             runtime_units: false,
             fail_before_rename: false,

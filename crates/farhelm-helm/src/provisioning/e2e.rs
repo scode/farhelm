@@ -354,14 +354,17 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         .await
     }
 
-    async fn install_bytes(
+    async fn install_bytes_checked(
         &self,
         target: &ProvisioningTarget,
         _content: &[u8],
         destination: &Path,
         _temporary: &Path,
         _mode: u32,
+        _expected: Option<Option<&str>>,
     ) -> Result<ActionOutcome, BackendFailure> {
+        // This browser fixture records workflow only; owned-filesystem and real
+        // finishing-command tests exercise the content precondition itself.
         let outcome = self.action(target, "write-unit").await?;
         // Generic uploads also include the supervisor unit. A fixed completion
         // marker lets setup tests prove this particular credential file was

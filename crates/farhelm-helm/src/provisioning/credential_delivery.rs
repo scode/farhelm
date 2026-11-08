@@ -434,10 +434,15 @@ impl CredentialDelivery {
             if previous_stamp.as_ref() == Some(&slot.stamp) {
                 continue;
             }
-            if slot.endpoint.is_some()
-                || slot.subscription.is_some()
-                || slot.stamp == EndpointStamp::Cleared
-            {
+            // Retry only this file, merging the editor's newest bytes once. A second
+            // conflict returns before the success stamp, so reconnect can retry later.
+            for attempt in 0..2 {
+                if slot.endpoint.is_none()
+                    && slot.subscription.is_none()
+                    && slot.stamp != EndpointStamp::Cleared
+                {
+                    break;
+                }
                 let backend = self
                     .backend
                     .as_ref()
@@ -457,16 +462,17 @@ impl CredentialDelivery {
                     .read_small_file(&target, &path)
                     .await
                     .map_err(|_| "could not read the agent settings")?;
-                let bytes = if let Some(endpoint) = slot.endpoint {
+                let expected = previous.as_deref().map(super::backend::hex_sha256);
+                let bytes = if let Some(endpoint) = &slot.endpoint {
                     Some(if is_claude {
-                        super::agent_endpoints::claude(previous.as_deref(), &endpoint)
+                        super::agent_endpoints::claude(previous.as_deref(), endpoint)
                     } else {
-                        super::agent_endpoints::codex(previous.as_deref(), &endpoint)
+                        super::agent_endpoints::codex(previous.as_deref(), endpoint)
                     }?)
-                } else if let Some(token) = slot.subscription {
+                } else if let Some(token) = &slot.subscription {
                     Some(super::agent_endpoints::claude_subscription(
                         previous.as_deref(),
-                        &token,
+                        token,
                     )?)
                 } else if is_claude {
                     super::agent_endpoints::clear_claude(previous.as_deref())?
@@ -487,11 +493,29 @@ impl CredentialDelivery {
                         .map_err(|_| "could not prepare the agent settings directory")?;
                     let temporary = path
                         .with_file_name(format!(".{file}.farhelm-tmp-{}", uuid::Uuid::new_v4()));
-                    backend
-                        .install_bytes(&target, &bytes, &path, &temporary, 0o600)
+                    match backend
+                        .install_bytes_checked(
+                            &target,
+                            &bytes,
+                            &path,
+                            &temporary,
+                            0o600,
+                            Some(expected.as_deref()),
+                        )
                         .await
-                        .map_err(|_| "could not install the agent settings")?;
+                    {
+                        Err(error)
+                            if error.context == super::backend::DESTINATION_CHANGED
+                                && attempt == 0 =>
+                        {
+                            continue;
+                        }
+                        result => {
+                            result.map_err(|_| "could not install the agent settings")?;
+                        }
+                    }
                 }
+                break;
             }
             if is_claude {
                 record.claude = Some(slot.stamp);

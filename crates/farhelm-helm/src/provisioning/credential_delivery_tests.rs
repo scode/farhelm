@@ -17,6 +17,86 @@ const CODEX_FIRST: &str =
     r#"{"tokens":{"refresh_token":"fictional-codex-seed"},"vendor_field":true}"#;
 const CODEX_REFRESHED: &str = r#"{"tokens":{"refresh_token":"fictional-codex-refreshed"}}"#;
 
+/// A saved edit must survive delivery, whether the initial read found a file or
+/// absence. Two competing saves exhaust the retry without falsely stamping success.
+#[farhelm_testtrace::test]
+async fn concurrent_settings_edits_are_merged_once_then_warn_and_retry_on_connect() {
+    for existing in [false, true] {
+        for conflicts in [1, 2] {
+            let f = Fixture::new(false).await;
+            let path = f.home.join(".claude/settings.json");
+            tokio::fs::create_dir(path.parent().unwrap()).await.unwrap();
+            if existing {
+                tokio::fs::write(&path, br#"{"env":{"EDITOR":"old"}}"#)
+                    .await
+                    .unwrap();
+            }
+            assert_eq!(path.exists(), existing);
+            assert!(
+                f.delivery
+                    .read_record(&f.row)
+                    .await
+                    .unwrap()
+                    .claude
+                    .is_none()
+            );
+            let editor_path = path.clone();
+            let backend = Arc::downgrade(&f.backend);
+            *f.backend.on_operation.lock().unwrap() = Some((
+                "write-unit",
+                Box::new(move || {
+                    std::fs::write(&editor_path, br#"{"env":{"EDITOR":"first"}}"#).unwrap();
+                    if conflicts == 2 {
+                        *backend.upgrade().unwrap().on_operation.lock().unwrap() = Some((
+                            "write-unit",
+                            Box::new(move || {
+                                std::fs::write(editor_path, br#"{"env":{"EDITOR":"second"}}"#)
+                                    .unwrap();
+                            }),
+                        ));
+                    }
+                }),
+            ));
+            let _lease = f.delivery.enter(&f.row);
+            f.delivery.connect(&f.row, &f.events).await;
+            assert_eq!(
+                f.operations()
+                    .iter()
+                    .filter(|op| *op == "write-unit")
+                    .count(),
+                2
+            );
+            let record = f.delivery.read_record(&f.row).await.unwrap();
+            if conflicts == 2 {
+                assert_eq!(f.claude().await, r#"{"env":{"EDITOR":"second"}}"#);
+                assert_eq!(
+                    f.delivery.warning(f.row.id).as_deref(),
+                    Some("could not install the agent settings")
+                );
+                assert!(record.claude.is_none());
+                f.delivery.connect(&f.row, &f.events).await;
+            } else {
+                assert!(record.claude.is_some());
+            }
+            assert_eq!(f.delivery.warning(f.row.id), None);
+            let settings: serde_json::Value = serde_json::from_str(&f.claude().await).unwrap();
+            assert_eq!(
+                settings["env"]["EDITOR"],
+                if conflicts == 2 { "second" } else { "first" }
+            );
+            assert_eq!(settings["env"]["ANTHROPIC_AUTH_TOKEN"], FIRST);
+            assert!(
+                f.delivery
+                    .read_record(&f.row)
+                    .await
+                    .unwrap()
+                    .claude
+                    .is_some()
+            );
+        }
+    }
+}
+
 /// Own both sides of delivery until every file and durable stamp is inspected.
 struct Fixture {
     _root: tempfile::TempDir,
