@@ -75,14 +75,15 @@ impl TensorlakeSshAccess {
     /// connection overrides, in a fixed order, for the builder's one-shot
     /// commands and a host's shared connections alike. Paths are
     /// config-encoded ([`crate::ssh::ssh_config_path_option`]), so a state
-    /// directory with spaces, quotes or `%` still names the right file.
+    /// directory with spaces still names the right file.
     ///
     /// `GlobalKnownHostsFile=/dev/null` keeps a system-wide entry for the
     /// alias (unlikely, but outside Farhelm's control) from overriding the
     /// one Farhelm recorded, and `UpdateHostKeys=no` keeps ssh from
     /// rewriting Farhelm's file on its own. Fails, naming the path, for a
     /// path that is not UTF-8 (which ssh's option text cannot carry) or that
-    /// holds `${` (which ssh would expand).
+    /// holds `${` (which ssh would expand), `%`, quotes or backslashes
+    /// (which supported older OpenSSH versions cannot carry safely).
     pub(crate) fn options(&self) -> Result<Vec<String>, String> {
         let text = |path: &Path| {
             path.to_str().map(str::to_string).ok_or_else(|| {
@@ -170,7 +171,7 @@ mod tests {
     /// known_hosts beside the key directory under the gateway alias with no
     /// global file, trust on first use with no host-key updates, a 30-second
     /// keepalive, and (for the builder's one-shot commands only) errors only
-    /// in ssh's own output, in that order; paths with spaces, quotes and `%` survive ssh's config
+    /// in ssh's own output, in that order; paths with spaces and apostrophes survive ssh's config
     /// parsing. Composed with the one-shot argv, `--` still precedes the
     /// destination.
     ///
@@ -179,15 +180,15 @@ mod tests {
     /// writing the user's known_hosts, or prompting under `BatchMode`.
     #[farhelm_testtrace::test]
     fn options_name_farhelms_key_and_known_hosts_and_never_share() {
-        let dir = Path::new("/state dir/te'n%s\"or/tensorlake");
+        let dir = Path::new("/state dir/te'nsor/tensorlake");
         let access = TensorlakeSshAccess::new(dir, dir.join("ssh-key/id_ed25519"));
         assert_eq!(access.known_hosts, dir.join("known_hosts"));
         assert_eq!(
             access.oneshot_options().unwrap(),
             [
-                r#"IdentityFile="/state dir/te'n%%s\"or/tensorlake/ssh-key/id_ed25519""#,
+                r#"IdentityFile="/state dir/te'nsor/tensorlake/ssh-key/id_ed25519""#,
                 "IdentitiesOnly=yes",
-                r#"UserKnownHostsFile="/state dir/te'n%%s\"or/tensorlake/known_hosts""#,
+                r#"UserKnownHostsFile="/state dir/te'nsor/tensorlake/known_hosts""#,
                 "GlobalKnownHostsFile=/dev/null",
                 "HostKeyAlias=sandbox.tensorlake.ai",
                 "StrictHostKeyChecking=accept-new",
@@ -220,6 +221,29 @@ mod tests {
                 argv.windows(2).any(|pair| pair == ["-o", option]),
                 "{option}"
             );
+        }
+    }
+
+    /// Both host and builder options must refuse paths older clients can
+    /// misread, especially a percent path that would lose known-host pins.
+    /// The error names the actual path and how to move to supported state.
+    #[farhelm_testtrace::test]
+    fn unsupported_state_paths_refuse_host_and_builder_options() {
+        for raw in ["/state/50%", "/state/quoted\"", "/state/back\\slash"] {
+            let dir = Path::new(raw);
+            let unsafe_identity = TensorlakeSshAccess::new(dir, dir.join("key"));
+            let safe_identity = TensorlakeSshAccess::new(dir, PathBuf::from("/state/key"));
+            for (keyword, access) in [
+                ("IdentityFile", unsafe_identity),
+                ("UserKnownHostsFile", safe_identity),
+            ] {
+                for result in [access.options(), access.oneshot_options()] {
+                    let error = result.expect_err("unsupported paths never reach ssh");
+                    assert!(error.contains(raw), "{error}");
+                    assert!(error.contains("--state-dir"), "{error}");
+                    assert!(error.contains(keyword), "{error}");
+                }
+            }
         }
     }
 

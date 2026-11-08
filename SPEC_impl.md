@@ -6292,17 +6292,18 @@ sandbox name presents the gateway's one host key), `StrictHostKeyChecking=accept
 `ServerAliveInterval=30` with `ServerAliveCountMax=3`, inside the gateway's measured 300 to 400 second silent-drop
 window. The builder alone adds `LogLevel=ERROR`, which drops the gateway's login banner from every command's stderr; a
 host's connections leave it out, because their failure text is ssh's stderr tail and OpenSSH logs a server's disconnect
-reason below that level. Paths are encoded for ssh_config with every `%` doubled, and a path containing `${`, which ssh
-would expand, is refused. The Tensorlake directory both use is computed in one place (`tensorlake::tensorlake_dir`). The
-child runs in its own process group and is captured through provisioning's bounded `capture_child`, which fails past 64
-KiB of output, so every script logs to `/var/tmp/farhelm-build-<step>.log` on the sandbox and sends back only the log's
-last 8 KiB on failure; the helm keeps the last 12 lines, at most 2000 characters, stripped of presentation-unsafe
-characters. Exit 255 with OpenSSH's `Permission denied (publickey` is a refused key and fails at once with the
-registration hint; any other 255 is unreachable, retried for up to 60 seconds while connecting, since sshd can lag the
-sandbox's running state. The readiness script refuses a PID 1 other than systemd, polls `systemctl is-system-running`
-every 2 seconds for up to 180 until it says (right after boot it answers nothing, even with `--wait`) `running` or
-`degraded`, and requires `sudo -n`. The package script runs `dpkg --configure -a`, `apt-get update` and
-`apt-get install ca-certificates curl gh <packages>` through
+reason below that level. Paths are quoted for ssh_config. Tensorlake access refuses a path containing `%`, `"` or `\`,
+which supported older OpenSSH versions cannot carry safely, or `${`, which ssh would expand, with a message naming the
+path and asking the user to move the helm's state directory. The Tensorlake directory both use is computed in one place
+(`tensorlake::tensorlake_dir`). The child runs in its own process group and is captured through provisioning's bounded
+`capture_child`, which fails past 64 KiB of output, so every script logs to `/var/tmp/farhelm-build-<step>.log` on the
+sandbox and sends back only the log's last 8 KiB on failure; the helm keeps the last 12 lines, at most 2000 characters,
+stripped of presentation-unsafe characters. Exit 255 with OpenSSH's `Permission denied (publickey` is a refused key and
+fails at once with the registration hint; any other 255 is unreachable, retried for up to 60 seconds while connecting,
+since sshd can lag the sandbox's running state. The readiness script refuses a PID 1 other than systemd, polls
+`systemctl is-system-running` every 2 seconds for up to 180 until it says (right after boot it answers nothing, even
+with `--wait`) `running` or `degraded`, and requires `sudo -n`. The package script runs `dpkg --configure -a`,
+`apt-get update` and `apt-get install ca-certificates curl gh <packages>` through
 `sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a` with `DPkg::Lock::Timeout=600` and `confdef`/`confold`,
 each package shell-quoted. Each agent script downloads its installer with `curl --proto '=https' --tlsv1.2 -fsSL` into a
 file and runs that file (`bash` for `https://claude.ai/install.sh`, `CODEX_NON_INTERACTIVE=1 sh` for
@@ -6327,8 +6328,9 @@ decoded `kind` alone would let a sandbox row be retargeted or forgotten as an ss
 Connections to a sandbox use the ordinary ssh argv, with its shared connections, plus the snapshot builder's Tensorlake
 ssh options (see "Tensorlake snapshot builds") before the option terminator, so builders and hosts share Farhelm's key,
 one known-hosts file and one host key alias. The user's ssh config is still read, since a network may need its
-`ProxyCommand`; command-line options win where they overlap. A state directory whose path contains `${` is refused with
-an error naming it, because OpenSSH expands `${NAME}` in these options even inside quotes and has no escape for it.
+`ProxyCommand`; command-line options win where they overlap. A state directory whose path contains `${`, `%`, `"` or `\`
+is refused with an error naming it: OpenSSH expands `${NAME}` in these options even inside quotes and has no escape for
+it, and supported older OpenSSH versions cannot carry the other three safely (see "Tensorlake snapshot builds").
 Provisioning targets keep the `Ssh` shape with an `access` field (omitted from a plan for an ordinary host), so every
 decision keyed on an ssh target, the payload uploads included, holds for sandboxes.
 

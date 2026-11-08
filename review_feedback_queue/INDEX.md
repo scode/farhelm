@@ -16,10 +16,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   queued Delete answer can still destroy orphaned cloud resources after Cancel was accepted in the same rendered
   question.
 
-- [`openssh-floor-percent-path-disables-stable-host-pin.md`](openssh-floor-percent-path-disables-stable-host-pin.md) —
-  On supported OpenSSH 7.6, a percent-bearing managed path can prevent the host key from being retained, so later
-  connections accept a new key again.
-
 - [`codex-endpoint-change-retains-environment-key.md`](codex-endpoint-change-retains-environment-key.md) — Changing
   Codex's API endpoint can leave its old environment-key setting active and send that credential to the newly selected
   endpoint.
