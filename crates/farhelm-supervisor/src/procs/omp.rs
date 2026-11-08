@@ -16,8 +16,9 @@ pub(super) const OMP_DIST_ENTRY_SUFFIX: &[u8] =
     b"node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js";
 pub(super) const OMP_SRC_ENTRY_SUFFIX: &[u8] = b"packages/coding-agent/src/cli.ts";
 pub(super) const OMP_PACKAGE: &[u8] = b"@oh-my-pi/pi-coding-agent";
-/// OMP's selected command under npm/npx: the package's own bin, spelled
-/// exactly as the launcher resolves it. Anything else after the option
+/// OMP's selected command in the npm/npx argument grammar: the package's
+/// own bin. Matching that grammar does not prove live npm support, since
+/// npm rewrites its process arguments. Anything else after the option
 /// boundary is a foreign command the package merely makes available.
 pub(super) const OMP_BIN: &[u8] = b"omp";
 
@@ -99,7 +100,7 @@ pub(super) fn is_npm_launcher_level_token(token: &[u8]) -> bool {
         || token == b"--package-name"
 }
 
-/// Whether a Node launcher link spells a supported npm/npx launch of
+/// Whether a Node launcher link spells an npm/npx argument pattern for
 /// OMP: the `npm-cli.js`/`npx-cli.js` entry with the subcommand, the
 /// package selection, the option boundary, and the selected bin each in
 /// its proper position. Three forms, and only these three:
@@ -124,6 +125,12 @@ pub(super) fn is_npm_launcher_level_token(token: &[u8]) -> bool {
 /// launcher evidence — and nothing past an unrecognized shape is
 /// either. The Bun-resulting rule is enforced by the runtime below,
 /// not here: this recognizes the launcher, and only the launcher.
+///
+/// These expanded argv patterns have shape-test coverage, not live npm
+/// coverage: npm rewrites its process title before the walk can see them.
+/// With dash as `sh`, npm also leaves a non-exec `sh -c` link that the
+/// corridor refuses. Bash can exec that shell away, leaving npm at the
+/// pane's positional exemption, but that live path remains unverified.
 pub(super) fn is_omp_npm_launcher(argv: &[Vec<u8>]) -> bool {
     let [program, entry, rest @ ..] = argv else {
         return false;
@@ -337,8 +344,10 @@ pub(crate) fn omp_corridor(
     // emitter: unreadable arguments can hide an outer OMP runtime and let
     // a nested conversation stand for the session's own. For Bun and npm
     // launches a readable pane keeps its positional exemption, because npm
-    // rewrites its argv and a launcher match would refuse legitimate package
-    // launches. An installed `omp` launch or a direct `bun <entry>` launch
+    // rewrites its argv. This exemption alone does not establish live npm
+    // support: dash's resident `sh -c` link still refuses below, and the
+    // shell-exec path on bash has not been verified live. An installed
+    // `omp` launch or a direct `bun <entry>` launch
     // has no launcher at the pane at all, so any Bun or Node pane that is
     // not the emitter still refuses there (`omp-corridor-uncounted-pane-runtime`).
     let pane_index = chain.len() - 1;
