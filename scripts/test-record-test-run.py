@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import fcntl
 import hashlib
 import importlib.util
 import json
@@ -1448,6 +1449,74 @@ class RecorderTest(unittest.TestCase):
         self.assertEqual(len(collection["files"]), 5)
         with tarfile.open(run_dir / collection["archive"]) as archive:
             self.assertEqual(archive.extractfile("slot-000/head.jsonl").read(), b"partial event")
+
+    def test_command_gets_a_locked_temporary_directory_removed_after_the_run(self) -> None:
+        """The command's TMPDIR is the recorder's own sweep-family directory, gone afterwards.
+
+        Why: plain temporary directories made by recorded tests used to land
+        loose in /tmp, where killed or failed tests left them for weeks (about
+        21,000 on one shared host). Spec: TMPDIR is a fresh `/tmp/fh-tmp.`
+        directory with a six-character suffix whatever the ambient value says,
+        the family's lock in it is held while the command runs (the child
+        cannot take it), and once the run ends the directory and what the
+        command left in it are removed and the manifest says so.
+        """
+
+        code = (
+            "import fcntl, os, pathlib, re; "
+            "tmp = pathlib.Path(os.environ['TMPDIR']); "
+            "assert re.fullmatch(r'/tmp/fh-tmp\\.[A-Za-z0-9]{6}', str(tmp)), tmp; "
+            "fd = os.open(tmp / 'fh-run.lock', os.O_RDONLY); "
+            "held = False\n"
+            "try: fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+            "except BlockingIOError: held = True\n"
+            "assert held, 'the recorder must hold the lock while the command runs'; "
+            "(tmp / 'left' / 'nested').mkdir(parents=True); "
+            "(tmp / 'left' / 'nested' / 'file').write_bytes(b'x'); "
+            "print(tmp)"
+        )
+        result = self.invoke([PYTHON, "-c", code], env=self.environment(TMPDIR="/nonexistent-ambient"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        _, manifest = self.latest_manifest()
+        record = manifest["child_tmp"]
+        self.assertTrue(record["removed"], record)
+        self.assertTrue(record["ambient_tmpdir_set"])
+        path = pathlib.Path("/tmp") / record["name"]
+        self.assertIn(os.fsencode(path), result.stdout)
+        self.assertFalse(path.exists())
+
+    def test_a_socket_left_in_the_temporary_directory_leaves_it_to_the_sweep(self) -> None:
+        """A directory still holding a unix socket is kept, with its lock released.
+
+        Why: the socket may be a terminal host or tmux server the command left
+        running, and deleting its directory would strand that process where
+        nothing can reach and stop it; farhelm-teststate's sweep ends such
+        servers before removing their directory. Spec: the run keeps the
+        directory, names the reason in the manifest, and no longer holds the
+        lock, so the sweep can judge the directory dead.
+        """
+
+        code = (
+            "import os, pathlib, socket; "
+            "tmp = pathlib.Path(os.environ['TMPDIR']); "
+            "s = socket.socket(socket.AF_UNIX); s.bind(os.fspath(tmp / 'sock'))"
+        )
+        result = self.invoke([PYTHON, "-c", code])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        _, manifest = self.latest_manifest()
+        record = manifest["child_tmp"]
+        path = pathlib.Path("/tmp") / record["name"]
+        try:
+            self.assertFalse(record["removed"], record)
+            self.assertEqual(record["left_for_sweep"], "a unix socket remains")
+            self.assertTrue((path / "sock").exists())
+            fd = os.open(path / "fh-run.lock", os.O_RDONLY)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            finally:
+                os.close(fd)
+        finally:
+            shutil.rmtree(path, ignore_errors=True)
 
     def test_local_helper_import_leaves_committed_source_unchanged(self) -> None:
         """The observer must not fingerprint bytecode that its own import just created.

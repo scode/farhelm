@@ -2,8 +2,8 @@
 //! one liveness protocol, one sweep.
 //!
 //! Every harness that builds state under /tmp — the Playwright stack script,
-//! the desktop smoke and the Rust integration tests — leaks that state when
-//! it is killed
+//! the desktop smoke, the Rust integration tests and the test recorder's
+//! per-command TMPDIR — leaks that state when it is killed
 //! without running its cleanup (SIGKILL, OOM, a crashed shell). One long day
 //! of killed runs accumulated 423 orphans (~22 GB) and hit disk-full. The
 //! old defense was a shell `find` in e2e/start-stack.sh that matched only
@@ -86,12 +86,25 @@ const RUST_HARNESS_PREFIX: &str = "fh-it.";
 /// marker and is reaped once [`SweepPolicy::kept`] has passed.
 const DESKTOP_SMOKE_PREFIX: &str = "fh-smoke.";
 
+/// The test recorder's prefix (scripts/record-test-run.py's
+/// `CHILD_TMP_PREFIX`): each recorded command's own TMPDIR, so that the
+/// plain `tempfile` directories, nested builds and browser profiles its tests
+/// leave behind go with it. The recorder holds the lock and removes the
+/// directory when the command ends; the sweep reaps one whose recorder was
+/// killed, or that still held a socket when its run ended.
+const RECORDER_TMP_PREFIX: &str = "fh-tmp.";
+
 /// The prefix family: the complete set of prefixes the sweep considers
 /// its own, built from the per-creator constants above so a creator
 /// prefix cannot drift away from the sweep's view of the family. This is
 /// the single authority — there is deliberately no parallel list in
 /// shell.
-pub const PREFIXES: &[&str] = &[PLAYWRIGHT_PREFIX, RUST_HARNESS_PREFIX, DESKTOP_SMOKE_PREFIX];
+pub const PREFIXES: &[&str] = &[
+    PLAYWRIGHT_PREFIX,
+    RUST_HARNESS_PREFIX,
+    DESKTOP_SMOKE_PREFIX,
+    RECORDER_TMP_PREFIX,
+];
 
 /// Length of the random suffix both creators append (`mktemp`'s XXXXXX
 /// and tempfile's default are both six alphanumerics). The sweep requires
@@ -900,6 +913,7 @@ mod tests {
             dead_dir(root.path(), "fh-it.dead02"),
             dead_dir(root.path(), "fh-e2e.dead03"),
             dead_dir(root.path(), "fh-smoke.dead04"),
+            dead_dir(root.path(), "fh-tmp.dead05"),
         ];
         let mut outcome = sweep(root.path(), &instant_policy());
         dead.sort();

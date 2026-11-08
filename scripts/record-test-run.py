@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import fcntl
 import hashlib
 import json
 import locale
@@ -18,11 +19,13 @@ import os
 import pathlib
 import platform
 import queue
+import secrets
 import select
 import selectors
 import shutil
 import signal
 import stat
+import string
 import subprocess
 import sys
 import threading
@@ -1601,6 +1604,134 @@ def prepare_root(
     return root
 
 
+# The command's own temporary directory.
+#
+# Everything the command puts in its temporary directory used to land loose
+# in /tmp, and everything a killed or failed test left there stayed until the
+# machine's 30-day cleanup: by 2026-11 one shared host held about 21,000
+# `.tmpXXXXXX` directories from plain `tempfile::tempdir()` tests, a nested
+# cargo build's target directory per killed compile-contract test, and
+# Playwright's browser profiles and caches. The recorder now hands each
+# command a private TMPDIR in farhelm-teststate's sweep family, holds the
+# family's liveness lock on it for the run, and removes it afterwards. A
+# recorder that is itself killed leaves it to that sweep, which every Rust
+# test process and browser stack runs over /tmp.
+
+CHILD_TMP_ROOT = pathlib.Path("/tmp")
+# Must match farhelm-teststate's `RECORDER_TMP_PREFIX`, `RANDOM_SUFFIX_LEN`
+# and `LOCK_FILE_NAME`: the sweep only judges names its creators could have
+# generated, and only a held lock of that name proves a run alive.
+CHILD_TMP_PREFIX = "fh-tmp."
+CHILD_TMP_SUFFIX_LEN = 6
+CHILD_TMP_LOCK_NAME = "fh-run.lock"
+CHILD_TMP_SOCKET_WALK_LIMIT = 100_000
+
+
+@dataclass
+class ChildTmp:
+    """A command's private temporary directory and the lock that marks it live."""
+
+    path: pathlib.Path
+    lock_fd: int
+
+
+def create_child_tmp(root: pathlib.Path = CHILD_TMP_ROOT) -> ChildTmp:
+    """Create a locked, private sweep-family directory for one command's TMPDIR.
+
+    The directory sits directly under /tmp, never under the evidence root,
+    because tests bind unix sockets below their temporary directories and the
+    socket path limit (104 bytes on macOS) leaves no room for a deep base.
+    The extra path component adds 14 bytes to Linux's bare `/tmp`, and the
+    whole base is still shorter than macOS's per-user default under
+    `/var/folders`. The lock descriptor is not
+    inherited by the command (Python opens descriptors non-inheritable), so a
+    daemon the command leaves behind cannot keep a dead run looking alive.
+    """
+
+    alphabet = string.ascii_letters + string.digits
+    for _ in range(100):
+        suffix = "".join(secrets.choice(alphabet) for _ in range(CHILD_TMP_SUFFIX_LEN))
+        path = root / f"{CHILD_TMP_PREFIX}{suffix}"
+        try:
+            os.mkdir(path, 0o700)
+        except FileExistsError:
+            continue
+        break
+    else:
+        raise RecorderFailure("could not create a unique temporary directory for the command")
+    lock_fd = os.open(
+        path / CHILD_TMP_LOCK_NAME,
+        os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+        0o600,
+    )
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    except OSError:
+        os.close(lock_fd)
+        raise
+    return ChildTmp(path, lock_fd)
+
+
+def holds_socket(path: pathlib.Path, limit: int = CHILD_TMP_SOCKET_WALK_LIMIT) -> bool | None:
+    """Report whether any unix socket remains under `path`, without following links.
+
+    None means the walk could not finish (an unreadable directory, or more
+    entries than `limit`), which callers must treat like a socket: unknown.
+    """
+
+    seen = 0
+    pending = [path]
+    while pending:
+        current = pending.pop()
+        try:
+            entries = list(os.scandir(current))
+        except OSError:
+            return None
+        for entry in entries:
+            seen += 1
+            if seen > limit:
+                return None
+            try:
+                mode = entry.stat(follow_symlinks=False).st_mode
+            except OSError:
+                return None
+            if stat.S_ISSOCK(mode):
+                return True
+            if stat.S_ISDIR(mode):
+                pending.append(pathlib.Path(entry.path))
+    return False
+
+
+def release_child_tmp(child_tmp: ChildTmp) -> dict[str, object]:
+    """Remove the command's temporary directory once its processes are gone.
+
+    A directory still holding a socket is left in place: it may belong to a
+    terminal host or tmux server the command left running, and deleting the
+    socket's directory would strand that process with no way for anyone to
+    reach and stop it. farhelm-teststate's sweep reaps such a directory once
+    the lock released here has been free for its grace period, ending the
+    hosts and servers it finds first. Returns the manifest record.
+    """
+
+    record: dict[str, object] = {"name": child_tmp.path.name}
+    sockets = holds_socket(child_tmp.path)
+    if sockets is False:
+        try:
+            shutil.rmtree(child_tmp.path)
+            record["removed"] = True
+        except OSError as error:
+            record["removed"] = False
+            record["left_for_sweep"] = f"removal failed: {type(error).__name__}"
+    else:
+        record["removed"] = False
+        record["left_for_sweep"] = "a unix socket remains" if sockets else "contents could not be checked"
+    try:
+        os.close(child_tmp.lock_fd)
+    except OSError:
+        pass
+    return record
+
+
 def initial_manifest(
     run_id: str,
     args: argparse.Namespace,
@@ -1696,6 +1827,7 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
     output: OutputStore | None = None
     console: ConsoleForwarder | None = None
     trace_fd: int | None = None
+    child_tmp: ChildTmp | None = None
     # Retain observed child facts across a failed first terminal publication;
     # the fallback reports its IO failure without inventing an unknown result.
     result: CommandResult | None = None
@@ -1820,6 +1952,17 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
         # A killed recorder leaves this running record and its raw fixed files;
         # the standalone collector can export them without rerunning the test.
         manifest.write()
+        # Created last, right before the spawn, so that a refusal or a
+        # metadata failure never leaves one behind. TMPDIR overrides any
+        # ambient value: the point is that nothing the command makes there
+        # can outlive the run, whatever the caller's environment says.
+        child_tmp = create_child_tmp()
+        child_env["TMPDIR"] = os.fspath(child_tmp.path)
+        manifest.data["child_tmp"] = {
+            "name": child_tmp.path.name,
+            "ambient_tmpdir_set": "TMPDIR" in ambient,
+        }
+        manifest.write()
         output = OutputStore(run_dir)
         console = ConsoleForwarder()
         result = run_command(
@@ -1909,6 +2052,8 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
             collected = {"status": "incomplete", "collection_complete": False,
                          "errors": [{"kind": type(error).__name__}]}
         manifest.data["test_traces"]["collection"] = collected
+        manifest.data["child_tmp"] = {**manifest.data["child_tmp"], **release_child_tmp(child_tmp)}
+        child_tmp = None
         manifest.data["duration_seconds"] = time.monotonic() - total_started
         manifest.data["finished_at"] = utc_now()
         try:
@@ -1977,6 +2122,11 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
                 os.close(trace_fd)
             except OSError:
                 pass
+        # Reached with the directory still held only when the run failed
+        # after creating it; the command's processes are gone by then, so the
+        # same release applies, and its record has nowhere left to go.
+        if child_tmp is not None:
+            release_child_tmp(child_tmp)
         for signum, handler in prior_handlers.items():
             signal.signal(signum, handler)
 
