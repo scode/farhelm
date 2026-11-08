@@ -2292,9 +2292,10 @@ red when any update is required, amber otherwise; its accessible name and hover 
 
 The attention list above sessions has one row per host, with its rail mark and short name, its state, and the action
 that state offers. Live setup, update or uninstall progress takes precedence over a problem, which takes precedence over
-an available update. Working rows say **Setting up**, **Updating** or **Uninstalling** and show a progress bar when a
-step count is available; they have no action button. A connection interruption during that work does not replace its
-progress with a problem. Problems appear first, then working hosts, then updates, in rail order within each group.
+an available update. Working rows say **Setting up**, **Updating** or **Uninstalling** and show a progress bar, filled
+as steps complete when a step count is available and otherwise left empty and static, which keeps the row's height; they
+have no action button. A connection interruption during that work does not replace its progress with a problem. Problems
+appear first, then working hosts, then updates, in rail order within each group.
 
 Problem rows offer **Details**: Unreachable (worded **Unreachable, retrying**), Identity mismatch, Identity unverified,
 Duplicate, Retired, Unrecognized, a protocol skew without an available Update or with the host's higher protocol, a
