@@ -19,8 +19,10 @@ specific to OMP.
 - After `/new`, the new conversation can be restarted right away, before OMP has replied to it.
 - OMP matches model names loosely: a typo or a retired model name can quietly start a different model instead of
   failing. If the exact model matters, check it in OMP itself after launch.
-- Farhelm can follow the conversation when OMP is started directly, through `bun x` or `npx`, or as OMP's compiled
-  binary. A [wrapper prefix](/docs/agents/agent-wrappers/) must `exec` that command; a resident wrapper or Node launcher
-  runs it normally, but **Restart** stays greyed out.
+- Farhelm can follow the conversation when OMP is run as `omp` (installed with npm or Bun), through `bun x`, or as OMP's
+  compiled binary. An `npx` launch runs, but on Debian, Ubuntu and other Linux systems whose `sh` is dash, Farhelm
+  cannot follow its conversation, so **Restart** stays greyed out; elsewhere, including macOS, `npx` is untested. A
+  [wrapper prefix](/docs/agents/agent-wrappers/) must `exec` the OMP command; a resident wrapper or Node launcher runs
+  it normally, but **Restart** stays greyed out.
 - Restart refuses, rather than starting fresh, when OMP has compressed the conversation's file into a `.jsonl.gz`
   archive, or has moved it and not yet said where. Replace the session to start over.

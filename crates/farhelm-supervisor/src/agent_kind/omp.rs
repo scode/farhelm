@@ -42,7 +42,9 @@ pub(crate) enum OmpLaunchProgram {
     /// [`OmpLaunchProgram::Bun`] because only a launcher pane earns the
     /// positional exemption (SPEC_impl.md, "The OMP ownership proof").
     BunEntry,
-    /// An npm/npx launch: launcher above the runtime, Bun-resulting only.
+    /// An npm/npx launch candidate, Bun-resulting only. Classification does
+    /// not establish live support: npm rewrites its argv, and the corridor
+    /// refuses the resident `sh -c` intermediary on dash-based systems.
     Npm,
     /// A directly Node-executed entry point: never a supported runtime.
     Node,
