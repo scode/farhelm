@@ -191,12 +191,14 @@
 #   the archive is built.
 # - Every GitHub action, referenced by a mutable version tag
 #   (`actions/checkout@v6` and friends), not a commit SHA.
+# - The Ubicloud runners the Linux build jobs run on (see the runner table
+#   below): the machines, and the image they boot, are Ubicloud's.
 #
 # A compromise of any of those upstreams could tamper with the build, and the
 # maintainer's later signature would then cover the result; signing proves
 # who published a release, not that the build machine was clean.
-# The three are the same class of trust (a distribution's or GitHub's own
-# publishing chain), so pinning only one of them would not change the trust
+# They are the same class of trust (a distribution's, GitHub's or a runner
+# provider's own publishing chain), so pinning only one of them would not change the trust
 # the release rests on. Pinning all of them is a possible future hardening
 # project, not a requirement today. What IS pinned by checksum stays pinned:
 # tmux and its libraries, the zig wheel, nextest, and dx.
@@ -272,13 +274,25 @@ contents = "read"
 # own native runner instead: no cross toolchain, and the binary is linked
 # where it is meant to run.
 #
-# `ubuntu-24.04-arm` is a standard GitHub-hosted label (4 vCPU arm64), free
-# for public repositories and no longer carrying the public-preview note its
-# 26.04 sibling still does — checked against GitHub's runner documentation
-# when this landed. Should it ever go away, the fallback is to build that
-# target on `ubuntu-latest` through a cross-compiler installed in
-# `dist-build-setup.yml`, as the retired hand-written workflow did with
-# cargo-zigbuild.
+# The Linux jobs run on 8 vCPU Ubicloud runners, the provider `ci.yml`
+# already uses, not on GitHub's 4 vCPU hosted ones. Every Linux build job is
+# almost all compiling, and the x86_64 one decides how long a release takes:
+# measured on the same commit, its leg took 26:40 on `ubicloud-standard-8`
+# and 23:54 on `ubicloud-standard-16`, against a median of about 49 minutes
+# on `ubuntu-latest` over the ten releases before. Doubling again to 16
+# saved under three minutes: about ten minutes of the job keep fewer than two
+# cores busy whatever the machine (tests capped at four nextest slots, the
+# smoke's sequential legs, container provisioning), so 8 is where more cores
+# stop paying.
+#
+# What this accepts: a tag build now needs the Ubicloud GitHub App installed
+# on the repository and Ubicloud's service up, and the Linux archives are
+# built on Ubicloud's machines, which also receive the job's GitHub token with
+# the workflow-wide `contents: write` described under "Residuals" above.
+#
+# If Ubicloud is unavailable, a tag build's Linux jobs wait in the queue: set
+# these labels back to `ubuntu-latest` (x86_64) and `ubuntu-24.04-arm`,
+# regenerate, and re-run.
 #
 # `macos-15` rather than `macos-14`, which GitHub began deprecating in July
 # 2026 and retires in November 2026 — brownouts before then would make Apple
@@ -286,11 +300,11 @@ contents = "read"
 # actions/runner-images), so this changes the image and not the target.
 #
 # `global` is where dist builds the extra artifacts (the two tmux binaries)
-# and assembles checksums. All GitHub-hosted, not the `ubicloud` runners
-# `ci.yml` uses: the release workflow runs a few times a year and must work
-# with nothing but a GitHub token.
+# and assembles checksums, and dist also runs its plan, host and announce
+# jobs on it. It stays on GitHub: those jobs take seconds to a few minutes
+# and gain nothing from more cores.
 [dist.github-custom-runners]
-x86_64-unknown-linux-musl = "ubuntu-latest"
-aarch64-unknown-linux-musl = "ubuntu-24.04-arm"
+x86_64-unknown-linux-musl = "ubicloud-standard-8"
+aarch64-unknown-linux-musl = "ubicloud-standard-8-arm"
 aarch64-apple-darwin = "macos-15"
 global = "ubuntu-latest"
