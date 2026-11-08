@@ -296,6 +296,18 @@ vte = { path = "vendor/vte" }
 [profile.dev.package.sha2]
 opt-level = 3
 
+# Build scripts and proc macros get full debug info in test builds. Cargo
+# builds them without debug info by default, but one that the test build also
+# links into a test binary (`syn`, `proc-macro2` and the like) is built just
+# once, with the test binary's full debug info. A doctest build links none of
+# them into a test binary, so it got the default instead and compiled a second
+# copy of the whole proc-macro chain and everything above it (about a hundred
+# crates) right after the release gate's test build. With every host build at
+# the same setting, `cargo test --doc` reuses the test build. Shipped binaries
+# use the release profiles and are not affected.
+[profile.test.build-override]
+debug = true
+
 # `wasm-release` is the cargo profile dx compiles the web UI under; this
 # stanza merges into dx's own definition of it. The strip exists because
 # rustc's precompiled wasm32 std ships DWARF debug sections (~1.4 MB in our
