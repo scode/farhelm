@@ -355,34 +355,59 @@ passed its code review gate, and the real-sandbox verification is recorded in th
 TODO.md. Open, not merged. If a `## Decisions` section exists, its latest entry must also be satisfied. Then close the
 plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12). Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-11-08 (claim ec23f9).
+### 2026-11-08: answer to a blocked question
 
-### Real recipe builds need a project API key
+The question, as the executor put it:
 
-Recipes are changing from either installing software or reusing an image/snapshot unchanged to always building on the
-selected base. Every base gets the optional packages, Claude Code and Codex, then a snapshot for new hosts. Existing
-hosts keep their software, and rerunning their setup skips the build.
+> Blocked on 2026-11-08 (claim ec23f9).
+>
+> ### Real recipe builds need a project API key
+>
+> Recipes are changing from either installing software or reusing an image/snapshot unchanged to always building on the
+> selected base. Every base gets the optional packages, Claude Code and Codex, then a snapshot for new hosts. Existing
+> hosts keep their software, and rerunning their setup skips the build.
+>
+> The consistent implementation is in [draft PR #3178](https://github.com/scode/farhelm/pull/3178/changes), head
+> `7074763e`, based on main `c0df0df4`. Code review found no remaining actionable findings. The required real-cloud
+> verification is still outstanding: a build on Tensorlake Ubuntu must pass the new requirements check, and builders
+> must work from an image name and a user snapshot. In particular, local tests cannot establish that Tensorlake's
+> current Ubuntu image already contains curl and git.
+>
+> This executor has no usable project API key. Its signed-in Tensorlake CLI credential is refused by the production API
+> used by Farhelm because that credential requires an organization header. Changing Farhelm's authentication model or
+> borrowing the live installation's credentials would be outside this plan. No real sandbox, snapshot or SSH key was
+> created; the owned resource ledger is empty.
+>
+> Can a usable project API key be made available to the executing session, or should this work stay parked? Supplying
+> the key through the execution environment (`TENSORLAKE_API_KEY`) and returning the plan to pending lets the executor
+> run the agreed checks with an isolated test helm and promptly clean up its resources. Leaving it blocked keeps the
+> draft unlanded and delays the dependent prepared-snapshot and per-session sandbox work. I recommend providing that
+> access and resuming; the live checks should remain required. Never put the key in this plan or its decision text.
+>
+> The working log is `farhelm-plan-recipe-bases-log.md` beside the checkouts. It records local validation, retained
+> failures and the final rebase's evidence-reuse judgment; this block is not a completed validation report. Old reuse
+> recipes with an earlier failed or interrupted build retain that history and show Retry; it runs the same build rather
+> than erasing ownership history during upgrade.
 
-The consistent implementation is in [draft PR #3178](https://github.com/scode/farhelm/pull/3178/changes), head
-`7074763e`, based on main `c0df0df4`. Code review found no remaining actionable findings. The required real-cloud
-verification is still outstanding: a build on Tensorlake Ubuntu must pass the new requirements check, and builders must
-work from an image name and a user snapshot. In particular, local tests cannot establish that Tensorlake's current
-Ubuntu image already contains curl and git.
+The maintainer's answer:
 
-This executor has no usable project API key. Its signed-in Tensorlake CLI credential is refused by the production API
-used by Farhelm because that credential requires an organization header. Changing Farhelm's authentication model or
-borrowing the live installation's credentials would be outside this plan. No real sandbox, snapshot or SSH key was
-created; the owned resource ledger is empty.
+### The maintainer has provided a project API key
 
-Can a usable project API key be made available to the executing session, or should this work stay parked? Supplying the
-key through the execution environment (`TENSORLAKE_API_KEY`) and returning the plan to pending lets the executor run the
-agreed checks with an isolated test helm and promptly clean up its resources. Leaving it blocked keeps the draft
-unlanded and delays the dependent prepared-snapshot and per-session sandbox work. I recommend providing that access and
-resuming; the live checks should remain required. Never put the key in this plan or its decision text.
+The maintainer supplied a Tensorlake project API key on 2026-11-08, in conversation with the landing monitor, which
+records it here. This is the maintainer's own decision, not one the monitor made on their behalf: provide the access and
+resume, with the live checks still required, as the Blocked question recommends.
 
-The working log is `farhelm-plan-recipe-bases-log.md` beside the checkouts. It records local validation, retained
-failures and the final rebase's evidence-reuse judgment; this block is not a completed validation report. Old reuse
-recipes with an earlier failed or interrupted build retain that history and show Retry; it runs the same build rather
-than erasing ownership history during upgrade.
+The key is in a file named `tl-key.txt` directly in this machine's system temporary directory, readable only by the user
+the executors run as. The key itself is not in this decision and must never be written anywhere else.
+
+- Read the file into `TENSORLAKE_API_KEY` only in the environment of the commands that need it: the isolated test helm
+  and the real-cloud checks the plan requires. Do not copy the file, and do not print, log, commit or quote the key, in
+  the working log, a report, a PR, a plan, a test-run record or a sandbox, beyond what Farhelm itself does with the key
+  during those checks.
+- Run the agreed live checks: a build on Tensorlake's Ubuntu image passes the new requirements check, and builders work
+  from an image name and from a user snapshot. Record every sandbox, snapshot and SSH key you create in the owned
+  resource ledger and clean them up promptly, as the plan says.
+- If the file is missing (the temporary directory may be cleared on a reboot), or the API refuses the key, block again
+  and say which, so the maintainer can supply it another way.
