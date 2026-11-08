@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`tab-output-hangup`](reports/tab-output-hangup.report.md) landed 2026-10-31 in #2846: Find what terminated a heavy-output command in a live terminal tab and fix it; a tab is closed or signalled only when its shell really exited or the user closed or deleted it, with logs that name the tab and what was signalled.
 - [`command-shell-meaning`](reports/command-shell-meaning.report.md) landed 2026-10-31 in #2847, #2848: Command launches' commands, resume commands and wrappers run through bash with full shell meaning (so `~`, `$VAR` and globs work), host and container alike; breaking change.
 - [`grid-repeated-link-warning`](reports/grid-repeated-link-warning.report.md) landed 2026-11-04 in #2949: Grid terminals: stop a link a program starts twice from showing a false "does not match" warning
 - [`readopt-unavailable-hosts`](reports/readopt-unavailable-hosts.report.md) landed 2026-11-04 in #2950, #2956: Re-adopt terminal hosts (agents and tabs) that become unavailable while the supervisor runs
