@@ -601,3 +601,35 @@ passed its code review gate, the real-sandbox verification is recorded in the re
 2 TODO.md entry with its follow-up entries. Open, not merged. If a `## Decisions` section exists, its latest entry must
 also be satisfied. Then close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12). Never
 edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-11-08 (claim 8ec594).
+
+### Sandbox-session launch cannot check SSH key registration in advance
+
+This plan lets a user launch a session into a new Tensorlake sandbox from a recipe, then explicitly suspend, resume or
+delete that sandbox. The agreed launcher disables a recipe when Farhelm's SSH key has not been registered with the
+Tensorlake account, so a user cannot start a billed sandbox that Farhelm cannot reach.
+
+The existing product specification says Farhelm cannot check that registration: its saved Tensorlake API key cannot list
+the account's SSH keys. Farhelm can establish that its own key exists locally, but that does not establish account
+registration. Existing Tensorlake host setup learns about a missing registration only when SSH admission fails, after
+creating the sandbox. A remembered registration checkbox would not establish the current state either, because the user
+can remove the key or switch accounts outside Farhelm.
+
+The implementation has not started. The independent design review found this conflict, and it needs a decision because
+silently allowing an unverified registration would weaken the agreed preflight gate.
+
+Options:
+
+- Allow recipe selection when the API key, local Farhelm SSH key and built snapshot exist. Show the existing
+  registration command and explanation. If SSH then refuses the key, refuse the launch with the registration remedy and
+  delete its newly created sandbox and snapshots; retain an explicit cleanup entry if Tensorlake refuses deletion. This
+  can briefly create a billed sandbox before discovering the missing registration.
+- Keep the strict prelaunch registration guarantee and defer this plan until Tensorlake provides a way for Farhelm to
+  check it with its supported credentials. Adding a different account-login or registration-tracking system would need a
+  separate design decision.
+
+Recommendation: take the first option and explicitly amend the launcher requirement. It uses the existing authentication
+model and preserves the agreed failure-cleanup behavior without pretending registration was checked.
