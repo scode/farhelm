@@ -2955,11 +2955,16 @@ pub(super) fn SessionRow(
             // The helm's own refusal, and on a stale row it names the host's
             // state and can quote peer-supplied text — so it renders through
             // the same escaping and isolation as every other peer string.
-            // Only while the panel is CLOSED: the open panel carries the
-            // error itself (above), and rendering both would say one
-            // refusal twice.
+            // Keep the row's error footprint while its panel carries the
+            // visible copy. Otherwise dismissing the panel on pointer-down
+            // grows this row and moves a neighbouring target before pointer-up.
+            // The reserved copy is hidden from both sight and accessibility
+            // while the panel exposes the refusal.
             if let Some(err) = error {
-                if !menu_open {
+                div {
+                    class: "session-row-error",
+                    aria_hidden: menu_open,
+                    style: if menu_open { "visibility: hidden" } else { "" },
                     PeerLine {
                         class: "action-error".to_string(),
                         parts: vec![DetailPart::peer(err)],

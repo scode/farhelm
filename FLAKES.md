@@ -4370,3 +4370,96 @@ artifact expires with GitHub's artifact retention. The test was last changed in 
 Class: ambiguous-observable
 
 Cause: hypothesis
+
+## 2026-11-08 — shallow-pause observation included later flow control (crates/farhelm/tests/e2e/terminal_backpressure.rs)
+
+`terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` failed all three attempts in batch
+`08f2a1f0-4479-4839-9b7d-540799af1c77`. The first retained trace attributes a reset at 7.810 seconds to
+`tmux_flow_control`. A bounded, test-only per-channel recovery observer then reproduced the unchanged assertion in
+`4eb03c5f-0b42-47f1-9e8e-7b528e2833b7`, recording a natural flow-control recovery 7.216973212 seconds after the
+half-second pause began. Its two following attempts passed, as did the earlier instrumented attempt
+`1bd8a1c1-18e0-4b7b-85f0-545e48760061`; the failure remains retained. The ten-second drain was checking later,
+legitimate recovery rather than just the shallow-pause seam. The corrected test requires 1,000 new records beyond the
+quiet boundary, no recovery decision or reset through that continuation, and consecutive records across the original
+pause boundary. Detach still fails the shared marker wait. All five corrected attempts passed in batch
+`8524996d-c4d7-47b0-9eda-40efb54f2672`; the exclusion is removed with the correction. The final premise check also
+requires the pause to remain below tmux's five-second threshold and passed in `177216ac-dd27-4bf6-86ca-86e1fec181d5`.
+
+```text
+a pause lifted inside tmux's pause-after window must not trigger a catch-up reset
+bounded recovery causes (channel, death-requested, time after pause): [(1, false, Some(7.216973212s))]
+```
+
+Evidence: exact nextest selection `test(terminal_backpressure::shallow_pause_resumes_without_reset_or_replay)`, four
+runner slots, one selected test, zero retries. The earlier three-case selection also included
+`terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled` and
+`launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail`, which each passed
+three times. Its third attempt had incomplete console forwarding, so that batch is not a clean pass. The tested source
+was `0ef65075` for the three-case run and `9fd3bdce` for the instrumented and corrected selections, with the uncommitted
+repairs described here and below; the observer alone preceded the assertion correction. Shared x86_64 Linux with other
+builds and test runs active; case-level memory pressure was not measured. Pinned nextest 0.9.148 and verified tmux 3.7c,
+executable SHA256 `39d8d6a031abbdc450145b81026d58ce58f6ea9ae6c0f242eea9c23a5975b480`, C.UTF-8. Ambient `FARHELM_*`
+inputs were scrubbed; only recorder-owned `FARHELM_TEST_TRACE_DIR` was supplied. Private UUID evidence expires with
+temporary-file cleanup. The older memory and sentinel reports remain open; these passes do not justify restoring the
+integration gate.
+
+Class: ambiguous-observable
+
+Cause: established
+
+## 2026-11-08 — known browser flake repairs and bounded reruns (e2e/tests)
+
+All 56 selected cases passed in each of three attempts on Chromium and WebKit, 168 actual passes with no skips, in batch
+`f4198d7e-0aa0-4029-9546-a1e30020ea3b`: `2cb0aeaa-3e46-4d5b-8eca-3641290e7e6a`, `abee6b8f-2f25-4ae5-8540-2989252bb5e3`,
+and `a6e1846e-b79a-45fa-adb7-16d3b4941729`. No historical browser failure was reproduced. Four excluded browser cases
+have targeted corrections: both checkout-save cases in `settings.spec.ts` drain their owned backend writes before
+restoration instead of awaiting WebKit's request-finished notification;
+`host-settings scrollports stay reachable while saving` in `modal-layout.spec.ts` waits for the
+animation-frame-installed region and Tab stop before scanning; and the same-source header YOLO-cancellation case in
+`replace.spec.ts` retains the errored row's height while its menu is open. The maintainer chose that layout correction.
+The test's explicit Escape workaround was removed, and both sidebar and header variants check height invariance across
+the next real click. These four exclusions are removed with their repairs. The historical cleanup and scroll failures
+were not freshly reproduced, so causal attribution to those lifecycle gaps rests on the recorded failure sites and
+source inspection, not a new before/after failure.
+
+The other 18 excluded browser cases passed three attempts per engine without establishing a fix; their assertions and
+exclusions remain. In particular the native tunnel preview took 56.606 seconds on WebKit in the first attempt against
+its unchanged 60-second deadline. The separate stack cleanup command passed every parent/direct termination and
+replacement phase in `2501ef60-3920-4ecf-9a2b-04e88d32fe87`, preserving its decoys; the historical leak remains open.
+The desktop launch-lock test in `crates/farhelm-ui/src/desktop.rs` now publishes its release signal before dropping the
+lock, eliminating the observable unlock-before-send ordering. It passed exact selections in
+`4656ccc3-0d40-4cd4-96b7-203715e12d55` and `15382298-318a-4b45-bfaf-ef87f09ff467`; its exclusion is removed.
+
+Evidence: browser selection below, Playwright 1.64.0, three workers with one real stack each, zero retries, host
+terminals. Source `0ef650750a923292ee3497f6e4711b63f19ca0d4` with the uncommitted UI and test repairs; the later rebase
+onto `9fd3bdce` changes only a separate grid-component font fixture and plan records, so it does not change this
+coverage. The desktop test used four nextest slots and no tmux; cleanup and browser runs verified tmux 3.7c with the
+SHA256 recorded above. C.UTF-8, ambient `FARHELM_*` scrubbed and recorder-owned `FARHELM_TEST_TRACE_DIR` supplied. Other
+builds and tests shared the machine; load average was about 61 during setup, with no per-case load measurement. Private
+UUID reports and output expire with temporary-file cleanup. A browser startup before its CLI build completed
+(`684a0e95-cbdb-441d-90b8-d99b742a25c6`) and two Rust attempts that timed out waiting for Cargo's build lock
+(`8d9dd8f4-eecf-4114-a61e-011b1be7bc19`, `f41bc72c-1e27-49ee-b935-cef7d2477f24`) ran no assertions and remain separate
+incomplete evidence, never flake reproductions or passes.
+
+```sh
+npx playwright test --grep 'visit history chooses and remembers|view-changes-do-not-postpone|plain Replace keeps a newer|don.t ask again on a refused YOLO|native tunnel preview keeps ports|trash header and global confirmation|create-intent-key-rebinds-on|editing the working directory after a failed create|changed-host advice while following|a first identity learned while following|a sequence refused at its prefix|typed page refusals are atomic|expanded setup failure closes|post-clone commands with carriage returns|a pending checkout folder save survives|incarnation churn keeps a followed|host-settings scrollports stay reachable|a progress read failure during an update'
+```
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-11-08 — reports older than fifteen days dismissed
+
+The maintainer asked to retire active reports whose latest recorded failure was more than fifteen days old. This
+dismisses reconnect timing (`e2e/tests/terminal-reconnect.spec.ts`, 2026-10-09), interrupted-session Replace clicks
+(`e2e/tests/terminal-restart.spec.ts`, 2026-10-20), parent-SIGTERM stack cleanup (`scripts/test-start-stack-cleanup.sh`,
+2026-09-25), stalled-viewer memory growth (`crates/farhelm/tests/e2e/terminal_backpressure.rs`, 2026-09-03), and the
+malformed launch sentinel (`crates/farhelm/tests/e2e/launch_sentinel_error_status.rs`, 2026-09-03). Their active TODO
+reports and the two individual browser exclusions are removed. The older observations remain historical evidence;
+dismissal does not establish a cause or claim that a fix was found. This is a maintainer decision, not a new test run.
+The maintainer also asked to restore the full Rust integration release gate, which is restored with these dismissals.
+
+Class: unknown
+
+Cause: unknown

@@ -2803,8 +2803,10 @@ mod tests {
         let holder = std::thread::spawn(move || {
             // sleep-ok: the brief holder's hold is the behavior under test.
             std::thread::sleep(Duration::from_millis(200));
-            drop(held);
+            // Publish while still holding the lock: acquiring it must imply
+            // that this signal is already observable, regardless of scheduling.
             released_tx.send(()).unwrap();
+            drop(held);
         });
         refuse_if_app_open(state.path(), Duration::from_secs(10))
             .expect("a holder that lets go within the wait is waited out");

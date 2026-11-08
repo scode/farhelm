@@ -87,8 +87,8 @@ Two caveats before trusting a narrow non-reproduction:
 
 - Concurrency. A narrow run may have no contention; nextest shares four slots across selected binaries, with an e2e
   group cap and explicit expensive-test reservations in `.config/nextest.toml`. The in-process SLOTS semaphore cannot
-  coordinate nextest children. Ordinary CI does not run Rust tests, and full e2e remains excluded from release. At rung
-  3, use `cargo nextest run -p farhelm --test e2e` through the recorder. Cross-binary contention may require a broader
+  coordinate nextest children. Ordinary CI does not run Rust tests; the Linux release gate includes full e2e. At rung 3,
+  use `cargo nextest run -p farhelm --test e2e` through the recorder. Cross-binary contention may require a broader
   package selection after that; do not run both full nextest and full libtest batteries by default.
 - Ambient environment. A shell inside a farhelm session carries `FARHELM_AGENT_ID`, and the supervisor's sweep tests
   inspect live `/proc` environs. Four `service::sweep::tests` cases in `farhelm-supervisor` have failed under an ambient

@@ -349,6 +349,11 @@ test("host-settings scrollports stay reachable while saving", async ({ page }) =
     await expect(input).toBeDisabled();
     await expect(body.locator("button:enabled, input:enabled, select:enabled, textarea:enabled")).toHaveCount(0);
     await page.setViewportSize({ width: 360, height: 300 });
+    // Resize and disabled-control observations schedule reconciliation for a
+    // later animation frame. Scan the settled keyboard contract, not the gap
+    // between the new geometry and its region attributes.
+    await expect(body).toHaveAttribute("role", "region");
+    await expect(body).toHaveAttribute("tabindex", "0");
     await expectKeyboardReachableScrollers(dialog);
   } finally {
     releaseSave();

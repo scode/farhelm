@@ -12,8 +12,8 @@ only (`pr-run-mode = "skip"`, D19), so a PR exercises none of it: the release pa
 the gate `.github/dist-build-setup.yml` puts at the top of every build job — the tag-shape assertion, the changelog
 format and announcement checks, then the retained Rust targets, pinned shutdown regression, JS harness, CentOS
 provisioning, desktop unit test, and desktop smoke on the x86_64 Linux one; standalone uninstall validation and desktop
-unit test on macOS. The tmux-driven e2e suite remains out of the Linux gate until its load-sensitive tests are deflaked;
-TODO.md lists the condition for putting it back. That gate lives inside the build jobs rather than in a `plan-jobs`
+unit test on macOS. The Linux workspace selection includes the full farhelm integration suite, with rootless Podman and
+its offline Ubuntu image prepared before execution. That gate lives inside the build jobs rather than in a `plan-jobs`
 workflow because dist 0.32 lets a failed plan job SKIP the build jobs, and its `host` job accepts a skip; a failure
 inside a build job is the only kind it refuses.
 

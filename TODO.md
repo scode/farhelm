@@ -640,14 +640,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
-- **The desktop launch lock's brief-holder test checks its release signal too early.**
-  `desktop::tests::the_launch_lock_refuses_beside_an_open_app_and_waits_out_a_brief_holder` in
-  `crates/farhelm-ui/src/desktop.rs` failed once with "the lock was taken only after the holder let go: Empty" in the
-  x86_64 Linux job of release-gate rehearsal run `42434794872` (8 vCPU Ubicloud runner); it passed in five other gate
-  runs. Hypothesis: the holder thread drops the lock before it sends on its release channel, so the waiter can take the
-  lock and check the channel first; sending before the drop keeps the check meaningful. Not reproduced or re-run
-  (FLAKES.md, 2026-11-07).
-
 - **A full browser report exceeded the recorder's inspection bound.** Browser sweep run
   `b0269440-1711-4470-8e18-f6f7ef88bec3` on clean main `2146e607ea9227579740704f2e120ee6192c2525` retained a
   33,090,209-byte `playwright.json`, above `scripts/test_run_playwright.py`'s 16 MiB report limit. Its metadata
@@ -673,20 +665,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   2026-11-04). On 2026-11-05 it passed five attempts per engine across ordinary and host terminals; no fresh
   error-status detail was captured, and the exclusion remains.
 
-- **Shallow pause resets under load.** `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` in
-  `crates/farhelm/tests/e2e/terminal_backpressure.rs` failed one of three exact nextest attempts on 2026-11-05 (batch
-  `ef5851af-9d04-48d0-a378-9c256e2c10a7`, failure `dfecb8be-7208-44be-b9bf-047950e05e5c`). It rejects a reset anywhere
-  in its ten-second post-resume drain, including a later legitimate tmux pause under load. The retained trace still
-  evicts the needed attribution events; add a bounded per-channel cause observable before changing the assertion. The
-  existing sweep exclusion remains. See FLAKES.md, 2026-10-17 and 2026-11-05.
-
-- **Reconnect recovery misses its window under load.** `view-changes-do-not-postpone-a-recovery` in
-  `e2e/tests/terminal-reconnect.spec.ts` passed five exact attempts per engine on 2026-11-05: three with ordinary
-  terminals, two with host terminals. The historical 4185ms failure against 4000ms remains unresolved: driver and
-  deferred terminal-mount latency are included in that observation. Keep the existing exclusion and timing assertion
-  until a retry-deadline observable distinguishes rearming from late observation. See FLAKES.md, 2026-10-17 and
-  2026-11-05.
-
 - **Native tunnel preview exceeds WebKit's case budget.**
   `native tunnel preview keeps ports and actions inside a 650px pane` in `e2e/tests/header.spec.ts` timed out during
   cleanup at its unchanged 60-second deadline in recorder `1fc8687c-1044-4c63-83f9-dfddf8da2604`, then passed unchanged
@@ -694,47 +672,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   out twice and passing unchanged in 58.7 seconds. Cause unknown; the narrow timing margin is a hypothesis, not a
   diagnosed fix. On 2026-11-05 it passed five attempts per engine; WebKit took 45.9–56.6 seconds across those runs. The
   deadline and exclusion remain unchanged; see the bounded-attempt follow-up in FLAKES.md.
-
-- **Interrupted-card Replace clicks lost under load.** The WebKit test
-  `don't ask again on a refused YOLO replace marks the host, then replaces with the override` in
-  `e2e/tests/terminal-restart.spec.ts` failed in full browser run `49c74525-36ad-44e1-825b-878edadfd71c`: the Replace
-  confirmation click landed but no YOLO question or replace request followed. On unmodified main `9f0fd7e9` it failed
-  once in six runs under added load (`61cbd3cf-a2ab-4ebc-9b91-cc801ba932dd`) and passed four of four on a quiet machine.
-  A Cancel click in the same card was lost the same way once in run `13808999-b14a-44ef-a7df-b547a8419a62`. Hypothesis:
-  the spec's injected sessions use ids without the host-entry prefix #2368 made mandatory, so the UI's background
-  session reads get 400s, and one completing at the click re-renders the card (FLAKES.md, 2026-10-20). On 2026-11-05 it
-  passed five attempts per engine across ordinary and host terminals. The raw-ID hypothesis was not established by a
-  fresh failure; the fixture and exclusion remain unchanged.
-
-- **Same-source Replace menu fails to open after YOLO cancellation.**
-  `plain Replace keeps a newer same-source key after old header YOLO cancellation` in `e2e/tests/replace.spec.ts` failed
-  in WebKit waiting five seconds for the source row's menu in browser run `d01a19ad-811c-4dae-90b8-2c22a70ab473`.
-  Isolated classification reruns failed, passed, failed: `213407df-5293-46eb-87ca-d08bbe6b3535`,
-  `46df9503-ab98-4587-a36d-c8392c58183d`, `a4bb8764-8cf4-42f0-aeee-d97ad0267184`. A further WebKit repetition failed
-  five of ten attempts (`0c25b7f9-40a5-47d2-af94-0c93edf7a331`). Trace and code review identify a product pointer race:
-  dismissing the other row's open menu moves its error into that row, shifting the source toggle between pointer press
-  and release. Leave the exclusion in place. An explicit test-side close would hide the bug; choosing between stable
-  error space and changed dismissal/input ordering needs a product decision (FLAKES.md, 2026-10-17). On 2026-11-05 it
-  passed five attempts per engine across ordinary and host terminals. The layout decision is still open; no test-side
-  menu dismissal was added to hide the earlier product race.
-
-- **Browser stack parent-SIGTERM cleanup.** `scripts/test-start-stack-cleanup.sh` left the stack serving, with state and
-  processes intact, after killing its spawner with SIGTERM in run `f2355071-3c67-4a7b-ba05-37f853c4a6b3`. The isolated
-  repetition `a1b6e9b1-a246-4272-8d7b-89452a3f4c45` passed unchanged. Leading hypothesis (2026-10-01 review, not
-  confirmed): the kill landed while `e2e/start-stack.sh` was still in a foreground startup step, and bash defers the
-  TERM trap until that command returns, past the check's 20-second wait. One candidate step is the startup session
-  create, whose first create probes the systemd user manager under a 15-second bound; nothing yet shows which step it
-  was. `start-stack.sh` now prints timestamped lifecycle markers (each startup step, the orphan watcher's decisions,
-  when the signal trap actually ran, cleanup stages), and a failed phase dumps the stack's process tree and supervisor
-  log tails before its emergency cleanup. On the next failure, compare the watcher's `sent TERM` marker (and the check's
-  own timestamped kill of the spawner) with the `signal trap` marker, and look for a long-running foreground command in
-  the dump. A missing `sent TERM` line alone is not proof the TERM was not sent: cleanup can kill the watcher between
-  its signal and its marker. A PATH `curl` shim delaying startup `POST /api/sessions` by 25 seconds confirmed trap
-  deferral of about 24–26 seconds in run `b9d6942f-1800-40f4-b65d-45f4bd078afa`, but all cleanup phases passed. The
-  check's 20 iterations also include command latency. This did not reproduce the historical leak; retain the markers and
-  investigate a retained failure before treating interruptible startup commands as its fix. The complete cleanup script
-  passed unchanged on 2026-11-05 in run `6f2eff90-c59c-4602-8283-489747b8a36d`, including spawner SIGKILL, spawner
-  SIGTERM, script SIGTERM and both replacement-supervisor phases. This did not reproduce the leak.
 
 - **Trash dialog's PageDown check on Chromium.** `trash header and global confirmation remain reachable` (both widths)
   in `e2e/tests/trash-dialog.spec.ts` sometimes leaves the Delete all confirmation's scroll area at the top after
@@ -778,27 +715,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `0563c44f`; WebKit passed, and the failure snapshot still had terminal input focused after the blur. No additional
   reproduction or fix was attempted (FLAKES.md, 2026-11-05).
 
-- **Settings save cleanup waits for a request-finished event WebKit never sends.** Two checkout-save tests in
-  `e2e/tests/settings.spec.ts` (post-clone commands with carriage returns, and a pending checkout folder save surviving
-  close) time out in cleanup on `reply.finished()` (runs `40e6f124-6214-4bd7-865c-64740aecd10e`,
-  `b9bc59c5-c98f-4e0d-92fc-6735b2c9fc50`); host-terminal re-runs `cb57caa4-7c10-4a8b-9a8f-157331af8daa` passed.
-  Hypothesis: the WebKit behavior #3061 fixed in two sibling tests with a drained route (FLAKES.md, 2026-11-06).
-
-- **A held host-settings save leaves the dialog body without a keyboard stop on WebKit.**
-  `host-settings scrollports stay reachable while saving` (`e2e/tests/modal-layout.spec.ts`) failed once on WebKit in
-  two full browser runs on 2026-11-07 (runs `627f4a69-8586-40fa-93f6-395295f760d5`,
-  `0e536f3c-fa3d-4a52-8182-0596188a0e0e`) and passed every re-run (`2144e44a-3ab6-436b-886e-9360ea84bd6b`,
-  `2c518375-6a3f-4bab-9321-28b492f1dc5d`). Hypothesis: the scan runs before the body's region attributes follow the
-  viewport shrink (FLAKES.md, 2026-11-07).
-
 ### Difficult deflake
-
-- Restore the release integration gate after the remaining Rust flake reports are resolved. The binary-output loss and
-  degenerate-size READY matcher have fixes recorded in FLAKES.md (2026-09-30 and 2026-09-07). The older stalled-viewer
-  RSS and malformed-sentinel reports each passed three focused nextest attempts on 2026-11-05 in batch
-  `51c6a652-7437-4d1a-a579-920a936cc00b`; those non-reproductions do not close them. The shallow-pause reset still
-  recurs, as its Deflake entry records. Keep the integration target's exclusion in `.github/dist-build-setup.yml` until
-  evidence supports reversing it. Browser flakes are separate coverage and do not themselves gate that Rust target.
 
 ## Broken tests
 

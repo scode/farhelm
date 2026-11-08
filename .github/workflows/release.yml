@@ -201,14 +201,21 @@ jobs:
         run: |
           nextest_dir=$(python3 scripts/install-pinned-nextest.py --output-root "$RUNNER_TEMP/nextest-tools") || exit 1
           printf '%s\n' "$nextest_dir" >> "$GITHUB_PATH"
+      - name: "Prepare rootless Podman integration fixtures"
+        if: "runner.os == 'Linux' && runner.arch == 'X64'"
+        run: |
+          sudo apt-get install -y podman uidmap slirp4netns fuse-overlayfs
+          test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
+          podman pull docker.io/library/ubuntu:24.04
+          podman run --rm docker.io/library/ubuntu:24.04 true
       - name: "Run the test suite against the pinned tmux"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
           PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
-            --runner nextest --kind release --selection 'workspace except farhelm integration tests and farhelm-desktop' \
+            --runner nextest --kind release --selection 'workspace Rust targets except farhelm-desktop' \
             --concurrency '4 nextest slots across binaries; retries 0' --tmux required \
             --output-root "$RUNNER_TEMP/test-run-evidence" \
-            -- cargo nextest run --workspace --exclude farhelm-desktop -E 'not (package(farhelm) & kind(test))'
+            -- cargo nextest run --workspace --exclude farhelm-desktop
           PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
             --kind release --selection 'workspace doctests except farhelm-desktop' \
             --concurrency '4 doctest threads' --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" \

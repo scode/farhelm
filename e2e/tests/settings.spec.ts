@@ -1319,15 +1319,17 @@ test("settings saves and clears the all-hosts post-clone command", async ({ page
 test("post-clone commands with carriage returns refuse edits but can be cleared", async ({ page, request }) => {
   const previous = await readPostClone(request);
   let writes = 0;
-  const submitted: Request[] = [];
+  let bodyFailed = false;
   const intercept = async (route: Route) => {
     if (route.request().method() === "PUT") {
       writes++;
-      submitted.push(route.request());
+      // Own the backend reply even when WebKit omits requestfinished.
+      await route.fulfill({ response: await route.fetch() });
+      return;
     }
     await route.continue();
   };
-  await page.route("**/api/checkout-post-clone", intercept);
+  const stopSaves = await drainedRoute(page, "**/api/checkout-post-clone", intercept);
   try {
     await page.goto("/");
     const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
@@ -1370,16 +1372,18 @@ test("post-clone commands with carriage returns refuse edits but can be cleared"
       expect(await readPostClone(request)).toEqual({ command: "printf 'ordinary'" });
       await dialog.getByRole("button", { name: "Close", exact: true }).click();
     }
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    // Even an assertion during a save cannot let its late PUT undo restoration.
-    for (const put of submitted) {
-      const reply = await put.response();
-      if (reply) await reply.finished();
-    }
-    await page.unroute("**/api/checkout-post-clone", intercept);
-    const restored = await request.put("/api/checkout-post-clone", { data: previous });
-    expect(restored.ok(), await restored.text()).toBe(true);
-    expect(await readPostClone(request)).toEqual(previous);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["submitted post-clone saves", stopSaves],
+      ["post-clone command", async () => {
+        const restored = await request.put("/api/checkout-post-clone", { data: previous });
+        expect(restored.ok(), await restored.text()).toBe(true);
+        expect(await readPostClone(request)).toEqual(previous);
+      }],
+    ]);
   }
 });
 
@@ -1735,19 +1739,18 @@ test("an untouched checkout folder save writes nothing and edited paths are trim
  * leave the old folder, so the success line alone cannot satisfy this test. */
 test("a pending checkout folder save survives closing settings", async ({ page, request }) => {
   const previous = await readCheckoutRoot(request);
+  let bodyFailed = false;
   let release!: () => void;
   let signalSubmitted!: () => void;
   const held = new Promise<void>((resolve) => { release = resolve; });
   const submitted = new Promise<void>((resolve) => { signalSubmitted = resolve; });
-  let submittedRequest: Request | undefined;
   const intercept = async (route: Route) => {
     if (route.request().method() !== "PUT") return route.continue();
-    submittedRequest = route.request();
     signalSubmitted();
     await held;
-    await route.continue();
+    await route.fulfill({ response: await route.fetch() });
   };
-  await page.route("**/api/checkout-root", intercept);
+  const stopSaves = await drainedRoute(page, "**/api/checkout-root", intercept);
   try {
     await page.goto("/");
     await openSettings(page, "checkouts");
@@ -1769,16 +1772,21 @@ test("a pending checkout folder save survives closing settings", async ({ page, 
     await openSettings(page, "checkouts");
     await expect(folder).toBeEditable();
     await expect(folder).toHaveValue("~/save-survives-close");
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
     release();
-    // A failed assertion can leave the released PUT in flight. Wait for its
-    // response or cancellation before restoring, or it can overwrite cleanup.
-    const reply = await submittedRequest?.response();
-    if (reply) await reply.finished();
-    await page.unroute("**/api/checkout-root", intercept);
-    const restored = await request.put("/api/checkout-root", { data: previous });
-    expect(restored.ok(), await restored.text()).toBe(true);
-    expect(await readCheckoutRoot(request)).toEqual(previous);
+    // Drain the real backend write before restoration. Browser completion
+    // events are not a reliable teardown boundary on WebKit.
+    await cleanupOwnedSteps(bodyFailed, [
+      ["submitted checkout saves", stopSaves],
+      ["checkout folder", async () => {
+        const restored = await request.put("/api/checkout-root", { data: previous });
+        expect(restored.ok(), await restored.text()).toBe(true);
+        expect(await readCheckoutRoot(request)).toEqual(previous);
+      }],
+    ]);
   }
 });
 
