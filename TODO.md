@@ -24,6 +24,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Revisit letting the agent settings overwrite fix grow to about 280 lines.** Decided on the maintainer's behalf on
+  2026-11-08 when agent-settings-compare-replace blocked: the fix that keeps Farhelm's credential delivery to a
+  Tensorlake host from overwriting a Claude Code or Codex settings edit saved after Farhelm read the file (check the
+  file right before replacing it, merge once on a change, keep the amber warning on a second conflict) was estimated at
+  180-280 changed lines against the plan's 100-line limit, because the shared file installer has to carry the expected
+  old content to its final replacement. The limit was raised to about 280 lines with the same scope. The alternative was
+  to keep the 100-line limit and defer the fix, leaving the overwrite possible.
+
 - **Stop the Settings dialog resizing when the section changes.** The dialog takes the height of whichever section is
   showing, so moving between Sessions, Appearance, Credentials and the rest makes the whole modal jump and the footer's
   Close button move with it. Fix is TBD; keep the dialog one size across sections.
