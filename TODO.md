@@ -72,6 +72,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Fix the misleading message when Stop interrupts a starting agent.** A Stop pressed while the agent is still starting
+  is recorded as a launch that never started, and its message wrongly blames the host's systemd user manager. The
+  message should say what happened: the user stopped the session before its agent finished starting. Found while
+  reviewing the stop-closes-tabs plan on 2026-11-08; the behavior predates that plan.
+
 - **Stop the Settings dialog resizing when the section changes.** The dialog takes the height of whichever section is
   showing, so moving between Sessions, Appearance, Credentials and the rest makes the whole modal jump and the footer's
   Close button move with it. Fix is TBD; keep the dialog one size across sections.
