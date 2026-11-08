@@ -33,6 +33,11 @@ binary="$repo/.ci-tmux/tmux"
 # 350 MB that nothing used after the build and that `cargo clean` does not
 # reach. Reclaim one an older build left behind.
 rm -rf "$repo/.ci-tmux-python"
+# Likewise the temporary build and zig directories below, which live in
+# `.ci-tmux/` and are removed when the build exits; one killed mid-build
+# leaves its directory here. A checkout has one agent at a time (AGENTS.md,
+# "Sharing the machine with other agents"), so any that exist now are dead.
+rm -rf "$repo/.ci-tmux"/.tmux-build.* "$repo/.ci-tmux"/.tmux-python.*
 
 # Unset first so the guard below can only be satisfied by the pin file
 # itself, never by a TMUX_VERSION inherited from the caller's environment.
@@ -58,7 +63,8 @@ if ! test -x "$binary"; then
   # lives in a temporary directory that goes away with the build, and pip's
   # wheel cache is skipped for the same reason: nothing would ever read either
   # again, since the finished binary is what the next run reuses.
-  python_env=$(mktemp -d "${TMPDIR:-/tmp}/farhelm-tmux-python.XXXXXX")
+  mkdir -p "$repo/.ci-tmux"
+  python_env=$(mktemp -d "$repo/.ci-tmux/.tmux-python.XXXXXX")
   trap 'rm -rf "$python_env"' EXIT
   # Build chatter goes to stderr so stdout stays the one-line contract above.
   {

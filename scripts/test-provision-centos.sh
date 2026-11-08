@@ -80,6 +80,13 @@ ssh_config="$HOME/.ssh/config"
 
 run_dir=$(mktemp -d "${TMPDIR:-/tmp}/farhelm-centos-ci.XXXXXX")
 container=""
+# This run's liveness lock, which later runs read to tell a live run's
+# container from one a killed run left behind (see reap_dead_runs below). A
+# separate holder process takes it so that no child of this script (docker,
+# ssh, cargo) inherits the descriptor and keeps a dead run looking alive;
+# `tail --pid` ends with this shell, even by SIGKILL. Its output goes to
+# /dev/null so it never holds a pipe the test recorder waits on.
+flock -o -w 10 "$run_dir/run.lock" tail --pid=$$ -f /dev/null </dev/null >/dev/null 2>&1 &
 # The alias the test dials is PER RUN, suffixed with the run directory's
 # random tail, and so are the markers that fence its block in `~/.ssh/config`.
 # `~/.ssh/config` is shared by every checkout this user runs this script from,
@@ -204,6 +211,25 @@ remove_ssh_config_block() {
   fi
 }
 
+# Remove the containers of earlier runs that died without their EXIT trap.
+# The container runs systemd as PID 1, so a SIGKILLed run's container never
+# exits on its own: it kept running, with its writable layer, until someone
+# noticed. Each container carries its run directory as a label; a container
+# whose run directory is gone, or whose run lock nobody holds, belongs to a
+# dead run. A held lock is a live run on this machine, and its container is
+# left alone.
+reap_dead_runs() {
+  local id dir
+  docker ps -aq --filter label=farhelm-centos-ci.run-dir | while read -r id; do
+    dir=$(docker inspect -f '{{ index .Config.Labels "farhelm-centos-ci.run-dir" }}' "$id" 2>/dev/null) || continue
+    if [ -n "$dir" ] && [ -d "$dir" ] && ! flock -n "$dir/run.lock" true 2>/dev/null; then
+      continue
+    fi
+    echo "   removing container ${id:0:12} left by a dead run" >&2
+    docker rm -f "$id" >/dev/null 2>&1 || true
+  done
+}
+
 cleanup() {
   status=$?
   if [ -n "$container" ]; then
@@ -253,6 +279,7 @@ tmux_payload="$("$repo/scripts/build-pinned-tmux-ci.sh")/tmux"
 echo "== building the CentOS Stream 9 image"
 cat >"$run_dir/Dockerfile" <<EOF
 FROM quay.io/centos/centos:stream9
+LABEL farhelm-centos-ci=1
 # systemd is the point of the image: provisioning writes a user unit and
 # expects a user manager to start it. openssh-server is the transport; the
 # payload push streams over plain ssh, so no sftp subsystem is needed.
@@ -278,6 +305,11 @@ RUN sed -i "/^$container_user:/d" /etc/shadow \\
 CMD ["/usr/sbin/init"]
 EOF
 docker build -t "$image" "$run_dir"
+# A changed Dockerfile leaves the previous build's image dangling under no
+# tag, and nothing else would ever remove it. The label limits the prune to
+# this script's own images, and docker keeps any image a container still uses.
+docker image prune -f --filter label=farhelm-centos-ci=1 >/dev/null || true
+reap_dead_runs
 
 echo "== booting the container"
 # Flag by flag, because each one is load-bearing and none is cargo-culted:
@@ -297,6 +329,7 @@ echo "== booting the container"
 #                       picks. Choosing one here would be a race between the
 #                       check and the bind; asking docker afterwards cannot be.
 container=$(docker run -d \
+  --label "farhelm-centos-ci.run-dir=$run_dir" \
   --privileged \
   --cgroupns=host \
   -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
