@@ -807,6 +807,12 @@ that its required systemd or SSH substrate ran.
 - `dist generate --check` — `release.yml` is generated from `dist-workspace.toml` plus `.github/dist-build-setup.yml`,
   and the release `plan` job refuses a stale one; this asks the same question before a tag has to. Needs the pinned
   cargo-dist (`cargo install --locked cargo-dist --version 0.32.0`, the version `dist-workspace.toml` names).
+- `python3 -B scripts/test-install-pinned-nextest.py` and `python3 -B scripts/test-install-pinned-dx.py` — the
+  installers that put the pinned nextest and dx binaries on PATH in the release build jobs (and nextest locally), and
+  the checksum verification and atomic publication they share (`scripts/pinned_tool.py`): archive and executable
+  digests, archive shape, cache reuse, curl's size limit, each tool's platform mapping, and dx's refusal of a pin that
+  is not the workspace's `dioxus` version. Run them when an installer, the shared module or a pins file changes;
+  seconds, no network.
 - `scripts/publish-docs-shots.sh --self-test` — the docs screenshot publisher's whole validation: against a bare
   repository standing in for GitHub, it checks that refused publishes push nothing, that only `refs/docs-assets/keep` is
   ever created (never a branch), that a snapshot holds exactly the shots the docs pages reference, that partial,

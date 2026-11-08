@@ -119,6 +119,7 @@ Generic recorder wrapping is fine but not required for these; record each result
   among them loading the old-terminal set's account from the checkout; running the harness is only on the maintainer's
   request, `.agents/tensorlake.md`)
 - `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py`
+- `python3 -B scripts/test-install-pinned-nextest.py` and `python3 -B scripts/test-install-pinned-dx.py`
 - The vendored terminal crates' three recorded test commands from `.agents/validation.md` (`vendor/vte`,
   `vendor/alacritty_terminal`, and both together in `vendor/pair-tests`), which the sweep's workspace batteries never
   reach
