@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`tensorlake-ui-fixes`](reports/tensorlake-ui-fixes.report.md) landed 2026-11-05 in #3048, #3049, #3050, #3051: Tensorlake fixes: recipe Save always visible, Suspending…/Resuming… states, launch-resume progress instead of a false "unavailable", Refresh with feedback, structured add-host and suspend dialogs
 - [`bulk-session-actions`](reports/bulk-session-actions.report.md) landed 2026-11-05 in #3052, #3053: Shift+click and Cmd/Ctrl+click select several sessions; a bar offers Stop, Delete, Pin/Unpin and Mark read/unread, with one structured confirmation for a bulk Delete
 - [`host-filter-feedback`](reports/host-filter-feedback.report.md) landed 2026-11-05 in #3054: A host chosen in the rail shows as a removable chip beside the status filter, and an empty filtered list names its host and status
 - [`one-press-suspended-checkout`](reports/one-press-suspended-checkout.report.md) landed 2026-11-06 in #3073: A fresh GitHub checkout on a suspended host takes one Launch press: the host resumes and the session starts in an automatically picked folder
