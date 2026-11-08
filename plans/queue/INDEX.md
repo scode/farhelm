@@ -6,7 +6,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `macos-remote-hosts.md` — Set up, update and uninstall an Apple-silicon Mac as a remote host over SSH, with the supervisor as a per-user launchd job and no tmux on Mac hosts
 - [in-flight b1a4d9] `stop-start-message.md` — A Stop while the agent is still starting shows "Exited — stopped before the agent finished starting" instead of a launch failure blaming systemd; Restart and Replace get the same fix
 - [held] `rail-notification-bell.md` — A notification bell in the rail for notices that are not about one session, red with a count when unread; its first notice is a trashed checkout whose files could not be freed, with Retry now, and the Trash dialog keeps such folders listed
-- [landing b198e1] `snapshot-in-place-paint.md` — Paint a terminal snapshot straight into its blob, roughly halving peak memory for typical terminals with byte-identical output; the fixup-heavy worst case is recorded as a Maybe later entry
 - [held] `settings-dialog-fixed-size.md` — The Settings dialog keeps one fixed height across sections (about 640px, capped by the window), its body scrolling for taller sections
 - [held] `upgrade-epochs.md` — Upgrade epochs as an upgrade floor: installations and hosts below the floor are told to uninstall and reinstall; the SPEC.md freeze becomes the floor rule
 - [held] `pin-rust-toolchain.md` — Pin Rust to the newest stable in rust-toolchain.toml so local checks, CI and release builds agree; bumps are manual PRs
