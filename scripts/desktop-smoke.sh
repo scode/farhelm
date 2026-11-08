@@ -52,6 +52,8 @@
 # web bundle, which is then embedded in the desktop build), and tmux.
 # Usage: scripts/desktop-smoke.sh   (from the repo root; ~5 min)
 # Honors CARGO_TARGET_DIR, relative or absolute.
+# DESKTOP_SMOKE_WEB_DIST=/abs/path/to/public skips the web build and embeds
+# that already-built bundle instead (the release gate's use).
 # DESKTOP_SMOKE_APPEARANCE=1 selects only the finite native appearance leg
 # after the shared build/display setup. It retains bounded JSON and one final
 # client screenshot per case. DOM state is not proof of presentation; normal
@@ -638,7 +640,24 @@ else
 fi
 export CARGO_TARGET_DIR
 TARGET_DIR="$CARGO_TARGET_DIR"
-WEB_DIST="$TARGET_DIR/dx/farhelm-ui/release/web/public"
+
+# DESKTOP_SMOKE_WEB_DIST names a web bundle that is already built, which the
+# smoke then embeds and serves instead of building its own. The release gate
+# sets it to the bundle the release ships, so the smoke tests those exact
+# bytes and the job builds the bundle once (.github/dist-build-setup.yml,
+# "Run the native desktop smoke gate"). Unset, the smoke builds the bundle
+# itself, as a local run needs.
+if [ -n "${DESKTOP_SMOKE_WEB_DIST:-}" ]; then
+  case "$DESKTOP_SMOKE_WEB_DIST" in
+    /*) ;;
+    # farhelm-helm's build.rs rejects a relative FARHELM_UI_DIST.
+    *) fail "DESKTOP_SMOKE_WEB_DIST must be an absolute path ($DESKTOP_SMOKE_WEB_DIST)" ;;
+  esac
+  [ -f "$DESKTOP_SMOKE_WEB_DIST/index.html" ] || fail "DESKTOP_SMOKE_WEB_DIST has no index.html ($DESKTOP_SMOKE_WEB_DIST)"
+  WEB_DIST="$DESKTOP_SMOKE_WEB_DIST"
+else
+  WEB_DIST="$TARGET_DIR/dx/farhelm-ui/release/web/public"
+fi
 
 echo "== building (cargo + web bundle + dx desktop build)"
 (cd "$REPO" && flock --close /tmp/fh-build.lock -c 'ulimit -c unlimited && cargo build --quiet') || fail "cargo build"
@@ -649,7 +668,9 @@ echo "== building (cargo + web bundle + dx desktop build)"
 # `crates/farhelm-ui/crates/farhelm`, which does not exist, and dx panics on
 # the `unwrap` (`packages/cli/src/workspace.rs`). Naming the package takes an
 # earlier return that never reads `default-members` at all.
-(cd "$REPO/crates/farhelm-ui" && flock --close /tmp/fh-build.lock -c 'ulimit -c unlimited && dx build --package farhelm-ui --platform web --release' >"$X/dx-web.log" 2>&1) || fail "dx web build (see $X/dx-web.log)"
+if [ -z "${DESKTOP_SMOKE_WEB_DIST:-}" ]; then
+  (cd "$REPO/crates/farhelm-ui" && flock --close /tmp/fh-build.lock -c 'ulimit -c unlimited && dx build --package farhelm-ui --platform web --release' >"$X/dx-web.log" 2>&1) || fail "dx web build (see $X/dx-web.log)"
+fi
 # FARHELM_UI_DIST makes this a release-SHAPED desktop build (D12/D13): the web
 # bundle built a moment ago is compiled into `farhelm-helm`, and it is that
 # embedded tree — not the `assets/` directory dx leaves beside the binary —

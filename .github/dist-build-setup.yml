@@ -397,9 +397,64 @@
     dx_dir=$(python3 scripts/install-pinned-dx.py --output-root "$RUNNER_TEMP/dx-tools") || exit 1
     printf '%s\n' "$dx_dir" >> "$GITHUB_PATH"
 
+- name: Let the toolchain's rust-objcopy find libLLVM on macOS
+  # Rust 1.98.0 links the Darwin toolchain's bundled `rust-objcopy` and
+  # `rust-lld` against a shared `@rpath/libLLVM.dylib` with an rpath of
+  # `@loader_path/../lib` (rust-lang/rust#157205), but the rustc component
+  # ships that library only at `<sysroot>/lib`, not under
+  # `lib/rustlib/<target>/lib` where the rpath points. rustup's proxies paper
+  # over it by prepending `<sysroot>/lib` to `DYLD_FALLBACK_LIBRARY_PATH` for
+  # every tool THEY launch, which is why plain cargo builds still work — but
+  # dx runs `rust-objcopy` directly to strip the bundle (dioxus-cli 0.7.10,
+  # `post_process_executable`), sets the Linux `LD_LIBRARY_PATH` instead of
+  # the Darwin variable, and so dies with "Library not loaded:
+  # @rpath/libLLVM.dylib ... Failed to strip binary". That is what failed
+  # the v0.4.0-rc.1 tag build on 2026-09-04, the first tag cut after the
+  # `macos-15` image moved from Rust 1.97.1 to 1.98.0 (v0.3.0-rc.2, built on
+  # the older image the day before, was fine).
+  #
+  # The symlink puts the library exactly where the rpath looks, the same
+  # shape the nix rustc packagers adopted (nix-community/fenix#253); it is
+  # guarded so a toolchain that already resolves the library (an older Rust,
+  # or a future rustc component that ships it in place) is left untouched.
+  # Drop this step once the image's Rust resolves `rust-objcopy` on its own.
+  if: runner.os == 'macOS'
+  run: |
+    sysroot=$(rustc --print sysroot)
+    for target_dir in "$sysroot"/lib/rustlib/*-apple-darwin; do
+      if [ -x "$target_dir/bin/rust-objcopy" ] && [ ! -e "$target_dir/lib/libLLVM.dylib" ] && [ -e "$sysroot/lib/libLLVM.dylib" ]; then
+        mkdir -p "$target_dir/lib"
+        ln -s "$sysroot/lib/libLLVM.dylib" "$target_dir/lib/libLLVM.dylib"
+        echo "linked libLLVM.dylib into $target_dir/lib"
+      fi
+    done
+    "$sysroot"/lib/rustlib/aarch64-apple-darwin/bin/rust-objcopy --version
+
+- name: Build the web bundle
+  # `rm -rf target/dx` is not hygiene theater: dx never prunes that directory,
+  # so it accumulates every generation it has ever built, and a stale
+  # content-hashed asset there is indistinguishable from a current one once
+  # `FARHELM_UI_DIST` sweeps the tree into the binary. `farhelm-helm`'s
+  # build.rs documents the same trap.
+  #
+  # `--package` is load-bearing: the workspace has `default-members`, and dx
+  # 0.7.10 canonicalizes those relative paths against its own working
+  # directory, which panics from inside `crates/farhelm-ui`.
+  #
+  # It is built here, before the Linux desktop smoke, so that the smoke tests
+  # this exact bundle rather than building its own (see that step). The
+  # manifest of every file's name and digest is what "Point the release build
+  # at the web bundle" checks, after the smoke has run in the same target
+  # tree, so that nothing written there since can ride into the release.
+  run: |
+    rm -rf target/dx
+    (cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release)
+    (cd target/dx/farhelm-ui/release/web/public && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256) \
+      > "$RUNNER_TEMP/web-bundle.sha256"
+
 # ---------------------------------------------------------------------------
-# Native Linux desktop gate, after its wasm and dx prerequisites but before
-# the release web bundle is built and exported through FARHELM_UI_DIST.
+# Native Linux desktop gate, after the release web bundle is built (the smoke
+# embeds it) but before it is exported through FARHELM_UI_DIST.
 # ---------------------------------------------------------------------------
 
 - name: Install native desktop smoke dependencies
@@ -429,8 +484,8 @@
 
 - name: Test the native desktop seams
   # This is deliberately after the release job installed wasm and dx, so the
-  # following smoke step can reuse those prerequisites, but before the final
-  # release web build writes FARHELM_UI_DIST into the job environment.
+  # following smoke step can reuse those prerequisites, but before
+  # FARHELM_UI_DIST is written into the job environment.
   if: runner.os == 'Linux' && runner.arch == 'X64'
   run: |
     python3 scripts/record-test-run.py \
@@ -443,20 +498,26 @@
       -- cargo test --locked --doc -p farhelm-ui --features desktop -- --show-output --test-threads=4
 
 - name: Run the native desktop smoke gate
-  # desktop-smoke builds a native app and its own web bundle. Its target must
-  # never share cargo-dist's target tree, whose later musl outputs and final
-  # release bundle are publication inputs. The script keeps its state on
-  # failure; successful cleanup removes only this step's owned target tree.
+  # The smoke embeds the release's own web bundle, built above, and builds
+  # its native app in the job's ordinary target tree, the one every test step
+  # before it shares. That makes it test the bundle the release ships, and
+  # spares it a cold debug build and a second web build of its own.
+  #
+  # It used to build in a separate target tree, so that nothing it built
+  # could reach a publication input. The two inputs it could reach are covered
+  # without that: cargo-dist's musl build uses its own target triple and
+  # profile, so it never reuses the smoke's host debug artifacts, and the
+  # bundle's digests are checked before it is embedded ("Point the release
+  # build at the web bundle").
   if: runner.os == 'Linux' && runner.arch == 'X64'
   env:
     CI: true
     DESKTOP_SMOKE_DIR: ${{ runner.temp }}/desktop-smoke
-    CARGO_TARGET_DIR: ${{ runner.temp }}/desktop-smoke-target
+    DESKTOP_SMOKE_WEB_DIST: ${{ github.workspace }}/target/dx/farhelm-ui/release/web/public
   run: |
     PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
       --kind release --selection 'native desktop smoke legs' --concurrency 'sequential smoke legs' \
       --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" -- scripts/desktop-smoke.sh
-    rm -rf -- "$CARGO_TARGET_DIR"
 
 - name: Collect native desktop smoke failure evidence
   # The owned smoke state also contains sockets and credential-bearing config
@@ -528,56 +589,22 @@
     if-no-files-found: warn
     path: "${{ runner.temp }}/test-run-failure-evidence"
 
-- name: Let the toolchain's rust-objcopy find libLLVM on macOS
-  # Rust 1.98.0 links the Darwin toolchain's bundled `rust-objcopy` and
-  # `rust-lld` against a shared `@rpath/libLLVM.dylib` with an rpath of
-  # `@loader_path/../lib` (rust-lang/rust#157205), but the rustc component
-  # ships that library only at `<sysroot>/lib`, not under
-  # `lib/rustlib/<target>/lib` where the rpath points. rustup's proxies paper
-  # over it by prepending `<sysroot>/lib` to `DYLD_FALLBACK_LIBRARY_PATH` for
-  # every tool THEY launch, which is why plain cargo builds still work — but
-  # dx runs `rust-objcopy` directly to strip the bundle (dioxus-cli 0.7.10,
-  # `post_process_executable`), sets the Linux `LD_LIBRARY_PATH` instead of
-  # the Darwin variable, and so dies with "Library not loaded:
-  # @rpath/libLLVM.dylib ... Failed to strip binary". That is what failed
-  # the v0.4.0-rc.1 tag build on 2026-09-04, the first tag cut after the
-  # `macos-15` image moved from Rust 1.97.1 to 1.98.0 (v0.3.0-rc.2, built on
-  # the older image the day before, was fine).
-  #
-  # The symlink puts the library exactly where the rpath looks, the same
-  # shape the nix rustc packagers adopted (nix-community/fenix#253); it is
-  # guarded so a toolchain that already resolves the library (an older Rust,
-  # or a future rustc component that ships it in place) is left untouched.
-  # Drop this step once the image's Rust resolves `rust-objcopy` on its own.
-  if: runner.os == 'macOS'
-  run: |
-    sysroot=$(rustc --print sysroot)
-    for target_dir in "$sysroot"/lib/rustlib/*-apple-darwin; do
-      if [ -x "$target_dir/bin/rust-objcopy" ] && [ ! -e "$target_dir/lib/libLLVM.dylib" ] && [ -e "$sysroot/lib/libLLVM.dylib" ]; then
-        mkdir -p "$target_dir/lib"
-        ln -s "$sysroot/lib/libLLVM.dylib" "$target_dir/lib/libLLVM.dylib"
-        echo "linked libLLVM.dylib into $target_dir/lib"
-      fi
-    done
-    "$sysroot"/lib/rustlib/aarch64-apple-darwin/bin/rust-objcopy --version
-
-- name: Build the web bundle
-  # `rm -rf target/dx` is not hygiene theater: dx never prunes that directory,
-  # so it accumulates every generation it has ever built, and a stale
-  # content-hashed asset there is indistinguishable from a current one once
-  # `FARHELM_UI_DIST` sweeps the tree into the binary. `farhelm-helm`'s
-  # build.rs documents the same trap.
-  #
-  # `--package` is load-bearing: the workspace has `default-members`, and dx
-  # 0.7.10 canonicalizes those relative paths against its own working
-  # directory, which panics from inside `crates/farhelm-ui`.
-  run: |
-    rm -rf target/dx
-    cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release
-
 - name: Point the release build at the web bundle
   # Absolute, because cargo runs build scripts from their own crate
   # directory: `farhelm-helm`'s build.rs refuses a relative value outright
   # rather than resolve it under `crates/farhelm-helm` and embed whatever it
   # finds there.
-  run: echo "FARHELM_UI_DIST=$GITHUB_WORKSPACE/target/dx/farhelm-ui/release/web/public" >> "$GITHUB_ENV"
+  #
+  # The bundle must still be exactly what "Build the web bundle" produced:
+  # the same files, with the same bytes. The Linux desktop smoke builds in the
+  # same target tree after it, and a file added to or changed in this
+  # directory would be embedded into the release like any other.
+  run: |
+    dist="$GITHUB_WORKSPACE/target/dx/farhelm-ui/release/web/public"
+    (cd "$dist" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256) > "$RUNNER_TEMP/web-bundle.now"
+    cmp "$RUNNER_TEMP/web-bundle.sha256" "$RUNNER_TEMP/web-bundle.now" || {
+      echo "the web bundle changed after it was built; refusing to embed it" >&2
+      diff "$RUNNER_TEMP/web-bundle.sha256" "$RUNNER_TEMP/web-bundle.now" >&2
+      exit 1
+    }
+    echo "FARHELM_UI_DIST=$dist" >> "$GITHUB_ENV"
