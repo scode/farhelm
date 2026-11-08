@@ -1745,7 +1745,7 @@ async function keyboardFocusSwitch(page: Page, dialog: Locator, input: Locator) 
   await keyboardFocusControl(page, dialog, input);
 }
 
-/** Show every web Settings pane without saving the illustrative checkout drafts.
+/** Review web Settings controls without saving the illustrative checkout drafts.
  * Both the full review and the Settings-only selection use this sequence, so
  * palette, focus and long-content evidence cannot drift between capture modes.
  * App remains native-only; no updater seam is introduced to photograph it.
