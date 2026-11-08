@@ -23,10 +23,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   sharing a Tensorlake project can collide in their short ownership tag; a build can then terminate the other's builder
   and delete its snapshots.
 
-- [`recipe-delete-warning-omits-newly-finished-snapshot.md`](recipe-delete-warning-omits-newly-finished-snapshot.md) — A
-  recipe Delete question opened before its build finishes can omit the resulting snapshot even though deletion
-  subsequently removes it.
-
 - [`generated-host-name-collision-adopts-unrelated-sandbox.md`](generated-host-name-collision-adopts-unrelated-sandbox.md)
   — A generated host-name collision can make first-time Add adopt an unrelated sandbox and replace its endpoint
   credentials before later copied-state checks can refuse it.
