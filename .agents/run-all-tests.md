@@ -113,6 +113,7 @@ Generic recorder wrapping is fine but not required for these; record each result
 - `bash scripts/test-plans-watch.sh` and `python3 scripts/test-plans-queue.py`, with `shellcheck` over
   `scripts/plans-watch.sh`, `scripts/test-plans-watch.sh` and `scripts/publish-docs-shots.sh`
 - `python3 scripts/test-todo-picker.py` (TODO extraction and legacy standalone checklist)
+- `python3 -B scripts/test-capture-agent-screens.py` (fixture URL privacy guard; no vendor turns)
 - `deno test -A scripts/serve-page.ts` (legacy standalone server; agent pages use the `interactive-artifact` skill)
 - `deno test -A scripts/tensorlake/sandbox-tests.ts` and
   `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-shard.sh` (the Tensorlake harness's own checks,

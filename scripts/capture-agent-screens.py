@@ -94,10 +94,12 @@ class Scrubber:
     # A URL that points into this machine or its private network: an agent shows one when its configuration sends it
     # through a local proxy (Codex warns that its base URL is overridden). It says how the capture host is set up, so
     # its scheme, host and port become a neutral placeholder. `host` is the scrubbed host name, so a URL to this
-    # machine by name is caught after the word replacements too.
+    # machine by name is caught after the word replacements too. Userinfo belongs to the authority, not the host,
+    # and must disappear with it: a configured proxy URL can carry a password before `@`.
     LOCAL_URL = re.compile(
-        r"\b[a-z][a-z0-9+.-]*://(?:localhost|host|\[::1\]|0\.0\.0\.0|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}"
-        r"|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})(?::\d+)?(?=[/\s.,;)]|$)",
+        r"\b[a-z][a-z0-9+.-]*://(?:[^\s/?#@]+@)?"
+        r"(?:localhost|host|\[::1\]|0\.0\.0\.0|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}"
+        r"|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})(?::\d+)?(?=[/?#\s.,;)]|$)",
         re.IGNORECASE,
     )
     LOCAL_URL_PLACEHOLDER = "http://proxy.invalid"
