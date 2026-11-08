@@ -79,8 +79,9 @@ function stream(name: string): string[] {
  * holds the component, every input message it sent, the sizes it
  * reported, the selections it copied, the links it reported clicked and
  * any late protocol error; `harness.withhold` is what `linkPress` answers.
- * The bundled terminal font has loaded before this returns, so cell
- * metrics are the real ones.
+ * Both bundled terminal font weights have loaded before this returns, as
+ * they do before an application terminal mounts. Otherwise bold fixture
+ * runs can still use fallback glyphs when layout assertions measure them.
  */
 async function openGrid(page: Page): Promise<void> {
   await page.route(`${ORIGIN}/**`, async (route) => {
@@ -93,7 +94,10 @@ async function openGrid(page: Page): Promise<void> {
   });
   await page.goto(`${ORIGIN}/`);
   await page.evaluate(async () => {
-    await document.fonts.load('14px "JetBrains Mono"');
+    await Promise.all([
+      document.fonts.load('14px "JetBrains Mono"'),
+      document.fonts.load('700 14px "JetBrains Mono"'),
+    ]);
     const sent: unknown[] = [];
     const resizes: unknown[] = [];
     const copies: string[] = [];
