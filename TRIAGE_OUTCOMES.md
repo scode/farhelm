@@ -21618,7 +21618,10 @@
   gate: about 100 lines of diff (estimated 15), as above; over it, block and bring it back. The same change settles
   `openssh-floor-misparses-managed-known-host-path.md` and may remove both items. Remove the feedback file and its index
   entry.
-- Execution: planned in `plans/queue/openssh-state-path-refusal.md`.
+- Execution: implemented in jj change `qssyuolxkmwuuoynuxlrlwsqmylqrnzy`, bookmark
+  `plan/openssh-state-path-refusal/01-refuse-unsafe-state-path`,
+  [PR #3168](https://github.com/scode/farhelm/pull/3168/changes). Tensorlake host and builder options refuse `%`, `"`
+  and `\` in managed paths with the path and relocation advice. The sibling item is closed in the next PR.
 
 ## openssh-floor-misparses-managed-known-host-path.md
 

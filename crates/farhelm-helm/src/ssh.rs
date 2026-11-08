@@ -364,12 +364,13 @@ pub(crate) fn ssh_oneshot_args(dest: &str, extra_options: &[String]) -> Vec<Stri
 
 /// `Keyword="path"` for an ssh `-o` option whose value is a local path
 /// (`IdentityFile`, `UserKnownHostsFile`), encoded for ssh_config's value
-/// parser: quotes and backslashes escaped, and every `%` doubled, because
-/// those keywords expand percent tokens and a path is never meant to hold
-/// one. Unlike [`ssh_control_path_option`], no trailing token survives.
+/// parser. Unlike [`ssh_control_path_option`], no trailing token survives.
 /// The one encoder for these options, shared by Tensorlake hosts and the
 /// snapshot builder.
 ///
+/// Refuses `%`, quotes and backslashes: supported older OpenSSH versions
+/// cannot decode them consistently across identity and known-hosts paths.
+/// In particular, a misdirected known-hosts file can silently lose its pins.
 /// Refuses a path containing `${`, naming it. OpenSSH expands `${NAME}` in
 /// these options even inside config quotes, and has no escape for it: an
 /// unset variable makes ssh exit with "invalid environment variable
@@ -382,6 +383,12 @@ pub(crate) fn ssh_oneshot_args(dest: &str, extra_options: &[String]) -> Vec<Stri
 /// `raw` must already be UTF-8 text; the caller owns that check, as
 /// [`ssh_base_args`] does for the control path.
 pub(crate) fn ssh_config_path_option(keyword: &str, raw: &str) -> Result<String, String> {
+    if let Some(character) = raw.chars().find(|c| matches!(c, '%' | '"' | '\\')) {
+        return Err(format!(
+            "path {raw} contains {character:?}, which supported OpenSSH versions cannot use safely in \
+             their {keyword} option; move Farhelm's state directory (--state-dir) to a path without it"
+        ));
+    }
     if raw.contains("${") {
         return Err(format!(
             "path {raw} contains \"${{\", which ssh would expand as an environment variable in \
@@ -1319,18 +1326,14 @@ mod tests {
         assert_eq!(options, expected);
     }
 
-    /// Spec: a path option is `Keyword="..."` with backslashes and quotes
-    /// escaped and every `%` doubled, a trailing `%C` included.
+    /// Spec: a supported path option is quoted, preserving spaces and apostrophes.
     ///
-    /// Why: `IdentityFile` and `UserKnownHostsFile` expand percent tokens, so
-    /// an undoubled `%` in a state directory's path would make ssh read a
-    /// different file than the one Farhelm wrote; unescaped quotes would end
-    /// the value early.
+    /// Why: spaces must not split a path into multiple ssh_config values.
     #[farhelm_testtrace::test]
-    fn path_options_escape_quotes_backslashes_and_every_percent() {
+    fn path_options_quote_supported_paths() {
         assert_eq!(
-            super::ssh_config_path_option("IdentityFile", r#"/a b/"q"\x/%d/%C"#).unwrap(),
-            r#"IdentityFile="/a b/\"q\"\\x/%%d/%%C""#
+            super::ssh_config_path_option("IdentityFile", "/a b/it's here").unwrap(),
+            r#"IdentityFile="/a b/it's here""#
         );
     }
 
@@ -1351,11 +1354,11 @@ mod tests {
     ///
     /// Spec: the Tensorlake argv is the user-config argv with exactly the
     /// shared Tensorlake access options (no builder log level) inserted before the option terminator, in both
-    /// shared and unshared shapes, with both paths config-quoted (spaces,
-    /// quotes and `%` survive); the user-config argv has none of them.
+    /// shared and unshared shapes, with both paths config-quoted (spaces
+    /// survive); the user-config argv has none of them.
     #[farhelm_testtrace::test]
     fn tensorlake_access_adds_its_options_before_the_terminator() {
-        let state = std::path::Path::new("/state dir/50%");
+        let state = std::path::Path::new("/state dir/normal");
         let access = super::SshAccess::resolve(super::SshAccessKind::Tensorlake, state).unwrap();
         let super::SshAccess::Tensorlake(crate::tensorlake::ssh::TensorlakeSshAccess {
             identity_file,
@@ -1366,16 +1369,16 @@ mod tests {
         };
         assert_eq!(
             identity_file,
-            std::path::Path::new("/state dir/50%/tensorlake/ssh-key/id_ed25519")
+            std::path::Path::new("/state dir/normal/tensorlake/ssh-key/id_ed25519")
         );
         assert_eq!(
             known_hosts,
-            std::path::Path::new("/state dir/50%/tensorlake/known_hosts")
+            std::path::Path::new("/state dir/normal/tensorlake/known_hosts")
         );
         let expected = [
-            r#"IdentityFile="/state dir/50%%/tensorlake/ssh-key/id_ed25519""#,
+            r#"IdentityFile="/state dir/normal/tensorlake/ssh-key/id_ed25519""#,
             "IdentitiesOnly=yes",
-            r#"UserKnownHostsFile="/state dir/50%%/tensorlake/known_hosts""#,
+            r#"UserKnownHostsFile="/state dir/normal/tensorlake/known_hosts""#,
             "GlobalKnownHostsFile=/dev/null",
             "HostKeyAlias=sandbox.tensorlake.ai",
             "StrictHostKeyChecking=accept-new",
