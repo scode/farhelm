@@ -245,12 +245,30 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         self.action(target, "configure-github-helper").await?;
         Ok(self.behavior(target).await?.github_cli)
     }
+    async fn wait_tensorlake_ssh(&self, target: &ProvisioningTarget) -> Result<(), BackendFailure> {
+        self.action(target, "wait-tensorlake-ssh").await?;
+        Ok(())
+    }
+
     async fn prepare_tensorlake_sandbox(
         &self,
         target: &ProvisioningTarget,
     ) -> Result<PathBuf, BackendFailure> {
         self.action(target, "prepare-sandbox").await?;
         Ok(self.behavior(target).await?.home.into())
+    }
+
+    /// The browser seam models the explicit checkpoint-safety result and its
+    /// failure propagation, not a remote filesystem or real supervisor boot.
+    /// Production command tests and the two-clone gate supply those proofs.
+    async fn finish_snapshot_install(
+        &self,
+        target: &ProvisioningTarget,
+        _unit: &str,
+        _state_dir: &Path,
+    ) -> Result<(), BackendFailure> {
+        self.action(target, "finish-snapshot-install").await?;
+        Ok(())
     }
 
     async fn read_small_file(

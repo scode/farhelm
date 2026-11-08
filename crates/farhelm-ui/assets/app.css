@@ -4108,10 +4108,11 @@ a:any-link,
 .recipe-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .recipe-row-name { color: var(--fg-0); font-weight: 600; overflow-wrap: anywhere; }
 .recipe-row-summary, .recipe-row-status { color: var(--fg-1); font-size: 12px; overflow-wrap: anywhere; }
-/* A managed recipe's snapshot status: one line per fact, by tone. Build
-   failures carry the script's own error lines, so they keep line breaks. */
-.recipe-row-snapshot { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.recipe-row-snapshot .recipe-row-status { display: flex; align-items: baseline; gap: 6px; }
+/* Build and preparation are separate status regions. Their failures retain
+   remote error line breaks, and busy dots use the shared motion policy. */
+.recipe-row-snapshot, .recipe-row-prepared { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.recipe-row-snapshot .recipe-row-status, .recipe-row-prepared .recipe-row-status { display: flex; align-items: baseline; gap: 6px; }
+.recipe-row-status-positive { color: var(--ok); }
 .recipe-row-status-warning { color: var(--warn-bright); }
 .recipe-row-status-error { color: var(--danger); white-space: pre-wrap; }
 .recipe-row-status-muted { color: var(--fg-2); }

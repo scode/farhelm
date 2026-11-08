@@ -19,6 +19,8 @@
 //! - [`build`]: snapshot builds of managed recipes, which run their scripts
 //!   ([`build_script`]) in a builder sandbox through [`shell`] over ssh with
 //!   Farhelm's Tensorlake ssh options ([`ssh`]).
+//! - [`prepared`]: the provisioning-owned checkpoint installer contract and the
+//!   install coordinates carried to new hosts. The build registry owns its jobs.
 //! - [`hosts`]: what a Tensorlake host needs from the API once it exists: the
 //!   status check before every dial, and removal, which deletes the sandbox.
 //!   The host model itself (`HostKind::Tensorlake` and its columns) is in
@@ -40,6 +42,7 @@ pub(crate) mod hosts;
 mod http;
 pub(crate) mod lifecycle;
 pub(crate) mod orphans;
+pub(crate) mod prepared;
 pub(crate) mod recipes;
 pub(crate) mod shell;
 pub(crate) mod ssh;
@@ -82,6 +85,10 @@ struct Inner {
     shell: Arc<dyn SandboxShell>,
     /// The snapshot builds, which share this service's API and key.
     builds: Arc<RecipeBuilds>,
+    /// Kept when test seams replace API or shell; preparation must keep its
+    /// selected backend instead of silently falling back to an offline installer.
+    #[cfg(test)]
+    preparer: Arc<dyn prepared::SnapshotPreparer>,
     /// Forwards are read here and owned by the connected actors' leases.
     tunnels: tunnels::Tunnels,
     /// Same validated browser fake as the API, never a production fallback.
@@ -101,6 +108,7 @@ impl Inner {
         ssh_keys: Option<Arc<SshKeyStore>>,
         tunnel_fake: Option<Arc<e2e::E2eTensorlake>>,
         delivery: Arc<crate::provisioning::credential_delivery::CredentialDelivery>,
+        preparer: Arc<dyn prepared::SnapshotPreparer>,
     ) -> Self {
         let builds = Arc::new(RecipeBuilds::new(
             store.clone(),
@@ -108,6 +116,8 @@ impl Inner {
             Arc::clone(&shell),
             ssh_keys.clone(),
             BuildTimings::default(),
+            Arc::clone(&preparer),
+            farhelm_proto::BUILD_VERSION.to_string(),
         ));
         Self {
             store,
@@ -117,6 +127,8 @@ impl Inner {
             #[cfg(test)]
             shell,
             builds,
+            #[cfg(test)]
+            preparer,
             tunnels: tunnels::Tunnels::default(),
             tunnel_fake,
             orphan_cleanups: orphans::Cleanups::default(),
@@ -145,6 +157,7 @@ impl Tensorlake {
         store: HelmStore,
         state_dir: &Path,
         delivery: Arc<crate::provisioning::credential_delivery::CredentialDelivery>,
+        preparer: Arc<dyn prepared::SnapshotPreparer>,
     ) -> anyhow::Result<Self> {
         let (api, shell, fake): ProductionSeams = if cfg!(test) {
             (Arc::new(Offline::test()), Arc::new(OfflineShell), None)
@@ -159,6 +172,7 @@ impl Tensorlake {
             Some(Arc::new(SshKeyStore::new(tensorlake_dir))),
             fake,
             delivery,
+            preparer,
         ))))
     }
 
@@ -185,6 +199,7 @@ impl Tensorlake {
             None,
             None,
             delivery,
+            Arc::new(prepared::UnavailablePreparer),
         )))
     }
 
@@ -200,6 +215,7 @@ impl Tensorlake {
             self.0.ssh_keys.clone(),
             None,
             Arc::clone(&self.0.delivery),
+            Arc::clone(&self.0.preparer),
         )))
     }
 
@@ -214,6 +230,7 @@ impl Tensorlake {
             self.0.ssh_keys.clone(),
             None,
             Arc::clone(&self.0.delivery),
+            Arc::clone(&self.0.preparer),
         )))
     }
 
@@ -222,13 +239,33 @@ impl Tensorlake {
         &self.0.builds
     }
 
+    /// Inject checkpoint preparation without changing API, shell or key storage.
+    /// Like the other seams, already-running jobs stay with the old registry.
+    #[cfg(test)]
+    pub(crate) fn with_preparer(&self, preparer: Arc<dyn prepared::SnapshotPreparer>) -> Self {
+        Self(Arc::new(Inner::new(
+            self.0.store.clone(),
+            Arc::clone(&self.0.api),
+            Arc::clone(&self.0.shell),
+            self.0.ssh_keys.clone(),
+            self.0.tunnel_fake.clone(),
+            Arc::clone(&self.0.delivery),
+            preparer,
+        )))
+    }
+
     /// Settings/key tests need the ordinary key directory, without any file
     /// delivery backend or second production environment selection.
     #[cfg(test)]
     pub(crate) fn production(store: HelmStore, state_dir: &Path) -> anyhow::Result<Self> {
         let delivery =
             crate::provisioning::credential_delivery::CredentialDelivery::detached(store.clone());
-        Self::production_with_delivery(store, state_dir, delivery)
+        Self::production_with_delivery(
+            store,
+            state_dir,
+            delivery,
+            Arc::new(prepared::UnavailablePreparer),
+        )
     }
 
     /// Setup, host presentation and replacement routes share the connect hook's

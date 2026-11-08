@@ -277,15 +277,21 @@ pub struct RecipeView {
     pub codex_login_credential: Option<String>,
     pub github_token_credential: Option<String>,
     pub tunnels: Vec<Tunnel>,
-    /// The snapshot new hosts start from. Base or package edits keep it until
-    /// an explicit rebuild records its replacement.
+    /// The built software layer. Base or package edits keep it until an explicit
+    /// rebuild records its replacement; preparation adds Farhelm on top of it.
     #[serde(default)]
     pub snapshot: Option<SnapshotView>,
     /// Whether a snapshot build is running, or how the last one ended when
     /// it did not succeed.
     #[serde(default)]
     pub build: BuildView,
-    /// A build sandbox or a superseded snapshot that Farhelm created for this
+    /// The Farhelm installation checkpoint reused by new hosts, when available.
+    #[serde(default)]
+    pub prepared: Option<PreparedSnapshotView>,
+    /// Lazy preparation runs separately from an explicit snapshot build.
+    #[serde(default)]
+    pub preparation: PrepareView,
+    /// A build/preparation sandbox or superseded snapshot created for this
     /// recipe still exists on Tensorlake because deleting it failed. It bills
     /// until the next build or the recipe's deletion removes it.
     #[serde(default)]
@@ -389,6 +395,84 @@ pub enum BuildView {
     },
     /// A build started and never finished because the helm stopped while it
     /// ran. What it left behind is removed by the next build.
+    Interrupted { started_at: i64 },
+}
+
+/// A prepared installation's provenance, with freshness decided by the helm.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct PreparedSnapshotView {
+    pub id: String,
+    pub prepared_at: i64,
+    pub farhelm_version: String,
+    pub source_snapshot: String,
+    pub stale_reason: Option<PreparedStaleReason>,
+}
+
+/// The only reasons preparation is renewed. Recipe settings alone do not renew it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreparedStaleReason {
+    Expired,
+    FarhelmUpdated,
+    SnapshotRebuilt,
+}
+
+/// Preparation's five visible phases; installation includes checkpoint-safety
+/// verification, and snapshotting begins only after that verification succeeds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrepareStep {
+    Creating,
+    Starting,
+    Installing,
+    Snapshotting,
+    Finishing,
+}
+
+impl PrepareStep {
+    /// All clients use the same phase count in waiting and failure messages.
+    pub const COUNT: u8 = 5;
+
+    /// Stable one-based position for progress and failure messages.
+    pub fn number(self) -> u8 {
+        match self {
+            Self::Creating => 1,
+            Self::Starting => 2,
+            Self::Installing => 3,
+            Self::Snapshotting => 4,
+            Self::Finishing => 5,
+        }
+    }
+
+    /// A phrase completing both preparing and preparation-failed messages.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Creating => "creating the preparer sandbox",
+            Self::Starting => "starting the preparer sandbox",
+            Self::Installing => "installing Farhelm",
+            Self::Snapshotting => "taking the prepared snapshot",
+            Self::Finishing => "finishing up",
+        }
+    }
+}
+
+/// Preparation outlives its requesting host setup. An interrupted run is retried
+/// lazily by the next new host, without an eager renewal or separate button.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum PrepareView {
+    /// No preparation is running; the prepared record separately describes reuse.
+    #[default]
+    Idle,
+    /// Registry-owned work that concurrent host setups join.
+    Preparing { step: PrepareStep, started_at: i64 },
+    /// Failure preserves the earlier checkpoint and its actual stale reason.
+    Failed {
+        step: PrepareStep,
+        message: String,
+        at: i64,
+    },
+    /// A durable start without a live task; the next use reconciles its ownership.
     Interrupted { started_at: i64 },
 }
 

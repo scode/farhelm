@@ -31,6 +31,8 @@ fn saved_view() -> RecipeView {
         }],
         snapshot: None,
         build: farhelm_proto::tensorlake::recipes::BuildView::Idle,
+        prepared: None,
+        preparation: farhelm_proto::tensorlake::recipes::PrepareView::Idle,
         cleanup_pending: false,
     }
 }

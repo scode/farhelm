@@ -8,7 +8,7 @@ pub(crate) use automatic::AutomaticUpdates;
 
 use super::backend::{
     ActionOutcome, BackendFailure, PreparedPayload, ProbeObservation, ProbeTarget,
-    ProvisioningBackend, ReachOutcome, SystemBackend, path_text, stage_payload,
+    ProvisioningBackend, ReachOutcome, SystemBackend, path_text,
 };
 use super::credential_delivery::CredentialDelivery;
 use super::e2e::{E2E_BACKEND_ENV, E2ePayloads, E2eProvisioningBackend};
@@ -331,10 +331,12 @@ fn schema_refusal(host_schema: Option<i64>) -> Option<String> {
 }
 
 /// Select transport and payloads before the manager can run a connection hook.
-/// Both services receive these same validated seams; a late backend attachment
-/// or a second environment selection would leave initial connections different.
+/// Host setup and credential delivery share their validated backend. Snapshot
+/// preparation selects its one-shot backend here too; a late attachment or a
+/// second environment selection would leave initial work using different seams.
 pub(crate) struct ProductionProvisioning {
     backend: Arc<dyn ProvisioningBackend>,
+    preparation_backend: Arc<dyn ProvisioningBackend>,
     payloads: Arc<dyn PayloadSource>,
     pub(crate) delivery: Arc<CredentialDelivery>,
 }
@@ -349,38 +351,74 @@ impl ProductionProvisioning {
         selection: PayloadSelection,
         release_build: bool,
     ) -> anyhow::Result<Self> {
-        let (backend, payloads): (Arc<dyn ProvisioningBackend>, Arc<dyn PayloadSource>) =
-            if let Some(root) = std::env::var_os(E2E_BACKEND_ENV) {
-                let root = PathBuf::from(root);
-                let backend = E2eProvisioningBackend::new(root.clone(), state_dir)?;
-                eprintln!(
-                    "WARNING: E2E-only injected provisioning backend enabled from {}; host setup actions are simulated",
-                    root.display()
-                );
-                (
-                    Arc::new(backend),
-                    Arc::new(E2ePayloads(root.join("ENABLED"))),
-                )
-            } else {
-                // Resolve a relative payload selection against the same cwd as
-                // the former service constructor, preserving its alias guard.
-                let cwd =
-                    std::env::current_dir().context("reading the current working directory")?;
-                (
-                    Arc::new(SystemBackend::new(state_dir.to_path_buf())),
-                    production_payloads(selection, state_dir, release_build, &cwd)?,
-                )
-            };
+        let (backend, preparation_backend, payloads): (
+            Arc<dyn ProvisioningBackend>,
+            Arc<dyn ProvisioningBackend>,
+            Arc<dyn PayloadSource>,
+        ) = if let Some(root) = std::env::var_os(E2E_BACKEND_ENV) {
+            let root = PathBuf::from(root);
+            let backend = E2eProvisioningBackend::new(root.clone(), state_dir)?;
+            eprintln!(
+                "WARNING: E2E-only injected provisioning backend enabled from {}; host setup actions are simulated",
+                root.display()
+            );
+            let backend: Arc<dyn ProvisioningBackend> = Arc::new(backend);
+            (
+                Arc::clone(&backend),
+                backend,
+                Arc::new(E2ePayloads(root.join("ENABLED"))),
+            )
+        } else {
+            // Resolve a relative payload selection against the same cwd as
+            // the former service constructor, preserving its alias guard.
+            let cwd = std::env::current_dir().context("reading the current working directory")?;
+            (
+                Arc::new(SystemBackend::new(state_dir.to_path_buf())),
+                Arc::new(SystemBackend::one_shot(state_dir.to_path_buf())),
+                production_payloads(selection, state_dir, release_build, &cwd)?,
+            )
+        };
         let delivery = CredentialDelivery::new(store, Arc::clone(&backend));
         Ok(Self {
             backend,
+            preparation_backend,
             payloads,
             delivery,
         })
     }
+
+    /// Construct preparation before the manager exists, using the transport
+    /// and payload policy already selected for this helm. It has no store,
+    /// delivery service or manager through which it could configure a host.
+    pub(crate) fn snapshot_preparer(
+        &self,
+        state_dir: &Path,
+    ) -> Arc<dyn crate::tensorlake::prepared::SnapshotPreparer> {
+        Arc::new(super::snapshot_preparer::InstallerSnapshotPreparer::new(
+            Arc::clone(&self.preparation_backend),
+            Arc::clone(&self.payloads),
+            PlanLayout::production(state_dir.to_path_buf()),
+            farhelm_proto::BUILD_VERSION.to_string(),
+        ))
+    }
 }
 
 impl ProvisioningService {
+    /// Give an owned fixture the same installer seams without retaining the
+    /// service, manager or delivery hook. The injected backend must implement
+    /// the explicit checkpoint guard; its default still refuses preparation.
+    #[cfg(test)]
+    pub(super) fn snapshot_preparer(
+        &self,
+    ) -> Arc<dyn crate::tensorlake::prepared::SnapshotPreparer> {
+        Arc::new(super::snapshot_preparer::InstallerSnapshotPreparer::new(
+            Arc::clone(&self.backend),
+            Arc::clone(&self.payloads),
+            self.layout.clone(),
+            self.helm_build(),
+        ))
+    }
+
     /// Drive one real scan with caller-owned attempt memory, without a timer or
     /// background scheduling, so retry tests can name the exact event boundary.
     #[cfg(test)]
@@ -2503,50 +2541,7 @@ impl ProvisioningService {
         &self,
         plan: &ProvisioningPlan,
     ) -> Result<HashMap<super::plan::PayloadKind, PreparedPayload>, (usize, BackendFailure)> {
-        let mut seen = std::collections::HashSet::new();
-        let preparations =
-            plan.actions
-                .iter()
-                .enumerate()
-                .filter_map(|(index, action)| match action {
-                    ProvisioningAction::UploadPayload { payload, arch, .. }
-                    | ProvisioningAction::InstallPayload { payload, arch, .. }
-                        if seen.insert(*payload) =>
-                    {
-                        Some((index, *payload, *arch))
-                    }
-                    _ => None,
-                })
-                .map(|(index, payload, arch)| async move {
-                    let source =
-                        self.payloads.path(payload, arch).await.map_err(|error| {
-                            (index, BackendFailure::new(format!("{error:#}"), ""))
-                        })?;
-                    let staged = stage_payload(&source)
-                        .await
-                        .map_err(|error| (index, error))?;
-                    Ok::<_, (usize, BackendFailure)>((index, payload, staged))
-                });
-        let mut prepared = HashMap::new();
-        // Reported in plan order rather than completion order, so two
-        // failures in one run always name the same step.
-        let mut failure: Option<(usize, BackendFailure)> = None;
-        for outcome in futures_util::future::join_all(preparations).await {
-            match outcome {
-                Ok((_, payload, staged)) => {
-                    prepared.insert(payload, staged);
-                }
-                Err((index, error)) => {
-                    if failure.as_ref().is_none_or(|(first, _)| index < *first) {
-                        failure = Some((index, error));
-                    }
-                }
-            }
-        }
-        match failure {
-            Some(failure) => Err(failure),
-            None => Ok(prepared),
-        }
+        super::installation::prepare_payloads(self.payloads.as_ref(), plan).await
     }
 
     /// Retain one failed action and release the host claim without undoing
@@ -2596,66 +2591,20 @@ impl ProvisioningService {
         prepared: &HashMap<super::plan::PayloadKind, PreparedPayload>,
     ) -> Result<ActionOutcome, BackendFailure> {
         match action {
-            ProvisioningAction::EnsureDirectories { directories } => {
-                self.backend
-                    .ensure_directories(&plan.target, directories)
-                    .await
-            }
-            ProvisioningAction::UploadPayload {
-                payload,
-                destination,
-                temporary,
-                ..
-            } => {
-                let source = prepared.get(payload).ok_or_else(|| {
-                    BackendFailure::new("the prepared payload disappeared before upload", "")
-                })?;
-                self.backend
-                    .upload_path(&plan.target, *payload, source, destination, temporary)
-                    .await
-            }
-            ProvisioningAction::InstallPayload {
-                payload,
-                destination,
-                temporary,
-                ..
-            } => {
-                let source = prepared.get(payload).ok_or_else(|| {
-                    BackendFailure::new("the prepared payload disappeared before installation", "")
-                })?;
-                self.backend
-                    .install_path(
-                        &plan.target,
-                        *payload,
-                        source,
-                        destination,
-                        temporary,
-                        0o755,
-                    )
-                    .await
-            }
-            ProvisioningAction::WriteUnit {
-                content,
-                destination,
-                temporary,
-                ..
-            } => {
-                self.backend
-                    .install_bytes(
-                        &plan.target,
-                        content.as_bytes(),
-                        destination,
-                        temporary,
-                        0o644,
-                    )
-                    .await
-            }
-            ProvisioningAction::DaemonReload => self.backend.daemon_reload(&plan.target).await,
-            ProvisioningAction::EnableSupervisor {
-                unit, unit_path, ..
-            } => self.backend.enable_now(&plan.target, unit, unit_path).await,
-            ProvisioningAction::EnableLinger { .. } => {
-                self.backend.enable_linger(&plan.target).await
+            ProvisioningAction::EnsureDirectories { .. }
+            | ProvisioningAction::UploadPayload { .. }
+            | ProvisioningAction::InstallPayload { .. }
+            | ProvisioningAction::WriteUnit { .. }
+            | ProvisioningAction::DaemonReload
+            | ProvisioningAction::EnableSupervisor { .. }
+            | ProvisioningAction::EnableLinger { .. } => {
+                super::installation::execute_install_action(
+                    self.backend.as_ref(),
+                    plan,
+                    action,
+                    prepared,
+                )
+                .await
             }
             ProvisioningAction::RestartSupervisor { unit } => {
                 self.backend.restart(&plan.target, unit).await
@@ -2706,62 +2655,71 @@ impl ProvisioningService {
                 Ok(ActionOutcome::Completed)
             }
             ProvisioningAction::AttachSupervisor => {
-                if let Some(outcome) = self.backend.injected_attach(&plan.target).await? {
-                    return Ok(outcome);
-                }
-                let previous_incarnation =
-                    self.manager.status(host).map(|status| status.incarnation);
-                // A fresh window, not a plain retry: this step runs seconds
-                // after starting or restarting the supervisor's own unit,
-                // so the host is coming back by our own action — and a
-                // single probe would race that start latency, then sit out
-                // a full re-probe past this step's own deadline.
-                //
-                // The ticket separates the helm refusing the supervisor this
-                // run just installed from a refusal the host already held
-                // before this step, often the very protocol skew an update
-                // is fixing: only a refusal from a dial numbered after the
-                // ticket stops the wait (see
-                // `ConnectionManager::retry_now_with_fresh_window`). `None`
-                // (no such host) stops nothing early; the loop below then
-                // reports the host as gone, as before.
-                let ticket = self
-                    .manager
-                    .retry_now_with_fresh_window(host)
-                    .await
-                    .map_err(|error| {
-                        BackendFailure::new("requesting supervisor attach", error.to_string())
-                    })?;
-                let attached = tokio::time::timeout(ATTACH_TIMEOUT, async {
-                    loop {
-                        let status = self.manager.status(host)?;
-                        if status.state.is_connected()
-                            && status.client.is_some()
-                            && Some(status.incarnation) != previous_incarnation
-                        {
-                            return Some(Ok(()));
-                        }
-                        if ticket.is_some_and(|ticket| status.refusal_attempt > ticket)
-                            && let Some(failure) = attach_refusal(&status.state)
-                        {
-                            return Some(Err(failure));
-                        }
-                        tokio::time::sleep(Duration::from_millis(20)).await;
-                    }
-                })
-                .await
-                .map_err(|_| {
-                    BackendFailure::new("waiting for the provisioned supervisor", "timed out")
-                })?;
-                attached.ok_or_else(|| {
-                    BackendFailure::new(
-                        "waiting for the provisioned supervisor",
-                        "the registered host actor disappeared",
-                    )
-                })??;
-                Ok(ActionOutcome::Completed)
+                self.attach_supervisor(host, &plan.target).await
             }
         }
+    }
+
+    /// Wait for a new usable connection after setup or a prepared clone's
+    /// boot. The caller owns run progress and install-coordinate admission;
+    /// attachment retains the same refusal ticket and fresh retry window.
+    async fn attach_supervisor(
+        &self,
+        host: HostId,
+        target: &ProvisioningTarget,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        if let Some(outcome) = self.backend.injected_attach(target).await? {
+            return Ok(outcome);
+        }
+        let previous_incarnation = self.manager.status(host).map(|status| status.incarnation);
+        // A fresh window, not a plain retry: this step runs seconds
+        // after starting or restarting the supervisor's own unit, or
+        // after a prepared clone booted with that unit enabled,
+        // so the host is coming back by our own action — and a
+        // single probe would race that start latency, then sit out
+        // a full re-probe past this step's own deadline.
+        //
+        // The ticket separates the helm refusing the supervisor this
+        // run just installed from a refusal the host already held
+        // before this step, often the very protocol skew an update
+        // is fixing: only a refusal from a dial numbered after the
+        // ticket stops the wait (see
+        // `ConnectionManager::retry_now_with_fresh_window`). `None`
+        // (no such host) stops nothing early; the loop below then
+        // reports the host as gone, as before.
+        let ticket = self
+            .manager
+            .retry_now_with_fresh_window(host)
+            .await
+            .map_err(|error| {
+                BackendFailure::new("requesting supervisor attach", error.to_string())
+            })?;
+        let attached = tokio::time::timeout(ATTACH_TIMEOUT, async {
+            loop {
+                let status = self.manager.status(host)?;
+                if status.state.is_connected()
+                    && status.client.is_some()
+                    && Some(status.incarnation) != previous_incarnation
+                {
+                    return Some(Ok(()));
+                }
+                if ticket.is_some_and(|ticket| status.refusal_attempt > ticket)
+                    && let Some(failure) = attach_refusal(&status.state)
+                {
+                    return Some(Err(failure));
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .map_err(|_| BackendFailure::new("waiting for the provisioned supervisor", "timed out"))?;
+        attached.ok_or_else(|| {
+            BackendFailure::new(
+                "waiting for the provisioned supervisor",
+                "the registered host actor disappeared",
+            )
+        })??;
+        Ok(ActionOutcome::Completed)
     }
 
     /// Publish one progress transition through the fleet's no-data feed.

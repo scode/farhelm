@@ -4463,3 +4463,30 @@ The maintainer also asked to restore the full Rust integration release gate, whi
 Class: unknown
 
 Cause: unknown
+
+## 2026-11-08 — a credential delivery parking test missed a brief reconnect (crates/farhelm-helm/src/provisioning/credential_delivery_tests.rs)
+
+`actor_hold_cancels_the_real_hook_before_acknowledging_parking` failed once in a plan executor's recorded nextest run
+`ea27aab9-582b-4970-9b7e-1c0809b1b1d1` (x86_64 Linux, 18 CPUs, kernel 6.8): a development selection of the helm's
+`tensorlake::` and `provisioning::` modules plus the prepared-snapshot store and UI tests
+(`cargo nextest run -p farhelm-helm -p farhelm-proto -p farhelm-ui --lib -E '...'`), four slots, zero retries, at head
+`bf86b15a` with the uncommitted prepared-snapshots change on top (dirty tree; the change later landed as #3203). tmux
+3.7c, the pinned build, executable SHA256 `3590826b41cd0671f16fce6b08d11ef6ac75cc548373c7eb98204273e4f0539f`; C.UTF-8;
+ambient `FARHELM_*` names scrubbed and the recorder's own `FARHELM_TEST_TRACE_DIR` supplied. The test ran into its
+30-second state wait (30.1 s) rather than failing on an assertion. Five other tests failed in the same run, all new
+prepared-snapshot tests whose fixtures the executor then corrected; none shares this test's seam. Other builds and tests
+shared the machine; load was not measured. The test kills the host's connection, waits to see a state other than
+Connected, then waits for Connected again. Its trace shows the helm dropping the connection, entering Connecting and
+dialing again within about half a millisecond, and the panic reports Connected as the last state seen, so a state poll
+saw Connected on both sides of the reconnect and never the brief Connecting state between. The test code predates the
+plan; the plan's code did not change the reconnect path it observes. Disposition: fixed in #3203, which waits for a new
+dial followed by Connected instead of the brief state. Not reproduced separately; the fixed test passed in the landing's
+helm crate run `de3c2c8a-7885-42df-b5c0-c1714bb9ba80`.
+
+```
+host 2 never reached the expected state; last seen Some(Connected { identity: None, build_version: "peer-build", last_refresh: Ok { sessions: 0 } })
+```
+
+Class: ambiguous-observable
+
+Cause: established

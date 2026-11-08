@@ -1,14 +1,14 @@
 //! Explicit cleanup of reserved-name sandboxes this helm does not own.
 //!
 //! Names are the only ownership tag Tensorlake supplies. Host rows and all
-//! saved recipes exclude their sandboxes, including a builder known only by
-//! its deterministic name after an interrupted create. Nothing is reclaimed
+//! saved recipes exclude their sandboxes, including a builder or preparer known
+//! only by its deterministic name after an interrupted create. Nothing is reclaimed
 //! automatically; another helm's tag is a warning, not permission to delete.
 
 use super::{
     Tensorlake,
     api::{SandboxStatus, TensorlakeError, list_all_sandboxes},
-    build::{BUILDER_PREFIX, builder_name},
+    build::{BUILDER_PREFIX, PREPARER_PREFIX, builder_name, preparer_name},
     config::helm_tag,
 };
 use crate::AppState;
@@ -43,12 +43,13 @@ impl Cleanups {
     }
 }
 
-/// Return the creator tag only for the two product namespaces. The
+/// Return the creator tag only for the three product namespaces. The
 /// browser harness's farhelm-sbx names must never become cleanup candidates.
 fn creator(name: &str) -> Option<&str> {
     let suffix = name
         .strip_prefix(HOST_PREFIX)
-        .or_else(|| name.strip_prefix(BUILDER_PREFIX))?;
+        .or_else(|| name.strip_prefix(BUILDER_PREFIX))
+        .or_else(|| name.strip_prefix(PREPARER_PREFIX))?;
     let (tag, rest) = suffix.split_once('-')?;
     (!tag.is_empty() && !rest.is_empty()).then_some(tag)
 }
@@ -56,11 +57,13 @@ fn creator(name: &str) -> Option<&str> {
 /// The namespace, rather than today's tag length, is the vendor-side
 /// ownership signal. An older helm's tag spelling must not hide a leftover.
 fn reserved(name: &str) -> bool {
-    name.starts_with(HOST_PREFIX) || name.starts_with(BUILDER_PREFIX)
+    name.starts_with(HOST_PREFIX)
+        || name.starts_with(BUILDER_PREFIX)
+        || name.starts_with(PREPARER_PREFIX)
 }
 
 impl Tensorlake {
-    /// Current host names and deterministic builders for every saved recipe,
+    /// Current host names and deterministic builders/preparers for every recipe,
     /// not just a build whose create has already returned its ID. A host
     /// reserves its name even with schema 72's create marker still pending
     /// and no sandbox ID or admitted install coordinates yet.
@@ -76,6 +79,7 @@ impl Tensorlake {
             .collect();
         for (name, _, _) in self.0.store.tensorlake_recipe_rows().await? {
             known.insert(builder_name(&tag, &name));
+            known.insert(preparer_name(&tag, &name));
         }
         Ok((tag, known))
     }
@@ -344,6 +348,8 @@ mod tests {
     fn only_product_names_have_creator_tags() {
         assert_eq!(creator("farhelm-host-k7q2-dev-m3x9"), Some("k7q2"));
         assert_eq!(creator("farhelm-build-k7q2-rust"), Some("k7q2"));
+        assert_eq!(creator("farhelm-prepare-k7q2-rust"), Some("k7q2"));
+        assert!(reserved("farhelm-prepare-k7q2-rust"));
         for name in [
             "farhelm-sbx-k7q2-1",
             "other",
@@ -371,6 +377,7 @@ mod tests {
             &orphan,
             &other,
             &builder_name(&tag, "saved"),
+            &preparer_name(&tag, "saved"),
             "farhelm-sbx-test-1",
             "my-sandbox",
         ] {

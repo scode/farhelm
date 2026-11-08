@@ -1,0 +1,102 @@
+//! The second recipe snapshot contains Farhelm's installation, with no captured
+//! supervisor state. Provisioning owns installation and verification; the recipe
+//! engine owns the billed sandbox and snapshot lifecycle.
+
+use std::path::PathBuf;
+
+use async_trait::async_trait;
+use farhelm_proto::tensorlake::recipes::{PreparedSnapshotView, PreparedStaleReason};
+use serde::{Deserialize, Serialize};
+
+use super::ssh::TensorlakeSshAccess;
+
+/// Coordinates from the actual install plan, retained for a clone's admission.
+/// They carry no supervisor identity. Each clone learns its identity at hello.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct PreparedInstallFacts {
+    pub(crate) home: PathBuf,
+    pub(crate) farhelm_path: PathBuf,
+    pub(crate) state_dir: PathBuf,
+    pub(crate) farhelm_version: String,
+}
+
+/// Install and leave a sandbox safe to checkpoint without delivering credentials.
+///
+/// Success requires a boot-enabled supervisor unit, a stopped supervisor, an
+/// absent whole state directory (including supervisor.db), and an empty machine-id.
+/// The implementation must refuse copied supervisor state before installation.
+/// Inherited authentication belongs to the base author and is left unchanged.
+/// Errors must be suitable for bounded display; never include credentials or raw
+/// remote captures. Cancellation leaves vendor cleanup to the recipe engine.
+#[async_trait]
+pub(crate) trait SnapshotPreparer: Send + Sync {
+    async fn prepare(
+        &self,
+        sandbox: &str,
+        access: &TensorlakeSshAccess,
+    ) -> anyhow::Result<PreparedInstallFacts>;
+}
+
+/// An explicit offline seam: tests unrelated to preparation must not accidentally
+/// install software or silently pretend a safe checkpoint was produced.
+pub(crate) struct UnavailablePreparer;
+
+#[async_trait]
+impl SnapshotPreparer for UnavailablePreparer {
+    async fn prepare(
+        &self,
+        _: &str,
+        _: &TensorlakeSshAccess,
+    ) -> anyhow::Result<PreparedInstallFacts> {
+        anyhow::bail!("snapshot preparation is unavailable on this helm")
+    }
+}
+
+/// A durably owned installation checkpoint and the exact built source it used.
+/// Recipe edits do not invalidate it until Rebuild publishes a different source.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct PreparedSnapshot {
+    pub(crate) id: String,
+    pub(crate) prepared_at: i64,
+    pub(crate) farhelm_version: String,
+    pub(crate) source_snapshot: String,
+    pub(crate) disk_gb: u32,
+    pub(crate) facts: PreparedInstallFacts,
+}
+
+impl PreparedSnapshot {
+    /// Exactly three facts govern reuse. Version wins display precedence over
+    /// source, then age; clock rollback adds no fourth invalidation rule.
+    pub(crate) fn stale_reason(
+        &self,
+        now: i64,
+        version: &str,
+        source: Option<&str>,
+    ) -> Option<PreparedStaleReason> {
+        if self.farhelm_version != version {
+            Some(PreparedStaleReason::FarhelmUpdated)
+        } else if source != Some(self.source_snapshot.as_str()) {
+            Some(PreparedStaleReason::SnapshotRebuilt)
+        } else if now.saturating_sub(self.prepared_at) > 86_400 {
+            Some(PreparedStaleReason::Expired)
+        } else {
+            None
+        }
+    }
+
+    /// The public summary excludes install paths, which only clone admission uses.
+    pub(crate) fn view(
+        &self,
+        now: i64,
+        version: &str,
+        source: Option<&str>,
+    ) -> PreparedSnapshotView {
+        PreparedSnapshotView {
+            id: self.id.clone(),
+            prepared_at: self.prepared_at,
+            farhelm_version: self.farhelm_version.clone(),
+            source_snapshot: self.source_snapshot.clone(),
+            stale_reason: self.stale_reason(now, version, source),
+        }
+    }
+}

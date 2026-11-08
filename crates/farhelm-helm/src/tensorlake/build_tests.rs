@@ -41,6 +41,9 @@ struct MemoryApi {
     create_reply: StdMutex<Option<TensorlakeError>>,
     hold_create: watch::Sender<bool>,
     create_committed: watch::Sender<bool>,
+    /// Inspect durable replacement at the actual deletion boundary, not just
+    /// after both publication and retirement have already completed.
+    verify_prepared_retirement: StdMutex<Option<(String, HelmStore)>>,
 }
 
 impl Default for MemoryApi {
@@ -53,6 +56,7 @@ impl Default for MemoryApi {
             create_reply: StdMutex::default(),
             hold_create: watch::channel(false).0,
             create_committed: watch::channel(false).0,
+            verify_prepared_retirement: StdMutex::new(None),
         }
     }
 }
@@ -156,6 +160,21 @@ impl TensorlakeApi for MemoryApi {
         Ok(self.model().list_snapshots())
     }
     async fn delete_snapshot(&self, _: &ApiKey, id: &str) -> Result<(), TensorlakeError> {
+        let verify = self.verify_prepared_retirement.lock().unwrap().clone();
+        if let Some((retired, store)) = verify.filter(|(retired, _)| retired.as_str() == id) {
+            let state = store
+                .tensorlake_recipe_row(RECIPE)
+                .await
+                .unwrap()
+                .unwrap()
+                .1;
+            assert_ne!(
+                state.prepared.as_ref().unwrap().id,
+                retired,
+                "replacement must be durable before old checkpoint deletion"
+            );
+            assert!(state.retired_snapshots.contains(&retired));
+        }
         self.call("delete_snapshot", id)?;
         self.model().delete_snapshot(id)
     }
@@ -265,6 +284,9 @@ impl SandboxShell for ScriptedShell {
 
 const RECIPE: &str = "rust-dev";
 
+#[path = "prepared_tests.rs"]
+mod prepared_tests;
+
 /// An add must join Settings' active build and use the resulting snapshot;
 /// asking for it again must reuse it without another billed builder. The
 /// first progress callback proves the add is waiting before release.
@@ -358,6 +380,8 @@ async fn fixture() -> Fixture {
         shell.clone(),
         Some(Arc::new(SshKeyStore::new(tensorlake_dir))),
         BuildTimings::default(),
+        Arc::new(super::super::prepared::UnavailablePreparer),
+        farhelm_proto::BUILD_VERSION.to_string(),
     ));
     let tag = helm_tag(&store.registry_namespace().await.unwrap());
     Fixture {
@@ -1703,6 +1727,8 @@ async fn a_builder_found_by_name_is_recorded_before_it_is_terminated() {
         f.shell.clone(),
         Some(Arc::new(SshKeyStore::new(f._dir.path().join("tensorlake")))),
         BuildTimings::default(),
+        Arc::new(super::super::prepared::UnavailablePreparer),
+        farhelm_proto::BUILD_VERSION.to_string(),
     ));
     restarted
         .start_or_join(RECIPE, Arc::clone(&f.events))

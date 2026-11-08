@@ -5,6 +5,7 @@
 use super::*;
 use crate::rest_harness::{FleetBuilder, Harness};
 use crate::tensorlake::e2e::{E2eTensorlake, FakeModel};
+use crate::tensorlake::prepared::{PreparedInstallFacts, PreparedSnapshot};
 use farhelm_proto::tensorlake::{
     SaveSettings,
     recipes::{RecipeBase, RecipeSave},
@@ -21,7 +22,9 @@ struct Fixture {
 
 /// Assemble a real provisioning service over the repository's two controlled
 /// fakes. Ubuntu fixtures build on add; image fixtures start with a recorded
-/// snapshot so tests of later setup phases need no unrelated builder lifecycle.
+/// built snapshot so later setup tests still exercise preparation without an
+/// unrelated package/agent build. Preparation uses the service's real installer
+/// over the same explicit backend and payload fakes as ordinary host setup.
 async fn fixture(build_on_add: bool) -> Fixture {
     let harness = FleetBuilder::new().await.start().await;
     let root = tempfile::tempdir().unwrap();
@@ -94,6 +97,7 @@ async fn fixture(build_on_add: bool) -> Fixture {
         PlanLayout::production(root.path().to_path_buf()),
         "/fixture/farhelm".into(),
     );
+    let tensorlake = tensorlake.with_preparer(service.snapshot_preparer());
     Fixture {
         harness,
         root,
@@ -120,6 +124,8 @@ impl Fixture {
             .unwrap()
     }
 
+    /// Start the ordinary initial Add through its one-use offer, so tests retain
+    /// registration and confirmation semantics alongside the controlled backend.
     async fn add(&self) -> RunAccepted {
         let ProbeResponse::TensorlakeProvisionable { probe_id, .. } = self
             .probe(ProbeDestination::Tensorlake {
@@ -157,10 +163,262 @@ impl Fixture {
         serde_json::from_slice(&std::fs::read(self.root.path().join("api/state.json")).unwrap())
             .unwrap()
     }
+
+    /// Record a legacy host directly, before the prepared Add path existed.
+    /// Its sandbox is already billed but its install coordinates are absent,
+    /// which preserves the ordinary copied-state and rerun admission fence.
+    async fn legacy_host(&self) -> HostId {
+        let sandbox = "farhelm-host-test-legacy";
+        let recipe = self
+            .harness
+            .store
+            .tensorlake_recipe_row("test-recipe")
+            .await
+            .unwrap()
+            .unwrap()
+            .0;
+        let host = self
+            .harness
+            .store
+            .register_tensorlake_host(NewTensorlakeHost {
+                destination: crate::tensorlake::ssh::destination(sandbox),
+                entry: NewHostEntry::new(Some("Test host")).unwrap(),
+                sandbox: sandbox.into(),
+                recipe: "test-recipe".into(),
+                resources: recipe.size,
+            })
+            .await
+            .unwrap();
+        let mut model = self.model();
+        let created = model
+            .create(&CreateSandbox {
+                name: sandbox.into(),
+                source: SandboxSource::Image("legacy/systemd".into()),
+                resources: Resources {
+                    cpus: 2.0,
+                    memory_mb: 4096,
+                    disk_mb: 20480,
+                },
+                timeout_secs: 0,
+                auto_resume: false,
+                max_pending_secs: 900,
+            })
+            .unwrap();
+        std::fs::write(
+            self.root.path().join("api/state.json"),
+            serde_json::to_vec(&model).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            self.harness
+                .store
+                .set_tensorlake_sandbox_id(host, &created.sandbox_id)
+                .await
+                .unwrap()
+        );
+        assert!(
+            self.harness
+                .store
+                .tensorlake_prepared_install(host)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        self.harness.manager.sync_registry().await.unwrap();
+        host
+    }
+
+    /// A controlled existing-host run must use the ordinary installer even
+    /// when its recipe later acquires a reusable prepared snapshot.
+    async fn rerun(&self, host: HostId) -> RunAccepted {
+        let ProbeResponse::TensorlakeProvisionable { probe_id, .. } =
+            self.probe(ProbeDestination::TensorlakeHost { host }).await
+        else {
+            panic!("expected rerun plan")
+        };
+        self.service
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .unwrap()
+    }
+
+    /// Plant a complete cache only when a test needs its failure injection to
+    /// reach host creation rather than the preceding preparer creation.
+    async fn seed_prepared(&self) -> PreparedInstallFacts {
+        let facts = PreparedInstallFacts {
+            home: "/home/cached-user".into(),
+            farhelm_path: "/home/cached-user/.local/lib/farhelm/farhelm".into(),
+            state_dir: "/home/cached-user/.local/state/farhelm".into(),
+            farhelm_version: farhelm_proto::BUILD_VERSION.into(),
+        };
+        let mut model = self.model();
+        let id = model.plant_snapshot("earlierpreparer");
+        std::fs::write(
+            self.root.path().join("api/state.json"),
+            serde_json::to_vec(&model).unwrap(),
+        )
+        .unwrap();
+        let retained = facts.clone();
+        self.harness
+            .store
+            .update_tensorlake_recipe_state("test-recipe", move |_, state| {
+                let built = state
+                    .snapshot
+                    .as_ref()
+                    .expect("cache requires a built source");
+                state.prepared = Some(PreparedSnapshot {
+                    id,
+                    prepared_at: crate::tensorlake::recipes::now_secs(),
+                    farhelm_version: retained.farhelm_version.clone(),
+                    source_snapshot: built.id.clone(),
+                    disk_gb: built.disk_gb,
+                    facts: retained,
+                });
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        facts
+    }
+
+    /// Targeted JSON events distinguish preparer installation from credential
+    /// delivery on a host; substring order across both targets cannot do that.
+    fn backend_events(&self) -> Vec<serde_json::Value> {
+        std::fs::read_to_string(self.root.path().join("backend/events.jsonl"))
+            .unwrap_or_default()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+
+    /// Publish gate changes atomically while the backend is rereading them.
+    /// A partially written JSON file would fail the run for the wrong reason.
+    fn backend_config(&self, config: serde_json::Value) {
+        let next = self.root.path().join("backend/config.next");
+        std::fs::write(&next, serde_json::to_vec(&config).unwrap()).unwrap();
+        std::fs::rename(next, self.root.path().join("backend/config.json")).unwrap();
+    }
+
+    /// Observe the deliberately held preparation boundary, rather than merely
+    /// the presence of a planned step before execution reaches it.
+    async fn wait_for_backend(&self, event: &str) {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                if self
+                    .backend_events()
+                    .iter()
+                    .any(|entry| entry["event"] == event)
+                {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("backend never reached {event}: {:?}", self.backend_events()));
+    }
+
+    /// Reassemble from the same durable database and fake files with no retained
+    /// service memory. Restart recovery must use the host's saved create facts.
+    async fn restart(self) -> Self {
+        let Self {
+            harness,
+            root,
+            service,
+            tensorlake,
+        } = self;
+        drop(service);
+        drop(tensorlake);
+        let harness = harness.restart_with(|_| {}).await;
+        let api = Arc::new(E2eTensorlake::new(root.path().join("api"), root.path()).unwrap());
+        let backend_dir = root.path().join("backend");
+        let service = ProvisioningService::injected(
+            harness.store.clone(),
+            Arc::clone(&harness.manager),
+            Arc::new(E2eProvisioningBackend::new(backend_dir.clone(), root.path()).unwrap()),
+            Arc::new(E2ePayloads(backend_dir.join("ENABLED"))),
+            PlanLayout::production(root.path().to_path_buf()),
+            "/fixture/farhelm".into(),
+        );
+        let tensorlake = Tensorlake::production(harness.store.clone(), root.path())
+            .unwrap()
+            .with_api(api.clone())
+            .with_shell(api)
+            .with_preparer(service.snapshot_preparer());
+        Self {
+            harness,
+            root,
+            service,
+            tensorlake,
+        }
+    }
+
+    /// Every credential operation belongs to this host, while initial install
+    /// operations belong to its preparer. This is a workflow assertion, not a
+    /// claim about files inherited from a user-supplied base.
+    async fn assert_host_delivery(&self, host: HostId, required: &str) {
+        let row = self
+            .harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        let target = format!("ssh:{}", row.destination.unwrap());
+        let events = self.backend_events();
+        let delivery = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event["event"].as_str(),
+                    Some(
+                        "read-agent-settings"
+                            | "wrote-claude-settings"
+                            | "remove-github-token"
+                            | "configure-github-helper"
+                    )
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            delivery.iter().any(|event| event["event"] == required),
+            "missing {required}: {events:?}"
+        );
+        assert!(
+            delivery.iter().all(|event| event["target"] == target),
+            "preparer must receive no credentials: {events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| event["target"] == target && event["event"] == "enable-supervisor"),
+            "the host must boot the prepared supervisor: {events:?}"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| event["target"] != target && event["event"] == "enable-supervisor"),
+            "premise: the preparer performed installation"
+        );
+        let attach = events
+            .iter()
+            .position(|event| event["target"] == target && event["event"] == "attach-supervisor")
+            .unwrap();
+        let delivered = events
+            .iter()
+            .rposition(|event| event["target"] == target && event["event"] == required)
+            .unwrap();
+        assert!(
+            delivered < attach,
+            "delivery finishes before the connection becomes usable: {events:?}"
+        );
+    }
 }
 
 /// Endpoint delivery shares setup's injected backend. A credential failure
-/// remains a warning while the supervisor installation completes, so an image
+/// remains a warning while connection completes, so an image
 /// with unreadable agent settings can still become a usable Farhelm host.
 #[farhelm_testtrace::test]
 async fn credential_delivery_warning_does_not_abort_tensorlake_setup() {
@@ -211,13 +469,8 @@ async fn credential_delivery_warning_does_not_abort_tensorlake_setup() {
             .as_deref(),
         Some("could not read the agent settings")
     );
-    let events = std::fs::read_to_string(f.root.path().join("backend/events.jsonl")).unwrap();
-    let read = events.find("read-agent-settings").unwrap();
-    let enable = events.find("enable-supervisor").unwrap();
-    assert!(
-        read < enable,
-        "the warning must precede continued installation: {events}"
-    );
+    f.assert_host_delivery(accepted.host_id, "read-agent-settings")
+        .await;
     assert!(
         !serde_json::to_string(&view)
             .unwrap()
@@ -244,8 +497,8 @@ async fn credential_delivery_warning_does_not_abort_tensorlake_setup() {
 }
 
 /// Codex modes need setup's credential step even without any API endpoint.
-/// Subscription seeds before supervisor startup; None still reports a failed
-/// settings cleanup as a warning while installation continues.
+/// Subscription seeds before the host connection becomes usable; None still
+/// reports a failed settings cleanup as a warning while connection continues.
 #[farhelm_testtrace::test]
 async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
     use farhelm_proto::credentials::{CreateCredential, CredentialKind};
@@ -292,13 +545,8 @@ async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
             );
         }
         let events = std::fs::read_to_string(f.root.path().join("backend/events.jsonl")).unwrap();
-        assert!(
-            events.find("check-supervisor-state").unwrap()
-                < events.find("read-agent-settings").unwrap()
-        );
-        assert!(
-            events.find("read-agent-settings").unwrap() < events.find("enable-supervisor").unwrap()
-        );
+        f.assert_host_delivery(accepted.host_id, "read-agent-settings")
+            .await;
         assert!(
             !events.contains("fictional-setup-codex-secret")
                 && !events.contains("fictional-private-diagnostic")
@@ -332,10 +580,10 @@ async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
 }
 
 /// Claude subscription setup must finish its private settings write before
-/// starting the supervisor, even when the recipe has no API endpoints. A
+/// making the host connection usable, even without API endpoints. A
 /// nonsecret durable stamp witnesses completion without logging the token.
 #[farhelm_testtrace::test]
-async fn claude_subscription_setup_delivers_before_supervisor_startup() {
+async fn claude_subscription_setup_delivers_only_to_the_host_before_attach() {
     use farhelm_proto::credentials::{CreateCredential, CredentialKind};
     let f = fixture(false).await;
     let mut recipe = crate::tensorlake::recipes::tests_support::save();
@@ -369,13 +617,8 @@ async fn claude_subscription_setup_delivers_before_supervisor_startup() {
     assert_eq!(step.status, StepStatus::Completed);
     assert!(step.message.is_none());
     let events = std::fs::read_to_string(f.root.path().join("backend/events.jsonl")).unwrap();
-    assert!(
-        events.find("check-supervisor-state").unwrap()
-            < events.find("wrote-claude-settings").unwrap()
-    );
-    assert!(
-        events.find("wrote-claude-settings").unwrap() < events.find("enable-supervisor").unwrap()
-    );
+    f.assert_host_delivery(accepted.host_id, "wrote-claude-settings")
+        .await;
     assert!(!events.contains("sk-ant-oat01-fictional-setup-claude"));
     let host = accepted.host_id;
     let json: String = f
@@ -398,10 +641,10 @@ async fn claude_subscription_setup_delivers_before_supervisor_startup() {
 }
 
 /// GitHub-only recipes must enter setup's credential step without an agent
-/// endpoint to trigger it. Hosts without gh still finish installing
-/// Farhelm after the token upload, keeping the unsuccessful slot retryable.
+/// endpoint to trigger it. Hosts without gh still finish connecting after the
+/// token upload, keeping the unsuccessful delivery slot retryable.
 #[farhelm_testtrace::test]
-async fn github_only_setup_delivers_before_starting_the_supervisor() {
+async fn github_only_setup_delivers_only_to_the_host_before_attach() {
     use farhelm_proto::credentials::{CreateCredential, CredentialKind};
     for github_cli in [true, false] {
         let f = fixture(false).await;
@@ -445,14 +688,8 @@ async fn github_only_setup_delivers_before_starting_the_supervisor() {
         if !github_cli {
             assert!(warning.unwrap().contains("private clones need gh"));
         }
-        let events = std::fs::read_to_string(f.root.path().join("backend/events.jsonl")).unwrap();
-        assert!(
-            events.find("write-unit").unwrap() < events.find("configure-github-helper").unwrap()
-        );
-        assert!(
-            events.find("configure-github-helper").unwrap()
-                < events.find("enable-supervisor").unwrap()
-        );
+        f.assert_host_delivery(accepted.host_id, "configure-github-helper")
+            .await;
         let host = accepted.host_id;
         let record: String = f
             .harness
@@ -667,11 +904,11 @@ async fn an_unrequested_name_collision_refuses_setup_and_delete_leaves_it_alone(
     );
 }
 
-/// The run builds once, records its host before work, splices the concrete
-/// install steps, and defaults only YOLO permission on. Rerun keeps the
-/// same sandbox rather than allocating another billed machine.
+/// Initial Add builds and prepares once, then boots a host without reinstalling.
+/// Rerun retains ordinary installation on that same sandbox; otherwise recovery
+/// would silently depend on the recipe's current prepared cache.
 #[farhelm_testtrace::test]
-async fn managed_add_splices_setup_and_rerun_adopts_the_same_sandbox() {
+async fn managed_add_uses_preparation_and_rerun_installs_on_the_same_sandbox() {
     let f = fixture(true).await;
     let accepted = f.add().await;
     assert!(
@@ -705,11 +942,23 @@ async fn managed_add_splices_setup_and_rerun_adopts_the_same_sandbox() {
     );
     let model = f.model();
     assert_eq!(model.live_sandboxes().len(), 1);
-    assert_eq!(model.sandboxes.len(), 2, "one builder and one host");
+    assert_eq!(
+        model.sandboxes.len(),
+        3,
+        "one builder, one preparer and one host"
+    );
     let sandbox = model.live_sandboxes().pop().unwrap();
     let created = model.sandboxes.iter().find(|s| s.id == sandbox.id).unwrap();
     assert_eq!(created.timeout_secs, 0);
     assert!(!created.auto_resume);
+    let host_target = format!("ssh:{}", row.destination.as_deref().unwrap());
+    let events = f.backend_events();
+    assert!(
+        !events
+            .iter()
+            .any(|event| event["target"] == host_target && event["event"] == "install-farhelm")
+    );
+    let before_rerun = events.len();
     let ProbeResponse::TensorlakeProvisionable { probe_id, .. } = f
         .probe(ProbeDestination::TensorlakeHost { host: row.id })
         .await
@@ -732,9 +981,464 @@ async fn managed_add_splices_setup_and_rerun_adopts_the_same_sandbox() {
     );
     assert_eq!(
         f.model().sandboxes.len(),
-        2,
-        "rerun creates neither builder nor host"
+        3,
+        "rerun creates neither builder, preparer nor host"
     );
+    assert!(
+        f.backend_events()[before_rerun..]
+            .iter()
+            .any(|event| event["target"] == host_target && event["event"] == "install-farhelm"),
+        "ordinary rerun still installs Farhelm"
+    );
+}
+
+/// A held first preparation keeps its durable explanation visible while step
+/// messages change. A second Add reuses the exact cache and performs no further
+/// preparation or installation, so the optimization is observable at both the
+/// confirmation and execution boundaries.
+#[farhelm_testtrace::test]
+async fn lazy_preparation_explains_its_wait_and_fresh_cache_skips_installation() {
+    let f = fixture(false).await;
+    f.backend_config(serde_json::json!({"default": {"hold_actions": true}}));
+    let ProbeResponse::TensorlakeProvisionable {
+        probe_id,
+        confirmation,
+        steps,
+        ..
+    } = f
+        .probe(ProbeDestination::Tensorlake {
+            name: "First host".into(),
+            recipe: "test-recipe".into(),
+        })
+        .await
+    else {
+        panic!("first Add plan")
+    };
+    let explanation =
+        "Only the first time, and then at most once every 24 hours or after Farhelm updates.";
+    let prepare = steps
+        .steps
+        .iter()
+        .find(|step| step.id == "prepare-snapshot")
+        .unwrap();
+    assert_eq!(prepare.explanation.as_deref(), Some(explanation));
+    assert!(confirmation.contains(explanation));
+    let first = f
+        .service
+        .start_add(ProvisionRequest { probe_id })
+        .await
+        .unwrap();
+    f.wait_for_backend("prepare-sandbox").await;
+    let waiting = f.service.view(first.host_id).await.unwrap();
+    assert_eq!(waiting.status, RunStatus::Running);
+    let prepare = waiting
+        .steps
+        .iter()
+        .find(|step| step.step == "prepare-snapshot")
+        .unwrap();
+    assert_eq!(prepare.status, StepStatus::Running);
+    assert_eq!(prepare.explanation.as_deref(), Some(explanation));
+    assert!(
+        f.model().sandboxes.iter().all(|sandbox| !sandbox
+            .name
+            .as_deref()
+            .is_some_and(|name| name.starts_with("farhelm-host-"))),
+        "the preparation gate precedes host creation"
+    );
+    f.backend_config(serde_json::json!({}));
+    assert_eq!(f.finish(first.host_id).await.status, RunStatus::Completed);
+    let state = f
+        .harness
+        .store
+        .tensorlake_recipe_row("test-recipe")
+        .await
+        .unwrap()
+        .unwrap()
+        .1;
+    let prepared = state.prepared.unwrap();
+    let before_model = f.model();
+    let before_events = f.backend_events();
+    assert_eq!(
+        before_model.sandboxes.len(),
+        2,
+        "built source was seeded; only preparer and first host are new"
+    );
+    assert_eq!(
+        before_events
+            .iter()
+            .filter(|event| event["event"] == "finish-snapshot-install")
+            .count(),
+        1
+    );
+    let ProbeResponse::TensorlakeProvisionable {
+        probe_id,
+        confirmation,
+        steps,
+        ..
+    } = f
+        .probe(ProbeDestination::Tensorlake {
+            name: "Second host".into(),
+            recipe: "test-recipe".into(),
+        })
+        .await
+    else {
+        panic!("fresh Add plan")
+    };
+    assert!(!steps.steps.iter().any(|step| step.id == "prepare-snapshot"));
+    assert!(!confirmation.contains("Prepare snapshot"));
+    let second = f
+        .service
+        .start_add(ProvisionRequest { probe_id })
+        .await
+        .unwrap();
+    let completed = f.finish(second.host_id).await;
+    assert_eq!(
+        completed.status,
+        RunStatus::Completed,
+        "{:?}",
+        completed.message
+    );
+    assert!(
+        !completed
+            .steps
+            .iter()
+            .any(|step| step.step == "prepare-snapshot")
+    );
+    let after = f.model();
+    let added = after
+        .sandboxes
+        .iter()
+        .filter(|sandbox| {
+            !before_model
+                .sandboxes
+                .iter()
+                .any(|old| old.id == sandbox.id)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(added.len(), 1, "fresh cache creates only the second host");
+    assert_eq!(added[0].snapshot_id.as_deref(), Some(prepared.id.as_str()));
+    let later = &f.backend_events()[before_events.len()..];
+    assert!(
+        !later.iter().any(|event| matches!(
+            event["event"].as_str(),
+            Some(
+                "prepare-sandbox"
+                    | "inspect"
+                    | "upload-farhelm"
+                    | "install-farhelm"
+                    | "enable-supervisor"
+                    | "finish-snapshot-install"
+            )
+        )),
+        "fresh Add must not reinstall: {later:?}"
+    );
+}
+
+/// The API can report Running before SSH accepts a channel. A prepared clone
+/// must stay unadmitted and receive no credential operations until that separate
+/// transport boundary succeeds, without running setup on the clone itself.
+#[farhelm_testtrace::test]
+async fn prepared_clone_waits_for_ssh_before_admission_and_delivery() {
+    let f = fixture(false).await;
+    f.seed_prepared().await;
+    f.backend_config(serde_json::json!({"default": {"hold_actions": true}}));
+    let host = f.add().await.host_id;
+    f.wait_for_backend("wait-tensorlake-ssh").await;
+    let row = f
+        .harness
+        .store
+        .list_hosts()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == host)
+        .unwrap();
+    assert!(
+        row.tensorlake.as_ref().unwrap().sandbox_id.is_some(),
+        "the API already created the clone"
+    );
+    assert!(row.remote_farhelm.is_none() && row.remote_state_dir.is_none());
+    assert_eq!(f.harness.fleet.dials(host), 0);
+    assert!(
+        f.backend_events()
+            .iter()
+            .all(|event| event["event"] == "wait-tensorlake-ssh"),
+        "no installation or credential work starts while SSH is held"
+    );
+    f.backend_config(serde_json::json!({}));
+    assert_eq!(f.finish(host).await.status, RunStatus::Completed);
+    let events = f.backend_events();
+    let ready = events
+        .iter()
+        .position(|event| event["event"] == "wait-tensorlake-ssh")
+        .unwrap();
+    let delivery = events
+        .iter()
+        .position(|event| event["event"] == "read-agent-settings")
+        .unwrap();
+    assert!(ready < delivery);
+    assert!(
+        !events
+            .iter()
+            .any(|event| event["event"] == "prepare-sandbox")
+    );
+}
+
+/// The checkpoint-safety hook is an actual success boundary for the engine.
+/// Refusing copied state or refusing final cleanup must stop before snapshot
+/// creation and before allocating a host. The hook fake proves propagation;
+/// filesystem removal and fresh clone identities have separate real proofs.
+#[farhelm_testtrace::test]
+async fn preparation_refusal_never_checkpoints_or_creates_a_host_clone() {
+    for action in ["check-supervisor-state", "finish-snapshot-install"] {
+        let f = fixture(false).await;
+        f.backend_config(serde_json::json!({"default": {"fail_action": action, "message": "retained supervisor state"}}));
+        let accepted = f.add().await;
+        let failed = f.finish(accepted.host_id).await;
+        assert_eq!(failed.status, RunStatus::Failed);
+        assert!(
+            failed
+                .steps
+                .iter()
+                .any(|step| step.step == "prepare-snapshot" && step.status == StepStatus::Failed)
+        );
+        assert!(
+            f.backend_events()
+                .iter()
+                .any(|event| event["event"] == action),
+            "premise: refusal came from the intended hook"
+        );
+        let model = f.model();
+        assert_eq!(model.sandboxes.len(), 1, "only the preparer was created");
+        assert!(
+            model.sandboxes[0]
+                .name
+                .as_deref()
+                .is_some_and(|name| name.starts_with("farhelm-prepare-"))
+        );
+        assert_eq!(model.sandboxes[0].status, "terminated");
+        let events = std::fs::read_to_string(f.root.path().join("api/events.jsonl")).unwrap();
+        assert!(
+            !events
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                .any(|event| event["op"] == "create_snapshot"),
+            "refusal must prevent checkpoint: {events}"
+        );
+        let row = f
+            .harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == accepted.host_id)
+            .unwrap();
+        let binding = row.tensorlake.unwrap();
+        assert!(binding.sandbox_id.is_none() && binding.pending_create_at.is_none());
+        assert!(
+            row.remote_farhelm.is_none()
+                && row.remote_state_dir.is_none()
+                && row.host_identity.is_none()
+        );
+        assert_eq!(f.harness.fleet.dials(row.id), 0);
+        assert!(
+            !f.backend_events().iter().any(|event| matches!(
+                event["event"].as_str(),
+                Some(
+                    "read-agent-settings"
+                        | "wrote-claude-settings"
+                        | "configure-github-helper"
+                        | "remove-github-token"
+                )
+            )),
+            "preparer receives no credential delivery"
+        );
+    }
+}
+
+/// An uncertain create may become visible after a helm restart and after a
+/// different prepared snapshot replaces its source. Its own saved facts must
+/// survive both an outstanding request and an observed ID, without opening
+/// dialing early or reinstalling from the later recipe's metadata.
+#[farhelm_testtrace::test]
+async fn prepared_create_recovers_its_exact_install_facts_after_restart() {
+    for recorded_id in [false, true] {
+        let f = fixture(false).await;
+        let selected = f.seed_prepared().await;
+        let original = f
+            .harness
+            .store
+            .tensorlake_recipe_row("test-recipe")
+            .await
+            .unwrap()
+            .unwrap()
+            .1
+            .prepared
+            .unwrap();
+        std::fs::write(
+            f.root.path().join("api/config.json"),
+            r#"{"fail":{"create_sandbox":{"status":500,"message":"reply lost"}}}"#,
+        )
+        .unwrap();
+        let host = f.add().await.host_id;
+        assert_eq!(f.finish(host).await.status, RunStatus::Failed);
+        let row = f
+            .harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        assert!(row.tensorlake.as_ref().unwrap().pending_create_at.is_some());
+        assert!(row.remote_farhelm.is_none() && row.remote_state_dir.is_none());
+        assert_eq!(
+            f.harness
+                .store
+                .tensorlake_prepared_install(host)
+                .await
+                .unwrap(),
+            Some(selected.clone())
+        );
+        let mut model = f.model();
+        let created = model
+            .create(&CreateSandbox {
+                name: row.tensorlake.as_ref().unwrap().sandbox.clone(),
+                source: SandboxSource::Snapshot(original.id),
+                resources: Resources {
+                    cpus: 2.0,
+                    memory_mb: 4096,
+                    disk_mb: 20480,
+                },
+                timeout_secs: 0,
+                auto_resume: false,
+                max_pending_secs: 900,
+            })
+            .unwrap();
+        let latest_snapshot = model.plant_snapshot("laterpreparer");
+        std::fs::write(
+            f.root.path().join("api/state.json"),
+            serde_json::to_vec(&model).unwrap(),
+        )
+        .unwrap();
+        if recorded_id {
+            assert!(
+                f.harness
+                    .store
+                    .set_tensorlake_sandbox_id(host, &created.sandbox_id)
+                    .await
+                    .unwrap()
+            );
+        }
+        f.harness
+            .store
+            .update_tensorlake_recipe_state("test-recipe", move |_, state| {
+                let current = state.prepared.as_mut().unwrap();
+                current.id = latest_snapshot;
+                current.farhelm_version = "a-different-helm-build".into();
+                current.facts.home = "/home/later-user".into();
+                current.facts.farhelm_path = "/later/farhelm".into();
+                current.facts.state_dir = "/later/state".into();
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        std::fs::write(f.root.path().join("api/config.json"), "{}").unwrap();
+        let f = f.restart().await;
+        assert_eq!(
+            f.harness
+                .store
+                .tensorlake_prepared_install(host)
+                .await
+                .unwrap(),
+            Some(selected.clone())
+        );
+        assert_eq!(
+            f.harness.fleet.dials(host),
+            0,
+            "saved facts remain unadmitted across restart"
+        );
+        let ProbeResponse::TensorlakeProvisionable {
+            probe_id, steps, ..
+        } = f.probe(ProbeDestination::TensorlakeHost { host }).await
+        else {
+            panic!("prepared recovery offer")
+        };
+        assert!(
+            !steps.steps.iter().any(|step| step.id == "prepare-snapshot"),
+            "recovering the chosen clone must not promise renewal of the now-stale recipe cache"
+        );
+        assert!(!steps.steps.iter().any(|step| step.id == "set-up-farhelm"));
+        f.service
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .unwrap();
+        let completed = f.finish(host).await;
+        assert_eq!(
+            completed.status,
+            RunStatus::Completed,
+            "{:?}",
+            completed.message
+        );
+        let row = f
+            .harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        assert_eq!(
+            row.remote_farhelm.as_deref(),
+            selected.farhelm_path.to_str()
+        );
+        assert_eq!(row.remote_state_dir.as_deref(), selected.state_dir.to_str());
+        assert_eq!(
+            row.tensorlake.unwrap().sandbox_id.as_deref(),
+            Some(created.sandbox_id.as_str())
+        );
+        assert!(
+            f.harness
+                .store
+                .tensorlake_prepared_install(host)
+                .await
+                .unwrap()
+                .is_none(),
+            "admission consumes the transient facts"
+        );
+        let stamp: String = f
+            .harness
+            .store
+            .conn()
+            .call("inspect recovered credential home", move |conn| {
+                Ok(conn.query_row(
+                    "SELECT tensorlake_credential_delivery FROM hosts WHERE id = ?1",
+                    [host],
+                    |row| row.get(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&stamp).unwrap()["home"],
+            selected.home.to_str().unwrap()
+        );
+        assert_eq!(
+            f.model().sandboxes.len(),
+            1,
+            "recovery adopts the one exact clone"
+        );
+        assert!(
+            !f.backend_events().iter().any(|event| matches!(
+                event["event"].as_str(),
+                Some("prepare-sandbox" | "inspect" | "install-farhelm" | "enable-supervisor")
+            )),
+            "recovery must not reinstall or inspect a booted prepared clone"
+        );
+    }
 }
 
 /// Migrated image and snapshot recipes have no built snapshot, but their old
@@ -745,7 +1449,22 @@ async fn managed_add_splices_setup_and_rerun_adopts_the_same_sandbox() {
 async fn rerun_of_an_existing_sandbox_skips_building_even_without_a_recipe_snapshot() {
     for lost_id in [false, true] {
         let f = fixture(false).await;
-        let host = f.add().await.host_id;
+        let host = f.legacy_host().await;
+        let ProbeResponse::TensorlakeProvisionable {
+            probe_id, steps, ..
+        } = f.probe(ProbeDestination::TensorlakeHost { host }).await
+        else {
+            panic!("ordinary recovery offer")
+        };
+        assert!(
+            steps.steps.iter().any(|step| step.id == "set-up-farhelm"),
+            "a legacy unadmitted sandbox still authorizes ordinary installation"
+        );
+        assert!(!steps.steps.iter().any(|step| step.id == "prepare-snapshot"));
+        f.service
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .unwrap();
         assert_eq!(f.finish(host).await.status, RunStatus::Completed);
         let before = f.model();
         assert_eq!(before.live_sandboxes().len(), 1);
@@ -861,7 +1580,8 @@ async fn rerun_of_an_existing_sandbox_skips_building_even_without_a_recipe_snaps
 async fn rerun_does_not_build_while_a_sandbox_is_unsettled_or_recorded_gone() {
     for recorded in [false, true] {
         let f = fixture(false).await;
-        let host = f.add().await.host_id;
+        let host = f.legacy_host().await;
+        f.rerun(host).await;
         assert_eq!(f.finish(host).await.status, RunStatus::Completed);
         let mut model = f.model();
         model.sandboxes.clear();
@@ -917,8 +1637,8 @@ async fn rerun_does_not_build_while_a_sandbox_is_unsettled_or_recorded_gone() {
             .filter(|event| event["op"] == "create_sandbox")
             .count();
         assert_eq!(
-            creates_before, 1,
-            "premise: only the original host was created"
+            creates_before, 0,
+            "premise: the legacy sandbox was planted without a Farhelm create"
         );
         let ProbeResponse::TensorlakeProvisionable { probe_id, .. } =
             f.probe(ProbeDestination::TensorlakeHost { host }).await
@@ -970,6 +1690,10 @@ async fn rerun_does_not_build_while_a_sandbox_is_unsettled_or_recorded_gone() {
             state.snapshot.is_none()
                 && state.builder_sandbox_id.is_none()
                 && state.build_started_at.is_none()
+                && state.prepared.is_none()
+                && state.preparer_sandbox_id.is_none()
+                && state.prepare_started_at.is_none()
+                && state.prepare_pending_create_at.is_none()
         );
     }
 }
@@ -1023,8 +1747,10 @@ async fn new_hosts_from_image_and_snapshot_bases_build_before_create() {
             .unwrap()
             .1;
         let built = state.snapshot.unwrap();
+        let prepared = state.prepared.unwrap();
+        assert_eq!(prepared.source_snapshot, built.id);
         let model = f.model();
-        assert_eq!(model.sandboxes.len(), 2, "one builder, then one host");
+        assert_eq!(model.sandboxes.len(), 3, "builder, preparer, then host");
         let builder = &model.sandboxes[0];
         assert_eq!(builder.status, "terminated");
         if snapshot_base {
@@ -1039,6 +1765,17 @@ async fn new_hosts_from_image_and_snapshot_bases_build_before_create() {
             model.sandboxes[1].snapshot_id.as_deref(),
             Some(built.id.as_str())
         );
+        assert!(
+            model.sandboxes[1]
+                .name
+                .as_deref()
+                .is_some_and(|name| name.starts_with("farhelm-prepare-"))
+        );
+        assert_eq!(model.sandboxes[1].status, "terminated");
+        assert_eq!(
+            model.sandboxes[2].snapshot_id.as_deref(),
+            Some(prepared.id.as_str())
+        );
     }
 }
 
@@ -1047,12 +1784,13 @@ async fn new_hosts_from_image_and_snapshot_bases_build_before_create() {
 #[farhelm_testtrace::test]
 async fn failed_prepare_keeps_ownership_and_rerun_continues_without_recreate() {
     let f = fixture(false).await;
+    let host = f.legacy_host().await;
     std::fs::write(
         f.root.path().join("backend/config.json"),
         r#"{"default":{"fail_action":"prepare-sandbox","message":"image needs systemd"}}"#,
     )
     .unwrap();
-    let accepted = f.add().await;
+    let accepted = f.rerun(host).await;
     let failed = f.finish(accepted.host_id).await;
     assert_eq!(failed.status, RunStatus::Failed);
     assert!(
@@ -1116,8 +1854,9 @@ async fn failed_prepare_keeps_ownership_and_rerun_continues_without_recreate() {
 #[farhelm_testtrace::test]
 async fn copied_supervisor_state_refuses_before_installation() {
     let f = fixture(false).await;
+    let host = f.legacy_host().await;
     std::fs::write(f.root.path().join("backend/config.json"), r#"{"default":{"fail_action":"check-supervisor-state","message":"image contains Farhelm supervisor state"}}"#).unwrap();
-    let accepted = f.add().await;
+    let accepted = f.rerun(host).await;
     let failed = f.finish(accepted.host_id).await;
     assert_eq!(failed.status, RunStatus::Failed);
     assert!(failed.message.unwrap().contains("supervisor state"));
@@ -1210,6 +1949,7 @@ async fn copied_supervisor_state_refuses_before_installation() {
 #[farhelm_testtrace::test]
 async fn unresolved_create_blocks_delete_across_restart_until_sandbox_appears() {
     let f = fixture(false).await;
+    f.seed_prepared().await;
     std::fs::write(
         f.root.path().join("api/config.json"),
         r#"{"fail":{"create_sandbox":{"status":500,"message":"reply lost"}}}"#,
@@ -1342,6 +2082,7 @@ async fn unresolved_create_blocks_delete_across_restart_until_sandbox_appears() 
 async fn settled_absence_and_definite_refusal_allow_delete() {
     for status in [500, 401] {
         let f = fixture(false).await;
+        f.seed_prepared().await;
         std::fs::write(
             f.root.path().join("api/config.json"),
             format!(r#"{{"fail":{{"create_sandbox":{{"status":{status}}}}}}}"#),

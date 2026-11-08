@@ -1035,6 +1035,7 @@ impl Harness {
                         store,
                         _dir.path(),
                         Arc::clone(&sources.delivery),
+                        sources.snapshot_preparer(_dir.path()),
                     )
                     .expect("build the restarted Tensorlake service"),
                     _dir.path().to_path_buf(),
@@ -1427,6 +1428,7 @@ impl FleetBuilder {
                     self.store,
                     &state_dir,
                     Arc::clone(&sources.delivery),
+                    sources.snapshot_preparer(&state_dir),
                 )
                 .expect("build the harness Tensorlake service"),
                 state_dir,

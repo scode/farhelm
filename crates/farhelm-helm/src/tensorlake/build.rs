@@ -1,5 +1,5 @@
-//! Snapshot builds: turning a recipe into a Tensorlake snapshot that
-//! hosts start from.
+//! Recipe snapshots: a built software layer, then a lazy Farhelm installation
+//! checkpoint that new hosts clone. Each layer has independent task admission.
 //!
 //! A build creates a builder sandbox from the recipe's base
 //! ([`TENSORLAKE_BASE_IMAGE`] for Tensorlake Ubuntu) with the recipe's size,
@@ -48,6 +48,15 @@
 //! script runs, poll sleeps) are cancelled, never a state write, so a
 //! cancelled build has recorded everything it created before the delete
 //! reads the state.
+//!
+//! Preparation follows the same ownership rules in a separate sandbox. Its
+//! installer ([`SnapshotPreparer`]) receives no recipe credentials or host ID and
+//! returns only after supervisor state is absent. A per-recipe mutex excludes
+//! source retirement through clone create, durable ID recording and Running.
+//! Installation does not hold that mutex: Rebuild may publish meanwhile, and
+//! ensure-prepared rechecks the source before returning. This mutex is not a
+//! durable dependency registry; interrupted creates retain ordinary vendor
+//! failure/retry behavior when source retirement overlaps them.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -58,7 +67,8 @@ use std::{
 
 use anyhow::Context as _;
 use farhelm_proto::tensorlake::recipes::{
-    BuildStep, BuildView, RecipeBase, RecipeSize, SnapshotView,
+    BuildStep, BuildView, PrepareStep, PrepareView, PreparedSnapshotView, RecipeBase, RecipeSize,
+    SnapshotView,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
@@ -69,6 +79,7 @@ use super::api::{
 };
 use super::build_script;
 use super::config::helm_tag;
+use super::prepared::{PreparedSnapshot, SnapshotPreparer};
 use super::recipes::{StoredRecipe, decode_spec, now_secs};
 use super::shell::{SandboxShell, ShellFailure, ShellOutput};
 use super::ssh::TensorlakeSshAccess;
@@ -84,6 +95,14 @@ pub(crate) const TENSORLAKE_BASE_IMAGE: &str = "tensorlake/ubuntu-systemd";
 /// repository's browser-test harness names its sandboxes `farhelm-sbx-`, and
 /// the orphan list must never take one of those for a builder.
 pub(crate) const BUILDER_PREFIX: &str = "farhelm-build-";
+
+/// Separate namespace so preparation cannot occupy the recipe's build name.
+pub(crate) const PREPARER_PREFIX: &str = "farhelm-prepare-";
+
+/// A deterministic name permits recovery only with its pending-create marker.
+pub(crate) fn preparer_name(tag: &str, recipe: &str) -> String {
+    format!("{PREPARER_PREFIX}{tag}-{recipe}")
+}
 
 /// The builder's idle timeout, in seconds. A builder only goes idle if the
 /// helm died mid-build (an open ssh channel counts as activity); then this
@@ -188,16 +207,25 @@ pub(crate) struct FailureRecord {
     pub(crate) at: i64,
 }
 
-/// A recipe's `state_json`: the helm's own build bookkeeping, written only
-/// by the build engine and the recipe's deletion. Saves never retire a
+/// A recipe's `state_json`: both snapshot jobs' ownership bookkeeping, written
+/// only by this engine and recipe deletion. Saves never retire a
 /// snapshot: a successful replacement build does. `{}` decodes to the
 /// default; unknown fields are ignored so an older helm can read a newer
 /// state.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub(crate) struct RecipeState {
-    /// The snapshot hosts start from.
+    /// The built software layer from which preparation starts.
     pub(crate) snapshot: Option<BuiltSnapshot>,
+    /// Current installation checkpoint; failures preserve its provenance even
+    /// when age, Farhelm version or a newer built source makes it unusable.
+    pub(crate) prepared: Option<PreparedSnapshot>,
+    /// Preparation owns a distinct sandbox and pending request, so a rebuild
+    /// cannot mistake installation work for its own interrupted builder.
+    pub(crate) preparer_sandbox_id: Option<String>,
+    pub(crate) prepare_pending_create_at: Option<i64>,
+    pub(crate) prepare_started_at: Option<i64>,
+    pub(crate) last_prepare_failure: Option<PrepareFailureRecord>,
     /// The builder sandbox, from right after create (or from when one is
     /// found by its name) until it is terminated and its snapshots are
     /// deleted.
@@ -226,6 +254,10 @@ impl RecipeState {
     /// that needs the pending-create marker written before the request.
     pub(crate) fn needs_cleanup(&self) -> bool {
         self.snapshot.is_some()
+            || self.prepared.is_some()
+            || self.preparer_sandbox_id.is_some()
+            || self.prepare_pending_create_at.is_some()
+            || self.prepare_started_at.is_some()
             || self.builder_sandbox_id.is_some()
             || self.pending_create_at.is_some()
             || self.build_started_at.is_some()
@@ -344,14 +376,20 @@ impl HelmStore {
             .await
     }
 
-    /// Every snapshot ID a recipe records as its current snapshot. A sweep
-    /// never deletes one of these, whatever sandbox it came from.
+    /// Both current snapshot layers are protected, whatever sandbox produced
+    /// them. A builder sweep must not erase a separately recorded installation.
     async fn recorded_tensorlake_snapshots(&self) -> anyhow::Result<HashSet<String>> {
         Ok(self
             .tensorlake_recipe_rows()
             .await?
             .into_iter()
-            .filter_map(|(_, _, state)| state.snapshot.map(|snapshot| snapshot.id))
+            .flat_map(|(_, _, state)| {
+                state
+                    .snapshot
+                    .map(|snapshot| snapshot.id)
+                    .into_iter()
+                    .chain(state.prepared.map(|snapshot| snapshot.id))
+            })
             .collect())
     }
 }
@@ -379,6 +417,10 @@ struct ActiveBuild {
 #[derive(Default)]
 struct Registry {
     active: HashMap<String, Arc<ActiveBuild>>,
+    preparing: HashMap<String, Arc<ActivePreparation>>,
+    /// Never remove a mutex while callers can retain its owned guard: a new
+    /// mutex for the same recipe would defeat source-retirement exclusion.
+    snapshot_use: HashMap<String, Arc<tokio::sync::Mutex<()>>>,
     /// Recipes a delete is cleaning up; no build may start for them.
     deleting: HashSet<String>,
 }
@@ -407,11 +449,14 @@ pub(crate) enum CleanupRefusal {
     Storage(anyhow::Error),
 }
 
-/// The helm's snapshot builds. One per helm, shared by the routes.
+/// Both recipe snapshot jobs share this registry, while retaining independent
+/// single-flight admission, progress and sandbox ownership. One per helm.
 pub(crate) struct RecipeBuilds {
     store: HelmStore,
     api: Arc<dyn TensorlakeApi>,
     shell: Arc<dyn SandboxShell>,
+    preparer: Arc<dyn SnapshotPreparer>,
+    helm_version: String,
     /// `None` for a helm without a state directory, which keeps no key.
     ssh_keys: Option<Arc<SshKeyStore>>,
     timings: BuildTimings,
@@ -420,6 +465,10 @@ pub(crate) struct RecipeBuilds {
     /// window between a create and its record.
     #[cfg(test)]
     fail_builder_record: std::sync::atomic::AtomicBool,
+    /// The preparation counterpart exercises ownership after an acknowledged
+    /// create whose durable ID write fails.
+    #[cfg(test)]
+    fail_preparer_record: std::sync::atomic::AtomicBool,
 }
 
 /// What one build works with, fixed when it starts.
@@ -468,12 +517,16 @@ fn storage(step: BuildStep, error: anyhow::Error) -> Stop {
 }
 
 impl RecipeBuilds {
+    /// Inject the exact installer and version selected at helm assembly. Detached
+    /// tests use an explicit unavailable installer; production has no late fallback.
     pub(crate) fn new(
         store: HelmStore,
         api: Arc<dyn TensorlakeApi>,
         shell: Arc<dyn SandboxShell>,
         ssh_keys: Option<Arc<SshKeyStore>>,
         timings: BuildTimings,
+        preparer: Arc<dyn SnapshotPreparer>,
+        helm_version: String,
     ) -> Self {
         Self {
             store,
@@ -481,9 +534,13 @@ impl RecipeBuilds {
             shell,
             ssh_keys,
             timings,
+            preparer,
+            helm_version,
             registry: Mutex::new(Registry::default()),
             #[cfg(test)]
             fail_builder_record: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            fail_preparer_record: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -516,10 +573,13 @@ impl RecipeBuilds {
             },
             (None, None, None) => BuildView::Idle,
         };
-        let cleanup_pending = live.is_none()
-            && (state.builder_sandbox_id.is_some()
-                || state.pending_create_at.is_some()
-                || !state.retired_snapshots.is_empty());
+        let preparing = self.registry().preparing.contains_key(name);
+        let cleanup_pending = (live.is_none()
+            && (state.builder_sandbox_id.is_some() || state.pending_create_at.is_some()))
+            || (!preparing
+                && (state.preparer_sandbox_id.is_some()
+                    || state.prepare_pending_create_at.is_some()))
+            || (live.is_none() && !preparing && !state.retired_snapshots.is_empty());
         let snapshot = state.snapshot.as_ref().map(|snapshot| SnapshotView {
             id: snapshot.id.clone(),
             built_at: snapshot.built_at,
@@ -894,6 +954,7 @@ impl RecipeBuilds {
         // old one is deleted only after the new one is recorded. The snapshot's
         // frozen base and packages remain visible if the recipe changed during
         // the build; edits require another explicit rebuild.
+        let publication = self.snapshot_mutex(&ctx.recipe).lock_owned().await;
         self.store
             .update_tensorlake_recipe_state(&ctx.recipe, move |_, state| {
                 if let Some(old) = state.snapshot.take() {
@@ -905,6 +966,7 @@ impl RecipeBuilds {
             })
             .await
             .map_err(|error| storage(BuildStep::Finishing, error))?;
+        drop(publication);
         // The snapshot is recorded: from here on the build has succeeded, and
         // a failed deletion only leaves something for the next build.
         if let Err(error) = self
@@ -1271,38 +1333,79 @@ impl RecipeBuilds {
         key: &ApiKey,
         id: &str,
     ) -> Result<(), TensorlakeError> {
-        match self.api.terminate_sandbox(key, id).await {
-            Ok(()) | Err(TensorlakeError::NotFound { .. }) => {}
-            Err(error) => return Err(error),
-        }
-        let keep = self
-            .store
-            .recorded_tensorlake_snapshots()
+        self.sweep_owned_sandbox(recipe, key, id, false).await
+    }
+
+    /// Both job roles sweep only their own recorded sandbox. The same source
+    /// exclusion used by creates prevents a sweep from retiring a source mid-boot.
+    async fn sweep_owned_sandbox(
+        &self,
+        recipe: &str,
+        key: &ApiKey,
+        id: &str,
+        preparing: bool,
+    ) -> Result<(), TensorlakeError> {
+        self.sweep_owned_sandbox_with_limit(recipe, key, id, preparing, None)
             .await
-            .map_err(|error| {
-                tracing::warn!("Tensorlake snapshot sweep: storage failed: {error:#}");
-                TensorlakeError::Transport("Farhelm could not read its recorded snapshots".into())
-            })?;
-        let snapshots = self.api.list_snapshots(key).await?;
-        let mut first_error = None;
-        for snapshot in snapshots.snapshots.iter().filter(|snapshot| {
-            snapshot.sandbox_id.as_deref() == Some(id) && !keep.contains(&snapshot.id)
-        }) {
-            match self.api.delete_snapshot(key, &snapshot.id).await {
+    }
+
+    /// Bound only resource discovery/deletion, never the ownership write that
+    /// settles it. A timed-out resource phase keeps the old durable owner.
+    async fn sweep_owned_sandbox_with_limit(
+        &self,
+        recipe: &str,
+        key: &ApiKey,
+        id: &str,
+        preparing: bool,
+        limit: Option<Duration>,
+    ) -> Result<(), TensorlakeError> {
+        let resources = async {
+            let source = self.snapshot_mutex(recipe).lock_owned().await;
+            match self.api.terminate_sandbox(key, id).await {
                 Ok(()) | Err(TensorlakeError::NotFound { .. }) => {}
-                Err(error) => {
-                    first_error.get_or_insert(error);
+                Err(error) => return Err(error),
+            }
+            let keep = self
+                .store
+                .recorded_tensorlake_snapshots()
+                .await
+                .map_err(|error| {
+                    tracing::warn!("Tensorlake snapshot sweep: storage failed: {error:#}");
+                    TensorlakeError::Transport(
+                        "Farhelm could not read its recorded snapshots".into(),
+                    )
+                })?;
+            let snapshots = self.api.list_snapshots(key).await?;
+            let mut first_error = None;
+            for snapshot in snapshots.snapshots.iter().filter(|snapshot| {
+                snapshot.sandbox_id.as_deref() == Some(id) && !keep.contains(&snapshot.id)
+            }) {
+                match self.api.delete_snapshot(key, &snapshot.id).await {
+                    Ok(()) | Err(TensorlakeError::NotFound { .. }) => {}
+                    Err(error) => {
+                        first_error.get_or_insert(error);
+                    }
                 }
             }
-        }
-        if let Some(error) = first_error {
-            return Err(error);
-        }
+            if let Some(error) = first_error {
+                return Err(error);
+            }
+            Ok(source)
+        };
+        let _source = match limit {
+            Some(limit) => tokio::time::timeout(limit, resources).await.map_err(|_| {
+                TensorlakeError::Transport("sandbox cleanup did not finish in time".into())
+            })??,
+            None => resources.await?,
+        };
         let id = id.to_string();
         self.store
             .update_tensorlake_recipe_state(recipe, move |_, state| {
-                if state.builder_sandbox_id.as_deref() == Some(id.as_str()) {
+                if !preparing && state.builder_sandbox_id.as_deref() == Some(id.as_str()) {
                     state.builder_sandbox_id = None;
+                }
+                if preparing && state.preparer_sandbox_id.as_deref() == Some(id.as_str()) {
+                    state.preparer_sandbox_id = None;
                 }
             })
             .await
@@ -1321,6 +1424,7 @@ impl RecipeBuilds {
         recipe: &str,
         key: &ApiKey,
     ) -> Result<(), TensorlakeError> {
+        let _source = self.snapshot_mutex(recipe).lock_owned().await;
         let retired = match self.store.tensorlake_recipe_row(recipe).await {
             Ok(Some((_, state))) => state.retired_snapshots,
             Ok(None) => return Ok(()),
@@ -1351,9 +1455,9 @@ impl RecipeBuilds {
     }
 
     /// Delete the billed resources recorded for recipe `name`, for the
-    /// recipe's deletion: cancel a running build and wait for it to stop,
-    /// sweep the recorded builder and reconcile an outstanding create,
-    /// and delete the recipe's snapshot and retired snapshots. Each record
+    /// recipe's deletion: cancel both job roles and wait outside source exclusion,
+    /// reconcile their recorded owners and outstanding creates, then delete both
+    /// current snapshots and retired snapshots. Each record
     /// is cleared as its deletion succeeds; on failure the rest stays, so a
     /// retry finishes the job.
     /// A missing ID and pending marker, including a legacy or power-loss
@@ -1365,21 +1469,30 @@ impl RecipeBuilds {
         self: &Arc<Self>,
         name: &str,
     ) -> Result<DeleteGuard, CleanupRefusal> {
-        let task = {
+        let tasks = {
             let mut registry = self.registry();
             if !registry.deleting.insert(name.to_string()) {
                 return Err(CleanupRefusal::Deleting);
             }
-            registry.active.get(name).and_then(|active| {
+            let build = registry.active.get(name).and_then(|active| {
                 active.cancel.send_replace(true);
                 active.task.lock().expect("build task slot poisoned").take()
-            })
+            });
+            let prepare = registry.preparing.get(name).and_then(|active| {
+                active.cancel.send_replace(true);
+                active
+                    .task
+                    .lock()
+                    .expect("preparation task slot poisoned")
+                    .take()
+            });
+            (build, prepare)
         };
         let guard = DeleteGuard {
             builds: Arc::clone(self),
             name: name.to_string(),
         };
-        if let Some(task) = task {
+        for task in [tasks.0, tasks.1].into_iter().flatten() {
             // The task stops at its next wait and writes its end; a panic in
             // it has nothing left to wait for.
             let _ = task.await;
@@ -1411,28 +1524,695 @@ impl RecipeBuilds {
         // The recipe's own snapshot goes to the retired list first, so the
         // sweeps below may delete it too (nothing records it any more) and
         // `delete_retired` removes whatever is left.
+        let publication = self.snapshot_mutex(name).lock_owned().await;
         self.store
             .update_tensorlake_recipe_state(name, |_, state| {
                 if let Some(snapshot) = state.snapshot.take() {
                     state.retired_snapshots.push(snapshot.id);
                 }
+                if let Some(snapshot) = state.prepared.take() {
+                    state.retired_snapshots.push(snapshot.id);
+                }
             })
             .await
             .map_err(CleanupRefusal::Storage)?;
+        drop(publication);
         self.reconcile_builder(name, &key, &builder_name(&tag, name))
             .await
             .map_err(|failure| match failure {
                 ReconcileFailure::Storage(error) => CleanupRefusal::Storage(error),
                 other => CleanupRefusal::Tensorlake(other.to_string()),
             })?;
+        self.reconcile_preparer(name, &key, &preparer_name(&tag, name))
+            .await
+            .map_err(|error| CleanupRefusal::Tensorlake(super::shell::shown(&error.to_string())))?;
         self.delete_retired(name, &key).await.map_err(tensorlake)?;
         self.store
             .update_tensorlake_recipe_state(name, |_, state| {
                 state.build_started_at = None;
+                state.prepare_started_at = None;
             })
             .await
             .map_err(CleanupRefusal::Storage)?;
         Ok(guard)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Lazy preparation: separate admission, shared snapshot ownership
+// ---------------------------------------------------------------------------
+
+/// Persisted failure survives a helm restart without losing the earlier snapshot.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct PrepareFailureRecord {
+    pub(crate) step: PrepareStep,
+    pub(crate) message: String,
+    pub(crate) at: i64,
+}
+
+/// Live task outcome includes persistence failure because that failure itself
+/// may be impossible to record in the recipe's durable failure history.
+#[derive(Clone, Copy)]
+struct PrepareProgress {
+    step: PrepareStep,
+    started_at: i64,
+    /// A failed ownership write cannot always be persisted as last_failure.
+    /// Carry that failure to live waiters rather than spinning lazy retries.
+    persistence_failed: bool,
+}
+
+/// An owned preparation task; request cancellation only detaches its waiter.
+struct ActivePreparation {
+    progress: watch::Sender<PrepareProgress>,
+    cancel: watch::Sender<bool>,
+    task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+/// Frozen sizing and access for one preparation. Its source is selected later,
+/// under exclusion, so admission cannot freeze an already-retired snapshot ID.
+struct PrepareContext {
+    recipe: String,
+    sandbox: String,
+    key: ApiKey,
+    access: TensorlakeSshAccess,
+    size: RecipeSize,
+    events: Arc<FleetEvents>,
+    progress: watch::Sender<PrepareProgress>,
+    cancel: watch::Receiver<bool>,
+    started_at: i64,
+}
+
+impl PrepareContext {
+    /// Publish phase changes through the same invalidation feed as builds.
+    fn enter(&self, step: PrepareStep) {
+        self.progress.send_replace(PrepareProgress {
+            step,
+            started_at: self.started_at,
+            persistence_failed: false,
+        });
+        self.events.bump();
+    }
+}
+
+/// Cancellation delegates cleanup to the deleting caller; failure attempts a
+/// bounded sweep and keeps any ownership that could not be settled.
+enum PrepareStop {
+    Cancelled,
+    Failed(PrepareStep, String),
+}
+
+/// All incoming preparer/API messages pass through the existing bounded peer
+/// text filter. In particular, an anyhow chain is never logged or displayed.
+fn prepare_failed(step: PrepareStep, error: impl std::fmt::Display) -> PrepareStop {
+    PrepareStop::Failed(step, super::shell::shown(&error.to_string()))
+}
+
+impl RecipeBuilds {
+    /// Obtain stable per-recipe exclusion without lending the registry mutex
+    /// across a wait. The unchecked form also serves deletion after admission.
+    fn snapshot_mutex(&self, name: &str) -> Arc<tokio::sync::Mutex<()>> {
+        Arc::clone(
+            self.registry()
+                .snapshot_use
+                .entry(name.to_string())
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+        )
+    }
+
+    /// Protect selection and create through the clone's first Running observation.
+    /// Acquire only after ensuring/joining snapshots; publication needs this lock.
+    /// This is in-memory exclusion, not a crash-safe source dependency record.
+    pub(crate) async fn lock_snapshot_use(
+        &self,
+        name: &str,
+    ) -> anyhow::Result<tokio::sync::OwnedMutexGuard<()>> {
+        let guard = self.snapshot_mutex(name).lock_owned().await;
+        anyhow::ensure!(
+            !self.registry().deleting.contains(name),
+            "the recipe is being deleted"
+        );
+        anyhow::ensure!(
+            self.store.tensorlake_recipe_row(name).await?.is_some(),
+            "the recipe no longer exists"
+        );
+        Ok(guard)
+    }
+
+    /// Local-only reuse decision, also used while a consumer holds source exclusion.
+    /// Failure history does not add an invalidation rule to the three cache facts.
+    pub(crate) async fn fresh_prepared_snapshot(
+        &self,
+        name: &str,
+    ) -> anyhow::Result<Option<PreparedSnapshot>> {
+        anyhow::ensure!(
+            !self.registry().deleting.contains(name),
+            "the recipe is being deleted"
+        );
+        let (_, state) = self
+            .store
+            .tensorlake_recipe_row(name)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("the recipe no longer exists"))?;
+        let source = state.snapshot.as_ref().map(|snapshot| snapshot.id.as_str());
+        Ok(state
+            .prepared
+            .as_ref()
+            .filter(|snapshot| {
+                snapshot
+                    .stale_reason(now_secs(), &self.helm_version, source)
+                    .is_none()
+            })
+            .cloned())
+    }
+
+    /// Project preparation independently of explicit build progress. An old record
+    /// remains visible during renewal and after failure, with its real freshness.
+    pub(crate) fn preparation_view(
+        &self,
+        name: &str,
+        state: &RecipeState,
+    ) -> (Option<PreparedSnapshotView>, PrepareView) {
+        let live = self
+            .registry()
+            .preparing
+            .get(name)
+            .map(|active| *active.progress.borrow());
+        let preparation = match (live, state.prepare_started_at, &state.last_prepare_failure) {
+            (Some(p), _, _) => PrepareView::Preparing {
+                step: p.step,
+                started_at: p.started_at,
+            },
+            (None, Some(started_at), _) => PrepareView::Interrupted { started_at },
+            (None, None, Some(f)) => PrepareView::Failed {
+                step: f.step,
+                message: f.message.clone(),
+                at: f.at,
+            },
+            _ => PrepareView::Idle,
+        };
+        let source = state.snapshot.as_ref().map(|snapshot| snapshot.id.as_str());
+        (
+            state
+                .prepared
+                .as_ref()
+                .map(|snapshot| snapshot.view(now_secs(), &self.helm_version, source)),
+            preparation,
+        )
+    }
+
+    /// Ensure a fresh installation checkpoint, joining one task per recipe.
+    /// Rebuild remains separate: if it changes the source during installation,
+    /// the completed checkpoint is recorded but renewed before returning to Add.
+    pub(crate) async fn ensure_prepared_snapshot<F, Fut>(
+        self: &Arc<Self>,
+        name: &str,
+        frozen: &StoredRecipe,
+        events: Arc<FleetEvents>,
+        mut progress: F,
+    ) -> anyhow::Result<PreparedSnapshot>
+    where
+        F: FnMut(String) -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        loop {
+            self.ensure_snapshot(name, frozen, Arc::clone(&events), &mut progress)
+                .await?;
+            if let Some(snapshot) = self.fresh_prepared_snapshot(name).await? {
+                return Ok(snapshot);
+            }
+            let mut receiver = self
+                .start_preparation(name, frozen, Arc::clone(&events))
+                .await?;
+            loop {
+                let step = receiver.borrow_and_update().step;
+                progress(format!(
+                    "Preparing snapshot: {} (step {} of {})",
+                    step.label(),
+                    step.number(),
+                    PrepareStep::COUNT
+                ))
+                .await;
+                if receiver.changed().await.is_err() {
+                    break;
+                }
+            }
+            anyhow::ensure!(
+                !receiver.borrow().persistence_failed,
+                "Farhelm could not save preparation progress; run setup again"
+            );
+            let (_, state) = self
+                .store
+                .tensorlake_recipe_row(name)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("the recipe no longer exists"))?;
+            if let Some(failure) = state.last_prepare_failure {
+                anyhow::bail!("{}", failure.message);
+            }
+            // This watch describes the attempt we joined. The durable start
+            // marker may already belong to a newer preparation another waiter
+            // started after Rebuild; the next iteration must join that job.
+            anyhow::ensure!(
+                state.prepared.is_some(),
+                "snapshot preparation ended without a snapshot; run setup again"
+            );
+            // Freshness is rechecked at the top, outside source exclusion. A
+            // concurrent Rebuild may require another preparation, never a stale return.
+        }
+    }
+
+    /// Admit preparation independently from Build/Rebuild, subscribing while the
+    /// registry lock still protects the task so a fast completion cannot be missed.
+    async fn start_preparation(
+        self: &Arc<Self>,
+        name: &str,
+        frozen: &StoredRecipe,
+        events: Arc<FleetEvents>,
+    ) -> anyhow::Result<watch::Receiver<PrepareProgress>> {
+        {
+            let registry = self.registry();
+            anyhow::ensure!(
+                !registry.deleting.contains(name),
+                "the recipe is being deleted"
+            );
+            if let Some(active) = registry.preparing.get(name) {
+                return Ok(active.progress.subscribe());
+            }
+        }
+        let key = self.api_key().await?.ok_or_else(|| {
+            anyhow::anyhow!("save a Tensorlake API key in Settings → Tensorlake first")
+        })?;
+        let access = self.ssh_access().await.map_err(anyhow::Error::msg)?;
+        let tag = helm_tag(&self.store.registry_namespace().await?);
+        let mut registry = self.registry();
+        anyhow::ensure!(
+            !registry.deleting.contains(name),
+            "the recipe is being deleted"
+        );
+        if let Some(active) = registry.preparing.get(name) {
+            return Ok(active.progress.subscribe());
+        }
+        let started_at = now_secs();
+        let (progress, receiver) = watch::channel(PrepareProgress {
+            step: PrepareStep::Creating,
+            started_at,
+            persistence_failed: false,
+        });
+        let (cancel, cancel_rx) = watch::channel(false);
+        let active = Arc::new(ActivePreparation {
+            progress: progress.clone(),
+            cancel,
+            task: Mutex::new(None),
+        });
+        let ctx = PrepareContext {
+            recipe: name.to_string(),
+            sandbox: preparer_name(&tag, name),
+            key,
+            access,
+            size: frozen.size,
+            events,
+            progress,
+            cancel: cancel_rx,
+            started_at,
+        };
+        let engine = Arc::clone(self);
+        let mine = Arc::clone(&active);
+        let task = tokio::spawn(async move {
+            engine.run_preparation(&ctx).await;
+            let mut registry = engine.registry();
+            if registry
+                .preparing
+                .get(&ctx.recipe)
+                .is_some_and(|current| Arc::ptr_eq(current, &mine))
+            {
+                registry.preparing.remove(&ctx.recipe);
+            }
+            drop(registry);
+            ctx.events.bump();
+        });
+        *active.task.lock().expect("preparation task slot poisoned") = Some(task);
+        registry.preparing.insert(name.to_string(), active);
+        Ok(receiver)
+    }
+
+    /// Cancel only remote work and waits. Create plus its ownership writes are
+    /// awaited unconditionally so recipe deletion never loses a billed sandbox.
+    async fn prepare_remote<T>(
+        &self,
+        ctx: &PrepareContext,
+        future: impl Future<Output = T>,
+    ) -> Result<T, PrepareStop> {
+        let mut cancel = ctx.cancel.clone();
+        tokio::select! { biased;
+            _ = cancel.wait_for(|cancelled| *cancelled) => Err(PrepareStop::Cancelled),
+            output = future => Ok(output),
+        }
+    }
+
+    /// Record lifecycle boundaries even on failure; interrupted ownership is
+    /// reconciled lazily by the next preparation or explicit recipe deletion.
+    async fn run_preparation(&self, ctx: &PrepareContext) {
+        let at = ctx.started_at;
+        if !matches!(
+            self.store
+                .update_tensorlake_recipe_state(&ctx.recipe, move |_, state| {
+                    state.prepare_started_at = Some(at);
+                    state.last_prepare_failure = None;
+                })
+                .await,
+            Ok(Some(()))
+        ) {
+            ctx.progress
+                .send_modify(|progress| progress.persistence_failed = true);
+            return;
+        }
+        ctx.events.bump();
+        let mut sandbox = None;
+        let failure = match self.prepare_steps(ctx, &mut sandbox).await {
+            Ok(()) => return,
+            Err(PrepareStop::Cancelled) => None,
+            Err(PrepareStop::Failed(step, message)) => {
+                if let Some(id) = sandbox {
+                    // A failed best-effort sweep retains the durable owner.
+                    let _ = self
+                        .sweep_owned_sandbox_with_limit(
+                            &ctx.recipe,
+                            &ctx.key,
+                            &id,
+                            true,
+                            Some(self.timings.failure_sweep),
+                        )
+                        .await;
+                }
+                Some(PrepareFailureRecord {
+                    step,
+                    message,
+                    at: now_secs(),
+                })
+            }
+        };
+        if self
+            .store
+            .update_tensorlake_recipe_state(&ctx.recipe, move |_, state| {
+                state.prepare_started_at = None;
+                if failure.is_some() {
+                    state.last_prepare_failure = failure;
+                }
+            })
+            .await
+            .is_err()
+        {
+            ctx.progress
+                .send_modify(|progress| progress.persistence_failed = true);
+        }
+    }
+
+    /// Installation never holds source exclusion. Only selection/create/Running
+    /// and publication need to serialize with source retirement.
+    async fn prepare_steps(
+        &self,
+        ctx: &PrepareContext,
+        sandbox: &mut Option<String>,
+    ) -> Result<(), PrepareStop> {
+        let creating = PrepareStep::Creating;
+        // These helpers include durable ownership writes. Await them whole:
+        // cancellation must never drop a record after an observed vendor change.
+        self.reconcile_preparer(&ctx.recipe, &ctx.key, &ctx.sandbox)
+            .await
+            .map_err(|error| prepare_failed(creating, error))?;
+        let _ = self.delete_retired(&ctx.recipe, &ctx.key).await;
+        let deadline = tokio::time::Instant::now() + self.timings.name_free;
+        loop {
+            match self
+                .prepare_remote(ctx, self.api.get_sandbox(&ctx.key, &ctx.sandbox))
+                .await?
+            {
+                Err(TensorlakeError::NotFound { .. }) => break,
+                Ok(found) if found.status == SandboxStatus::Terminated => break,
+                Ok(_) if tokio::time::Instant::now() < deadline => {}
+                Ok(_) => {
+                    return Err(prepare_failed(
+                        creating,
+                        "a sandbox still occupies the recipe's preparation name; remove it in Tensorlake or retry later",
+                    ));
+                }
+                Err(error) => return Err(prepare_failed(creating, error)),
+            }
+            self.prepare_remote(ctx, tokio::time::sleep(self.timings.poll))
+                .await?;
+        }
+        let source_guard = self
+            .prepare_remote(ctx, self.snapshot_mutex(&ctx.recipe).lock_owned())
+            .await?;
+        // Another waiter may have completed preparation between the caller's
+        // freshness read and admission. Avoid a second billed create.
+        let state = self
+            .store
+            .tensorlake_recipe_row(&ctx.recipe)
+            .await
+            .map_err(|_| prepare_failed(creating, "Farhelm could not read preparation progress"))?
+            .ok_or_else(|| prepare_failed(creating, "the recipe was deleted"))?
+            .1;
+        let source = state
+            .snapshot
+            .ok_or_else(|| prepare_failed(creating, "the recipe has no built snapshot"))?;
+        if state.prepared.as_ref().is_some_and(|prepared| {
+            prepared
+                .stale_reason(now_secs(), &self.helm_version, Some(&source.id))
+                .is_none()
+        }) {
+            let _ = self
+                .store
+                .update_tensorlake_recipe_state(&ctx.recipe, |_, state| {
+                    state.prepare_started_at = None;
+                })
+                .await;
+            return Ok(());
+        }
+        let id = self.create_preparer(ctx, &source, sandbox).await?;
+        ctx.enter(PrepareStep::Starting);
+        let deadline = tokio::time::Instant::now() + self.timings.start;
+        loop {
+            let info = self
+                .prepare_remote(ctx, self.api.get_sandbox(&ctx.key, &id))
+                .await?
+                .map_err(|error| prepare_failed(PrepareStep::Starting, error))?;
+            match info.status {
+                SandboxStatus::Running => break,
+                SandboxStatus::Terminated => {
+                    return Err(prepare_failed(
+                        PrepareStep::Starting,
+                        "Tensorlake ended the preparation sandbox",
+                    ));
+                }
+                _ => {}
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(prepare_failed(
+                    PrepareStep::Starting,
+                    "the preparation sandbox did not start in time",
+                ));
+            }
+            self.prepare_remote(ctx, tokio::time::sleep(self.timings.poll))
+                .await?;
+        }
+        drop(source_guard);
+        ctx.enter(PrepareStep::Installing);
+        let facts = self
+            .prepare_remote(ctx, self.preparer.prepare(&ctx.sandbox, &ctx.access))
+            .await?
+            .map_err(|error| prepare_failed(PrepareStep::Installing, error))?;
+        if facts.farhelm_version != self.helm_version
+            || !facts.home.is_absolute()
+            || !facts.farhelm_path.is_absolute()
+            || !facts.state_dir.is_absolute()
+        {
+            return Err(prepare_failed(
+                PrepareStep::Installing,
+                "the preparer returned incompatible installation coordinates or version",
+            ));
+        }
+        ctx.enter(PrepareStep::Snapshotting);
+        let snapshot = self
+            .prepare_remote(
+                ctx,
+                self.api
+                    .create_snapshot(&ctx.key, &id, SnapshotType::Filesystem),
+            )
+            .await?
+            .map_err(|error| prepare_failed(PrepareStep::Snapshotting, error))?
+            .snapshot_id;
+        let deadline = tokio::time::Instant::now() + self.timings.snapshot;
+        loop {
+            let info = self
+                .prepare_remote(ctx, self.api.get_snapshot(&ctx.key, &snapshot))
+                .await?
+                .map_err(|error| prepare_failed(PrepareStep::Snapshotting, error))?;
+            match info.status {
+                SnapshotStatus::Completed => break,
+                SnapshotStatus::Failed => {
+                    return Err(prepare_failed(
+                        PrepareStep::Snapshotting,
+                        "Tensorlake could not complete the prepared snapshot",
+                    ));
+                }
+                _ => {}
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(prepare_failed(
+                    PrepareStep::Snapshotting,
+                    "the prepared snapshot did not complete in time",
+                ));
+            }
+            self.prepare_remote(ctx, tokio::time::sleep(self.timings.poll))
+                .await?;
+        }
+        ctx.enter(PrepareStep::Finishing);
+        let prepared = PreparedSnapshot {
+            id: snapshot,
+            prepared_at: now_secs(),
+            farhelm_version: self.helm_version.clone(),
+            source_snapshot: source.id,
+            disk_gb: source.disk_gb,
+            facts,
+        };
+        let publication = self
+            .prepare_remote(ctx, self.snapshot_mutex(&ctx.recipe).lock_owned())
+            .await?;
+        self.store
+            .update_tensorlake_recipe_state(&ctx.recipe, move |_, state| {
+                if let Some(old) = state.prepared.replace(prepared) {
+                    state.retired_snapshots.push(old.id);
+                }
+                state.prepare_started_at = None;
+                state.last_prepare_failure = None;
+            })
+            .await
+            .map_err(|_| {
+                prepare_failed(
+                    PrepareStep::Finishing,
+                    "Farhelm could not save the prepared snapshot",
+                )
+            })?
+            .ok_or_else(|| prepare_failed(PrepareStep::Finishing, "the recipe was deleted"))?;
+        drop(publication);
+        let _ = self
+            .sweep_owned_sandbox(&ctx.recipe, &ctx.key, &id, true)
+            .await;
+        let _ = self.delete_retired(&ctx.recipe, &ctx.key).await;
+        Ok(())
+    }
+
+    /// The pending marker and observed ID writes bracket an uncancellable create.
+    /// Only that outstanding marker authorizes later recovery by deterministic name.
+    async fn create_preparer(
+        &self,
+        ctx: &PrepareContext,
+        source: &BuiltSnapshot,
+        sandbox: &mut Option<String>,
+    ) -> Result<String, PrepareStop> {
+        let step = PrepareStep::Creating;
+        let sent = now_secs();
+        self.store
+            .update_tensorlake_recipe_state(&ctx.recipe, move |_, state| {
+                state.prepare_pending_create_at = Some(sent);
+            })
+            .await
+            .map_err(|_| prepare_failed(step, "Farhelm could not record the preparation create"))?
+            .ok_or_else(|| prepare_failed(step, "the recipe was deleted"))?;
+        let request = CreateSandbox {
+            name: ctx.sandbox.clone(),
+            source: SandboxSource::Snapshot(source.id.clone()),
+            resources: Resources {
+                cpus: f64::from(ctx.size.cpus),
+                memory_mb: u64::from(ctx.size.memory_gb) * 1024,
+                disk_mb: u64::from(source.disk_gb) * 1024,
+            },
+            timeout_secs: BUILDER_IDLE_TIMEOUT_SECS,
+            auto_resume: false,
+            max_pending_secs: 900,
+        };
+        let id = match self.api.create_sandbox(&ctx.key, &request).await {
+            Ok(created) => created.sandbox_id,
+            Err(error) if create_was_refused(&error) => {
+                let _ = self
+                    .store
+                    .update_tensorlake_recipe_state(&ctx.recipe, |_, state| {
+                        state.prepare_pending_create_at = None;
+                    })
+                    .await;
+                return Err(prepare_failed(step, error));
+            }
+            Err(error) => match self.api.get_sandbox(&ctx.key, &ctx.sandbox).await {
+                Ok(found) => found.id,
+                _ => return Err(prepare_failed(step, error)),
+            },
+        };
+        self.record_preparer(&ctx.recipe, &id).await.map_err(|_| {
+            prepare_failed(step, "Farhelm could not record the preparation sandbox")
+        })?;
+        *sandbox = Some(id.clone());
+        Ok(id)
+    }
+
+    /// Recording an observed owner settles the pending request in the same write.
+    async fn record_preparer(&self, recipe: &str, id: &str) -> anyhow::Result<()> {
+        #[cfg(test)]
+        if self
+            .fail_preparer_record
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            anyhow::bail!("injected failure recording the preparer");
+        }
+        let id = id.to_string();
+        self.store
+            .update_tensorlake_recipe_state(recipe, move |_, state| {
+                state.preparer_sandbox_id = Some(id);
+                state.prepare_pending_create_at = None;
+            })
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("the recipe was deleted"))
+    }
+
+    /// Reconcile only a recorded ID or outstanding create; a preparation start
+    /// alone is never evidence that a same-name sandbox belongs to this helm.
+    async fn reconcile_preparer(
+        &self,
+        recipe: &str,
+        key: &ApiKey,
+        name: &str,
+    ) -> anyhow::Result<()> {
+        let state = self
+            .store
+            .tensorlake_recipe_row(recipe)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("the recipe was deleted"))?
+            .1;
+        if let Some(id) = state.preparer_sandbox_id {
+            self.sweep_owned_sandbox(recipe, key, &id, true).await?;
+        }
+        if let Some(sent) = state.prepare_pending_create_at {
+            match self.api.get_sandbox(key, name).await {
+                Ok(found) => {
+                    self.record_preparer(recipe, &found.id).await?;
+                    self.sweep_owned_sandbox(recipe, key, &found.id, true)
+                        .await?;
+                }
+                Err(TensorlakeError::NotFound { .. })
+                    if now_secs().saturating_sub(sent) >= CREATE_SETTLE_SECS =>
+                {
+                    self.store
+                        .update_tensorlake_recipe_state(recipe, |_, state| {
+                            state.prepare_pending_create_at = None;
+                        })
+                        .await?;
+                }
+                Err(TensorlakeError::NotFound { .. }) => anyhow::bail!(
+                    "a preparation sandbox Farhelm asked Tensorlake for may still be starting; try again in a few minutes"
+                ),
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1462,7 +2242,7 @@ enum ReconcileFailure {
     Storage(anyhow::Error),
 }
 
-/// Holds off builds of a recipe being deleted; see
+/// Holds off both snapshot jobs for a recipe being deleted; see
 /// [`RecipeBuilds::clean_for_delete`].
 pub(crate) struct DeleteGuard {
     builds: Arc<RecipeBuilds>,
