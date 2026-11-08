@@ -378,13 +378,23 @@ fi
 # reported missing, which is true once rustup is installed.
 installed_targets=""
 if [ "$have_rust" -eq 1 ]; then
-  installed_targets=$(rustup target list --installed)
+  # The caller may be outside this checkout. Read its pin here and name that
+  # toolchain in the printed fixes, which the caller pastes into their shell.
+  rust_toolchain=$(
+    cd "$repo" || exit 1
+    rustup show active-toolchain || {
+      rustup toolchain install >&2 || exit 1
+      rustup show active-toolchain
+    }
+  ) || exit 1
+  rust_toolchain=${rust_toolchain%% *}
+  installed_targets=$(rustup target list --installed --toolchain "$rust_toolchain") || exit 1
 fi
 # wasm32 for the web UI dx builds into the desktop app; one musl target per
 # Linux architecture whose payload is built.
 for target in wasm32-unknown-unknown "${arches[@]/%/-unknown-linux-musl}"; do
   printf '%s\n' "$installed_targets" | grep -qx "$target" \
-    || need "rustup target $target" "rustup target add $target"
+    || need "rustup target $target" "rustup target add${rust_toolchain:+ --toolchain $rust_toolchain} $target"
 done
 
 dx_version=0.7.10
@@ -421,6 +431,9 @@ if [ "${#missing_names[@]}" -gt 0 ]; then
     exit 1
   fi
   echo "install them with:" >&2
+  # This also gives a newly installed rustup the checkout's pin before any
+  # target or cargo-installed tool is requested in the pasted block.
+  printf '  cd %q\n' "$repo" >&2
   for fix in "${missing_fixes[@]}"; do
     echo "  $fix" >&2
   done

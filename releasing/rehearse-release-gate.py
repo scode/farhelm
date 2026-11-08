@@ -7,8 +7,8 @@ so GitHub runs it, and the branch is deleted afterwards. `.agents/run-all-tests.
 The release's test gate (`.github/dist-build-setup.yml`, spliced by cargo-dist into every per-target build job of the
 generated `.github/workflows/release.yml`) only ever runs on a tag push, and a tag push publishes a release. Several
 failure classes only show up on GitHub's runners: the macOS and arm64 legs, the runner images' preinstalled tools, and
-whatever Rust stable happens to be current there. This script is how to get that verdict for an arbitrary commit
-without publishing anything.
+the runner's rustup selecting the repository's pinned Rust. This script is how to get that verdict for an arbitrary
+commit without publishing anything.
 
 Here's the TLDR of the rewrite, which emulates what dist's own `pr-run-mode = "upload"` would do:
 

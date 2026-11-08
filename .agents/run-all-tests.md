@@ -75,22 +75,19 @@ duplicate PRs.
 ## 2. Static and tooling checks
 
 Run these before the sweep: several of them compile, and the sweep's timing-sensitive tests assume a quiet machine. This
-is the inventory in `.agents/validation.md` minus every battery the sweep runs, plus three checks the inventory does not
-name (the CI job's Alpine/BusyBox installer run, the newest-stable clippy, and the rehearsal generator's self-test).
-Generic recorder wrapping is fine but not required for these; record each result in the log either way.
+is the inventory in `.agents/validation.md` minus every battery the sweep runs, plus two checks the inventory does not
+name (the CI job's Alpine/BusyBox installer run and the rehearsal generator's self-test). Generic recorder wrapping is
+fine but not required for these; record each result in the log either way. Rust commands use `rust-toolchain.toml`, the
+same pin CI and release builds use; no second clippy run on floating stable is needed.
 
 - `cargo fmt --all -- --check`
 - `python -B scripts/check-test-sleeps.py`, with the isolated interpreter from `docs/test-sleep-check.md` (create its
   venv in your scratch directory)
 - `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`
-- The same two clippy commands on the newest Rust stable, until the `TODO.md` entry "Pin the Rust toolchain" lands (then
-  drop this item). CI installs whatever stable is current when it runs, so a machine that has not updated can pass a
-  check CI fails. `rustup check` names the newest stable; install it beside the default with
-  `rustup toolchain install <version> --profile minimal -c clippy` and run `cargo +<version> clippy ...` with
-  `CARGO_TARGET_DIR` pointing into your scratch directory, so it does not churn the checkout's `target/`.
 - `cargo check -p farhelm-ui --features desktop` and `cargo check -p farhelm-desktop`
 - `scripts/check-desktop-assets.sh` (including its head-product-assets parity fixtures)
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh`
+- `bash -n scripts/devbuild-mac.sh && bash -n scripts/test-provision-centos.sh`, and `shellcheck` on both scripts
 - The CI install-script job's Alpine/BusyBox run (the `docker run ... alpine:3` step in `.github/workflows/ci.yml`, with
   a static musl `farhelm` from `cargo build -p farhelm --target x86_64-unknown-linux-musl` passed as `--farhelm`; the
   sweep runs `test-install-sh.sh` only under the host's GNU userland). Both runs include the installer's scenario-scoped

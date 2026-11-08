@@ -51,6 +51,10 @@ interrupted, poorly identified runs, or runs whose coverage no longer applies ar
 run now; checks reused, with the covered revision and why their coverage still applies; and checks skipped, with the
 reason.
 
+Rustup reads the exact compiler version, rustfmt, clippy and wasm target from `rust-toolchain.toml` for local, CI and
+release builds. Bump that file's version in a deliberate PR. Purpose-specific targets are added to that toolchain by
+their scripts; explicit `cargo +nightly` and `rustup ... --toolchain nightly` still select nightly for coverage.
+
 For Rust execution, first put the pinned nextest and tmux on PATH using the guarded setup in
 `docs/test-run-evidence.md`. Run from the checkout root with Python 3.11+ (Python 3.13+ on macOS). Use owned sandboxes
 for expensive, slow or memory-heavy checks; small focused checks can run locally. The recorder's nextest mode enforces
@@ -793,6 +797,10 @@ that its required systemd or SSH substrate ran.
   own. Needs docker and `musl-tools`: the payloads it pushes are the release's musl-static `farhelm` and static tmux,
   because the workspace's glibc debug binary cannot exec on CentOS 9. A few minutes, most of it the musl build; the
   container image and the tmux build are both cached after the first run.
+- `bash -n scripts/devbuild-mac.sh && bash -n scripts/test-provision-centos.sh` and
+  `shellcheck scripts/devbuild-mac.sh scripts/test-provision-centos.sh` — syntax and shell checks for the build scripts
+  that add purpose-specific Rust targets. Target selection uses the checkout's pin even when invoked from elsewhere;
+  devbuild's printed install commands name that toolchain too. Run when either script changes.
 - `dprint check`
 - `python3 scripts/check-agents-md.py` and `python3 scripts/check-agents-md.py --self-test` — keeps the agent
   instructions loadable: the root `AGENTS.md` within the 28 KiB budget (Codex injects only its first 32 KiB and drops

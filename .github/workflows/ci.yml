@@ -7,6 +7,8 @@
 # CARGO_BUILD_WARNINGS its `build-warnings` input sets) is cleared so these
 # commands behave identically in CI and locally. AGENTS.md's finish-work commands must
 # match these invocations exactly — change one, change both.
+# With no toolchain input, the pinned action reads rust-toolchain.toml.
+# Job-specific targets below extend that pin rather than select another Rust.
 #
 # Non-GitHub-owned actions are pinned to commit SHAs (tag in comment):
 # mutable tags would let an upstream compromise run arbitrary code with
