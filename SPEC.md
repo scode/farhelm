@@ -1988,11 +1988,13 @@ access and makes the user responsible for following the provider's terms of serv
 recipe uses a credential, with the recipe names shown. Reference changes refresh an open credential editor without
 discarding its unsaved replacement text.
 
-The Credentials overview, every credential editor, and both Tensorlake key forms show a prominent danger-tinted **Not
-encrypted on disk** warning explaining that anyone who can read the helm's state directory can read the values.
-Credentials also includes the same Tensorlake API key form as Tensorlake, with Save, Test and Clear. A save or clear in
-either updates both forms' saved-key metadata immediately; each keeps its own unsaved replacement draft. Credentials
-does not rename or duplicate the stored Tensorlake key.
+Credentials includes the same Tensorlake API key form as Tensorlake, with Save, Test and Clear, labelled **Tensorlake
+API key** there and **API key** in Tensorlake. The Credentials overview and every credential editor each show one
+prominent danger-tinted **Not encrypted on disk** warning explaining that anyone who can read the helm's state directory
+can read the values. The overview's warning names the Tensorlake API key, so the key form there shows none of its own;
+in Tensorlake the key form shows its own warning, worded for that one key. A save or clear in either updates both forms'
+saved-key metadata immediately; each keeps its own unsaved replacement draft. Credentials does not rename or duplicate
+the stored Tensorlake key.
 
 **Appearance** chooses **System**, **Dark** or **Light** for this device, with System as the default. System follows the
 device's current appearance, including changes while Farhelm stays open; an explicit choice overrides it. The browser or

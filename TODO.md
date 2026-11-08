@@ -24,21 +24,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Remove the duplicate "Not encrypted on disk" warning in Settings → Credentials.** The page shows the red notice
-  twice, stacked directly above the Tensorlake API key field: first the page-level notice that covers every secret
-  ("Farhelm stores these in plain text…"), then the reused Tensorlake key form's own singular one ("Farhelm stores this
-  key…"). The intent was one warning per surface, so an agent likely wired both into the same panel:
-  `CredentialsSettings` renders `StorageWarning { multiple: true }` and then `TensorlakeKey`, which renders its own
-  warning, and `e2e/tests/credentials-settings.spec.ts` asserts the text appears twice, which locks the duplicate in.
-  Decide whether the key form drops its warning where the page already shows one (keeping it only inside editors) or the
-  two collapse into a single notice, then fix that test. Plan: `plans/queue/tensorlake-credentials-polish.md`.
-
-- **Name the Tensorlake API key in Settings → Credentials.** The key form's visible heading is just "API key", carried
-  over from the Tensorlake page, where the surrounding section supplies the product name; inside Credentials it reads
-  like one of the named secrets and only the help text below says Tensorlake. The shared `TensorlakeKey` component
-  renders `span { "API key" }` for both pages, so label it "Tensorlake API key" at least where `credentials_location` is
-  set, the way its `aria_label` already does. Plan: `plans/queue/tensorlake-credentials-polish.md`.
-
 - **Stop the Settings dialog resizing when the section changes.** The dialog takes the height of whichever section is
   showing, so moving between Sessions, Appearance, Credentials and the rest makes the whole modal jump and the footer's
   Close button move with it. Fix is TBD; keep the dialog one size across sections.

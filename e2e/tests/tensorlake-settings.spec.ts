@@ -189,6 +189,7 @@ test("Tensorlake settings save a write-only key, test the saved key and clear it
     await expect(clear).toBeDisabled();
     await expect(save).toBeDisabled();
     await expect(section.getByText("Not encrypted on disk", { exact: true })).toBeVisible();
+    await expect(section.locator(".credential-storage-warning:visible")).toHaveCount(1);
     await expect(section).toContainText("Anyone who can read that folder can read it.");
     await expect.poll(async () => (await orphanSnapshot()).acted_on).toBe("1");
 
