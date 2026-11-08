@@ -21862,7 +21862,13 @@
   SPEC_impl.md states the same for builders. A test covers a foreign same-name builder left untouched. The same
   simplicity gate and fallback as that entry apply: if not simple, drop the code part and rely on the SPEC.md statement
   that running more than one helm from the same state is not supported. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/tensorlake-name-ownership.md`.
+- Execution: complete; implemented in change `rlrnlzxmvwqxpwswqmnpsmqoxwlwurzk`, bookmark
+  `plan/tensorlake-name-ownership/03-builder-adopt-own-record`;
+  [draft PR #3190](https://github.com/scode/farhelm/pull/3190/changes). Reconciliation sweeps a recorded ID and recovers
+  by name only for an outstanding pending create. Build starts are not ownership evidence, as the plan expressly
+  permits; ordinary write durability is retained. Foreign name occupants and their snapshots survive a fresh build,
+  recipe deletion, and cleanup of a different recorded ID. The independent pre-code simplicity review passed; the fix
+  adds no ownership state. The specs describe safe refusal and explicit cleanup when the name stays occupied.
 
 ## orphan-cleanup-uses-pre-adoption-ownership-snapshot.md
 

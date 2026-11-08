@@ -476,6 +476,12 @@ still appear, the recipe stays, with the reason, so a retry finishes the job. Ch
 until a successful rebuild replaces it. A recipe cannot select a snapshot Farhelm built for a recipe as its base, its
 own included, because Farhelm deletes those when their recipe moves on; that save is refused.
 
+A sandbox matching a recipe's build name is recovered only from an outstanding create request; a recorded sandbox ID
+permits cleaning up that sandbox alone. A build start without either record does not establish ownership. An unrelated
+sandbox at that name and its snapshots are left alone, and a build fails if the name stays occupied. The sandbox is
+hidden from **Sandboxes not on this helm** while the recipe exists; it must finish or be removed in Tensorlake before a
+retry can build. Missing records after an older installation or power loss require the same explicit cleanup.
+
 Upgrading converts recipes that installed packages to the Tensorlake Ubuntu base, keeping their packages and built
 snapshot. Recipes that reused an image or snapshot become that base with no packages and no built snapshot. Their rows
 show **No snapshot yet** with **Build snapshot**, unless an earlier build failed or was cut short, which keeps its

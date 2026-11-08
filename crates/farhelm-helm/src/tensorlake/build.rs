@@ -21,8 +21,9 @@
 //!   name alone is not enough: once terminated, a sandbox can no longer be
 //!   found by name reliably, and its snapshots are attributable only by its
 //!   ID;
-//! - a crash before that point leaves a sandbox with the fixed builder name,
-//!   which the next build's cleaning step looks up by name;
+//! - a crash before that point leaves the pending-create marker written
+//!   before the request, which lets the next build recover by name. A name
+//!   match without that marker is not evidence that this helm created it;
 //! - the new snapshot's ID is recorded in the same write that moves the old
 //!   one to `retired_snapshots`, so the old one is deleted only after the new
 //!   one is recorded, and a crash between the two leaves both recorded;
@@ -122,7 +123,8 @@ pub(crate) struct BuildTimings {
     pub(crate) poll: Duration,
     /// For the builder to run after create. Tensorlake may wait for capacity.
     pub(crate) start: Duration,
-    /// For a leftover builder's name to be free again after it terminated.
+    /// For the builder name to become free, including an unrelated occupant
+    /// this helm must leave alone.
     pub(crate) name_free: Duration,
     /// For ssh to reach the builder: its sshd can lag its "running" state.
     pub(crate) connect_window: Duration,
@@ -218,9 +220,10 @@ pub(crate) struct RecipeState {
 }
 
 impl RecipeState {
-    /// Whether the state records anything that may still bill on Tensorlake,
-    /// or a build that may have created something unrecorded (an
-    /// interrupted one, whose builder may exist under its name only).
+    /// Whether billed resources or an interrupted build still need settling
+    /// before the recipe can be forgotten. A build start keeps deletion on
+    /// the cleanup path, but does not authorize adopting a sandbox by name;
+    /// that needs the pending-create marker written before the request.
     pub(crate) fn needs_cleanup(&self) -> bool {
         self.snapshot.is_some()
             || self.builder_sandbox_id.is_some()
@@ -919,9 +922,10 @@ impl RecipeBuilds {
         Ok(())
     }
 
-    /// Step 1: remove what earlier builds left: the recorded builder, any
-    /// sandbox with the builder's name, and retired snapshots; then the name
-    /// must be free for the create.
+    /// Step 1: clean recorded resources and recover an outstanding create.
+    ///
+    /// A same-name sandbox without a create record is left alone. The name
+    /// must still become free before this build can create its own builder.
     async fn clean_leftovers(&self, ctx: &BuildContext) -> Result<(), Stop> {
         let step = BuildStep::Cleaning;
         self.remote(
@@ -952,7 +956,10 @@ impl RecipeBuilds {
             if tokio::time::Instant::now() >= deadline {
                 return Err(failed(
                     step,
-                    format!("the previous build sandbox {} did not go away", ctx.builder),
+                    format!(
+                        "a sandbox named {} still occupies the recipe's build name. Wait for it to finish or remove it in Tensorlake, then retry",
+                        ctx.builder
+                    ),
                 ));
             }
             self.pause(ctx, self.timings.poll).await?;
@@ -1061,11 +1068,14 @@ impl RecipeBuilds {
     /// for the next build and for the recipe's deletion alike.
     ///
     /// A recorded builder is swept first, so its record is never replaced
-    /// while its snapshots may remain. Then the builder's name is looked up:
-    /// a sandbox found there (a create whose answer was lost, or one that
-    /// finished after a crash) is recorded BEFORE it is terminated, because
-    /// once terminated it no longer answers to its name and only the
-    /// recorded ID attributes its snapshots; the record stays until the
+    /// while its snapshots may remain. Only an outstanding pending-create
+    /// marker then permits looking up the builder's name. A recorded ID
+    /// authorizes only that ID, never a different sandbox now at the name;
+    /// build starts alone authorize neither lookup nor adoption.
+    ///
+    /// A sandbox recovered from that request is recorded BEFORE it is
+    /// terminated, because it then no longer answers to its name and only
+    /// the recorded ID attributes its snapshots; the record stays until the
     /// whole sweep succeeded. Nothing under the name settles a pending
     /// create only once [`CREATE_SETTLE_SECS`] have passed since it was
     /// sent.
@@ -1086,6 +1096,9 @@ impl RecipeBuilds {
             self.sweep_builder(recipe, key, id)
                 .await
                 .map_err(ReconcileFailure::Tensorlake)?;
+        }
+        if state.pending_create_at.is_none() {
+            return Ok(());
         }
         match self.api.get_sandbox(key, builder).await {
             Ok(found) => {
@@ -1337,12 +1350,14 @@ impl RecipeBuilds {
         first_error.map_or(Ok(()), Err)
     }
 
-    /// Delete everything Tensorlake bills for the recipe `name`, for the
+    /// Delete the billed resources recorded for recipe `name`, for the
     /// recipe's deletion: cancel a running build and wait for it to stop,
-    /// sweep the recorded builder and any sandbox with the builder's name,
+    /// sweep the recorded builder and reconcile an outstanding create,
     /// and delete the recipe's snapshot and retired snapshots. Each record
     /// is cleared as its deletion succeeds; on failure the rest stays, so a
     /// retry finishes the job.
+    /// A missing ID and pending marker, including a legacy or power-loss
+    /// gap, leave any same-name sandbox for explicit cleanup.
     ///
     /// The returned guard keeps builds of `name` from starting until it is
     /// dropped, so the caller can delete the row with nothing new recorded.
@@ -1375,8 +1390,8 @@ impl RecipeBuilds {
             .await
             .map_err(CleanupRefusal::Storage)?
             .ok_or(CleanupRefusal::Missing)?;
-        // `needs_cleanup` covers a pending create and an interrupted build,
-        // so a builder known only by its name is still looked up.
+        // An interrupted start still has progress state to clear, even when
+        // no create record authorizes looking up or deleting its name.
         if !state.needs_cleanup() {
             return Ok(guard);
         }

@@ -838,12 +838,11 @@ async fn recovery_sweeps_a_recorded_builder_and_keeps_recorded_snapshots() {
     assert!(state.snapshot.is_some());
 }
 
-/// Spec: a sandbox with the builder's name that no state records (a crash
-/// before the ID was persisted) is terminated and its snapshots deleted
-/// before the new builder is created.
+/// Spec: an outstanding create recovers its builder by name after a crash
+/// before the ID was persisted, and sweeps it before the next create.
 ///
-/// Why: the fixed name is the only record of that window; without the
-/// lookup the create would also fail on the taken name.
+/// Why: the pending marker attributes that lost response to this recipe;
+/// the name alone must never authorize deleting a colliding sandbox.
 #[farhelm_testtrace::test(start_paused = true)]
 async fn a_leftover_found_only_by_name_is_swept_before_the_create() {
     let f = fixture().await;
@@ -852,6 +851,9 @@ async fn a_leftover_found_only_by_name_is_swept_before_the_create() {
         seed_sandbox(&mut model, "leftover0000000000001", &f.builder, "running");
         model.plant_snapshot("leftover0000000000001")
     };
+    f.set_state(|state| state.pending_create_at = Some(now_secs()))
+        .await;
+    assert!(f.state().await.pending_create_at.is_some());
     f.build().await;
     assert_eq!(
         f.api.model().get("leftover0000000000001").unwrap().status,
@@ -863,6 +865,151 @@ async fn a_leftover_found_only_by_name_is_swept_before_the_create() {
             < f.api.position(&format!("create_sandbox {}", f.builder))
     );
     assert!(f.state().await.snapshot.is_some());
+}
+
+/// A fresh build must refuse an occupied name without modifying its sandbox
+/// or snapshots. Its own persisted start is progress, not proof of a create;
+/// treating it as ownership would defeat the check on every ordinary build.
+#[farhelm_testtrace::test(start_paused = true)]
+async fn a_new_build_leaves_an_unrequested_same_name_sandbox_untouched() {
+    let f = fixture().await;
+    let before = {
+        let mut model = f.api.model();
+        seed_sandbox(&mut model, "foreign00000000000001", &f.builder, "running");
+        model.plant_snapshot("foreign00000000000001");
+        model.clone()
+    };
+    let state = f.state().await;
+    assert!(state.build_started_at.is_none());
+    assert!(state.builder_sandbox_id.is_none() && state.pending_create_at.is_none());
+    assert_eq!(
+        f.api.model().get(&f.builder).unwrap().status,
+        SandboxStatus::Running
+    );
+
+    f.build().await;
+
+    let state = f.state().await;
+    let failure = state
+        .last_failure
+        .as_ref()
+        .expect("the occupied name refuses the build");
+    assert_eq!(failure.step, BuildStep::Cleaning);
+    assert!(failure.message.contains(&f.builder), "{failure:?}");
+    assert!(
+        failure.message.contains("remove it in Tensorlake"),
+        "{failure:?}"
+    );
+    assert!(state.builder_sandbox_id.is_none() && state.pending_create_at.is_none());
+    assert!(state.snapshot.is_none());
+    assert_eq!(*f.api.model(), before);
+    let calls = f.api.ops();
+    assert!(!calls.is_empty(), "the name was checked before refusal");
+    assert!(
+        calls
+            .iter()
+            .all(|op| op == &format!("get_sandbox {}", f.builder)),
+        "{calls:?}"
+    );
+    assert!(f.shell.labels().is_empty());
+}
+
+/// An interrupted start without an ID or pending create permits deleting
+/// the recipe row, but no vendor call. Older state or power loss can leave
+/// this shape; guessing ownership from its name would destroy another helm's
+/// builder and its snapshots.
+#[farhelm_testtrace::test(start_paused = true)]
+async fn deleting_an_interrupted_start_leaves_an_unrequested_builder_untouched() {
+    let f = fixture().await;
+    let before = {
+        let mut model = f.api.model();
+        seed_sandbox(&mut model, "foreign00000000000001", &f.builder, "running");
+        model.plant_snapshot("foreign00000000000001");
+        model.clone()
+    };
+    f.set_state(|state| state.build_started_at = Some(now_secs()))
+        .await;
+    let state = f.state().await;
+    assert!(state.needs_cleanup() && state.build_started_at.is_some());
+    assert!(state.builder_sandbox_id.is_none() && state.pending_create_at.is_none());
+    assert_eq!(
+        f.api.model().get(&f.builder).unwrap().status,
+        SandboxStatus::Running
+    );
+
+    let guard = f
+        .builds
+        .clean_for_delete(RECIPE)
+        .await
+        .expect("only progress needs clearing");
+
+    assert!(!f.state().await.needs_cleanup());
+    assert_eq!(
+        f.store
+            .delete_tensorlake_recipe(RECIPE.into())
+            .await
+            .unwrap(),
+        Ok(())
+    );
+    assert!(f.api.ops().is_empty(), "{:?}", f.api.ops());
+    assert_eq!(*f.api.model(), before);
+    drop(guard);
+}
+
+/// A saved ID authorizes sweeping that builder's leftovers, not adopting a
+/// different sandbox now at its old name. Otherwise the post-sweep lookup
+/// would silently turn legitimate cleanup into another helm's data loss.
+#[farhelm_testtrace::test(start_paused = true)]
+async fn sweeping_a_saved_builder_does_not_adopt_a_different_name_occupant() {
+    let f = fixture().await;
+    let expected = {
+        let mut model = f.api.model();
+        seed_sandbox(
+            &mut model,
+            "oldbuilder00000000001",
+            "old-builder",
+            "terminated",
+        );
+        let old_snapshot = model.plant_snapshot("oldbuilder00000000001");
+        seed_sandbox(&mut model, "foreign00000000000001", &f.builder, "running");
+        model.plant_snapshot("foreign00000000000001");
+        let mut expected = model.clone();
+        expected
+            .snapshots
+            .retain(|snapshot| snapshot.id != old_snapshot);
+        expected
+    };
+    f.set_state(|state| state.builder_sandbox_id = Some("oldbuilder00000000001".into()))
+        .await;
+    let state = f.state().await;
+    assert_eq!(
+        state.builder_sandbox_id.as_deref(),
+        Some("oldbuilder00000000001")
+    );
+    assert!(state.pending_create_at.is_none());
+    assert_eq!(
+        f.api.model().get(&f.builder).unwrap().id,
+        "foreign00000000000001"
+    );
+
+    f.build().await;
+
+    let state = f.state().await;
+    assert_eq!(
+        state.last_failure.as_ref().unwrap().step,
+        BuildStep::Cleaning
+    );
+    assert!(state.builder_sandbox_id.is_none() && state.pending_create_at.is_none());
+    assert!(state.snapshot.is_none());
+    assert_eq!(*f.api.model(), expected);
+    let calls = f.api.ops();
+    assert!(calls.contains(&"terminate_sandbox oldbuilder00000000001".into()));
+    assert!(!calls.contains(&"terminate_sandbox foreign00000000000001".into()));
+    assert!(
+        !calls.iter().any(|op| op.starts_with("create_sandbox ")),
+        "{calls:?}"
+    );
+    assert!(f.shell.labels().is_empty());
 }
 
 /// Spec: a retired snapshot whose deletion fails stays listed and the view
@@ -1505,7 +1652,7 @@ async fn a_failed_builder_record_leaves_the_builder_for_reconciliation() {
     );
 }
 
-/// Spec: a builder found only by its name is recorded before it is
+/// Spec: a pending create's builder found by its name is recorded before it is
 /// terminated; when the snapshot listing then fails, the record stays (the
 /// terminated builder no longer answers to its name), and a fresh engine
 /// over the same store, as after a helm restart, deletes its snapshot.
@@ -1521,6 +1668,9 @@ async fn a_builder_found_by_name_is_recorded_before_it_is_terminated() {
         seed_sandbox(&mut model, "leftover0000000000001", &f.builder, "running");
         model.plant_snapshot("leftover0000000000001")
     };
+    f.set_state(|state| state.pending_create_at = Some(now_secs()))
+        .await;
+    assert!(f.state().await.pending_create_at.is_some());
     f.api.fail_once(
         "list_snapshots ",
         TensorlakeError::Status {

@@ -6278,33 +6278,39 @@ its snapshots are attributable only by its source ID. The create and that write 
 for them. A create answer that is not a refusal (a transport failure, a reply that does not decode, a server error)
 leaves the outcome open: the builder is looked up by name and adopted if found, and otherwise the pending record stays,
 counts as awaiting cleanup and blocks the store from deleting the row. Reconciliation, shared by the next build's
-cleaning step and the recipe's deletion, first sweeps a recorded builder, then looks up the builder's name and records
-any sandbox found there before terminating it; a lookup that finds nothing settles a pending create only 15 minutes
-after it was sent (the client's ten-minute create bound plus margin; Tensorlake makes a sandbox durable, and so findable
-by name, before it waits for capacity), and until then the delete is refused with "try again in a few minutes". The new
-snapshot's ID is written in the same write that moves the old one to `retired_snapshots`, and a builder ID or retired
-snapshot is removed only once Tensorlake confirms the deletion or answers 404. The steps are: cleaning (reconcile, retry
-retired deletions, wait up to two minutes for the name to be free), creating (the recipe's image or snapshot base, with
-Tensorlake Ubuntu resolved through the one `tensorlake/ubuntu-systemd` constant; the recipe's CPUs, memory and disk; a
-900-second idle timeout, so a builder a crashed helm left suspends and stops billing for compute; `auto_resume` off),
-starting (poll every 2 s for up to 15 minutes; terminated fails with Tensorlake's reason), connecting and checking the
-base (`Connecting`, step 4 of 9), packages, Claude Code, Codex, snapshotting (`filesystem`, polled until `completed`,
-not merely `local_ready`, for up to 30 minutes; `failed` fails the build) and finishing. Sweeping a builder terminates
-it, lists every snapshot and deletes those whose `sandbox_id` is the builder's, except any snapshot a recipe records as
-current; a failure leaves the builder recorded. After a failed step the builder, if its ID is recorded, is swept,
-bounded to two minutes; a builder whose ID could not be recorded is left running under the pending create, for the next
-build or the delete to find by name and record before terminating it. The failure is recorded with its step, and the
-previous snapshot is untouched. A build records the frozen base and packages it used even if the recipe was edited while
-it ran; the row then warns that the current definition differs. Deleting a recipe marks it as being deleted (no build
-may start), cancels a running build and waits for its task, reconciles, deletes the snapshot and retired snapshots, and
-only then deletes the row. Cancellation is cooperative: only waits on Tensorlake, the sandbox and poll sleeps are
-cancelled, never the create or a state write, so everything a cancelled build created is recorded before the delete
-reads the state. A recipe cannot select as its snapshot base a snapshot Farhelm built (any recipe's current or retired
-one): Farhelm deletes those when their recipe moves on, so the save is refused naming the owning recipe. Not covered: a
-snapshot a builder took that no recipe records yet (the helm stopped between taking it and recording it) can be named as
-a snapshot base, and the next sweep of that builder then deletes it; finding its ID takes listing the account's
-snapshots by hand. The list shows a running or interrupted build and pending cleanup for every recipe. Build, Rebuild
-and Retry are available for every base.
+cleaning step and the recipe's deletion, first sweeps a recorded builder by its ID. Only an outstanding pending create
+then permits looking up the builder's name and recording a sandbox found there before terminating it. A saved ID
+authorizes only that sandbox; neither an interrupted build start nor the current build's own start authorizes adopting a
+different sandbox by name. Without a pending create, an unrelated name occupant and its snapshots are left alone; the
+normal name-free wait refuses a new build if the name stays occupied. Such a sandbox stays hidden from Sandboxes not on
+this helm while its recipe exists, so it must finish or be removed in Tensorlake before retrying. Ordinary write
+durability is retained: a legacy row or power loss that loses both the ID and pending marker requires explicit cleanup.
+A lookup that finds nothing settles a pending create only 15 minutes after it was sent (the client's ten-minute create
+bound plus margin; Tensorlake makes a sandbox durable, and so findable by name, before it waits for capacity), and until
+then the delete is refused with "try again in a few minutes". The new snapshot's ID is written in the same write that
+moves the old one to `retired_snapshots`, and a builder ID or retired snapshot is removed only once Tensorlake confirms
+the deletion or answers 404. The steps are: cleaning (reconcile, retry retired deletions, wait up to two minutes for the
+name to be free), creating (the recipe's image or snapshot base, with Tensorlake Ubuntu resolved through the one
+`tensorlake/ubuntu-systemd` constant; the recipe's CPUs, memory and disk; a 900-second idle timeout, so a builder a
+crashed helm left suspends and stops billing for compute; `auto_resume` off), starting (poll every 2 s for up to 15
+minutes; terminated fails with Tensorlake's reason), connecting and checking the base (`Connecting`, step 4 of 9),
+packages, Claude Code, Codex, snapshotting (`filesystem`, polled until `completed`, not merely `local_ready`, for up to
+30 minutes; `failed` fails the build) and finishing. Sweeping a builder terminates it, lists every snapshot and deletes
+those whose `sandbox_id` is the builder's, except any snapshot a recipe records as current; a failure leaves the builder
+recorded. After a failed step the builder, if its ID is recorded, is swept, bounded to two minutes; a builder whose ID
+could not be recorded is left running under the pending create, for the next build or the delete to find by name and
+record before terminating it. The failure is recorded with its step, and the previous snapshot is untouched. A build
+records the frozen base and packages it used even if the recipe was edited while it ran; the row then warns that the
+current definition differs. Deleting a recipe marks it as being deleted (no build may start), cancels a running build
+and waits for its task, reconciles, deletes the snapshot and retired snapshots, and only then deletes the row.
+Cancellation is cooperative: only waits on Tensorlake, the sandbox and poll sleeps are cancelled, never the create or a
+state write, so everything a cancelled build created is recorded before the delete reads the state. A recipe cannot
+select as its snapshot base a snapshot Farhelm built (any recipe's current or retired one): Farhelm deletes those when
+their recipe moves on, so the save is refused naming the owning recipe. Not covered: a snapshot a builder took that no
+recipe records yet (the helm stopped between taking it and recording it) can be named as a snapshot base, and the next
+sweep of that builder then deletes it; finding its ID takes listing the account's snapshots by hand. The list shows a
+running or interrupted build and pending cleanup for every recipe. Build, Rebuild and Retry are available for every
+base.
 
 The build's scripts (`build_script.rs`) run as the sandbox user under `sh -c`, through the narrow `SandboxShell` trait.
 Its production implementation runs `ssh` with `ssh_oneshot_args` (the connection overrides, `BatchMode=yes`,
