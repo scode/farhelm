@@ -5008,10 +5008,11 @@ test("a retained refusal stays inside a bottom-row menu's scrolling panel", asyn
 
     const flyout = target.locator(".session-row-menu-flyout");
     const panel = target.locator(".session-row-menu-panel");
-    const error = target.locator(".action-error");
-    // Exactly one copy of the refusal while the menu is open: the closed
-    // row's own line yields to the open menu's.
-    await expect(error).toHaveCount(1);
+    const error = panel.locator(".action-error");
+    // The row keeps its banner in the DOM to preserve layout, but hides it
+    // while the menu owns the visible refusal. Count painted copies rather
+    // than treating that retained hidden banner as a second user message.
+    await expect(target.locator(".action-error:visible")).toHaveCount(1);
     await expect(error).toContainText("refusal-sentinel-0");
 
     // Premises: the refusal alone is taller than the painted panel, so it
