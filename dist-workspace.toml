@@ -294,10 +294,13 @@ contents = "read"
 # these labels back to `ubuntu-latest` (x86_64) and `ubuntu-24.04-arm`,
 # regenerate, and re-run.
 #
-# `macos-15` rather than `macos-14`, which GitHub began deprecating in July
-# 2026 and retires in November 2026 — brownouts before then would make Apple
-# tag builds fail intermittently. Both labels are arm64 (`macos-15-arm64` in
-# actions/runner-images), so this changes the image and not the target.
+# `macos-latest` is the label for GitHub's newest standard Apple Silicon
+# image (3 vCPU M1, arm64), so releases are not built on an image GitHub is
+# retiring, as `macos-14` was in 2026. The label moves to each new macOS on
+# GitHub's schedule, not ours, and an image change has broken a tag build
+# before (the Rust 1.98.0 move behind the libLLVM step in
+# `.github/dist-build-setup.yml`): a tag build that fails right after GitHub
+# moves the label should be checked against the new image first.
 #
 # `global` is where dist builds the extra artifacts (the two tmux binaries)
 # and assembles checksums, and dist also runs its plan, host and announce
@@ -306,5 +309,5 @@ contents = "read"
 [dist.github-custom-runners]
 x86_64-unknown-linux-musl = "ubicloud-standard-8"
 aarch64-unknown-linux-musl = "ubicloud-standard-8-arm"
-aarch64-apple-darwin = "macos-15"
+aarch64-apple-darwin = "macos-latest"
 global = "ubuntu-latest"
