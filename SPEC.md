@@ -2987,8 +2987,9 @@ are not persisted.
 
 The runtime guarantees below do not establish support for every historical data schema or a downgrade path between
 arbitrary versions. Upgrade compatibility is decided with the maintainer per feature, as specified in the
-maintainer-confirmed decisions below; agents must surface potential data/state loss and missing downgrade paths before
-proceeding with such changes.
+maintainer-confirmed decisions below; agents must surface potential data/state loss before proceeding with such changes.
+A schema version bump on its own, where older releases merely refuse the newer data and nothing is lost, need not be
+raised.
 
 Sessions depend on exactly one thing staying up: their host. Every other component is disposable:
 
@@ -4768,8 +4769,9 @@ or a reason to add cancellation or continuity machinery. Any new request or conn
 authenticate with a current credential. Rotation does not stop the agent processes running in Farhelm sessions.
 
 Supporting a range of historical data schemas and hardening every upgrade/downgrade path are not current design goals.
-During feature design, agents must alert the maintainer to potential loss of data or state and absence of a downgrade
-path before proceeding. Compatibility is decided per feature; this is not blanket permission for destructive migrations
+During feature design, agents must alert the maintainer to potential loss of data or state before proceeding. The mere
+fact that a schema version was bumped, so that older releases refuse the newer data, is not worth raising (the
+maintainer, 2026-11-08). Compatibility is decided per feature; this is not blanket permission for destructive migrations
 or ordinary runtime data loss. Revisit broader compatibility as the project matures, and record future breaking
 transitions when there is an expectation of users beyond the maintainer.
 
