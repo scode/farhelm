@@ -21666,7 +21666,8 @@
   and its snapshots on Tensorlake are deleted." (the wording may be tightened, the meaning kept); any test pinning the
   old text is updated. Size gate: about 100 lines of diff (estimated 5), as above. Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/tensorlake-settings-prompts.md`.
+- Execution: implemented in change `qmqvryzz`, bookmark `plan/tensorlake-settings-prompts/02-recipe-delete-wording`;
+  draft [PR #3187](https://github.com/scode/farhelm/pull/3187/changes).
 
 ## invalid-capture-run-recursive-removal.md
 

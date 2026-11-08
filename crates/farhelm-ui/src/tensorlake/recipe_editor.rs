@@ -562,16 +562,12 @@ pub(crate) fn RecipeEditor(
         .as_ref()
         .map(|view| view.name.clone())
         .unwrap_or_default();
-    // A built snapshot is deleted with the recipe (the helm does it first),
-    // so the confirmation says so: it is the part a user cannot get back.
-    let delete_question = if existing
-        .as_ref()
-        .is_some_and(|view| view.snapshot.is_some())
-    {
-        format!("Delete recipe {shown_name} and its snapshot on Tensorlake? This can't be undone.")
-    } else {
-        format!("Delete recipe {shown_name}? This can't be undone.")
-    };
+    // A build may finish while this editor keeps its opening view. Warn about
+    // cleanup unconditionally, naming only the snapshots Farhelm built so a
+    // user-supplied base is never described as part of the deletion.
+    let delete_question = format!(
+        "Delete recipe {shown_name}? Any running build is cancelled and the snapshots Farhelm built for it on Tensorlake are deleted."
+    );
     let title = match &existing {
         None => "New recipe".to_string(),
         Some(view) => format!("Recipe: {}", view.name),

@@ -576,7 +576,9 @@ for (const agent of ["Claude", "Codex"] as const) {
  * packages (split on spaces and new lines), tunnel, Claude Code endpoint and
  * GitHub selection. Pickers filter credential kinds; only names are returned. Reopening keeps
  * the explicit selection, including across a URL change, and deleting the
- * credential is refused until the recipe no longer uses it.
+ * credential is refused until the recipe no longer uses it. Delete warns about
+ * build cancellation and Farhelm-built snapshots even before a snapshot exists,
+ * since the editor's opening view cannot bound what cleanup will find later.
  *
  * Why: this is the whole create/edit/delete loop a user goes through, and the
  * named token is the part a regression would quietly break (a value echoed
@@ -730,7 +732,7 @@ test("a managed recipe is created, edited and deleted without exposing its token
     });
     await deleting.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(
-      deleting.getByText(`Delete recipe ${name}? This can't be undone.`, {
+      deleting.getByText(`Delete recipe ${name}? Any running build is cancelled and the snapshots Farhelm built for it on Tensorlake are deleted.`, {
         exact: true,
       }),
     ).toBeVisible();
@@ -1174,7 +1176,8 @@ async function recipe(request: APIRequestContext, name: string): Promise<any> {
  * keeps the prior build until replacement. Each base creates the right builder
  * source and runs the same install steps. A failed base check names its missing
  * requirement with Retry and keeps the built snapshot; Retry builds. Deleting
- * the recipe deletes its snapshot, leaving the user's base snapshot alone.
+ * the recipe warns about its Farhelm-built snapshots and deletes them, leaving
+ * the user's base snapshot alone. The warning must distinguish that ownership.
  *
  * Why: this is the user's whole loop with snapshots, and the fake's state is
  * the evidence that nothing the helm created is left billing; a regression
@@ -1367,7 +1370,7 @@ test("a recipe's snapshot builds, rebuilds, recovers from a failed step and goes
     await editor.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(
       editor.getByText(
-        `Delete recipe ${name} and its snapshot on Tensorlake? This can't be undone.`,
+        `Delete recipe ${name}? Any running build is cancelled and the snapshots Farhelm built for it on Tensorlake are deleted.`,
         { exact: true },
       ),
     ).toBeVisible();
