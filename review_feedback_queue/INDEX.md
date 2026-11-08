@@ -1758,10 +1758,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   an old tunnel can start a new SSH connection if the control handshake fails after connecting. The deployed ordering
   and resulting delay remain unverified after investigation.
 
-- [`openssh-floor-misparses-managed-known-host-path.md`](openssh-floor-misparses-managed-known-host-path.md) — The
-  supported older OpenSSH parser can misread managed known-hosts paths containing quoting characters, preventing normal
-  sandbox access.
-
 - [`snapshot-cleanup-races-new-host-registration.md`](snapshot-cleanup-races-new-host-registration.md) — Snapshot
   cleanup can remove a generated snapshot before a newly admitted host records its use, causing setup failure and
   rebuild cost.
