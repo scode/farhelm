@@ -21479,3 +21479,368 @@
   `plan/triage-misc-nov4/04-discard-old-wrapper-finding`; removed the feedback file and index entry under the recorded
   decision to leave old templates unchanged. No code or specification change. Draft PR
   [#3039](https://github.com/scode/farhelm/pull/3039/changes).
+
+## cancelled-orphan-delete-accepts-queued-confirmation.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main ebaaf6a7 (delegated checker; the triage session re-read the prompt). The
+  "Sandboxes not on this helm" Delete question (`crates/farhelm-ui/src/tensorlake/orphans.rs`, around 163-182) is a
+  plain signal, not a `ConfirmSlot`: Cancel clears it, and "Delete sandbox" checks only the busy flag before sending the
+  sandbox captured when the question was drawn. A Cancel and a Delete click delivered in one event burst, before the
+  render that removes the question, still delete the sandbox with its files, sessions and snapshots, and so can a stale
+  click after the user cancelled and opened another row's question. That burst shape is the UI's own documented event
+  model (`ops.rs`, the header Replace precedent `header-replace-confirm-ignores-cancel.md`). Not reproduced. Bucket
+  highest kept: a cloud sandbox and its work destroyed after Cancel.
+- Decision: recorded as `fix code` without asking, under the 2026-10-19 clearly-settled rule (triage.md, "Preparing each
+  item"), on SPEC_impl.md "Answers bind to what was drawn": "Every question, confirmation and destructive prompt goes
+  through `ConfirmSlot` ... an answer whose token is not the open one does nothing and leaves the current prompt up".
+  The orphan question is not one of the four prompts named there as staying up through their request. The user can
+  revise it.
+- Completion criteria: the orphan Delete question opens through `ConfirmSlot`; Delete answers with `take` on the shown
+  token and Cancel with `cancel_for`, so a queued answer after Cancel, or for another row's question, does nothing (no
+  fifth stay-up exception). A headless test delivers Cancel then Delete in one burst and expects no delete request. Size
+  gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
+  fragment); over it, block and bring it back. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## launcher-live-draft-submission-source-gap.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed for the pending-Resume route by code reading on main ebaaf6a7 (delegated checker; the triage
+  session re-read the fingerprint). After Launch on a suspended host's fresh checkout, Resume drops the operation claim
+  and arms a one-shot pending submission that fires on the form's Ready preview. Its identity (`preview_agent_now`,
+  `crates/farhelm-ui/src/list/create_form.rs` around 3689-3715, inside `GuardedSubmitStamp`) omits the Custom permission
+  words, so editing them during the preview wait launches the edited words without a second Launch press, for example
+  replacing a guarded vendor mode with `--dangerously-skip-permissions`. On a host that asks before YOLO the YOLO
+  question still applies (every Custom launch counts as YOLO); on a host that starts YOLO without asking (the Tensorlake
+  default) nothing asks again. The file's older generic live-draft concern remains unverified after investigation and is
+  not part of this outcome. Bucket: the established consequence is a launch the user did not press for, with words they
+  typed; high on what is established, highest arguable on the reviewer's reading.
+- Decision: recorded as `fix code` without asking, under the 2026-10-19 clearly-settled rule, on SPEC_impl.md
+  (Tensorlake resume, fresh checkouts): "The form's own Ready preview on the returned connection submits once, spending
+  the pending submission before dispatch. Draft or opening changes cancel it." The user can revise it.
+- Completion criteria: an edit of the Custom permission words after the press cancels the pending submission (either the
+  words join the pending identity or any admitted draft edit retires it), with a test that edits them during the wait
+  and expects no submission. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
+  queue removal or a changelog fragment); over it, block and bring it back. Narrow the feedback file to the generic
+  live-draft remainder ("Earlier generic live-draft investigation" and the d6645f77 addition) and move its index entry
+  to the other bucket, since that remainder's own assessment is other priority and unverified.
+- Execution: `pending`.
+
+## dead-host-report-anchor-identity-gap.md
+
+- Outcome: `other`.
+- Assessment: mechanisms confirmed individually, complete route unverified (delegated checker on main ebaaf6a7; the
+  reviewer's own disposition was unverified after investigation). A terminal host's child already reaped when a
+  supervisor adopts the host is anchored by its process number alone (`hosts/terminal.rs` around 880-895, deliberate),
+  so a stale report from the session's previous run whose recorded ancestry happens to contain that reused process
+  number could be credited to the current run, and a later Restart could resume that conversation. It needs a report
+  still pending across a relaunch, a reused process number and an agent that exited before a supervisor restart.
+- Decision: covered, removed without asking. SPEC.md "Lifecycle operations", Confirmed 2026-10-10: the cleanup and
+  resume rules "do not extend to ... two independent rare faults coinciding (... a lost report and a reused process
+  number, and the like). Under those conditions it is accepted ... that a session's recorded conversation is wrong until
+  the agent next reports one, so Restart may resume a different conversation of that agent". The same acceptance settled
+  the tmux-pane case of this check (`pid-only-anchoring-admit-earlier-launchs-durable-report.md`). The FILTER.md
+  process-number filter does not apply (it covers the signal handoff only). The user can revise it.
+- Completion criteria: remove the feedback file and its index entry. No code or spec change.
+- Execution: complete; the feedback file and its index entry were removed during triage on 2026-11-07.
+
+## agent-settings-save-overwrites-concurrent-editor.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by code reading on main ebaaf6a7 (delegated checker), with a wider window than the reviewer's
+  equal-length example. Credential delivery (`crates/farhelm-helm/src/provisioning/credential_delivery.rs`, around
+  456-493) reads a Tensorlake host's Claude or Codex settings file, merges Farhelm's keys on the helm, creates
+  directories and installs the result; the install (`backend.rs` `install_source`, around 991-1125) compares the
+  destination only with the new bytes' hash before `mv -f`. Nothing compares the live file with what was read, and the
+  per-host lock serializes only Farhelm's own writers. An edit of any length saved in the roughly six SSH round trips
+  after the read is silently undone. The reverse also happens: an agent's own read-modify-write straddling the install
+  undoes the new token, and since the delivery record then says delivered, nothing repairs it until the next
+  replacement. Since the settings-credentials plan, delivery runs at setup, on a connection whose remembered delivery
+  differs, and on every credential replacement while the host is connected, so the likeliest concurrent writer is a
+  running agent. Unverified: which agent commands write these files, and the window's length. Not covered by the
+  2026-10-21 last-write-wins exception (SPEC.md "One GUI at a time"), which names only GUI saves of launch templates and
+  number-key bindings. Bucket: high, not highest (one save's few lines, recreatable in a moment under the 2026-10-14
+  rule); proposed on the triage page and not contested.
+- Decision: the user picked "Refuse to replace a changed file" on the triage page, 2026-11-07, without comment.
+  Principle: Farhelm's delivery into an agent settings file never undoes a change saved to that file after Farhelm read
+  it.
+- Completion criteria: the final replace checks that the destination still matches the bytes that were read (or is still
+  absent) and refuses otherwise. On a mismatch, delivery re-reads and merges once; if the file changed again, it falls
+  back to the existing amber warning and retries on the next connection, without recording the delivery as done. One
+  SPEC_impl.md sentence states the rule beside the delivery description. Tests cover a change between read and replace,
+  for an existing file and for an absent one. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  this ledger, the queue removal or a changelog fragment; estimated 50-90); over it, block and bring it back. Remove the
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## removed-ssh-host-can-reappear-with-old-grants.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed as a mechanism by code reading on main ebaaf6a7 (delegated checker).
+  `HelmStore::remove_host_row` (`crates/farhelm-helm/src/store.rs`, around 7587-7621) deletes the host row under the
+  connection's ordinary NORMAL durability; the durability-revocations work (#3023) moved only the permission setters and
+  tunnel-consent patches onto `call_full_sync_if(true, ...)`. The command, YOLO and link grants live on the host row, so
+  an OS crash or power loss that loses the delete restores the host with its grants, and since removal leaves the remote
+  supervisor running (SPEC.md), the restored row reconnects with those powers. Unverified: the full reconnect and
+  approvals chain, and the size of the loss window. SPEC_impl.md's trust-revocation sentence (around 5306-5308) lists
+  the protected writes by name and omits removal; the plan's exclusion of removal was a planner proposal, not a
+  maintainer decision. Bucket highest kept: restored command and YOLO authority for a host the user removed, and SPEC.md
+  names removal as the remedy for a misbehaving host.
+- Decision: the user picked "All eight as listed" for the batch question on the triage page, 2026-11-07. Removing a host
+  is a trust revocation under the 2026-11-04 "protect trust, not recent history" decision
+  (`normal-durability-restores-revoked-grants.md`).
+- Completion criteria: the host-row delete runs under the existing full-durability barrier
+  (`call_full_sync_if(true, ...)`); SPEC_impl.md's trust-revocation sentence names host removal; the existing durability
+  test (`trust_revocations_commit_with_full_sync`) covers removal. Identity adoption's permission reset is not in scope.
+  Size gate: about 100 lines of diff (estimated 25), as above; over it, block and bring it back. Remove the feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## openssh-floor-percent-path-disables-stable-host-pin.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed in Farhelm's code on main ebaaf6a7 (delegated checker); the OpenSSH half was not re-verified.
+  `ssh_config_path_option` and `escape_config_path` (`crates/farhelm-helm/src/ssh.rs`, around 384-393 and 629-633)
+  double every `%` for both `IdentityFile` and `UserKnownHostsFile`, and Tensorlake access uses them with
+  `StrictHostKeyChecking=accept-new`. On the reviewer's reading of OpenSSH 7.6 sources, versions before 8.4
+  percent-expand `IdentityFile` but not `UserKnownHostsFile`, so with a `%` in the helm state path the known-hosts file
+  is read and written at a nonexistent doubled path and every connection accepts whatever gateway key it is shown. A `%`
+  appears only through `--state-dir`, an `XDG_STATE_HOME` or desktop state-dir value containing one, or a home path
+  containing one. SPEC_impl.md sets the 7.6 floor (around 3259) and specifies the doubling (around 6259-6260); they
+  conflict on 7.6-8.3. Bucket highest kept: host-key pinning silently off, exposing delivered credentials to an active
+  network attacker.
+- Decision: the user picked "All eight as listed" for the batch question on the triage page, 2026-11-07. Principle: a
+  helm state path containing a character older OpenSSH parsers cannot carry is an unsupported configuration and is
+  refused with a clear message, as SPEC.md requires of unsupported configurations.
+- Completion criteria: Tensorlake access refuses a helm state path containing `%`, `"` or `\`, with a message naming the
+  path, as `${` is refused today; SPEC_impl.md's path-encoding sentence says so; a test covers each character. Size
+  gate: about 100 lines of diff (estimated 15), as above; over it, block and bring it back. The same change settles
+  `openssh-floor-misparses-managed-known-host-path.md` and may remove both items. Remove the feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## openssh-floor-misparses-managed-known-host-path.md
+
+- Outcome: `fix spec+code`.
+- Assessment: not separately verified by triage beyond the group checker's note on main ebaaf6a7 that it is the same
+  path encoder (`ssh.rs`, around 612-615: backslashes doubled, quotes escaped) on the same OpenSSH 7.6 floor. The
+  reviewer read OpenSSH 7.6's tokenizer as stripping quotes without decoding backslash escapes, so a `"` or `\` in the
+  helm state path makes Tensorlake connections fail on 7.6 (a different identity path, or a fatal parse error). Bucket
+  other: connection failure, no security or work-loss route.
+- Decision: recorded with `openssh-floor-percent-path-disables-stable-host-pin.md` under the batch question's "All eight
+  as listed", 2026-11-07, as the triage page stated: the refusal covers quotes and backslashes too.
+- Completion criteria: settled by the refusal of `%`, `"` and `\` in that entry; remove this feedback file and its index
+  entry in the same change.
+- Execution: `pending`.
+
+## recipe-delete-warning-omits-newly-finished-snapshot.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main ebaaf6a7 (delegated checker); not run. Edit stays enabled while a
+  recipe's build runs and captures the row's view at click time; the delete question
+  (`crates/farhelm-ui/src/tensorlake/recipe_editor.rs`, around 565-573) is worded from that frozen view, while the
+  helm's `clean_for_delete` acts on current state. Opening the editor during a recipe's first build and deleting after
+  it finishes asks only "Delete recipe X?" and deletes the new snapshot. The question never mentions cancelling a
+  running build either. Bucket other: a Farhelm-built snapshot is not user-owned work (no host depends on it, Farhelm
+  cannot reuse it once its recipe is gone, Rebuild regenerates it).
+- Decision: the user picked "All eight as listed" for the batch question on the triage page, 2026-11-07. A Farhelm-built
+  snapshot isn't user-owned work, but the question should say what happens.
+- Completion criteria: the question uses unconditional wording such as "Delete recipe X? Any running build is cancelled
+  and its snapshots on Tensorlake are deleted." (the wording may be tightened, the meaning kept); any test pinning the
+  old text is updated. Size gate: about 100 lines of diff (estimated 5), as above. Remove the feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## invalid-capture-run-recursive-removal.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main ebaaf6a7 (delegated checker). `scripts/agent-tui.py stop` (around
+  134-141) runs `shutil.rmtree(directory, ignore_errors=True)` and returns success when the path is not a run (the host
+  helper raises because `<dir>/farhelm` is missing). Introduced by 2d5859c5 (#3088); before it, a non-run path exited
+  without deleting. `stop ""` resolves to the current directory (`Path("")` is `.`), so an agent whose shell lost `$run`
+  between commands and ran `stop "$run"` at the checkout root would delete the checkout's contents. That trigger is
+  inferred, not run. Bucket highest kept: catastrophic, and outside the tool itself.
+- Decision: the user picked "All eight as listed" for the batch question on the triage page, 2026-11-07. Maintainer
+  tools leave alone what they can't identify as their own.
+- Completion criteria: on a path that is not a run, `stop` exits non-zero and deletes nothing, as before #3088; the
+  tool's self-test (or a test) shows a non-run directory surviving. Size gate: about 100 lines of diff (estimated 5), as
+  above. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## fixture-url-userinfo-credentials.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main ebaaf6a7 (delegated checker). The capture scrubber's local-URL pattern
+  (`scripts/capture-agent-screens.py`, around 98-102) needs the host right after `://`, and the Rust fixture check
+  (`crates/farhelm-supervisor/src/agent_kind/screen_fixtures.rs`, around 214-234) takes the text before the first `:` as
+  the host, so both miss `http://user:pass@localhost:8080/` and bracketed `[::1]` after userinfo. Unverified: that Codex
+  prints userinfo in its base-URL warning; no leak observed. docs/agent-screen-fixtures.md promises to replace and
+  refuse such URLs; its manual diff read is the backstop. Bucket other: maintainer tooling, not catastrophic.
+- Decision: the user picked "All eight as listed" for the batch question on the triage page, 2026-11-07. The scrubber
+  keeps its documented promise.
+- Completion criteria: both the Python scrubber and the Rust check recognize `user@` and `user:pass@` before the host,
+  including localhost and `[::1]`, so such a URL is replaced and a screen still holding one is refused; tests cover each
+  form. Size gate: about 100 lines of diff (estimated 20-30), as above. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## right-edge-zero-width-sign-reorders-retained-text.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by reading the vendored terminal code on main ebaaf6a7 (delegated checker); not run. With
+  autowrap off, an unattached Hangul vowel or trailing sign after a non-Hangul character in the last column falls back
+  to ordinary zero-width storage, which targets the cell before the cursor (deliberate tmux parity, vendor/README.md),
+  while a following presentation selector targets the last-column character. Copied text is reordered; the program, its
+  files and its input are unaffected, and old terminals reorder ordinary combining marks the same way. Bucket other.
+- Decision: the user picked "All eight as listed" for the batch question on the triage page, 2026-11-07. Reordered
+  retained text isn't user-owned work; the edge interaction is accepted.
+- Completion criteria: one SPEC_impl.md clause beside the unattached-sign sentence (around 2750-2751) accepts that at
+  the right edge with autowrap off an unattached sign joins the cell before the last-column character, by the tmux
+  parity rule, so a following selector applies to the last-column character. No code or vendor change. Remove the
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## guarded-container-launch-approval-omits-sensitive-options.md
+
+- Outcome: `other`.
+- Assessment: partly correct, by code reading on main ebaaf6a7 (delegated checker). The launch approval card
+  (`crates/farhelm-ui/src/approvals.rs` `launch_rows`, around 1184-1286) never reads the container, so a launch from a
+  container template reads like an ordinary launch and names no container, image, port or token file; template cards
+  show them since #3035. The "hidden grant" claim is overstated: SPEC.md makes a container launch strictly narrower than
+  an ordinary launch on the same host. Unverified: whether a cross-host copy from a malicious supervisor can supply
+  container settings that matter. Bucket other. Not covered by `container-policy-missing-from-approvals.md`, which
+  excluded the launch card.
+- Decision: the user picked "All eight as listed" for the batch question on the triage page, 2026-11-07. Container
+  findings go to the "Podman rigor" TODO entry, as decided on 2026-11-04.
+- Completion criteria: add a line to TODO.md's near-term "Podman rigor" entry: launch approval cards show the container
+  settings, reusing the template card's rows. No code change now. Remove the feedback file and its index entry in the
+  same change.
+- Execution: `pending`.
+
+## older-browser-approves-undisclosed-container-options.md
+
+- Outcome: `other`.
+- Assessment: confirmed as a mechanism by source reading on main ebaaf6a7 (delegated checker), not reproduced. UIs from
+  v0.33.0 through v0.35.0 decode a template's container but show no container rows, so such a page left open across an
+  upgrade can approve a container-bearing template card without showing its settings. The shipped CLI always sends no
+  container, so the harmful variant needs a hand-built request. Bucket other under the established-route rule; it would
+  move to highest once a shipped control can set or remove a template's container while such pages are in use.
+- Decision: the user picked "All eight as listed" for the batch question on the triage page, 2026-11-07. Same "Podman
+  rigor" TODO entry.
+- Completion criteria: add a line to TODO.md's near-term "Podman rigor" entry: container-bearing approval cards get a
+  card kind older pages cannot decode, as prompt-bearing and shortcut-moving cards already have, before or together with
+  "Containerized sessions: `farhelm spawn` and CLI flags". No code change now. Remove the feedback file and its index
+  entry in the same change.
+- Execution: `pending`.
+
+## startup-probe-false-tmux-absence.md
+
+- Outcome: `discard`.
+- Assessment: confirmed as a source route on main ebaaf6a7 (delegated checker). At startup any connect error on the
+  private tmux socket, not only a missing or refusing socket, is read as "no server" (`tmux.rs` `socket_answers`, around
+  3146-3166), so old sessions show as ended until the next supervisor restart and a Delete of one, asking nothing, kills
+  its running agent. Unverified: that the connect fails that way in practice (file-handle or memory exhaustion at that
+  moment, or a full backlog on macOS). Specific to old terminals.
+- Decision: the user picked "Discard all three" on the triage page, 2026-11-07, after commenting: "if it's specific to
+  old terminals, always discard unless it's a very serious problem. we're about to nuke support for them very soon. tell
+  me if anything here is very serious". Triage answered that all three are specific to old terminals and none is very
+  serious.
+- Completion criteria: remove the feedback file and its index entry. No code or spec change.
+- Execution: `pending`.
+
+## unusable-tmux-delete-consent.md
+
+- Outcome: `discard`.
+- Assessment: confirmed, both variants, by code reading on main ebaaf6a7 (delegated checker). While the private tmux
+  server is unusable, Restart refuses (`core.rs`, around 13206-13216) but Delete does not: a Delete of an old session
+  that shows as ended kills its agent in the process sweep and only then reports failure. For a session whose agent
+  moved to a terminal host but which still has old tabs, the Delete completes and kills those tabs' programs. The first
+  variant contradicts SPEC_impl.md ("the supervisor refuses to Delete or Restart a session whose agent may live on that
+  server") and would have been `fix code` under the clearly-settled rule (copy Restart's refusal, about 10-15 lines);
+  the page offered that as an alternative, and the user chose discard instead. Specific to old terminals.
+- Decision: the user picked "Discard all three" on the triage page, 2026-11-07, under the comment quoted in
+  `startup-probe-false-tmux-absence.md`: old-terminal findings are discarded unless very serious, since support for old
+  terminals is about to be removed.
+- Completion criteria: remove the feedback file and its index entry. No code or spec change.
+- Execution: `pending`.
+
+## tmux-client-loss-latches-absence.md
+
+- Outcome: `discard`.
+- Assessment: confirmed on the Farhelm side by code reading on main ebaaf6a7 (delegated checker). A tmux "server exited
+  unexpectedly" reply is read as an empty server by the pane listing and by startup's session listing, so startup sends
+  `kill-server` (ending every old terminal on the host) and steady state latches absence, after which Delete kills old
+  agents unwarned. Unverified: that tmux prints this while its server lives (the reviewer's reading of upstream tmux, an
+  allocation failure inside one client command; not re-checked). Specific to old terminals.
+- Decision: the user picked "Discard all three" on the triage page, 2026-11-07, under the comment quoted in
+  `startup-probe-false-tmux-absence.md`.
+- Completion criteria: remove the feedback file and its index entry. No code or spec change.
+- Execution: `pending`.
+
+## generated-host-name-collision-adopts-unrelated-sandbox.md
+
+- Outcome: `fix spec+code`.
+- Assessment: partly correct, by code reading on main ebaaf6a7 (delegated checker). Host creation
+  (`crates/farhelm-helm/src/provisioning/tensorlake_add.rs` `create_host_sandbox`, around 530-617) looks up the
+  generated name and adopts any sandbox found, with no check of the pending-create marker, then prepares it. The
+  reviewer's "credentials replaced before the copied-state check" was fixed by #3081 (delivery now follows the
+  copied-supervisor refusal), but a rowless same-name sandbox with no Farhelm install still gets this helm's agent
+  credentials written into it. Host Delete's name lookup for a row that never sent a create (`tensorlake/hosts.rs`,
+  around 157-191) has the same gap. Realistic sources of such a sandbox are a restore from an older copy of helm state,
+  or a second helm run from copied state; independent helms collide about 9e-12 per pair of same-slug hosts.
+  SPEC_impl.md says host creation "adopts an existing sandbox, including after a lost create response". Not run. Bucket
+  highest: credentials delivered into a sandbox the user did not choose.
+- Decision: the user picked "Act only on sandboxes this helm asked for" on the triage page, 2026-11-07, with the
+  comment: "with hard complexity gate. there alternative is that we simply don't support this. running multiple
+  instances on the same state turn is definitely not a supported thing, so us protecting against this is nice, but no
+  insane compexity just to get this. lines of code isn't super important so long as it's _SIMPLE_ and not complicated."
+  Principle: Farhelm acts on a reserved-name Tensorlake sandbox only when this helm has a durable record of asking for
+  it; running several helms from one state is not supported, so this protection is wanted only if it stays simple.
+- Completion criteria: host Add adopts a same-name sandbox only when the row records a sandbox ID or an outstanding
+  pending-create marker; otherwise it refuses with a message naming the sandbox ("a sandbox named X already exists"),
+  leaving it for "Sandboxes not on this helm". Host Delete skips the name lookup for a row that never sent a create.
+  SPEC_impl.md's adoption sentence says "only when this row records an outstanding create". Tests cover adoption with a
+  marker and refusal without one. Complexity gate (the user's, replacing the usual line-count gate for this item): the
+  fix must be simple, a check of records Farhelm already keeps at the points that adopt or delete by name, with no new
+  ledger, lock, protocol field or vendor-side metadata. If it is not that simple, drop the code part and instead state
+  in SPEC.md that running more than one helm from the same state (including a copy) against one Tensorlake account is
+  not supported, and that reserved-name collisions arising from it are accepted. Either way, remove the feedback file
+  and its index entry.
+- Execution: `pending`.
+
+## short-helm-tag-collision-destroys-other-builder.md
+
+- Outcome: `fix spec+code`.
+- Assessment: partly correct, by code reading on main ebaaf6a7 (delegated checker). Every build start and recipe
+  deletion calls `reconcile_builder` (`crates/farhelm-helm/src/tensorlake/build.rs`, around 1070-1110), which adopts any
+  sandbox answering to the builder name `farhelm-build-<tag>-<recipe>` without checking `pending_create_at`;
+  `sweep_builder` (around 1253-1300) then terminates it and deletes its snapshots except this helm's recorded ones. With
+  a shared tag and recipe name, one helm's build kills another helm's running builder and deletes the snapshot it was
+  making, or in a seconds-long window the one it just made. Independent helms share the 4-character tag about 6e-7 per
+  pair; helms run from copied state always do. Not run. Bucket high, not highest: what is lost is a Farhelm-built
+  snapshot, which Rebuild regenerates (proposed on the page and not contested).
+- Decision: decided with `generated-host-name-collision-adopts-unrelated-sandbox.md` on the triage page, 2026-11-07,
+  under the same pick and comment (quoted there). The page had explained that a longer tag would not cover copied or
+  restored state and would not be simpler.
+- Completion criteria: builder reconciliation adopts and sweeps a same-name builder only when the recipe records
+  evidence that this helm asked for it (`pending_create_at`, a recorded builder ID, or an interrupted build start);
+  otherwise it leaves the sandbox alone and the build fails safely through the existing "did not go away" wait.
+  SPEC_impl.md states the same for builders. A test covers a foreign same-name builder left untouched. The same
+  simplicity gate and fallback as that entry apply: if not simple, drop the code part and rely on the SPEC.md statement
+  that running more than one helm from the same state is not supported. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## orphan-cleanup-uses-pre-adoption-ownership-snapshot.md
+
+- Outcome: `other`.
+- Assessment: partly correct, by code reading on main ebaaf6a7 (delegated checker). Deleting a leftover from "Sandboxes
+  not on this helm" checks ownership (`crates/farhelm-helm/src/tensorlake/orphans.rs` `delete_orphan`, around 143-216)
+  and then terminates by ID with no recheck against a concurrent Add adopting the same name. The harmful ordering needs
+  the delete to stall for minutes after its check plus a generated-name collision with that very leftover; the orderings
+  shown just make the Add fail cleanly. Bucket other under the established-route rule.
+- Decision: decided with `generated-host-name-collision-adopts-unrelated-sandbox.md` on the triage page, 2026-11-07,
+  under the same pick and comment: closed by that fix, since an Add without a pending-create marker no longer adopts a
+  pre-existing name.
+- Completion criteria: no separate change. Remove the feedback file and its index entry together with the generated-host
+  fix, or with its SPEC.md fallback if the code part is dropped.
+- Execution: `pending`.
