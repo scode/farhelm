@@ -161,7 +161,9 @@ test(`an ${skip ? "opted-out tabs-only" : "unconfirmed"} delete sends the precon
 
     await row.locator(".session-row-delete").click();
 
-    await expect(row.locator(".action-error")).toContainText(`Delete: ${REFUSAL}`);
+    // The open menu owns the visible refusal; the row also retains a banner
+    // copy for when that menu closes.
+    await expect(row.locator(".session-row-menu-panel .action-error")).toContainText(`Delete: ${REFUSAL}`);
     expect(deleteUrls).toHaveLength(1);
     expect(new URL(deleteUrls[0]).searchParams.get("only_if_nothing_alive")).toBe(skip ? null : "true");
     expect(new URL(deleteUrls[0]).searchParams.get("only_if_agent_ended")).toBe(skip ? "true" : null);
