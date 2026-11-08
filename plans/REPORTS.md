@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`session-summary-beside-list`](reports/session-summary-beside-list.report.md) landed 2026-11-04 in #2972: Show the session hover summary card beside the session list, level with the row, instead of over neighbouring rows
 - [`in-app-announcements`](reports/in-app-announcements.report.md) landed 2026-11-04 in #2978, #2979, #2980: An announcement queue the app shows once per helm, fed for now by announcements built into releases
 - [`launcher-permission-keywords`](reports/launcher-permission-keywords.report.md) landed 2026-11-04 in #2987, #2989: launcher: show input rejections in the warning yellow, and accept yolo/guarded before a harness is chosen
 - [`podman-rigor-todo`](reports/podman-rigor-todo.report.md) landed 2026-11-05 in #3017: containerized sessions: move eight review findings into one near-term Podman rigor TODO entry
