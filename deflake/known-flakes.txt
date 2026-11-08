@@ -32,3 +32,4 @@ playwright settings.spec.ts a pending checkout folder save survives closing sett
 playwright provisioning.spec.ts incarnation churn keeps a followed run while a target change detaches it  # update-progress-step-name-late
 playwright modal-layout.spec.ts host-settings scrollports stay reachable while saving  # host-settings-scrollport-held-save
 playwright provisioning.spec.ts a progress read failure during an update recovers on retry demand alone  # update-progress-step-name-late
+playwright provisioning.spec.ts changed-host advice while following: destination  # update-progress-step-name-late

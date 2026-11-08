@@ -712,7 +712,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   fourth test, "incarnation churn keeps a followed run while a target change detaches it", failed the same way on WebKit
   in run `269f1dd3-f429-4b1d-9171-523f76ef94d9` and passed three re-runs (FLAKES.md, 2026-11-06). A fifth, "a progress
   read failure during an update recovers on retry demand alone", failed the same way on Chromium in run
-  `88d8738b-6a0d-43a7-a9e6-d455a1b7775f` (FLAKES.md, 2026-11-07).
+  `88d8738b-6a0d-43a7-a9e6-d455a1b7775f` (FLAKES.md, 2026-11-07). A sixth, "changed-host advice while following:
+  destination", failed the same way on Chromium in run `29358e1b-1c83-4089-a665-b589f9ada509` (FLAKES.md, 2026-11-07).
 
 - **Quick launch's focus does not return to the page body on Chromium.** Two tests in `e2e/tests/quick-launch.spec.ts`
   poll for the body to hold focus after a blur and sometimes never see it (runs `2d338903-2d70-4c8c-99c4-3d4044d78670`,
