@@ -21501,7 +21501,7 @@
   fifth stay-up exception). A headless test delivers Cancel then Delete in one burst and expects no delete request. Size
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/tensorlake-settings-prompts.md`.
 
 ## launcher-live-draft-submission-source-gap.md
 
@@ -21525,7 +21525,7 @@
   queue removal or a changelog fragment); over it, block and bring it back. Narrow the feedback file to the generic
   live-draft remainder ("Earlier generic live-draft investigation" and the d6645f77 addition) and move its index entry
   to the other bucket, since that remainder's own assessment is other priority and unverified.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-misc-nov7.md`.
 
 ## dead-host-report-anchor-identity-gap.md
 
@@ -21572,7 +21572,7 @@
   for an existing file and for an absent one. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment; estimated 50-90); over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/agent-settings-compare-replace.md`.
 
 ## removed-ssh-host-can-reappear-with-old-grants.md
 
@@ -21595,7 +21595,7 @@
   test (`trust_revocations_commit_with_full_sync`) covers removal. Identity adoption's permission reset is not in scope.
   Size gate: about 100 lines of diff (estimated 25), as above; over it, block and bring it back. Remove the feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-misc-nov7.md`.
 
 ## openssh-floor-percent-path-disables-stable-host-pin.md
 
@@ -21618,7 +21618,7 @@
   gate: about 100 lines of diff (estimated 15), as above; over it, block and bring it back. The same change settles
   `openssh-floor-misparses-managed-known-host-path.md` and may remove both items. Remove the feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/openssh-state-path-refusal.md`.
 
 ## openssh-floor-misparses-managed-known-host-path.md
 
@@ -21632,7 +21632,7 @@
   as listed", 2026-11-07, as the triage page stated: the refusal covers quotes and backslashes too.
 - Completion criteria: settled by the refusal of `%`, `"` and `\` in that entry; remove this feedback file and its index
   entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/openssh-state-path-refusal.md`.
 
 ## recipe-delete-warning-omits-newly-finished-snapshot.md
 
@@ -21650,7 +21650,7 @@
   and its snapshots on Tensorlake are deleted." (the wording may be tightened, the meaning kept); any test pinning the
   old text is updated. Size gate: about 100 lines of diff (estimated 5), as above. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/tensorlake-settings-prompts.md`.
 
 ## invalid-capture-run-recursive-removal.md
 
@@ -21666,7 +21666,7 @@
 - Completion criteria: on a path that is not a run, `stop` exits non-zero and deletes nothing, as before #3088; the
   tool's self-test (or a test) shows a non-run directory surviving. Size gate: about 100 lines of diff (estimated 5), as
   above. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/maintainer-tool-safety.md`.
 
 ## fixture-url-userinfo-credentials.md
 
@@ -21682,7 +21682,7 @@
 - Completion criteria: both the Python scrubber and the Rust check recognize `user@` and `user:pass@` before the host,
   including localhost and `[::1]`, so such a URL is replaced and a screen still holding one is refused; tests cover each
   form. Size gate: about 100 lines of diff (estimated 20-30), as above. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/maintainer-tool-safety.md`.
 
 ## right-edge-zero-width-sign-reorders-retained-text.md
 
@@ -21698,7 +21698,7 @@
   the right edge with autowrap off an unattached sign joins the cell before the last-column character, by the tmux
   parity rule, so a following selector applies to the last-column character. No code or vendor change. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-misc-nov7.md`.
 
 ## guarded-container-launch-approval-omits-sensitive-options.md
 
@@ -21715,7 +21715,7 @@
 - Completion criteria: add a line to TODO.md's near-term "Podman rigor" entry: launch approval cards show the container
   settings, reusing the template card's rows. No code change now. Remove the feedback file and its index entry in the
   same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-misc-nov7.md`.
 
 ## older-browser-approves-undisclosed-container-options.md
 
@@ -21731,7 +21731,7 @@
   card kind older pages cannot decode, as prompt-bearing and shortcut-moving cards already have, before or together with
   "Containerized sessions: `farhelm spawn` and CLI flags". No code change now. Remove the feedback file and its index
   entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-misc-nov7.md`.
 
 ## startup-probe-false-tmux-absence.md
 
@@ -21746,7 +21746,7 @@
   me if anything here is very serious". Triage answered that all three are specific to old terminals and none is very
   serious.
 - Completion criteria: remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-misc-nov7.md`.
 
 ## unusable-tmux-delete-consent.md
 
@@ -21762,7 +21762,7 @@
   `startup-probe-false-tmux-absence.md`: old-terminal findings are discarded unless very serious, since support for old
   terminals is about to be removed.
 - Completion criteria: remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-misc-nov7.md`.
 
 ## tmux-client-loss-latches-absence.md
 
@@ -21775,7 +21775,7 @@
 - Decision: the user picked "Discard all three" on the triage page, 2026-11-07, under the comment quoted in
   `startup-probe-false-tmux-absence.md`.
 - Completion criteria: remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-misc-nov7.md`.
 
 ## generated-host-name-collision-adopts-unrelated-sandbox.md
 
@@ -21806,7 +21806,7 @@
   in SPEC.md that running more than one helm from the same state (including a copy) against one Tensorlake account is
   not supported, and that reserved-name collisions arising from it are accepted. Either way, remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/tensorlake-name-ownership.md`.
 
 ## short-helm-tag-collision-destroys-other-builder.md
 
@@ -21828,7 +21828,7 @@
   SPEC_impl.md states the same for builders. A test covers a foreign same-name builder left untouched. The same
   simplicity gate and fallback as that entry apply: if not simple, drop the code part and rely on the SPEC.md statement
   that running more than one helm from the same state is not supported. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/tensorlake-name-ownership.md`.
 
 ## orphan-cleanup-uses-pre-adoption-ownership-snapshot.md
 
@@ -21843,4 +21843,4 @@
   pre-existing name.
 - Completion criteria: no separate change. Remove the feedback file and its index entry together with the generated-host
   fix, or with its SPEC.md fallback if the code part is dropped.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/tensorlake-name-ownership.md`.
