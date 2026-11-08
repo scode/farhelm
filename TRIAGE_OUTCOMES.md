@@ -21767,7 +21767,8 @@
   me if anything here is very serious". Triage answered that all three are specific to old terminals and none is very
   serious.
 - Completion criteria: remove the feedback file and its index entry. No code or spec change.
-- Execution: planned in `plans/queue/triage-misc-nov7.md`.
+- Execution: implemented in change `yrytoksmtroxrtkvunvtpsmmuurnpvlm`, bookmark
+  `plan/triage-misc-nov7/06-discard-startup-probe`, [PR #3179](https://github.com/scode/farhelm/pull/3179/changes).
 
 ## unusable-tmux-delete-consent.md
 

@@ -39,10 +39,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Orphan cleanup can use an old ownership snapshot to terminate a sandbox after Add has adopted it and ordinary user
   work has begun.
 
-- [`startup-probe-false-tmux-absence.md`](startup-probe-false-tmux-absence.md) — A temporary resource/connection failure
-  at startup can make a live old session appear ended; its normal guarded Delete can then stop that live work without
-  authorizing it. This is a source-established conditional failure, not a measured incident.
-
 - [`unusable-tmux-delete-consent.md`](unusable-tmux-delete-consent.md) — When tmux cannot be used, a Delete presented as
   stopping nothing alive can still kill either an old agent or live old-tab work beside a migrated, exited host agent.
   The old-agent variant later refuses; the migrated-host variant can complete.
