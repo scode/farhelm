@@ -21877,4 +21877,9 @@
   pre-existing name.
 - Completion criteria: no separate change. Remove the feedback file and its index entry together with the generated-host
   fix, or with its SPEC.md fallback if the code part is dropped.
-- Execution: planned in `plans/queue/tensorlake-name-ownership.md`.
+- Execution: complete; implemented in change `tslrnktkmnmzpyyprwkouwuotslltykz`, bookmark
+  `plan/tensorlake-name-ownership/02-orphan-race-closed`;
+  [draft PR #3189](https://github.com/scode/farhelm/pull/3189/changes), directly above the host fix in
+  [#3188](https://github.com/scode/farhelm/pull/3188/changes). That fix refuses adoption of a pre-existing sandbox when
+  the host has no saved ID or outstanding create, closing the reported orphan-deletion race without another ownership
+  check or synchronization mechanism. No separate code change is needed; the feedback file and index entry are removed.
