@@ -410,3 +410,31 @@ passed its code review gate, and the real-sandbox verification and the spawn-tim
 report. This plan does not change TODO.md. Open, not merged. If a `## Decisions` section exists, its latest entry must
 also be satisfied. Then close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12). Never
 edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-11-08 (claim 20ec23).
+
+### Decision needed: credentials inherited from custom bases
+
+Prepared snapshots would let new Tensorlake hosts reuse an installation of Farhelm instead of installing it on every
+host. The plan requires these snapshots to contain no agent login, endpoint credential, GitHub token or gh Git
+configuration. Preparation can avoid adding any of these, but a recipe's custom image or snapshot can already contain
+them. The existing recipe build preserves that content, and the current inspection only checks for copied Farhelm
+supervisor state.
+
+May preparation preserve authentication already present in a custom base, with the base author responsible for that
+content, while guaranteeing that Farhelm delivers no credentials or tunnels to the preparer? Hosts created from that
+prepared snapshot could inherit that authentication too. I recommend this interpretation: it preserves the custom-base
+behavior delivered by the preceding plan and avoids deleting user configuration or claiming that a limited check proves
+every supported login store is empty. The plan's acceptance wording would need to record that boundary.
+
+If inherited authentication must instead be refused, the decision should name the supported credential locations and
+configuration to reject. A bounded refusal would leave the base unchanged and explain what its author must remove.
+Deleting inherited authentication would require a separate explicit policy; it is not part of the current
+implementation.
+
+Design investigation and an independent scope assessment are complete. No product PR has been delivered and the existing
+Add host, Rerun and Update behavior is unchanged. Implementation notes are retained in the plan's working log. No cloud
+resources were created; the plan's 100-sandbox budget is unused. Identity isolation, real-clone boot verification and
+timings remain required after this decision; none is being waived.
