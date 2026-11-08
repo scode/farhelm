@@ -445,6 +445,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   matters, and change what does not hold up. Since that reading, recipe tunnels moved onto this connection, which added
   a cap of 64 tunneled connections per host and half-close for every relay.
 
+- **Stop the session header's actions collapsing into their tunnel-pill compact style.** On 2026-11-08 the cluster at
+  the right of a session's header (zoom, Stop, Restart ▾, Replace ▾, Clone, Delete) was seen drawn cramped, suspected to
+  follow switching from the session view to a host view, though not reproducible on demand. The cramped state is exactly
+  the compact block in `crates/farhelm-ui/assets/app.css` (the `.session-topbar:has(> .session-tunnel-pill)` rules near
+  line 9583): measured against a normal shot at the same 2x scale, the gap between actions falls from 6px to 2px, each
+  button's inline padding from 8px to 0, and the labels from 12px to 11px, while icons and button height do not change.
+  That block exists so the header fits its 650px floor while a tunnel pill is present; the pill is rendered by
+  `NativeTunnelStrip` in `crates/farhelm-ui/src/tunnels.rs` only while the session has open tunnels, so find out which
+  of these holds: the selector matching a pill the user cannot see (a stale tunnel list surviving the view switch, or a
+  pill shrunk to zero width, since `.session-tunnel-pill` is `flex: 0 1 auto; min-width: 0`), or a pill that was really
+  there, off to the left of the screenshot's crop, with the compact style keyed off pill presence where it should be
+  keyed off actual width pressure. Fix the trigger, and add a browser test that the actions keep their normal metrics
+  when no pill is visible.
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
