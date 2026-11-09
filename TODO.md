@@ -333,19 +333,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   before the shape is settled. Related to, but not the same as, the grid stream encoding overhaul in this bucket, which
   keeps the split and changes how the same lines are encoded.
 
-- **Review how the helm-to-supervisor connection multiplexes its streams.** One connection carries every terminal,
-  upload, download, TCP relay and control reply as framed channels, and the maintainer wants to challenge its sizing and
-  scheduling before more traffic (recipe tunnels) moves onto it. As read from the code on 2026-11-07, not measured:
-  frames up to 8 MiB; uploads, downloads and relays in 256 KiB chunks with a 4 MiB credit window per stream, so one
-  stream's throughput is capped near window / round-trip time; terminal output in 32 KiB chunks with no credit window
-  (watermark pause and resume instead); on the helm, a single 64-slot writer queue with no priority lane, where bulk
-  traffic is rationed to 4 queued frames ahead of keystrokes and acks; on the supervisor, priority, ordinary and bulk
-  queues, with bulk drained only when the other two are empty, so sustained terminal output can starve relays and
-  downloads; no cap on concurrent relays; no half-close on relays; and a 60-second write stall that ends the whole
-  connection. Challenge the chunk sizes, window sizes, queue depths and the fairness between streams, measure where it
-  matters, and change what does not hold up. Since that reading, recipe tunnels moved onto this connection, which added
-  a cap of 64 tunneled connections per host and half-close for every relay. Plan: `plans/queue/mux-chunk-size.md`.
-
 - **Stop the session header's actions collapsing into their tunnel-pill compact style.** On 2026-11-08 the cluster at
   the right of a session's header (zoom, Stop, Restart ▾, Replace ▾, Clone, Delete) was seen drawn cramped, suspected to
   follow switching from the session view to a host view, though not reproducible on demand. The cramped state is exactly

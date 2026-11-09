@@ -3286,6 +3286,8 @@ or `ssh -O exit` on its socket); see the `CONNECTION_OVERRIDES` docs. `ClearAllF
 because the jump runs as its own `ssh -W` child; that was checked with a real connection through a jump on localhost.
 JSON control frames keep the protocol debuggable by eye; raw binary data channels keep PTY throughput off the JSON path.
 
+### Grid streams
+
 Protocol 68 adds grid streams, the form in which terminals that run in terminal hosts reach their viewers: the
 supervisor interprets their output and sends the screen as rows of styled runs. `Attach` carries the client's `grid`
 capability and `Attached` the channel's stream kind (`bytes` or `grid`), which the helm passes to the browser as a
@@ -3357,6 +3359,8 @@ than hiding the pane, because silence is the reap's promise for a tab this view 
 `NotFound` stays `other`: its reason is the supervisor's account of the session, such as a reboot and what restart would
 do.
 
+### TCP relay channels
+
 Protocol version 54 adds helm-only raw TCP relay channels for the Mac app's localhost tunnels. `BeginTcpRelay` fixes a
 nonzero channel's bidirectional byte meaning; `TcpRelayStarted` correlates admission, while `TcpRelayAck`,
 `CloseTcpRelay` and `TcpRelayEnded` belong to the channel. Older peers cannot decode these tagged variants, so remote
@@ -3416,6 +3420,51 @@ compares them to the exact owner/client snapshot used for the listener; a preced
 different owner found after adoption or reconnect. The native terminal route is the user's direct selection and has no
 agent-origin restriction. The UI keeps an accepted warning's action claim until its consent save finishes, even if its
 source view retires; the existing source-generation check then suppresses opening from that retired gesture.
+
+### Multiplexing, chunks and writer priority
+
+The [transport above](#helm--supervisor-transport-system-ssh--stdio-protocol) carries control replies, terminals,
+uploads, downloads and [TCP relays](#tcp-relay-channels) on one framed connection per host. A frame has a four-byte
+length followed by a one-byte kind, a four-byte channel id and its body; channel zero carries control. The 8 MiB
+`MAX_FRAME_LEN` ceiling counts kind, channel and body, not the length prefix. It bounds decode allocation, not the
+ordinary data chunk. Each side has one writer, which writes and flushes one complete frame before taking another;
+partial frames from different channels never interleave.
+
+Uploads, downloads and relay data use at most 32 KiB per frame and a 4 MiB byte-credit window per stream direction.
+Acknowledgements count cumulative bytes. Uploads earn one after each disk write; relays return credit after a socket
+write. Downloads earn one when the helm's consumer takes a chunk from its bounded receive queue, before it writes or
+forwards those bytes. Uploads are rechunked independently of HTTP body boundaries. Downloads fill frames across short
+file reads and send a partial frame only at EOF. Relays forward short socket reads immediately rather than waiting to
+fill a frame, as the [relay contract](#tcp-relay-channels) explains. Terminal bytes use 32 KiB pieces, while grid
+messages target 32 KiB and may need a larger frame for one row. Terminals use [pause and resume](#grid-streams), not
+transfer credit.
+
+The 32 KiB transfer cap matches OpenSSH's default session-channel packet size
+([`CHAN_SES_PACKET_DEFAULT`](https://github.com/openssh/openssh-portable/blob/master/channels.h)), so larger frames
+bought little on remote hosts. The window remains 4 MiB: smaller chunks increase the number of frames and acks per
+window, without changing its byte credit. Protocol 71 makes this incompatible change explicit. A former peer can send
+256 KiB chunks that the new size checks refuse; in the other direction, its 17-slot file receiver cannot hold a new
+128-frame window. The hello therefore refuses mixed protocol versions before transfers begin.
+
+The writer queues deliberately differ by direction:
+
+| Writer             | Queues and selection                                                                                                                                                                        |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Helm to supervisor | One 64-frame FIFO, with heartbeat selection biased ahead of it. Upload and relay data share four enqueue permits across the connection, held until each frame is written.                   |
+| Supervisor to helm | Priority (32 frames, upload and relay acknowledgements), ordinary (64 frames, terminal output and control replies), then bulk (downloads and relay traffic), selected in that strict order. |
+
+The supervisor's bulk queue and each upload's receiving queue use `ceil(window / chunk) + 1`: now 129 frames rather than
+17, still about 4 MiB of full-sized payload. The helm's download receiver uses the same derivation. Fixed queue depths
+and scheduling are unchanged. The helm's four-frame allowance now bounds bulk payload queued ahead of a keystroke to 128
+KiB rather than about 1 MiB. This is no latency promise: bytes already accepted by the pipe, ssh or TCP buffers remain
+in flight.
+
+Terminal output from a host intentionally takes precedence over downloads and tunnel data toward the helm. Those
+transfers can slow or stall while terminal output stays heavy. Uploads and tunnel data toward the host are not queued
+behind that output; their returning credit has priority over it. A frame already being written is never preempted. On
+either writer, a 60-second window with no byte progress ends the entire connection and its channels. Progress rearms the
+window without dropping or retrying a partial frame; a flush that never completes is bounded too. This is separate from
+a terminal's pause deadline and from an upload's progress deadlines.
 
 ### What the helm believes from a supervisor
 

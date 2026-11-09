@@ -1,5 +1,5 @@
 //! Native bookkeeping for one bidirectional TCP channel. TCP read boundaries
-//! are arbitrary: a byte window must not become a seventeen-packet limit just
+//! are arbitrary: a byte window must not become a file-transfer frame limit just
 //! because file transfers normally fill their frames. Both peers use this
 //! bounded byte inbox and cumulative credit, while retaining their own writer
 //! queues, task ownership, and socket lifetimes.
@@ -237,7 +237,7 @@ mod tests {
     use super::*;
 
     /// Legal tiny TCP reads must consume byte credit rather than exhaust a
-    /// file-transfer queue's seventeen frame slots. EOF preserves the bytes.
+    /// file-transfer queue's frame slots. EOF preserves the bytes.
     #[farhelm_testtrace::test]
     async fn fragmented_frames_use_byte_capacity_and_drain_before_eof() {
         let state = TcpRelayState::default();
