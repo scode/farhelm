@@ -68,12 +68,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   user cannot uninstall while that volume is mounted. Only an ambiguous line that could name a path at or below the
   directory being removed should refuse. Found by the landing review of the macos-remote-hosts plan on 2026-11-08.
 
-- **Fix the misleading message when Stop interrupts a starting agent.** A Stop pressed while the agent is still starting
-  is recorded as a launch that never started, and its message wrongly blames the host's systemd user manager. The
-  message should say what happened: the user stopped the session before its agent finished starting. Found while
-  reviewing the stop-closes-tabs plan on 2026-11-08; the behavior predates that plan. Plan:
-  `plans/queue/stop-start-message.md`.
-
 - **Overhaul the grid stream's encoding and the grid client's history storage.** Grid terminals (terminals in a terminal
   host) get their screen and history from the supervisor as JSON messages, and the page keeps every history line
   decoded, as one JavaScript object per run of styled text plus a style object per distinct color pair. Measured in

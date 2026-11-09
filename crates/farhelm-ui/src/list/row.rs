@@ -1195,7 +1195,10 @@ pub(super) fn SessionRow(
         &session.status,
         session.annotation.as_ref().map(crate::peer::PeerText::raw),
     ) {
-        (SessionStatus::Exited { .. }, Some("stopped by user")) => Some(EndedGlyph::Stopped),
+        (
+            SessionStatus::Exited { .. },
+            Some(farhelm_proto::STOP_ANNOTATION | farhelm_proto::STOP_BEFORE_START_ANNOTATION),
+        ) => Some(EndedGlyph::Stopped),
         (SessionStatus::Exited { .. }, _) => Some(EndedGlyph::Exited),
         (SessionStatus::Interrupted, _) => Some(EndedGlyph::Interrupted),
         (SessionStatus::Error { .. }, _) => Some(EndedGlyph::Error),
@@ -4209,6 +4212,40 @@ mod tests {
             }
         }
         VirtualDom::new(app).rebuild_to_vec().edits
+    }
+
+    /// Compact rows keep both user Stop outcomes distinct from an ordinary exit.
+    ///
+    /// Render the actual row rather than testing a copy of its match: the icon,
+    /// accessible wording and hover detail must all describe the same outcome.
+    #[farhelm_testtrace::test]
+    fn compact_rows_draw_both_stop_annotations_with_the_stopped_icon() {
+        for (annotation, glyph) in [
+            (Some(farhelm_proto::STOP_ANNOTATION), "stopped"),
+            (Some(farhelm_proto::STOP_BEFORE_START_ANNOTATION), "stopped"),
+            (None, "exited"),
+            (Some("some other annotation"), "exited"),
+        ] {
+            let mut session = row_specimen("stopped-start");
+            session.annotation = annotation.map(Into::into);
+            assert!(session.status.has_ended(), "premise: this is an exited row");
+            let edits = marked_identity_row_edits(session, false, true, false, false, false);
+            assert!(attribute_values(&edits, "data-glyph").contains(&glyph.to_string()));
+            if let Some(annotation) = annotation {
+                assert!(
+                    text_values(&edits)
+                        .iter()
+                        .any(|text| text.contains(annotation)),
+                    "the full annotation remains accessible"
+                );
+                assert!(
+                    attribute_values(&edits, "data-tooltip")
+                        .iter()
+                        .any(|text| text.contains(annotation)),
+                    "the compact icon retains the full outcome on hover"
+                );
+            }
+        }
     }
 
     /// A mark must not become the navigation selection: both states can coexist,

@@ -1687,8 +1687,9 @@ test("stop and delete a session through the HTTP API", async ({ page, request })
     const afterCreate = await (await request.get("/api/sessions")).json();
     expect(afterCreate.total).toBe(totalBefore + 1);
 
-    // A create reply precedes the exec shim. Stopping before the command
-    // writes this marker can correctly report that it never started.
+    // This case checks Stop after startup. The create reply precedes the
+    // exec shim, so wait for the command's marker to distinguish it from
+    // a Stop annotated as happening before the agent finished starting.
     await page.goto("/");
     await attachSession(page, id);
     await waitForTermText(page, "FH_STOP_READY");

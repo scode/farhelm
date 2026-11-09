@@ -3081,17 +3081,24 @@ failure, writes a sentinel with the errno detail to a per-launch status file (na
 a sentinel left by a failed earlier launch can never describe a later relaunch) before exiting. The supervisor
 classifies **error** on that sentinel; the one sentinel-less error path is a launch whose login shell or `systemd-run`
 scope wrapper died before the shim ever ran, recognized only by its full evidence shape (owned dead pane, launch spec
-still unconsumed, no sentinel). An absent or unattributed pane does not qualify, and a completed user Stop keeps its
-annotation. A scoped window command first execs `farhelm internal launch-wrapped`, which creates an empty
-generation-named `.waypoint` file without following symlinks and then execs the wrapper with the ordinary shim command
-appended. No waypoint means the login shell exited before Farhelm's command; a waypoint means the systemd scope wrapper
-exited before starting the agent. The error names that step and includes the pane's exit code when known. New specs
-carry `scope_waypoint_expected`; an older scoped spec without that bit retains the two-suspect explanation because it
-never promised a waypoint. An unscoped command has no wrapper, so its unconsumed spec already identifies the shell,
-including for older launches. A failed wrapper exec records the ordinary sentinel with the wrapper and errno. NOTE: a
-sentinel written by the shell after a failed `exec` was audited and rejected — interactive bash survives a failed exec,
-but zsh terminates on it in every mode, so shell-side code after `exec` never runs for zsh users; the shim works
-identically under any `$SHELL`.
+still unconsumed, no sentinel). An absent or unattributed pane does not qualify. A pending user Stop excludes every
+pane-based launch inference, including checkout preparation, in observation, reload and an ended-agent Stop. Direct and
+inferred failures stay distinguishable through the outcome transition and temporary error cache: the store's transaction
+and the cache's read-side outcome check both reject an inference when Stop was recorded during an earlier asynchronous
+evidence read. A shim failure report still supplies direct evidence while the stop is pending; once an annotated exit
+commits, it keeps its annotation. Each stop-annotating transition carries whether the launch spec was still unconsumed
+after the terminal ended: that yields "stopped before the agent finished starting", otherwise "stopped by user". An
+inconclusive spec read uses the latter, and the first committed annotation wins. The choice is free text on the wire;
+older clients show the new wording but retain their ordinary exited icon in compact mode. A scoped window command first
+execs `farhelm internal launch-wrapped`, which creates an empty generation-named `.waypoint` file without following
+symlinks and then execs the wrapper with the ordinary shim command appended. No waypoint means the login shell exited
+before Farhelm's command; a waypoint means the systemd scope wrapper exited before starting the agent. The error names
+that step and includes the pane's exit code when known. New specs carry `scope_waypoint_expected`; an older scoped spec
+without that bit retains the two-suspect explanation because it never promised a waypoint. An unscoped command has no
+wrapper, so its unconsumed spec already identifies the shell, including for older launches. A failed wrapper exec
+records the ordinary sentinel with the wrapper and errno. NOTE: a sentinel written by the shell after a failed `exec`
+was audited and rejected — interactive bash survives a failed exec, but zsh terminates on it in every mode, so
+shell-side code after `exec` never runs for zsh users; the shim works identically under any `$SHELL`.
 
 Command launches keep two transient representations at spawn. The existing `shell_words` projection supplies validation,
 hook policy, launch classification, conversation capture and the stored resume arguments. The original command or resume

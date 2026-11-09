@@ -137,7 +137,10 @@ async fn a_host_terminals_status_follows_its_runtime_and_records_the_exit_code()
         .expect("observe");
     assert_eq!(
         observed.transition,
-        Some(Transition::ObservedExit { exit_code: Some(7) })
+        Some(Transition::ObservedExit {
+            stopped_before_start: false,
+            exit_code: Some(7)
+        })
     );
     assert_eq!(observed.sentinel, None);
 }

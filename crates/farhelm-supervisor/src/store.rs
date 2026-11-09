@@ -160,7 +160,7 @@ pub enum LastOutcome {
     /// by the mere absence of side effects: PLAN_M3.md item 2 sends a
     /// launching row whose side effects cannot be found to error-or-retry
     /// territory (item 3's sentinel, item 6's reservation), and SPEC.md's
-    /// `Exited` means the agent RAN. A launch that may never have started
+    /// an unannotated `Exited` means the agent RAN. A launch that may never have started
     /// is reported as `Unknown` until one of those PRs can say which.
     Launching,
     /// The launch was confirmed: the session's agent terminal (a tmux pane,
@@ -185,13 +185,14 @@ pub enum LastOutcome {
     /// state, and [`Transition::ObservedExit`] from `StopRequested` is
     /// defined to produce the annotated exit.
     StopRequested,
-    /// The agent ended and the supervisor saw it. `exit_code` is tmux's
+    /// The agent ended, or the user stopped its startup, and the supervisor
+    /// saw it. `exit_code` is tmux's
     /// own `#{pane_dead_status}` when it had one to give — `None` covers a
     /// signal death and the case where no pane survived to be asked.
     /// `annotation` is SPEC.md's user-legible qualifier, set only by a
-    /// user-initiated stop (`farhelm_proto::STOP_ANNOTATION`), which is
-    /// what makes "stopped by user" survive a supervisor restart and a
-    /// reboot alike.
+    /// user-initiated stop. The ordinary and stopped-before-start proto
+    /// annotations both survive supervisor restarts and reboots as the
+    /// first committed annotation, independent of later artifact cleanup.
     Exited {
         exit_code: Option<i32>,
         annotation: Option<String>,
@@ -318,11 +319,21 @@ pub enum Transition {
     ///
     /// From `StopRequested` this yields the ANNOTATED exit — the observer
     /// need not know a stop was in flight, which is precisely why the
-    /// annotation can no longer be raced away.
-    ObservedExit { exit_code: Option<i32> },
+    /// annotation can no longer be raced away. `stopped_before_start` is
+    /// evidence from the stopped launch's unread spec, collected even if this
+    /// observer has not yet seen a concurrent Stop's intent.
+    ObservedExit {
+        exit_code: Option<i32>,
+        stopped_before_start: bool,
+    },
     /// A stop's kill sweep completed against a pane this supervisor
-    /// observed ALIVE when the stop began. Yields the annotated exit.
-    StopCompleted { exit_code: Option<i32> },
+    /// observed ALIVE when the stop began. Yields the annotated exit,
+    /// choosing startup wording only when the stopped launch's spec was
+    /// still readable; inconclusive evidence keeps the ordinary wording.
+    StopCompleted {
+        exit_code: Option<i32>,
+        stopped_before_start: bool,
+    },
     /// A launching row whose terminal was rediscovered (a tmux pane by its
     /// session name, a host by its tag), found dead: the terminal's address
     /// and the exit it evidences, recorded together so no crash window can
@@ -331,15 +342,19 @@ pub enum Transition {
     RediscoveredExit {
         address: String,
         exit_code: Option<i32>,
+        /// Whether the dead launch still had its unread spec. Carries the
+        /// annotation choice in the same transaction as the recovered address.
+        stopped_before_start: bool,
     },
     /// The launch shim's exec-failure sentinel was found for this
     /// session's CURRENT launch (`crate::launch::read_launch_sentinel`).
     /// `detail` is the shim's own recorded report, carried straight
     /// through to [`LastOutcome::Error`] and from there to the wire's
     /// `SessionStatus::Error` (PLAN_M3.md item 3).
-    /// Also used for interrupted checkout preparation after an accepted
-    /// terminal stops: its durable non-Ready evidence outranks an inferred
-    /// ordinary exit, under the same monotonic transition rules.
+    /// Also used for inferred wrapper or checkout-preparation failures after
+    /// an accepted terminal stops. Those callers set `inferred`: their
+    /// evidence outranks an ordinary exit but not a pending Stop, whose own
+    /// kill leaves the same terminal and launch artifacts behind.
     ///
     /// `address`, when `Some`, is whatever terminal address the CALLER
     /// already had in hand for this row at the moment it read the sentinel
@@ -361,6 +376,10 @@ pub enum Transition {
     SentinelError {
         detail: String,
         address: Option<String>,
+        /// Pane-based wrapper or preparation evidence, rather than a report
+        /// from the shim. A concurrent Stop owns that same dead-pane shape,
+        /// so only direct evidence may override its pending intent.
+        inferred: bool,
     },
 }
 
@@ -390,8 +409,9 @@ impl Transition {
     ///   replaces a missing one and never the reverse. The stop annotation
     ///   is the same shape of enrichment on the other field.
     /// - **A stop in flight owns the annotation.** Both `ObservedExit`
-    ///   from `StopRequested` and `StopCompleted` produce it, so whichever
-    ///   observer commits first, the answer is the same.
+    ///   from `StopRequested` and `StopCompleted` carry the unread-spec
+    ///   choice. The first annotation committed stays, including when a
+    ///   later read can no longer find the launch's artifacts.
     /// - **Nothing resurrects.** `ConfirmRunning` against a terminal
     ///   outcome is refused rather than reopening a closed session.
     /// - **A sentinel wins over every state EXCEPT a genuine stop
@@ -411,11 +431,10 @@ impl Transition {
     ///   defined to outrank, and letting terminal-stickiness protect a
     ///   WRONG terminal classification would defeat the entire point of
     ///   reading the sentinel at all. The one thing that DOES block it: an
-    ///   `Exited` carrying a stop annotation, because that means a REAL
-    ///   run was observed alive long enough for the user to stop it — a
-    ///   sentinel and a stop annotation cannot both be true of the same
-    ///   launch, so an annotated exit is retained genuine knowledge, not
-    ///   an inference to override. An already-`Error` row is simply
+    ///   `Exited` carrying a stop annotation: the completed Stop is final,
+    ///   even when it interrupted startup. Direct shim evidence still wins
+    ///   while Stop is pending, but a pane-based inference never does:
+    ///   Stop's own kill leaves that same dead-pane shape. An already-`Error` row is simply
     ///   unchanged (idempotent), and `Interrupted`/unannotated-`Exited`
     ///   fall out of the same two arms rather than needing their own.
     ///   The one case this policy does NOT cover on its own — a sentinel
@@ -444,7 +463,16 @@ impl Transition {
             .then_some(merged)
         }
 
-        let stopped = || Some(farhelm_proto::STOP_ANNOTATION.to_string());
+        let stopped = |before_start: bool| {
+            Some(
+                if before_start {
+                    farhelm_proto::STOP_BEFORE_START_ANNOTATION
+                } else {
+                    farhelm_proto::STOP_ANNOTATION
+                }
+                .to_string(),
+            )
+        };
         let ended = |exit_code: &Option<i32>, annotation: Option<String>| {
             Some(LastOutcome::Exited {
                 exit_code: *exit_code,
@@ -454,6 +482,7 @@ impl Transition {
         use LastOutcome as O;
         use Transition as T;
         match (self, current) {
+            (T::SentinelError { inferred: true, .. }, O::StopRequested) => None,
             // A sentinel supersedes an INFERRED terminal state — `Interrupted`
             // (the reboot conversion) or an `Exited` with NO stop annotation
             // (nothing but a dead-or-vanished pane ever backed either one).
@@ -472,10 +501,9 @@ impl Transition {
             ) => Some(O::Error {
                 detail: detail.clone(),
             }),
-            // ...but a GENUINE stop annotation is retained knowledge, not
-            // an inference: it means a real run was observed alive long
-            // enough for the user to stop it, which cannot be true of the
-            // same launch a sentinel also claims never started. And an
+            // ...but a completed Stop keeps its chosen annotation, including
+            // when it interrupted startup. This path never reads a sentinel
+            // as part of Stop's kill, so a later report cannot revise it. An
             // already-`Error` row is simply unchanged (idempotent).
             (
                 T::SentinelError { .. },
@@ -498,31 +526,51 @@ impl Transition {
             (T::StopRequested, O::StopRequested | O::Exited { .. }) => None,
 
             (
-                T::ObservedExit { exit_code } | T::RediscoveredExit { exit_code, .. },
+                T::ObservedExit { exit_code, .. } | T::RediscoveredExit { exit_code, .. },
                 O::Launching | O::Running,
             ) => ended(exit_code, None),
             (
-                T::ObservedExit { exit_code } | T::RediscoveredExit { exit_code, .. },
+                T::ObservedExit {
+                    exit_code,
+                    stopped_before_start,
+                }
+                | T::RediscoveredExit {
+                    exit_code,
+                    stopped_before_start,
+                    ..
+                },
                 O::StopRequested,
-            ) => ended(exit_code, stopped()),
+            ) => ended(exit_code, stopped(*stopped_before_start)),
             (
-                T::ObservedExit { exit_code } | T::RediscoveredExit { exit_code, .. },
+                T::ObservedExit { exit_code, .. } | T::RediscoveredExit { exit_code, .. },
                 O::Exited {
                     exit_code: current_code,
                     annotation,
                 },
             ) => enrich(*exit_code, None, *current_code, annotation),
 
-            (T::StopCompleted { exit_code }, O::Launching | O::Running | O::StopRequested) => {
-                ended(exit_code, stopped())
-            }
             (
-                T::StopCompleted { exit_code },
+                T::StopCompleted {
+                    exit_code,
+                    stopped_before_start,
+                },
+                O::Launching | O::Running | O::StopRequested,
+            ) => ended(exit_code, stopped(*stopped_before_start)),
+            (
+                T::StopCompleted {
+                    exit_code,
+                    stopped_before_start,
+                },
                 O::Exited {
                     exit_code: current_code,
                     annotation,
                 },
-            ) => enrich(*exit_code, stopped(), *current_code, annotation),
+            ) => enrich(
+                *exit_code,
+                stopped(*stopped_before_start),
+                *current_code,
+                annotation,
+            ),
         }
     }
 
@@ -6920,45 +6968,69 @@ mod tests {
             // annotated exit without knowing a stop was in flight.
             (
                 LastOutcome::StopRequested,
-                Transition::ObservedExit { exit_code: Some(0) },
+                Transition::ObservedExit {
+                    stopped_before_start: false,
+                    exit_code: Some(0),
+                },
                 Some(exited(Some(0), stopped())),
             ),
             // A plain observed exit stays plain.
             (
                 LastOutcome::Running,
-                Transition::ObservedExit { exit_code: Some(3) },
+                Transition::ObservedExit {
+                    stopped_before_start: false,
+                    exit_code: Some(3),
+                },
                 Some(exited(Some(3), None)),
             ),
             // Monotonic enrichment: a code fills a gap, never the reverse.
             (
                 exited(None, None),
-                Transition::ObservedExit { exit_code: Some(3) },
+                Transition::ObservedExit {
+                    stopped_before_start: false,
+                    exit_code: Some(3),
+                },
                 Some(exited(Some(3), None)),
             ),
             (
                 exited(Some(3), None),
-                Transition::ObservedExit { exit_code: None },
+                Transition::ObservedExit {
+                    stopped_before_start: false,
+                    exit_code: None,
+                },
                 None,
             ),
             (
                 exited(Some(3), stopped()),
-                Transition::ObservedExit { exit_code: Some(9) },
+                Transition::ObservedExit {
+                    stopped_before_start: false,
+                    exit_code: Some(9),
+                },
                 None,
             ),
             // A completed stop annotates, keeping a code already observed.
             (
                 LastOutcome::StopRequested,
-                Transition::StopCompleted { exit_code: None },
+                Transition::StopCompleted {
+                    stopped_before_start: false,
+                    exit_code: None,
+                },
                 Some(exited(None, stopped())),
             ),
             (
                 exited(Some(143), None),
-                Transition::StopCompleted { exit_code: None },
+                Transition::StopCompleted {
+                    stopped_before_start: false,
+                    exit_code: None,
+                },
                 Some(exited(Some(143), stopped())),
             ),
             (
                 exited(Some(143), stopped()),
-                Transition::StopCompleted { exit_code: None },
+                Transition::StopCompleted {
+                    stopped_before_start: false,
+                    exit_code: None,
+                },
                 None,
             ),
             // Reload's rediscovered pane, dead: plain from running,
@@ -6966,6 +7038,7 @@ mod tests {
             (
                 LastOutcome::Launching,
                 Transition::RediscoveredExit {
+                    stopped_before_start: false,
                     address: "%2".into(),
                     exit_code: Some(7),
                 },
@@ -6974,6 +7047,7 @@ mod tests {
             (
                 LastOutcome::StopRequested,
                 Transition::RediscoveredExit {
+                    stopped_before_start: false,
                     address: "%2".into(),
                     exit_code: None,
                 },
@@ -6982,26 +7056,38 @@ mod tests {
             // Nothing reclassifies a reboot or a failed exec.
             (
                 LastOutcome::Interrupted,
-                Transition::ObservedExit { exit_code: Some(1) },
+                Transition::ObservedExit {
+                    stopped_before_start: false,
+                    exit_code: Some(1),
+                },
                 None,
             ),
             (
                 LastOutcome::Interrupted,
-                Transition::StopCompleted { exit_code: Some(1) },
+                Transition::StopCompleted {
+                    stopped_before_start: false,
+                    exit_code: Some(1),
+                },
                 None,
             ),
             (
                 LastOutcome::Error {
                     detail: "ENOENT".into(),
                 },
-                Transition::ObservedExit { exit_code: Some(1) },
+                Transition::ObservedExit {
+                    stopped_before_start: false,
+                    exit_code: Some(1),
+                },
                 None,
             ),
             (
                 LastOutcome::Error {
                     detail: "ENOENT".into(),
                 },
-                Transition::StopCompleted { exit_code: None },
+                Transition::StopCompleted {
+                    stopped_before_start: false,
+                    exit_code: None,
+                },
                 None,
             ),
             // A sentinel reclassifies every non-terminal state to `Error`
@@ -7011,6 +7097,7 @@ mod tests {
             (
                 LastOutcome::Launching,
                 Transition::SentinelError {
+                    inferred: false,
                     detail: "exec_failed errno=2".into(),
                     address: None,
                 },
@@ -7021,6 +7108,7 @@ mod tests {
             (
                 LastOutcome::Running,
                 Transition::SentinelError {
+                    inferred: false,
                     detail: "exec_failed errno=13".into(),
                     address: Some("%3".into()),
                 },
@@ -7031,6 +7119,7 @@ mod tests {
             (
                 LastOutcome::StopRequested,
                 Transition::SentinelError {
+                    inferred: false,
                     detail: "exec_failed errno=2".into(),
                     address: None,
                 },
@@ -7049,6 +7138,7 @@ mod tests {
             (
                 exited(Some(0), None),
                 Transition::SentinelError {
+                    inferred: false,
                     detail: "exec_failed errno=2".into(),
                     address: None,
                 },
@@ -7059,6 +7149,7 @@ mod tests {
             (
                 LastOutcome::Interrupted,
                 Transition::SentinelError {
+                    inferred: false,
                     detail: "exec_failed errno=2".into(),
                     address: None,
                 },
@@ -7066,14 +7157,14 @@ mod tests {
                     detail: "exec_failed errno=2".into(),
                 }),
             ),
-            // ...but a GENUINELY annotated exit (a real stop) is retained
-            // knowledge, not an inference — a sentinel and a stop
-            // annotation cannot both be true of the same launch — so this
-            // is the one terminal state a sentinel still cannot cross. An
+            // ...but a completed Stop retains its annotation, including a
+            // stopped startup. Only a still-pending Stop accepts a direct
+            // shim report; the completed outcome is not revised later. An
             // already-`Error` row is simply unchanged (idempotent).
             (
                 exited(Some(0), stopped()),
                 Transition::SentinelError {
+                    inferred: false,
                     detail: "exec_failed errno=2".into(),
                     address: None,
                 },
@@ -7084,6 +7175,7 @@ mod tests {
                     detail: "ENOENT".into(),
                 },
                 Transition::SentinelError {
+                    inferred: false,
                     detail: "exec_failed errno=2".into(),
                     address: None,
                 },
@@ -7097,6 +7189,104 @@ mod tests {
                 "{transition:?} against {current:?}"
             );
         }
+    }
+
+    /// All stop-writing transitions preserve the same unread-spec choice.
+    /// Once one writer commits its annotation, a later read with less evidence
+    /// must neither replace it nor let a late shim report turn it into Error.
+    #[farhelm_testtrace::test]
+    fn stopped_startup_annotation_is_chosen_once_across_exit_writers() {
+        for before_start in [false, true] {
+            let expected = if before_start {
+                farhelm_proto::STOP_BEFORE_START_ANNOTATION
+            } else {
+                farhelm_proto::STOP_ANNOTATION
+            };
+            let transitions = [
+                Transition::ObservedExit {
+                    exit_code: Some(3),
+                    stopped_before_start: before_start,
+                },
+                Transition::RediscoveredExit {
+                    address: "%1".into(),
+                    exit_code: Some(3),
+                    stopped_before_start: before_start,
+                },
+                Transition::StopCompleted {
+                    exit_code: Some(3),
+                    stopped_before_start: before_start,
+                },
+            ];
+            for transition in transitions {
+                let first = transition.apply(&LastOutcome::StopRequested).unwrap();
+                assert_eq!(
+                    first,
+                    LastOutcome::Exited {
+                        exit_code: Some(3),
+                        annotation: Some(expected.into()),
+                    }
+                );
+                assert_eq!(
+                    Transition::StopCompleted {
+                        exit_code: Some(3),
+                        stopped_before_start: !before_start,
+                    }
+                    .apply(&first),
+                    None,
+                    "the first annotation remains final"
+                );
+                assert_eq!(
+                    Transition::SentinelError {
+                        detail: "late shim report".into(),
+                        address: None,
+                        inferred: false,
+                    }
+                    .apply(&first),
+                    None
+                );
+            }
+        }
+    }
+
+    /// Store-time precedence closes the await window between evidence and its
+    /// commit. Stop first rejects an old inference, error first remains final,
+    /// and direct shim evidence still wins while Stop is only pending.
+    #[farhelm_testtrace::test]
+    fn pending_stop_arbitrates_inferred_and_direct_launch_errors_at_commit() {
+        let inferred = Transition::SentinelError {
+            detail: "wrapper exited".into(),
+            address: None,
+            inferred: true,
+        };
+        let pending = Transition::StopRequested
+            .apply(&LastOutcome::Running)
+            .unwrap();
+        assert_eq!(inferred.apply(&pending), None);
+        let stopped = Transition::ObservedExit {
+            exit_code: Some(9),
+            stopped_before_start: true,
+        }
+        .apply(&pending)
+        .unwrap();
+        assert_eq!(
+            stopped,
+            LastOutcome::Exited {
+                exit_code: Some(9),
+                annotation: Some(farhelm_proto::STOP_BEFORE_START_ANNOTATION.into()),
+            }
+        );
+        let failed = inferred.apply(&LastOutcome::Running).unwrap();
+        assert!(matches!(failed, LastOutcome::Error { .. }));
+        assert_eq!(Transition::StopRequested.apply(&failed), None);
+        assert!(matches!(
+            Transition::SentinelError {
+                detail: "exec_failed errno=2".into(),
+                address: None,
+                inferred: false,
+            }
+            .apply(&pending),
+            Some(LastOutcome::Error { .. })
+        ));
     }
 
     /// The upgrade path M3 owes every host that already ran M2: a
@@ -9553,7 +9743,14 @@ mod tests {
         force_outcome(&store, "s1", &LastOutcome::Interrupted);
 
         let committed = store
-            .transition("s1", 0, Transition::ObservedExit { exit_code: Some(1) })
+            .transition(
+                "s1",
+                0,
+                Transition::ObservedExit {
+                    stopped_before_start: false,
+                    exit_code: Some(1),
+                },
+            )
             .await
             .expect("transition");
         assert_eq!(committed, Some(LastOutcome::Interrupted));
@@ -9564,7 +9761,14 @@ mod tests {
         store.delete_session("s1", None).await.expect("delete");
         assert_eq!(
             store
-                .transition("s1", 0, Transition::ObservedExit { exit_code: None })
+                .transition(
+                    "s1",
+                    0,
+                    Transition::ObservedExit {
+                        stopped_before_start: false,
+                        exit_code: None
+                    }
+                )
                 .await
                 .expect("transition"),
             None
@@ -9678,6 +9882,7 @@ mod tests {
                 "s1",
                 0,
                 Transition::RediscoveredExit {
+                    stopped_before_start: false,
                     address: "%9".into(),
                     exit_code: Some(2),
                 },
@@ -9718,7 +9923,14 @@ mod tests {
             .await
             .expect("intent");
         store
-            .transition("a", 0, Transition::ObservedExit { exit_code: Some(0) })
+            .transition(
+                "a",
+                0,
+                Transition::ObservedExit {
+                    stopped_before_start: false,
+                    exit_code: Some(0),
+                },
+            )
             .await
             .expect("list observation");
         assert_eq!(
@@ -9734,11 +9946,25 @@ mod tests {
         // code the list had already captured.
         insert_running(&store, "b").await;
         store
-            .transition("b", 0, Transition::ObservedExit { exit_code: Some(0) })
+            .transition(
+                "b",
+                0,
+                Transition::ObservedExit {
+                    stopped_before_start: false,
+                    exit_code: Some(0),
+                },
+            )
             .await
             .expect("list observation");
         store
-            .transition("b", 0, Transition::StopCompleted { exit_code: None })
+            .transition(
+                "b",
+                0,
+                Transition::StopCompleted {
+                    stopped_before_start: false,
+                    exit_code: None,
+                },
+            )
             .await
             .expect("stop completion");
         assert_eq!(
@@ -9779,7 +10005,14 @@ mod tests {
             insert_running(&store, id).await;
             force_outcome(&store, id, &seeded);
             store
-                .transition(id, 0, Transition::StopCompleted { exit_code: None })
+                .transition(
+                    id,
+                    0,
+                    Transition::StopCompleted {
+                        stopped_before_start: false,
+                        exit_code: None,
+                    },
+                )
                 .await
                 .expect("stop");
         }
@@ -10013,6 +10246,7 @@ mod tests {
                 "row",
                 0,
                 Transition::SentinelError {
+                    inferred: false,
                     detail: "exec_failed errno=2".to_string(),
                     address: Some("%9".to_string()),
                 },
@@ -10068,6 +10302,7 @@ mod tests {
                     id,
                     0,
                     Transition::SentinelError {
+                        inferred: false,
                         detail: "exec_failed errno=2".to_string(),
                         address: None,
                     },
@@ -10105,6 +10340,7 @@ mod tests {
                 "stopped",
                 0,
                 Transition::SentinelError {
+                    inferred: false,
                     detail: "exec_failed errno=2".to_string(),
                     address: None,
                 },
@@ -15027,7 +15263,14 @@ mod tests {
             .await
             .expect("stop intent");
         store
-            .transition("s1", 0, Transition::StopCompleted { exit_code: Some(0) })
+            .transition(
+                "s1",
+                0,
+                Transition::StopCompleted {
+                    stopped_before_start: false,
+                    exit_code: Some(0),
+                },
+            )
             .await
             .expect("stop outcome");
         let stopped = store.session("s1").await.expect("read").expect("present");
@@ -15130,7 +15373,14 @@ mod tests {
             .await
             .expect("stop intent");
         store
-            .transition("s1", 0, Transition::StopCompleted { exit_code: Some(3) })
+            .transition(
+                "s1",
+                0,
+                Transition::StopCompleted {
+                    stopped_before_start: false,
+                    exit_code: Some(3),
+                },
+            )
             .await
             .expect("stop outcome");
 
@@ -15339,7 +15589,14 @@ mod tests {
             .expect("confirm the new launch");
 
         let committed = store
-            .transition("s1", 0, Transition::ObservedExit { exit_code: Some(9) })
+            .transition(
+                "s1",
+                0,
+                Transition::ObservedExit {
+                    stopped_before_start: false,
+                    exit_code: Some(9),
+                },
+            )
             .await
             .expect("stale observation")
             .expect("the row exists");

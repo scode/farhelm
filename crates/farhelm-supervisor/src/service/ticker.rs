@@ -1390,6 +1390,13 @@ pub(super) async fn observe_entries(
                     negative_reads.push(entry);
                 }
                 if let Some(detail) = observed.sentinel {
+                    // Stop can commit while the evidence reads are awaited.
+                    // Retain provenance for the reply's current-outcome fence,
+                    // not only for the store's later atomic arbitration.
+                    let detail = super::launch_artifacts::LaunchError {
+                        detail,
+                        inferred: observed.inferred,
+                    };
                     let changed = {
                         let mut cached = entry
                             .run
@@ -4213,7 +4220,11 @@ mod tests {
                     conn.execute_batch("CREATE TRIGGER refuse_outcome BEFORE UPDATE OF outcome_state ON sessions BEGIN SELECT RAISE(FAIL, 'injected outcome failure'); END;").unwrap();
                 }
                 "cached-error" => {
-                    *entry.run.launch_error.lock().unwrap() = Some("uncommitted failure".into());
+                    *entry.run.launch_error.lock().unwrap() =
+                        Some(super::super::launch_artifacts::LaunchError {
+                            detail: "uncommitted failure".into(),
+                            inferred: false,
+                        });
                 }
                 _ => unreachable!(),
             }
@@ -4407,6 +4418,7 @@ mod tests {
                 "cleanup-once",
                 0,
                 Transition::SentinelError {
+                    inferred: false,
                     detail: "failed launch".into(),
                     address: Some(pane),
                 },

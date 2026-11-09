@@ -269,6 +269,10 @@ async fn a_failed_restart_restores_the_stop_annotation_it_had_cleared() {
 /// agent into a directory an attacker chose is not a decision the user
 /// made, and `ensure_cwd_usable`'s existence check cannot see it — the
 /// directory is perfectly usable, it is simply a different one.
+///
+/// The fake agent must reach its post-exec ready marker before Stop: this
+/// test preserves an ordinary stop annotation, while stopping the startup
+/// wrapper legitimately records that the agent never finished starting.
 #[farhelm_testtrace::test]
 async fn a_repointed_working_directory_refuses_the_restart() {
     let h = harness().await;
@@ -286,6 +290,7 @@ async fn a_repointed_working_directory_refuses_the_restart() {
         24,
     )
     .await;
+    wait_for_agent_ready(&h, &session.id).await;
     h.client.stop_session(&session.id).await.expect("stop");
 
     // The repoint.
@@ -529,6 +534,9 @@ async fn a_stale_generation_zero_sentinel_cannot_taint_generation_one() {
 /// Generation 0 is stopped while the marker provably does not exist yet,
 /// so it cannot have exited on its own; generation 1 is left looping until
 /// the test creates the marker, at which point it exits 0 naturally.
+/// The loop's own ready output proves generation 0 reached the command
+/// before Stop; a live status can still describe the startup wrapper and
+/// would make the expected ordinary stop annotation depend on scheduling.
 #[farhelm_testtrace::test]
 async fn stop_then_restart_then_natural_exit_carries_no_stale_annotation() {
     let h = harness().await;
@@ -537,12 +545,24 @@ async fn stop_then_restart_then_natural_exit_carries_no_stale_annotation() {
     let session = create_resumable_session(
         &h,
         &work.path().to_string_lossy(),
-        "sh -c 'until [ -e released ]; do sleep 0.2; done'",
+        "sh -c 'echo LOOP-READY; until [ -e released ]; do sleep 0.2; done'",
         80,
         24,
     )
     .await;
-    wait_for_live_status(&h.client, &session.id, 30).await;
+    let (channel, replay, mut output) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach to the first run's terminal");
+    let mut seen = replay;
+    wait_for(&mut output, &mut seen, "LOOP-READY", 30).await;
+    h.client.detach(channel).await;
+    assert!(
+        !marker.exists(),
+        "test setup: generation 0 must still be looping, not having exited on its own, when \
+         it is stopped"
+    );
 
     h.client
         .stop_session(&session.id)
@@ -559,12 +579,6 @@ async fn stop_then_restart_then_natural_exit_carries_no_stale_annotation() {
         "the stop's annotation must be recorded where it happens, exactly like the other \
          stop-annotation tests"
     );
-    assert!(
-        !marker.exists(),
-        "test setup: generation 0 must still be looping, not having exited on its own, when \
-         it was stopped"
-    );
-
     // The session already exited, so no live agent needs consent to stop
     // it first.
     let restarted = h

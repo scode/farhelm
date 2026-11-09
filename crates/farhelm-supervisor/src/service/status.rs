@@ -69,7 +69,8 @@
 
 use super::core::{NewTerminals, SessionEntry, Supervisor};
 use super::launch_artifacts::{
-    append_launch_excerpt, read_launch_sentinel, sentinel_could_still_apply, wrapper_failure_detail,
+    append_launch_excerpt, read_launch_sentinel, sentinel_could_still_apply, stopped_before_start,
+    wrapper_failure_detail,
 };
 use super::terminals::{DiscoveredTab, Terminal, tabs_from_pane_states, tmux_tab_home};
 use crate::agent_kind::screen_reader::ScreenState;
@@ -560,13 +561,13 @@ pub(crate) fn entry_info(
         .lock()
         .expect("launch-error mutex poisoned")
         .clone();
-    let launch_error = launch_error.filter(|_| {
+    let launch_error = launch_error.filter(|error| {
         // An observer can publish its cache after Stop has already committed.
         // Recheck the outcome on the read side instead of relying on cache
         // cleanup or on the observer's earlier eligibility decision. The
         // cache mutex has been released before taking this outcome lock.
         let applicable =
-            sentinel_could_still_apply(&entry.run.outcome.lock().expect("outcome mutex poisoned"));
+            error.applies_to(&entry.run.outcome.lock().expect("outcome mutex poisoned"));
         if !applicable {
             // That fence may have committed after the first status read.
             // Refresh its status too, so rejecting a stale error cannot lose
@@ -581,7 +582,9 @@ pub(crate) fn entry_info(
         info.status = status;
         info.annotation = annotation;
     } else if let Some(detail) = launch_error {
-        info.status = SessionStatus::Error { detail };
+        info.status = SessionStatus::Error {
+            detail: detail.detail,
+        };
         info.annotation = None;
     } else {
         info.status = status;
@@ -686,14 +689,24 @@ pub(crate) fn observation(
                     exit_code: recorded_code,
                     ..
                 } if recorded_code.is_none() && exit_code.is_some() => {
-                    Some(Transition::ObservedExit { exit_code })
+                    Some(Transition::ObservedExit {
+                        stopped_before_start: false,
+                        exit_code,
+                    })
                 }
                 _ if recorded.is_terminal() => None,
-                _ => Some(Transition::ObservedExit { exit_code }),
+                _ => Some(Transition::ObservedExit {
+                    stopped_before_start: false,
+                    exit_code,
+                }),
             }
         }
-        None => matches!(recorded, LastOutcome::Running | LastOutcome::StopRequested)
-            .then_some(Transition::ObservedExit { exit_code: None }),
+        None => matches!(recorded, LastOutcome::Running | LastOutcome::StopRequested).then_some(
+            Transition::ObservedExit {
+                stopped_before_start: false,
+                exit_code: None,
+            },
+        ),
     }
 }
 
@@ -706,10 +719,13 @@ pub(crate) struct EntryObservation {
     /// settle future reads only once this entry's terminal outcome is durable.
     pub(crate) settle_launch_reads: bool,
     /// A launch-sentinel, wrapper-failure or interrupted-preparation detail found for this
-    /// entry NOW. Outranks whatever `session_status` would compute,
-    /// whether or not the matching transition also commits — see
+    /// entry NOW. Outranks ordinary status while its provenance still applies
+    /// to the current outcome, whether or not the matching transition commits — see
     /// the generation-local launch-error mirror read by [`entry_info`].
     pub(crate) sentinel: Option<String>,
+    /// Whether the cached detail came from pane-based inference. A Stop may
+    /// commit during its reads, so this provenance must survive publication.
+    pub(crate) inferred: bool,
     /// The transition this observation wants committed, or `None`
     /// when nothing changed or this supervisor may not record.
     pub(crate) transition: Option<Transition>,
@@ -757,7 +773,9 @@ pub(crate) async fn interrupted_preparation_detail(
 ///
 /// The timer and wake share this precedence: durable Error is settled;
 /// a shim failure, wrapper failure or incomplete accepted preparation outranks
-/// an inferred exit. An unattributed pane permits only launch-sentinel evidence,
+/// an inferred exit. A pending Stop excludes wrapper and preparation inference
+/// because its own kill leaves that same evidence; a direct shim report still
+/// wins until Stop's annotated exit commits. An unattributed pane permits only launch-sentinel evidence,
 /// while a pane recycled into another known session counts as absent.
 /// Callers batch transitions, mirror committed outcomes and retain uncommitted
 /// error details for replies. An unreadable sentinel returns an error so the
@@ -784,6 +802,7 @@ pub(crate) async fn observe_entry_with_capture_budget(
     if matches!(recorded, LastOutcome::Error { .. }) {
         return Ok(EntryObservation {
             sentinel: None,
+            inferred: false,
             transition: None,
             settled_error: true,
             settle_launch_reads: false,
@@ -800,6 +819,7 @@ pub(crate) async fn observe_entry_with_capture_budget(
     if unreadable_host {
         return Ok(EntryObservation {
             sentinel: None,
+            inferred: false,
             transition: None,
             settled_error: false,
             settle_launch_reads: false,
@@ -845,9 +865,10 @@ pub(crate) async fn observe_entry_with_capture_budget(
             .with_context(|| {
                 format!("could not read session {}'s launch sentinel", entry.info.id)
             })?;
+        let inferred = found.is_none();
         let mut detail = match found {
             Some(detail) => Some(detail),
-            None if unattributed => None,
+            None if unattributed || recorded == LastOutcome::StopRequested => None,
             // The wrapper-failure shape: no sentinel, a pane that is
             // present and dead, and a launch spec nothing consumed.
             None => match wrapper_failure_detail(
@@ -870,7 +891,7 @@ pub(crate) async fn observe_entry_with_capture_budget(
                 }
             },
         };
-        if detail.is_none() && !unattributed {
+        if detail.is_none() && !unattributed && recorded != LastOutcome::StopRequested {
             detail = interrupted_preparation_detail(
                 &sup.state_dir,
                 &sup.store,
@@ -886,6 +907,7 @@ pub(crate) async fn observe_entry_with_capture_budget(
             // keep that provenance alive after the physical terminal
             // disappears.
             let transition = sup.may_record().then(|| Transition::SentinelError {
+                inferred,
                 detail: detail.clone(),
                 address: entry
                     .terminal
@@ -894,6 +916,7 @@ pub(crate) async fn observe_entry_with_capture_budget(
             });
             return Ok(EntryObservation {
                 sentinel: Some(detail),
+                inferred,
                 transition,
                 settled_error: false,
                 settle_launch_reads: false,
@@ -913,12 +936,24 @@ pub(crate) async fn observe_entry_with_capture_budget(
     }
 
     let transition = if sup.may_record() && !unattributed {
-        observation(&recorded, live)
+        let mut transition = observation(&recorded, live);
+        // Read even when the cached outcome still says Running: a Stop may
+        // have committed its intent while this observer awaited evidence.
+        // The store chooses whether this exit needs an annotation.
+        if let Some(Transition::ObservedExit {
+            stopped_before_start: choice,
+            ..
+        }) = &mut transition
+        {
+            *choice = stopped_before_start(&sup.state_dir, &entry.info.id, entry.generation).await;
+        }
+        transition
     } else {
         None
     };
     Ok(EntryObservation {
         sentinel: None,
+        inferred: false,
         transition,
         settled_error: false,
         settle_launch_reads,
@@ -992,7 +1027,11 @@ mod tests {
         ];
         for (outcome, expected, annotation) in cases {
             let entry = entry_with(None, outcome.clone());
-            *entry.run.launch_error.lock().expect("launch-error mutex") = Some(cached.into());
+            *entry.run.launch_error.lock().expect("launch-error mutex") =
+                Some(super::super::launch_artifacts::LaunchError {
+                    detail: cached.into(),
+                    inferred: false,
+                });
             let reply = entry_info(&entry, &HashMap::new(), &KnownTmuxNames::default());
             assert_eq!(reply.status, expected, "recorded outcome: {outcome:?}");
             assert_eq!(
@@ -1000,6 +1039,36 @@ mod tests {
                 annotation,
                 "recorded outcome: {outcome:?}"
             );
+        }
+    }
+
+    /// A cached inference can arrive after Stop committed during evidence I/O.
+    /// Reply construction must reject it from the current pending state, while
+    /// preserving a direct shim report and ordinary degraded-mode inference.
+    #[farhelm_testtrace::test]
+    fn pending_stop_filters_only_inferred_cached_launch_errors() {
+        for outcome in [LastOutcome::Running, LastOutcome::StopRequested] {
+            for inferred in [false, true] {
+                let entry = entry_with(None, outcome.clone());
+                let baseline = entry_info(&entry, &HashMap::new(), &KnownTmuxNames::default());
+                *entry.run.launch_error.lock().unwrap() =
+                    Some(super::super::launch_artifacts::LaunchError {
+                        detail: "launch evidence".into(),
+                        inferred,
+                    });
+                let reply = entry_info(&entry, &HashMap::new(), &KnownTmuxNames::default());
+                if outcome == LastOutcome::StopRequested && inferred {
+                    assert_eq!(reply.status, baseline.status);
+                    assert_eq!(reply.annotation, baseline.annotation);
+                } else {
+                    assert_eq!(
+                        reply.status,
+                        SessionStatus::Error {
+                            detail: "launch evidence".into()
+                        }
+                    );
+                }
+            }
         }
     }
 
@@ -1247,7 +1316,10 @@ mod tests {
         );
         assert_eq!(
             observation(&LastOutcome::Running, Some((&dead_with_code).into())),
-            Some(Transition::ObservedExit { exit_code: Some(3) })
+            Some(Transition::ObservedExit {
+                stopped_before_start: false,
+                exit_code: Some(3)
+            })
         );
         assert_eq!(
             observation(&LastOutcome::Launching, Some((&dead_with_code).into())),
@@ -1256,11 +1328,17 @@ mod tests {
         );
         assert_eq!(
             observation(&LastOutcome::Running, None),
-            Some(Transition::ObservedExit { exit_code: None })
+            Some(Transition::ObservedExit {
+                stopped_before_start: false,
+                exit_code: None
+            })
         );
         assert_eq!(
             observation(&LastOutcome::StopRequested, None),
-            Some(Transition::ObservedExit { exit_code: None }),
+            Some(Transition::ObservedExit {
+                stopped_before_start: false,
+                exit_code: None
+            }),
             "a stop whose terminal vanished still ended; the store decides it was the stop"
         );
         assert_eq!(
@@ -1281,7 +1359,10 @@ mod tests {
                 },
                 Some((&dead_with_code).into())
             ),
-            Some(Transition::ObservedExit { exit_code: Some(3) }),
+            Some(Transition::ObservedExit {
+                stopped_before_start: false,
+                exit_code: Some(3)
+            }),
             "a code tmux can only now report must still reach the record"
         );
         assert_eq!(

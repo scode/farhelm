@@ -1651,14 +1651,19 @@ impl AgentKind {
     }
 }
 
-/// The one stop annotation this PR reserves. SPEC.md itself only promises
-/// THAT a user-initiated stop gets an annotation on an `Exited` session
-/// ("'stopped' is not a distinct status"), without pinning its exact
-/// text; `"stopped by user"` is the literal string PLAN_M3.md item 4
-/// chose for that annotation. Named here, like [`DETACH_REASON_STALLED`],
-/// so the (future) writer and the tests that check for it cannot drift
-/// independently.
+/// A user Stop after the agent consumed its launch spec, or when that is unknown.
+///
+/// Stop is an annotation on `Exited`, never a distinct status. Writers and
+/// compact status icons share the wording so an explicitly stopped session
+/// remains distinguishable from an agent that exited on its own.
 pub const STOP_ANNOTATION: &str = "stopped by user";
+
+/// A user Stop that ended the launch before its agent finished starting.
+///
+/// The supervisor chooses this only from an unconsumed launch spec after the
+/// terminal ended. The annotation remains free text on the wire: older clients
+/// show it verbatim, though their compact icon recognizes only [`STOP_ANNOTATION`].
+pub const STOP_BEFORE_START_ANNOTATION: &str = "stopped before the agent finished starting";
 
 /// Which of a session's terminals an `Attach` targets (PLAN_M4.md item 1).
 /// Before version 6 a session had exactly one terminal, so `Attach` named

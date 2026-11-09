@@ -6386,7 +6386,34 @@ async fn an_unscoped_login_shell_startup_failure_classifies_as_error() {
 /// same dead-pane shape into an error about a shell that failed on its own.
 #[farhelm_testtrace::test]
 async fn stopping_during_login_shell_startup_keeps_the_stop_annotation() {
+    assert_stop_during_login_shell_startup(false).await;
+}
+
+/// A usable systemd manager selects the scoped startup path, but Stop during
+/// the login shell must still say the user stopped startup. This deliberately
+/// stops before the shell reaches its wrapper; no host manager is sabotaged.
+#[farhelm_testtrace::test]
+async fn stopping_during_scoped_login_shell_startup_keeps_the_stop_annotation() {
+    assert_stop_during_login_shell_startup(true).await;
+}
+
+/// Hold the real interactive startup at an explicit readiness boundary.
+/// Both manager choices share this fixture so their difference is the scope
+/// selection, with the same unread spec and still-live shell before Stop.
+async fn assert_stop_during_login_shell_startup(scoped: bool) {
     use std::os::unix::fs::PermissionsExt;
+    let scopes = if scoped {
+        let Some(scopes) = probed_scope_manager(
+            "stopping_during_scoped_login_shell_startup_keeps_the_stop_annotation",
+        )
+        .await
+        else {
+            return;
+        };
+        scopes
+    } else {
+        Arc::new(farhelm_supervisor::scope::ScopeManager::disabled())
+    };
     let work = farhelm_teststate::tempdir().unwrap();
     let rc = work.path().join("startup.rc");
     let shell = work.path().join("login-shell");
@@ -6412,7 +6439,7 @@ async fn stopping_during_login_shell_startup_keeps_the_stop_annotation() {
         SupervisorTimeouts::default(),
         SupervisorSeams {
             launch_shell: Some(shell.to_string_lossy().into_owned()),
-            scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
+            scopes,
             ..SupervisorSeams::default()
         },
     )
@@ -6432,6 +6459,11 @@ async fn stopping_during_login_shell_startup_keeps_the_stop_annotation() {
         !agent_has_exited(&h, &session.id).await,
         "fixture premise: startup is still live"
     );
+    assert_eq!(
+        launch_scope_of(&h, &session.id).await.is_some(),
+        scoped,
+        "premise: this launch used the intended manager selection"
+    );
     h.client.stop_session(&session.id).await.unwrap();
     let rows = wait_for_reconciled_listing(&h.sup, &h.client, 15, "startup stop", |rows| {
         rows.iter()
@@ -6443,9 +6475,10 @@ async fn stopping_during_login_shell_startup_keeps_the_stop_annotation() {
         matches!(row.status, SessionStatus::Exited { .. }),
         "{row:?}"
     );
-    assert!(
-        row.annotation.is_some(),
-        "intentional Stop must remain annotated: {row:?}"
+    assert_eq!(
+        row.annotation.as_deref(),
+        Some(farhelm_proto::STOP_BEFORE_START_ANNOTATION),
+        "Stop must explain the interrupted startup: {row:?}"
     );
     let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
         .await
@@ -6453,9 +6486,9 @@ async fn stopping_during_login_shell_startup_keeps_the_stop_annotation() {
     assert!(matches!(
         store.session(&session.id).await.unwrap().unwrap().outcome,
         LastOutcome::Exited {
-            annotation: Some(_),
+            annotation: Some(annotation),
             ..
-        }
+        } if annotation == farhelm_proto::STOP_BEFORE_START_ANNOTATION
     ));
 }
 
