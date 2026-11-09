@@ -130,3 +130,73 @@ It was reproduced, corrected and verified by that same reviewer, which cleared t
 finding. Own-model scope reassessment confirmed the reveal boundary and empty-step correction fulfill the existing
 Decisions without a new mechanism. Resume and commit/PR wording checks passed. Every file touched in this round received
 a separate documentation pass. No rejected finding or omitted required behavior remains.
+
+### Landing
+
+Landed alone, as #3272, on the second landing attempt.
+
+While this plan was blocked earlier, the landing monitor answered its question on the maintainer's behalf (2026-11-09).
+A diagnosis too long to fit beside a readable current step becomes a shortened preview that says "Full details in
+Hosts", and the card stays a plain hover. That answer is listed in TODO.md under "Plan decisions to revisit".
+
+The first landing attempt stopped before merging anything. The plan's own test for that preview failed on the Tensorlake
+sandboxes the landing ran its browser tests on (cloud Linux machines, not the product's Tensorlake hosts): run alone ten
+times per engine, Chromium failed 10 of 10 (run `9640bd72`) and WebKit 2 of 10 (run `589e5217`), after the first failure
+in the full run (`197c18fb`), while it passed 6 of 6 on the landing machine (run `96062ef9`). The landing monitor sent
+it back to find out whether the test or the card was at fault. The executor reproduced it on a slowed-down machine and
+traced it to the test. When the test moved the pointer onto a host that the sidebar first had to scroll into view, the
+scroll sometimes arrived just after the pointer, and a scroll under a tooltip dismisses it, as it does for every
+tooltip. The test now finishes revealing the host before hovering. It still requires a visible card, a readable current
+step and the preview notice, and it now also checks that every character of the notice is inside the card. A real user
+hits the same dismissal only when the list scrolls under a resting pointer, which is how every tooltip already behaves.
+The executor recorded this in FLAKES.md as fixed. Along the way it fixed two real card faults. The step list's padding
+was counted twice, which could clip the "Full details in Hosts" notice. A run with no steps yet showed a long diagnosis
+uncut and without the notice. A test now covers that case too.
+
+The first attempt's fresh-context review found no interaction with the reworked agent request cards, which landed
+shortly before. A second fresh-context review, by the landing monitor's reviewer, read the executor's fix. It found the
+cause established on the slowed-down machine and the fixes correct. On the sandboxes the same cause is inferred; the
+rerun below shows the fixed test passing there on both engines. Sending the plan back was a plain instruction to fix a
+failing test, so it has no entry to revisit. Nothing else reached main between the two attempts.
+
+#### Things you should know
+
+From the first attempt's review, left as they are; none is worth holding the landing for:
+
+- The card's "Full details in Hosts" is a note, not a link; clicking the host opens Hosts. There the running host's row
+  is folded, and the user has to turn on Details to read the full diagnosis.
+- The shortened preview is cut at a pixel height rather than a whole line, so its last visible line is usually sliced
+  through.
+- The Hosts progress line and the card keep separate one-second clocks, so their elapsed times can differ by a second.
+- The Tensorlake hosts browser test gained a small fix that rides along: when one test stack serves both engines in
+  turn, it now counts only the setup work its own case started.
+
+#### Checks
+
+Run on the tree that merged (the executor's fixed PR on current main; the landing changed nothing), on this development
+machine and, as the maintainer asked for the landings of 2026-11-09, on Tensorlake sandboxes (cloud test machines):
+
+- Here: `cargo fmt --all -- --check`, `dprint check`, `python3 releasing/check-changelog.py format`, the test-sleep
+  checker, `scripts/check-desktop-assets.sh`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop` and the UI's
+  JavaScript unit tests (`node --test`, the tooltip's included) passed.
+- Here, recorded `cargo nextest run -p farhelm-ui --lib`: 927 passed, none skipped (run `c2487399`).
+- Tensorlake, browser, using the release web build, on Chromium and WebKit: the `host-updates`, `tooltip`,
+  `tooltip-coverage` (the page-wide check that nothing uses the browser's own tooltip), `provisioning`,
+  `tensorlake-hosts`, `host-rail-warning` and `approval-layout` specs. 368 passed, none failed, skipped or retried. Runs
+  `698ae387`, `88f2fce5`, `5dabc10b`, `d87c0de4`, `26b647d4`, `94b87b7a`, `4337b21f`, `fdc179e8`, `3a1aa88f` and
+  `ed44e87b`.
+- Tensorlake, the two long-diagnosis preview tests (with steps, and before any steps arrive) ten times each per engine:
+  20 of 20 passed on Chromium (run `566009a7`) and 20 of 20 on WebKit (run `2c78dfac`), where the first attempt had
+  failed 10 of 10 and 2 of 10.
+- The browser runs went through the recorder's general command mode, because its Playwright mode always runs both
+  engines and the runs here split the engines across sandboxes. The sandbox image runs Node 24, a slightly older release
+  than this machine's. Every sandbox reported that the services the tests rely on (a per-user systemd and SSH to itself)
+  worked.
+
+Reused: nothing from the executor's runs. The first attempt's failed runs and local pass are cited in the notes above
+only as the history of the fix.
+
+Skipped: the rest of the browser suite (the change is confined to hover cards and the host progress surfaces, which the
+specs above cover), the workspace's other Rust tests (no helm, supervisor or protocol code changed), the desktop smoke
+(no desktop-only code changed) and hosted CI (manual-only, not dispatched).
