@@ -336,7 +336,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 80;
+pub(crate) const SCHEMA_VERSION: i64 = 81;
 
 /// Named secrets have their own table so list responses never need to decode a
 /// secret-bearing configuration object. The monotonically increasing revision
@@ -2521,6 +2521,7 @@ pub struct HelmStore {
 /// - 79: transient install facts for a host created from a prepared snapshot,
 ///   retained across an interrupted create without opening connection admission.
 /// - 80: default-off authority for agents to manage sessions on their own host.
+/// - 81: shared condition notices, retaining existing hosts and preferences.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2841,14 +2842,16 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               {NTFY_ALERTS_SCHEMA}
               {REGISTRY_NAMESPACE_SCHEMA}
               {announcement_schema}
+              {notice_schema}
               {TENSORLAKE_ACCOUNT_SCHEMA}
               {TENSORLAKE_RECIPES_SCHEMA}
               {CREDENTIALS_SCHEMA}
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 80;",
+              PRAGMA user_version = 81;",
             announcement_schema = crate::announcements::SCHEMA,
+            notice_schema = crate::notices::SCHEMA,
         ))
         .context("creating schema")?;
         tx.execute(
@@ -4599,6 +4602,22 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         tx.execute_batch("PRAGMA user_version = 80;")
             .context("migrating helm.db to schema version 80")?;
         version = 80;
+    }
+    if version == 80 {
+        // Version-only historical fixtures already carry current tables.
+        // Genuine upgrades add an empty notice history without rewriting hosts.
+        let present: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM sqlite_master WHERE type = 'table' AND name = 'notices'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !present {
+            tx.execute_batch(crate::notices::SCHEMA)
+                .context("creating shared notices")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 81;")
+            .context("migrating helm.db to schema version 81")?;
+        version = 81;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
