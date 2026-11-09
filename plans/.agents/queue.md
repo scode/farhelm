@@ -82,9 +82,10 @@ landed. A plan that blocked while on hold (a held plan whose prerequisite was ab
 Blocked section opens "Blocked while on hold") goes back to `[held]` when answered, with or without `--hold`, so an
 answer the landing monitor gives on the maintainer's behalf never schedules work the maintainer parked.
 
-The read-only verbs: `status` (the queue with claims, claim times, open PRs, waiting dependencies, and flags for what a
-person or the monitor should look at, then the landed plans awaiting review; it prints main's commit id first), `check`
-(the invariants of a local tree, or of a remote ref with `--ref`; with `--base <branch>`, also what a planning PR may
-not change), `check-slug <slug>`, `history <slug>` (the plan's recent commits under `plans/`, each with the claim id it
-carried), and `wake-check` (used by the watcher, with `--for executor`, `--for lander`, or `--for lander-blocks` for the
-monitor's watcher during a round).
+The read-only verbs: `status` (the queue with claims, claim times, open PRs, waiting dependencies, each eligible or
+blocked plan's pass count and whether it is overdue (`plans/.agents/executing.md`, "Picking: "pick a plan to execute",
+"execute the next plan""), and flags for what a person or the monitor should look at, then the landed plans awaiting
+review; it prints main's commit id first), `check` (the invariants of a local tree, or of a remote ref with `--ref`;
+with `--base <branch>`, also what a planning PR may not change), `check-slug <slug>`, `history <slug>` (the plan's
+recent commits under `plans/`, each with the claim id it carried), and `wake-check` (used by the watcher, with
+`--for executor`, `--for lander`, or `--for lander-blocks` for the monitor's watcher during a round).

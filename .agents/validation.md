@@ -841,9 +841,10 @@ that its required systemd or SSH substrate ran.
 - `python3 scripts/test-plans-queue.py` — the plans queue script (`scripts/plans-queue.py`), which is the lock that
   keeps concurrent plan executors off each other's plans: its line grammar, every state transition and refusal, the
   invariants between a state and its files, the rules a planning PR must keep, the wake check for each role (the landing
-  monitor's mid-round role waking for new blocks only), and the compare-and-swap loop against an in-memory GitHub that
-  injects racing writers and lost responses. One case runs the real `dprint` when it is on PATH, which downloads
-  dprint's plugins if its cache is cold. Run it when the script changes; seconds, no other network.
+  monitor's mid-round role waking for new blocks only), the pass count that bounds how long picking can skip a plan for
+  conflicts, and the compare-and-swap loop against an in-memory GitHub that injects racing writers and lost responses.
+  One case runs the real `dprint` when it is on PATH, which downloads dprint's plugins if its cache is cold. Run it when
+  the script changes; seconds, no other network.
 - `python3 -B scripts/plans-landing/test-landing.py`, `deno check scripts/plans-landing/idle-watch.ts`,
   `deno test -A scripts/plans-landing/idle-watch.ts` and `shellcheck scripts/plans-landing/notify.sh` — the landing
   monitor's round tooling (`scripts/plans-landing/README.md`): the monitor log edits a resume relies on (Status and

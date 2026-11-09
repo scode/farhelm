@@ -220,22 +220,25 @@ class FakeGitHub:
             if info["merged"] and info["ref"].startswith(prefix)
         ]
 
-    def path_history(self, branch: str, path: str, limit: int) -> list[dict]:
-        """Commits that changed `path`, newest first. Like GitHub's, a directory path matches any file under it."""
+    def path_history(self, branch: str, path: str, limit: int, page: int = 1) -> list[dict]:
+        """Commits that changed `path`, newest first, `limit` to a page. Like GitHub's, a directory path matches any
+        file under it."""
 
         def under(files: dict[str, str]) -> dict[str, str]:
             return {p: c for p, c in files.items() if p == path or p.startswith(path + "/")}
 
         out = []
         node = self.refs[branch]
-        while node is not None and len(out) < limit:
+        while node is not None and len(out) < limit * page:
             commit = self.commits[node]
             parent = commit["parent"]
             before = under(self.commits[parent]["files"]) if parent else {}
             if under(commit["files"]) != before:
-                out.append({"commit": {"message": commit["message"], "committer": {"date": commit["date"]}}})
+                out.append(
+                    {"sha": node, "commit": {"message": commit["message"], "committer": {"date": commit["date"]}}}
+                )
             node = parent
-        return out
+        return out[limit * (page - 1) :]
 
 
 def base_files(index_text: str, **plans: str) -> dict[str, str]:
@@ -1341,11 +1344,11 @@ class WakeCheckTest(QueueTestCase):
         self.assertTrue(self.wakes())
 
     def test_holding_and_unholding_both_wake(self):
-        """Holding a pending plan can free a newer one: picking never lets a newer plan overtake an older one it
-        skipped for conflicting with unlanded work, so once the older one is held the newer one may be picked. Found in
-        review: the first version ignored holds of pending plans, and the newer plan slept until something unrelated
-        changed. Taking a plan off hold makes it eligible, which must wake an executor too. A hold already in place at
-        the baseline does not wake again."""
+        """Holding a pending plan can free a newer one: picking does not start work that conflicts with an overdue
+        plan, so once the overdue one is held the plans it held back may be picked. Found in review (back when any
+        skipped older plan held back newer conflicting ones): the first version ignored holds of pending plans, and the
+        newer plan slept until something unrelated changed. Taking a plan off hold makes it eligible, which must wake an
+        executor too. A hold already in place at the baseline does not wake again."""
         self.fake.land(
             "main",
             {
@@ -1602,6 +1605,122 @@ class StatusTest(QueueTestCase):
         by_slug = {p["slug"]: p for p in data["plans"]}
         self.assertFalse(any("possibly abandoned" in f for f in by_slug["b"]["flags"]))
         self.assertTrue(any("possibly abandoned" in f for f in by_slug["a"]["flags"]))
+
+
+class PassesTest(QueueTestCase):
+    """The pass count that bounds how long picking can keep skipping a plan for conflicts.
+
+    Picking skips a plan that conflicts with unlanded work, and a plan that touches a lot conflicts nearly all the
+    time; a real plan sat for most of a day that way, passed over while it was blocked and again after. The count is
+    what makes that bounded, so these tests pin which stretches of a plan's life count (waiting: eligible or blocked)
+    and which do not (held, in flight, waiting on a dependency, an earlier round). They drive the real verbs so the
+    walk is tested against the commit subjects the script actually writes.
+    """
+
+    NOW = datetime.datetime(2026, 10, 3, tzinfo=datetime.timezone.utc)
+
+    def add_plan(self, h: Harness, slug: str, deps: tuple[str, ...] = ()) -> None:
+        """Add a pending plan the way a planning PR does: its file and its INDEX.md line in one commit."""
+        text = h.fake.files()[pq.INDEX_PATH] + line("pending", slug, deps=deps) + "\n"
+        h.fake.land("main", {pq.INDEX_PATH: text, pq.plan_path(slug): plan()}, "docs: plan " + slug)
+
+    def claim(self, h: Harness, slug: str, claim: str = "0a1b2c") -> None:
+        code, out, err = h.run("claim", slug, "--claim", claim)
+        self.assertEqual(code, 0, err)
+
+    def passes(self, h: Harness, slug: str) -> dict:
+        data = pq.status(h.fake, "main", self.scratch, self.NOW)
+        return {p["slug"]: p for p in data["plans"]}[slug]
+
+    def test_counts_distinct_claims_since_the_plan_was_added_and_flags_overdue(self):
+        """Every other plan claimed while this one waits is a pass, conflicting or not; claims from before the plan
+        existed are not, and a plan claimed twice (given back and claimed again) passes it once. At OVERDUE_PASSES it
+        is overdue, and status shows both."""
+        h = self.harness(index(line("pending", "old")), old=plan())
+        self.claim(h, "old")
+        self.add_plan(h, "big")
+        for slug in ("s1", "s2", "s3"):
+            self.add_plan(h, slug)
+        self.claim(h, "s1", "111111")
+        self.assertEqual(h.run("unclaim", "s1", "--claim", "111111")[0], 0)
+        self.claim(h, "s1", "222222")
+        self.claim(h, "s2", "333333")
+        self.claim(h, "s3", "444444")
+        item = self.passes(h, "big")
+        self.assertEqual(item["passes"], 3)
+        self.assertFalse(item["overdue"])
+        self.add_plan(h, "s4")
+        self.claim(h, "s4", "555555")
+        item = self.passes(h, "big")
+        self.assertEqual(item["passes"], pq.OVERDUE_PASSES)
+        self.assertTrue(item["overdue"])
+        rendered = pq.render_status(pq.status(h.fake, "main", self.scratch, self.NOW))
+        self.assertIn(f"[pending] big | passed over {pq.OVERDUE_PASSES} (overdue)", rendered)
+
+    def test_blocked_time_counts_but_held_and_in_flight_time_does_not(self):
+        """The maintainer asked for blocked time to count, so a plan that blocks does not go back to the end of the
+        line each time it is answered; a block holds nothing back while it lasts (it is not eligible), so counting it
+        stops no work. Time on hold is the maintainer parking the plan, and time in flight is the plan's own turn."""
+        h = self.harness(index(line("pending", "big")), big=plan())
+        for slug in ("held1", "flight1", "blocked1", "after1"):
+            self.add_plan(h, slug)
+        self.assertEqual(h.run("hold", "big")[0], 0)
+        self.claim(h, "held1", "111111")
+        self.assertEqual(h.run("unhold", "big")[0], 0)
+        self.claim(h, "big", "999999")
+        self.claim(h, "flight1", "222222")
+        code, _, err = h.run("block", "big", "--claim", "999999", "--question", h.text_file("q.md", "Which way?\n"))
+        self.assertEqual(code, 0, err)
+        self.claim(h, "blocked1", "333333")
+        self.assertEqual(self.passes(h, "big")["passes"], 1, "a blocked plan reports its count too")
+        self.assertEqual(h.run("answer", "big", "--decision", h.text_file("d.md", "Left.\n"))[0], 0)
+        self.claim(h, "after1", "444444")
+        self.assertEqual(self.passes(h, "big")["passes"], 2)
+
+    def test_only_claims_after_the_last_dependency_landed_count(self):
+        """Before what it runs after has landed, a plan is not eligible and nothing is passing it."""
+        h = self.harness(index(line("pending", "dep")), dep=plan())
+        self.add_plan(h, "big", deps=("dep",))
+        self.add_plan(h, "early")
+        self.add_plan(h, "late")
+        self.claim(h, "dep", "111111")
+        self.claim(h, "early", "222222")
+        self.assertNotIn("passes", self.passes(h, "big"), "no count while a dependency is listed")
+        h.run("deliver", "dep", "--claim", "111111", "--report", h.text_file("r.md", "# R\n"))
+        h.run("start-landing", "dep", "--claim", "333333")
+        h.fake.closed[1] = {"ref": "plan/dep/01-x", "merged": True}
+        notes = h.text_file("n.md", "L\n")
+        code, _, err = h.run("landed", "dep", "--claim", "333333", "--merged", "1", "--notes", notes)
+        self.assertEqual(code, 0, err)
+        self.claim(h, "late", "444444")
+        self.assertEqual(self.passes(h, "big")["passes"], 1)
+
+    def test_a_follow_up_starts_a_new_count(self):
+        """A follow-up puts a landed plan back first in line; what passed it in its earlier round was its own work
+        going through, not starvation, so the count starts again from the follow-up."""
+        h = self.harness(index(line("pending", "big")), big=plan())
+        self.add_plan(h, "before")
+        self.add_plan(h, "after")
+        self.claim(h, "before", "111111")
+        self.claim(h, "big", "222222")
+        h.run("deliver", "big", "--claim", "222222", "--report", h.text_file("r.md", "# R\n"))
+        h.run("start-landing", "big", "--claim", "333333")
+        h.fake.closed[1] = {"ref": "plan/big/01-x", "merged": True}
+        h.run("landed", "big", "--claim", "333333", "--merged", "1", "--notes", h.text_file("n.md", "L\n"))
+        code, _, err = h.run("follow-up", "big", "--decision", h.text_file("d.md", "Also this.\n"))
+        self.assertEqual(code, 0, err)
+        self.claim(h, "after", "444444")
+        self.assertEqual(self.passes(h, "big")["passes"], 1)
+
+    def test_the_count_reads_past_the_first_page_of_history(self):
+        """INDEX.md moves several times per plan, so a plan that waited through a busy stretch has its passes spread
+        over more than one page of GitHub's commit history; stopping at the first page would undercount it."""
+        h = self.harness(index(line("pending", "big")), big=plan())
+        self.add_plan(h, "s1")
+        self.claim(h, "s1", "111111")
+        for n in range(110):
+            self.add_plan(h, f"filler{n}")
+        self.assertEqual(self.passes(h, "big")["passes"], 1)
 
 
 # --- Real dprint ----------------------------------------------------------------------------------------------------

@@ -18,6 +18,14 @@ SPEC.md or SPEC_impl.md in a way the work now contradicts, all without touching 
   titles, with the work's own diff in mind. Look specifically for functional conflicts that would not show up as textual
   ones.
 - Rebase, and resolve textual conflicts as usual. For a stack, rebase every PR in it and check each against what landed.
+- When main gained a database schema version since the work was based (the helm's or the supervisor's `SCHEMA_VERSION`
+  in its `store.rs`) and the work adds one too, renumber the work's step onto the new end of the ladder: its migration
+  branch and the version it stamps, the fresh-schema statements and their `PRAGMA user_version` literal (a bare SQL
+  number the compiler cannot check against the constant), the constant itself, and any historical-schema fixtures or
+  tests that name the version. The fresh schema must end up with both changes. This usually shows up as a textual
+  conflict at the end of the ladder, but check it on purpose: two steps that claim the same version, or a fresh-schema
+  literal that disagrees with the constant, can survive a rebase that applied cleanly, and an existing database then
+  skips a migration.
 - Fix obvious problems found either way as part of the rebase. A conflict that needs a design decision is the user's:
   describe it and ask rather than picking an answer.
 - Make a judgment call about re-running tests, following `AGENTS.md`, "Tests and validation", and
