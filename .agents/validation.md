@@ -832,24 +832,25 @@ that its required systemd or SSH substrate ran.
   script changes; seconds, no network, needs ImageMagick's `convert`.
 - `bash scripts/test-plans-watch.sh` — drives the plans monitor's watcher (`scripts/plans-watch.sh`) against a strict
   stub `gh` that runs the watcher's own `jq` filter over GitHub-shaped tree listings: change detection, baselines read
-  from a commit, the wake check that keeps claims from waking idle executors, the idle cap, retried and persistent
-  failures, malformed and truncated responses, hung requests, argument errors, and prompt exit on SIGTERM without
-  leaving children behind. Run it, with `shellcheck` on both scripts, when either changes; under a minute, no network,
-  needs `jq`.
+  from a commit, the wake check that keeps claims from waking idle executors and the role it is passed (`executor`,
+  `lander`, or the landing monitor's mid-round `lander-blocks`), the idle cap, retried and persistent failures,
+  malformed and truncated responses, hung requests, argument errors, and prompt exit on SIGTERM without leaving children
+  behind. Run it, with `shellcheck` on both scripts, when either changes; under a minute, no network, needs `jq`.
 - `python3 scripts/test-plans-queue.py` — the plans queue script (`scripts/plans-queue.py`), which is the lock that
   keeps concurrent plan executors off each other's plans: its line grammar, every state transition and refusal, the
-  invariants between a state and its files, the rules a planning PR must keep, the wake check, and the compare-and-swap
-  loop against an in-memory GitHub that injects racing writers and lost responses. One case runs the real `dprint` when
-  it is on PATH, which downloads dprint's plugins if its cache is cold. Run it when the script changes; seconds, no
-  other network.
+  invariants between a state and its files, the rules a planning PR must keep, the wake check for each role (the landing
+  monitor's mid-round role waking for new blocks only), and the compare-and-swap loop against an in-memory GitHub that
+  injects racing writers and lost responses. One case runs the real `dprint` when it is on PATH, which downloads
+  dprint's plugins if its cache is cold. Run it when the script changes; seconds, no other network.
 - `python3 -B scripts/plans-landing/test-landing.py`, `deno check scripts/plans-landing/idle-watch.ts`,
   `deno test -A scripts/plans-landing/idle-watch.ts` and `shellcheck scripts/plans-landing/notify.sh` — the landing
   monitor's round tooling (`scripts/plans-landing/README.md`): the monitor log edits a resume relies on (Status and
   entry sharing one stamp, a stopped monitor's Status refused, the claim line replaced once or refused), the round
   files, the claim check before every push and merge (exact slug and claim id), the landing notes' placeholder and
-  line-length rules, the review page's escaping, and the idle watcher's reading of `queue status` and of the origin
-  remote. The jj and gh sequences themselves are exercised only by real landings. Run them when those files change;
-  seconds, no network beyond Deno's first fetch of its `jsr:` imports.
+  line-length rules, the review page's escaping, and the idle watcher's reading of `queue status` (between rounds, and
+  in its mid-round `--blocks-only` mode, blocks alone) and of the origin remote. The jj and gh sequences themselves are
+  exercised only by real landings. Run them when those files change; seconds, no network beyond Deno's first fetch of
+  its `jsr:` imports.
 - `python3 scripts/test-todo-picker.py` — TODO extraction and the legacy standalone checklist
   (`scripts/todo-picker.py`): how TODO.md buckets and entries are read, that entries with a plan are left out, that a
   summaries file written against an older TODO.md is refused, and that summaries are escaped into the page. Run it when

@@ -39,12 +39,13 @@ Every fork goes one of two ways instead. A decision only the maintainer can make
 or a landing conflict that needs a design choice) is a block: write the question per
 `plans/.agents/maintainer-writing.md`, "Writing for the maintainer", and run `queue block`, which puts it where the
 review flow finds it and notifies. The landing monitor then answers it on the maintainer's behalf unless the question is
-huge, and records each judgment call as an entry in TODO.md's "Plan decisions to revisit" bucket for the maintainer to
-revisit (`plans/.agents/landing.md`, "Answering blocks"). Everything else is the agent's to decide: take the option that
-best fits the plan, its Decisions and the specs, log it as a DECISION, and carry on. Things the maintainer should know,
-optional extras, and possible follow-ups are not questions either. They go into the report's "things you should know"
-and "open questions and possible follow-ups" sections (or the monitor's landing notes), written as statements the
-maintainer can act on during review. An optional idea is never a reason to stop, ask, or block.
+huge, even when the maintainer is present in its conversation, and records each judgment call as an entry in TODO.md's
+"Plan decisions to revisit" bucket for the maintainer to revisit (`plans/.agents/landing.md`, "Answering blocks").
+Everything else is the agent's to decide: take the option that best fits the plan, its Decisions and the specs, log it
+as a DECISION, and carry on. Things the maintainer should know, optional extras, and possible follow-ups are not
+questions either. They go into the report's "things you should know" and "open questions and possible follow-ups"
+sections (or the monitor's landing notes), written as statements the maintainer can act on during review. An optional
+idea is never a reason to stop, ask, or block.
 
 The one question these flows ask in conversation is whether to carry on without notifications when the ntfy topic file
 is missing (`plans/AGENTS.md`, "Notifications"), at the start of a flow, before any claim, while the maintainer who

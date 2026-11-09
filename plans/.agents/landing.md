@@ -92,6 +92,22 @@ Do not:
 On 2026-10-10 a round that started with three plans grew to nine this way, one claim at a time, and nothing merged for
 about two hours.
 
+Blocks do not wait for the next round: a plan that blocks while a round runs would otherwise sit until the round ends,
+which can be an hour or more with browser tests. When a round has plans to land, start
+`scripts/plans-landing/idle-watch.ts --blocks-only --baseline-from <the round's status head>`, with
+`--ignore-blocked <slug>` for each block the monitor log records as left for the maintainer, as a background command
+whose exit wakes the session (run the way `plans/.agents/watching.md`, "Drain and keep monitoring", runs the watcher),
+and record its task handle and baseline in the monitor log. It wakes only for a plan that is blocked now and was not at
+its baseline. On a block wake (`watcher exit 0: changed ...` or `blocked <slug>`), run `queue status`, answer per
+`plans/.agents/landing.md`, "Answering blocks", each `[blocked]` plan in it not already left for the maintainer, and
+restart the watcher with that status's head as baseline and any block left for the maintainer added to
+`--ignore-blocked`. A block the monitor made itself at landing and is already answering needs only the restart.
+Answering goes through GitHub alone and does not touch the checkout, so it can run beside the round's checks; its TODO
+entries stay pending in the monitor log until the round ends, as step 4 there says. A block wake never changes the
+round: the list above still holds, and a plan that completed meanwhile waits for the next round. Any other exit means
+the mid-round wake is not working: record it in the log and carry on without it, since the round's end answers blocks
+anyway. Stop it before starting the watcher between rounds.
+
 Before anything merges, review on purpose what has landed on main since each complete plan's stack was based, and what
 is about to land together: the diffs, not the titles, read against each other. Look for interactions that produce no
 textual conflict: something one change renamed or repurposed that another relies on, a contract a new caller assumes
@@ -168,9 +184,16 @@ or the monitor did at landing, does not wait for the maintainer unless its quest
 
 A huge question is one whose answer drops or reverses a feature or behavior the maintainer asked for, risks losing user
 data or weakens security, is irreversible or published (a release, a publication, deleting user data), or needs a
-required authorization (`AGENTS.md`, "Unattended runs"), which never becomes the monitor's decision. Leave such a block
-for the maintainer: notify (`plans/AGENTS.md`, "Notifications") and record the slug in the monitor log as left for the
-maintainer.
+required authorization (`AGENTS.md`, "Unattended runs"), which never becomes the monitor's decision. Spending within a
+budget the maintainer granted in the current session (a number of Tensorlake sandboxes, say) is an answer already given
+under that section, not a required authorization. Leave a huge block for the maintainer: notify (`plans/AGENTS.md`,
+"Notifications") and record the slug in the monitor log as left for the maintainer. Only such a block is put to the
+maintainer, in conversation too, and the monitor then says which part of this test it meets.
+
+The maintainer being present in the monitor's conversation changes none of this. A non-huge block is answered as below,
+and then the monitor tells the maintainer what it decided; a later change of mind is a follow-up. A request like "what's
+blocked" asks for status, not for a decision. In one session the monitor put four non-huge blocks to the maintainer in
+conversation because they happened to be there and asked that, and the maintainer asked for this rule afterwards.
 
 Answer every other block:
 
@@ -198,9 +221,11 @@ Answer every other block:
 monitoring"), with the same watcher run the same way, except for its role, what its exits mean, and a `--max-wait 6600`
 that makes it wake about every 110 minutes even when nothing changed. The executors have no use for that wake-up, but
 the monitor does: it is how a claim that went quiet gets noticed, and how the review flow can tell the monitor is still
-alive. The monitor also wakes for a plan that blocks, which it answers (`plans/.agents/landing.md`, "Answering blocks").
+alive. The monitor also wakes for a plan that blocks, which it answers (`plans/.agents/landing.md`, "Answering blocks");
+during a round, the blocks-only watcher that `plans/.agents/landing.md`, "A landing round", starts does that instead.
 
-Before starting the watcher at the end of a round, measure the checkout with `du -sh` on its directory. If it reports
+Before starting the watcher at the end of a round, stop the round's blocks-only watcher (its exit is then ignored, like
+that of any watcher the agent stopped itself), and measure the checkout with `du -sh` on its directory. If it reports
 more than 50 GB, run `cargo clean` in the checkout and delete the one-off outputs listed in
 `plans/.agents/close-reset.md`, "Pruning build leftovers", once nothing the round started is still building or testing,
 even though the next round's first build is then slower. The monitor builds and tests every plan it lands in this one

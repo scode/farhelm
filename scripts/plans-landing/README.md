@@ -11,7 +11,7 @@ notes' text and their cold read stay with the monitor.
 
 - `landing.py`: one command per step, below. Python 3.11+, standard library only. `landing.py <command> --help` shows
   each command's arguments.
-- `idle-watch.ts`: the watcher between rounds (Deno).
+- `idle-watch.ts`: the watcher between rounds, and with `--blocks-only` the one that runs during a round (Deno).
 - `notify.sh`: the plans notification send.
 - `test-landing.py`: tests of `landing.py`'s log edits, round files, claim check, notes rules and page escaping.
 
@@ -71,6 +71,12 @@ Commands run from the checkout root, and `landing.py` is short for `scripts/plan
   left for the maintainer. It runs `scripts/plans-watch.sh --wake-for lander --max-wait 6600` and handles the `idle`
   exit itself as `landing.md`, "Waiting between rounds", says (status check, Status line, restart), so the model wakes
   only for a change, a flag, a block, or an error that needs it. It prints one `wake <reason>` line.
+- Waiting for blocks during a round: run `scripts/plans-landing/idle-watch.ts --blocks-only --baseline-from <commit>`
+  with the round's status head, plus the same `--ignore-blocked` list, in the background once `round-start` has recorded
+  plans, and stop it before `round-end`'s watcher starts (`landing.md`, "A landing round"). It runs the watcher with
+  `--wake-for lander-blocks`, and its idle checks wake only for a `[blocked]` plan, never for a `[complete]` one or a
+  flag. Its idle checks only append to the monitor log, which the round is editing at the same time, and leave the
+  Status line alone.
 - Logging: `echo '<entry>' | scripts/plans-landing/landing.py log` appends a History entry and refreshes the Status line
   with the same real time.
 - Notifying: `scripts/plans-landing/notify.sh '<one line naming the slug>'`, or with `--urgent` first when the
