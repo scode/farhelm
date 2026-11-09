@@ -74,12 +74,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   rather than assume. The grid stream is not a permanent format, so a new encoding is an ordinary protocol bump
   (`crates/farhelm-proto/src/grid.rs`, "Why this shape", which chose JSON for readable traces and to avoid a
   hand-written binary decoder in the browser, the place where bounds would be easy to get wrong). Commit a benchmark
-  that measures memory, attach size and attach time before and after.
+  that measures memory, attach size and attach time before and after. Plan: `plans/queue/grid-binary-stream.md`.
 
 - **Bootstrap a Podman image on a remote host.** Automatically bootstrap a Podman image on a remote host, with some
   reasonable defaults, as a supported flow.
-
-- Initial version of agent2agent comms.
 
 - **Show the user when the trash cannot finish freeing space.** With `instant-trash-delete`, a deleted checkout leaves
   the trash at once and the host removes its files in the background, retrying after restarts when it cannot (files
@@ -110,16 +108,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and interrupted startups included, without treating old records as trustworthy retroactively), check how commands
   inside sessions select a binary under the new meaning of the record, and then restore the automatic replacement. Start
   with a focused review of supervisor startup and interruption before implementing.
-
-- **Re-assess letting agents prompt running sessions.** `farhelm agent prompt` (an agent sending a message into another
-  session's running Claude or Codex agent) landed and was turned off before any release: the helm refuses every such
-  request, and the command is hidden from agents. One gap remains where a delivered message could do something the user
-  never agreed to. The "is it waiting on a question?" check uses a status reading up to about two seconds old, so a
-  permission or trust question that appears in that window, or right after the agent starts, can receive the message and
-  its Enter as its answer. Re-enabling means fixing that gap or deciding to accept it, then setting
-  `AGENT_PROMPTS_ENABLED` in `crates/farhelm-helm/src/agent_requests.rs` to true, unhiding the CLI verb, restoring its
-  agent instructions and docs, un-ignoring the end-to-end delivery tests, and writing a new changelog fragment. SPEC.md,
-  Agent-spawned sessions, keeps the design.
 
 - **Search sessions by content or action.** Let the user find a session by what happened in it — which session ran a
   certain task, command, or produced a given output — rather than only by name. What gets indexed and how the search is
@@ -160,15 +148,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Muse screens. These can currently look idle while Muse waits for an answer. Capturing them needs an authenticated test
   provider or a documented provider fixture protocol that can ask a real question. Plan:
   `plans/queue/muse-session-tracking.md`.
-
-- **Support Kimi Code.** Add Moonshot's Kimi Code CLI as an agent type: terminal launches with guarded and YOLO
-  permission flags, model, effort and prompt choices once their command-line contracts are verified, a harness mark and
-  docs page, then session tracking — per-launch hooks/instructions, conversation capture for resume, and waiting/status
-  recognition.
-
-- **Support DeepSeek's coding agent.** DeepSeek publishes models, but no clearly official terminal coding agent was
-  found on 2026-10-28; the DeepSeek CLIs that turn up are third-party. Confirm the product and its binary first, then
-  add it the way Kimi Code is to be added.
 
 - **Podman rigor: review findings for containerized sessions.** Future work for the experimental feature, from the
   2026-11-04 triage; these findings were assessed from source, not reproduced at runtime.
@@ -307,7 +286,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Mac uses one consistent mechanism. Related: "Let the Mac's supervisor outlive the desktop app" under Maybe later.
 
 - **Closing or starting terminals must not block other actions.** Closing a terminal or starting new ones should not
-  disable doing other things, like switching to other sessions.
+  disable doing other things, like switching to other sessions. Plan: `plans/queue/nonblocking-session-actions.md`.
 
 - **Decide how terminal snapshots are supposed to work.** Every checkpoint of a terminal in a terminal host encodes the
   whole terminal (screen, up to 12,000 lines of scrollback, modes) into one self-contained blob, even though most of the
@@ -327,7 +306,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   directory rarely suits every machine: an absolute path from one machine may not exist or be writable on another, and
   hosts can differ in where projects belong. Let the user set the checkout directory per host in the UI, with the global
   value as the default. Today the only per-host override is `farhelm helm checkout-config set-root --host <id>`, which
-  takes a numeric host ID that nothing shows the user.
+  takes a numeric host ID that nothing shows the user. Plan: `plans/queue/per-host-checkout-folder.md`.
 
 - **Credentials for containerized sessions and ordinary hosts.** The Credentials section of Settings (planned in
   `plans/queue/settings-credentials.md`) serves only Tensorlake hosts, through their recipes. Extend it so containerized
@@ -385,7 +364,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   downloads; no cap on concurrent relays; no half-close on relays; and a 60-second write stall that ends the whole
   connection. Challenge the chunk sizes, window sizes, queue depths and the fairness between streams, measure where it
   matters, and change what does not hold up. Since that reading, recipe tunnels moved onto this connection, which added
-  a cap of 64 tunneled connections per host and half-close for every relay.
+  a cap of 64 tunneled connections per host and half-close for every relay. Plan: `plans/queue/mux-chunk-size.md`.
 
 - **Stop the session header's actions collapsing into their tunnel-pill compact style.** On 2026-11-08 the cluster at
   the right of a session's header (zoom, Stop, Restart ▾, Replace ▾, Clone, Delete) was seen drawn cramped, suspected to
@@ -399,7 +378,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   pill shrunk to zero width, since `.session-tunnel-pill` is `flex: 0 1 auto; min-width: 0`), or a pill that was really
   there, off to the left of the screenshot's crop, with the compact style keyed off pill presence where it should be
   keyed off actual width pressure. Fix the trigger, and add a browser test that the actions keep their normal metrics
-  when no pill is visible.
+  when no pill is visible. Plan: `plans/queue/header-actions-compact.md`.
 
 ### Tensorlake
 
@@ -529,6 +508,38 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
   the user a structured question (multiple choice, say), presented like those artifacts rather than as plain text.
+
+- Initial version of agent2agent comms.
+
+- **Re-assess letting agents prompt running sessions.** `farhelm agent prompt` (an agent sending a message into another
+  session's running Claude or Codex agent) landed and was turned off before any release: the helm refuses every such
+  request, and the command is hidden from agents. One gap remains where a delivered message could do something the user
+  never agreed to. The "is it waiting on a question?" check uses a status reading up to about two seconds old, so a
+  permission or trust question that appears in that window, or right after the agent starts, can receive the message and
+  its Enter as its answer. Re-enabling means fixing that gap or deciding to accept it, then setting
+  `AGENT_PROMPTS_ENABLED` in `crates/farhelm-helm/src/agent_requests.rs` to true, unhiding the CLI verb, restoring its
+  agent instructions and docs, un-ignoring the end-to-end delivery tests, and writing a new changelog fragment. SPEC.md,
+  Agent-spawned sessions, keeps the design.
+
+- **Support Kimi Code.** Add Moonshot's Kimi Code CLI as an agent type: terminal launches with guarded and YOLO
+  permission flags, model, effort and prompt choices once their command-line contracts are verified, a harness mark and
+  docs page, then session tracking — per-launch hooks/instructions, conversation capture for resume, and waiting/status
+  recognition.
+
+- **Support DeepSeek's coding agent.** DeepSeek publishes models, but no clearly official terminal coding agent was
+  found on 2026-10-28; the DeepSeek CLIs that turn up are third-party. Confirm the product and its binary first, then
+  add it the way Kimi Code is to be added.
+
+- **Consider auto-scaling the transfer window.** Uploads, downloads and tunnel relays between the helm and a supervisor
+  each have a fixed 4 MiB credit window, so one stream's throughput is capped near 4 MiB per round trip whatever the
+  link can carry. Asked for by the maintainer on 2026-11-08 while planning the chunk-size change
+  (`plans/queue/mux-chunk-size.md`): consider sizing the window automatically from bandwidth and round-trip time,
+  bearing in mind that on remote hosts ssh's own channel window, shared by every stream, may be the real cap.
+
+- **Cap the Mac app's own localhost tunnels.** Recipe tunnels are capped at 64 tunneled connections per host, but the
+  relays the helm opens for the desktop app's localhost tunnels take no permit, so their number is unbounded
+  (`crates/farhelm-supervisor/src/service/tcp_relays.rs`, around the relay start). Asked for by the maintainer on
+  2026-11-08 while planning the chunk-size change.
 
 ## Doc todo
 
@@ -986,7 +997,7 @@ are not.
 
 - **Inject commands into agents from the UI.** A button such as "stop all work and restart" could send a message to a
   running agent. `farhelm agent prompt` holds the delivery path for Claude and Codex but is turned off for now (see
-  "Re-assess letting agents prompt running sessions", Near term); a UI button and delivery to other agents remain
+  "Re-assess letting agents prompt running sessions", Mid term); a UI button and delivery to other agents remain
   separate work. See SPEC.md, Agent-spawned sessions.
 
 - **Make copying work out of the box with Codex.** Since Codex 0.157 its fullscreen interface captures the mouse, so a
