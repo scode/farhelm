@@ -4,7 +4,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [pending] `sandbox-sessions.md` — Launch a session in a named Tensorlake sandbox of its own from a recipe (launcher, templates, Clone), with explicit Suspend/Resume, Stop and suspend, Delete removing the sandbox, and agent operations refused (after `prepared-snapshots.md`)
 - [complete] `rail-notification-bell.md` — A notification bell in the rail for notices that are not about one session, red with a count when unread; its first notice is a trashed checkout whose files could not be freed, with Retry now, and the Trash dialog keeps such folders listed
-- [pending] `grid-binary-stream.md` — A committed browser memory and attach benchmark, then a binary encoding for new terminals' screen and history messages and compact on-demand-decoded scrollback in the page
+- [in-flight e174dc] `grid-binary-stream.md` — A committed browser memory and attach benchmark, then a binary encoding for new terminals' screen and history messages and compact on-demand-decoded scrollback in the page
 - [pending] `nonblocking-session-actions.md` — Pending Stop, Restart, Replace, Delete and launches no longer block switching sessions or acting on other ones; the acted-on session shows "Stopping…" and keeps its result after a switch
 - [complete] `mux-chunk-size.md` — Upload, download and tunnel data between helm and supervisor goes in 32 KiB chunks instead of 256 KiB, with the connection's multiplexing explained in SPEC_impl.md
 - [pending] `header-actions-compact.md` — The session header's actions compact only when the header is actually short of room, not whenever a tunnel pill is shown, with a browser test
