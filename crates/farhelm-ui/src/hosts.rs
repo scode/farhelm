@@ -92,7 +92,6 @@ use crate::peer::{DetailPart, PeerLine, display_identity, display_peer};
 use crate::provisioning::{
     ActionRequest, HostBinding, HostUpdateProgress, ProvisioningMenuState, ProvisioningPanel,
     ProvisioningTraceShape, SetupPlanConfirmation, UninstallNotice, UpdateProgressSummary,
-    UpdateStepLine,
 };
 use crate::{ApiBase, ConnectionStage, Host, HostId, HostKind, HostPhase, RefreshHealth};
 
@@ -3945,43 +3944,12 @@ fn host_row_renders() -> Vec<(HostId, usize)> {
     HOST_ROW_RENDERS.with(|renders| renders.borrow().iter().map(|(id, n)| (*id, *n)).collect())
 }
 
-/// Render a live host run's compact progress inside the row that owns it.
-///
-/// The one-second clock's future belongs to this keyed component: when the
-/// run completes, is replaced, or the row unmounts, Dioxus drops the task
-/// instead of leaving a page-wide interval behind.
-///
-/// Each part is its own flex item because the status spot has to fit the
-/// fixed-width sidebar beside the host name and the always-present `⋯`
-/// toggle (see `.host-status.updating` in `app.css`). Only the step name may
-/// give up width: the `N/M` count and the clock are what the user reads at a
-/// glance, so they never truncate. Update keeps its prefix visually hidden
-/// because it consumed most of the room the step name needed. Setup and
-/// uninstall show their verbs so the same count cannot be mistaken for Update.
-/// The leading spaces in the text nodes are for the text content (what
-/// assistive technology and tests read); the visible spacing comes from the
-/// flex gap, since a flex item's leading space collapses.
-///
-/// ## The hover popup
-///
-/// Hovering anywhere on the label shows [`UpdateProgressPopup`] with the
-/// count, the run's whole step list with the untruncated current step
-/// highlighted, and the clock. It replaces the step
-/// span's native `title`, which only covered the step and only appeared
-/// after the browser's own delay, and it must not be clipped by the
-/// sidebar: `.app-sidebar` scrolls and is positioned, so no absolutely
-/// positioned descendant can paint past its edge. The popup is therefore
-/// `position: fixed`, anchored to the label's viewport rectangle as
-/// measured on `pointerenter`. It is decoration for pointer users only: it
-/// takes no pointer events, cannot be focused, and is hidden from assistive
-/// technology, which already reads the full text from the label itself.
-///
-/// The rectangle is read once per hover, not tracked. Scrolling the sidebar
-/// under a stationary pointer can leave the popup a few pixels off until the
-/// next hover; that was judged not worth a scroll listener for a transient,
-/// non-interactive popup.
+/// Keep the run's glanceable count and clock in the folded management row.
+/// Only the step name shrinks; the sibling card source carries its full text.
+/// The keyed clock ends with this run, and shared tooltip handling owns hover,
+/// placement and dismissal without adding a keyboard stop to a status label.
 #[component]
-fn UpdateProgressLabel(summary: UpdateProgressSummary) -> Element {
+fn UpdateProgressLabel(summary: UpdateProgressSummary, card_id: String) -> Element {
     let started_at = summary.started_at;
     let mut elapsed = use_signal(|| started_at.elapsed().as_secs());
     use_future(move || async move {
@@ -3991,48 +3959,10 @@ fn UpdateProgressLabel(summary: UpdateProgressSummary) -> Element {
         }
     });
     let elapsed_text = format_elapsed(elapsed());
-    let mut anchor = use_signal(|| None::<Rc<MountedData>>);
-    // Whether the pointer is over the label right now. Kept apart from the
-    // measured position because the measurement is asynchronous: a pointer
-    // that leaves before the rectangle arrives must not have the popup
-    // appear behind it.
-    let mut hovered = use_signal(|| false);
-    // The label's viewport rectangle and the viewport height, measured on
-    // `pointerenter`; the popup places itself from these and its own
-    // rendered height.
-    let mut popup_origin = use_signal(|| None::<PopupOrigin>);
-
     rsx! {
-        span {
-            class: "host-status-label host-update-running",
-            onmounted: move |element| anchor.set(Some(element.data())),
-            onpointerenter: move |_| async move {
-                hovered.set(true);
-                let Some(handle) = anchor.peek().clone() else {
-                    return;
-                };
-                let Ok(rect) = handle.get_client_rect().await else {
-                    return;
-                };
-                // The label's rect alone cannot say whether the popup fits
-                // below it; the viewport height decides that, and it is not
-                // part of `MountedData`. A failed read falls back to
-                // "below", the old behavior, rather than hiding the popup.
-                let viewport_height = document::eval("return window.innerHeight;")
-                    .join::<f64>()
-                    .await
-                    .ok();
-                if *hovered.peek() {
-                    popup_origin.set(Some(PopupOrigin {
-                        label: rect,
-                        viewport_height,
-                    }));
-                }
-            },
-            onpointerleave: move |_| {
-                hovered.set(false);
-                popup_origin.set(None);
-            },
+        span { class: "host-status-label host-update-running",
+            "data-tooltip-card": card_id,
+            "data-tooltip-anchor": "session-row",
             UpdateProgressDot {}
             if summary.operation != ProvisioningOperation::Update {
                 span { class: "host-update-verb", "{summary.verb()}" }
@@ -4047,232 +3977,98 @@ fn UpdateProgressLabel(summary: UpdateProgressSummary) -> Element {
                 span { class: "host-update-step peer-value", dir: "ltr", " {display_peer(&step)}" }
             }
             span { class: "host-update-elapsed", "aria-hidden": "true", " {elapsed_text}" }
-            if let Some(origin) = popup_origin() {
-                UpdateProgressPopup {
-                    origin,
-                    verb: summary.verb(),
-                    done: summary.done,
-                    total: summary.total,
-                    steps: summary.steps.clone(),
-                    elapsed: elapsed_text.clone(),
+        }
+    }
+}
+
+/// Publish a tooltip source beside its row, never inside row-scoped detail queries.
+/// Surface-qualified IDs distinguish the always-mounted Hosts source from the
+/// attention source. Its run-keyed clock updates the shared tooltip's clone even
+/// while the Hosts panel is closed; no run or host data is fetched here.
+#[component]
+pub(crate) fn HostProgressCardSource(
+    id: String,
+    host: Host,
+    summary: UpdateProgressSummary,
+) -> Element {
+    let started_at = summary.started_at;
+    let mut elapsed = use_signal(|| started_at.elapsed().as_secs());
+    use_future(move || async move {
+        loop {
+            crate::reader::sleep_ms(1_000).await;
+            elapsed.set(started_at.elapsed().as_secs());
+        }
+    });
+    rsx! {
+        div { id, hidden: true, class: "host-progress-source",
+            HostProgressCard { host, summary, elapsed: format_elapsed(elapsed()) }
+        }
+    }
+}
+
+/// Give both progress surfaces the same run snapshot and live connection diagnosis.
+/// Peer values retain their escaping and isolates. The tooltip reserves the
+/// current step's height before fitting diagnostics; only oversized diagnostics
+/// become previews, with a visible pointer to the whole text in Hosts. Its follow
+/// behavior recenters the current item after every clone, including clock updates.
+/// Connection state belongs to the host, and Connected has no diagnostic section.
+#[component]
+fn HostProgressCard(host: Host, summary: UpdateProgressSummary, elapsed: String) -> Element {
+    let connection = (!is_connected(&host.state)).then(|| {
+        state_detail(&host.state)
+            .into_iter()
+            .map(|part| match part {
+                DetailPart::Peer(value) => DetailPart::MonoPeer(value),
+                other => other,
+            })
+            .collect::<Vec<_>>()
+    });
+    rsx! {
+        div { class: "host-progress-card",
+            div { class: "host-progress-header",
+                div { class: "host-progress-title",
+                    HostMark { icon: host.icon, color: host.color, local: host.kind.is_this_machine(), tooltip: "" }
+                    span { class: "peer-value", dir: "ltr", "{host.short_name().escaped()}" }
+                }
+                div { class: "host-progress-meta",
+                    span { class: "host-progress-count", "{summary.verb()}: {summary.done} of {summary.total} steps done" }
+                    span { class: "host-progress-elapsed", span { class: "font-mono", "{elapsed}" } " elapsed" }
                 }
             }
-        }
-    }
-}
-
-/// What [`UpdateProgressPopup`] places itself against: the label's viewport
-/// rectangle and the viewport's height (`None` when it could not be read),
-/// both measured when the pointer entered the label.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct PopupOrigin {
-    label: dioxus::html::geometry::PixelsRect,
-    viewport_height: Option<f64>,
-}
-
-/// Where [`UpdateProgressPopup`] is pinned, in viewport pixels.
-///
-/// The popup hangs below the label unless that would run it off the bottom
-/// of the viewport, in which case it sits above the label, and when it fits
-/// on neither side it is pinned inside the viewport over the label. The
-/// decision uses the popup's own rendered height, measured once it has
-/// mounted: it lists every step of the run, so its height varies with the
-/// run and with font metrics no estimate here could track. A
-/// fixed-position box escapes the sidebar's clipping but not the viewport's,
-/// and with the native `title` gone this popup is the only place a truncated
-/// step name can be read, so a popup below the fold would hide it outright.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum PopupAnchor {
-    /// `left`/`top` of the popup's top-left corner.
-    Below { left: f64, top: f64 },
-    /// `left`, and `bottom` measured up from the viewport's bottom edge.
-    Above { left: f64, bottom: f64 },
-    /// `left`/`top` of a popup that fits neither below nor above the label,
-    /// held inside the viewport instead, covering the label if it must. The
-    /// popup takes no pointer events, so covering the label cannot end the
-    /// hover, and it repeats everything the label says.
-    Pinned { left: f64, top: f64 },
-}
-
-impl PopupAnchor {
-    /// Gap between the label and the popup, so the popup reads as hanging
-    /// off the label rather than overlapping it.
-    const GAP_PX: f64 = 4.0;
-
-    /// Closest a pinned popup comes to the viewport's edges.
-    const EDGE_PX: f64 = 8.0;
-
-    /// Left-aligned with the label: below it when a popup `reserve` pixels
-    /// tall fits there, above it when it fits there instead, and otherwise
-    /// pinned as low in the viewport as `reserve` allows (never above
-    /// [`Self::EDGE_PX`]). A run's
-    /// full step list can outgrow both sides of a label in a short window,
-    /// and a popup hanging past either edge hides the steps it exists to
-    /// show. No horizontal clamp: the sidebar is the leftmost column, so
-    /// there is always the main pane's width to the right for the popup to
-    /// spill into. An unknown viewport height keeps the popup below.
-    fn beside(
-        rect: &dioxus::html::geometry::PixelsRect,
-        viewport_height: Option<f64>,
-        reserve: f64,
-    ) -> Self {
-        let left = rect.min_x();
-        let top = rect.max_y() + Self::GAP_PX;
-        let Some(height) = viewport_height else {
-            return Self::Below { left, top };
-        };
-        if top + reserve <= height {
-            Self::Below { left, top }
-        } else if reserve <= rect.min_y() - Self::GAP_PX {
-            Self::Above {
-                left,
-                bottom: height - rect.min_y() + Self::GAP_PX,
-            }
-        } else {
-            Self::Pinned {
-                left,
-                top: (height - reserve - Self::EDGE_PX).max(Self::EDGE_PX),
-            }
-        }
-    }
-
-    /// The inline position for the popup's style. Both vertical properties
-    /// are spelled out, the unused one as `auto`: the popup mounts with a
-    /// hidden `top` before it is placed, and a style string that merely
-    /// omits a property leaves the old value on the element, which for an
-    /// `Above` popup would pin both edges and collapse it.
-    fn style(self) -> String {
-        match self {
-            Self::Below { left, top } | Self::Pinned { left, top } => {
-                format!("left: {left}px; top: {top}px; bottom: auto;")
-            }
-            Self::Above { left, bottom } => {
-                format!("left: {left}px; top: auto; bottom: {bottom}px;")
-            }
-        }
-    }
-}
-
-/// The complete state of a running update, for the pointer hover on
-/// [`UpdateProgressLabel`]: the count, every step of the run with the one in
-/// progress highlighted, and the clock.
-///
-/// A user who hovers wants the detail the narrow inline label cannot hold,
-/// so this lists the run's whole step list, the same steps and statuses the
-/// expanded row's `provisioning-steps` list shows (and styled with its
-/// classes). Warnings and failures keep the helm's reason, since folding the
-/// row otherwise hides what that status means. The step in progress carries
-/// `data-current` and its name keeps the `host-update-popup-step` class, the
-/// untruncated copy of the name the inline label may have cut short.
-///
-/// It mounts hidden below the label, measures its own height, and only then
-/// takes the placement [`PopupAnchor::beside`] chooses for that height, so it
-/// never shows in a spot that runs off the viewport. A failed measurement
-/// leaves it hidden rather than placed blind.
-///
-/// The count and the clock come first and never shrink; only the step list
-/// gives up height. In a window too short for the whole list, the list is
-/// scrolled so the step in progress stays in view: the popup takes no
-/// pointer events, so the user cannot scroll it, and the current step is
-/// the one line it must not lose.
-#[component]
-fn UpdateProgressPopup(
-    origin: PopupOrigin,
-    /// The visible action word from the run's summary.
-    verb: &'static str,
-    done: usize,
-    total: usize,
-    steps: Vec<UpdateStepLine>,
-    elapsed: String,
-) -> Element {
-    let mut placed = use_signal(|| None::<PopupAnchor>);
-    // The mounted element, stored the same way the label stores its own;
-    // the effect below measures it once it exists.
-    let mut own = use_signal(|| None::<Rc<MountedData>>);
-    use_effect(move || {
-        let Some(handle) = own() else {
-            return;
-        };
-        spawn(async move {
-            if let Ok(rect) = handle.get_client_rect().await {
-                placed.set(Some(PopupAnchor::beside(
-                    &origin.label,
-                    origin.viewport_height,
-                    rect.height(),
-                )));
-            }
-        });
-    });
-    // Placement and progress both require a scroll: this popup cannot be
-    // scrolled by hand, so an already-open popup must follow each new step.
-    let current = steps.iter().position(|step| step.current);
-    use_effect(use_reactive((&current,), move |(_current,)| {
-        if placed().is_some() {
-            document::eval(
-                "const list = document.querySelector('.host-update-popup .host-update-popup-steps');
-                 const step = list && list.querySelector('[data-current]');
-                 if (list && step) {
-                   list.scrollTop = step.offsetTop - list.offsetTop
-                     - Math.max(0, (list.clientHeight - step.offsetHeight) / 2);
-                 }",
-            );
-        }
-    }));
-    // `visibility` is spelled out in both states: dropping a style property
-    // from the string does not reliably clear it from the element, so a
-    // placed popup says `visible` rather than merely not saying `hidden`.
-    let style = match placed() {
-        Some(at) => format!("{} visibility: visible;", at.style()),
-        None => format!(
-            "visibility: hidden; left: {}px; top: {}px;",
-            origin.label.min_x(),
-            origin.label.max_y() + PopupAnchor::GAP_PX,
-        ),
-    };
-    rsx! {
-        span {
-            class: "host-update-popup",
-            "aria-hidden": "true",
-            style,
-            onmounted: move |element| own.set(Some(element.data())),
-            span { "{verb}: {done} of {total} steps done" }
-            // The duration is technical; the suffix is interface wording.
-            span { class: "host-update-popup-elapsed", span { class: "font-mono", "{elapsed}" } " elapsed" }
-            ol { class: "provisioning-steps host-update-popup-steps",
-                for step in steps {
-                    li {
-                        class: "provisioning-step",
-                        "data-step": "{step.id}",
-                        "data-status": "{step.status}",
-                        "data-current": if step.current { "true" },
+            ol { class: "provisioning-steps host-progress-steps", "data-tooltip-follow": "true",
+                for step in summary.steps {
+                    li { class: "provisioning-step", "data-step": "{step.id}",
+                        "data-status": "{step.status}", "data-current": if step.current { "true" },
                         span { class: "provisioning-step-marker", aria_hidden: "true" }
-                        span {
-                            class: if step.current {
-                                "provisioning-step-name host-update-popup-step peer-value"
-                            } else {
-                                "provisioning-step-name peer-value"
-                            },
-                            dir: "ltr",
-                            "{display_peer(&step.name)}"
+                        span { class: if step.current {
+                            "provisioning-step-name host-progress-step-current peer-value"
+                        } else { "provisioning-step-name peer-value" },
+                            dir: "ltr", "{display_peer(&step.name)}"
                         }
                         span { class: "provisioning-step-status", "{crate::provisioning::progress_step_status(&step.status)}" }
                         if let Some(explanation) = step.explanation {
-                            PeerLine {
-                                class: "provisioning-step-message",
-                                parts: vec![DetailPart::peer(explanation)],
-                            }
+                            PeerLine { class: "provisioning-step-message", parts: vec![DetailPart::peer(explanation)] }
                         }
                         if matches!(step.status.as_str(), "degraded" | "failed") {
                             if let Some(message) = step.message {
-                                PeerLine {
-                                    class: "provisioning-step-message",
-                                    parts: vec![DetailPart::peer(message)],
-                                }
+                                PeerLine { class: "provisioning-step-message", parts: vec![DetailPart::peer(message)] }
                             }
                         }
                     }
                 }
             }
+            if let Some(parts) = connection.filter(|parts| !parts.is_empty()) {
+                div { class: "host-progress-connection",
+                    strong { "Connection" }
+                    PeerLine { class: "host-progress-connection-detail", parts }
+                }
+            }
+            if let Some(message) = summary.message {
+                div { class: "host-progress-run-message",
+                    PeerLine { class: "host-progress-run-detail", parts: vec![DetailPart::peer(message)] }
+                }
+            }
+            div { class: "host-progress-preview-notice", hidden: true, "Full details in Hosts" }
         }
     }
 }
@@ -4797,6 +4593,10 @@ fn HostRow(
     // keep their atomic prefix comparison at the accepted host-read boundary.
     use_rendered_movement(&diagnostics, || capture_lower_hosts.call(id));
 
+    let progress_card = match &update_progress {
+        Some(HostUpdateProgress::Running(summary)) => Some((host.clone(), summary.clone())),
+        _ => None,
+    };
     rsx! {
         div {
             class: host_row_class(menu_open),
@@ -4880,7 +4680,7 @@ fn HostRow(
                             }
                         },
                         Some(HostUpdateProgress::Running(summary)) => rsx! {
-                            UpdateProgressLabel { key: "{summary.run_id}", summary }
+                            UpdateProgressLabel { key: "{summary.run_id}", summary, card_id: format!("host-progress-hosts-{id}") }
                         },
                         None => rsx! {
                             span {
@@ -5459,6 +5259,11 @@ fn HostRow(
             }
             }
             {provisioning_section}
+        }
+        if let Some((card_host, summary)) = progress_card {
+            HostProgressCardSource {
+                key: "{summary.run_id}", id: format!("host-progress-hosts-{id}"), host: card_host, summary
+            }
         }
     }
 }
@@ -6387,160 +6192,83 @@ mod tests {
         }
     }
 
-    /// A label-sized rect at `top`, 100px wide and 16px tall, starting 40px
-    /// from the viewport's left edge.
-    fn label_rect_at(top: f64) -> dioxus::html::geometry::PixelsRect {
-        dioxus::html::geometry::PixelsRect::new(
-            dioxus::html::geometry::euclid::point2(40.0, top),
-            dioxus::html::geometry::euclid::size2(100.0, 16.0),
-        )
-    }
-
-    /// A folded setup leaves its popup as the full waiting description.
-    /// Running-step explanations must survive folding, keep peer escaping,
-    /// and leave opaque executor handles out of visible text.
+    /// Folding must retain explanations, failure reasons and the run message as
+    /// escaped peer text. Connection detail is read independently from the host:
+    /// reconnecting exposes its last error, while Connected adds no such section.
     #[farhelm_testtrace::test]
-    fn folded_progress_renders_running_step_explanations_as_peer_text() {
-        /// Mount the production popup without mounted-element events: this
-        /// checks its words, not browser placement or physical scrolling.
-        fn render() -> Element {
-            rsx! {
-                UpdateProgressPopup {
-                    origin: PopupOrigin {
-                        label: label_rect_at(100.0),
-                        viewport_height: Some(800.0),
+    fn folded_progress_card_keeps_peer_diagnostics_and_live_connection() {
+        for connecting in [true, false] {
+            let mut dom = VirtualDom::new_with_props(
+                HostProgressCard,
+                HostProgressCardProps {
+                    host: host(if connecting {
+                        HostPhase::Connecting {
+                            attempt: 3,
+                            stage: Some(ConnectionStage::WaitingToConnect),
+                            last_error: Some("ssh\u{202e}error".into()),
+                        }
+                    } else {
+                        HostPhase::Connected {
+                            identity: None,
+                            build_version: "current".into(),
+                            old_version: false,
+                            newer_version: false,
+                            refresh: RefreshHealth::Pending,
+                        }
+                    }),
+                    summary: UpdateProgressSummary {
+                        run_id: "opaque-run".into(),
+                        operation: ProvisioningOperation::Add,
+                        current_step: Some("Prepare snapshot".into()),
+                        done: 1,
+                        total: 2,
+                        started_at: web_time::Instant::now(),
+                        message: Some("run\u{2066}message".into()),
+                        steps: vec![
+                            crate::provisioning::UpdateStepLine {
+                                id: "opaque-step".into(),
+                                name: "Prepare snapshot".into(),
+                                status: "running".into(),
+                                explanation: Some("first launch\u{202e}".into()),
+                                message: None,
+                                current: true,
+                            },
+                            crate::provisioning::UpdateStepLine {
+                                id: "failed-step".into(),
+                                name: "Upload".into(),
+                                status: "failed".into(),
+                                explanation: None,
+                                message: Some("upload\u{200b}failed".into()),
+                                current: false,
+                            },
+                        ],
                     },
-                    verb: "Setting up",
-                    done: 0,
-                    total: 1,
-                    elapsed: "0:41".to_owned(),
-                    steps: vec![UpdateStepLine {
-                        id: "opaque-executor-step".into(),
-                        name: "Prepare snapshot".into(),
-                        status: "running".into(),
-                        explanation: Some(
-                            "Only the first time, and then at most once every 24 hours or after Farhelm updates.\u{202e}".into()
-                        ),
-                        message: None,
-                        current: true,
-                    }],
-                }
-            }
-        }
-        let mut dom = VirtualDom::new(render);
-        let mutations = dom.rebuild_to_vec();
-        let texts = mutations
-            .edits
-            .iter()
-            .filter_map(|edit| match edit {
-                dioxus::core::Mutation::CreateTextNode { value, .. }
-                | dioxus::core::Mutation::SetText { value, .. } => Some(value.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert!(texts.contains(&
-            "Only the first time, and then at most once every 24 hours or after Farhelm updates.<U+202E>"
-        ), "the running step must keep its explanation: {texts:?}");
-        assert!(
-            texts
+                    elapsed: "0:41".into(),
+                },
+            );
+            let mutations = dom.rebuild_to_vec();
+            let texts = mutations
+                .edits
                 .iter()
-                .all(|text| !text.contains("opaque-executor-step"))
-        );
-        assert!(texts.iter().all(|text| !text.contains('\u{202e}')));
-    }
-
-    /// Every placement's style names both vertical edges, the unused one as
-    /// `auto`.
-    ///
-    /// Why: the popup mounts hidden with a `top` and is then re-styled, and
-    /// a style string that merely omits a property leaves the old value on
-    /// the element. An `Above` popup that kept the mount-time `top` would
-    /// have both edges pinned and collapse between them.
-    #[farhelm_testtrace::test]
-    fn every_popup_placement_names_both_vertical_edges() {
-        assert_eq!(
-            PopupAnchor::Above {
-                left: 1.0,
-                bottom: 2.0
+                .filter_map(|edit| match edit {
+                    dioxus::core::Mutation::CreateTextNode { value, .. }
+                    | dioxus::core::Mutation::SetText { value, .. } => Some(value.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            for expected in [
+                "first launch<U+202E>",
+                "upload<U+200B>failed",
+                "run<U+2066>message",
+            ] {
+                assert!(texts.contains(&expected), "missing {expected}: {texts:?}");
             }
-            .style(),
-            "left: 1px; top: auto; bottom: 2px;"
-        );
-        for anchor in [
-            PopupAnchor::Below {
-                left: 1.0,
-                top: 2.0,
-            },
-            PopupAnchor::Pinned {
-                left: 1.0,
-                top: 2.0,
-            },
-        ] {
-            assert_eq!(anchor.style(), "left: 1px; top: 2px; bottom: auto;");
+            // Static heading text lives in Dioxus's template, while these
+            // mutations expose the diagnosis that distinguishes host phases.
+            assert_eq!(texts.contains(&"ssh<U+202E>error"), connecting);
+            assert!(texts.iter().all(|text| !text.contains("opaque-")
+                && !text.contains(['\u{202e}', '\u{2066}', '\u{200b}'])));
         }
-    }
-
-    /// The update popup is the only place a truncated step name and the
-    /// run's full step list can be read, so it must stay inside the
-    /// viewport. Specifies, for a popup of a given (measured) height: below
-    /// the label when it fits there; above it, bottom-anchored, when it fits
-    /// there instead; pinned inside the viewport, over the label, when it
-    /// fits on neither side; and below whenever the viewport height is
-    /// unknown.
-    #[farhelm_testtrace::test]
-    fn update_popup_flips_above_only_when_below_would_overflow() {
-        assert_eq!(
-            PopupAnchor::beside(&label_rect_at(100.0), Some(800.0), 90.0),
-            PopupAnchor::Below {
-                left: 40.0,
-                top: 120.0
-            },
-        );
-        assert_eq!(
-            PopupAnchor::beside(&label_rect_at(750.0), Some(800.0), 90.0),
-            PopupAnchor::Above {
-                left: 40.0,
-                bottom: 54.0
-            },
-        );
-        assert_eq!(
-            PopupAnchor::beside(&label_rect_at(750.0), None, 90.0),
-            PopupAnchor::Below {
-                left: 40.0,
-                top: 770.0
-            },
-        );
-        // A 60px viewport with the label at 10px: 30px free below, 6px
-        // above. Neither fits the reserve, so the popup is pinned inside the
-        // viewport, as high as its edge margin allows, over the label.
-        assert_eq!(
-            PopupAnchor::beside(&label_rect_at(10.0), Some(60.0), 90.0),
-            PopupAnchor::Pinned {
-                left: 40.0,
-                top: 8.0
-            },
-        );
-        // Pinned as low as the reserve allows when the viewport has room for
-        // it, just not on either side of the label.
-        assert_eq!(
-            PopupAnchor::beside(&label_rect_at(100.0), Some(200.0), 150.0),
-            PopupAnchor::Pinned {
-                left: 40.0,
-                top: 42.0
-            },
-        );
-        // Taller popups flip where shorter ones still fit: the label ends
-        // at 516px in an 800px viewport, so after the gap 280px are free
-        // below it.
-        let label = label_rect_at(500.0);
-        assert!(matches!(
-            PopupAnchor::beside(&label, Some(800.0), 280.0),
-            PopupAnchor::Below { .. }
-        ));
-        assert!(matches!(
-            PopupAnchor::beside(&label, Some(800.0), 281.0),
-            PopupAnchor::Above { .. }
-        ));
     }
 
     /// Probe and manual diagnostics cannot carry bidi or invisible controls
@@ -7275,6 +7003,7 @@ mod tests {
                 let pending = HostUpdateProgress::PendingConfirmed(operation);
                 let running = HostUpdateProgress::Running(UpdateProgressSummary {
                     run_id: "rail-run".to_string(),
+                    message: None,
                     operation,
                     current_step: None,
                     steps: vec![],

@@ -773,6 +773,9 @@ test("adding a Tensorlake host confirms billing and keeps setup progress", async
   const recipe = "e2e-host-recipe";
   const fake = await controls("tensorlake_fake", { snapshot_polls: 0 });
   const backend = await controls("provisioning_backend", { default: { hold_actions: true } });
+  // A stack can serve successive engine projects. Its append-only event log
+  // keeps earlier preparations, so count only work admitted by this case.
+  const priorEventCount = (await backendEvents(backend)).length;
   expect((await hosts(request)).some((h) => h.alias === name)).toBe(false);
   expect(
     (await request.put("/api/tensorlake", {
@@ -856,8 +859,10 @@ test("adding a Tensorlake host confirms billing and keeps setup progress", async
     await expect(preparing).toHaveAttribute("data-status", "running");
     await expect(preparing.getByText(PREPARATION_EXPLANATION, { exact: true })).toBeVisible();
     await row.locator(".provisioning-run-fold").click();
+    // Folding keeps the waiting policy in the shared body-level hover card;
+    // its hidden source must not add another step inside the managed row.
     await row.locator(".host-update-verb").hover();
-    await expect(row.locator(".host-update-popup").getByText(PREPARATION_EXPLANATION, { exact: true })).toBeVisible();
+    await expect(page.locator(".farhelm-tooltip .host-progress-card").getByText(PREPARATION_EXPLANATION, { exact: true })).toBeVisible();
     await controls("provisioning_backend", {});
     await expect.poll(async () =>
       (await (await request.get(`/api/hosts/${host.id}/provisioning`)).json())
@@ -879,7 +884,7 @@ test("adding a Tensorlake host confirms billing and keeps setup progress", async
     const firstClone = beforeSecond.sandboxes.find((s: any) => s.name === host.tensorlake.sandbox);
     expect(firstClone.snapshot_id).toBe(preparedRecipe.prepared.id);
     const installerEvents = await backendEvents(backend);
-    expect(installerEvents.filter((event) => event.event === "finish-snapshot-install")).toHaveLength(1);
+    expect(installerEvents.slice(priorEventCount).filter((event) => event.event === "finish-snapshot-install")).toHaveLength(1);
     await page.getByRole("button", { name: "Add host", exact: true }).last().click();
     await dialog.getByRole("button", { name: "Tensorlake sandbox", exact: true }).click();
     await dialog.getByRole("textbox", { name: "Name", exact: true }).fill(`${name}-second`);

@@ -4545,3 +4545,47 @@ owned create reply must arrive: Elapsed(())
 Class: unknown
 
 Cause: unknown
+
+## 2026-11-09 — revealing a host cancelled its pending hover (e2e/tests/host-updates.spec.ts)
+
+`host progress previews only diagnostics that cannot fit beside its current step` failed during landing checks on cloud
+Linux machines: Chromium failed 10 of 10 repetitions (`9640bd72`) and WebKit 2 of 10 (`589e5217`), while the landing
+machine passed 6 of 6 on each engine (`96062ef9`). On the unchanged, clean rebased draft `aeb2b4d5`, an exact Chromium
+selection with `--repeat-each=6 --workers=1 --retries=0`, its child processes restricted to two CPUs, passed five times
+and failed once (`cebeb182-cf4e-4038-b139-1b3cd476bcf3`). The failure took 10.9 seconds against 6.2–7.2 seconds for
+passes, exhausting the five-second visible-card wait after shrinking the window a second time. The same selection with
+bounded event logging and ten repetitions passed six times and failed four (`27210f18-b266-44b8-bbd2-f85f1e85dbce`,
+dirty only for that diagnostic logging). This reproduced the first missing card, later hidden card, and empty computed
+pointer-style result. Event logging established that the attention list's reveal scroll could arrive after pointer
+entry: one failed first entry received pointer-over at 3048.2 ms and its ancestor's scroll at 3050.1 ms, with the same
+connected identity, source and hovered state. That scroll intentionally cancels tooltip display; movement within the
+identity does not start it again. Successful entries delivered the scroll before pointer entry. Fonts were already
+loaded at the failing boundary. The empty one-shot style is consistent with the elapsed clock replacing the cloned card,
+but that particular detached-node state was not recorded. The test now reveals the identity, verifies its full
+intersection and hit point, crosses one animation frame to dispatch the reveal scroll, then enters it. Its pointer-style
+assertion polls the same connected, displayed clone. The corrected case passed 10 repetitions per engine under the same
+two-CPU restriction (`420fd204-7912-479b-897f-8c2d0f6c562c`); these observations precede the separately strengthened
+full-notice glyph assertion and its sizing correction. Fixed in #3272, with normal scroll dismissal and all
+current-step, preview and live-update checks retained.
+
+All local attempts used one browser worker, three owned test stacks, zero retries, and the recorder's generic command
+mode. The only other owned process was the minute resource sampler; builds had finished, memory samples showed about 86
+GB available, and other agents' workload was not measured. Recorded tmux: 3.7c, executable SHA256
+`7ffdb77af092113ce3a777e581bbe9751c15504105404a68828a598cbf3e6bc1`; process locale `C.UTF-8`, browser locale `en-US`.
+Node 26.13.0 and Playwright 1.64.0 were observed locally; the configured browser revisions were Chromium 1248 and WebKit
+2370, without a separate browser-executable hash. Linux x86_64 kernel 6.8.0-149-generic; Python 3.15.2. The recorder
+removed ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and
+`FARHELM_TMUX`, retaining only its own `FARHELM_TEST_TRACE_DIR`. The failed UUID records, event log, screenshots and
+traces remain in private temporary evidence and expire with that storage. No other test was selected in these runs.
+
+```text
+Error: expect(locator).toBeVisible() failed
+Locator: locator('.farhelm-tooltip .host-progress-card')
+Expected: visible
+Received: hidden
+Timeout: 5000ms
+```
+
+Class: pointer-focus
+
+Cause: established — reveal scrolling could dismiss the tooltip after pointer entry.

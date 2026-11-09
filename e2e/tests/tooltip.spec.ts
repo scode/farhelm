@@ -109,6 +109,9 @@ test("a session's title and open area share its summary card", async ({ page, re
     });
     const source = page.locator(`#session-summary-${SESSION_ID}`);
     await expect(source).toBeHidden();
+    // Session summaries keep their existing presentation; only host progress
+    // cards opt into the new current-step scrolling contract.
+    await expect(source.locator("[data-tooltip-follow]")).toHaveCount(0);
     await expect(row.locator(".session-row-open")).toHaveAttribute("data-tooltip-card", `session-summary-${SESSION_ID}`);
     await expect(row.locator(".session-title")).not.toHaveAttribute("data-tooltip", /./);
     await expect(source.locator(".session-summary-title")).toHaveText("A <peer> title");
@@ -557,6 +560,80 @@ test("a card target clones its hidden source into the shared tooltip", async ({ 
   await expect(tooltip(page).locator("p")).toHaveText("Updated card");
   await page.locator("#tooltip-card-source").evaluate((source) => source.remove());
   await expect(tooltip(page), "a removed source leaves no stale card").toBeHidden();
+});
+
+/**
+ * Every source update makes a fresh clone. A pointer-inert progress list
+ * must follow its current item again, while an unmarked list with the same
+ * current marker stays untouched. Real overflow and item rectangles prove
+ * this after layout, which a scrollTop assignment in a DOM stub cannot.
+ */
+test("a card follows only its marked step list after every clone", async ({ page }) => {
+  await loadRow(page);
+  await parkPointer(page);
+  await page.evaluate(() => {
+    const source = document.createElement("div");
+    source.id = "tooltip-follow-source";
+    source.hidden = true;
+    for (const follow of [true, false]) {
+      const list = document.createElement("ol");
+      list.className = follow ? "tooltip-follow-list" : "tooltip-ordinary-list";
+      if (follow) list.dataset.tooltipFollow = "true";
+      list.setAttribute("style", "height:80px;overflow:auto;margin:0;padding:0;border:2px solid transparent;list-style:none;");
+      for (let index = 0; index < 12; index++) {
+        const item = document.createElement("li");
+        item.textContent = `Step ${index}`;
+        item.setAttribute("style", "height:20px;line-height:20px;");
+        if (index === 8) item.dataset.current = "true";
+        list.appendChild(item);
+      }
+      source.appendChild(list);
+    }
+    document.body.appendChild(source);
+    const target = document.createElement("button");
+    target.id = "tooltip-follow-target";
+    target.dataset.tooltipCard = source.id;
+    target.textContent = "Progress card";
+    target.setAttribute("style", "position:fixed;z-index:45;left:200px;top:300px;width:120px;height:40px;");
+    document.body.appendChild(target);
+  });
+  await expect(page.locator("#tooltip-follow-source")).toBeHidden();
+  await expect(page.locator("#tooltip-follow-target")).toHaveAttribute("data-tooltip-card", "tooltip-follow-source");
+  await page.locator("#tooltip-follow-target").hover();
+  await expect(tooltip(page)).toBeVisible();
+  const followed = tooltip(page).locator(".tooltip-follow-list");
+  const ordinary = tooltip(page).locator(".tooltip-ordinary-list");
+
+  /** Centre is measured inside the list's client box, excluding its border. */
+  const followsCurrent = () => followed.evaluate((node) => {
+    const list = node as HTMLElement;
+    const item = list.querySelector("[data-current]") as HTMLElement;
+    const bounds = list.getBoundingClientRect();
+    const current = item.getBoundingClientRect();
+    return {
+      overflow: list.scrollHeight > list.clientHeight,
+      scrollTop: list.scrollTop,
+      centreError: Math.abs(current.top + current.height / 2 - (bounds.top + list.clientTop + list.clientHeight / 2)),
+    };
+  });
+  await expect(followed.locator("[data-current]")).toHaveText("Step 8");
+  await expect.poll(followsCurrent).toMatchObject({ overflow: true });
+  expect((await followsCurrent()).scrollTop, "the current item starts beyond the list's first viewport").toBeGreaterThan(0);
+  await expect.poll(async () => (await followsCurrent()).centreError).toBeLessThanOrEqual(1);
+  expect(await ordinary.evaluate((node) => node.scrollTop), "unmarked content keeps its initial position").toBe(0);
+
+  // The pointer stays on its original target while the hidden source changes;
+  // the existing watch must lay out and follow the replacement clone itself.
+  await page.locator("#tooltip-follow-source").evaluate((source) => {
+    for (const list of source.querySelectorAll("ol")) {
+      list.querySelector("[data-current]")?.removeAttribute("data-current");
+      (list.children[2] as HTMLElement).dataset.current = "true";
+    }
+  });
+  await expect(followed.locator("[data-current]")).toHaveText("Step 2");
+  await expect.poll(async () => (await followsCurrent()).centreError).toBeLessThanOrEqual(1);
+  expect(await ordinary.evaluate((node) => node.scrollTop), "source changes do not opt an ordinary list into following").toBe(0);
+  await expect(tooltip(page)).toBeVisible();
 });
 
 /** Dispatch a mouse `pointerover` on an element, the event a dismissal exists to ignore. */

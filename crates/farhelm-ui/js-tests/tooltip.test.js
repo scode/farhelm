@@ -14,10 +14,19 @@
 // the terminal scrolls under live output) are behaviors, not crashes.
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { placeTooltip, placeSessionCard, instantFollowOn, scrollMovesTarget, install } = require("../assets/tooltip.js");
+const { placeTooltip, placeSessionCard, instantFollowOn, scrollMovesTarget, followCurrentStep, diagnosticPreviewHeights, install } = require("../assets/tooltip.js");
 const { installMenuFocus } = require("../assets/menu-focus.js");
 
 const VIEWPORT = { width: 1000, height: 800 };
+
+/** A short diagnosis stays whole even beside a much longer run message. */
+test("diagnostic previews spend only the height left after readable steps", () => {
+  assert.deepEqual(diagnosticPreviewHeights([30, 400], 130), [30, 100]);
+  assert.deepEqual(diagnosticPreviewHeights([400, 30], 130), [100, 30]);
+  assert.deepEqual(diagnosticPreviewHeights([400, 300], 130), [65, 65]);
+  assert.deepEqual(diagnosticPreviewHeights([30, 40], 130), [30, 40]);
+  assert.deepEqual(diagnosticPreviewHeights([30], -10), [0]);
+});
 
 /** A target rectangle from its left/top corner and size, as getBoundingClientRect reports one. */
 function rect(left, top, width, height) {
@@ -156,6 +165,57 @@ test("a scroll of an unrelated container (the terminal under live output) does n
   const terminalViewport = { contains: () => false };
   const doc = { documentElement: {}, body: {} };
   assert.equal(scrollMovesTarget(terminalViewport, target, doc), false);
+});
+
+// ---------------------------------------------------------------------------
+// Opted-in current-step following
+// ---------------------------------------------------------------------------
+
+/** A cloned card starts at zero; subsequent layout can encounter an already
+ * scrolled list. Both must centre the item using list-local coordinates,
+ * regardless of the card's position or the item's offset parent. */
+test("current-step following centres inside each marked list and clamps at its ends", () => {
+  const lists = [0, 120, 290].map((currentTop) => {
+    const list = {
+      clientTop: 2, clientHeight: 80, scrollHeight: 300, scrollTop: 0,
+      getBoundingClientRect: () => rect(50, 200, 200, 84),
+      querySelector(selector) {
+        assert.equal(selector, "[data-current]");
+        return { getBoundingClientRect: () => rect(60, 202 + currentTop - list.scrollTop, 180, 20) };
+      },
+    };
+    return list;
+  });
+  const root = {
+    querySelectorAll(selector) {
+      assert.equal(selector, "[data-tooltip-follow]");
+      return lists;
+    },
+  };
+  followCurrentStep(root);
+  assert.deepEqual(lists.map((list) => list.scrollTop), [0, 90, 220]);
+  followCurrentStep(root);
+  assert.deepEqual(lists.map((list) => list.scrollTop), [0, 90, 220], "repeating layout must not drift the list");
+});
+
+/** A run can temporarily have no current step. It must not reset that
+ * list or infer a current item from status text; an unmarked session card
+ * must not be searched or scrolled at all. */
+test("current-step following leaves missing-current lists and unmarked cards alone", () => {
+  const pending = {
+    scrollTop: 37,
+    querySelector(selector) { assert.equal(selector, "[data-current]"); return null; },
+    getBoundingClientRect() { assert.fail("no current step needs no layout read"); },
+  };
+  followCurrentStep({ querySelectorAll: () => [pending] });
+  assert.equal(pending.scrollTop, 37);
+  followCurrentStep({
+    querySelectorAll(selector) {
+      assert.equal(selector, "[data-tooltip-follow]", "only explicitly marked lists participate");
+      return [];
+    },
+    querySelector() { assert.fail("unmarked session-card content must never be searched"); },
+  });
 });
 
 // ---------------------------------------------------------------------------

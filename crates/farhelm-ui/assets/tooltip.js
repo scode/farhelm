@@ -28,6 +28,12 @@
 // `overflow: hidden auto`, which clips anything positioned inside a row.
 // Text help uses `textContent`; card help clones the source's children without
 // copying its id. Peer strings pass through `display_peer` on the Rust side.
+// A card can mark a list with `data-tooltip-follow` to keep its `data-current`
+// item centred after each clone is laid out. Only that list scrolls: the card
+// is pointer-inert, and a clone otherwise loses the source's scroll position.
+// Unmarked cards, including session summaries, retain their ordinary layout.
+// Host progress cards also reserve room for the current step before shortening
+// oversized diagnostics, and name Hosts as the place to read the full text.
 //
 // ## When it shows and hides
 //
@@ -99,10 +105,12 @@
 //
 // ## Testability
 //
-// The pure decisions (`placeTooltip`, `placeSessionCard`, `instantFollowOn`, `scrollMovesTarget`)
-// are exported under CommonJS as well as installed on `window`, the same
-// dual install term-bytes.js uses. The unit harness also exercises menu hover's
-// synchronous focus provenance and rest timers. The browser suite
+// The pure decisions (`placeTooltip`, `placeSessionCard`, `instantFollowOn`, `scrollMovesTarget`,
+// `diagnosticPreviewHeights`)
+// and the list-local `followCurrentStep` helper are exported under CommonJS
+// as well as installed on `window`, the same dual install term-bytes.js uses.
+// The unit harness also exercises menu hover's synchronous focus provenance
+// and rest timers. The browser suite
 // (e2e/tests/tooltip.spec.ts) observes real pointer, focus and scroll wiring.
 (function () {
   /** How long the pointer rests on a target, or keyboard focus stays on one, before the tooltip shows. */
@@ -191,6 +199,78 @@
       return true;
     }
     return typeof scrolled.contains === "function" && scrolled.contains(target);
+  }
+
+  /**
+   * Keep a pointer-inert card's current work visible after layout or recloning.
+   * Lists without a current item keep their existing scroll position.
+   * Viewport rectangles avoid depending on which ancestor establishes the
+   * item's offset parent. Scrolling the marked list alone leaves the page and
+   * the tooltip's header and diagnostics in place; scrollIntoView would not.
+   */
+  function followCurrentStep(root) {
+    for (const list of root.querySelectorAll("[data-tooltip-follow]")) {
+      const current = list.querySelector("[data-current]");
+      if (!current) continue;
+      const item = current.getBoundingClientRect();
+      const bounds = list.getBoundingClientRect();
+      const centred = list.scrollTop + item.top - bounds.top - list.clientTop
+        - (list.clientHeight - item.height) / 2;
+      list.scrollTop = Math.max(0, Math.min(centred, list.scrollHeight - list.clientHeight));
+    }
+  }
+
+  /**
+   * Share a diagnostic budget without cutting a short message to spare a long one.
+   * Once the smaller messages fit whole, the remaining oversized ones share the
+   * space equally. Heights are measured after wrapping at the card's real width.
+   */
+  function diagnosticPreviewHeights(heights, budget) {
+    let remaining = Math.max(0, budget);
+    let count = heights.length;
+    let cap = 0;
+    for (const height of [...heights].sort((a, b) => a - b)) {
+      cap = remaining / count;
+      if (height > cap) break;
+      remaining -= height;
+      count--;
+    }
+    return heights.map((height) => Math.min(height, cap));
+  }
+
+  /**
+   * Fit only host diagnostics around a readable current step, before placement.
+   * Each call receives a fresh clone, so taller windows and shorter new messages
+   * automatically regain their whole text. The source is never modified. Keeping
+   * the preview pointer-inert preserves the shared tooltip's dismissal contract.
+   */
+  function fitHostProgress(root, win) {
+    const card = root.querySelector(".host-progress-card");
+    if (!card) return;
+    const list = card.querySelector("[data-tooltip-follow]");
+    const current = list.querySelector("[data-current]") || list.firstElementChild;
+    const listStyle = win.getComputedStyle(list);
+    // A run can publish before its steps arrive. Its diagnosis still needs the
+    // same overflow notice; only the empty list's padding consumes step space.
+    const stepHeight = (current ? current.getBoundingClientRect().height : 0)
+      + parseFloat(listStyle.paddingTop) + parseFloat(listStyle.paddingBottom);
+    list.style.minHeight = `${stepHeight}px`;
+    const texts = Array.from(card.querySelectorAll(".host-progress-connection-detail, .host-progress-run-detail"));
+    if (texts.length === 0) return;
+    const heights = texts.map((text) => text.getBoundingClientRect().height);
+    const overhead = texts.reduce((sum, text, index) =>
+      sum + text.parentElement.getBoundingClientRect().height - heights[index], 0);
+    const header = card.querySelector(".host-progress-header").getBoundingClientRect().height;
+    // Keep every measurement fractional. Integer clientHeight can round a
+    // naturally fitting one-step card down and falsely charge it for a notice.
+    let budget = card.getBoundingClientRect().height - header - stepHeight - overhead;
+    if (heights.reduce((sum, height) => sum + height, 0) <= budget + 0.5) return;
+    const notice = card.querySelector(".host-progress-preview-notice");
+    notice.hidden = false;
+    budget -= notice.getBoundingClientRect().height;
+    diagnosticPreviewHeights(heights, budget).forEach((height, index) => {
+      if (height < heights[index]) texts[index].style.maxHeight = `${Math.floor(height)}px`;
+    });
   }
 
   /**
@@ -369,6 +449,7 @@
       // painted at the origin.
       box.style.left = "0px";
       box.style.top = "0px";
+      if (content.kind === "card") fitHostProgress(box, win);
       const size = box.getBoundingClientRect();
       const rect = tooltipAnchor(target).getBoundingClientRect();
       placedAt = {
@@ -384,6 +465,7 @@
       box.style.left = `${place.left}px`;
       box.style.top = `${place.top}px`;
       box.dataset.side = place.side;
+      if (content.kind === "card") followCurrentStep(box);
       if (place.side === "right") {
         const notch = pointerElement();
         notch.style.left = `${place.left - 5}px`;
@@ -596,7 +678,7 @@
     });
   }
 
-  const api = { placeTooltip, placeSessionCard, instantFollowOn, scrollMovesTarget, install };
+  const api = { placeTooltip, placeSessionCard, instantFollowOn, scrollMovesTarget, followCurrentStep, diagnosticPreviewHeights, install };
   if (typeof window !== "undefined") {
     window.farhelmTooltip = api;
     install(window);
