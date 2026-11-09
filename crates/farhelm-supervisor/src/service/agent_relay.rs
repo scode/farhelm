@@ -32,8 +32,17 @@
 //! trip. Sharing a namespace was never an option: `req_id` has only ever
 //! meant "request N on THIS connection".
 //!
-//! **Routing.** See [`Supervisor::helm_link_for_session`]: the helm that
-//! holds the session's attachment is the one asked.
+//! **Routing.** See [`Supervisor::owning_helm_link`]: the newest connection
+//! whose hello declared it the owning helm's
+//! ([`ControlMsg::Hello::owning_helm`]) is the one asked, whatever session
+//! is on screen. Until protocol 73 the relay asked the connection holding
+//! the asking session's terminal attachment instead, and that was wrong: the
+//! UI attaches only the session on screen, so an agent in any other session
+//! (a monitor that launches and deletes sessions in the background, say)
+//! was refused with "no helm is attached" while its helm was connected the
+//! whole time. Under SPEC.md's ownership policy one helm owns the supervisor
+//! and every session in it, so there is only ever one right helm to ask, and
+//! what it happens to display adds nothing.
 //!
 //! **Endings.** A helm can die mid-upcall, and a helm can simply never
 //! answer. Both have to end the wait, or the asking `farhelm agent`
@@ -70,8 +79,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tracing::warn;
 
-/// What a session is told when no helm holds its attachment, minus the
-/// remedy every such refusal shares.
+/// What a session is told when no connection has declared itself the
+/// owning helm, minus the remedy every such refusal shares.
 ///
 /// Named here rather than spelled at the one site that sends it because it
 /// is the relay's DEFINING failure — the thing the design accepted in
@@ -80,24 +89,33 @@ use tracing::warn;
 /// substring guesswork. The remedy is appended by [`unavailable`], which is
 /// what keeps this ending and the three connection-loss endings from
 /// telling a user four different things about the same situation.
-pub(crate) const NO_HELM_ATTACHED: &str = "no helm is attached to this session";
+///
+/// It says "this host" and not "this session" because the condition is the
+/// host's: no helm has a working connection to this supervisor right now.
+/// Other full-authority connections (a provisioning probe, a test client)
+/// may well be up; they are not helms that answer agent requests, and
+/// counting them would turn this refusal into a hang.
+pub(crate) const NO_HELM_CONNECTED: &str = "no helm is connected to this host";
 
-/// One full-authority connection's upward request channel.
+/// The owning helm's upward request channel on one of its connections.
 ///
-/// Registered when a connection finishes its hello with no session auth
-/// (i.e. it is a helm or something else holding full authority), and
-/// dropped from the registry when that connection's loop ends.
+/// Registered when a full-authority connection finishes a hello that
+/// declares it the owning helm's ([`ControlMsg::Hello::owning_helm`]), and
+/// dropped from the registry when that connection's loop ends. A
+/// full-authority connection that does not declare (the provisioning probe,
+/// another supervisor's startup check, a test client) gets no link at all,
+/// so it can never be handed an agent request or a change hint: that is
+/// decided once, at registration, rather than by a filter every reader of
+/// the registry would have to remember.
 ///
-/// The `notify` sender is the connection's ordinary writer queue and
-/// doubles as its IDENTITY, which is the same idiom the attachment
-/// handlers already use (`ConnectionCtx::tx`'s docs): channel ids are
-/// unique only within a connection, so `mpsc::Sender::same_channel` is the
-/// only thing that can say "this attachment belongs to that connection".
-/// Reusing it here is what lets an attachment be traced back to a link
-/// without a second id threaded through every `ActiveAttach` construction.
+/// More than one link can be registered at once even with one helm: a helm
+/// that reconnects while its old transport is still half-open has both
+/// connections up for a while. [`Supervisor::owning_helm_link`] picks the
+/// newest for that reason.
 pub(crate) struct HelmLink {
-    /// This connection's writer queue — the outbound half of the link and
-    /// its identity. See the struct docs.
+    /// This connection's ordinary writer queue — the outbound half of the
+    /// link. Upcalls and change hints ([`super::hints`]) travel on it behind
+    /// whatever terminal output is already queued.
     pub(crate) notify: mpsc::Sender<Frame>,
     /// The relay's way to END the connection this link belongs to; see
     /// [`HelmLink::retire`] for the two situations that need one.
@@ -511,10 +529,11 @@ fn connection_lost_after_queueing(cause: &str, mutating: bool) -> AgentOutcome {
 /// `cause` says what happened; the remedy is appended here rather than
 /// written into each cause. SPEC.md requires a concrete failure to carry an
 /// actionable next step, and all four of these endings have the SAME one —
-/// no helm is holding this session's attachment right now, and opening the
-/// session in a client is what creates one. Three of them used to say only
-/// that a connection had closed, which is a fact about the system rather
-/// than anything the user can act on.
+/// the owning helm has no working connection to this host right now, and
+/// getting Farhelm open and connected to the host is what gives it one (see
+/// [`AGENT_UNAVAILABLE_REMEDY`]). Three of them used to say only that a
+/// connection had closed, which is a fact about the system rather than
+/// anything the user can act on.
 fn unavailable(cause: &str) -> AgentOutcome {
     AgentOutcome::Err {
         kind: ErrorKind::Unavailable,
@@ -525,6 +544,12 @@ fn unavailable(cause: &str) -> AgentOutcome {
 impl Supervisor {
     /// Register one connection's upward channel; the returned handle is
     /// the connection's own and must be unregistered when its loop ends.
+    ///
+    /// The caller decides eligibility: production registers only a
+    /// full-authority connection whose hello declared it the owning helm's
+    /// (`connection::handle_connection`), because registering is what makes
+    /// a connection eligible for agent requests and change hints. Tests that
+    /// call this directly stand in for such a connection.
     ///
     /// `shutdown` is how the relay asks that connection to END — see
     /// [`HelmLink::retire`]. It is supplied by the caller rather than
@@ -559,47 +584,34 @@ impl Supervisor {
         link.fail_all().await;
     }
 
-    /// The registered helm that owns an attachment to `session_id`, if any.
+    /// The connection agent requests go to: the most recently registered
+    /// link, or `None` when no connection has declared itself the owning
+    /// helm.
     ///
-    /// THE ROUTING RULE: "the helm holding this session's attachment". It
-    /// is chosen over anything simpler — first registered link, only link,
-    /// most recent link — because it is the rule that stays correct if
-    /// several helms per supervisor ever become supported (TODO.md's
-    /// unbucketized multi-helm entry), and because by construction it
-    /// selects the helm the user is actually looking at, which is the whole
-    /// mental model this feature is built on.
+    /// THE ROUTING RULE. Only declaring connections are registered (see
+    /// [`HelmLink`]), so "a link exists" already means "a connection of the
+    /// owning helm", and the one question left is which of its connections.
+    /// The newest, because the case with more than one is a reconnect: the
+    /// new connection is the helm's current one, while the old one may be a
+    /// half-open transport nobody will ever read from again, and an upcall
+    /// sent there waits out its whole answer budget (and, for a mutation,
+    /// keeps the asking session's delete fence) although a healthy link
+    /// exists.
     ///
-    /// Several terminals may be attached for one session, and they need not
-    /// share one connection. Lease takeover evicts a DIFFERENT lease's
-    /// attachments, but a helm that reconnects under the SAME lease replaces
-    /// only the terminals it re-attaches; its other terminals stay bound to
-    /// the old connection, which can still be registered if that transport
-    /// is half-open. So among the links that own any of the session's
-    /// attachments, the most recently registered one wins: it is the helm's
-    /// current connection, and a stale one must not shadow it. Unregistered
-    /// owners are skipped entirely.
+    /// What the asking session's terminal is attached to plays no part, on
+    /// purpose; see this module's "Routing" paragraph for why the old
+    /// attachment rule was wrong.
     ///
-    /// Two lock hops rather than one: the attachment identifies its owning
-    /// connection only by that connection's writer queue (see
-    /// [`HelmLink::notify`]), so the answer is "the registered link whose
-    /// queue is the same channel". Both maps are small — attachments are
-    /// bounded by live terminals, links by connected helms — and neither
-    /// lock is held across the other.
-    pub(crate) async fn helm_link_for_session(&self, session_id: &str) -> Option<Arc<HelmLink>> {
-        let owners = {
-            let attachments = self.attachments.lock().await;
-            attachments
-                .iter()
-                .filter(|(key, _)| key.session == session_id)
-                .map(|(_, attachment)| attachment.notify.clone())
-                .collect::<Vec<_>>()
-        };
-        let links = self.helm_links.lock().await;
-        registered_link_for_attachments(owners.iter(), &links)
+    /// `helm_links` is in registration order, because
+    /// [`Supervisor::register_helm_link`] appends, so the last entry is the
+    /// newest.
+    pub(crate) async fn owning_helm_link(&self) -> Option<Arc<HelmLink>> {
+        self.helm_links.lock().await.last().map(Arc::clone)
     }
 
-    /// Forward one session's request to the helm attached to it and return
-    /// the outcome, refusing rather than waiting when there is none.
+    /// Forward one session's request to the owning helm and return the
+    /// outcome, refusing at once rather than waiting when no helm is
+    /// connected.
     ///
     /// The caller has ALREADY authorized the request (that `session_id` is
     /// the connection's own session); this function is the transport, and
@@ -617,12 +629,12 @@ impl Supervisor {
         request: AgentVerb,
         fence: Option<KeyedGuard>,
     ) -> AgentOutcome {
-        let Some(link) = self.helm_link_for_session(&session_id).await else {
-            // Not a log-worthy event: a session nobody has open in the UI
-            // is the ordinary state of most sessions most of the time.
-            // Nothing was sent, so the fence has nothing left to protect
-            // and is released with this frame.
-            return unavailable(NO_HELM_ATTACHED);
+        let Some(link) = self.owning_helm_link().await else {
+            // Not a log-worthy event: Farhelm being closed, or between
+            // connections to this host, is ordinary. Nothing was sent, so
+            // the fence has nothing left to protect and is released with
+            // this frame.
+            return unavailable(NO_HELM_CONNECTED);
         };
         // A verb the helm may hold for the user's approval gets the helm's
         // whole approval wait on top of the ordinary budget, so its own "not
@@ -662,28 +674,6 @@ impl Supervisor {
     }
 }
 
-/// Select the most recently registered link that owns any of the given
-/// attachments.
-///
-/// `links` is in registration order (links are appended as they register),
-/// so scanning it from the end prefers a reconnected helm's current link
-/// over an older one still owning some of the session's terminals; see
-/// `helm_link_for_session`. The attachment order, which comes from a
-/// `HashMap`, therefore never decides the route. Keeping this selection
-/// separate makes it directly testable without manufacturing a live
-/// terminal forwarder.
-fn registered_link_for_attachments<'a>(
-    attachments: impl Iterator<Item = &'a mpsc::Sender<Frame>>,
-    links: &[Arc<HelmLink>],
-) -> Option<Arc<HelmLink>> {
-    let owners = attachments.collect::<Vec<_>>();
-    links
-        .iter()
-        .rev()
-        .find(|link| owners.iter().any(|owner| link.notify.same_channel(owner)))
-        .map(Arc::clone)
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::core::KeyedLocks;
@@ -700,53 +690,6 @@ mod tests {
     /// at each call site that the number is deliberately inert, instead of
     /// having to work out whether it could be reached.
     const RETAIN_FOREVER: Duration = Duration::from_secs(86_400);
-
-    /// A reconnecting stale attachment must not hide a second terminal whose
-    /// owning helm connection is still registered for the same session.
-    #[test]
-    fn registered_link_skips_stale_matching_attachment() {
-        let (stale_tx, _stale_rx) = mpsc::channel(1);
-        let (live_tx, _live_rx) = mpsc::channel(1);
-        let (live_shutdown, _) = tokio::sync::watch::channel(false);
-        let live_link = Arc::new(HelmLink {
-            notify: live_tx.clone(),
-            shutdown: live_shutdown,
-            pending: Mutex::new(Pending::default()),
-            next_req: AtomicU64::new(1),
-        });
-
-        let owners = [stale_tx, live_tx];
-        let selected =
-            registered_link_for_attachments(owners.iter(), std::slice::from_ref(&live_link));
-        assert!(selected.is_some_and(|link| Arc::ptr_eq(&link, &live_link)));
-    }
-
-    /// When a session's terminals are owned by two registered links, the
-    /// newer registration wins regardless of attachment order.
-    ///
-    /// Why it matters: a helm that reconnects under the same lease leaves the
-    /// terminals it has not re-attached on its old connection, which can
-    /// stay registered while half-open. Routing an agent request there waits
-    /// out the whole answer budget (and, for a mutation, retains the delete
-    /// fence) although a healthy link exists. Attachment order comes from a
-    /// `HashMap`, so both orders are checked.
-    #[test]
-    fn registered_link_prefers_the_newest_owning_registration() {
-        let (old, _old_rx) = link();
-        let (new, _new_rx) = link();
-        let (unrelated, _unrelated_rx) = link();
-        let links = [Arc::clone(&old), Arc::clone(&new), Arc::clone(&unrelated)];
-        for owners in [
-            [old.notify.clone(), new.notify.clone()],
-            [new.notify.clone(), old.notify.clone()],
-        ] {
-            let selected = registered_link_for_attachments(owners.iter(), &links);
-            assert!(
-                selected.is_some_and(|link| Arc::ptr_eq(&link, &new)),
-                "the newest owning registration must win in either attachment order"
-            );
-        }
-    }
 
     /// A bare link with nothing behind it but a channel, so the endings can
     /// be produced directly rather than by staging a helm that dies.
@@ -770,6 +713,87 @@ mod tests {
             }),
             rx,
         )
+    }
+
+    /// Spec: agent requests go to the most recently registered link, and
+    /// when that connection goes away the one registered before it takes
+    /// over; with none registered there is no link to ask.
+    ///
+    /// Why: the case with two links is a helm reconnecting while its old
+    /// transport is still half-open. The old link is registered first and
+    /// may never answer again, so an upcall routed there waits out its whole
+    /// budget (and a mutation keeps the asking session's delete fence) even
+    /// though a healthy connection exists. Falling back to the older link
+    /// once the newer one leaves is what keeps routing working if the NEW
+    /// connection is the one that fails.
+    ///
+    /// Only declaring connections ever register a link (see
+    /// `connection::handle_connection`); that half is pinned end to end in
+    /// the farhelm crate's `e2e::agent_relay`, where a non-declaring client
+    /// stays connected throughout.
+    #[farhelm_testtrace::test]
+    async fn the_newest_registered_link_is_the_one_asked() {
+        let state = farhelm_teststate::tempdir().expect("state dir");
+        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+        assert!(
+            sup.owning_helm_link().await.is_none(),
+            "premise: a fresh supervisor has no helm link"
+        );
+
+        let (old_notify, _old_rx) = mpsc::channel(8);
+        let (old_shutdown, _) = tokio::sync::watch::channel(false);
+        let old = sup.register_helm_link(old_notify, old_shutdown).await;
+        let (new_notify, _new_rx) = mpsc::channel(8);
+        let (new_shutdown, _) = tokio::sync::watch::channel(false);
+        let new = sup.register_helm_link(new_notify, new_shutdown).await;
+
+        let asked = sup
+            .owning_helm_link()
+            .await
+            .expect("two links are registered");
+        assert!(Arc::ptr_eq(&asked, &new), "the newer registration must win");
+
+        sup.unregister_helm_link(&new).await;
+        let asked = sup
+            .owning_helm_link()
+            .await
+            .expect("the older link remains");
+        assert!(
+            Arc::ptr_eq(&asked, &old),
+            "the older link takes over once the newer one is gone"
+        );
+
+        sup.unregister_helm_link(&old).await;
+        assert!(sup.owning_helm_link().await.is_none());
+    }
+
+    /// Spec: with no helm link registered, an agent request is refused at
+    /// once as `Unavailable`, saying that no helm is connected to this host
+    /// and carrying the shared remedy.
+    ///
+    /// Why: the asking `farhelm agent` process has no deadline of its own,
+    /// so "nobody to ask" must end the request immediately rather than wait
+    /// for a helm. The wording is part of the contract: before protocol 73
+    /// this said no helm was attached to the session and told the user to
+    /// open it, which was false for a connected helm and sent people to fix
+    /// the wrong thing.
+    #[farhelm_testtrace::test]
+    async fn a_request_with_no_helm_link_is_refused_as_no_helm_connected() {
+        let state = farhelm_teststate::tempdir().expect("state dir");
+        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(5),
+            sup.relay_agent_request("s1".to_string(), AgentVerb::Sessions {}, None),
+        )
+        .await
+        .expect("a request with nobody to ask must be refused at once");
+        assert_eq!(
+            outcome,
+            AgentOutcome::Err {
+                kind: ErrorKind::Unavailable,
+                message: format!("{NO_HELM_CONNECTED} — {AGENT_UNAVAILABLE_REMEDY}"),
+            }
+        );
     }
 
     /// Take the next frame off a link's writer queue and insist it is an

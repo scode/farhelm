@@ -929,8 +929,8 @@ async fn assert_restart_refused(h: &Harness, id: &str) {
 /// Why: inheritance now goes through the helm so the user is asked (SPEC.md,
 /// Agent-spawned sessions), and the card and the agent YOLO rule judge the
 /// launch the supervisor puts here. This drives the real relay hop at the
-/// process boundary, through a scripted helm holding the session's
-/// attachment, rather than trusting a request body built in a test.
+/// process boundary, through a scripted owning helm, rather than trusting a
+/// request body built in a test.
 #[farhelm_testtrace::test]
 async fn explicit_spawn_inheritance_relays_the_parents_stored_launch() {
     use farhelm_proto::launcher::{TemplateDestination, TemplateFields};
@@ -965,11 +965,7 @@ async fn explicit_spawn_inheritance_relays_the_parents_stored_launch() {
             stale: false,
         },
     });
-    let helm = crate::agent_relay::connect_helm(&h.sup, handler.clone()).await;
-    let (_channel, _replay, _stream) = helm
-        .attach_live(&parent.id, 80, 24)
-        .await
-        .expect("the scripted helm attaches to the parent");
+    let _helm = crate::agent_relay::connect_helm(&h.sup, handler.clone()).await;
     let token = credential_for(&h, &parent.id).await;
     let mut peer = SessionPeer::connect(&h.sup, &parent.id, &token).await;
     let reply = peer

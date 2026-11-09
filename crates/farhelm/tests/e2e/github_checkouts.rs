@@ -189,9 +189,7 @@ async fn a_host_checkout_clone_receives_the_managed_github_token() {
 /// macOS spells a temporary root differently after resolving its `/tmp` symlink.
 #[farhelm_testtrace::test]
 async fn agent_create_checkout_replays_and_templates_use_fresh_admission() {
-    use crate::agent_listing_real_stack::{
-        attach_terminal, hosts_until_attached, session_token, spawn_agent_command_args,
-    };
+    use crate::agent_listing_real_stack::{session_token, spawn_agent_command_args};
     let stack = CheckoutStack::start().await;
     let root_a = stack.root_a.path().canonicalize().unwrap();
     for (route, field) in [
@@ -216,10 +214,8 @@ async fn agent_create_checkout_replays_and_templates_use_fresh_admission() {
     .await;
     assert!(status.is_success(), "create requester: {body}");
     let requester: SessionInfo = serde_json::from_str(&body).unwrap();
-    let _terminal = attach_terminal(stack.helm(), &stack.secret, &requester.id).await;
     let token = session_token(stack.supervisor.state.path(), &requester.id).await;
     let socket = stack.supervisor.state.path().join("supervisor.sock");
-    hosts_until_attached(&requester.id, &token, &socket).await;
     let command = fixture_cmd("fake-agent --script basic");
     let args = [
         "create",

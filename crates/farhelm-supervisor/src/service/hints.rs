@@ -36,12 +36,14 @@
 //!
 //! # Where hints go
 //!
-//! To every full-authority connection (every registered
-//! [`super::agent_relay::HelmLink`]), whatever its hello's `role` says: the
-//! role is diagnostic text, not an authorization input, and this supervisor
-//! cannot tell a helm from any other full-authority client. A connection
-//! that does not show sessions ignores the message. SPEC.md runs one helm at
-//! a time, so in practice this is that helm.
+//! To every registered [`super::agent_relay::HelmLink`], which means every
+//! connection whose hello declared it the owning helm's
+//! (`ControlMsg::Hello::owning_helm`, protocol 73): normally one, the
+//! helm's host connection, and briefly two while it reconnects. Other
+//! full-authority connections (a provisioning probe, a test client) register
+//! no link and get no hints, which loses nothing, since none of them shows
+//! sessions. Before protocol 73 the supervisor could not tell a helm from
+//! any other full-authority client and hinted all of them.
 //!
 //! Each hint is `try_send` on the connection's ordinary writer queue, behind
 //! whatever terminal output is already queued. A full queue DROPS the hint:
@@ -113,7 +115,7 @@ impl Supervisor {
         }
     }
 
-    /// Send one `SessionsChanged` to every registered full-authority
+    /// Send one `SessionsChanged` to every registered helm
     /// connection, dropping it on any whose writer queue is full.
     async fn send_sessions_changed(&self) {
         let frame = Frame::control(&ControlMsg::SessionsChanged);
@@ -168,7 +170,7 @@ pub(crate) mod test_support {
     use super::*;
     use std::time::Duration;
 
-    /// A registered full-authority link plus a running sender: what `serve`
+    /// A registered helm link plus a running sender: what `serve`
     /// would set up for a connected helm, minus the socket.
     pub(crate) struct HintProbe {
         receiver: tokio::sync::mpsc::Receiver<Frame>,
@@ -210,7 +212,7 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    /// Register a full-authority link on `sup` with a writer queue of
+    /// Register a helm link on `sup` with a writer queue of
     /// `capacity`, returning the queue's receiving end.
     async fn link(sup: &Arc<Supervisor>, capacity: usize) -> tokio::sync::mpsc::Receiver<Frame> {
         let (notify, receiver) = tokio::sync::mpsc::channel(capacity);
@@ -234,7 +236,7 @@ mod tests {
         }
     }
 
-    /// Spec: a mark reaches every registered full-authority connection as
+    /// Spec: a mark reaches every registered helm connection as
     /// one `SessionsChanged` at once; marks made during the following
     /// [`SESSIONS_CHANGED_MIN_GAP`] send nothing until the gap ends, then go
     /// out as exactly one hint.

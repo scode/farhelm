@@ -1,7 +1,9 @@
 //! The supervisor's agent→helm relay, driven end to end against a real
 //! supervisor: a session-authenticated peer asks, the supervisor forwards
-//! to whichever connection holds that session's attachment, and the answer
-//! comes back under the asking peer's own request id.
+//! to the newest connection that declared itself the owning helm in its
+//! hello, and the answer comes back under the asking peer's own request id.
+//! Whether anything is attached to the asking session plays no part, so
+//! most tests here attach nothing.
 //!
 //! Everything here is about the SUPERVISOR's half. The helm-side
 //! projection (which host is `current`, what a status word is) is unit
@@ -145,9 +147,13 @@ impl AgentRequestHandler for ScriptedHandler {
 /// Connect a client that answers agent upcalls with `handler`.
 ///
 /// `harness::connect_client`'s twin, kept here rather than in the harness
-/// because no other module needs a connection with an upcall handler on
-/// it. Registry id 1 is arbitrary: the supervisor never inspects it, and
-/// the helm-side meaning of the id (which host is `current`) is tested
+/// because few other modules need a connection with an upcall handler on
+/// it. Built the way the helm's host connection is (`start_for_host`), so
+/// its hello declares it the owning helm and the supervisor routes agent
+/// requests to it; the harness's own client does not declare, which is
+/// what lets every test here show that a connected non-declaring client is
+/// skipped. Registry id 1 is arbitrary: the supervisor never inspects it,
+/// and the helm-side meaning of the id (which host is `current`) is tested
 /// where that projection lives.
 pub(crate) async fn connect_helm(
     sup: &Arc<Supervisor>,
@@ -348,19 +354,24 @@ pub(crate) async fn credential_for(h: &Harness, session: &str) -> String {
         .expect("a created session has a credential")
 }
 
-/// Spec: a session-authenticated `AgentRequest` reaches the handler of the
-/// connection that holds that session's attachment, with the session id
-/// and verb intact, and the handler's reply comes back to the asking peer
-/// under the peer's own request id.
+/// Spec: a session-authenticated `AgentRequest` from a session that no
+/// client is attached to reaches the handler of the connection that
+/// declared itself the owning helm, with the session id and verb intact,
+/// and the handler's reply comes back to the asking peer under the peer's
+/// own request id.
 ///
 /// This is the whole feature in one test, and every clause is load-bearing.
-/// The ROUTING is what makes "ask the helm the user is looking at"
-/// meaningful — the harness's own client is connected the whole time and
-/// must NOT be the one asked, because it holds no attachment. The two
+/// Nothing in this test attaches to the session, which is the ordinary
+/// state of every session the user is not looking at: before protocol 73
+/// the relay asked only the connection holding the session's attachment,
+/// so an agent in a background session was refused although its helm was
+/// connected. The harness's own client is connected the whole time and does
+/// not declare itself, so it must NOT be the one asked; a relay that took
+/// "any full-authority connection" would reach it instead. The two
 /// request-id namespaces get their own test below, where two peers can
 /// collide on the same local number.
 #[farhelm_testtrace::test]
-async fn an_agent_request_is_answered_by_the_helm_holding_the_attachment() {
+async fn an_agent_request_from_an_unattached_session_is_answered_by_the_owning_helm() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
     let token = credential_for(&h, &session.id).await;
@@ -376,14 +387,9 @@ async fn an_agent_request_is_answered_by_the_helm_holding_the_attachment() {
         }],
         complete: true,
     });
-    let helm = connect_helm(&h.sup, handler.clone()).await;
-    // The attachment is what makes this connection the one asked. Held for
-    // the rest of the test: dropping the stream would tear it down and
-    // change which link the relay finds.
-    let (_channel, _replay, _stream) = helm
-        .attach_live(&session.id, 80, 24)
-        .await
-        .expect("the second client attaches");
+    // Held for the rest of the test: dropping the client would close the
+    // connection and take its link out of the registry.
+    let _helm = connect_helm(&h.sup, handler.clone()).await;
 
     let mut peer = SessionPeer::connect(&h.sup, &session.id, &token).await;
     let outcome = outcome_of(peer.ask(&session.id, AgentVerb::Hosts {}).await);
@@ -428,8 +434,7 @@ async fn initial_prompt_create_relay_preserves_literal_message() {
         },
     };
     let handler = ScriptedHandler::answering(reply.clone());
-    let helm = connect_helm(&h.sup, handler.clone()).await;
-    let (_channel, _replay, _stream) = helm.attach_live(&session.id, 80, 24).await.unwrap();
+    let _helm = connect_helm(&h.sup, handler.clone()).await;
     let mut peer = SessionPeer::connect(&h.sup, &session.id, &token).await;
     let verb = AgentVerb::Create {
         host: Some("host".into()),
@@ -456,7 +461,7 @@ async fn initial_prompt_create_relay_preserves_literal_message() {
     );
 }
 
-/// Delete reaches the attached helm with its explicit target and consent,
+/// Delete reaches the owning helm with its explicit target and consent,
 /// and its checkout notice survives both relay hops. A self-delete is refused
 /// locally before the helm is asked, avoiding its own retained request fence.
 #[farhelm_testtrace::test]
@@ -471,8 +476,7 @@ async fn agent_delete_relay_preserves_consent_and_refuses_self() {
         },
     };
     let handler = ScriptedHandler::answering(reply.clone());
-    let helm = connect_helm(&h.sup, handler.clone()).await;
-    let (_channel, _replay, _stream) = helm.attach_live(&session.id, 80, 24).await.unwrap();
+    let _helm = connect_helm(&h.sup, handler.clone()).await;
     let mut peer = SessionPeer::connect(&h.sup, &session.id, &token).await;
     let verb = AgentVerb::Delete {
         session_id: Some("another-session".into()),
@@ -505,37 +509,39 @@ async fn agent_delete_relay_preserves_consent_and_refuses_self() {
     );
 }
 
-/// Spec: with no helm attached to the session, the peer is refused
-/// `Unavailable` with the relay's own remedy sentence, and no request is
-/// forwarded anywhere.
+/// Spec: when only connections that did NOT declare themselves the owning
+/// helm are up, the peer is refused at once as `Unavailable`, with the
+/// relay's exact "no helm is connected to this host" message and its shared
+/// remedy, and no request is forwarded anywhere.
 ///
-/// The design chose to route EVERY verb through the helm, including
-/// questions the supervisor could have answered about its own host, so
-/// that there is one code path and one place for policy. This refusal is
-/// the price of that choice, and it has to be the honest failure rather
-/// than a silent downgrade to local semantics — an agent that sometimes
-/// sees the fleet and sometimes sees one machine, with nothing saying
-/// which, is worse off than one that is told to open the session.
+/// Two premises are covered in one fixture, and both matter. A non-declaring
+/// full-authority connection must never receive an agent request: in
+/// production that is the provisioning and update probe, which sends the
+/// same diagnostic `role` as the helm, answers nothing, and can be connected
+/// while the helm's own host connection is down or not yet up. And the
+/// refusal must be the honest one: the design routes EVERY verb through
+/// the helm so there is one code path and one place for policy, so with
+/// nobody to ask the agent is told so instead of being silently answered
+/// from local knowledge.
 ///
-/// The harness's client is connected throughout: a relay that picked "any
-/// full-authority connection" instead of "the one holding the attachment"
-/// would answer here and pass nothing.
+/// The second client also ATTACHES to the asking session, so both rules
+/// this replaced or rejected would pick it: before protocol 73 the relay
+/// asked the connection holding the attachment, and "the newest
+/// full-authority connection" was rejected for exactly this race. Such a
+/// client answers an upcall with a refusal of its own (it has no handler),
+/// so the exact-equality check below would catch a request that reached it.
 #[farhelm_testtrace::test]
-async fn a_session_no_helm_is_attached_to_is_told_so() {
+async fn with_only_non_declaring_connections_the_request_is_refused() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
     let token = credential_for(&h, &session.id).await;
-    // A helm with a handler is connected but attached to NOTHING, which is
-    // the case a "is any helm connected?" check would get wrong.
-    let _helm = connect_helm(
-        &h.sup,
-        ScriptedHandler::answering(AgentReply::Hosts {
-            caller_host_id: "host-local".to_string(),
-            hosts: Vec::new(),
-            complete: true,
-        }),
-    )
-    .await;
+    // The harness's own client is the first non-declaring connection; this
+    // is the second, and the newest, and it holds the session's attachment.
+    let bystander = connect_client(&h.sup).await;
+    let (_channel, _replay, _stream) = bystander
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("the non-declaring client attaches to the asking session");
 
     let mut peer = SessionPeer::connect(&h.sup, &session.id, &token).await;
     match outcome_of(peer.ask(&session.id, AgentVerb::Hosts {}).await) {
@@ -543,8 +549,10 @@ async fn a_session_no_helm_is_attached_to_is_told_so() {
             assert_eq!(kind, ErrorKind::Unavailable);
             assert_eq!(
                 message,
-                "no helm is attached to this session — open the session in the farhelm UI and \
-                 try again"
+                format!(
+                    "no helm is connected to this host — {}",
+                    farhelm_proto::AGENT_UNAVAILABLE_REMEDY
+                )
             );
         }
         other => panic!("expected a refusal, got {other:?}"),
@@ -572,11 +580,7 @@ async fn a_helm_that_never_answers_times_the_request_out() {
     let (session, _work) = basic_session(&h).await;
     let token = credential_for(&h, &session.id).await;
 
-    let helm = connect_helm(&h.sup, ScriptedHandler::silent()).await;
-    let (_channel, _replay, _stream) = helm
-        .attach_live(&session.id, 80, 24)
-        .await
-        .expect("the silent client attaches");
+    let _helm = connect_helm(&h.sup, ScriptedHandler::silent()).await;
 
     let mut peer = SessionPeer::connect(&h.sup, &session.id, &token).await;
     match outcome_of(peer.ask(&session.id, AgentVerb::Sessions {}).await) {
@@ -614,11 +618,7 @@ async fn an_acting_verb_waits_for_the_users_answer_past_the_ordinary_budget() {
     let (session, _work) = basic_session(&h).await;
     let token = credential_for(&h, &session.id).await;
     let (handler, mut calls) = ScriptedHandler::gated();
-    let helm = connect_helm(&h.sup, handler.clone()).await;
-    let (_channel, _replay, _stream) = helm
-        .attach_live(&session.id, 80, 24)
-        .await
-        .expect("the gated client attaches");
+    let _helm = connect_helm(&h.sup, handler.clone()).await;
 
     let mut peer = SessionPeer::connect(&h.sup, &session.id, &token).await;
     let stop = AgentVerb::Stop {
@@ -669,7 +669,7 @@ async fn a_peer_may_not_ask_as_another_session() {
     let (other, _other_work) = basic_session(&h).await;
     let token = credential_for(&h, &session.id).await;
 
-    let helm = connect_helm(
+    let _helm = connect_helm(
         &h.sup,
         ScriptedHandler::answering(AgentReply::Hosts {
             caller_host_id: "host-local".to_string(),
@@ -678,10 +678,6 @@ async fn a_peer_may_not_ask_as_another_session() {
         }),
     )
     .await;
-    let (_channel, _replay, _stream) = helm
-        .attach_live(&other.id, 80, 24)
-        .await
-        .expect("the helm attaches to the OTHER session");
 
     let mut peer = SessionPeer::connect(&h.sup, &session.id, &token).await;
     match outcome_of(peer.ask(&other.id, AgentVerb::Hosts {}).await) {
@@ -730,17 +726,9 @@ async fn two_peers_using_the_same_request_id_are_relayed_and_answered_apart() {
     let second_token = credential_for(&h, &second.id).await;
 
     let (handler, mut calls) = ScriptedHandler::gated();
-    let (helm, upstream_ids) = connect_helm_tapping_request_ids(&h.sup, handler.clone()).await;
-    // ONE helm connection holding BOTH attachments, which is what puts the
-    // two upcalls on one link and one pending table.
-    let (_c1, _r1, _s1) = helm
-        .attach_live(&first.id, 80, 24)
-        .await
-        .expect("attach the first session");
-    let (_c2, _r2, _s2) = helm
-        .attach_live(&second.id, 80, 24)
-        .await
-        .expect("attach the second session");
+    // ONE declaring helm connection, which is what puts the two upcalls on
+    // one link and one pending table.
+    let (_helm, upstream_ids) = connect_helm_tapping_request_ids(&h.sup, handler.clone()).await;
 
     let mut peer_one = SessionPeer::connect(&h.sup, &first.id, &first_token).await;
     let mut peer_two = SessionPeer::connect(&h.sup, &second.id, &second_token).await;
@@ -811,6 +799,9 @@ async fn a_helm_that_dies_mid_upcall_ends_the_request_at_once() {
 
     let (handler, mut calls) = ScriptedHandler::gated();
     let helm = connect_helm(&h.sup, handler.clone()).await;
+    // Not for routing, which ignores attachments. The helm dies with a live
+    // terminal stream on its connection, the shape the final-owner cleanup
+    // below has to close.
     let (_channel, _replay, stream) = helm
         .attach_live(&session.id, 80, 24)
         .await
@@ -836,7 +827,7 @@ async fn a_helm_that_dies_mid_upcall_ends_the_request_at_once() {
         AgentOutcome::Err { kind, message } => {
             assert_eq!(kind, ErrorKind::Unavailable);
             assert!(
-                message.contains("open the session in the farhelm UI"),
+                message.contains(farhelm_proto::AGENT_UNAVAILABLE_REMEDY),
                 "a connection-loss refusal must carry the remedy, got: {message}"
             );
         }
@@ -875,11 +866,7 @@ async fn a_deleted_session_cannot_ask_on_a_connection_it_already_opened() {
         hosts: Vec::new(),
         complete: true,
     });
-    let helm = connect_helm(&h.sup, handler.clone()).await;
-    let (_channel, _replay, _stream) = helm
-        .attach_live(&session.id, 80, 24)
-        .await
-        .expect("the helm attaches");
+    let _helm = connect_helm(&h.sup, handler.clone()).await;
 
     // Authenticated while the session still exists.
     let mut peer = SessionPeer::connect(&h.sup, &session.id, &token).await;

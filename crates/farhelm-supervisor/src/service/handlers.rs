@@ -3410,7 +3410,7 @@ pub(crate) async fn handle_restricted_control(
                 req_id,
                 ErrorKind::Unauthorized,
                 "a session can no longer create sessions directly; `farhelm spawn` asks the \
-                 attached helm, which asks the user"
+                 helm, which asks the user"
                     .to_string(),
             )
             .await;
@@ -6486,7 +6486,7 @@ mod tests {
     /// dispatch takes it at all. Nothing in the handler's shape forces it —
     /// the claim is one hoisted `if` away from being lost in a refactor,
     /// and losing it breaks nothing that any other test observes, since the
-    /// relay answers `Unavailable` either way with no helm attached.
+    /// relay answers `Unavailable` either way with no helm connected.
     ///
     /// Both directions are asserted from ONE fixture on purpose. "The
     /// mutation parked" is only meaningful next to "the listing did not" —
@@ -6507,7 +6507,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let fence = sup.agent_request_locks.claim("asker").await;
 
-        // The control. No helm is attached, so the relay refuses at once —
+        // The control. No helm is connected, so the relay refuses at once —
         // which is exactly what makes the refusal ARRIVING the evidence:
         // had a listing taken the fence, this call could not have returned.
         handle_restricted_control(
@@ -6845,7 +6845,7 @@ mod tests {
     /// an otherwise-eligible mutating request would be parked. Receiving the
     /// local refusal while that guard remains held distinguishes validation
     /// before the fence from validation after it without depending on
-    /// scheduler turns or an attached helm.
+    /// scheduler turns or a connected helm.
     #[farhelm_testtrace::test]
     async fn invalid_mutating_agent_request_bypasses_an_occupied_fence() {
         let state = StateDir::new();

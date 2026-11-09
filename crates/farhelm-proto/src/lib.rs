@@ -234,7 +234,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_72` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_73` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -245,7 +245,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 72;
+pub const PROTOCOL_VERSION: u32 = 73;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -416,17 +416,18 @@ pub enum ErrorKind {
     /// The request was well-formed and authorized, and the party that
     /// would have answered it is not currently reachable. Added with
     /// `PROTOCOL_VERSION` 13 for the agent relay's defining failure: no
-    /// helm holds an attachment to the asking session, so there is nobody
+    /// helm is connected to the asking session's host, so there is nobody
     /// to forward [`ControlMsg::AgentRequest`] to.
     ///
     /// Distinct from all four of the kinds above in what the caller should
     /// DO. `NotFound` says the thing named does not exist; here it does,
     /// and only the path to it is missing. `InvalidRequest` says resend a
     /// different request; here the same request will work once the helm is
-    /// attached again. `Internal` says nothing the caller does can help,
+    /// connected again. `Internal` says nothing the caller does can help,
     /// which is precisely wrong for a condition an operator fixes by
-    /// opening the session in the UI. Retry-when-the-fleet-changes is the
-    /// action, and no existing kind carries it.
+    /// opening Farhelm and getting the host connected.
+    /// Retry-when-the-fleet-changes is the action, and no existing kind
+    /// carries it.
     ///
     /// A supervisor also answers a management request (a stop, restart,
     /// rename, tab open or close, directory browse or repository search)
@@ -1915,7 +1916,7 @@ pub enum TemplateKeyEdit {
 ///
 /// EVERY verb is answered by the helm, including questions about the
 /// asking session's own host. One code path and one place for policy is
-/// the reason; the cost is that "no helm is attached" is a real failure
+/// the reason; the cost is that "no helm is connected" is a real failure
 /// rather than something the supervisor could quietly answer locally, and
 /// that is the honest trade — a silent downgrade to local semantics would
 /// give an agent a fleet view that is sometimes the fleet and sometimes
@@ -2336,7 +2337,7 @@ impl AgentTemplate {
 ///
 /// A tagged outcome rather than "reply, or else a bare `ControlMsg::Error`"
 /// because this message crosses two hops: the supervisor has refusals of
-/// its own to report (no attached helm, a timed-out upcall) and the helm
+/// its own to report (no connected helm, a timed-out upcall) and the helm
 /// has refusals of its own, and one shape carrying both means the CLI
 /// decodes exactly one thing and renders `message` verbatim whoever wrote
 /// it.
@@ -2481,12 +2482,21 @@ pub const HOST_BUSY_REFUSAL: &str =
 ///
 /// One constant across two crates because SPEC.md requires concrete
 /// failures to carry a remedy, and every way the relay can end in
-/// `Unavailable` has the SAME remedy: no helm holds the session's
-/// attachment right now, and opening the session in a client is what
-/// creates one. Spelled once so the four sites that produce such a refusal
-/// (no attachment, connection already closed, closing before enqueue, lost
-/// after acceptance) cannot drift into three different half-answers.
-pub const AGENT_UNAVAILABLE_REMEDY: &str = "open the session in the farhelm UI and try again";
+/// `Unavailable` has the SAME remedy: the owning helm has no working
+/// connection to this host right now, and getting Farhelm running and
+/// connected to the host is what gives it one. Spelled once so the four
+/// sites that produce such a refusal (no helm connected, connection already
+/// closed, closing before enqueue, lost after acceptance) cannot drift into
+/// three different half-answers.
+///
+/// It says "open Farhelm and check that this host is connected" rather than
+/// naming one cause, because the supervisor cannot tell them apart: Farhelm
+/// being closed and Farhelm running but unable to reach this host look the
+/// same from here. Until protocol 73 it said to open the session in the UI,
+/// which was the remedy for the old attachment-based routing and is wrong
+/// now that what is on screen does not matter.
+pub const AGENT_UNAVAILABLE_REMEDY: &str =
+    "open Farhelm and check that this host is connected, then try again";
 
 /// The recovery sentence a relay failure gets when the request had already
 /// been handed to the helm and the verb CHANGES something.
@@ -3006,6 +3016,28 @@ pub enum ControlMsg {
         /// hello without one is byte-identical to before.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         database_schema: Option<i64>,
+        /// This connection belongs to the helm that owns this supervisor,
+        /// and it answers agent requests: the supervisor sends every
+        /// [`ControlMsg::AgentRequest`] from its sessions to the newest
+        /// connection that said so, whichever session is on screen.
+        ///
+        /// A ROUTING input, never an authorization one. Every
+        /// full-authority connection is already trusted with everything;
+        /// this only says which of them is the helm's host connection, as
+        /// opposed to a provisioning probe, another supervisor's startup
+        /// check, or a test client, which also hold full authority and send
+        /// the same diagnostic `role`. Only the helm's host connection (the
+        /// one built with an agent-request handler) sends `true`, through
+        /// `io::handshake_as_owning_helm`. A session-authenticated hello
+        /// that sets it is not a helm, and the supervisor ignores it there.
+        ///
+        /// Added in protocol 73 together with the routing rule it feeds. It
+        /// is not additive within a version: a helm that omitted it would
+        /// silently stop receiving agent requests, which is why it came
+        /// with a bump rather than as an optional field. Omitted from the
+        /// wire when `false`, like `database_schema`.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        owning_helm: bool,
     },
     /// Create and launch a session. This is the one true creation path:
     /// the M1 CLI flags and any future UI dialog both land here
@@ -4149,7 +4181,7 @@ pub enum ControlMsg {
     /// has exactly one thing to decode. Two kinds are specific to this
     /// exchange, and they are split by whether a retry is free:
     /// [`ErrorKind::Unavailable`] means nothing is holding the request (no
-    /// helm attached, its connection died, the request was never delivered,
+    /// helm connected, its connection died, the request was never delivered,
     /// or the helm is starting up or shutting down), while
     /// [`ErrorKind::Timeout`] means the opposite and only that — a helm took
     /// the request and did not answer inside the relay's budget, so it may
@@ -4190,14 +4222,17 @@ pub enum ControlMsg {
 
 impl ControlMsg {
     /// A hello without host identity or database schema, regardless of
-    /// `role`. Correct as-is for the helm (which has no supervisor identity
-    /// or schema to report) and for every test double playing
-    /// a supervisor without needing to model minting. The REAL supervisor
-    /// connection loop does not call this constructor at all; it builds
-    /// its own `Hello` carrying `Supervisor::host_identity` (`io::
-    /// handshake_with_host_identity`'s job) precisely because this one
+    /// `role`, and NOT declaring itself the owning helm. Correct as-is for
+    /// a helm connection that answers no agent requests (the provisioning
+    /// probe), for full-authority tools and test clients, and for every
+    /// test double playing a supervisor without needing to model minting.
+    /// The REAL supervisor connection loop does not call this constructor
+    /// at all; it builds its own `Hello` carrying `Supervisor::host_identity`
+    /// (`io::handshake_with_host_identity`'s job) precisely because this one
     /// shared constructor cannot know those values. Test doubles using it
-    /// therefore model a supervisor that does not report its schema.
+    /// therefore model a supervisor that does not report its schema. The
+    /// helm's host connection, the one that does answer agent requests,
+    /// goes through `io::handshake_as_owning_helm` instead.
     pub fn hello(role: &str) -> ControlMsg {
         ControlMsg::Hello {
             database_schema: None,
@@ -4206,6 +4241,7 @@ impl ControlMsg {
             role: role.to_string(),
             host_identity: None,
             auth: None,
+            owning_helm: false,
         }
     }
 
@@ -5045,6 +5081,7 @@ mod tests {
                     role: "supervisor".to_string(),
                     host_identity: None,
                     auth: None,
+                    owning_helm: false,
                 },
                 serde_json::json!({
                     "type": "hello",
@@ -5063,6 +5100,7 @@ mod tests {
                     role: "supervisor".to_string(),
                     host_identity: Some("11111111-1111-1111-1111-111111111111".to_string()),
                     auth: None,
+                    owning_helm: false,
                 },
                 serde_json::json!({
                     "type": "hello",
@@ -5084,6 +5122,7 @@ mod tests {
                         session_id: "parent-1".to_string(),
                         token: "secret-token".to_string(),
                     }),
+                    owning_helm: false,
                 },
                 serde_json::json!({
                     "type": "hello",
@@ -5119,6 +5158,7 @@ mod tests {
                 session_id: "session-1".to_string(),
                 token: token.to_string(),
             }),
+            owning_helm: false,
         };
         let rendered = format!("{hello:?}");
         assert!(
@@ -5170,6 +5210,54 @@ mod tests {
         assert_eq!(auth, None, "a v10 hello has no session attribution");
     }
 
+    /// Spec: `owning_helm` is absent from the wire when false, travels as
+    /// the literal key `owning_helm` when true, and a hello without the key
+    /// decodes as not declaring.
+    ///
+    /// Why: absence-means-false is what keeps every non-declaring hello
+    /// (the probe's, a test client's, the supervisor's own) the same shape
+    /// it was before protocol 73, and the decode default is what makes a
+    /// hello from a sender that never sets the field a non-owner rather
+    /// than a decode error. The key's spelling is pinned against hand-written
+    /// JSON so renaming the field on both sides at once cannot slip by.
+    #[farhelm_testtrace::test]
+    fn owning_helm_is_omitted_when_false_and_spelled_when_true() {
+        let quiet = serde_json::to_value(ControlMsg::hello("helm")).unwrap();
+        assert!(
+            quiet.get("owning_helm").is_none(),
+            "a non-declaring hello must not carry the key: {quiet}"
+        );
+
+        let declaring = ControlMsg::Hello {
+            protocol_version: PROTOCOL_VERSION,
+            build_version: "1.2.3".to_string(),
+            role: "helm".to_string(),
+            host_identity: None,
+            auth: None,
+            database_schema: None,
+            owning_helm: true,
+        };
+        let json = serde_json::to_value(&declaring).unwrap();
+        assert_eq!(json["owning_helm"], true);
+        assert_eq!(
+            serde_json::from_value::<ControlMsg>(json).unwrap(),
+            declaring
+        );
+
+        let raw = r#"{
+            "type": "hello",
+            "protocol_version": 73,
+            "build_version": "1.2.3",
+            "role": "helm",
+            "host_identity": null,
+            "auth": null
+        }"#;
+        let ControlMsg::Hello { owning_helm, .. } = serde_json::from_str(raw).unwrap() else {
+            panic!("expected a hello");
+        };
+        assert!(!owning_helm, "an absent key decodes as not declaring");
+    }
+
     /// The REVERSE direction from the two tests above: a hand-rolled decoder
     /// shaped like the genuine v7 `Hello` — before
     /// `host_identity` existed at all (see the version history linked from
@@ -5204,6 +5292,7 @@ mod tests {
             role: "supervisor".to_string(),
             host_identity: Some("11111111-1111-1111-1111-111111111111".to_string()),
             auth: None,
+            owning_helm: false,
         };
         let json = serde_json::to_value(&new_msg).unwrap();
         assert_eq!(json["database_schema"], 31);
@@ -5679,8 +5768,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_72() {
-        assert_eq!(PROTOCOL_VERSION, 72);
+    fn protocol_version_is_pinned_at_73() {
+        assert_eq!(PROTOCOL_VERSION, 73);
     }
 
     /// A follow-up is an approved mutation even though its success has no
@@ -6074,6 +6163,7 @@ mod tests {
             role: "helm".to_string(),
             host_identity: None,
             auth: None,
+            owning_helm: false,
         };
 
         // A literal-v30 peer against THIS build's handshake.

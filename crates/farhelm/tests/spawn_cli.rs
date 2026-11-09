@@ -352,7 +352,7 @@ fn inheritance_with_a_launch_flag_is_refused() {
 /// title, parent and key carried over; the created id is the one stdout
 /// line.
 ///
-/// Why: SPEC.md has the attached helm resolve a spawn's launch flags, since
+/// Why: SPEC.md has the helm resolve a spawn's launch flags, since
 /// it owns the templates and composes agent launches; the spawn contract
 /// (one id on stdout) must hold on that path as on the inherited one. Its
 /// first message remains literal template edits, including leading hyphens

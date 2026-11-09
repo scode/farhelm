@@ -286,14 +286,14 @@ pub const UPLOAD_PROGRESS_TIMEOUT: Duration = Duration::from_secs(60);
 /// `await_disk_stage`.
 pub const UPLOAD_DISK_STAGE_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// How long the supervisor waits for the attached helm to answer one
+/// How long the supervisor waits for the owning helm to answer one
 /// agent request before telling the asking session it timed out — see
 /// [`super::agent_relay`].
 ///
 /// The bound exists at all because the asking side has none. `farhelm
 /// agent` blocks on a socket read with no deadline of its own,
 /// deliberately: the supervisor is the only party that can tell "no helm
-/// is attached" from "a helm took it and is slow", and a client-side
+/// is connected" from "a helm took it and is slow", and a client-side
 /// deadline would collapse those into one unactionable "it did not
 /// answer".
 ///
@@ -4920,7 +4920,8 @@ pub(crate) fn notification_cell()
 /// - `uploads`: may be taken under the whole mutation chain down to the
 ///   lifecycle claim (delete's teardown aborts the session's uploads), and
 ///   is never held alongside `attachments`, `sessions`, or `sinks`.
-/// - `helm_links`: taken only after releasing `attachments`.
+/// - `helm_links`: taken with nothing else held, and released before any
+///   other lock is taken.
 /// - `list_admission`: taken at the top of a list build with nothing else
 ///   held, and kept while the build takes `sessions` and runs its tmux and
 ///   capture work, then released before the reply is sent. Never held
@@ -5073,18 +5074,26 @@ pub struct Supervisor {
     /// lifecycle claim adds one ([`Supervisor::mark_delete_in_progress`]).
     pub(crate) deletes_in_progress:
         std::sync::Mutex<HashMap<String, tokio::sync::watch::Receiver<()>>>,
-    /// The upward request channel of every full-authority connection
-    /// currently served — see [`super::agent_relay`] for what travels up
-    /// one and why anything does.
+    /// The upward request channel of every connection currently served
+    /// whose hello declared it the owning helm's, in registration order —
+    /// see [`super::agent_relay`] for what travels up one and why anything
+    /// does.
     ///
-    /// A `Vec`, not a map: it is indexed by nothing (a link is found by
-    /// matching an attachment's writer queue against it), it holds one
-    /// entry per connected helm, and that is a number a person could count
-    /// on one hand. A key would have to be invented purely to have one.
+    /// Normally one entry: the owning helm's host connection. Briefly two
+    /// or more while that helm reconnects and an old, possibly half-open
+    /// connection has not yet been torn down, which is why routing takes the
+    /// LAST entry ([`Supervisor::owning_helm_link`]). Full-authority
+    /// connections that did not declare, and every session-authenticated
+    /// one, are never in here.
+    ///
+    /// A `Vec`, not a map: it is indexed by nothing (routing wants the
+    /// newest, hints want all of them), and it is a number a person could
+    /// count on one hand. A key would have to be invented purely to have
+    /// one.
     ///
     /// NOT part of the `attachments`-then-`sessions` lock-ordering rule
-    /// this struct's docs state: `helm_link_for_session` releases
-    /// `attachments` before taking this, and nothing else takes both.
+    /// this struct's docs state: every user takes it alone and releases it
+    /// before taking anything else.
     pub(crate) helm_links: Mutex<Vec<Arc<super::agent_relay::HelmLink>>>,
     /// Pending and active accepted tunnel sockets share one host-wide cap,
     /// including sockets held by overlapping helm connections during reconnect.
@@ -30342,6 +30351,7 @@ exit 0
                         role: "supervisor".into(),
                         host_identity: None,
                         auth: None,
+                        owning_helm: false,
                     })
                     .await
                     .expect("fixture: sending the stand-in's hello");

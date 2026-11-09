@@ -194,6 +194,15 @@ where
         crate::store::SCHEMA_VERSION,
     )
     .await?;
+    // Read before `peer_hello` is consumed below. Meaningful only on a
+    // full-authority connection; see where the link is registered.
+    let declares_owning_helm = matches!(
+        peer_hello,
+        ControlMsg::Hello {
+            owning_helm: true,
+            ..
+        }
+    );
     let restricted_auth = match peer_hello {
         ControlMsg::Hello {
             auth: Some(auth), ..
@@ -257,14 +266,24 @@ where
     // bounds bytes, and this shared queue also bounds frames across transfers.
     let (bulk_tx, bulk_rx) = mpsc::channel::<Frame>(super::uploads::UPLOAD_CHUNK_QUEUE);
     let (priority_tx, priority_rx) = mpsc::channel::<Frame>(UPLOAD_PRIORITY_QUEUE);
-    // A full-authority connection is a candidate for agent upcalls; a
-    // session-authenticated one never is. The distinction is admission, not
-    // the hello's `role` string, which is diagnostic free text and never an
-    // authorization input (see `ControlMsg::Hello::role`). Registering here,
-    // as soon as the connection has a writer queue, is what makes the link
-    // findable by any attachment this connection later takes — see
-    // `Supervisor::helm_link_for_session` for how one is found and why the
-    // rule is attachment ownership.
+    // Only the owning helm's connections get an upward link, and with it
+    // agent upcalls and change hints: a full-authority connection whose
+    // hello declared itself the owning helm (`ControlMsg::Hello::owning_helm`).
+    // A session-authenticated connection never does, whatever its hello
+    // claims, because it is a session's agent and not a helm. A
+    // full-authority connection that did not declare (the provisioning and
+    // update probe, another supervisor's startup check, a test client) gets
+    // none either: it sends the same diagnostic `role` as the helm and
+    // answers nothing, so handing it an agent request would leave the
+    // asking agent waiting out the whole budget. The hello's `role` string
+    // decides nothing here; it is diagnostic free text (see
+    // `ControlMsg::Hello::role`).
+    //
+    // Registering here, before this connection reads any request, is what
+    // guarantees that a session the helm created over this connection can
+    // ask the helm straight away. Which registered link gets a request is
+    // `Supervisor::owning_helm_link`'s rule (the newest); what the asking
+    // session's terminal is attached to plays no part.
     //
     // The link is also allowed to END this connection (see
     // `HelmLink::retire`): a relay that has provably stopped working — a
@@ -272,11 +291,11 @@ where
     // ran out its last bound — leaves pending upcalls that nothing on a
     // LIVE connection will resolve, and connection loss is the ending the
     // rest of the relay already knows how to report. The sender is created
-    // here, and kept in scope for the whole function even on a restricted
-    // connection that registers no link, so the `changed()` arm below never
-    // fires merely because the last sender was dropped.
+    // here, and kept in scope for the whole function even on a connection
+    // that registers no link, so the `changed()` arm below never fires
+    // merely because the last sender was dropped.
     let (link_shutdown, mut link_shutdown_rx) = watch::channel(false);
-    let link = if restricted_auth.is_none() {
+    let link = if restricted_auth.is_none() && declares_owning_helm {
         Some(
             sup.register_helm_link(tx.clone(), link_shutdown.clone())
                 .await,
@@ -693,9 +712,18 @@ where
                             }
 
                             ControlMsg::AgentResponse { req_id, outcome } => {
-                                let link = link.as_ref().expect(
-                                    "a full-authority connection registers its link at hello",
-                                );
+                                // A connection with no link was never sent an
+                                // upcall, so an answer from it can only be a
+                                // broken or confused peer; ending it matches
+                                // what the link itself does with an id it
+                                // never issued (`HelmLink::complete`).
+                                let Some(link) = link.as_ref() else {
+                                    anyhow::bail!(
+                                        "an AgentResponse arrived on a connection that did not \
+                                         declare itself the owning helm, so it was never sent an \
+                                         agent request"
+                                    );
+                                };
                                 link.complete(req_id, outcome).await;
                             }
                             msg => {
@@ -2743,6 +2771,7 @@ mod tests {
                     session_id: parent.id,
                     token: "definitely-not-the-minted-token".to_string(),
                 }),
+                owning_helm: false,
             })
             .await
             .expect("send authenticated hello");
@@ -2810,6 +2839,7 @@ mod tests {
                 role: "spawn".to_string(),
                 host_identity: None,
                 auth: None,
+                owning_helm: false,
             })
             .await
             .expect("send unauthenticated spawn-role hello");
@@ -2941,6 +2971,7 @@ mod tests {
                     session_id: parent.id,
                     token,
                 }),
+                owning_helm: false,
             })
             .await
             .unwrap();

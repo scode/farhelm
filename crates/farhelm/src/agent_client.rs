@@ -192,7 +192,7 @@ pub(crate) const REQUEST_ID: u64 = 1;
 ///
 /// NO TIMEOUT, deliberately. For an agent request the supervisor bounds the
 /// upcall (`AGENT_UPCALL_TIMEOUT`) and is the only party that can tell "no
-/// helm is attached" from "a helm has it and is slow"; a deadline here would
+/// helm is connected" from "a helm has it and is slow"; a deadline here would
 /// collapse the two and fire first, hiding the specific error the relay was
 /// about to send. That holds for a spawn too, which is relayed to the helm
 /// like every other acting verb, and for a wait on the user's approval,
@@ -324,12 +324,12 @@ pub(crate) struct SpawnArgs {
 }
 
 /// What a spawned child runs. Either way the spawn is relayed to the
-/// attached helm, which asks the user before it creates anything.
+/// helm that owns this host, which asks the user before it creates anything.
 pub(crate) enum SpawnLaunch {
     /// `--inherit-agent`: this session's own stored launch, which this
     /// host's supervisor fills in as it relays the request.
     Inherit,
-    /// Launch flags and templates, which only the attached helm can resolve
+    /// Launch flags and templates, which only the helm can resolve
     /// (it owns the templates and composes agent launches). The folder and
     /// title are added by [`spawn_session`].
     Flags {
@@ -352,12 +352,12 @@ pub(crate) enum SpawnLaunch {
 /// carries; every refusal and protocol mismatch is an error and therefore
 /// produces no id.
 ///
-/// Every spawn is relayed to the attached helm as an agent `create` placed
+/// Every spawn is relayed to the owning helm as an agent `create` placed
 /// on this session's own host, because the helm asks the user before it
 /// creates anything (SPEC.md, Agent-spawned sessions). With launch flags the
 /// helm resolves the launch; with `--inherit-agent` this host's supervisor
 /// fills in the session's own stored launch on the way up. With no helm
-/// attached, either is the relay's own "no helm is attached" refusal.
+/// connected, either is the relay's own "no helm is connected" refusal.
 ///
 /// A create is a mutation, so a reply lost after the request went out
 /// carries the outcome-unknown warning: the child may already be running.
@@ -469,7 +469,7 @@ pub(crate) const APPROVAL_NOTICE: &str = "farhelm: waiting for the helm; if Farh
 ///
 /// NO TIMEOUT here, deliberately. The supervisor bounds the upcall
 /// (`AGENT_UPCALL_TIMEOUT`) and is the only party that can tell "no helm is
-/// attached" from "a helm has it and is slow"; a deadline on this side
+/// connected" from "a helm has it and is slow"; a deadline on this side
 /// would collapse those into one unactionable failure and would fire first,
 /// hiding the specific error the relay was about to send.
 pub(crate) async fn agent_request(

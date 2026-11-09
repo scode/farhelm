@@ -94,7 +94,7 @@
 //!
 //! `agent_relay` is the one slice that is not a carve-out of an older
 //! file: it arrived whole with `PROTOCOL_VERSION` 13 to carry requests
-//! UPWARD, from a session's own agent to the helm attached to it. It is
+//! UPWARD, from a session's own agent to the helm that owns its host. It is
 //! separate rather than folded into `connection` because it is the only
 //! place in this service where the supervisor is a client of its peer,
 //! with a pending table and a timeout of its own.
