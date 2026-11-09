@@ -68,3 +68,27 @@ append-only events, revisions, withdrawals and independent judgments are retaine
 refer to the named reviewed revisions; the original revision context is 70cd68a03c101493e0adbf00bb27bb8004adfe41;
 persists unchanged through ca9b0a19856dc136f63ad2d14f1076027edce1eb.. This was a source-only review; runtime occurrence
 and frequency were not measured.
+
+## Additional reviewed commit: inherited size handoff
+
+Reviewed commit: b2545c81d0728993a1b4b6ee2547de5aa5e434f9
+
+The compatibility handoff now preserves the dimensions already sent by the old renderer until an effective sizing input
+changes (`crates/farhelm-ui/assets/grid-terminal.js:482-512`, `fitHandoff`). The first usable observation records its
+inputs and leaves that inherited answer unchanged; identical later observations do the same. `SPEC_impl.md`, "The grid
+client", explicitly permits an inherited answer differing from a direct mount and makes it local to that mount. For an
+inherited dimension above 1000, the unchanged mount therefore no longer sends the opportunistic corrective fit described
+above. The initial socket request still carries the old renderer's uncapped size before the handoff.
+
+This adds source evidence to the existing admission mismatch, not a demonstrated distinct regression. The oversized
+producer and possible first-Hello failure already precede the handoff. Source checks did not establish an old usable
+attachment rescued by the previous clamp that becomes broken solely because of this change, nor measure a supported
+viewport producing the oversized inherited answer. Keep the original **other** bucket. Confidence is confirmed source
+behavior for the removed correction, with the incremental runtime consequence **unverified after investigation**.
+Effective pane, font or pixel-ratio changes can still invoke deterministic fitting; unchanged retries have no newly
+established recovery guarantee. Evidence settling an incremental regression would need the exact oversized geometry and
+before/after resize-versus-Hello ordering on a supported client.
+
+Provenance: trailing review run `ee465fa5-0b29-4ce7-b1fe-8fabdb679cfe`, `fit/f6`. Its original stronger claim and
+withdrawal remain in the register. Fresh independent consultation L3 agreed only that a distinct incremental failure and
+a highest-priority route were not established; it did not drop this added evidence or the existing finding.
