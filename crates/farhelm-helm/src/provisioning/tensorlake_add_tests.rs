@@ -107,6 +107,52 @@ async fn fixture(build_on_add: bool) -> Fixture {
 }
 
 impl Fixture {
+    /// Put the same injected backend and account behind the real user router.
+    /// The ordinary Add tests keep their service-only composition; recipe launch
+    /// additionally needs the resulting session and cleanup to use this account.
+    async fn bind_session_launch(&mut self) {
+        self.tensorlake.ensure_host_key().await.unwrap();
+        let mut state = crate::AppState::with_provisioning(
+            Arc::clone(&self.harness.manager),
+            self.harness.store.clone(),
+            Arc::clone(&self.service),
+            self.harness.state.mode,
+        );
+        state.tensorlake = self.tensorlake.clone();
+        self.harness.state = Arc::new(state);
+    }
+
+    /// Exercise the new protected endpoint, with ordinary command fields and
+    /// no installed-host selector. A bounded wait for headers is independent
+    /// from reading the intentionally unfinished result body.
+    async fn session_launch(&self, confirmed: bool) -> axum::response::Response {
+        let body = serde_json::json!({
+            "recipe": "test-recipe", "confirmed": confirmed,
+            "request": { "cwd": "~", "command": { "command": "true", "yolo": false } },
+        });
+        self.session_launch_request(body).await
+    }
+
+    /// Keep malformed launch cases on the real route as well: a service-only
+    /// rejection would not establish that HTTP admission precedes billing.
+    async fn session_launch_request(&self, body: serde_json::Value) -> axum::response::Response {
+        use tower::ServiceExt as _;
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sandbox-sessions")
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(15),
+            self.harness.router().oneshot(request),
+        )
+        .await
+        .expect("admission headers arrive before the held setup finishes")
+        .unwrap()
+    }
+
     /// A probe has no network side effects; its opaque id is the sole
     /// authority the subsequent POST consumes.
     async fn probe(&self, target: ProbeDestination) -> ProbeResponse {
@@ -414,6 +460,370 @@ impl Fixture {
             delivered < attach,
             "delivery finishes before the connection becomes usable: {events:?}"
         );
+    }
+}
+
+/// Recipe launch must refuse before billing when its software has not been
+/// built. The same fixture's ordinary Add path may build, so this distinguishes
+/// the new launch contract from merely reusing Add without a preflight.
+#[farhelm_testtrace::test]
+async fn recipe_session_preflight_never_builds_a_missing_software_snapshot() {
+    let mut f = fixture(true).await;
+    f.bind_session_launch().await;
+    let invalid = f.session_launch_request(serde_json::json!({
+        "recipe": "test-recipe", "confirmed": true,
+        "request": { "cwd": "~", "prompt": "not accepted by a command", "command": { "command": "true", "yolo": false } },
+    })).await;
+    assert_eq!(invalid.status(), axum::http::StatusCode::BAD_REQUEST);
+    let reason = axum::body::to_bytes(invalid.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&reason).contains("initial prompt"),
+        "{reason:?}"
+    );
+    assert!(f.model().sandboxes.is_empty());
+    assert!(f.backend_events().is_empty());
+    for (confirmed, expected) in [(false, "confirm creation"), (true, "no built snapshot")] {
+        let response = f.session_launch(confirmed).await;
+        assert!(!response.status().is_success());
+        assert_ne!(
+            response.status(),
+            axum::http::StatusCode::UNAUTHORIZED,
+            "a user refusal must not sign the browser out"
+        );
+        let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&bytes).contains(expected),
+            "{bytes:?}"
+        );
+        assert!(
+            f.model().sandboxes.is_empty(),
+            "no billed build or session sandbox"
+        );
+        assert_eq!(f.harness.store.list_hosts().await.unwrap().len(), 1);
+        assert!(f.backend_events().is_empty());
+    }
+}
+
+/// Drive the owned setup task through a live scripted supervisor, rather than
+/// calling the session helper directly. Success retains its resource and clears
+/// admission; a post-attach refusal uses the same host teardown as explicit Delete.
+#[farhelm_testtrace::test]
+async fn recipe_session_task_publishes_success_and_cleans_a_connected_create_failure() {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    for fails in [false, true] {
+        let mut f = fixture(false).await;
+        f.seed_prepared().await;
+        f.bind_session_launch().await;
+        f.backend_config(serde_json::json!({"default": {"hold_actions": true}}));
+        let response = f.session_launch(true).await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let host: HostId = response.headers()["x-farhelm-sandbox-host"]
+            .to_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        f.wait_for_backend("wait-tensorlake-ssh").await;
+        assert!(
+            f.model().live_sandboxes().len() == 1,
+            "premise: one fresh resource waits for setup"
+        );
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let (done, mut finished) = tokio::sync::oneshot::channel();
+        let responder = tokio::spawn(async move {
+            let (read, write) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(read);
+            let mut writer = FrameWriter::new(write);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let mut creates = 0;
+            loop {
+                let frame = tokio::select! {
+                    _ = &mut finished => break,
+                    frame = reader.read_frame() => match frame.unwrap() { Some(frame) => frame, None => break },
+                };
+                let ControlMsg::CreateSession { req_id, .. } = parse_control(&frame).unwrap()
+                else {
+                    panic!("unexpected request after the setup connection attached");
+                };
+                creates += 1;
+                let reply = if fails {
+                    ControlMsg::Error {
+                        req_id,
+                        kind: farhelm_proto::ErrorKind::InvalidRequest,
+                        create_unaccepted: true,
+                        message: "connected create refused by fixture".into(),
+                    }
+                } else {
+                    ControlMsg::SessionCreated {
+                        req_id,
+                        session: crate::rest_harness::session("owned-child", 100),
+                    }
+                };
+                writer.write_control(&reply).await.unwrap();
+            }
+            creates
+        });
+        f.harness.fleet.edit(host, |script| {
+            *script = crate::rest_harness::HostScript {
+                identity: Some("fresh-task-install".into()),
+                peer: Some(client_side),
+                ..crate::rest_harness::HostScript::default()
+            }
+        });
+        f.backend_config(serde_json::json!({}));
+        let bytes = tokio::time::timeout(
+            Duration::from_secs(15),
+            axum::body::to_bytes(response.into_body(), 1 << 20),
+        )
+        .await
+        .expect("owned launch finishes while its supervisor fixture is alive")
+        .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(!f.service.memory.lock().await.busy.contains(&host));
+        if fails {
+            let error = body["error"].as_str().unwrap();
+            assert!(
+                error.starts_with("Not launched.")
+                    && error.contains("connected create refused by fixture"),
+                "{error}"
+            );
+            assert!(f.model().live_sandboxes().is_empty());
+            assert!(
+                !f.harness
+                    .store
+                    .list_hosts()
+                    .await
+                    .unwrap()
+                    .iter()
+                    .any(|row| row.id == host)
+            );
+        } else {
+            assert!(
+                body["session"]["id"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("expected a created session, got {body}"))
+                    .ends_with(":owned-child")
+            );
+            assert_eq!(
+                f.service.view(host).await.unwrap().status,
+                RunStatus::Completed
+            );
+            assert_eq!(
+                f.harness.store.cached_sessions(host).await.unwrap().len(),
+                1
+            );
+            assert_eq!(f.model().live_sandboxes().len(), 1);
+        }
+        let _ = done.send(());
+        assert_eq!(
+            responder.await.unwrap(),
+            1,
+            "one create dispatch per owned task"
+        );
+    }
+}
+
+/// Injected attachment can complete while the real host actor is Connecting.
+/// The task must wait for its actual verdict, preserve a settled refusal's
+/// routing message, and clean up its fresh resource without a supervisor create.
+#[farhelm_testtrace::test]
+async fn recipe_session_task_reports_settled_connection_failures_before_cleanup() {
+    for (reachable, protocol, phase, detail) in [
+        (
+            false,
+            farhelm_proto::PROTOCOL_VERSION,
+            "unreachable-reprobing",
+            "scripted host",
+        ),
+        (
+            true,
+            farhelm_proto::PROTOCOL_VERSION + 1,
+            "version-skew",
+            "speaks protocol",
+        ),
+    ] {
+        let mut f = fixture(false).await;
+        f.seed_prepared().await;
+        f.bind_session_launch().await;
+        f.backend_config(serde_json::json!({"default": {"hold_actions": true}}));
+        let response = f.session_launch(true).await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let host: HostId = response.headers()["x-farhelm-sandbox-host"]
+            .to_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        f.wait_for_backend("wait-tensorlake-ssh").await;
+        assert_eq!(f.model().live_sandboxes().len(), 1);
+        assert!(
+            f.harness
+                .store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.id == host && row.is_session_owned()),
+            "premise: this launch owns the resource still waiting for setup"
+        );
+        f.harness.fleet.edit(host, |script| {
+            *script = crate::rest_harness::HostScript {
+                reachable,
+                protocol,
+                ..crate::rest_harness::HostScript::default()
+            };
+        });
+        f.backend_config(serde_json::json!({}));
+        let bytes = tokio::time::timeout(
+            Duration::from_secs(15),
+            axum::body::to_bytes(response.into_body(), 1 << 20),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "launch never reported {phase}; host state: {:?}, live resources: {}",
+                f.harness.manager.state(host),
+                f.model().live_sandboxes().len()
+            )
+        })
+        .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let error = body["error"].as_str().unwrap_or_else(|| panic!("{body}"));
+        assert!(
+            error.starts_with("Not launched.")
+                && error.contains(&format!("is {phase},"))
+                && error.contains(detail),
+            "{error}"
+        );
+        assert!(!f.service.memory.lock().await.busy.contains(&host));
+        assert!(f.model().live_sandboxes().is_empty());
+        assert!(
+            !f.harness
+                .store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.id == host)
+        );
+    }
+}
+
+/// Admission must publish progress before setup finishes. Closing the body at
+/// that boundary loses only the reply: the owned launch still attempts cleanup.
+/// A failed cleanup instead keeps the named resource and an explicit remedy.
+#[farhelm_testtrace::test]
+async fn recipe_session_failure_cleanup_outlives_its_client_and_retains_failed_cleanup() {
+    for cleanup_fails in [false, true] {
+        let mut f = fixture(false).await;
+        f.seed_prepared().await;
+        f.bind_session_launch().await;
+        f.backend_config(serde_json::json!({"default": {"hold_actions": true, "fail_action": "wait-tensorlake-ssh"}}));
+        if cleanup_fails {
+            std::fs::write(
+                f.root.path().join("api/config.json"),
+                serde_json::json!({
+                    "fail": {"terminate_sandbox": {"status": 503, "message": "keep this resource"}}
+                })
+                .to_string(),
+            )
+            .unwrap();
+        }
+        let response = f.session_launch(true).await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let host: HostId = response.headers()["x-farhelm-sandbox-host"]
+            .to_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let run = response.headers()["x-farhelm-sandbox-run"]
+            .to_str()
+            .unwrap();
+        assert!(uuid::Uuid::parse_str(run).is_ok());
+        f.wait_for_backend("wait-tensorlake-ssh").await;
+        let rows = f.harness.store.list_hosts().await.unwrap();
+        let row = rows.iter().find(|row| row.id == host).unwrap();
+        assert!(row.is_session_owned());
+        let sandbox = row.tensorlake.as_ref().unwrap().sandbox.clone();
+        assert!(sandbox.starts_with("farhelm-sess-"));
+        let model = f.model();
+        let created = model
+            .sandboxes
+            .iter()
+            .find(|entry| entry.name.as_deref() == Some(&sandbox))
+            .unwrap();
+        assert_eq!(
+            created.status, "running",
+            "premise: cleanup has a real created resource to remove"
+        );
+        assert_eq!(created.timeout_secs, 1800);
+        assert!(!created.auto_resume);
+        assert!(
+            f.harness
+                .store
+                .cached_sessions(host)
+                .await
+                .unwrap()
+                .is_empty(),
+            "no placeholder session"
+        );
+        let body = if cleanup_fails {
+            Some(response.into_body())
+        } else {
+            drop(response);
+            None
+        };
+        f.backend_config(serde_json::json!({"default": {"fail_action": "wait-tensorlake-ssh"}}));
+        if cleanup_fails {
+            let bytes = tokio::time::timeout(
+                Duration::from_secs(15),
+                axum::body::to_bytes(body.unwrap(), 1 << 20),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let error = body["error"].as_str().unwrap();
+            assert!(
+                error.contains(&sandbox) && error.contains("Hosts"),
+                "{error}"
+            );
+            assert!(
+                f.harness
+                    .store
+                    .list_hosts()
+                    .await
+                    .unwrap()
+                    .iter()
+                    .any(|row| row.id == host)
+            );
+            assert_eq!(
+                f.service.view(host).await.unwrap().status,
+                RunStatus::Failed
+            );
+        } else {
+            tokio::time::timeout(Duration::from_secs(15), async {
+                while f
+                    .harness
+                    .store
+                    .list_hosts()
+                    .await
+                    .unwrap()
+                    .iter()
+                    .any(|row| row.id == host)
+                {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("owned cleanup finishes after client departure");
+            assert!(f.model().live_sandboxes().is_empty());
+        }
     }
 }
 
@@ -902,6 +1312,60 @@ async fn an_unrequested_name_collision_refuses_setup_and_delete_leaves_it_alone(
             .iter()
             .any(|leftover| leftover.id == created.sandbox_id)
     );
+}
+
+/// Every sandbox a session owns is created with the 30-minute idle timeout
+/// (SPEC.md), so a forgotten one stops billing for compute. A session-owned
+/// row can outlive its launch without a sandbox (the helm stopped before the
+/// create, or cleanup failed), and Hosts still offers the ordinary setup retry
+/// for it. That retry carries no session, so the timeout must follow the row's
+/// ownership rather than the launch; this pins it, alongside the ordinary
+/// host's zero timeout in the test below.
+#[farhelm_testtrace::test]
+async fn setup_retry_on_a_leftover_session_owned_row_keeps_the_idle_timeout() {
+    let f = fixture(true).await;
+    let sandbox = "farhelm-sess-test-leftover";
+    let size = f
+        .harness
+        .store
+        .tensorlake_recipe_row("test-recipe")
+        .await
+        .unwrap()
+        .unwrap()
+        .0
+        .size;
+    let host = f
+        .harness
+        .store
+        .register_session_sandbox(NewTensorlakeHost {
+            destination: crate::tensorlake::ssh::destination(sandbox),
+            entry: NewHostEntry::new(Some("Leftover sandbox")).unwrap(),
+            sandbox: sandbox.into(),
+            recipe: "test-recipe".into(),
+            resources: size,
+        })
+        .await
+        .unwrap();
+    f.harness.manager.sync_registry().await.unwrap();
+    assert!(
+        f.model()
+            .sandboxes
+            .iter()
+            .all(|entry| entry.name.as_deref() != Some(sandbox)),
+        "premise: the leftover row has no sandbox yet"
+    );
+
+    let accepted = f.rerun(host).await;
+    let view = f.finish(accepted.host_id).await;
+    assert_eq!(view.status, RunStatus::Completed, "{:?}", view.message);
+    let model = f.model();
+    let created = model
+        .sandboxes
+        .iter()
+        .find(|entry| entry.name.as_deref() == Some(sandbox))
+        .expect("the retry created the row's sandbox");
+    assert_eq!(created.timeout_secs, 1800);
+    assert!(!created.auto_resume);
 }
 
 /// Initial Add builds and prepares once, then boots a host without reinstalling.
@@ -2135,7 +2599,7 @@ async fn settled_absence_and_definite_refusal_allow_delete() {
 #[test]
 fn names_fit_tensorlake_grammar() {
     for name in ["", "---", "😀", "GPU Dev / 1", &"a".repeat(300)] {
-        let result = sandbox_name("k7q2", name);
+        let result = sandbox_name(crate::tensorlake::orphans::HOST_PREFIX, "k7q2", name);
         assert!(result.starts_with("farhelm-host-k7q2-"));
         assert!(result.len() <= 63);
         assert!(

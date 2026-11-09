@@ -180,6 +180,27 @@ impl TunnelManager {
         }
     }
 
+    /// Whole-host removal ends every local listener, including those for
+    /// sessions missing from the current cache. The caller holds mutation
+    /// after removing the host, so no new listener can be published for it.
+    pub(crate) async fn close_host_locked(&self, host: HostId) {
+        let entries = {
+            let mut listeners = self.listeners.lock().expect("tunnel listeners poisoned");
+            let ids: Vec<_> = listeners
+                .entries
+                .iter()
+                .filter(|(_, entry)| entry.session.host == host)
+                .map(|(id, _)| id.clone())
+                .collect();
+            ids.into_iter()
+                .filter_map(|id| listeners.entries.remove(&id))
+                .collect::<Vec<_>>()
+        };
+        for entry in entries {
+            entry.stop().await;
+        }
+    }
+
     /// Caller holds mutation after durably disabling consent; no creation can slip in.
     pub(crate) async fn close_all_locked(&self) {
         let entries = std::mem::take(
@@ -790,6 +811,24 @@ mod tests {
                 .await
                 .is_err()
         );
+        // Host removal has no complete session inventory to walk. Its actual
+        // HTTP path must still close the listener and spare the other entry.
+        let reopened = open_url(&harness.state, &first, &raw).await.unwrap();
+        let removed = harness
+            .router()
+            .oneshot(request(
+                Method::DELETE,
+                &format!("/api/hosts/{}", first.host),
+                json!(null),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(removed.status(), StatusCode::OK);
+        assert!(harness.state.tunnels.list(&first).is_empty());
+        assert_eq!(harness.state.tunnels.list(&second)[0].id, two.tunnel.id);
+        let _host_released = TcpListener::bind((Ipv4Addr::LOCALHOST, reopened.tunnel.local_port))
+            .await
+            .unwrap();
         harness.state.tunnels.shutdown().await;
     }
 

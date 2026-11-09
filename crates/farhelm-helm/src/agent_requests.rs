@@ -32,7 +32,7 @@
 //! Prompt delivery has no REST counterpart: [`agent_prompt`] routes the
 //! approved message to the owning supervisor's confirmed input operation.
 //! That path is dormant in this build: while [`AGENT_PROMPTS_ENABLED`] is
-//! off, `handle` refuses every prompt request before anything else.
+//! off, `handle` refuses prompt requests before verb validation or target work.
 //! Not for economy:
 //! the point of routing an agent's questions (and its actions) through the
 //! helm at all is that the agent and the user see, and act on, one fleet.
@@ -338,6 +338,11 @@ const AGENT_PROMPTS_ENABLED: bool = false;
 const AGENT_PROMPTS_OFF_REFUSAL: &str = "sending prompts to other sessions is turned off in this version of Farhelm, so nothing \
      was sent";
 
+/// Disposable sandboxes have no agent-request authority in this first version.
+/// The owning helm enforces this at the existing relay boundary, without asking
+/// the supervisor to persist policy or produce a notification.
+const SANDBOX_AGENT_REFUSAL: &str = "Agents in sandbox sessions can't ask Farhelm to act yet.";
+
 /// The most ENCODED session bytes one `sessions` reply will ever carry.
 ///
 /// The listing itself is bounded by rows (`farhelm_proto::LIST_SESSIONS_CAP`,
@@ -366,11 +371,8 @@ const AGENT_REPLY_BYTE_BUDGET: usize = 6 * 1024 * 1024;
 #[async_trait]
 impl AgentRequestHandler for HelmAgentRequests {
     async fn handle(&self, origin: AgentOrigin, session_id: &str, verb: AgentVerb) -> AgentOutcome {
-        // First, ahead of even the liveness and validation checks, so every
-        // prompt request gets the same final answer and none of them reads
-        // the target, shows a card or reaches a supervisor. `Unauthorized`
-        // is the kind a declined card and the YOLO rule use: a deliberate
-        // refusal that resending the same request will not change.
+        // Preserve the global Prompt switch's existing precedence, including
+        // for a disconnected origin: this verb is unavailable in every session.
         if matches!(verb, AgentVerb::Prompt { .. }) && !self.prompts_enabled {
             return AgentOutcome::Err {
                 kind: ErrorKind::Unauthorized,
@@ -392,6 +394,16 @@ impl AgentRequestHandler for HelmAgentRequests {
             return AgentOutcome::Err {
                 kind: ErrorKind::Unavailable,
                 message: "the host connection was replaced; retry".to_string(),
+            };
+        }
+        if state
+            .manager
+            .status(origin.host)
+            .is_some_and(|status| status.is_session_owned)
+        {
+            return AgentOutcome::Err {
+                kind: ErrorKind::Unauthorized,
+                message: SANDBOX_AGENT_REFUSAL.to_string(),
             };
         }
         // Keep the wire type's exhaustive classification as the authority for
@@ -427,6 +439,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                     .map(|views| AgentReply::Hosts {
                         hosts: views
                             .iter()
+                            .filter(|view| !view.is_session_owned)
                             .map(|view| agent_host(view, origin.host))
                             .collect(),
                         complete: true,
@@ -553,6 +566,9 @@ impl AgentRequestHandler for HelmAgentRequests {
                     Ok(target) => target,
                     Err(error) => return outcome_of(Err(error), mutating),
                 };
+                if let Err(error) = refuse_sandbox_target(&state, target.host).await {
+                    return outcome_of(Err(error), mutating);
+                }
                 if target == SessionKey::new(origin.host, session_id) {
                     return outcome_of(Err(anyhow::Error::new(crate::SupervisorError::helm(
                         ErrorKind::InvalidRequest,
@@ -1494,7 +1510,8 @@ async fn resolve_host(
     _origin: AgentOrigin,
     name: String,
 ) -> anyhow::Result<(HostId, String)> {
-    let views = crate::hosts::host_views(state).await?;
+    let mut views = crate::hosts::host_views(state).await?;
+    views.retain(|view| !view.is_session_owned);
     {
         let mut matches = views.iter().filter(|view| view.name == name);
         let Some(view) = matches.next() else {
@@ -1528,6 +1545,22 @@ async fn resolve_host(
         }
         Ok((view.id, view.name.clone()))
     }
+}
+
+/// Billed sandbox creation and destruction remain deliberate user actions,
+/// even when an agent on an ordinary host names a sandbox session by full ID.
+/// This preflight also works while that sandbox's supervisor is suspended.
+async fn refuse_sandbox_target(state: &AppState, host: HostId) -> anyhow::Result<()> {
+    if crate::hosts::registry_row(state, host)
+        .await?
+        .is_session_owned()
+    {
+        return Err(anyhow::Error::new(crate::SupervisorError::helm(
+            ErrorKind::Unauthorized,
+            "Only the user can delete or clone a sandbox session in Farhelm".to_string(),
+        )));
+    }
+    Ok(())
 }
 
 /// The sentence a not-found refusal adds when the fleet holds a host no
@@ -2067,47 +2100,18 @@ async fn create_checkout_for_agent(
     // Recovery above owns the original accepted name. Only a fresh preview
     // search may number a template Base; neither a lost create race nor a
     // keyed retry gets another automatic dispatch.
-    let base = (resolution.title_kind == Some(farhelm_proto::launcher::TemplateNameKind::Base))
-        .then(|| resolution.title.clone())
-        .flatten();
-    let mut sequence = farhelm_proto::github_checkout::CheckoutNameSequence::default();
-    let preview = loop {
-        let result = on_host(
-            crate::sessions::preview_github_checkout(
-                state,
-                &claim,
-                &client,
-                repo.clone(),
-                resolution.title.clone(),
-            )
-            .await,
-            &resolved.host_name,
-        );
-        match result {
-            Ok(preview) => break preview,
-            Err(error) => {
-                // This supervisor endpoint uses Conflict only for Occupied.
-                // Helm conflicts include a missing install identity and must
-                // not advance. Revisit this boundary if the endpoint gains
-                // another Conflict reason; never classify by error prose.
-                let occupied =
-                    error
-                        .downcast_ref::<crate::SupervisorError>()
-                        .is_some_and(|error| {
-                            error.origin() == crate::client::ErrorOrigin::SupervisorReply
-                                && error.kind() == ErrorKind::Conflict
-                        });
-                if let Some(base) = &base
-                    && occupied
-                    && sequence.advance(false)
-                {
-                    resolution.title = Some(sequence.name(base));
-                } else {
-                    return Err(error);
-                }
-            }
-        }
-    };
+    let preview = on_host(
+        crate::sessions::preview_named_github_checkout(
+            state,
+            &claim,
+            &client,
+            &repo,
+            &mut resolution.title,
+            resolution.title_kind,
+        )
+        .await,
+        &resolved.host_name,
+    )?;
     let wrapper_approved = approve_launch(
         state,
         origin,
@@ -2848,6 +2852,9 @@ async fn write_template_for_agent(
                 .to_string(),
         ));
     }
+    if fields.recipe.is_some() {
+        return Err(recipe_template_refusal());
+    }
     if !create
         && fields == farhelm_proto::launcher::TemplateFields::default()
         && host.is_none()
@@ -3352,6 +3359,7 @@ fn merge_template_fields(
         yolo,
         resume_command,
         host,
+        recipe,
         destination,
         name,
         name_kind,
@@ -3377,6 +3385,7 @@ fn merge_template_fields(
         yolo: yolo.or(existing.yolo),
         resume_command: resume_command.or(existing.resume_command),
         host: host.or(existing.host),
+        recipe: recipe.or(existing.recipe),
         destination: destination.or(existing.destination),
         name: name.or(existing.name),
         // A title-only edit keeps a stored Fixed policy. Explicit Base is
@@ -3390,12 +3399,28 @@ async fn find_template(
     state: &AppState,
     name: &str,
 ) -> anyhow::Result<Option<farhelm_proto::launcher::LaunchTemplate>> {
-    Ok(state
+    let template = state
         .store
         .launch_templates()
         .await?
         .into_iter()
-        .find(|template| template.name == name))
+        .find(|template| template.name == name);
+    if template
+        .as_ref()
+        .is_some_and(|template| template.fields.recipe.is_some())
+    {
+        return Err(recipe_template_refusal());
+    }
+    Ok(template)
+}
+
+/// Recipe templates stay GUI-only until agent-requested billing is designed.
+/// Refusing before an approval also keeps new placement fields off old agent wires.
+fn recipe_template_refusal() -> anyhow::Error {
+    anyhow::Error::new(crate::SupervisorError::helm(
+        ErrorKind::Unauthorized,
+        "Recipe templates can only be used and edited in Farhelm's GUI".into(),
+    ))
 }
 
 /// The display name of the host whose recorded install is `identity`, if
@@ -3453,6 +3478,7 @@ async fn template_listing(state: &AppState, caller_entry_uuid: &str) -> anyhow::
     Ok(AgentReply::Templates {
         templates: templates
             .iter()
+            .filter(|template| template.fields.recipe.is_none())
             .map(|template| {
                 let host_name = template.fields.host.as_deref().and_then(|identity| {
                     crate::agent_launch::template_host_row(&views, identity)
@@ -3538,6 +3564,7 @@ async fn clone_for_agent(
         "clone",
     )
     .await?;
+    refuse_sandbox_target(state, source_key.host).await?;
     let (source_claim, source_client) = crate::sessions::route_session(state, &source_key).await?;
     // Marked as the read-only phase it is: this listing runs before any
     // create is dispatched, so a transport failure here is retry-safe and
@@ -4538,6 +4565,7 @@ mod tests {
             yolo_without_asking: false,
             commands_without_asking: false,
             own_sessions_without_asking: false,
+            is_session_owned: false,
             links_without_asking: false,
             local_links_without_asking: false,
             icon: Default::default(),
@@ -13187,6 +13215,196 @@ mod tests {
         h.await_refreshed(remote).await;
         trust_without_asking(&h).await;
         (h, local, remote)
+    }
+
+    /// Sandbox refusal precedes permissions, cards and every verb's target
+    /// work. Ordinary-origin agents also cannot create or destroy a billed
+    /// resource through a source session or a recipe template.
+    #[farhelm_testtrace::test]
+    async fn sandbox_agent_policy_refuses_origins_and_billed_targets_without_cards() {
+        let (h, local, _) = host_fleet().await;
+        let owned = h
+            .store
+            .register_session_sandbox(crate::store::NewTensorlakeHost {
+                destination: crate::tensorlake::ssh::destination("farhelm-sess-test-owned"),
+                entry: crate::store::NewHostEntry::new(Some("Owned sandbox")).unwrap(),
+                sandbox: "farhelm-sess-test-owned".into(),
+                recipe: "dev".into(),
+                resources: farhelm_proto::tensorlake::recipes::RecipeSize {
+                    cpus: 1,
+                    memory_gb: 1,
+                    disk_gb: 10,
+                },
+            })
+            .await
+            .unwrap();
+        h.store
+            .admit_tensorlake_install(owned, "/fixture/farhelm", "/fixture/state")
+            .await
+            .unwrap();
+        h.store
+            .set_commands_without_asking(owned, true)
+            .await
+            .unwrap();
+        h.store
+            .set_own_sessions_without_asking(owned, true)
+            .await
+            .unwrap();
+        h.fleet.edit(owned, |script| {
+            *script = HostScript {
+                identity: Some("owned-install".into()),
+                sessions: vec![session("owned-session", 50)],
+                ..HostScript::default()
+            }
+        });
+        h.manager.sync_registry().await.unwrap();
+        h.await_refreshed(owned).await;
+        assert!(h.manager.status(owned).unwrap().is_session_owned);
+        let _gui = h.manager.events().admit(1).unwrap();
+        let handler = HelmAgentRequests::with_prompts_enabled(&h.state);
+        let origin = origin_of(&h, owned);
+        let mut spawn = command_create("unused", "~", "true", None, None);
+        if let AgentVerb::Create { host, spawn, .. } = &mut spawn {
+            *host = None;
+            *spawn = Some(farhelm_proto::SpawnPlacement {
+                parent: Some("owned-session".into()),
+                ..Default::default()
+            });
+        }
+        let target = full_id(&h, local, "local-live");
+        let before = h.fleet.host_requests(owned);
+        for verb in [
+            spawn,
+            command_create("Local (this machine)", "~", "true", None, None),
+            AgentVerb::Clone {
+                source_session_id: Some(target.clone()),
+                host: Some("Local (this machine)".into()),
+                cwd: None,
+                title: None,
+                intent_key: None,
+                confirm_yolo: false,
+            },
+            AgentVerb::Stop {
+                session_id: Some(target.clone()),
+            },
+            AgentVerb::Prompt {
+                session_id: Some(target),
+                prompt: "continue".into(),
+            },
+            AgentVerb::Templates {},
+            AgentVerb::Hosts {},
+        ] {
+            let (kind, message) = refused(handler.handle(origin, "owned-session", verb).await);
+            assert_eq!(kind, ErrorKind::Unauthorized);
+            assert_eq!(message, SANDBOX_AGENT_REFUSAL);
+            assert!(h.state.approvals.list().is_empty());
+        }
+        assert_eq!(
+            h.fleet.host_requests(owned),
+            before,
+            "no supervisor work or notification RPC"
+        );
+        let (kind, message) = refused(
+            HelmAgentRequests::for_state(&h.state)
+                .handle(
+                    origin,
+                    "owned-session",
+                    AgentVerb::Prompt {
+                        session_id: None,
+                        prompt: "x".into(),
+                    },
+                )
+                .await,
+        );
+        assert_eq!(kind, ErrorKind::Unauthorized);
+        assert_eq!(
+            message, AGENT_PROMPTS_OFF_REFUSAL,
+            "global prompts-off precedence remains ordinary"
+        );
+
+        put_template(
+            &h,
+            "recipe-template",
+            farhelm_proto::launcher::TemplateFields {
+                recipe: Some("dev".into()),
+                ..command_template("true")
+            },
+        )
+        .await;
+        let ordinary = origin_of(&h, local);
+        let owned_ref = full_id(&h, owned, "owned-session");
+        for verb in [
+            AgentVerb::Delete {
+                session_id: Some(owned_ref.clone()),
+                stop_if_running: true,
+            },
+            AgentVerb::Clone {
+                source_session_id: Some(owned_ref),
+                host: Some("Local (this machine)".into()),
+                cwd: None,
+                title: None,
+                intent_key: None,
+                confirm_yolo: false,
+            },
+            AgentVerb::TemplateDelete {
+                name: "recipe-template".into(),
+            },
+            AgentVerb::TemplateEdit {
+                name: "recipe-template".into(),
+                fields: farhelm_proto::launcher::TemplateFields {
+                    name: Some("edited".into()),
+                    ..Default::default()
+                },
+                host: None,
+                shortcuts: Default::default(),
+            },
+        ] {
+            let expected = if matches!(&verb, AgentVerb::Delete { .. } | AgentVerb::Clone { .. }) {
+                "Only the user can delete or clone a sandbox session in Farhelm"
+            } else {
+                "Recipe templates can only be used and edited in Farhelm's GUI"
+            };
+            let (kind, message) = refused(handler.handle(ordinary, "local-live", verb).await);
+            assert_eq!(kind, ErrorKind::Unauthorized);
+            assert_eq!(message, expected);
+            assert!(h.state.approvals.list().is_empty());
+        }
+        let AgentOutcome::Ok {
+            reply: AgentReply::Hosts { hosts, .. },
+        } = handler
+            .handle(ordinary, "local-live", AgentVerb::Hosts {})
+            .await
+        else {
+            panic!("ordinary origin can list ordinary hosts")
+        };
+        assert!(!hosts.iter().any(|host| host.name == "Owned sandbox"));
+        let AgentOutcome::Ok {
+            reply: AgentReply::Templates { templates, .. },
+        } = handler
+            .handle(ordinary, "local-live", AgentVerb::Templates {})
+            .await
+        else {
+            panic!("ordinary origin can list ordinary templates")
+        };
+        assert!(
+            !templates
+                .iter()
+                .any(|template| template.name == "recipe-template")
+        );
+        let mut create = command_create("Local (this machine)", "~", "true", None, None);
+        if let AgentVerb::Create { templates, .. } = &mut create {
+            templates.push("recipe-template".into());
+        }
+        let (_, message) = refused(handler.handle(ordinary, "local-live", create).await);
+        assert!(
+            message.contains("recipe") && message.contains("unavailable"),
+            "{message}"
+        );
+        assert!(h.state.approvals.list().is_empty());
+        assert!(
+            host_row(&h, owned).await.is_some(),
+            "agent requests changed no resource ownership"
+        );
     }
 
     /// The registry row for `host`, which these tests read to see what a

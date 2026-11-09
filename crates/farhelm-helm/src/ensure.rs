@@ -262,6 +262,7 @@ mod tests {
                 yolo_without_asking: false,
                 commands_without_asking: false,
                 own_sessions_without_asking: false,
+                session_owned: false,
                 links_without_asking: false,
                 local_links_without_asking: false,
                 icon: Default::default(),

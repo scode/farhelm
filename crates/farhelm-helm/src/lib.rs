@@ -698,6 +698,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             get(sessions::list_sessions).post(sessions::create_session),
         )
         .route("/api/launch-catalog", get(sessions::launch_catalog))
+        .route(
+            "/api/sandbox-sessions",
+            axum::routing::post(sessions::create_sandbox_session),
+        )
         .route("/api/notices", get(notices::get))
         .route("/api/notices/marks", axum::routing::post(notices::marks))
         .route("/api/sessions/{id}/tunnels", get(tunnels::list_tunnels))
@@ -726,6 +730,10 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/sessions/{id}/replace",
             axum::routing::post(sessions::replace_session),
+        )
+        .route(
+            "/api/sessions/{id}/stop-and-suspend",
+            axum::routing::post(sessions::stop_and_suspend),
         )
         .route(
             "/api/sessions/{id}",

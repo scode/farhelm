@@ -29,6 +29,37 @@ pub(super) struct TensorlakeAddPlan {
     recipe: StoredRecipe,
     steps: PlanSteps,
     tensorlake: Tensorlake,
+    session: Option<SessionLaunch>,
+}
+
+/// The initial session belongs to the existing provisioning task. Its caller
+/// waits for the result, but dropping that waiter never cancels resource cleanup.
+struct SessionLaunch {
+    state: Arc<crate::AppState>,
+    request: crate::sessions::CreateReq,
+    name_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
+    result: tokio::sync::oneshot::Sender<anyhow::Result<farhelm_proto::SessionInfo>>,
+}
+
+/// Reuse setup progress while naming the session-specific work honestly.
+fn session_steps(mut steps: PlanSteps, recipe: &str, session: bool) -> PlanSteps {
+    if session {
+        for step in &mut steps.steps {
+            step.name = match step.id.as_str() {
+                "prepare-snapshot" => format!("Preparing {recipe} for sessions…"),
+                "create-sandbox" => format!("Creating a {recipe} sandbox…"),
+                "attach-supervisor" => "Starting Farhelm in the sandbox…".into(),
+                _ => continue,
+            };
+        }
+        steps.steps.push(PlanStep {
+            id: "create-session".into(),
+            name: format!("Launching the session on {recipe} sandbox…"),
+            paths: vec![],
+            explanation: None,
+        });
+    }
+    steps
 }
 
 #[cfg(test)]
@@ -37,7 +68,7 @@ mod tests;
 
 /// Name the sandbox with a per-helm ownership tag, a readable slug, and a
 /// random suffix. Always valid Tensorlake grammar, at most 63 ASCII bytes.
-fn sandbox_name(tag: &str, display: &str) -> String {
+fn sandbox_name(prefix: &str, tag: &str, display: &str) -> String {
     let mut slug = String::new();
     for c in display.chars().flat_map(char::to_lowercase) {
         if c.is_ascii_alphanumeric() {
@@ -53,7 +84,7 @@ fn sandbox_name(tag: &str, display: &str) -> String {
         .unwrap()
         .trim_end_matches('-');
     format!(
-        "farhelm-host-{tag}-{slug}-{}",
+        "{prefix}{tag}-{slug}-{}",
         &uuid::Uuid::new_v4().simple().to_string()[..4]
     )
 }
@@ -241,14 +272,74 @@ impl ProvisioningService {
         tensorlake: Tensorlake,
     ) -> anyhow::Result<ProbeResponse> {
         let service = Arc::clone(self);
-        crate::run_owned(async move { service.probe_tensorlake_owned(request, tensorlake).await })
-            .await
+        crate::run_owned(async move {
+            service
+                .probe_tensorlake_owned(request, tensorlake, false)
+                .await
+        })
+        .await
+    }
+
+    /// Start a disposable launch through the ordinary host setup task and run
+    /// limit. There is no pending session row or startup recovery protocol.
+    pub(crate) async fn start_session_sandbox(
+        self: Arc<Self>,
+        state: Arc<crate::AppState>,
+        recipe: String,
+        request: crate::sessions::CreateReq,
+        name_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
+    ) -> anyhow::Result<(
+        RunAccepted,
+        tokio::sync::oneshot::Receiver<anyhow::Result<farhelm_proto::SessionInfo>>,
+    )> {
+        request.validate_sandbox_launch(&state).await?;
+        let probe = self
+            .probe_tensorlake_owned(
+                ProbeRequest {
+                    target: ProbeDestination::Tensorlake {
+                        name: format!(
+                            "{recipe} sandbox {}",
+                            &uuid::Uuid::new_v4().simple().to_string()[..4]
+                        ),
+                        recipe,
+                    },
+                    remote_farhelm: None,
+                    remote_state_dir: None,
+                    new_entry: None,
+                },
+                state.tensorlake.clone(),
+                true,
+            )
+            .await?;
+        let ProbeResponse::TensorlakeProvisionable { probe_id, .. } = probe else {
+            return Err(refused(
+                "the recipe could not produce a sandbox launch plan",
+            ));
+        };
+        let mut plan = {
+            let mut memory = self.memory.lock().await;
+            memory.plan_order.retain(|id| id != &probe_id);
+            memory
+                .tensorlake_plans
+                .remove(&probe_id)
+                .ok_or_else(|| refused("the sandbox launch plan expired; launch again"))?
+        };
+        let (result, receiver) = tokio::sync::oneshot::channel();
+        plan.session = Some(SessionLaunch {
+            state,
+            request,
+            name_kind,
+            result,
+        });
+        let accepted = self.start_tensorlake_add(plan).await?;
+        Ok((accepted, receiver))
     }
 
     async fn probe_tensorlake_owned(
         &self,
         request: ProbeRequest,
         tensorlake: Tensorlake,
+        session: bool,
     ) -> anyhow::Result<ProbeResponse> {
         let _slot = self
             .plan_slots
@@ -276,7 +367,15 @@ impl ProvisioningService {
                         None,
                         name.clone(),
                         recipe,
-                        sandbox_name(&tag, &name),
+                        sandbox_name(
+                            if session {
+                                crate::tensorlake::orphans::SESSION_PREFIX
+                            } else {
+                                crate::tensorlake::orphans::HOST_PREFIX
+                            },
+                            &tag,
+                            &name,
+                        ),
                         None,
                         false,
                         true,
@@ -335,6 +434,21 @@ impl ProvisioningService {
         if let Some(size) = size {
             recipe.size = size;
         }
+        if session {
+            if state.snapshot.is_none() {
+                return Err(refused(
+                    "this recipe has no built snapshot; build it in Settings → Tensorlake first",
+                ));
+            }
+            if !matches!(
+                tensorlake.settings().await?.ssh_key,
+                farhelm_proto::tensorlake::SshKeyStatus::Ready { .. }
+            ) {
+                return Err(refused(
+                    "create and register Farhelm's SSH key in Settings → Tensorlake first",
+                ));
+            }
+        }
         tensorlake.ensure_host_key().await.map_err(refused)?;
         let steps = if new_install {
             prepared_host_steps(
@@ -360,6 +474,7 @@ impl ProvisioningService {
                 recorded_sandbox,
             )
         };
+        let steps = session_steps(steps, &recipe_name, session);
         let confirmation = format!(
             "{}\n{}\nThis sandbox bills while running. See https://www.tensorlake.ai/pricing. On Usage Credits, Tensorlake suspends it after 24 hours without a connection. Farhelm never resumes it on its own.",
             steps.lead,
@@ -392,6 +507,7 @@ impl ProvisioningService {
             recipe,
             steps,
             tensorlake,
+            session: None,
         };
         let mut memory = self.memory.lock().await;
         while memory.plan_order.len() >= MAX_PENDING_PLANS {
@@ -418,16 +534,18 @@ impl ProvisioningService {
                 host
             }
             None => {
-                let host = self
-                    .store
-                    .register_tensorlake_host(NewTensorlakeHost {
-                        destination: plan.destination.clone(),
-                        entry: plan.entry.clone(),
-                        sandbox: plan.sandbox.clone(),
-                        recipe: plan.recipe_name.clone(),
-                        resources: plan.recipe.size,
-                    })
-                    .await?;
+                let new_host = NewTensorlakeHost {
+                    destination: plan.destination.clone(),
+                    entry: plan.entry.clone(),
+                    sandbox: plan.sandbox.clone(),
+                    recipe: plan.recipe_name.clone(),
+                    resources: plan.recipe.size,
+                };
+                let host = if plan.session.is_some() {
+                    self.store.register_session_sandbox(new_host).await?
+                } else {
+                    self.store.register_tensorlake_host(new_host).await?
+                };
                 let reconciled = async {
                     // Deletion may have won while confirmation was open.
                     // Check after insertion: from this point the recipe's
@@ -486,12 +604,11 @@ impl ProvisioningService {
         self.manager.events().bump();
         let service = Arc::clone(&self);
         let task = tokio::spawn(async move {
-            let _write = host_write;
             let _slot = Arc::clone(&service.run_slots)
                 .acquire_owned()
                 .await
                 .expect("run slots stay open");
-            service.execute_tensorlake_add(host, plan).await;
+            service.execute_tensorlake_add(host, plan, host_write).await;
         });
         self.memory.lock().await.tasks.insert(host, task);
         Ok(RunAccepted {
@@ -500,11 +617,94 @@ impl ProvisioningService {
         })
     }
 
-    /// Hold dialing until installation coordinates are durable. On failure
-    /// keep the row and all completed work; rerun adopts by the same name.
-    async fn execute_tensorlake_add(&self, host: HostId, plan: TensorlakeAddPlan) {
+    /// Keep setup and an optional session launch under one resource admission.
+    ///
+    /// Ordinary host failures retain progress for a setup retry. A fresh
+    /// session launch instead attempts whole-sandbox cleanup on failure,
+    /// including when a create reply was lost.
+    async fn execute_tensorlake_add(
+        &self,
+        host: HostId,
+        mut plan: TensorlakeAddPlan,
+        host_write: crate::manager::ProvisionLockGuard,
+    ) {
+        // Capture setup's held state before it can publish a real connection
+        // result. Remembering that later result instead would make the wait
+        // depend on another state change after the connection already settled.
+        let setup_state = self.manager.state(host);
         let mut index = 0;
         let result = self.tensorlake_steps(host, &plan, &mut index).await;
+        if let Some(launch) = plan.session.take() {
+            let result = match result {
+                Ok(()) => {
+                    index += 1;
+                    self.set_step(host, index, StepStatus::Running, None).await;
+                    // Normal attachment already waits; injected setup may finish
+                    // first, or that connection may drop before create. Admission
+                    // normally replaces the held placeholder with Connecting;
+                    // exclude both. Ordinary create owns the coherent state/client
+                    // check and refusal, including actor loss.
+                    let _ = self
+                        .manager
+                        .wait_for_state(host, |state| {
+                            Some(state) != setup_state.as_ref()
+                                && !matches!(state, HostState::Connecting { .. })
+                        })
+                        .await;
+                    crate::sessions::create_in_session_sandbox(
+                        &launch.state,
+                        host,
+                        launch.request,
+                        launch.name_kind,
+                    )
+                    .await
+                }
+                Err(error) => Err(error),
+            };
+            let result = match result {
+                Ok(session) => {
+                    self.set_step(host, index, StepStatus::Completed, None)
+                        .await;
+                    let mut memory = self.memory.lock().await;
+                    if let Some(run) = memory.runs.get_mut(&host) {
+                        run.status = RunStatus::Completed;
+                    }
+                    memory.busy.remove(&host);
+                    Ok(session)
+                }
+                Err(error) => {
+                    // This is the fresh sandbox created for this launch, never
+                    // a Replace source. A lost create reply may have started an
+                    // agent; the accepted cleanup rule still discards it.
+                    let cleanup = crate::hosts::forget_host_locked(
+                        &launch.state,
+                        host,
+                        host_write,
+                        RunTask::Detach,
+                    )
+                    .await;
+                    let message = match cleanup {
+                        Ok(()) => format!("Not launched. {error:#}"),
+                        Err(cleanup) => format!(
+                            "Not launched. {error:#}. Sandbox {} could not be removed: {cleanup:#}. Open Hosts to retry Delete sandbox or recover its files manually.",
+                            plan.sandbox
+                        ),
+                    };
+                    self.set_step(host, index, StepStatus::Failed, Some(message.clone()))
+                        .await;
+                    let mut memory = self.memory.lock().await;
+                    if let Some(run) = memory.runs.get_mut(&host) {
+                        run.status = RunStatus::Failed;
+                        run.message = Some(message.clone());
+                    }
+                    memory.busy.remove(&host);
+                    Err(refused(message))
+                }
+            };
+            let _ = launch.result.send(result);
+            self.manager.events().bump();
+            return;
+        }
         if let Err(error) = result {
             // Initial failures keep the admission hold. Missing install
             // coordinates also gate dialing after a manager restart; only
@@ -715,27 +915,38 @@ impl ProvisioningService {
                 .is_none();
         self.replace_tensorlake_steps(
             host,
-            &prepared_host_steps(
-                &plan.sandbox,
+            &session_steps(
+                prepared_host_steps(
+                    &plan.sandbox,
+                    &plan.recipe_name,
+                    &plan.recipe,
+                    built,
+                    plan.host.is_some(),
+                    prepare_visible,
+                ),
                 &plan.recipe_name,
-                &plan.recipe,
-                built,
-                plan.host.is_some(),
-                prepare_visible,
+                plan.session.is_some(),
             ),
         )
         .await;
         *index = 0;
         if needs_snapshot {
             self.set_step(host, *index, StepStatus::Running, None).await;
-            builds
-                .ensure_snapshot(
-                    &plan.recipe_name,
-                    &plan.recipe,
-                    Arc::clone(self.manager.events()),
-                    |line| self.set_step(host, 0, StepStatus::Running, Some(line)),
-                )
-                .await?;
+            if plan.session.is_some() {
+                anyhow::ensure!(
+                    built,
+                    "this recipe has no built snapshot; build it in Settings → Tensorlake first"
+                );
+            } else {
+                builds
+                    .ensure_snapshot(
+                        &plan.recipe_name,
+                        &plan.recipe,
+                        Arc::clone(self.manager.events()),
+                        |line| self.set_step(host, 0, StepStatus::Running, Some(line)),
+                    )
+                    .await?;
+            }
             self.set_step(
                 host,
                 0,
@@ -773,27 +984,42 @@ impl ProvisioningService {
                         prepare_visible = true;
                         self.replace_tensorlake_steps(
                             host,
-                            &prepared_host_steps(
-                                &plan.sandbox,
+                            &session_steps(
+                                prepared_host_steps(
+                                    &plan.sandbox,
+                                    &plan.recipe_name,
+                                    &plan.recipe,
+                                    true,
+                                    plan.host.is_some(),
+                                    true,
+                                ),
                                 &plan.recipe_name,
-                                &plan.recipe,
-                                true,
-                                plan.host.is_some(),
-                                true,
+                                plan.session.is_some(),
                             ),
                         )
                         .await;
                     }
                     *index = 1;
                     self.set_step(host, *index, StepStatus::Running, None).await;
-                    builds
-                        .ensure_prepared_snapshot(
-                            &plan.recipe_name,
-                            &plan.recipe,
-                            Arc::clone(self.manager.events()),
-                            |line| self.set_step(host, 1, StepStatus::Running, Some(line)),
-                        )
-                        .await?;
+                    if plan.session.is_some() {
+                        builds
+                            .ensure_prepared_snapshot_from_built(
+                                &plan.recipe_name,
+                                &plan.recipe,
+                                Arc::clone(self.manager.events()),
+                                |line| self.set_step(host, 1, StepStatus::Running, Some(line)),
+                            )
+                            .await?;
+                    } else {
+                        builds
+                            .ensure_prepared_snapshot(
+                                &plan.recipe_name,
+                                &plan.recipe,
+                                Arc::clone(self.manager.events()),
+                                |line| self.set_step(host, 1, StepStatus::Running, Some(line)),
+                            )
+                            .await?;
+                    }
                 }
                 let guard = builds.lock_snapshot_use(&plan.recipe_name).await?;
                 if let Some(prepared) = builds.fresh_prepared_snapshot(&plan.recipe_name).await? {
@@ -927,10 +1153,14 @@ impl ProvisioningService {
         );
         self.set_step(host, *index, status, message).await;
         let mut memory = self.memory.lock().await;
-        if let Some(run) = memory.runs.get_mut(&host) {
+        if let Some(run) = memory.runs.get_mut(&host)
+            && plan.session.is_none()
+        {
             run.status = RunStatus::Completed;
         }
-        memory.busy.remove(&host);
+        if plan.session.is_none() {
+            memory.busy.remove(&host);
+        }
         drop(memory);
         self.manager.events().bump();
         Ok(())
@@ -1087,7 +1317,16 @@ impl ProvisioningService {
                         memory_mb: u64::from(memory_gb) * 1024,
                         disk_mb: u64::from(disk_gb) * 1024,
                     },
-                    timeout_secs: 0,
+                    // Keyed on the row's ownership as well as the plan: an
+                    // ordinary setup retry from Hosts on a leftover
+                    // session-owned row (the helm stopped before create, or
+                    // cleanup failed) carries no session, and must still get
+                    // the 30-minute idle timeout every session sandbox has.
+                    timeout_secs: if plan.session.is_some() || row.is_session_owned() {
+                        1800
+                    } else {
+                        0
+                    },
                     auto_resume: false,
                     max_pending_secs: 900,
                 };

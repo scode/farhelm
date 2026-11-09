@@ -57,6 +57,10 @@ pub(crate) struct HostView {
     /// distinction is not cosmetic: it is what tells a client which rows
     /// offer edit and remove at all, and what removing one does.
     pub(crate) kind: &'static str,
+    /// Session launch ownership changes the resource's lifecycle, not its
+    /// inclusion in Hosts or its ordinary diagnostics and update eligibility.
+    #[serde(default)]
+    pub(crate) is_session_owned: bool,
     /// The sandbox behind a `"tensorlake"` host, for its details. Left out of
     /// the JSON for every other host, so their shape is unchanged.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -505,6 +509,7 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                     HostKind::Ssh => "ssh",
                     HostKind::Tensorlake => "tensorlake",
                 },
+                is_session_owned: snapshot.is_session_owned,
                 tensorlake: registry
                     .and_then(|row| row.tensorlake.as_ref())
                     .map(|binding| {
@@ -1332,11 +1337,18 @@ pub(crate) async fn remove_host(
 /// The HTTP handler inherits that from the router.
 async fn remove_host_for(state: &AppState, host: HostId) -> anyhow::Result<()> {
     let provisioning = provision_lock_or_busy(state, host)?;
-    forget_host_locked(state, host, provisioning).await
+    forget_host_locked(
+        state,
+        host,
+        provisioning,
+        crate::provisioning::RunTask::Abort,
+    )
+    .await
 }
 
-/// [`remove_host_for`] for an agent's approved `farhelm agent host remove`,
-/// carried out only while the host still is what the user approved:
+/// Remove only a host whose current resource still matches the caller's consent.
+/// Agent host removal and the user's whole-sandbox session Delete share this
+/// path, carried out only while the host still is what the user approved:
 /// `expected` judges the row as read under the host's provisioning lock,
 /// held until the row is gone, and its refusal (the caller's own error)
 /// removes nothing.
@@ -1361,7 +1373,13 @@ pub(crate) async fn remove_host_checked(
     state.approvals.hold_at_host_write_gate(host).await;
     let provisioning = provision_lock_or_busy(state, host)?;
     expected(&registry_row(state, host).await?)?;
-    forget_host_locked(state, host, provisioning).await
+    forget_host_locked(
+        state,
+        host,
+        provisioning,
+        crate::provisioning::RunTask::Abort,
+    )
+    .await
 }
 
 /// The host's provisioning lock, taken without waiting, or removal's
@@ -1394,10 +1412,13 @@ fn provision_lock_or_busy(
 /// lasts until the actor is stopped with the row. A failure leaves the host
 /// listed, releases the hold with a fresh retry, and answers with
 /// Tensorlake's reason; removing again picks up where it stopped.
-async fn forget_host_locked(
+/// Fresh-launch cleanup transfers its existing guard here and uses Detach:
+/// cancelling that provisioning task would abort its own cleanup midway.
+pub(crate) async fn forget_host_locked(
     state: &AppState,
     host: HostId,
     provisioning: crate::manager::ProvisionLockGuard,
+    run_task: crate::provisioning::RunTask,
 ) -> anyhow::Result<()> {
     let row = registry_row(state, host).await?;
     let deleted = if row.kind.removal_deletes_machine() {
@@ -1422,7 +1443,7 @@ async fn forget_host_locked(
     };
     let stopped = match state
         .provisioning
-        .delete_registered_host(host, crate::provisioning::RunTask::Abort, deleted.as_ref())
+        .delete_registered_host(host, run_task, deleted.as_ref())
         .await
     {
         Ok(stopped) => stopped,
@@ -1434,6 +1455,13 @@ async fn forget_host_locked(
             return Err(error);
         }
     };
+    // A removed host has no session that can retain a useful local listener.
+    // Serialize with listener publication so an in-flight open cannot leave
+    // behind a port after the actor and its cached sessions are gone.
+    {
+        let _mutation = state.tunnels.mutation.lock().await;
+        state.tunnels.close_host_locked(host).await;
+    }
     drop(provisioning);
     tracing::info!(
         host,
@@ -1581,6 +1609,7 @@ mod tests {
             yolo_without_asking: true,
             commands_without_asking: false,
             own_sessions_without_asking: false,
+            session_owned: false,
             links_without_asking: false,
             local_links_without_asking: false,
             icon: Default::default(),
@@ -1885,6 +1914,75 @@ mod tests {
         let local = rest_harness::local_id(&harness.store).await;
         harness.await_refreshed(local).await;
         harness
+    }
+
+    /// Ownership must remain available offline without hiding the resource
+    /// from Hosts. Exercise the ordinary manager and authenticated HTTP route,
+    /// retaining both the owned sandbox and the local row through suspension.
+    #[farhelm_testtrace::test]
+    async fn session_owned_hosts_stay_listed_with_offline_manager_metadata() {
+        let harness = lone_local_helm().await;
+        let host = harness
+            .store
+            .register_session_sandbox(crate::store::NewTensorlakeHost {
+                destination: "owned@owned.sandbox.tensorlake.ai".into(),
+                entry: crate::store::NewHostEntry::new(Some("Owned sandbox")).unwrap(),
+                sandbox: "owned".into(),
+                recipe: "test-recipe".into(),
+                resources: farhelm_proto::tensorlake::recipes::RecipeSize {
+                    cpus: 1,
+                    memory_gb: 1,
+                    disk_gb: 10,
+                },
+            })
+            .await
+            .unwrap();
+        harness.manager.sync_registry().await.unwrap();
+        let pending = harness.manager.status(host).unwrap();
+        assert!(pending.is_session_owned);
+        assert!(
+            pending.client.is_none(),
+            "premise: no sandbox has been provisioned or dialed"
+        );
+        let suspended = crate::manager::HostState::Suspended {
+            observed_at: 100,
+            suspended_by_farhelm_at: None,
+            resume_failed: None,
+        };
+        assert!(
+            harness
+                .manager
+                .hold_connection(host, suspended.clone())
+                .await
+        );
+        let status = harness.manager.status(host).unwrap();
+        assert!(status.is_session_owned);
+        assert!(status.client.is_none());
+        assert_eq!(status.state, suspended);
+        let snapshots = harness.manager.snapshots();
+        assert_eq!(snapshots.len(), 2);
+        assert!(
+            snapshots
+                .iter()
+                .find(|row| row.id == host)
+                .unwrap()
+                .is_session_owned
+        );
+        let local = rest_harness::local_id(&harness.store).await;
+        assert!(!harness.manager.status(local).unwrap().is_session_owned);
+        let (status, body, text) = call(&harness, "GET", "/api/hosts", None).await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        let hosts = body["hosts"].as_array().unwrap();
+        assert_eq!(hosts.len(), 2);
+        let owned = hosts.iter().find(|row| row["id"] == host).unwrap();
+        assert_eq!(owned["is_session_owned"], true);
+        assert_eq!(owned["kind"], "tensorlake");
+        assert_eq!(owned["tensorlake"]["sandbox"], "owned");
+        assert_eq!(owned["state"]["phase"], "suspended");
+        assert_eq!(
+            hosts.iter().find(|row| row["id"] == local).unwrap()["is_session_owned"],
+            false
+        );
     }
 
     /// The list must always contain the helm's own machine, named as

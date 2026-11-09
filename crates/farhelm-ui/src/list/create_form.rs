@@ -779,6 +779,7 @@ fn validated_template_batch(
     let context = farhelm_proto::launcher::TemplateContext {
         catalog,
         known_hosts: &known_hosts,
+        known_recipes: &[],
         host_fixed,
     };
     let normalized = templates

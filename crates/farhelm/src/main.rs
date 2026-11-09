@@ -1067,6 +1067,7 @@ impl LaunchFlags {
                 self.resume_command.clone().map(Some)
             },
             host: None,
+            recipe: None,
             destination: cwd.map(TemplateDestination::Folder),
             name: title,
             name_kind: None,

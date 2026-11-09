@@ -7,6 +7,158 @@ use super::{resolve_owner, store};
 use crate::rest_harness::{self, WsTestClient, silent_supervisor};
 use std::time::Duration;
 
+/// A recipe launch accepts repository intent before its machine exists. Once
+/// connected it must obtain that machine's exact preview, honor template Base
+/// numbering, and dispatch only one create through ordinary checkout admission.
+/// This also proves ordinary host selection cannot reuse the owned machine.
+#[farhelm_testtrace::test]
+async fn a_recipe_checkout_binds_its_new_machine_preview_before_one_create() {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::launcher::TemplateNameKind;
+
+    let h = rest_harness::idle_helm().await;
+    let owned = h
+        .store
+        .register_session_sandbox(store::NewTensorlakeHost {
+            destination: crate::tensorlake::ssh::destination("farhelm-sess-checkout"),
+            entry: store::NewHostEntry::new(Some("Checkout sandbox")).unwrap(),
+            sandbox: "farhelm-sess-checkout".into(),
+            recipe: "dev".into(),
+            resources: farhelm_proto::tensorlake::recipes::RecipeSize {
+                cpus: 1,
+                memory_gb: 1,
+                disk_gb: 10,
+            },
+        })
+        .await
+        .unwrap();
+    h.store
+        .admit_tensorlake_install(owned, "/fixture/farhelm", "/fixture/state")
+        .await
+        .unwrap();
+    h.store.set_checkout_root(None, "~/work").await.unwrap();
+    let (client_side, peer) = tokio::io::duplex(64 * 1024);
+    let (done, mut finished) = tokio::sync::oneshot::channel();
+    let responder = tokio::spawn(async move {
+        let (read, write) = tokio::io::split(peer);
+        let mut reader = FrameReader::new(read);
+        let mut writer = FrameWriter::new(write);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let mut previews = Vec::new();
+        let mut creates = 0;
+        loop {
+            let frame = tokio::select! {
+                _ = &mut finished => break,
+                frame = reader.read_frame() => frame.unwrap().expect("owned fixture remains connected"),
+            };
+            let reply = match parse_control(&frame).unwrap() {
+                ControlMsg::GithubCheckoutPreview { req_id, request } => {
+                    assert_eq!(request.host.as_deref(), Some(owned.to_string().as_str()));
+                    assert_eq!(request.repo, "acme/project");
+                    assert_eq!(request.root.as_deref(), Some("~/work"));
+                    let title = request.title.unwrap();
+                    previews.push(title.clone());
+                    if title == "review" {
+                        ControlMsg::Error {
+                            req_id,
+                            kind: farhelm_proto::ErrorKind::Conflict,
+                            create_unaccepted: false,
+                            message: "occupied in the new machine's image".into(),
+                        }
+                    } else {
+                        assert_eq!(title, "review-2");
+                        ControlMsg::GithubCheckoutPreviewed {
+                            req_id,
+                            preview: farhelm_proto::GithubPreviewResponse {
+                                canonical_root: "/new-home/work".into(),
+                                basename: "project-review-2".into(),
+                                cwd: "/new-home/work/project-review-2".into(),
+                                config_revision: request.config_revision.unwrap(),
+                                claim_context: farhelm_proto::ClaimContext {
+                                    host: owned.to_string(),
+                                    incarnation: request.expected_incarnation.unwrap(),
+                                },
+                            },
+                        }
+                    }
+                }
+                ControlMsg::CreateSession {
+                    req_id,
+                    title,
+                    github_checkout,
+                    ..
+                } => {
+                    creates += 1;
+                    assert_eq!(
+                        creates, 1,
+                        "preview search must never retry session creation"
+                    );
+                    assert_eq!(title.as_deref(), Some("review-2"));
+                    let checkout = github_checkout.expect("exact managed-checkout admission");
+                    assert_eq!(checkout.root, "~/work");
+                    assert_eq!(checkout.preview.cwd, "/new-home/work/project-review-2");
+                    assert_eq!(checkout.preview.basename, "project-review-2");
+                    let mut session = rest_harness::session("recipe-child", 100);
+                    session.title = title.unwrap();
+                    session.cwd = checkout.preview.cwd;
+                    ControlMsg::SessionCreated { req_id, session }
+                }
+                other => panic!("unexpected initial launch request: {other:?}"),
+            };
+            writer.write_control(&reply).await.unwrap();
+        }
+        (previews, creates)
+    });
+    h.fleet.edit(owned, |script| {
+        *script = rest_harness::HostScript {
+            identity: Some("fresh-recipe-install".into()),
+            peer: Some(client_side),
+            ..rest_harness::HostScript::default()
+        }
+    });
+    h.manager.sync_registry().await.unwrap();
+    h.await_refreshed(owned).await;
+    assert!(h.manager.status(owned).unwrap().is_session_owned);
+    let refused = super::create_target(&h.state, Some(owned))
+        .err()
+        .expect("owned destination refused");
+    assert_eq!(
+        refused
+            .downcast_ref::<crate::SupervisorError>()
+            .unwrap()
+            .kind(),
+        farhelm_proto::ErrorKind::InvalidRequest
+    );
+    assert!(refused.to_string().contains("Choose the recipe"));
+    let request: super::CreateReq = serde_json::from_value(serde_json::json!({
+        "cwd": "", "title": "review", "command": { "command": "true", "yolo": false },
+        "github_checkout": { "repo": "acme/project", "title": "review" },
+    }))
+    .unwrap();
+    request.validate_sandbox_launch(&h.state).await.unwrap();
+    let session = tokio::time::timeout(
+        Duration::from_secs(15),
+        super::create_in_session_sandbox(&h.state, owned, request, Some(TemplateNameKind::Base)),
+    )
+    .await
+    .expect("initial checkout must finish within the owned fixture's lifetime")
+    .unwrap();
+    assert_eq!(session.title, "review-2");
+    assert_eq!(session.cwd, "/new-home/work/project-review-2");
+    assert!(
+        session.id.ends_with(":recipe-child"),
+        "reply must be host-qualified: {}",
+        session.id
+    );
+    done.send(()).unwrap();
+    let (previews, creates) = responder.await.unwrap();
+    assert_eq!(previews, ["review", "review-2"]);
+    assert_eq!(creates, 1);
+}
+
 /// The composer reads its release-owned catalog and its successful-create
 /// suggestions through HTTP, rather than deriving either from a session list
 /// or browser-owned command rules.

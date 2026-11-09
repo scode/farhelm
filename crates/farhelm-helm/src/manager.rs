@@ -691,6 +691,9 @@ pub struct HostSnapshot {
     /// It survives connection replacement and never comes from the supervisor.
     pub entry_uuid: String,
     pub kind: HostKind,
+    /// The captured registry row's resource-lifecycle owner. Owned sandboxes
+    /// remain ordinary hosts for connection, update and diagnostic handling.
+    pub is_session_owned: bool,
     /// `None` for the reserved local row, always `Some` for an ssh row.
     pub destination: Option<String>,
     /// The registry alias paired with this connection state, so every
@@ -1292,6 +1295,9 @@ pub struct SessionClaim {
 pub struct HostStatus {
     /// The entry behind this exact state/client capture, independent of installation.
     pub entry_uuid: String,
+    /// Ownership from the same registry capture as this state and client,
+    /// available even while disconnected. It is not supervisor policy.
+    pub is_session_owned: bool,
     pub state: HostState,
     /// `None` in every state except [`HostState::Connected`]. Not an error
     /// case to paper over: it is the "refuse with the host's state named"
@@ -2080,6 +2086,7 @@ impl ConnectionManager {
                     id: handle.row.id,
                     entry_uuid: handle.row.entry_uuid.clone(),
                     kind: handle.row.kind,
+                    is_session_owned: handle.row.is_session_owned(),
                     destination: handle.row.destination.clone(),
                     alias: handle.row.alias.clone(),
                     state: published.state.clone(),
@@ -2111,6 +2118,7 @@ impl ConnectionManager {
         let published = handle.status.borrow();
         Some(HostStatus {
             entry_uuid: handle.row.entry_uuid.clone(),
+            is_session_owned: handle.row.is_session_owned(),
             state: published.state.clone(),
             client: published.client.clone(),
             live_sessions: published.live_sessions.clone(),
@@ -5548,6 +5556,7 @@ mod tests {
             yolo_without_asking: false,
             commands_without_asking: false,
             own_sessions_without_asking: false,
+            session_owned: false,
             links_without_asking: false,
             local_links_without_asking: false,
             icon: Default::default(),
@@ -6206,6 +6215,7 @@ mod tests {
             yolo_without_asking: false,
             commands_without_asking: false,
             own_sessions_without_asking: false,
+            session_owned: false,
             links_without_asking: false,
             local_links_without_asking: false,
             icon: Default::default(),
@@ -12458,6 +12468,7 @@ mod tests {
             yolo_without_asking: false,
             commands_without_asking: false,
             own_sessions_without_asking: false,
+            session_owned: false,
             links_without_asking: false,
             local_links_without_asking: false,
             icon: Default::default(),
@@ -12519,6 +12530,7 @@ mod tests {
             yolo_without_asking: false,
             commands_without_asking: false,
             own_sessions_without_asking: false,
+            session_owned: false,
             links_without_asking: false,
             local_links_without_asking: false,
             icon: Default::default(),

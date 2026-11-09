@@ -1728,15 +1728,61 @@ impl RecipeBuilds {
         name: &str,
         frozen: &StoredRecipe,
         events: Arc<FleetEvents>,
+        progress: F,
+    ) -> anyhow::Result<PreparedSnapshot>
+    where
+        F: FnMut(String) -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        self.ensure_prepared_snapshot_inner(name, frozen, events, progress, false)
+            .await
+    }
+
+    /// Prepare an existing software snapshot without starting a billed build.
+    /// Session launch can renew the installation checkpoint, but a missing
+    /// software snapshot is a separate explicit Build operation in Settings.
+    pub(crate) async fn ensure_prepared_snapshot_from_built<F, Fut>(
+        self: &Arc<Self>,
+        name: &str,
+        frozen: &StoredRecipe,
+        events: Arc<FleetEvents>,
+        progress: F,
+    ) -> anyhow::Result<PreparedSnapshot>
+    where
+        F: FnMut(String) -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        self.ensure_prepared_snapshot_inner(name, frozen, events, progress, true)
+            .await
+    }
+
+    /// Share preparation admission and source-change handling between Add host
+    /// and session launch. Only Add host may start a missing software build.
+    async fn ensure_prepared_snapshot_inner<F, Fut>(
+        self: &Arc<Self>,
+        name: &str,
+        frozen: &StoredRecipe,
+        events: Arc<FleetEvents>,
         mut progress: F,
+        built_only: bool,
     ) -> anyhow::Result<PreparedSnapshot>
     where
         F: FnMut(String) -> Fut,
         Fut: Future<Output = ()>,
     {
         loop {
-            self.ensure_snapshot(name, frozen, Arc::clone(&events), &mut progress)
-                .await?;
+            if built_only {
+                anyhow::ensure!(
+                    self.store
+                        .tensorlake_recipe_row(name)
+                        .await?
+                        .is_some_and(|(_, state)| state.snapshot.is_some()),
+                    "this recipe has no built snapshot; build it in Settings → Tensorlake first"
+                );
+            } else {
+                self.ensure_snapshot(name, frozen, Arc::clone(&events), &mut progress)
+                    .await?;
+            }
             if let Some(snapshot) = self.fresh_prepared_snapshot(name).await? {
                 return Ok(snapshot);
             }

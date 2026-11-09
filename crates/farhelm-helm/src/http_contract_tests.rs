@@ -130,6 +130,7 @@ fn host_list_body() -> serde_json::Value {
         yolo_without_asking: false,
         commands_without_asking: false,
         own_sessions_without_asking: false,
+        is_session_owned: false,
         links_without_asking: false,
         local_links_without_asking: false,
         icon: Default::default(),
@@ -234,6 +235,7 @@ fn host_list_body() -> serde_json::Value {
         // A Tensorlake host carries its sandbox, recipe and size; the other
         // kinds leave `tensorlake` out entirely.
         HostView {
+            is_session_owned: true,
             tensorlake: Some(tensorlake_view(11)),
             ..host(
                 11,

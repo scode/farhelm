@@ -23,7 +23,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-const HOST_PREFIX: &str = "farhelm-host-";
+pub(crate) const HOST_PREFIX: &str = "farhelm-host-";
+pub(crate) const SESSION_PREFIX: &str = "farhelm-sess-";
 
 /// In-flight and failed explicit deletions, keyed by canonical vendor ID.
 /// This is operation state for one helm lifetime, not an ownership ledger
@@ -43,11 +44,12 @@ impl Cleanups {
     }
 }
 
-/// Return the creator tag only for the three product namespaces. The
+/// Return the creator tag only for the product resource namespaces. The
 /// browser harness's farhelm-sbx names must never become cleanup candidates.
 fn creator(name: &str) -> Option<&str> {
     let suffix = name
         .strip_prefix(HOST_PREFIX)
+        .or_else(|| name.strip_prefix(SESSION_PREFIX))
         .or_else(|| name.strip_prefix(BUILDER_PREFIX))
         .or_else(|| name.strip_prefix(PREPARER_PREFIX))?;
     let (tag, rest) = suffix.split_once('-')?;
@@ -58,6 +60,7 @@ fn creator(name: &str) -> Option<&str> {
 /// ownership signal. An older helm's tag spelling must not hide a leftover.
 fn reserved(name: &str) -> bool {
     name.starts_with(HOST_PREFIX)
+        || name.starts_with(SESSION_PREFIX)
         || name.starts_with(BUILDER_PREFIX)
         || name.starts_with(PREPARER_PREFIX)
 }
