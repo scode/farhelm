@@ -5969,8 +5969,10 @@
          * anything is installed or torn down: the swap (`adoptGrid`) then
          * leaves the untouched xterm.js surface in place for the failure's
          * ending to reveal, and a direct mount rolls back through `mount()`'s
-         * catch block. `size` is the size the program already has, which a
-         * fit then reports only if it differs (grid-terminal.js's `create`);
+         * catch block. `size` is the size the program already has. The
+         * grid keeps it through its first usable fit and unchanged input
+         * notifications; later effective input changes use the grid's own
+         * deterministic rule (grid-terminal.js's `create`);
          * a direct mount passes none, and its first fit gives the size the
          * socket URL carries. The links the component hosts are disposed
          * with it, or here if it never was.
@@ -6196,10 +6198,11 @@
             delete window.__farhelmTermReady;
             window.__farhelmGrid = grid;
           }
-          // The grid fits as xterm.js does and starts at the size the URL
-          // carried, so this reports nothing in the same pane; it resizes
-          // only if the pane changed meanwhile. (The resize sent at `onopen`
-          // is unchanged for both kinds. It retries an attach-time sizing
+          // Establish the grid's input baseline while keeping the size
+          // already sent by xterm.js. Only a change observed after that
+          // baseline adopts the grid's deterministic sizing rule.
+          // (The resize sent at `onopen` is unchanged for both kinds.
+          // It retries an attach-time sizing
           // that failed, and a resize to the size the terminal already has
           // is a no-op: tmux ignores it, and the grid format requires the
           // supervisor to neither resize, reflow, redraw nor reset history
