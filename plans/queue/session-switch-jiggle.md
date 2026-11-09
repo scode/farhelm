@@ -272,3 +272,50 @@ passed its review gate, and the last code PR makes the TODO.md changes the accep
 If a `## Decisions` section exists, its latest entry must also be satisfied. Then close the plan per
 `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write
 a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-11-09 (claim 0a401d).
+
+### Sizing decision needed to finish stationary session switching
+
+Switching back to a new terminal could move text at its right edge and full-width horizontal rules after the session
+appeared. Investigation reproduced one cause in Linux WebKit at the default text size: the app fitted the same pane
+twice, and rounding chose different column counts. The independent draft correction avoids that duplicate resize and
+adds a real-session geometry regression on Chromium and WebKit. It does not complete this plan; the TODO remains open.
+
+Required review found another case. After the pane genuinely changes size, its current column count can depend on its
+previous size. Switching away and back discards that history and can choose a different count for the unchanged pane.
+For a fractional character width measured in WebKit, a two-pixel pane growth can fit 84 columns, then returning to that
+same pane fits 83. This remaining case is established by the sizing code's arithmetic; it has not been separately
+reproduced in the native Mac app. Both independent reviews agree it prevents claiming the full plan complete.
+
+The current implementation specification requires rounding from the previously fitted size. Finishing needs one of these
+decisions:
+
+- Permit a deterministic sizing calculation for new terminals that gives the same answer for the same pane and font,
+  irrespective of resize history. This changes the documented calculation and may change a row or column near a rounding
+  boundary. When the app changes from the old display component to the new one after connecting, it must still preserve
+  the size already sent to the program.
+- Retain each terminal's last sizing inputs and answer across session visits. This preserves the calculation, but
+  introduces state that outlives a view. Its identity, replacement/deletion cleanup and retention policy need settling;
+  evicting an old record can bring the movement back.
+- Explicitly narrow this plan to the demonstrated duplicate-resize cause, accepting that the resize-history case remains
+  for later work. The present broad no-movement acceptance cannot be called satisfied under that choice.
+
+Recommendation: permit deterministic sizing for new terminals and keep compatibility handling separate. It removes the
+history dependency directly and avoids a new cache lifetime. No such calculation or retained-state mechanism has been
+implemented, and no acceptance criterion has been weakened.
+
+Independent draft:
+[avoid duplicate terminal resizes on session switch](https://github.com/scode/farhelm/pull/3234/changes). The required
+Sol/high reviewer approved this partial fix while leaving the remaining case open. Validation passed: 194 grid component
+cases across both engines (recorder 85824375-84b9-4f80-b657-43160d6de8e3), four new geometry cases
+(548b0290-8ee7-442c-872a-970556d7313b), six existing switch/resize cases (03c6a722-331a-4e15-9acf-00d35655a691), and 530
+JavaScript unit cases (6c8d45bd-ca9e-4f7b-a556-3f47385f4208). The earlier WebKit reproduction captured movement and
+failed its geometry comparison; that failed run was retained (b24d16cd-b85d-477f-85fa-ee5171cb4093). An earlier
+component probe reproduced duplicate sizing in WebKit but had an invalid fixture premise in Chromium
+(c7122d28-091b-46a5-8d40-738db3eb467d); the corrected controlled case passed both engines
+(bb19bddb-b761-47e4-afdb-350c78f1047c). The remaining resize-history case has arithmetic evidence rather than a browser
+reproduction. Native Mac confirmation is still needed: switch between new-terminal Claude sessions and inspect the last
+word of full-width lines and the horizontal prompt rules, including after a pane resize.
