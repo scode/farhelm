@@ -37,7 +37,12 @@ specific version published there, including a prerelease. Set it on the `sh` sid
 curl -fsSL https://get.farhelm.io/install.sh | FARHELM_VERSION=0.23.0 sh
 ```
 
-Updates preserve user data.
+Each release has an upgrade floor, initially 0.23.0: the oldest installed version it supports updating from. An
+installation below that floor is refused before the update starts. Stop local sessions and their terminals, quit
+Farhelm, run `farhelm uninstall`, then run the installer again. Uninstall keeps your data on disk, but reinstalling does
+not promise that the new release can use every feature's older data. If your release has no uninstall command, follow
+the manual fallback under [Uninstalling](#uninstalling). Development builds and versions Farhelm cannot parse are not
+treated as below the floor. Updates from supported versions preserve user data.
 
 Farhelm also keeps itself up to date. Shortly after it starts, and about once a day after that, the app checks
 get.farhelm.io for the latest stable release (never a prerelease). When that release is newer than the installed
@@ -72,13 +77,11 @@ finishes the job. `Contents/MacOS/farhelm` is a small script that runs the right
 started from, for commands that come from inside its sessions, and otherwise the installed one. Each update removes
 version folders other than the new one, the one it replaced, and the one a running Farhelm started from.
 
-The first update from a release that installed copies of `farhelm` and `farhelm-desktop` in `~/.local/bin` converts the
-installation to this layout: quit Farhelm before that update. The installer removes those copies when their checksums
-show they are the ones it put there (the record below), and rebuilds the app. The installer only replaces an app it can
-tell it built: one carrying its current record, or, for this conversion, the previous layout's record naming
-`~/.local/bin`, or the recordless app the installers of early September 2026 built. Any other `Farhelm.app` (one you
-built or customised, or one recorded for another installation directory) is left untouched and the installer exits with
-an error before changing anything; rename or remove it and re-run the installer.
+Installations from before the side-by-side layout are below the upgrade floor and must be removed before a fresh
+install. The installer also refuses a `Versions/` folder whose `installed` record is missing or unreadable, because it
+cannot establish which version would be updated. The Terminal command may then be unable to start uninstall either; use
+the manual fallback under [Uninstalling](#uninstalling). An unrelated `Farhelm.app` (one you built or customised, or one
+recorded for another installation directory) is also left untouched; rename or remove it before running the installer.
 
 A `farhelm` in `~/.local/bin` that the installer did not put there, such as a wrapper script of your own, is kept under
 a visible name like `farhelm.replaced-20260928T221500Z` in the same directory, and the installer's closing message names
@@ -146,8 +149,14 @@ farhelm uninstall --dry-run
 ```
 
 Then run `farhelm uninstall` and confirm once. For noninteractive use, `farhelm uninstall --yes` skips the prompt; the
-same ownership checks still apply. If your macOS release has no uninstall command, update with the installer once to get
-it. The installer cannot provide that upgrade on Linux.
+same ownership checks still apply. If your macOS release has no uninstall command, an update below the floor cannot
+provide it. The manual fallback also applies when a missing or unreadable installed-version record prevents the Terminal
+command from starting, or an old uninstall leaves a recordless app in place. After stopping sessions and their
+terminals, quitting Farhelm and stopping manually started Farhelm processes, move `~/Applications/Farhelm.app` to the
+Trash. Remove `~/.local/bin/farhelm` if it is that installation's link or old installed binary, and
+`~/.local/bin/farhelm-desktop` if it is that installation's old copy; keep wrappers or files you placed there yourself.
+Leave the data directory and unrelated files alone. Then run the installer for a fresh installation. The installer
+cannot provide an uninstall upgrade on Linux either.
 
 The command selects the installation containing the CLI you invoked. On a Mac, run it as
 `~/.local/bin/farhelm uninstall` (or `farhelm uninstall` when `~/.local/bin` is on your `PATH`), which reaches the

@@ -6999,12 +6999,19 @@ its own version folder is missing (`grep` on the downloaded binary; a test in `d
 together), which marks every desktop build that understands the side-by-side layout.
 
 Installing a supported target over a newer Installed version remains part of the installer contract: there is no
-version-order refusal, and the target's own published installer restores the main program, Info.plist and forwarder to
-that target while retaining the previous Installed and Running folders. The ownership record must remain readable by
-supported older installers; changing its representation requires a compatible path, not just a new writer. Tagged stable
-installers from v0.23.0 through v0.28.2 accept the `farhelm-app-v2` NUL-separated link record and this replacement.
-These are mechanical compatibility properties, not proof that downgrading local databases is safe, and the updater does
-not use them to replace withdrawn waiting releases.
+version-order refusal for a Terminal install whose existing version meets the target's upgrade floor, and the target's
+own published installer restores the main program, Info.plist and forwarder to that target while retaining the previous
+Installed and Running folders. The ownership record must remain readable by supported older installers; changing its
+representation requires a compatible path, not just a new writer. Tagged stable installers from v0.23.0 through v0.28.2
+accept the `farhelm-app-v2` NUL-separated link record and this replacement. These are mechanical compatibility
+properties, not proof that downgrading local databases is safe, and the updater does not use them to replace withdrawn
+waiting releases.
+
+`farhelm_proto::version::UPGRADE_FLOOR` holds the release's minimum supported update source, initially `0.23.0`. The
+shared comparison takes both the source and floor as inputs, uses SemVer precedence without build metadata, and never
+treats a development build or an unparseable version as below the floor. The floor controls update mechanics, not
+data-schema compatibility. An agent raises it in the change that first relies on an earlier release's upgrade logic; the
+release procedure surfaces the raise for the maintainer's decision before proceeding.
 
 The dx-produced bundle went away because a bare binary has nowhere to put a `Resources/` directory, and Dioxus's
 `asset!()` files were the only thing that needed one. They are served instead from the UI tree compiled into
@@ -7132,18 +7139,30 @@ move to visible replaced names before hashing: only matching contents are delete
 visible name and is reported. The link's folder is flushed. The script then touches the bundle and re-registers it with
 `lsregister -f`, because Spotlight and Launch Services otherwise keep showing the old version.
 
-An app at the usual place without `Versions/`, or no app at all, is instead built whole under a temporary name beside
-its place, flushed, and renamed into place (moving any existing app aside first, and putting it back if the rename
-fails); `~/Applications` is flushed after. An existing installation's id carries over; otherwise a new one is minted.
-The script decides beforehand whether an app without this layout's record is one an older installer built (its old
-record, or the recordless shape), which is the only foreign-looking app that is replaced. Because that check runs before
-the lock, its approval names the folder it checked by inode (`ls -di`, read before and after the check), and the locked
-work replaces only a folder with that inode: an app Finder puts at the place in the meantime is refused, and a file
-there never counts as an older app. The rebuild moves the app aside before checking the moved folder is the approved
-one, then puts back anything else. One narrow case stays open, accepted by the maintainer on 2026-10-24 rather than
-answered with durable records of what was approved: if Finder puts another app at the place in that instant and the run
-is then killed before its check (or Finder fills the place again before the app can be put back), the next run's cleanup
-deletes the folder moved aside, because only a moved-aside Farhelm is ever expected there.
+Before update or rebuild, after the updater's expectation comparison, the locked installer checks the existing
+installation against that floor. Both update-only and Terminal invocations use this gate; a fresh install is allowed. A
+pre-`Versions/` installation is known to predate the floor and is refused. A `Versions/` folder whose Installed record
+is missing or unreadable is refused conservatively because the source version cannot be established; a readable
+unparseable version remains exempt. Refusal uses status 76, distinct from the busy and changed-installation retries, and
+tells the user that the data stays on disk, to run `farhelm uninstall`, then the installer, without promising the new
+release can use every feature's old data. The documented manual removal fallback covers releases without uninstall, an
+old uninstall that retains a recordless app, and a missing or unreadable Installed record that prevents the Terminal
+command from starting uninstall. The gate precedes new update/rebuild writes; existing locked recovery of an interrupted
+run's leftovers still happens before inspection, so the gate sees the recovered installation. The shell installer and
+its permanent interface are unchanged.
+
+The retained rebuild code builds an app at the usual place without `Versions/`, or no app at all, whole under a
+temporary name beside its place, flushed, and renamed into place (moving any existing app aside first, and putting it
+back if the rename fails); `~/Applications` is flushed after. An existing installation's id carries over; otherwise a
+new one is minted. The script decides beforehand whether an app without this layout's record is one an older installer
+built (its old record, or the recordless shape), which is the only foreign-looking app that is replaced. Because that
+check runs before the lock, its approval names the folder it checked by inode (`ls -di`, read before and after the
+check), and the locked work replaces only a folder with that inode: an app Finder puts at the place in the meantime is
+refused, and a file there never counts as an older app. The rebuild moves the app aside before checking the moved folder
+is the approved one, then puts back anything else. One narrow case stays open, accepted by the maintainer on 2026-10-24
+rather than answered with durable records of what was approved: if Finder puts another app at the place in that instant
+and the run is then killed before its check (or Finder fills the place again before the app can be put back), the next
+run's cleanup deletes the folder moved aside, because only a moved-aside Farhelm is ever expected there.
 
 The ownership record, `Contents/.farhelm-installation` (mode 0600), keeps the format name and the first two
 NUL-terminated fields older installers read (`farhelm-app-v2`, then the Terminal link) and appends three: a random
@@ -7381,6 +7400,12 @@ reads, so that quitting the app mid-install neither kills nor signals it: an ins
 skip its own cleanup and leave its lock behind, and every later install, automatic or by hand, would refuse until
 someone removed it. The worker copies that file into the app's log once the installer exits.
 
+An installer exit of 76 means the installed source cannot meet the target's upgrade floor. The updater maps it to the
+existing lasting reinstall warning, with an uninstall-first remedy followed by the installer command; it is not a busy
+retry. Older app releases keep their ordinary install-failure message and installer details in the log. Verification
+failures use the same warning mechanism. Its ordinary clearing rules apply to either cause, and no new persisted updater
+state or pre-download metadata check is added.
+
 Version order uses the helm's SemVer precedence (`farhelm_helm::build_is_newer`), the same comparison the host list uses
 for a host's build, so there is one rule for which build is newer.
 
@@ -7526,6 +7551,13 @@ authorization — the wire keeps the same single-consumption authority either wa
 Discovery records the resolved supervisor binary, state directory, and identity together so a later helm dials the same
 installation that answered the probe. UPDATE starts from those recorded coordinates rather than assuming the standard
 layout.
+
+Update also checks the probed supervisor version against the shared upgrade floor at planning and at execution, on both
+connected and protocol-skewed paths, beside the downgrade and newer-schema refusals. A single refusal helper takes the
+floor as an input and uses the probed program and data paths in its manual recovery advice: stop the host's Farhelm
+supervisor service, remove its program directory, optionally remove the data directory if losing that data is accepted,
+then remove the host from Farhelm and set it up again. Development builds and unparseable versions stay exempt. No
+protocol field, host state or automatic-update scheduling rule changes.
 
 The supervisor-unit ownership rule in SPEC.md is enforced twice on remote Linux hosts. The reach check reports whether
 the user-unit directory already holds a `farhelm-supervisor.service` whose first line is setup's managed-by marker (the
