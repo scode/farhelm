@@ -19,6 +19,14 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`claude-endpoint-change-retains-custom-headers.md`](claude-endpoint-change-retains-custom-headers.md) — Changing
   Claude's API endpoint can retain custom authorization headers and send their old secret to the new endpoint.
 
+- [`combined-stop-closes-undisplayed-tabs.md`](combined-stop-closes-undisplayed-tabs.md) — Confirming Stop for the agent
+  and a displayed number of terminal tabs can also end a tab opened afterward by another client, including its work.
+  Whether the specification intends to accept that combined-prompt case is unresolved.
+
+- [`approval-grant-outlives-origin-card.md`](approval-grant-outlives-origin-card.md) — A permanent approval answer
+  waiting for a host lock can enable unattended session control after the requesting connection has ended and its card
+  has disappeared. The original command remains fenced, but the saved permission can survive.
+
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
@@ -105,6 +113,10 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`credential-push-misses-retired-lifetime.md`](credential-push-misses-retired-lifetime.md) — A replacement connection
   can hide the last lease's zero transition, allowing obsolete credential transport work to delay reconnect. No
   disclosure, wrong-machine delivery or user-work loss is established.
+
+- [`settings-save-races-final-replacement.md`](settings-save-races-final-replacement.md) — Credential delivery can
+  silently overwrite an agent settings save made after its final digest check and before replacement. The new comparison
+  protects earlier edits but leaves this narrower window.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -884,10 +896,13 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   terminal size readout is documented as points while its value reports CSS pixels.
 
 - [`browser-shard-failure-sweeps-running-siblings.md`](browser-shard-failure-sweeps-running-siblings.md) — An early
-  shard exception can clean up workers that sibling shards are still using.
+  shard exception can clean up workers that sibling shards are still using. Additional reviewed scope: A Rust runner
+  infrastructure or local evidence-save exception can sweep sibling sandboxes before their work and evidence collection
+  settle.
 
 - [`browser-shard-failures-exit-successfully.md`](browser-shard-failures-exit-successfully.md) — The browser harness can
-  exit successfully even when its shards report validation failures.
+  exit successfully even when its shards report validation failures. Additional reviewed scope: The Rust sandbox command
+  can exit successfully even when its shard results say tests failed.
 
 - [`worker-evidence-deleted-after-download-failure.md`](worker-evidence-deleted-after-download-failure.md) — The harness
   can delete a failed worker's evidence even when downloading that evidence failed.
@@ -900,7 +915,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`worker-checkpoint-polling-has-no-failure-exit.md`](worker-checkpoint-polling-has-no-failure-exit.md) — Worker
   checkpoint polling can wait indefinitely for completion; the exact service transition needed for the suspected
-  permanent wait remains unresolved.
+  permanent wait remains unresolved. Additional reviewed scope: Unverified after investigation: Rust staging also polls
+  a snapshot indefinitely until completed, with no deadline. The actual service transition needed to leave that wait
+  permanently stuck remains unestablished.
 
 - [`worker-allocation-precedes-ownership-ledger.md`](worker-allocation-precedes-ownership-ledger.md) — A created worker
   can fall outside cleanup when ledger writing fails or remote creation succeeds before the local request times out.
@@ -2162,3 +2179,52 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`launcher-live-draft-submission-source-gap.md`](launcher-live-draft-submission-source-gap.md) — The launcher reads
   live choices at submission, but no complete supported sequence establishes a contradictory accepted launch for the
   remaining generic concern. Other priority; unverified after investigation.
+
+- [`notification-read-failure-leaves-stale-cell.md`](notification-read-failure-leaves-stale-cell.md) — After a
+  notification read fails just after an old-terminal warning changes, the bell can remain missing or urgently unresolved
+  after storage recovers. Normal reconciliation does not retry that publication.
+
+- [`tunnel-dns-outlives-dial-admission.md`](tunnel-dns-outlives-dial-admission.md) — Unverified after investigation:
+  stalled hostname resolution can outlive recipe tunnel timeouts and admission limits, potentially accumulating work or
+  delaying helm shutdown. An affected native resolver execution has not been demonstrated.
+
+- [`container-path-publication-keeps-stale-cut.md`](container-path-publication-keeps-stale-cut.md) — Unverified after
+  investigation: a container terminal can offer an obsolete joined filename if neighboring output changes while a
+  separate hyperlink lookup is pending. The download path independently checks recognition and refuses the changed
+  target.
+
+- [`settings-close-test-forwards-cancelled-save.md`](settings-close-test-forwards-cancelled-save.md) — The regression
+  meant to prove that a settings save survives closing its dialog can pass even if the original browser request is
+  cancelled: the test itself sends an independent write. No current product save-loss bug is established.
+
+- [`shallow-pause-observer-exceeds-boundary.md`](shallow-pause-observer-exceeds-boundary.md) — Unverified after
+  investigation: a legitimate later recovery may fail the shallow-pause regression because its observer continues beyond
+  the declared output boundary. The required tmux and runtime scheduling has not been demonstrated.
+
+- [`capture-scrubber-misses-multiple-at-signs.md`](capture-scrubber-misses-multiple-at-signs.md) — The capture scrubber
+  and its immediate check both miss a local proxy URL with another raw at sign in its password. The separate Rust check
+  catches it when run; actual vendor display and publication of such a URL are unestablished.
+
+- [`fixture-url-guard-consumes-adjacent-at-sign.md`](fixture-url-guard-consumes-adjacent-at-sign.md) — The independent
+  fixture privacy check can miss a local proxy URL followed by comma-separated text containing an at sign. Automatic
+  capture scrubs this exact input, but manually authored fixtures can pass the weakened guard.
+
+- [`landing-tests-import-unregistered-module.md`](landing-tests-import-unregistered-module.md) — The documented
+  landing-tool validation command can crash during import before testing any safeguards, because its dynamically loaded
+  module is absent from Python's module registry.
+
+- [`outer-recorder-deletes-nested-failure-evidence.md`](outer-recorder-deletes-nested-failure-evidence.md) — Recording a
+  script that starts another recorder can delete the inner failed run's evidence during outer temporary-directory
+  cleanup. The release invocation that explicitly forwards both output roots is outside this route.
+
+- [`rust-sandbox-runner-passes-empty-selection.md`](rust-sandbox-runner-passes-empty-selection.md) — The Rust sandbox
+  runner can announce all shards passed while running no tests, including with zero or nonnumeric shard counts and an
+  empty overall filter selection.
+
+- [`rust-sandbox-pack-ignores-cargo-target-dir.md`](rust-sandbox-pack-ignores-cargo-target-dir.md) — A checkout built
+  only into a shared or external Cargo target directory cannot package its Rust sandbox tests: the runner still requires
+  its fixture binary under the default target path.
+
+- [`rust-sandbox-staging-misquotes-checkout-path.md`](rust-sandbox-staging-misquotes-checkout-path.md) — The Rust
+  sandbox runner cannot stage an ordinary checkout whose absolute path contains spaces, because nested remote shell
+  commands interpolate that path without quoting it.
