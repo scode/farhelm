@@ -314,3 +314,34 @@ passed its review gate, and the last code PR makes the TODO.md changes the accep
 If a `## Decisions` section exists, its latest entry must also be satisfied. Then close the plan per
 `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write
 a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked while landing on 2026-11-09 (claim 3e9ef1).
+
+### Landing review: scoped cleanup misses a session-started tmux server's panes
+
+The landing monitor blocked this plan before merging anything; none of its PRs (#3237) has merged, and main holds none
+of it.
+
+This plan lets Stop, closing a tab, Restart and Delete trust a launch's or tab's systemd scope and skip the machine-wide
+scan for processes carrying the session's marker. The landing review found that this breaks a rule the maintainer
+confirmed on 2026-10-22 and 2026-10-23: a per-user tmux server that an agent or a terminal tab starts first ends with
+that agent or tab, along with everything later run in it. Ubuntu's stock tmux (3.4, linked with systemd) moves every
+pane's processes into a separate `tmux-spawn-*.scope` unit, outside Farhelm's scope. Before this plan the marker scan
+still found them; with it, killing Farhelm's scope ends the tmux server, and anything in its panes that ignores the
+hangup (a detached dev server, work started in that tmux over SSH) survives Stop, Restart, tab close and Delete. The
+user does nothing unusual for this to happen, so it is not the deliberate escape the plan's decision accepted.
+
+The review also found that Delete can skip the scan while an unscoped tab's processes may remain: a session with no
+terminal skips tab discovery, and an old tmux session whose server died lists no tabs, so only scoped tabs are found
+through the systemd manager. That contradicts the plan's own SPEC_impl.md text ("unavailable selection keeps the sweep
+required"). About eight code comments still describe the always-run sweep (`core.rs` and `teardown.rs` mostly).
+
+Options:
+
+- Keep the full sweep whenever a tmux server is running inside a scope the cleanup trusts, checked before the scope is
+  killed, and fix the Delete gap and the stale comments. Sessions that start no tmux server keep the cheaper cleanup.
+- Accept the tmux case as a documented limit of scoped cleanup in SPEC.md and the changelog entry.
+
+Recommendation: the first option, which keeps the confirmed tmux promise at little cost.
