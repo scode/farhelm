@@ -44,49 +44,12 @@ const FIXTURES: &[&str] = &[
     "input/valid/text.json",
     "output/invalid/clipboard-missing-last.json",
     "output/invalid/clipboard-unknown-target.json",
-    "output/invalid/frame-cursor-as-array.json",
-    "output/invalid/frame-cursor-past-cols.json",
-    "output/invalid/frame-cursor-past-rows.json",
-    "output/invalid/frame-rev-past-safe-integer.json",
-    "output/invalid/frame-shift-past-rows.json",
-    "output/invalid/frame-unknown-cursor-shape.json",
-    "output/invalid/frame-zero-rows.json",
     "output/invalid/hello-history-cap-past-largest.json",
     "output/invalid/hello-missing-history-cap.json",
     "output/invalid/hello-rows-past-largest.json",
     "output/invalid/hello-zero-cols.json",
-    "output/invalid/history-cols-past-largest.json",
-    "output/invalid/history-empty-past-safe-integer.json",
-    "output/invalid/history-missing-cols.json",
-    "output/invalid/history-past-safe-integer.json",
-    "output/invalid/history-run-overlap.json",
-    "output/invalid/history-run-past-cols.json",
-    "output/invalid/history-zero-cols.json",
     "output/invalid/missing-type.json",
     "output/invalid/not-an-object.json",
-    "output/invalid/rows-ascii-width-mismatch.json",
-    "output/invalid/rows-color-below-default.json",
-    "output/invalid/rows-color-between-palette-and-direct.json",
-    "output/invalid/rows-color-past-direct.json",
-    "output/invalid/rows-empty-text.json",
-    "output/invalid/rows-link-id-too-long.json",
-    "output/invalid/rows-link-out-of-range.json",
-    "output/invalid/rows-link-uri-too-long.json",
-    "output/invalid/rows-link-without-links.json",
-    "output/invalid/rows-non-ascii-run-wider-than-a-cell.json",
-    "output/invalid/rows-out-of-order.json",
-    "output/invalid/rows-overlap.json",
-    "output/invalid/rows-row-as-array.json",
-    "output/invalid/rows-row-missing-wrap.json",
-    "output/invalid/rows-run-past-largest.json",
-    "output/invalid/rows-run-too-long.json",
-    "output/invalid/rows-run-too-short.json",
-    "output/invalid/rows-style-too-long.json",
-    "output/invalid/rows-style-too-short.json",
-    "output/invalid/rows-text-past-cell-budget.json",
-    "output/invalid/rows-too-many-links.json",
-    "output/invalid/rows-y-past-largest.json",
-    "output/invalid/rows-zero-width.json",
     "output/invalid/state-default-color-as-default-bg.json",
     "output/invalid/state-missing-default-fg.json",
     "output/invalid/state-missing-exit.json",
@@ -94,28 +57,13 @@ const FIXTURES: &[&str] = &[
     "output/invalid/state-unknown-exit.json",
     "output/invalid/state-unknown-mouse-mode.json",
     "output/invalid/unknown-type.json",
-    "output/tolerated/frame-zero-shift.json",
     "output/tolerated/hello-unknown-field.json",
-    "output/tolerated/row-unknown-field.json",
-    "output/tolerated/rows-empty-links.json",
-    "output/tolerated/rows-reserved-style-bits.json",
     "output/tolerated/state-unknown-field.json",
     "output/valid/clipboard-first-part.json",
     "output/valid/clipboard.json",
-    "output/valid/frame-shift.json",
-    "output/valid/frame-underline-cursor.json",
-    "output/valid/frame.json",
     "output/valid/hello-limits.json",
     "output/valid/hello.json",
-    "output/valid/history-empty-at-last-line.json",
-    "output/valid/history-full-width.json",
-    "output/valid/history-last-line.json",
     "output/valid/history-reset.json",
-    "output/valid/history-wrapped-with-trailing-blanks.json",
-    "output/valid/history.json",
-    "output/valid/rows-blank.json",
-    "output/valid/rows-empty.json",
-    "output/valid/rows.json",
     "output/valid/state-click.json",
     "output/valid/state-drag-alt-screen.json",
     "output/valid/state-exited.json",
@@ -166,7 +114,8 @@ fn fixtures_in(prefix: &str) -> Vec<(&'static str, Vec<u8>)> {
 /// given, and the browser's tests read the directory as it is. A file added
 /// without a listing entry would be tested on one side only, and a listed
 /// file deleted would quietly drop a case. Spec: the files under
-/// `grid-fixtures/` are exactly [`FIXTURES`].
+/// `grid-fixtures/` are exactly [`FIXTURES`] plus the paired binary
+/// descriptions/bytes returned by [`binary_fixture_cases`].
 #[farhelm_testtrace::test]
 fn the_fixture_directory_holds_exactly_the_listed_fixtures() {
     let base = fixture_dir();
@@ -175,10 +124,21 @@ fn the_fixture_directory_holds_exactly_the_listed_fixtures() {
     found.sort();
     let mut listed: Vec<String> = FIXTURES.iter().map(|s| s.to_string()).collect();
     listed.sort();
+    for case in binary_fixture_cases() {
+        let prefix = if case.valid { "valid" } else { "invalid" };
+        for extension in ["bin", "json"] {
+            listed.push(format!(
+                "output/binary/{prefix}/{}.{}",
+                case.name, extension
+            ));
+        }
+    }
+    listed.sort();
     assert_eq!(found, listed);
 }
 
-/// Every valid fixture decodes, and encodes back to the same JSON.
+/// Every valid JSON control/input fixture decodes and encodes back to the
+/// same JSON. Binary descriptions and exact bytes are checked separately.
 ///
 /// Why: the fixtures are the format as the browser sees it. Decoding proves
 /// the Rust types accept what the format document describes; encoding back
@@ -296,31 +256,6 @@ const INVALID_REASONS: &[(&str, &str)] = &[
         "unknown variant `secondary`",
     ),
     (
-        "output/invalid/frame-cursor-as-array.json",
-        "invalid type: sequence, expected a JSON object",
-    ),
-    (
-        "output/invalid/frame-cursor-past-cols.json",
-        "cursor at (80, 0)",
-    ),
-    (
-        "output/invalid/frame-cursor-past-rows.json",
-        "cursor at (0, 24)",
-    ),
-    (
-        "output/invalid/frame-rev-past-safe-integer.json",
-        "frame rev 9007199254740992",
-    ),
-    (
-        "output/invalid/frame-shift-past-rows.json",
-        "frame shift 25",
-    ),
-    (
-        "output/invalid/frame-unknown-cursor-shape.json",
-        "unknown variant `beam`",
-    ),
-    ("output/invalid/frame-zero-rows.json", "frame rows is 0"),
-    (
         "output/invalid/hello-history-cap-past-largest.json",
         "history_cap 100001",
     ),
@@ -333,113 +268,8 @@ const INVALID_REASONS: &[(&str, &str)] = &[
         "hello rows is 1001",
     ),
     ("output/invalid/hello-zero-cols.json", "hello cols is 0"),
-    (
-        "output/invalid/history-cols-past-largest.json",
-        "history cols is 1001",
-    ),
-    (
-        "output/invalid/history-empty-past-safe-integer.json",
-        "history first line 9007199254740992",
-    ),
-    (
-        "output/invalid/history-missing-cols.json",
-        "missing field `cols`",
-    ),
-    (
-        "output/invalid/history-past-safe-integer.json",
-        "run past line",
-    ),
-    (
-        "output/invalid/history-run-overlap.json",
-        "run at column 1 overlaps",
-    ),
-    (
-        "output/invalid/history-run-past-cols.json",
-        "ends past column 80",
-    ),
-    ("output/invalid/history-zero-cols.json", "history cols is 0"),
     ("output/invalid/missing-type.json", "missing field `t`"),
     ("output/invalid/not-an-object.json", "not a JSON object"),
-    (
-        "output/invalid/rows-ascii-width-mismatch.json",
-        "ASCII run at column 0 has 2 characters",
-    ),
-    (
-        "output/invalid/rows-color-below-default.json",
-        "-2 is not a grid color",
-    ),
-    (
-        "output/invalid/rows-color-between-palette-and-direct.json",
-        "256 is not a grid color",
-    ),
-    (
-        "output/invalid/rows-color-past-direct.json",
-        "33554432 is not a grid color",
-    ),
-    ("output/invalid/rows-empty-text.json", "has no text"),
-    (
-        "output/invalid/rows-link-id-too-long.json",
-        "link id of 251 bytes",
-    ),
-    (
-        "output/invalid/rows-link-out-of-range.json",
-        "names link 1, but the message has 1",
-    ),
-    (
-        "output/invalid/rows-link-uri-too-long.json",
-        "link URI of 2084 bytes",
-    ),
-    (
-        "output/invalid/rows-link-without-links.json",
-        "names link 0, but the message has 0",
-    ),
-    (
-        "output/invalid/rows-non-ascii-run-wider-than-a-cell.json",
-        "non-ASCII run at column 0 has width 4",
-    ),
-    (
-        "output/invalid/rows-out-of-order.json",
-        "run at column 0 overlaps or precedes",
-    ),
-    (
-        "output/invalid/rows-overlap.json",
-        "run at column 2 overlaps",
-    ),
-    (
-        "output/invalid/rows-row-as-array.json",
-        "invalid type: sequence, expected a JSON object",
-    ),
-    (
-        "output/invalid/rows-row-missing-wrap.json",
-        "missing field `w`",
-    ),
-    (
-        "output/invalid/rows-run-past-largest.json",
-        "ends past column 1000",
-    ),
-    ("output/invalid/rows-run-too-long.json", "invalid length 6"),
-    ("output/invalid/rows-run-too-short.json", "invalid length 3"),
-    (
-        "output/invalid/rows-style-too-long.json",
-        "invalid length 5",
-    ),
-    (
-        "output/invalid/rows-style-too-short.json",
-        "invalid length 2",
-    ),
-    (
-        "output/invalid/rows-text-past-cell-budget.json",
-        "69 bytes of text for 1 cells",
-    ),
-    (
-        "output/invalid/rows-too-many-links.json",
-        "257 links in one message",
-    ),
-    (
-        "output/invalid/rows-y-past-largest.json",
-        "screen row 1000 is past",
-    ),
-    ("output/invalid/rows-zero-width.json", "has width 0"),
     (
         "output/invalid/state-default-color-as-default-bg.json",
         "default_bg is -1, not a direct color",
@@ -531,6 +361,684 @@ fn a_paste_part_with_a_lone_surrogate_is_refused() {
     );
 }
 
+// ---- Binary fixtures and deliberate corruptions -----------------------------
+
+/// Both fixture directions share one inventory, but binary descriptions are
+/// semantic JSON only. `valid` chooses their checked-in category; invalid
+/// descriptions explain a mutation rather than pretending to decode it.
+struct BinaryFixture {
+    name: String,
+    bytes: Vec<u8>,
+    description: serde_json::Value,
+    valid: bool,
+}
+
+/// Generate the valid corpus with the production encoder, then corrupt
+/// known fields only after proving the original message and byte premise.
+/// A changed layout must break this construction, not silently turn a
+/// width test into an unrelated truncation test.
+fn binary_fixture_cases() -> Vec<BinaryFixture> {
+    let mut cases = Vec::new();
+    let mut add_valid = |name: String, message: GridOutput| {
+        let bytes = message.encode().unwrap();
+        assert_eq!(
+            GridOutput::decode(&bytes).unwrap(),
+            message,
+            "{name}: encoder premise"
+        );
+        cases.push(BinaryFixture {
+            name,
+            bytes,
+            description: serde_json::to_value(message).unwrap(),
+            valid: true,
+        });
+    };
+    for name in [
+        "frame-shift",
+        "frame-underline-cursor",
+        "frame",
+        "history-empty-at-last-line",
+        "history-full-width",
+        "history-last-line",
+        "history-wrapped-with-trailing-blanks",
+        "history",
+        "rows-blank",
+        "rows-empty",
+        "rows",
+    ] {
+        let path = fixture_dir().join(format!("output/binary/valid/{name}.json"));
+        let message = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        add_valid(name.into(), message);
+    }
+    // This LCG is a fixture recipe, not a source of runtime randomness.
+    // A fixed seed keeps cross-language byte comparisons reproducible.
+    let mut seed = 0x53b1_9e27u32;
+    let mut next = || {
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        seed
+    };
+    for case in 0..16 {
+        let cols = 64;
+        let links = vec![
+            Link {
+                id: "example".into(),
+                uri: "https://example.invalid/é".into(),
+            },
+            Link {
+                id: String::new(),
+                uri: String::new(),
+            },
+        ];
+        let mut rows = Vec::new();
+        for _ in 0..8 {
+            let mut runs = Vec::new();
+            let mut col = 0u16;
+            while col + 5 < cols {
+                let value = next();
+                let (width, text) = match value % 5 {
+                    0 => (2, "漢".to_string()),
+                    1 => (1, "e\u{301}".to_string()),
+                    2 => (1, "\0".to_string()),
+                    _ => (3, "a\\\"".to_string()),
+                };
+                let fg = match (value >> 4) % 3 {
+                    0 => Color::Default,
+                    1 => Color::Palette((value >> 8) as u8),
+                    _ => Color::Rgb {
+                        r: value as u8,
+                        g: (value >> 8) as u8,
+                        b: (value >> 16) as u8,
+                    },
+                };
+                let style = Style {
+                    flags: ((value >> 12) as u16) & 0x0fff,
+                    fg,
+                    bg: if value & 8 != 0 {
+                        Color::Palette(255)
+                    } else {
+                        Color::Default
+                    },
+                    underline_color: match value % 3 {
+                        0 => None,
+                        1 => Some(Color::Default),
+                        _ => Some(fg),
+                    },
+                };
+                runs.push(Run {
+                    col,
+                    width,
+                    text,
+                    style,
+                    link: (value & 16 != 0).then_some((value & 1) as u16),
+                });
+                col += width + ((value >> 20) % 3) as u16;
+            }
+            rows.push(Row {
+                wraps: next() & 1 != 0,
+                runs,
+            });
+        }
+        let message = if case % 2 == 0 {
+            GridOutput::History {
+                first: 123 + case,
+                cols,
+                rows,
+                links,
+            }
+        } else {
+            GridOutput::Rows {
+                rows: rows
+                    .into_iter()
+                    .enumerate()
+                    .map(|(y, row)| ScreenRow { y: y as u16, row })
+                    .collect(),
+                links,
+            }
+        };
+        add_valid(format!("corpus-{case:02}"), message);
+    }
+    let probe = GridOutput::Rows {
+        rows: vec![ScreenRow {
+            y: 0,
+            row: Row {
+                wraps: false,
+                runs: vec![
+                    Run {
+                        style: Style {
+                            flags: 0,
+                            fg: Color::Palette(3),
+                            bg: Color::Rgb { r: 0, g: 0, b: 0 },
+                            underline_color: Some(Color::Default),
+                        },
+                        link: Some(0),
+                        ..run(0, 1, "a")
+                    },
+                    run(2, 1, "b"),
+                ],
+            },
+        }],
+        links: vec![Link {
+            id: "i".into(),
+            uri: "u".into(),
+        }],
+    };
+    add_valid("optional-fields".into(), probe.clone());
+    add_valid(
+        "frame-bar".into(),
+        GridOutput::Frame {
+            rev: GRID_MAX_LINE_NUMBER,
+            cols: 1,
+            rows: 1,
+            shift: 1,
+            cursor: Cursor {
+                x: 0,
+                y: 0,
+                visible: false,
+                shape: CursorShape::Bar,
+                blink: true,
+            },
+        },
+    );
+    // A field-leading BOM is actual terminal/link data. Browser decoders
+    // must preserve it rather than apply TextDecoder's default BOM removal.
+    add_valid(
+        "field-leading-bom".into(),
+        GridOutput::History {
+            first: 0,
+            cols: 1,
+            rows: vec![Row {
+                wraps: false,
+                runs: vec![Run {
+                    link: Some(0),
+                    ..run(0, 1, "\u{feff}a")
+                }],
+            }],
+            links: vec![Link {
+                id: "\u{feff}id".into(),
+                uri: "\u{feff}https://example.invalid".into(),
+            }],
+        },
+    );
+    let probe = probe.encode().unwrap();
+    let mut add_invalid = |name: &str, bytes: Vec<u8>, reason: &str| {
+        let error = GridOutput::decode(&bytes).expect_err(name);
+        assert!(
+            error.to_string().contains(reason),
+            "{name}: {error}, expected {reason}"
+        );
+        cases.push(BinaryFixture {
+            name: name.into(),
+            bytes,
+            description: serde_json::json!({"invalid": reason}),
+            valid: false,
+        });
+    };
+    // Each replacement asserts its complete original field. All base
+    // buffers were decoded successfully above or immediately below.
+    for (name, offset, before, after, reason) in [
+        ("unknown-kind", 1, vec![1], vec![255], "unknown binary"),
+        (
+            "too-many-links",
+            2,
+            1u16.to_le_bytes().to_vec(),
+            257u16.to_le_bytes().to_vec(),
+            "link count",
+        ),
+        (
+            "link-id-too-long",
+            4,
+            1u16.to_le_bytes().to_vec(),
+            251u16.to_le_bytes().to_vec(),
+            "string",
+        ),
+        (
+            "link-uri-too-long",
+            7,
+            1u16.to_le_bytes().to_vec(),
+            2084u16.to_le_bytes().to_vec(),
+            "string",
+        ),
+        ("invalid-link-utf8", 6, vec![b'i'], vec![255], "UTF-8"),
+        (
+            "huge-row-count",
+            10,
+            1u32.to_le_bytes().to_vec(),
+            u32::MAX.to_le_bytes().to_vec(),
+            "count",
+        ),
+        (
+            "screen-y-past-largest",
+            14,
+            0u16.to_le_bytes().to_vec(),
+            1000u16.to_le_bytes().to_vec(),
+            "screen row",
+        ),
+        (
+            "huge-row-length",
+            16,
+            35u32.to_le_bytes().to_vec(),
+            u32::MAX.to_le_bytes().to_vec(),
+            "truncated",
+        ),
+        (
+            "row-length-before-next-field",
+            16,
+            35u32.to_le_bytes().to_vec(),
+            34u32.to_le_bytes().to_vec(),
+            "truncated",
+        ),
+        ("invalid-wraps", 20, vec![0], vec![2], "wraps"),
+        (
+            "huge-run-count",
+            21,
+            2u16.to_le_bytes().to_vec(),
+            1001u16.to_le_bytes().to_vec(),
+            "run count",
+        ),
+        (
+            "zero-width",
+            25,
+            1u16.to_le_bytes().to_vec(),
+            0u16.to_le_bytes().to_vec(),
+            "outside row",
+        ),
+        (
+            "run-end-past-largest",
+            23,
+            0u16.to_le_bytes().to_vec(),
+            1000u16.to_le_bytes().to_vec(),
+            "outside row",
+        ),
+        (
+            "text-past-cell-budget",
+            29,
+            1u16.to_le_bytes().to_vec(),
+            69u16.to_le_bytes().to_vec(),
+            "cell byte",
+        ),
+        (
+            "color-below-default",
+            31,
+            3i32.to_le_bytes().to_vec(),
+            (-2i32).to_le_bytes().to_vec(),
+            "grid color",
+        ),
+        (
+            "color-between-palette-and-rgb",
+            31,
+            3i32.to_le_bytes().to_vec(),
+            256i32.to_le_bytes().to_vec(),
+            "grid color",
+        ),
+        (
+            "color-past-rgb",
+            31,
+            3i32.to_le_bytes().to_vec(),
+            0x200_0000i32.to_le_bytes().to_vec(),
+            "grid color",
+        ),
+        (
+            "noncanonical-foreground-default",
+            31,
+            3i32.to_le_bytes().to_vec(),
+            (-1i32).to_le_bytes().to_vec(),
+            "noncanonical",
+        ),
+        (
+            "noncanonical-background-default",
+            35,
+            0x100_0000i32.to_le_bytes().to_vec(),
+            (-1i32).to_le_bytes().to_vec(),
+            "noncanonical",
+        ),
+        (
+            "link-out-of-range",
+            43,
+            0u16.to_le_bytes().to_vec(),
+            1u16.to_le_bytes().to_vec(),
+            "names link",
+        ),
+        ("invalid-text-utf8", 45, vec![b'a'], vec![255], "UTF-8"),
+        (
+            "overlapping-runs",
+            46,
+            2u16.to_le_bytes().to_vec(),
+            0u16.to_le_bytes().to_vec(),
+            "overlaps",
+        ),
+        (
+            "ascii-width-mismatch",
+            48,
+            1u16.to_le_bytes().to_vec(),
+            2u16.to_le_bytes().to_vec(),
+            "ASCII run",
+        ),
+    ] {
+        let bytes = replace_field(&probe, offset, &before, &after);
+        add_invalid(name, bytes, reason);
+    }
+    for (name, end) in [
+        ("truncated-header", 1),
+        ("truncated-integer", 3),
+        ("truncated-row-text", probe.len() - 1),
+    ] {
+        assert!(end < probe.len());
+        add_invalid(name, probe[..end].to_vec(), "truncated");
+    }
+    let mut trailing = probe.clone();
+    trailing.push(0);
+    add_invalid("trailing-message-byte", trailing, "trailing");
+    add_invalid(
+        "invalid-discriminator",
+        replace_field(&probe, 0, &[0], &[1]),
+        "not a JSON object",
+    );
+    let mut row_trailing = replace_field(&probe, 16, &35u32.to_le_bytes(), &36u32.to_le_bytes());
+    row_trailing.push(0);
+    add_invalid("trailing-row-byte", row_trailing, "trailing");
+    // Remove the last run's sole text byte while fixing its row length,
+    // so this tests empty text rather than an inconsistent outer boundary.
+    let mut empty = replace_field(&probe, 52, &1u16.to_le_bytes(), &0u16.to_le_bytes());
+    assert_eq!(empty.pop(), Some(b'b'));
+    empty = replace_field(&empty, 16, &35u32.to_le_bytes(), &34u32.to_le_bytes());
+    add_invalid("empty-text", empty, "no text");
+    let mut non_ascii = replace_field(&probe, 48, &1u16.to_le_bytes(), &3u16.to_le_bytes());
+    non_ascii = replace_field(&non_ascii, 54, b"b", &[1]);
+    add_invalid("non-ascii-width", non_ascii, "non-ASCII");
+    let Either::Out(frame) = frame(7, 80, 24, 0, 0, 0) else {
+        unreachable!()
+    };
+    let frame_bytes = frame.encode().unwrap();
+    assert_eq!(GridOutput::decode(&frame_bytes).unwrap(), frame);
+    for (name, offset, before, after, reason) in [
+        (
+            "unsafe-revision",
+            2,
+            7u64.to_le_bytes().to_vec(),
+            (GRID_MAX_LINE_NUMBER + 1).to_le_bytes().to_vec(),
+            "counter",
+        ),
+        (
+            "zero-frame-cols",
+            10,
+            80u16.to_le_bytes().to_vec(),
+            0u16.to_le_bytes().to_vec(),
+            "frame cols",
+        ),
+        (
+            "zero-frame-rows",
+            12,
+            24u16.to_le_bytes().to_vec(),
+            0u16.to_le_bytes().to_vec(),
+            "frame rows",
+        ),
+        (
+            "frame-shift-past-rows",
+            14,
+            0u16.to_le_bytes().to_vec(),
+            25u16.to_le_bytes().to_vec(),
+            "frame shift",
+        ),
+        (
+            "frame-cols-past-largest",
+            10,
+            80u16.to_le_bytes().to_vec(),
+            1001u16.to_le_bytes().to_vec(),
+            "frame cols",
+        ),
+        (
+            "frame-rows-past-largest",
+            12,
+            24u16.to_le_bytes().to_vec(),
+            1001u16.to_le_bytes().to_vec(),
+            "frame rows",
+        ),
+        (
+            "cursor-past-cols",
+            16,
+            0u16.to_le_bytes().to_vec(),
+            80u16.to_le_bytes().to_vec(),
+            "cursor at",
+        ),
+        (
+            "cursor-past-rows",
+            18,
+            0u16.to_le_bytes().to_vec(),
+            24u16.to_le_bytes().to_vec(),
+            "cursor at",
+        ),
+        (
+            "reserved-cursor-flags",
+            20,
+            vec![1],
+            vec![17],
+            "cursor flags",
+        ),
+        (
+            "invalid-cursor-shape",
+            20,
+            vec![1],
+            vec![13],
+            "cursor shape",
+        ),
+    ] {
+        add_invalid(
+            name,
+            replace_field(&frame_bytes, offset, &before, &after),
+            reason,
+        );
+    }
+    let Either::Out(history) = history_at(GRID_MAX_LINE_NUMBER - 1, 80, 2) else {
+        unreachable!()
+    };
+    let history_bytes = history.encode().unwrap();
+    assert_eq!(GridOutput::decode(&history_bytes).unwrap(), history);
+    for (name, offset, before, after, reason) in [
+        (
+            "unsafe-first-line",
+            2,
+            (GRID_MAX_LINE_NUMBER - 1).to_le_bytes().to_vec(),
+            (GRID_MAX_LINE_NUMBER + 1).to_le_bytes().to_vec(),
+            "counter",
+        ),
+        (
+            "unsafe-last-line",
+            2,
+            (GRID_MAX_LINE_NUMBER - 1).to_le_bytes().to_vec(),
+            GRID_MAX_LINE_NUMBER.to_le_bytes().to_vec(),
+            "last safe line",
+        ),
+        (
+            "zero-history-cols",
+            10,
+            80u16.to_le_bytes().to_vec(),
+            0u16.to_le_bytes().to_vec(),
+            "history cols",
+        ),
+        (
+            "history-cols-past-largest",
+            10,
+            80u16.to_le_bytes().to_vec(),
+            1001u16.to_le_bytes().to_vec(),
+            "history cols",
+        ),
+        (
+            "huge-history-count",
+            14,
+            2u32.to_le_bytes().to_vec(),
+            u32::MAX.to_le_bytes().to_vec(),
+            "count",
+        ),
+    ] {
+        add_invalid(
+            name,
+            replace_field(&history_bytes, offset, &before, &after),
+            reason,
+        );
+    }
+    let GridOutput::Rows { rows, links } = GridOutput::decode(&probe).unwrap() else {
+        unreachable!()
+    };
+    let narrow = GridOutput::History {
+        first: 0,
+        cols: 3,
+        rows: rows.into_iter().map(|row| row.row).collect(),
+        links,
+    };
+    let narrow_bytes = narrow.encode().unwrap();
+    assert_eq!(GridOutput::decode(&narrow_bytes).unwrap(), narrow);
+    add_invalid(
+        "history-run-past-cols",
+        replace_field(&narrow_bytes, 10, &3u16.to_le_bytes(), &2u16.to_le_bytes()),
+        "outside row width",
+    );
+    cases
+}
+
+/// Replace a whole known field, refusing stale offsets. This is shared by
+/// fixture construction and direct boundary tests so malformed cases keep
+/// the premise their names claim even if the encoder layout changes.
+fn replace_field(bytes: &[u8], offset: usize, before: &[u8], after: &[u8]) -> Vec<u8> {
+    assert_eq!(before.len(), after.len());
+    assert_eq!(
+        &bytes[offset..offset + before.len()],
+        before,
+        "mutation premise at {offset}"
+    );
+    let mut changed = bytes.to_vec();
+    changed[offset..offset + after.len()].copy_from_slice(after);
+    changed
+}
+
+/// Checked-in bytes must retain both their meaning and their exact encoder
+/// representation. The malformed descriptors also pin the claimed refusal,
+/// preventing a corruption recipe from drifting to a different failure.
+#[farhelm_testtrace::test]
+fn binary_fixtures_match_the_rust_encoder_and_refusal_premises() {
+    for case in binary_fixture_cases() {
+        let category = if case.valid { "valid" } else { "invalid" };
+        let stem = fixture_dir().join(format!("output/binary/{category}/{}", case.name));
+        let bytes = std::fs::read(stem.with_extension("bin")).unwrap();
+        assert_eq!(bytes, case.bytes, "{}: binary drift", case.name);
+        let description: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(stem.with_extension("json")).unwrap()).unwrap();
+        assert_eq!(
+            description, case.description,
+            "{}: description drift",
+            case.name
+        );
+        if case.valid {
+            let message = GridOutput::decode(&bytes).unwrap();
+            assert_eq!(serde_json::to_value(&message).unwrap(), description);
+            assert_eq!(message.encode().unwrap(), bytes);
+        } else {
+            assert!(GridOutput::decode(&bytes).is_err(), "{}", case.name);
+        }
+    }
+}
+
+/// Explicit regeneration uses the real encoder and the same premise-checked
+/// mutations as the reader tests. It never runs during normal validation;
+/// a reviewer must inspect any intentional changes to the checked-in bytes.
+#[farhelm_testtrace::test]
+#[ignore = "explicit binary grid fixture regeneration"]
+fn write_binary_grid_fixtures() {
+    for case in binary_fixture_cases() {
+        let category = if case.valid { "valid" } else { "invalid" };
+        let dir = fixture_dir().join(format!("output/binary/{category}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let stem = dir.join(case.name);
+        std::fs::write(stem.with_extension("bin"), case.bytes).unwrap();
+        let mut json = serde_json::to_vec_pretty(&case.description).unwrap();
+        json.push(b'\n');
+        std::fs::write(stem.with_extension("json"), json).unwrap();
+    }
+}
+
+/// The protocol has one encoding for each kind. Serde remains useful for
+/// semantic descriptions, but accepting their JSON on the wire would hide
+/// a mismatched sender after a protocol bump.
+#[farhelm_testtrace::test]
+fn json_rows_frame_and_history_are_refused_on_the_wire() {
+    for message in [
+        screen_rows(&[]),
+        match frame(0, 80, 24, 0, 0, 0) {
+            Either::Out(m) => m,
+            _ => unreachable!(),
+        },
+        match history(0, 0) {
+            Either::Out(m) => m,
+            _ => unreachable!(),
+        },
+    ] {
+        let json = serde_json::to_vec(&message).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<GridOutput>(&json).unwrap(),
+            message
+        );
+        assert!(
+            GridOutput::decode(&json)
+                .unwrap_err()
+                .to_string()
+                .contains("require binary")
+        );
+    }
+}
+
+/// Message bytes, not an arbitrary row-count cap, bound blank history.
+/// At seven bytes per blank row this reaches the exact 1 MiB payload edge,
+/// and also exercises a count larger than the maximum retained scrollback.
+#[farhelm_testtrace::test]
+fn binary_history_accepts_the_exact_message_limit_without_a_row_count_cap() {
+    let count = (GRID_MAX_MESSAGE - 18) / 7;
+    assert_eq!(18 + 7 * count, GRID_MAX_MESSAGE, "premise: exact boundary");
+    let Either::Out(message) = history(0, count) else {
+        unreachable!()
+    };
+    let mut bytes = message.encode().unwrap();
+    assert_eq!(bytes.len(), GRID_MAX_MESSAGE);
+    assert_eq!(GridOutput::decode(&bytes).unwrap(), message);
+    bytes.push(0);
+    assert!(matches!(
+        GridOutput::decode(&bytes),
+        Err(GridError::TooLarge { .. })
+    ));
+}
+
+/// Optional-field flags must not absorb unsupported style bits. This tests
+/// the typed sender boundary because every binary metadata bit has a real
+/// meaning and cannot represent a reserved style bit independently.
+#[farhelm_testtrace::test]
+fn reserved_style_bits_are_refused_by_shared_validation_and_encoding() {
+    let Either::Out(mut message) = one_row(0, vec![run(0, 1, "a")], vec![]) else {
+        unreachable!()
+    };
+    let GridOutput::Rows { rows, .. } = &mut message else {
+        unreachable!()
+    };
+    rows[0].row.runs[0].style.flags = 0x1000;
+    assert!(message.validate().is_err());
+    assert!(message.encode().is_err());
+}
+
+/// Truncating any field of the three binary kinds must fail without a panic
+/// or partial message. These small independently shaped messages exercise
+/// all integer widths and the row/link string boundaries.
+#[farhelm_testtrace::test]
+fn every_binary_prefix_is_refused_until_the_complete_message_arrives() {
+    for case in binary_fixture_cases().into_iter().filter(|case| {
+        case.valid && ["optional-fields", "frame", "history"].contains(&case.name.as_str())
+    }) {
+        for end in 0..case.bytes.len() {
+            assert!(
+                GridOutput::decode(&case.bytes[..end]).is_err(),
+                "{} prefix {end}",
+                case.name
+            );
+        }
+    }
+}
+
 // ---- Bounds at and just past their limits -----------------------------------
 
 /// A message of either direction, so one table can hold both.
@@ -547,7 +1055,7 @@ impl Either {
         match self {
             Either::Out(m) => {
                 m.validate()?;
-                let decoded = GridOutput::decode(&serde_json::to_vec(m).unwrap())?;
+                let decoded = GridOutput::decode(&m.encode()?)?;
                 assert_eq!(&decoded, m, "decode must give back the encoded message");
                 m.encode().map(drop)
             }
@@ -560,11 +1068,17 @@ impl Either {
         }
     }
 
-    /// Whether the receiving side refuses this message's JSON, independent
-    /// of the sender's own check.
+    /// Exercise the receiver without the sender's semantic gate. These
+    /// bounded invalid values still fit the binary fields, allowing the
+    /// table below to distinguish sender and receiver enforcement.
     fn receiver_refuses(&self) -> bool {
         match self {
-            Either::Out(m) => GridOutput::decode(&serde_json::to_vec(m).unwrap()).is_err(),
+            Either::Out(m) => {
+                let bytes = binary::encode(m)
+                    .unwrap()
+                    .unwrap_or_else(|| serde_json::to_vec(m).unwrap());
+                GridOutput::decode(&bytes).is_err()
+            }
             Either::In(m) => GridInput::decode(&serde_json::to_vec(m).unwrap()).is_err(),
         }
     }
@@ -999,7 +1513,7 @@ fn color_wire_values_and_their_gaps() {
 /// protocol error with the whole attachment lost. Spec: a message of exactly
 /// the limit decodes (padded with JSON whitespace, which changes nothing
 /// else), one byte more is refused as too large, and `encode` refuses a
-/// message whose JSON is over the limit.
+/// message whose encoded form is over the limit.
 #[farhelm_testtrace::test]
 fn message_size_limits_are_inclusive_and_enforced_on_both_sides() {
     let mut output = br#"{"t":"history_reset"}"#.to_vec();
@@ -1020,7 +1534,7 @@ fn message_size_limits_are_inclusive_and_enforced_on_both_sides() {
         Err(GridError::TooLarge { .. })
     ));
 
-    // 100 rows of 1000 one-cell runs is about two megabytes of JSON,
+    // 120 rows of 1000 one-cell runs exceed a megabyte of binary data,
     // although every row is valid on its own.
     let wide = Row {
         wraps: false,
@@ -1031,7 +1545,7 @@ fn message_size_limits_are_inclusive_and_enforced_on_both_sides() {
     let oversized = GridOutput::History {
         first: 0,
         cols: GRID_MAX_DIMENSION,
-        rows: vec![wide; 100],
+        rows: vec![wide; 120],
         links: Vec::new(),
     };
     oversized

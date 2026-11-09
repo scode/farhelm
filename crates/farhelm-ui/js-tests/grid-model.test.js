@@ -21,17 +21,18 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const grid = require("../assets/grid-model.js");
+const { encode } = require("./grid-test-encoder.js");
 
 const FIXTURES = path.join(__dirname, "fixtures/grid");
 const PLAIN = [0, -1, -1];
 
-/** Every message of a fixture stream, one JSON object per line, as data frames. */
+/** Readable fixture messages cross the same binary boundary as Rust output. */
 function frames(name) {
   return fs
     .readFileSync(path.join(FIXTURES, name), "utf8")
     .split("\n")
     .filter((line) => line.trim() !== "")
-    .map((line) => Buffer.from(line, "utf8"));
+    .map((line) => encode(line));
 }
 
 function applyAll(model, list) {
@@ -422,9 +423,11 @@ test("runs with the same style share one style object", () => {
   assert.equal(styles[0], styles[2]);
 });
 
-test("unknown flag bits are dropped rather than refused", () => {
-  const style = grid.decodeStyle([0x1000 | 1, -1, -1]);
-  assert.equal(style.flags, 1);
+test("style bits cannot overlap binary presence metadata", () => {
+  // A new flag must earn a protocol bump; masking it would confuse it
+  // with a field-presence bit in the encoder's shared metadata word.
+  assert.throws(() => grid.decodeStyle([0x1000 | 1, -1, -1]), grid.GridProtocolError);
+  assert.throws(() => encode({ t: "rows", rows: [[0, row([[0, 1, "x", [0x1000, -1, -1]]])]] }), /style bits/);
 });
 
 test("link tables past their bounds are refused", () => {

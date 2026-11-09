@@ -20,6 +20,7 @@ import { join } from "node:path";
 
 const ASSETS = join(__dirname, "../../crates/farhelm-ui/assets");
 const FIXTURES = join(__dirname, "../../crates/farhelm-ui/js-tests/fixtures/grid");
+const TEST_ENCODER = readFileSync(join(__dirname, "../../crates/farhelm-ui/js-tests/grid-test-encoder.js"), "utf8");
 const ORIGIN = "https://grid.test";
 
 // Records the document's live listeners, so a spec can tell whether a drag's
@@ -53,6 +54,7 @@ const PAGE = `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
+<script>${TEST_ENCODER}</script>
 <script>${LISTENER_LEDGER}</script>
 <link rel="stylesheet" href="/assets/app.css">
 <script src="/assets/terminal-theme.js"></script>
@@ -129,7 +131,7 @@ async function openGrid(page: Page): Promise<void> {
       sanitizePaste: (text: string) => text.replace(/\x1b/g, ""),
     });
     grid.fit();
-    const encoder = new TextEncoder();
+    const encoder = (window as any).farhelmGridTestEncoder;
     w.harness = {
       grid,
       sent,
@@ -1108,7 +1110,7 @@ test("a large history is applied in slices: the screen draws at once and the res
   await openGrid(page);
   const result = await page.evaluate(() => {
     const h = (window as any).harness;
-    const encoder = new TextEncoder();
+    const encoder = (window as any).farhelmGridTestEncoder;
     const send = (message: unknown) => h.grid.receive(encoder.encode(JSON.stringify(message)));
     const plain = [0, -1, -1];
     send({ t: "hello", cols: 200, rows: 2, history_cap: 5000 });
@@ -1141,7 +1143,7 @@ test("a bad history row found after the frame that carried it is reported as a p
   await feed(page, attachWithHistory(200, 2, 0));
   const outcome = await page.evaluate(() => {
     const h = (window as any).harness;
-    const encoder = new TextEncoder();
+    const encoder = (window as any).farhelmGridTestEncoder;
     let seed = 3;
     const color = () => 0x1000000 + ((seed = (seed * 1103515245 + 12345) & 0xffffff));
     const rows: unknown[] = Array.from({ length: 120 }, () => ({ w: false, r: Array.from({ length: 200 }, (_, col) => [col, 1, "\u2580", [0, color(), color()]]) }));
@@ -1336,7 +1338,7 @@ test("history keeps being applied after the page is hidden", async ({ page }) =>
     const w = window as any;
     w.requestAnimationFrame = () => 0;
     w.cancelAnimationFrame = () => {};
-    const encoder = new TextEncoder();
+    const encoder = (window as any).farhelmGridTestEncoder;
     const send = (message: unknown) => w.harness.grid.receive(encoder.encode(JSON.stringify(message)));
     send({ t: "hello", cols: 200, rows: 2, history_cap: 5000 });
     send({ t: "state", mouse: "off", focus: false, alt_screen: false, default_fg: null, default_bg: null, history_trimmed: false, exit: null });
@@ -1397,7 +1399,7 @@ test("redraws ask for links never with nothing hovered, and once per change to a
   /** Send `texts` to row `y`, one frame each, painting after each. */
   const redraw = (y: number, texts: string[], from: number) => page.evaluate(async ({ y, texts, from }) => {
     const grid = (window as any).harness.grid;
-    const encoder = new TextEncoder();
+    const encoder = (window as any).farhelmGridTestEncoder;
     let rev = from;
     for (const text of texts) {
       grid.receive(encoder.encode(JSON.stringify({ t: "rows", rows: [[y, { w: false, r: [[0, text.length, text, [0, -1, -1]]] }]] })));
@@ -1408,7 +1410,7 @@ test("redraws ask for links never with nothing hovered, and once per change to a
   }, { y, texts, from });
   await page.evaluate((lines) => {
     const grid = (window as any).harness.grid;
-    const encoder = new TextEncoder();
+    const encoder = (window as any).farhelmGridTestEncoder;
     for (const line of lines) grid.receive(encoder.encode(line));
     grid.flush();
   }, [
@@ -1509,7 +1511,7 @@ async function gridWithHeldAnswers(page: Page, rows: number, history: string[]):
     });
     w.harness.grid = grid;
     grid.fit();
-    const encoder = new TextEncoder();
+    const encoder = (window as any).farhelmGridTestEncoder;
     const send = (message: unknown) => grid.receive(encoder.encode(JSON.stringify(message)));
     const plain = [0, -1, -1];
     send({ t: "hello", cols: 20, rows, history_cap: 100 });
@@ -1525,7 +1527,7 @@ async function gridWithHeldAnswers(page: Page, rows: number, history: string[]):
 async function frame(page: Page, rev: number, rows: [number, string][], rowsInView = 3): Promise<void> {
   await page.evaluate(({ rev, rows, rowsInView }) => {
     const grid = (window as any).harness.grid;
-    const encoder = new TextEncoder();
+    const encoder = (window as any).farhelmGridTestEncoder;
     const plain = [0, -1, -1];
     if (rows.length) grid.receive(encoder.encode(JSON.stringify({ t: "rows", rows: rows.map(([y, text]) => [y, { w: false, r: [[0, text.length, text, plain]] }]) })));
     grid.receive(encoder.encode(JSON.stringify({ t: "frame", rev, cols: 20, rows: rowsInView, cursor: { x: 3, y: 2, visible: true, shape: "block", blink: true } })));
@@ -1584,7 +1586,7 @@ test("a late link answer is dropped when a row of a long printed URL beyond the 
   await gridWithHeldAnswers(page, 3, []);
   const premise = await page.evaluate(() => {
     const grid = (window as any).harness.grid;
-    const encoder = new TextEncoder();
+    const encoder = (window as any).farhelmGridTestEncoder;
     const send = (message: unknown) => grid.receive(encoder.encode(JSON.stringify(message)));
     const plain = [0, -1, -1];
     const url = "https://example.com/" + "a".repeat(1298);
@@ -1604,7 +1606,7 @@ test("a late link answer is dropped when a row of a long printed URL beyond the 
   await expect.poll(() => page.evaluate(() => (window as any).pending.length)).toBe(1);
   await page.evaluate(() => {
     const grid = (window as any).harness.grid;
-    const encoder = new TextEncoder();
+    const encoder = (window as any).farhelmGridTestEncoder;
     grid.receive(encoder.encode(JSON.stringify({ t: "rows", rows: [[129, { w: true, r: [[0, 10, "bbbbbbbbbb", [0, -1, -1]]] }]] })));
     grid.receive(encoder.encode(JSON.stringify({ t: "frame", rev: 3, cols: 10, rows: 132, cursor: { x: 0, y: 0, visible: false, shape: "block", blink: true } })));
     grid.flush();

@@ -18,12 +18,14 @@
 //!   So the grid stream changes with ordinary protocol bumps and has no
 //!   version of its own. Contrast the terminal host's protocol and the
 //!   snapshot format, which are permanent.
-//! - **JSON messages.** The control channel is already JSON so a human can
-//!   read a trace; the browser parses JSON without a hand-written binary
-//!   decoder to get bounds wrong in; the prototype's renderer bench was driven
-//!   by JSON row frames. Short keys keep it compact. If a measurement later
-//!   shows the encoding is the bottleneck, a binary encoding is an ordinary
-//!   protocol bump.
+//! - **Binary rows and JSON controls.** The measured full-scrollback attach
+//!   pays heavily for repeated JSON run/style objects, especially with a
+//!   different color in every cell. Rows, frames and history therefore use
+//!   fixed-width binary fields. Their row-length prefixes also let the page
+//!   retain history close to its received form and decode requested lines.
+//!   Small controls and all input stay readable JSON. The browser decoder is
+//!   bounds-checked and held to Rust-generated fixtures; there is no second
+//!   compatible encoding, compression or state shared across messages.
 //! - **The helm relays without interpreting.** Grid messages travel on the
 //!   attachment's data channel (the one `ControlMsg::Attach` named), exactly
 //!   where terminal bytes travel for tmux terminals, and the helm relays each
@@ -68,21 +70,54 @@
 //!
 //! # Framing
 //!
-//! Each data frame on a grid channel carries exactly one message: a UTF-8
-//! JSON object whose `t` field names its type. Data frames never split or
-//! join messages. A supervisor-to-client message ([`GridOutput`]) is at most
-//! [`GRID_MAX_MESSAGE`] bytes of JSON; a client-to-supervisor message
+//! Each data frame on a grid channel carries exactly one message. A leading
+//! zero byte identifies binary rows, frame or history; all other messages
+//! are UTF-8 JSON objects whose `t` field names their type. JSON forms of
+//! rows/frame/history are refused. Data frames never split or join messages.
+//! A supervisor-to-client message ([`GridOutput`]) is at most
+//! [`GRID_MAX_MESSAGE`] encoded bytes; a client-to-supervisor message
 //! ([`GridInput`]) is at most [`GRID_MAX_INPUT_MESSAGE`]. Senders split large
 //! content (history, a screen of many long rows, a long clipboard write)
 //! across messages as the message types allow.
 //!
 //! A receiver closes the attachment (supervisor) or reports a protocol error
-//! and reconnects (client) on a message that is too large, is not a JSON
-//! object, has an unknown `t`, or breaks a bound or an ordering rule.
-//! Unknown fields are ignored, so an additive field within one protocol
-//! version is harmless. Both sides enforce what they receive, and
+//! and reconnects (client) on a message that is too large, breaks its JSON
+//! or binary framing, has an unknown kind, or breaks a bound or ordering rule.
+//! Unknown JSON fields are ignored. Binary messages have no tolerated
+//! extensions: unknown tags, flags and trailing bytes are refused. Both sides enforce what they receive, and
 //! [`GridOutput::encode`]/[`GridInput::encode`] refuse what the other side
 //! would reject, so a sender bug surfaces at the sender.
+//!
+//! ## Binary layout
+//!
+//! All integers are little-endian and fixed-width. The first two bytes are
+//! zero and a kind: 1 rows, 2 frame, 3 history. Counters are u64 but never
+//! exceed 2^53-1. Strings are fatal UTF-8. Every count/length is checked
+//! against remaining bytes and its semantic bound before allocation.
+//!
+//! A link table is u16 count followed by entries of u16 id byte length,
+//! id bytes, u16 URI byte length, URI bytes. Indices are zero-based.
+//! Each row starts with u32 body byte length. Its body is u8 wraps (0/1),
+//! u16 run count, then runs. Each run is u16 column, width, metadata and
+//! text byte length, optional i32 foreground/background/underline in that
+//! order, optional u16 link index, then text. Metadata's low twelve bits
+//! are style flags; bits 12/13/14/15 mark those four optional fields.
+//! Absent foreground/background mean default, and explicitly encoding
+//! their default is refused. Underline can be explicitly default.
+//!
+//! After the discriminator, rows carries its link table, u32 row count,
+//! then u16 y and a prefixed row for each entry. History carries u64 first,
+//! u16 cols, link table, u32 row count, then prefixed rows. Frame carries
+//! u64 revision, u16 cols/rows/shift/cursor-x/cursor-y, then u8 flags:
+//! bit 0 visible, bit 1 blink, bits 2/3 shape (0 block, 1 underline, 2 bar).
+//! Shape 3 and bits 4..7 are refused. A complete frame is 21 bytes.
+//! Row bodies need at least three bytes. Before reserving rows, the count
+//! must fit the remaining payload at a minimum of nine bytes per screen
+//! entry or seven per history entry. Run count is at most the row's width.
+//! No extra message-level history count cap is imposed beyond its bytes.
+//!
+//! The JSON examples below describe the semantic types; for rows, frame
+//! and history they are fixture descriptions rather than accepted wire data.
 //!
 //! # Supervisor to client
 //!
@@ -142,9 +177,9 @@
 //! The sender must fit every message in [`GRID_MAX_MESSAGE`], and a row
 //! cannot be split across messages. A row's runs alone always fit (a
 //! 1000-column row of one-cell runs with maximal text is a few hundred KB of
-//! JSON even with every quote escaped), but its links may not: a hostile
+//! binary), but its links may not: a hostile
 //! program can put more than [`GRID_MAX_LINKS`] distinct links on one row, or
-//! fill 256 maximal links with characters JSON escapes. When a row cannot be
+//! fill the table with long targets. When a row cannot be
 //! sent with all its links, the sender drops the `link` of as many of its
 //! runs as it must and sends the text and styles unchanged.
 //!
@@ -314,7 +349,7 @@
 //! # What this module checks
 //!
 //! [`GridOutput::decode`] and [`GridInput::decode`] check everything one
-//! message can show on its own: size, JSON shape, the `t` tag, and every
+//! message can show on its own: size, JSON/binary shape, the kind, and every
 //! bound in the table below that does not depend on earlier messages. The
 //! rules that do depend on them belong to the receiver's view of the stream,
 //! and [`GridStreamCheck`] applies them in Rust: `hello` first and once,
@@ -327,7 +362,7 @@
 //!
 //! | Bound | Value |
 //! | --- | --- |
-//! | supervisor-to-client message | [`GRID_MAX_MESSAGE`], 1 MiB of JSON |
+//! | supervisor-to-client message | [`GRID_MAX_MESSAGE`], 1 MiB encoded |
 //! | client-to-supervisor message | [`GRID_MAX_INPUT_MESSAGE`], 64 KiB of JSON |
 //! | `cols`, `rows` (also `history` `cols`) | `1..=`[`GRID_MAX_DIMENSION`] (1000) |
 //! | `history_cap` | at most [`GRID_MAX_HISTORY_CAP`] (100000) |
@@ -343,7 +378,16 @@
 //!
 //! # Golden fixtures
 //!
-//! `crates/farhelm-proto/grid-fixtures/` holds one JSON file per message.
+//! `crates/farhelm-proto/grid-fixtures/` holds JSON controls/input and binary
+//! rows/frame/history under `output/binary/{valid,invalid}/`. Each binary
+//! fixture has a matching JSON description: the direct semantic message for
+//! valid data, or an `invalid` reason string for malformed data. There is no
+//! tolerated binary category. Valid bytes come from the actual Rust encoder,
+//! including a fixed-seed varied-row corpus, and tests pin exact byte equality.
+//! The explicit ignored writer regenerates these fixtures; ordinary tests
+//! only read them.
+//!
+//! The remaining JSON fixtures follow the categories below.
 //! `output/` is supervisor to client and `input/` client to supervisor;
 //! under each, `valid/` fixtures decode and encode back to the same JSON,
 //! `tolerated/` fixtures decode (unknown fields, explicitly empty optional
@@ -379,7 +423,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 // ---- Bounds -----------------------------------------------------------------
 
-/// Most bytes of JSON in one supervisor-to-client grid message.
+/// Most encoded bytes in one supervisor-to-client grid message.
 ///
 /// Larger than [`crate::MAX_TERMINAL_DATA_LEN`] because a row cannot be split
 /// across messages and one 1000-column row with its links can exceed 64 KiB.
@@ -450,8 +494,9 @@ pub const GRID_MAX_LINE_NUMBER: u64 = (1 << 53) - 1;
 
 /// The `flags` bits of a [`Style`].
 ///
-/// Bits above [`style_flags::BLINK`] are reserved: senders never set them and
-/// receivers ignore them, the same tolerance unknown fields get.
+/// Bits above [`style_flags::BLINK`] are not style flags: the binary run
+/// metadata uses them for optional fields, so shared validation refuses
+/// a sender style that sets them rather than silently changing its meaning.
 pub mod style_flags {
     pub const BOLD: u16 = 1;
     pub const DIM: u16 = 2;
@@ -496,7 +541,8 @@ pub enum GridError {
     /// type here can hold (a color out of range, say).
     #[error("grid message is malformed: {0}")]
     Json(#[from] serde_json::Error),
-    /// Well-formed, but a bound or a rule of the format is broken.
+    /// A semantic bound, binary field/framing rule, or stream ordering
+    /// rule is broken. Callers never branch on this diagnostic text.
     #[error("grid message breaks a bound: {0}")]
     Bound(String),
 }
@@ -508,7 +554,10 @@ macro_rules! bound {
     };
 }
 
-/// Refuse a message whose JSON is larger than `max`, before or after parsing.
+mod binary;
+
+/// Refuse an encoded payload larger than its direction's cap. Decoders
+/// call this before parsing or allocating from any peer-supplied field.
 fn check_len(len: usize, max: usize) -> Result<(), GridError> {
     if len > max {
         return Err(GridError::TooLarge { len, max });
@@ -600,8 +649,9 @@ impl<'de> Deserialize<'de> for Color {
     }
 }
 
-/// How a run's cells are drawn: `[flags, fg, bg]` or
-/// `[flags, fg, bg, underline_color]` on the wire.
+/// How a run's cells are drawn. Its semantic JSON description is
+/// `[flags, fg, bg]` or `[flags, fg, bg, underline_color]`; binary uses
+/// presence metadata and writes only nondefault foreground/background.
 ///
 /// `underline_color` keeps whether it was sent: an absent one and an explicit
 /// `-1` both mean the default underline color, but each encodes back to what
@@ -693,7 +743,7 @@ fn no_more<'de, A: SeqAccess<'de>>(
 // ---- Rows, runs and links ---------------------------------------------------
 
 /// One run of cells sharing a style: `[col, width, text, style]` or
-/// `[col, width, text, style, link]` on the wire. See the module docs, "Rows
+/// `[col, width, text, style, link]` in semantic JSON. See the module docs, "Rows
 /// and runs", for what each part means.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Run {
@@ -751,10 +801,13 @@ impl<'de> Deserialize<'de> for Run {
 }
 
 impl Run {
-    /// Check this run on its own: a width of at least 1, an end within
+    /// Check this run on its own: only supported style bits, width at least 1, an end within
     /// `row_width`, text within its byte budget and not empty, the width rule
     /// for ASCII and non-ASCII text, and a link index inside `links_len`.
     fn validate(&self, row_width: u16, links_len: usize) -> Result<(), GridError> {
+        if self.style.flags & !0x0fff != 0 {
+            return Err(bound!("reserved style bits {:#x}", self.style.flags));
+        }
         if self.width == 0 {
             return Err(bound!("run at column {} has width 0", self.col));
         }
@@ -811,10 +864,18 @@ impl Run {
     pub fn end(&self) -> u32 {
         u32::from(self.col) + u32::from(self.width)
     }
+
+    /// Encoded run bytes for already bounded text and style. A caller
+    /// sizing a row before assigning its message-local link index can pass
+    /// whether that link will be retained; the index value costs no extra.
+    pub fn binary_len(text: &str, style: Style, linked: bool) -> usize {
+        binary::run_len(text, style, linked)
+    }
 }
 
-/// One row of cells: `{"w":bool,"r":[run...]}` on the wire, and only as
-/// an object (see `object_only`).
+/// One row of cells. Its semantic JSON description is the object
+/// `{"w":bool,"r":[run...]}`; binary gives each row an independent length
+/// boundary so readers can index history without keeping decoded runs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Row {
     /// The row's text continues on the next row (a soft wrap).
@@ -863,6 +924,16 @@ fn object_only<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
 }
 
 impl Row {
+    /// Exact body length, excluding the outer u32 row prefix. This assumes
+    /// the row is semantically valid; encode performs that validation before
+    /// using lengths to allocate or narrow wire integers.
+    pub fn binary_len(&self) -> usize {
+        3 + self
+            .runs
+            .iter()
+            .map(|run| Run::binary_len(&run.text, run.style, run.link.is_some()))
+            .sum::<usize>()
+    }
     /// Check every run against `row_width`, and that runs are in increasing
     /// column order without overlapping.
     fn validate(&self, row_width: u16, links_len: usize) -> Result<(), GridError> {
@@ -886,7 +957,8 @@ impl Row {
     }
 }
 
-/// A screen row and where it goes: `[y, row]` on the wire.
+/// A screen row and where it goes: `[y, row]` in semantic JSON, a u16 y
+/// and a length-prefixed body in binary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "(u16, Row)", into = "(u16, Row)")]
 pub struct ScreenRow {
@@ -907,7 +979,8 @@ impl From<ScreenRow> for (u16, Row) {
     }
 }
 
-/// One OSC 8 hyperlink a run can point at: `[id, uri]` on the wire.
+/// One OSC 8 hyperlink a run can point at. Semantic JSON uses `[id, uri]`;
+/// binary uses two length-prefixed UTF-8 strings in a message-local table.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "(String, String)", into = "(String, String)")]
 pub struct Link {
@@ -917,6 +990,14 @@ pub struct Link {
     /// The target, as the program wrote it. Data, never trusted: the client
     /// opens only what its link-scheme rules allow.
     pub uri: String,
+}
+
+impl Link {
+    /// Bytes of one validated table entry, excluding the table count. The
+    /// limit is in UTF-8 bytes; JSON escaping has no role in binary packing.
+    pub fn binary_len(&self) -> usize {
+        4 + self.id.len() + self.uri.len()
+    }
 }
 
 impl From<(String, String)> for Link {
@@ -1169,12 +1250,21 @@ fn is_false(value: &bool) -> bool {
 
 impl GridOutput {
     /// Decode one data frame's payload, refusing anything a client must
-    /// refuse on its own: too large, malformed, an unknown `t`, or a bound
-    /// one message can show it breaks.
+    /// refuse on its own: size, framing, unknown kinds and bounds visible
+    /// in one message. Rows/frame/history have only their binary form;
+    /// serde JSON is retained separately for semantic fixture descriptions.
     pub fn decode(bytes: &[u8]) -> Result<GridOutput, GridError> {
         check_len(bytes.len(), GRID_MAX_MESSAGE)?;
+        if bytes.first() == Some(&0) {
+            let message = binary::decode(bytes)?;
+            message.validate()?;
+            return Ok(message);
+        }
         check_object(bytes)?;
         let message: GridOutput = serde_json::from_slice(bytes)?;
+        if binary::carries_rows(&message) {
+            return Err(bound!("rows, frame and history require binary encoding"));
+        }
         message.validate()?;
         Ok(message)
     }
@@ -1184,6 +1274,9 @@ impl GridOutput {
     /// protocol error.
     pub fn encode(&self) -> Result<Vec<u8>, GridError> {
         self.validate()?;
+        if let Some(bytes) = binary::encode(self)? {
+            return Ok(bytes);
+        }
         let bytes = serde_json::to_vec(self)?;
         check_len(bytes.len(), GRID_MAX_MESSAGE)?;
         Ok(bytes)

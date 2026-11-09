@@ -64,7 +64,7 @@ use farhelm_terminal_emulator::alacritty_terminal::vte::ansi::{
 };
 use farhelm_terminal_emulator::{Emulator, MouseReporting};
 
-/// About how many bytes of JSON a `rows` or `history` message is packed
+/// About how many binary bytes a `rows` or `history` message is packed
 /// to, well below [`GRID_MAX_MESSAGE`].
 ///
 /// The format allows 1 MiB, but the connection's writer queue is bounded by
@@ -76,9 +76,8 @@ use farhelm_terminal_emulator::{Emulator, MouseReporting};
 /// many links) still goes, alone, in a message of its own.
 pub const MESSAGE_TARGET: usize = 32 * 1024;
 
-/// What a message's own fields take beyond its rows and links, rounded up:
-/// `{"t":"history","first":N,"cols":C,"rows":[],"links":[]}` with every
-/// number at its longest.
+/// Conservative JSON envelope allowance for clipboard parts. Row messages
+/// count their exact binary headers separately.
 const ENVELOPE: usize = 128;
 
 // ---- Rows ---------------------------------------------------------------------
@@ -716,17 +715,23 @@ struct Pack<T> {
     rows: Vec<T>,
     links: Vec<Link>,
     index: HashMap<LinkKey, u16>,
-    /// Bytes of JSON the rows and links take so far.
+    /// Exact binary bytes, including this message's fixed envelope.
     size: usize,
+    /// Screen entries also carry y; history entries carry only row length.
+    row_prefix: usize,
 }
 
 impl<T> Pack<T> {
-    fn new() -> Pack<T> {
+    /// Start accounting with the caller's exact fixed fields. Screen and
+    /// history have different row prefixes, but share link-table packing
+    /// and the single-row fallback; clipboard remains independent JSON.
+    fn new(envelope: usize, row_prefix: usize) -> Pack<T> {
         Pack {
             rows: Vec::new(),
             links: Vec::new(),
             index: HashMap::new(),
-            size: 0,
+            size: envelope,
+            row_prefix,
         }
     }
 
@@ -742,7 +747,9 @@ impl<T> Pack<T> {
             return true;
         }
         let new = new_links(row, &self.index);
-        let bytes: usize = row_json_estimate(row) + new.iter().map(link_json_len).sum::<usize>();
+        let bytes = self.row_prefix
+            + cell_row_binary_len(row)
+            + new.iter().map(Link::binary_len).sum::<usize>();
         self.links.len() + new.len() <= GRID_MAX_LINKS && self.size + bytes <= MESSAGE_TARGET
     }
 
@@ -756,8 +763,10 @@ impl<T> Pack<T> {
         wanted.truncate(GRID_MAX_LINKS - self.links.len());
         loop {
             let wire = to_wire(row, &self.index, &wanted, self.links.len());
-            let bytes = json_len(&wire) + wanted.iter().map(link_json_len).sum::<usize>();
-            if self.size + bytes + ENVELOPE <= GRID_MAX_MESSAGE || wanted.is_empty() {
+            let bytes = self.row_prefix
+                + wire.binary_len()
+                + wanted.iter().map(Link::binary_len).sum::<usize>();
+            if self.size + bytes <= GRID_MAX_MESSAGE || wanted.is_empty() {
                 for link in wanted {
                     self.index.insert(link_key(&link), self.links.len() as u16);
                     self.links.push(link);
@@ -809,18 +818,20 @@ fn to_wire(row: &CellRow, index: &HashMap<LinkKey, u16>, added: &[Link], table_l
     }
 }
 
-/// The JSON a wire value takes.
-fn json_len(value: &impl serde::Serialize) -> usize {
-    serde_json::to_vec(value).map_or(0, |bytes| bytes.len())
+/// Exact row body bytes before assigning link indices. The pack's admission
+/// check only accepts rows whose links all fit; its single-row fallback
+/// later counts again after dropping links that exceed the hard cap.
+fn cell_row_binary_len(row: &CellRow) -> usize {
+    3 + row
+        .runs
+        .iter()
+        .map(|run| Run::binary_len(&run.text, run.style, run.link.is_some()))
+        .sum::<usize>()
 }
 
-/// What one `[id, uri]` entry and its comma take.
-fn link_json_len(link: &Link) -> usize {
-    json_len(link) + 1
-}
-
-/// No less than what `row` and the links it uses take as JSON in a
-/// `history` message, worked out without encoding it: each run's text escaped at its longest
+/// A conservative live-read budget for `row` and its links, worked out
+/// without encoding it. This retains the former JSON upper bound, which
+/// exceeds the binary representation: each run's text escaped at its longest
 /// ([`escaped_len_at_most`]), the most a run takes besides
 /// (`[col,width,"",[flags,fg,bg,underline],link],` with every number at its
 /// widest), the run's link as an `["id","uri"],` entry of the message's
@@ -862,34 +873,14 @@ fn escaped_len_at_most(text: &str) -> usize {
         .sum()
 }
 
-/// About what `row` takes as JSON with its links as indices: exact but for
-/// the indices' digits, which three per run cover.
-fn row_json_estimate(row: &CellRow) -> usize {
-    let wire = Row {
-        wraps: row.wraps,
-        runs: row
-            .runs
-            .iter()
-            .map(|run| Run {
-                col: run.col,
-                width: run.width,
-                text: run.text.clone(),
-                style: run.style,
-                link: None,
-            })
-            .collect(),
-    };
-    json_len(&wire) + 4 * row.runs.iter().filter(|run| run.link.is_some()).count() + 8
-}
-
 /// Screen rows as `rows` messages of about [`MESSAGE_TARGET`] bytes each,
 /// in the order given. No message for no rows.
 pub fn rows_messages(rows: &[(u16, &CellRow)]) -> Vec<GridOutput> {
     let mut messages = Vec::new();
-    let mut pack: Pack<ScreenRow> = Pack::new();
+    let mut pack: Pack<ScreenRow> = Pack::new(8, 6);
     for (y, row) in rows {
         if !pack.takes(row) {
-            let full = std::mem::replace(&mut pack, Pack::new());
+            let full = std::mem::replace(&mut pack, Pack::new(8, 6));
             messages.push(GridOutput::Rows {
                 rows: full.rows,
                 links: full.links,
@@ -912,11 +903,11 @@ pub fn rows_messages(rows: &[(u16, &CellRow)]) -> Vec<GridOutput> {
 /// for no lines.
 pub fn history_messages(first: u64, cols: u16, lines: &[CellRow]) -> Vec<GridOutput> {
     let mut messages = Vec::new();
-    let mut pack: Pack<Row> = Pack::new();
+    let mut pack: Pack<Row> = Pack::new(18, 4);
     let mut pack_first = first;
     for line in lines {
         if !pack.takes(line) {
-            let full = std::mem::replace(&mut pack, Pack::new());
+            let full = std::mem::replace(&mut pack, Pack::new(18, 4));
             let count = full.rows.len() as u64;
             messages.push(GridOutput::History {
                 first: pack_first,

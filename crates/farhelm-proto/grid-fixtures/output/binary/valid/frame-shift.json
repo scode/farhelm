@@ -1,0 +1,14 @@
+{
+  "cols": 100,
+  "cursor": {
+    "blink": false,
+    "shape": "bar",
+    "visible": false,
+    "x": 99,
+    "y": 29
+  },
+  "rev": 7,
+  "rows": 30,
+  "shift": 30,
+  "t": "frame"
+}

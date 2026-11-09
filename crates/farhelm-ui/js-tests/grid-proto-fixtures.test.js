@@ -1,6 +1,10 @@
 // The grid client held to the grid stream format's golden fixtures.
 //
-// `crates/farhelm-proto/grid-fixtures/` holds one JSON file per message,
+// `crates/farhelm-proto/grid-fixtures/` holds JSON controls and inputs,
+// plus binary output paired with JSON descriptions. Rust writes those
+// bytes, including a fixed-seed corpus; this test also holds the readable
+// test-feed encoder byte-equal to that independent producer. Binary has
+// no tolerated extensions within the locked protocol version.
 // and `farhelm-proto`'s own tests decode every one of them with the Rust
 // types the supervisor sends and receives with (`grid_tests.rs`). This file
 // runs the same files through the browser's side: grid-model.js decodes
@@ -23,8 +27,8 @@
 //   row cleared and a row left alone all show), a state over one that
 //   differs in every field, a history reset over existing history.
 // - `output/tolerated/` must be accepted and must then hold what its
-//   canonical form says (`TOLERATED_CANONICAL`: the unknown field dropped,
-//   reserved style bits cleared), over the same observing prelude as a
+//   canonical form says (`TOLERATED_CANONICAL`: the unknown field dropped),
+//   over the same observing prelude as a
 //   valid fixture, so a client that ignored the whole message cannot pass
 //   for one that ignored only the extension (except where the message
 //   carries nothing to lose, such as `rows-empty-links`).
@@ -55,6 +59,7 @@ const path = require("node:path");
 const { isDeepStrictEqual } = require("node:util");
 const grid = require("../assets/grid-model.js");
 const input = require("../assets/grid-input.js");
+const { encode } = require("./grid-test-encoder.js");
 
 const FIXTURES = path.join(__dirname, "../../farhelm-proto/grid-fixtures");
 
@@ -80,6 +85,36 @@ function jsonOf(category, name) {
 function assertNamesExactly(table, category, tableName) {
   assert.deepEqual([...table.keys()].sort(), namesIn(category), `${tableName} names exactly the files in ${category}/`);
 }
+
+/** Both halves of every binary fixture are named explicitly; an unpaired file cannot go unread. */
+function assertBinaryNames(stems, category) {
+  const names = stems.flatMap((stem) => [`${stem}.bin`, `${stem}.json`]).sort();
+  assert.deepEqual(namesIn(category), names, `binary fixtures in ${category}/ have exactly the named pairs`);
+}
+
+// The fixed-seed corpus count is part of the checked-in coverage. Expanding
+// Rust's corpus deliberately requires expanding this account too.
+const BINARY_VALID = [
+  "frame", "frame-shift", "frame-underline-cursor", "frame-bar",
+  "rows", "rows-blank", "rows-empty",
+  "history", "history-empty-at-last-line", "history-full-width", "history-last-line",
+  "history-wrapped-with-trailing-blanks", "optional-fields", "field-leading-bom",
+  ...Array.from({ length: 16 }, (_, i) => `corpus-${String(i).padStart(2, "0")}`),
+];
+
+const BINARY_INVALID = [
+  "unknown-kind", "too-many-links", "link-id-too-long", "link-uri-too-long", "invalid-link-utf8",
+  "huge-row-count", "screen-y-past-largest", "huge-row-length", "row-length-before-next-field", "invalid-wraps",
+  "huge-run-count", "zero-width", "run-end-past-largest", "text-past-cell-budget", "color-below-default",
+  "color-between-palette-and-rgb", "color-past-rgb", "noncanonical-foreground-default",
+  "noncanonical-background-default", "link-out-of-range", "invalid-text-utf8", "overlapping-runs",
+  "ascii-width-mismatch", "truncated-header", "truncated-integer", "truncated-row-text",
+  "trailing-message-byte", "invalid-discriminator", "trailing-row-byte", "empty-text", "non-ascii-width",
+  "unsafe-revision", "zero-frame-cols", "zero-frame-rows", "frame-cols-past-largest", "frame-rows-past-largest",
+  "frame-shift-past-rows", "cursor-past-cols",
+  "cursor-past-rows", "reserved-cursor-flags", "invalid-cursor-shape", "unsafe-first-line", "unsafe-last-line",
+  "zero-history-cols", "history-cols-past-largest", "huge-history-count", "history-run-past-cols",
+];
 
 // ## Applying one output fixture
 
@@ -188,7 +223,7 @@ function preludeFor(message, observe) {
  */
 function prepare(message, observe) {
   const model = new grid.GridModel();
-  for (const before of preludeFor(message, observe)) model.apply(before);
+  for (const before of preludeFor(message, observe)) model.apply(grid.decodeFrame(encode(before)));
   if (observe && (message.t === "frame" || message.t === "rows")) {
     if (message.t === "frame") assert.ok(message.rev > 0, "premise: the fixture's revision is above the seeded screen's 0");
     const seeded = Array.from({ length: model.rows }, (_, y) => fixtureRow(seededRow(y)));
@@ -285,7 +320,7 @@ function assertModelHolds(model, fixture, name) {
       // Rows are invisible until a frame commits them. Over the seeded
       // screen, a named row is replaced (a blank one clears it) and every
       // other row keeps its seeded content.
-      model.apply(COMMIT);
+      model.apply(grid.decodeFrame(encode(COMMIT)));
       const sent = new Map(fixture.rows.map(([y, row]) => [y, fixtureRow(row, fixture.links)]));
       for (const [y, row] of sent) assert.deepEqual(modelRow(model.screen[y]), row, `${name}: screen row ${y}`);
       const changed = model.screen.flatMap((row, y) => !sent.has(y) && !isDeepStrictEqual(modelRow(row), fixtureRow(seededRow(y))) ? [y] : []);
@@ -310,7 +345,7 @@ function assertModelHolds(model, fixture, name) {
       // continue the old one.
       assert.equal(model.takeDamage().historyReset, true, `${name}: the reset is reported as one`);
       assert.equal(model.historyLength, 0, `${name}: the seeded history is cleared`);
-      model.apply({ t: "history", first: 100, cols: 80, rows: [{ w: false, r: [[0, 3, "new", PLAIN]] }] });
+      model.apply(grid.decodeFrame(encode({ t: "history", first: 100, cols: 80, rows: [{ w: false, r: [[0, 3, "new", PLAIN]] }] })));
       assert.deepEqual([model.historyFirst, model.historyLength], [100, 1], `${name}: history starts again anywhere`);
       return;
     case "clipboard":
@@ -335,34 +370,13 @@ function without(object, key) {
   return rest;
 }
 
-// The style flag bits the format defines (1 bold through 2048 blink); the
-// client drops the rest rather than refusing them, like unknown fields.
-const KNOWN_FLAGS = 0xfff;
-
 /**
  * For each tolerated output fixture, the valid message it means, which
- * `assertModelHolds` then holds the model to: unknown fields dropped, an
- * empty `links` the same as none, reserved style bits cleared.
+ * `assertModelHolds` then holds the model to: unknown control fields
+ * dropped. Row-bearing output has one exact binary representation.
  */
 const TOLERATED_CANONICAL = new Map([
-  // An explicit zero shift is no shift: the revision and cursor still apply.
-  ["frame-zero-shift.json", (f) => ({ ...f, cursor: without(f.cursor, "future") })],
   ["hello-unknown-field.json", (f) => without(f, "future")],
-  ["row-unknown-field.json", (f) => ({ ...f, rows: f.rows.map(([y, row]) => [y, without(row, "future")]) })],
-  ["rows-empty-links.json", (f) => without(f, "links")],
-  [
-    "rows-reserved-style-bits.json",
-    (f) => {
-      const flags = f.rows[0][1].r[0][3][0];
-      assert.notEqual(flags & ~KNOWN_FLAGS, 0, "premise: the fixture sets reserved style bits");
-      const canonical = {
-        ...f,
-        rows: f.rows.map(([y, row]) => [y, { ...row, r: row.r.map(([col, width, text, style, ...link]) => [col, width, text, [style[0] & KNOWN_FLAGS, ...style.slice(1)], ...link]) }]),
-      };
-      assert.equal(canonical.rows[0][1].r[0][3][0], 1, "premise: the known bit under the reserved ones is bold");
-      return canonical;
-    },
-  ],
   ["state-unknown-field.json", (f) => without(f, "title")],
 ]);
 
@@ -376,49 +390,12 @@ const TOLERATED_CANONICAL = new Map([
 const INVALID_REASONS = new Map([
   ["clipboard-missing-last.json", "bad clipboard part"],
   ["clipboard-unknown-target.json", "bad clipboard target"],
-  ["frame-cursor-as-array.json", "bad cursor"],
-  ["frame-cursor-past-cols.json", "cursor off the screen"],
-  ["frame-cursor-past-rows.json", "cursor off the screen"],
-  ["frame-rev-past-safe-integer.json", "bad frame revision"],
-  ["frame-shift-past-rows.json", "bad frame shift"],
-  ["frame-unknown-cursor-shape.json", "bad cursor shape"],
-  ["frame-zero-rows.json", "bad frame size"],
   ["hello-history-cap-past-largest.json", "bad history cap"],
   ["hello-missing-history-cap.json", "bad history cap"],
   ["hello-rows-past-largest.json", "bad hello size"],
   ["hello-zero-cols.json", "bad hello size"],
-  ["history-cols-past-largest.json", "bad history width"],
-  ["history-empty-past-safe-integer.json", "bad history line number"],
-  ["history-missing-cols.json", "bad history width"],
-  ["history-past-safe-integer.json", "history line numbers past the largest safe integer"],
-  ["history-run-overlap.json", "run column out of order or past the row"],
-  ["history-run-past-cols.json", "run width past the row"],
-  ["history-zero-cols.json", "bad history width"],
   ["missing-type.json", "message has no type"],
   ["not-an-object.json", "message has no type"],
-  ["rows-ascii-width-mismatch.json", "an ASCII run's width is not its length"],
-  ["rows-color-below-default.json", "bad background color"],
-  ["rows-color-between-palette-and-direct.json", "bad foreground color"],
-  ["rows-color-past-direct.json", "bad foreground color"],
-  ["rows-empty-text.json", "empty run text"],
-  ["rows-link-id-too-long.json", "bad link id"],
-  ["rows-link-out-of-range.json", "run link out of range"],
-  ["rows-link-uri-too-long.json", "bad link target"],
-  ["rows-link-without-links.json", "run link out of range"],
-  ["rows-non-ascii-run-wider-than-a-cell.json", "a non-ASCII run holds more than one cell"],
-  ["rows-out-of-order.json", "run column out of order or past the row"],
-  ["rows-overlap.json", "run column out of order or past the row"],
-  ["rows-row-as-array.json", "bad row"],
-  ["rows-row-missing-wrap.json", "bad row wrap flag"],
-  ["rows-run-past-largest.json", "run width past the row"],
-  ["rows-run-too-long.json", "bad run"],
-  ["rows-run-too-short.json", "bad run"],
-  ["rows-style-too-long.json", "bad style"],
-  ["rows-style-too-short.json", "bad style"],
-  ["rows-text-past-cell-budget.json", "bad run text"],
-  ["rows-too-many-links.json", "bad links table"],
-  ["rows-y-past-largest.json", "row index out of range"],
-  ["rows-zero-width.json", "bad run width"],
   ["state-default-color-as-default-bg.json", "bad default background"],
   ["state-missing-default-fg.json", "bad default foreground"],
   ["state-missing-exit.json", "bad exit"],
@@ -624,12 +601,43 @@ const INPUT_INVALID = new Map([
 test("the client knows every category of golden fixture", () => {
   // Why: the per-category rules below are the whole contract; a new kind
   // of fixture (another directory) would otherwise be read by nobody here.
-  // Spec: grid-fixtures/ holds exactly `input` and `output`, each with
-  // exactly `invalid`, `tolerated` and `valid`.
+  // Spec: JSON input and output have valid/tolerated/invalid categories;
+  // binary output has only valid/invalid, since there is one wire version.
   const dirs = (where) => fs.readdirSync(where, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
   assert.deepEqual(dirs(FIXTURES), ["input", "output"]);
-  for (const side of ["input", "output"]) {
-    assert.deepEqual(dirs(path.join(FIXTURES, side)), ["invalid", "tolerated", "valid"], side);
+  assert.deepEqual(dirs(path.join(FIXTURES, "input")), ["invalid", "tolerated", "valid"]);
+  assert.deepEqual(dirs(path.join(FIXTURES, "output")), ["binary", "invalid", "tolerated", "valid"]);
+  assert.deepEqual(dirs(path.join(FIXTURES, "output/binary")), ["invalid", "valid"]);
+});
+
+test("Rust binary fixtures decode exactly and the test producer writes identical bytes", () => {
+  // Why: round-tripping only the JS writer and reader can hide the same
+  // mistake on both sides. Rust's bytes and descriptions are independent,
+  // and model effects show that a decoder did more than accept a message.
+  const category = "output/binary/valid";
+  assertBinaryNames(BINARY_VALID, category);
+  for (const stem of BINARY_VALID) {
+    const description = jsonOf(category, `${stem}.json`);
+    const bytes = bytesOf(category, `${stem}.bin`);
+    assert.deepEqual(grid.decodeFrame(bytes), description, `${stem}: exact decoded fields`);
+    assert.deepEqual(Buffer.from(encode(description)), bytes, `${stem}: JS producer matches Rust`);
+    assertModelHolds(acceptFixture(category, `${stem}.bin`), description, stem);
+  }
+});
+
+test("every malformed Rust binary fixture is refused at the browser boundary", () => {
+  // Rust's fixture builder proves the original message and each mutated
+  // field before producing these records, then pins the refusal reason.
+  // Here the contract is a protocol error from the real decoder/model,
+  // without coupling two languages to the same diagnostic wording.
+  const category = "output/binary/invalid";
+  assertBinaryNames(BINARY_INVALID, category);
+  for (const stem of BINARY_INVALID) {
+    const description = jsonOf(category, `${stem}.json`);
+    assert.deepEqual(Object.keys(description), ["invalid"], `${stem}: refusal description`);
+    assert.equal(typeof description.invalid, "string", `${stem}: names the rejected rule`);
+    assert.ok(description.invalid.length > 0);
+    assert.throws(() => applyPlain(bytesOf(category, `${stem}.bin`)), grid.GridProtocolError, stem);
   }
 });
 
