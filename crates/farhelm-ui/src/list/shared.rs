@@ -22,6 +22,7 @@ use farhelm_proto::host_appearance::{HostColor, HostIcon};
 /// carrying unrelated launch settings through the action callback.
 #[derive(Debug, Clone)]
 pub(super) struct DeleteTarget {
+    pub(super) sandbox: Option<HostId>,
     pub(super) id: String,
     pub(super) status: SessionStatus,
     pub(super) tabs: usize,
@@ -33,6 +34,7 @@ impl DeleteTarget {
     /// a visible spelling would address a different session.
     pub(super) fn for_session(session: &Session) -> Self {
         Self {
+            sandbox: None,
             id: session.id.raw().to_owned(),
             status: session.status.clone(),
             tabs: session.tabs.len(),
@@ -57,7 +59,7 @@ impl DeleteTarget {
     /// What a Delete click on this row does: open the confirmation, or
     /// delete at once with the supervisor-side precondition attached.
     pub(super) fn click(&self, skip_confirmations: bool) -> DeleteClick {
-        if self.needs_confirmation() && !skip_confirmations {
+        if self.sandbox.is_some() || self.needs_confirmation() && !skip_confirmations {
             DeleteClick::Confirm
         } else {
             DeleteClick::DeleteGuarded(crate::status::delete_guard(&self.status, self.tabs))
@@ -335,6 +337,10 @@ pub(crate) fn SessionHostName(
 /// exist to prevent. `ListView` reduces each host to these facts once.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct HostOption {
+    /// Keep owned rows available to Restart/Replace, but never offer them as
+    /// unrelated new-session destinations.
+    pub(super) session_owned: bool,
+    pub(super) recipe: Option<String>,
     pub(super) id: HostId,
     /// The helm's own display name; selectors keep the full form even though
     /// sidebar rows use the registered host's separately derived short form.
@@ -647,18 +653,24 @@ pub(super) fn enrich_created_session(
     }
 }
 
-/// Every registered host as the create dialog and the filter surface offer
-/// it.
+/// Reduce every registered host without losing internal Restart/Replace targets.
 ///
 /// A free function over the snapshot rather than an inline `map` in the
 /// render, because `ListView`'s target effect needs exactly the same reduction
 /// from inside an effect, where the render's local is not in scope. Every host
-/// is offered whatever phase it is in — see `ListView` for why filtering to
-/// connected ones would quietly rewrite SPEC.md's creation default.
+/// remains present whatever phase it is in — see `ListView` for why filtering to
+/// connected ones would quietly rewrite SPEC.md's creation default. Ordinary
+/// launcher/template controls filter session-owned rows at their choice boundary;
+/// this shared snapshot must retain them for operations on existing sessions.
 pub(super) fn host_options(hosts: &[Host]) -> Vec<HostOption> {
     hosts
         .iter()
         .map(|host| HostOption {
+            session_owned: host.is_session_owned,
+            recipe: host
+                .tensorlake
+                .as_ref()
+                .map(|binding| binding.recipe.raw().to_string()),
             id: host.id,
             // HostOption owns raw matching input; its label applies the GUI spelling later.
             name: host.name.raw().to_owned(),
@@ -750,6 +762,7 @@ pub(super) mod tests {
             (SessionStatus::Unknown, 1, crate::DeleteGuard::Unconditional),
         ] {
             let target = DeleteTarget {
+                sandbox: None,
                 id: "shown".into(),
                 status,
                 tabs,
@@ -812,6 +825,8 @@ pub(super) mod tests {
     /// `phase: None` is what "connected" means to an option.
     pub(in super::super) fn option(id: HostId, name: &str, local: bool) -> HostOption {
         HostOption {
+            session_owned: false,
+            recipe: None,
             id,
             name: name.into(),
             local,

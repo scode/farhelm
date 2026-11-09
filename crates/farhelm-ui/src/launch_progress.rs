@@ -35,6 +35,15 @@ impl LaunchAction {
 /// operation's busy state cannot look like this call's progress.
 #[derive(Clone, PartialEq)]
 pub(crate) struct PendingLaunch {
+    /// Existing provisioning progress can name a preparation phase. It never
+    /// changes this request's lifetime or its uncertain-outcome semantics.
+    pub(crate) stage: Option<String>,
+    /// Preparation's first-use/24-hour explanation remains visible while
+    /// its ordinary host step runs, including the floating quick-launch pill.
+    pub(crate) stage_detail: Option<String>,
+    /// Provisioning publishes no phase timestamps. This local display clock
+    /// starts at the first observation of a changed phase name.
+    stage_started: Option<Instant>,
     pub(crate) started: Instant,
     pub(crate) action: LaunchAction,
     pub(crate) host: String,
@@ -46,11 +55,24 @@ impl PendingLaunch {
     /// Later form edits or host refreshes must not relabel an in-flight request.
     pub(crate) fn new(action: LaunchAction, host: String, title: Option<String>) -> Self {
         Self {
+            stage: None,
+            stage_detail: None,
+            stage_started: None,
             started: Instant::now(),
             action,
             host,
             title: title.filter(|title| !title.is_empty()),
         }
+    }
+
+    /// Update advisory host progress without restarting its clock on each poll.
+    /// The request's total clock still controls the initial visibility delay.
+    pub(crate) fn observe_stage(&mut self, name: String, detail: Option<String>) {
+        if self.stage.as_ref() != Some(&name) {
+            self.stage_started = Some(Instant::now());
+        }
+        self.stage = Some(name);
+        self.stage_detail = detail;
     }
 
     /// Explain a deadline without claiming the helm refused the operation.
@@ -80,6 +102,9 @@ impl PendingLaunch {
     /// Keep relayed names isolated from the UI's own operation and punctuation.
     /// The same immutable words serve the visible line and its one announcement.
     fn label_parts(&self) -> Vec<DetailPart> {
+        if let Some(stage) = &self.stage {
+            return vec![DetailPart::peer(stage.clone())];
+        }
         let mut parts = vec![DetailPart::text(self.action.present())];
         if let Some(title) = &self.title {
             parts.extend([
@@ -115,10 +140,13 @@ pub(crate) fn LaunchProgress(
             now.set(Instant::now());
         }
     });
-    let elapsed = now().saturating_duration_since(pending.started).as_secs();
-    if elapsed < 2 {
+    let now = now();
+    if now.saturating_duration_since(pending.started).as_secs() < 2 {
         return rsx! {};
     }
+    let elapsed = now
+        .saturating_duration_since(pending.stage_started.unwrap_or(pending.started))
+        .as_secs();
     let label = pending.label_parts();
     rsx! {
         div { class: "launch-progress delete-progress",
@@ -130,6 +158,9 @@ pub(crate) fn LaunchProgress(
             div { class: "launch-progress-visible", aria_hidden: "true",
                 span { class: "delete-spinner" }
                 PeerLine { class: "launch-progress-label".to_string(), parts: label }
+                if let Some(detail) = &pending.stage_detail {
+                    PeerLine { class: "launch-progress-detail".to_string(), parts: vec![DetailPart::peer(detail.clone())] }
+                }
                 span { class: "launch-progress-elapsed", " {elapsed} s" }
             }
         }

@@ -1,5 +1,6 @@
 ---
 kind: added
+pr: 3265
 ---
 
 Experimental [sandbox sessions](https://farhelm.io/docs/using/tensorlake-sandboxes/) can create a Tensorlake sandbox for

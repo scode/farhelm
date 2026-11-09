@@ -69,6 +69,8 @@ pub(super) enum CheckoutInput<'a> {
 /// launch variant even if later edits have selected a different tab.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct LaunchDraft {
+    /// A missing recipe remains selected; reconciliation must never retarget it.
+    recipe: Option<String>,
     /// Restart compares against stored choices; it must never acquire create's
     /// permission defaults or permit a search action to replace held context.
     restart_baseline: Option<api::RestartEdit>,
@@ -135,6 +137,7 @@ impl LaunchDraft {
     /// Seed only remembered permissions; New never guesses an agent or model.
     pub(super) fn new(remembered_permission: Option<LaunchPermission>) -> Self {
         Self {
+            recipe: None,
             restart_baseline: None,
             harness: None,
             model: None,
@@ -299,6 +302,26 @@ impl LaunchDraft {
     // the editor triple survives managed mode for an explicit return to Folder.
     // All folder transitions keep those roles linked without caching previews.
 
+    /// A fresh resource target, never an installed-host identity.
+    pub(super) fn recipe(&self) -> Option<String> {
+        self.recipe.clone()
+    }
+
+    /// New resources have no previous filesystem; repository intent survives
+    /// placement changes and is allocated only after the new host connects.
+    fn select_recipe(&mut self, recipe: Option<String>) {
+        self.recipe = recipe;
+        if self.recipe.is_some() {
+            if matches!(self.destination, DestinationDraft::Existing { .. }) {
+                self.edit_folder("~".into());
+            }
+            self.cwd = "~".into();
+            self.cwd_raw_seed = None;
+            self.cwd_edited = false;
+            self.folder_is_explicit = false;
+        }
+    }
+
     /// Dormant folder display survives managed mode; it is never a preview path.
     pub(super) fn cwd(&self) -> String {
         self.cwd.clone()
@@ -356,6 +379,9 @@ impl LaunchDraft {
     /// A typed folder exits managed mode and deliberately owns its spelling.
     /// Report operational path change, independently of editor ownership bits.
     pub(super) fn edit_folder(&mut self, text: String) -> bool {
+        if self.recipe.is_some() && !matches!(text.as_str(), "" | "~") {
+            return false;
+        }
         let changed =
             !matches!(&self.destination, DestinationDraft::Existing { cwd } if cwd == &text);
         self.destination = DestinationDraft::Existing { cwd: text.clone() };
@@ -368,6 +394,9 @@ impl LaunchDraft {
     /// Equality concerns the semantic destination, not raw/edited ownership;
     /// callers separately account for invalid remembered-destination correction.
     pub(super) fn choose_existing_folder(&mut self, raw: &str) -> bool {
+        if self.recipe.is_some() && !matches!(raw, "" | "~") {
+            return false;
+        }
         let changed =
             !matches!(&self.destination, DestinationDraft::Existing { cwd } if cwd == raw);
         self.seed_folder(raw);
@@ -1154,6 +1183,7 @@ fn joined(words: Option<&Vec<String>>) -> String {
 /// Memo peeks can be stale in one event turn; imperative callers use snapshot().
 #[derive(Clone, Copy)]
 pub(super) struct DraftFields {
+    pub(super) recipe: Memo<Option<String>>,
     pub(super) cwd: Memo<String>,
     pub(super) cwd_edited: Memo<bool>,
     pub(super) title: Memo<String>,
@@ -1340,6 +1370,7 @@ impl ModelTargets {
 /// Immutable existing facts for one acceptance, never another authority.
 /// Preferences remain a handle for the original application-time peek.
 pub(super) struct SearchInputs<'a> {
+    pub(super) recipes: &'a [String],
     pub(super) templates: &'a [farhelm_proto::launcher::LaunchTemplate],
     pub(super) hosts: &'a [HostOption],
     pub(super) catalog: Option<&'a [api::LaunchCatalogModel]>,
@@ -1397,6 +1428,22 @@ pub(super) struct LaunchDraftState {
 }
 
 impl LaunchDraftState {
+    /// Recipe picks retain the ordinary busy gate and retire host-bound retries.
+    pub(super) fn choose_recipe(self, recipe: String) -> bool {
+        self.apply_edit(EditRule::Ordinary, |draft| {
+            let changed = draft.recipe.as_ref() != Some(&recipe);
+            draft.select_recipe(Some(recipe));
+            (
+                (),
+                EditFacts {
+                    publish: true,
+                    changed,
+                },
+            )
+        })
+        .is_some()
+    }
+
     /// Current values without adding a whole-draft reactive subscription.
     pub(super) fn snapshot(self) -> LaunchDraft {
         self.value.peek().clone()
@@ -1580,7 +1627,8 @@ impl LaunchDraftState {
         hosts: &[HostOption],
         mut targets: PlacementTargets,
     ) -> bool {
-        self.apply_edit(EditRule::Ordinary, |_| {
+        self.apply_edit(EditRule::Ordinary, |draft| {
+            draft.select_recipe(None);
             targets.choices.partial_template_hint.set(false);
             self.chosen_host.set(Some(id));
             targets
@@ -1592,7 +1640,7 @@ impl LaunchDraftState {
             (
                 (),
                 EditFacts {
-                    publish: false,
+                    publish: true,
                     changed: true,
                 },
             )
@@ -1606,7 +1654,8 @@ impl LaunchDraftState {
     /// took the default, which is true even when the folder already matched.
     pub(super) fn seed_default_folder(self, raw: &str) -> bool {
         self.apply_edit(EditRule::SourceReconciliation, |draft| {
-            let accepted = !draft.folder_is_explicit()
+            let accepted = draft.recipe.is_none()
+                && !draft.folder_is_explicit()
                 && matches!(draft.destination(), DestinationDraft::Existing { .. });
             let changed = accepted && draft.submitted_cwd() != raw;
             if changed {
@@ -2328,13 +2377,14 @@ impl LaunchDraftState {
     ) -> Result<(), String> {
         use crate::launch_composer::{ComposerPermission, ComposerSearchResult};
         use farhelm_proto::launcher::{LauncherKind, TemplateDestination};
-        let (applied, repositories, templates) = super::validated_template_batch(
+        let (applied, repositories, templates) = super::validated_template_batch_known(
             std::slice::from_ref(template),
             inputs.hosts,
             inputs.catalog.unwrap_or_default(),
             inputs.host_fixed,
             draft,
             *self.chosen_host.peek(),
+            inputs.recipes,
         )?;
         let repository = repositories.into_iter().next().flatten();
         targets.template_error.set(None);
@@ -2460,6 +2510,9 @@ impl LaunchDraftState {
                 inputs,
                 targets,
             );
+        }
+        if let Some(recipe) = fields.recipe {
+            draft.select_recipe(Some(recipe));
         }
         match (fields.destination, repository) {
             (Some(TemplateDestination::Folder(folder)), _) => {
@@ -2590,6 +2643,7 @@ impl LaunchDraftState {
                 changed = draft.edit_title(name);
             }
             ComposerSearchResult::Host(host) => {
+                draft.select_recipe(None);
                 // A host action has the same authority effects as the selector:
                 // it takes over clone defaults and retires the old destination
                 // before a queued history callback or submit can observe it.
@@ -2611,9 +2665,21 @@ impl LaunchDraftState {
             }
             crate::launch_composer::ComposerSearchResult::UsePath(folder)
             | crate::launch_composer::ComposerSearchResult::Folder(folder) => {
+                if draft.recipe.is_some() && !matches!(folder.as_str(), "" | "~") {
+                    action_error.set(Some(
+                        "A new sandbox's Folder is fixed to its home directory".into(),
+                    ));
+                    return (None, false, false);
+                }
                 changed = draft.choose_existing_folder(&folder) || correcting_invalid;
             }
             crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => {
+                if draft.recipe.is_some() {
+                    action_error.set(Some(
+                        "A new sandbox cannot be browsed before it exists".into(),
+                    ));
+                    return (None, false, false);
+                }
                 // Query-path actions are treated like other relayed path choices:
                 // the escaped field remains reviewable, while the browse request
                 // and an untouched later create retain the exact requested bytes.
@@ -2792,6 +2858,16 @@ impl LaunchDraftState {
                     draft.choose_tab(LaunchTab::Command);
                     draft.clear_for_command_seed();
                 }
+                // Clone inherits repository/launch intent, never the old
+                // machine's directory. Restart and Replace retain their host.
+                draft.select_recipe(if prefill.mode.holds_host() {
+                    None
+                } else {
+                    hosts
+                        .iter()
+                        .find(|host| Some(host.id) == prefill.host && host.session_owned)
+                        .map(|host| host.recipe.clone().unwrap_or_default())
+                });
                 (
                     (),
                     EditFacts {
@@ -2825,7 +2901,16 @@ impl LaunchDraftState {
             targets.clone_host_state.set(next_state);
             match action {
                 CloneHostAction::Hold => {}
-                CloneHostAction::Bind(target) => self.chosen_host.set(Some(target.host)),
+                CloneHostAction::Bind(target) => {
+                    self.chosen_host.set(Some(target.host));
+                    if !prefill.mode.holds_host()
+                        && let Some(host) = hosts
+                            .iter()
+                            .find(|host| host.id == target.host && host.session_owned)
+                    {
+                        self.choose_recipe(host.recipe.clone().unwrap_or_default());
+                    }
+                }
                 CloneHostAction::Withdraw => self.chosen_host.set(None),
             }
         }
@@ -2926,6 +3011,7 @@ pub(super) fn use_launch_draft(
         draft
     });
     let fields = DraftFields {
+        recipe: use_memo(move || value.read().recipe()),
         cwd: use_memo(move || value.read().cwd()),
         cwd_edited: use_memo(move || value.read().cwd_edited()),
         title: use_memo(move || value.read().title()),
@@ -2984,6 +3070,36 @@ fn observe_search_agent_fields(fields: DraftFields) {
 mod tests {
     use super::super::LauncherMode;
     use super::*;
+
+    /// A recipe has no old filesystem. Folder edits queued before its read-only
+    /// render cannot replace home, while switching back to a host restores the
+    /// ordinary editable destination contract.
+    #[farhelm_testtrace::test]
+    fn recipe_placement_retires_the_old_folder_and_rejects_queued_path_edits() {
+        let mut draft = LaunchDraft::new(None);
+        draft.edit_folder("/old/work".into());
+        draft.select_recipe(Some("dev".into()));
+        assert_eq!(draft.recipe().as_deref(), Some("dev"));
+        assert_eq!(draft.submitted_cwd(), "~");
+        assert!(!draft.edit_folder("/old/queued".into()));
+        assert!(!draft.choose_existing_folder("/old/recent"));
+        assert_eq!(draft.submitted_cwd(), "~");
+        draft.select_recipe(None);
+        assert!(draft.edit_folder("/host/work".into()));
+        assert_eq!(draft.submitted_cwd(), "/host/work");
+    }
+
+    /// Clone/template repository intent survives selecting a fresh machine.
+    /// The old directory cannot become a preview for the future sandbox.
+    #[farhelm_testtrace::test]
+    fn recipe_placement_preserves_the_managed_repository() {
+        let mut draft = LaunchDraft::new(None);
+        let repo = crate::github_checkout::GithubRepo::parse("example/project").unwrap();
+        draft.select_repository(repo.clone());
+        draft.select_recipe(Some("dev".into()));
+        assert_eq!(draft.destination().repo(), Some(&repo));
+        assert_eq!(draft.cwd(), "~");
+    }
 
     /// Copying a launch retains its isolation intent. An incomplete correction
     /// cannot project as an ordinary host launch, and a folder destination must
@@ -3792,6 +3908,7 @@ mod tests {
             Some(&template),
             false,
             SearchInputs {
+                recipes: &[],
                 templates: &[],
                 hosts: &[],
                 catalog: Some(&[]),
@@ -4007,6 +4124,7 @@ mod tests {
                         None,
                         false,
                         SearchInputs {
+                            recipes: &[],
                             templates: &[],
                             hosts: &[],
                             catalog: None,
@@ -4032,6 +4150,7 @@ mod tests {
                         Some(&blocked),
                         false,
                         SearchInputs {
+                            recipes: &[],
                             templates: &[],
                             hosts: &[],
                             catalog: None,
@@ -4344,6 +4463,7 @@ mod tests {
                     Some(&template),
                     false,
                     SearchInputs {
+                        recipes: &[],
                         templates: &[],
                         hosts: &[],
                         catalog: Some(&[]),
@@ -4366,6 +4486,7 @@ mod tests {
                     None,
                     false,
                     SearchInputs {
+                        recipes: &[],
                         templates: &[],
                         hosts: &[],
                         catalog: None,
@@ -4413,6 +4534,7 @@ mod tests {
                     Some(&explicit),
                     false,
                     SearchInputs {
+                        recipes: &[],
                         templates: &[],
                         hosts: &[],
                         catalog: Some(&[]),
@@ -4453,6 +4575,7 @@ mod tests {
                     Some(&automatic),
                     false,
                     SearchInputs {
+                        recipes: &[],
                         templates: &[],
                         hosts: &[],
                         catalog: Some(&[]),
@@ -4500,6 +4623,7 @@ mod tests {
                         None,
                         false,
                         SearchInputs {
+                            recipes: &[],
                             templates: &[],
                             hosts: &[],
                             catalog: None,
@@ -4521,6 +4645,7 @@ mod tests {
                         None,
                         false,
                         SearchInputs {
+                            recipes: &[],
                             templates: &[],
                             hosts: &[],
                             catalog: None,

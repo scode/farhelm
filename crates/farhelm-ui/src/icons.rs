@@ -54,6 +54,32 @@
 
 use dioxus::prelude::*;
 
+/// Farhelm's own resource glyph, in the ordinary 16-unit host-mark box.
+///
+/// It stands where a session's host mark would, so it carries that mark's
+/// hover duty too (SPEC.md: every icon that carries meaning has hover text).
+/// Like `HostMark`, only the list row asks for beside-the-list placement.
+/// The glyph stays `aria-hidden`; callers add the visually hidden word.
+#[component]
+pub(crate) fn SandboxMark(#[props(default = false)] session_row: bool) -> Element {
+    rsx! { svg { width: "12", height: "12", view_box: "0 0 16 16", fill: "none",
+        stroke: "currentColor", stroke_width: "1.3", stroke_linejoin: "round", "aria-hidden": "true",
+        "data-glyph": "sandbox",
+        "data-tooltip": "Sandbox: runs in its own disposable Tensorlake sandbox",
+        "data-tooltip-anchor": if session_row { "session-row" },
+        path { d: "M8 1.5 14 4.75v6.5L8 14.5 2 11.25v-6.5Z M2 4.75 8 8l6-3.25 M8 8v6.5" }
+    } }
+}
+
+/// Suspension freezes the resource; Resume continues its preserved processes.
+#[component]
+pub(crate) fn SandboxPause(#[props(default)] resume: bool) -> Element {
+    rsx! { svg { width: "12", height: "12", view_box: "0 0 16 16", fill: "currentColor", "aria-hidden": "true",
+        if resume { path { d: "M4 2 13 8 4 14Z" } }
+        else { rect { x: "3", y: "2", width: "3", height: "12", rx: "1" } rect { x: "10", y: "2", width: "3", height: "12", rx: "1" } }
+    } }
+}
+
 // ===== Shared action glyphs ===========================================
 
 /// Name a control's drawing without coupling its behavior to another screen.
@@ -407,6 +433,7 @@ pub(crate) fn ManagedCheckoutMark(
     cwd: crate::peer::PeerText,
     #[props(default = false)] show_repository: bool,
     #[props(default = false)] session_row: bool,
+    #[props(default = false)] sandbox: bool,
 ) -> Element {
     let repo = crate::peer::display_peer(&checkout.repo.identifier());
     let path = checkout.canonical_path.escaped();
@@ -416,7 +443,11 @@ pub(crate) fn ManagedCheckoutMark(
     if cwd.raw() != checkout.canonical_path.raw() {
         description.push_str(&format!(" Session folder: {}.", cwd.escaped()));
     }
-    description.push_str(" Farhelm made the checkout folder for its first session. When the last session using it is deleted, the checkout moves to the trash.");
+    description.push_str(if sandbox {
+        " Delete permanently removes the whole sandbox, including this checkout and unpushed changes. Nothing moves to the trash."
+    } else {
+        " Farhelm made the checkout folder for its first session. When the last session using it is deleted, the checkout moves to the trash."
+    });
     let tooltip = format!("Managed checkout of {repo}{description}");
     rsx! {
         span { class: "managed-checkout-mark", "data-tooltip": tooltip,

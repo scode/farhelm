@@ -58,12 +58,17 @@ fn install_outside_blur() {
 /// without a timer or extra task.
 #[component]
 pub(super) fn HostPicker(
-    hosts: Vec<HostOption>,
+    mut hosts: Vec<HostOption>,
     selected: Option<HostId>,
+    #[props(default)] recipe: Option<String>,
+    #[props(default)] recipes: Vec<crate::sandbox_sessions::RecipeChoice>,
+    #[props(default)] catalog_error: Option<String>,
+    on_recipe: EventHandler<String>,
     busy: bool,
     on_pick: EventHandler<HostId>,
     on_enter: EventHandler<()>,
 ) -> Element {
+    hosts.retain(|host| !host.session_owned || Some(host.id) == selected);
     let mut open = use_signal(|| false);
     let mut active = use_signal(|| 0_usize);
     let mut prefix = use_signal(String::new);
@@ -75,14 +80,26 @@ pub(super) fn HostPicker(
         }
     }));
     let chosen = hosts.iter().find(|host| Some(host.id) == selected);
-    let committed_index = hosts
-        .iter()
-        .position(|host| Some(host.id) == selected)
-        .unwrap_or(0);
-    let index = active().min(hosts.len().saturating_sub(1));
+    let committed_index = recipe
+        .as_ref()
+        .and_then(|selected| recipes.iter().position(|choice| &choice.name == selected))
+        .map(|index| index + hosts.len())
+        .unwrap_or_else(|| {
+            hosts
+                .iter()
+                .position(|host| Some(host.id) == selected)
+                .unwrap_or(0)
+        });
+    let index = active().min((hosts.len() + recipes.len()).saturating_sub(1));
     let showing = open() && !busy;
-    let count = hosts.len();
-    let keys = hosts.clone();
+    let count = hosts.len() + recipes.len();
+    let keys = hosts
+        .iter()
+        .map(HostOption::label)
+        .chain(recipes.iter().map(|choice| choice.name.clone()))
+        .collect::<Vec<_>>();
+    let key_hosts = hosts.clone();
+    let key_recipes = recipes.clone();
     use_effect(move || {
         if open() {
             let index = active();
@@ -128,8 +145,10 @@ pub(super) fn HostPicker(
                             event.prevent_default(); event.stop_propagation();
                             if event.is_auto_repeating() { return; }
                             if showing {
-                                if let Some(host) = keys.get(index)
-                                    && Some(host.id) != selected { on_pick.call(host.id); }
+                                if let Some(host) = key_hosts.get(index) {
+                                    if Some(host.id) != selected { on_pick.call(host.id); }
+                                } else if let Some(choice) = key_recipes.get(index.saturating_sub(key_hosts.len()))
+                                    && choice.refusal.is_none() { on_recipe.call(choice.name.clone()); }
                                 open.set(false);
                             } else { active.set(committed_index); open.set(true); }
                         return;
@@ -161,13 +180,13 @@ pub(super) fn HostPicker(
                             let (query, repeated) = typeahead_query(&old, &key);
                             // The prefix is at most the longest offered label: longer
                             // input cannot match and need not grow retained UI state.
-                            if query.len() <= keys.iter().map(|host| host.label().len()).max().unwrap_or(0) {
+                            if query.len() <= keys.iter().map(String::len).max().unwrap_or(0) {
                                 prefix.set(query.clone());
                             }
                             typed_at.set(Some(now));
                             let start = if repeated { index + 1 } else { 0 };
                             if let Some(found) = (0..count).map(|offset| (start + offset) % count)
-                                .find(|position| keys[*position].label().to_lowercase().starts_with(&query)) {
+                                .find(|position| keys[*position].to_lowercase().starts_with(&query)) {
                                 active.set(found);
                             }
                             open.set(true);
@@ -175,7 +194,10 @@ pub(super) fn HostPicker(
                         _ => {}
                     }
                 },
-                if let Some(host) = chosen {
+                if let Some(recipe) = &recipe {
+                    crate::icons::SandboxMark {}
+                    bdi { "New sandbox · {display_peer(recipe)}" }
+                } else if let Some(host) = chosen {
                     HostMark { icon: host.icon, color: host.color, local: host.local }
                     bdi { "{display_peer(&host.label())}" }
                 }
@@ -199,6 +221,26 @@ pub(super) fn HostPicker(
                             HostMark { icon: host.icon, color: host.color, local: host.local }
                             bdi { "{display_peer(&host.label())}" }
                         }
+                    }
+                    if !recipes.is_empty() || catalog_error.is_some() {
+                    div { role: "group", aria_label: "New sandbox for this session",
+                        div { class: "launch-composer-search-group-heading", "New sandbox for this session" }
+                        if let Some(error) = &catalog_error { p { role: "status", "{display_peer(error)}" } }
+                        for (offset, choice) in recipes.iter().enumerate() {
+                            button { r#type: "button", role: "option", tabindex: "-1",
+                                id: "launcher-host-option-{offset + hosts.len()}",
+                                class: "launcher-host-option", aria_selected: index == offset + hosts.len(),
+                                aria_disabled: choice.refusal.is_some(), disabled: busy,
+                                onmousedown: move |event| event.prevent_default(),
+                                onclick: { let choice = choice.clone(); move |_| {
+                                    if !busy && choice.refusal.is_none() { on_recipe.call(choice.name.clone()); open.set(false); }
+                                } },
+                                crate::icons::SandboxMark {}
+                                bdi { "{display_peer(&choice.name)}" }
+                                span { "{display_peer(choice.refusal.as_deref().unwrap_or(&choice.size))}" }
+                            }
+                        }
+                    }
                     }
                 }
             }

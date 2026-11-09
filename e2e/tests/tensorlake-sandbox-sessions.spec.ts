@@ -1,0 +1,370 @@
+/** Session-owned UI uses a real remote session, with displayed ownership and
+ * vendor state controlled at the HTTP boundary. Recipe admission is refused
+ * deliberately: this proves consent and placement without pretending the fake
+ * vendor provides a dialable new sandbox. Backend tests cover that task. */
+import { expect, test } from "./helpers/evidence";
+import type { APIRequestContext, Page } from "@playwright/test";
+import { cleanupSession, createSession, openHostsPanel, openRowMenu, patchPreferences, pinAutoSelect, readPreferences, stubFeed } from "./helpers/fleet";
+import { drainedRoute } from "./helpers/drained-route";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { answerYolo } from "./helpers/term";
+
+/** Every controlled response retains the serving build stamp. Owned remote
+ * identity and session transport stay real; only its presentation is replaced. */
+async function ownedHost(page: Page, request: APIRequestContext) {
+  const response = await request.get("/api/hosts");
+  expect(response.ok()).toBe(true);
+  const build = response.headers()["x-farhelm-build"];
+  expect(build).toBeTruthy();
+  const remote = (await response.json()).hosts.find((host: any) => host.kind === "ssh" && host.state.phase === "connected");
+  expect(remote, "owned stack has a connected remote supervisor").toBeTruthy();
+  const feed = await stubFeed(page);
+  feed.notifyOnConnect(1);
+  let revision = 1;
+  let suspended = true;
+  const stops: Array<() => Promise<void>> = [];
+  const calls: string[] = [];
+  stops.push(await drainedRoute(page, "**/api/hosts", async (route) => {
+    const reply = await route.fetch();
+    const json = await reply.json();
+    json.hosts = json.hosts.map((host: any) => host.id === remote.id ? {
+      ...host,
+      name: "Owned sandbox",
+      kind: "tensorlake",
+      is_session_owned: true,
+      state: suspended
+        ? { phase: "suspended", observed_at: Date.now(), suspended_by_farhelm_at: null, resume_failed: null }
+        : host.state,
+      tensorlake: { sandbox: "farhelm-sess-e2e-owned", recipe: "session-ready", size: { cpus: 2, memory_gb: 4, disk_gb: 20 } },
+    } : host);
+    await route.fulfill({ response: reply, json });
+  }));
+  stops.push(await drainedRoute(page, /\/api\/sessions(\?|$)/, async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const reply = await route.fetch();
+    if (!reply.ok()) return route.fulfill({ response: reply });
+    const json = await reply.json();
+    // The actual helm marks a disconnected host's cached sessions stale. The
+    // presentation fixture must reproduce that fact as well as the host phase.
+    json.sessions = json.sessions.map((session: any) => session.host === remote.id
+      ? { ...session, stale: suspended || session.stale }
+      : session);
+    await route.fulfill({ response: reply, json });
+  }));
+  for (const verb of ["suspend", "resume"]) {
+    stops.push(await drainedRoute(page, `**/api/hosts/${remote.id}/${verb}`, async (route) => {
+      expect(route.request().method()).toBe("POST");
+      calls.push(verb);
+      suspended = verb === "suspend";
+      await route.fulfill({ status: 200, headers: { "x-farhelm-build": build }, json: {} });
+      await feed.waitForConnection(1);
+      feed.notify(++revision);
+    }));
+  }
+  return { remote, build, calls, stops };
+}
+
+/** A ready recipe and an unbuilt recipe differ only in the prerequisite the
+ * picker must explain. No saved account or vendor resource is changed. */
+async function recipeChoices(page: Page, build: string) {
+  const stops = [];
+  stops.push(await drainedRoute(page, "**/api/tensorlake", async (route) => {
+    const reply = await route.fetch();
+    const json = await reply.json();
+    json.api_key_set = true;
+    json.create_without_asking = false;
+    json.ssh_key = {
+      state: "ready", public_key: "ssh-ed25519 fixture", public_key_path: "fixture.pub",
+      name: "fixture", register_command: "tl sbx ssh keys add --name fixture fixture.pub",
+    };
+    await route.fulfill({ response: reply, json });
+  }));
+  stops.push(await drainedRoute(page, "**/api/tensorlake/recipes", async (route) => {
+    const base = { kind: "tensorlake_ubuntu" };
+    const recipe = {
+      size: { cpus: 2, memory_gb: 4, disk_gb: 20 }, base, packages: [], claude: null, codex: null,
+      claude_login_credential: null, codex_login_credential: null, github_token_credential: null, tunnels: [],
+    };
+    await route.fulfill({ status: 200, headers: { "x-farhelm-build": build }, json: { recipes: [
+      { ...recipe, name: "session-ready", snapshot: {
+        id: "fixture-built", built_at: 1, base, disk_gb: 20, packages: [], claude_version: null, codex_version: null,
+      } },
+      { ...recipe, name: "session-unbuilt", snapshot: null },
+    ] } });
+  }));
+  return stops;
+}
+
+/** Billing consent must precede a recipe request, and a recipe refusal must
+ * never fall back to ordinary session creation on Local. */
+test("recipe placement explains prerequisites and requires billing consent", async ({ page, request }, testInfo) => {
+  const response = await request.get("/api/hosts");
+  const build = response.headers()["x-farhelm-build"];
+  expect(build).toBeTruthy();
+  const stops = await recipeChoices(page, build);
+  const bodies: any[] = [];
+  let uncertainReply = false;
+  let ordinaryCreates = 0;
+  stops.push(await drainedRoute(page, "**/api/sandbox-sessions", async (route) => {
+    expect(route.request().method()).toBe("POST");
+    bodies.push(route.request().postDataJSON());
+    if (uncertainReply) return route.fulfill({ status: 200, headers: {
+      "x-farhelm-build": build, "x-farhelm-sandbox-host": "3",
+      "x-farhelm-sandbox-run": "1ddba07b-2a1a-46c6-945a-b09d87e741a8",
+    }, body: "incomplete launch result" });
+    await route.fulfill({ status: 409, headers: { "x-farhelm-build": build }, body: "recipe fixture refused launch" });
+  }));
+  stops.push(await drainedRoute(page, "**/api/sessions", async (route) => {
+    if (route.request().method() === "POST") ordinaryCreates++;
+    await route.continue();
+  }));
+  try {
+    await page.goto("/");
+    await page.locator(".new-session-button").click();
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible();
+    await form.getByRole("combobox", { name: "Host", exact: true }).click();
+    const recipes = form.getByRole("group", { name: "New sandbox for this session", exact: true });
+    await expect(recipes).toBeVisible();
+    const unbuilt = recipes.getByRole("option").filter({ hasText: "session-unbuilt" });
+    await expect(unbuilt).toHaveAttribute("aria-disabled", "true");
+    await expect(unbuilt).toContainText("No snapshot yet");
+    await recipes.getByRole("option").filter({ hasText: "session-ready" }).click();
+    await expect(form.getByRole("combobox", { name: "Host", exact: true })).toContainText("New sandbox · session-ready");
+    await form.getByRole("tab", { name: "Command", exact: true }).click();
+    await form.getByLabel("Agent command", { exact: true }).fill("sleep 300");
+    await answerYolo(form, true);
+    await form.locator(".create-session-submit").click();
+    const question = form.getByRole("alertdialog", { name: "Create a sandbox for this session?", exact: true });
+    await expect(question).toContainText("bills while running");
+    await expect(question).toContainText("30 minutes");
+    expect(bodies).toEqual([]);
+    await question.getByRole("button", { name: "Cancel", exact: true }).click();
+    expect(bodies).toEqual([]);
+    await form.locator(".create-session-submit").click();
+    await question.getByRole("button", { name: "Create and launch", exact: true }).click();
+    await expect(form.getByRole("alert")).toContainText("recipe fixture refused launch");
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({ recipe: "session-ready", confirmed: true, request: { cwd: "~" } });
+    expect(bodies[0].request).not.toHaveProperty("host");
+    expect(bodies[0].request).not.toHaveProperty("expected_incarnation");
+    expect(ordinaryCreates).toBe(0);
+    // Losing the admitted result cannot establish that the owned task refused
+    // to launch. It must point to Hosts without the definite refusal prefix.
+    uncertainReply = true;
+    await form.locator(".create-session-submit").click();
+    await question.getByRole("button", { name: "Create and launch", exact: true }).click();
+    await expect(form.getByRole("alert")).toContainText("Check Hosts");
+    await expect(form.getByRole("alert")).not.toContainText("Not launched.");
+    expect(bodies).toHaveLength(2);
+    expect(ordinaryCreates).toBe(0);
+  } finally {
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, stops.map((stop, index) => [`recipe route ${index}`, stop]));
+  }
+});
+
+/** Template quick launch must retain recipe placement and ask the same billing
+ * question. An obsolete or refused recipe cannot become an installed host. */
+test("a recipe template quick launch asks before one recipe request", async ({ page, request }, testInfo) => {
+  const name = `e2e-session-template-${Date.now()}`;
+  const response = await request.get("/api/hosts");
+  const build = response.headers()["x-farhelm-build"];
+  expect(build).toBeTruthy();
+  const saved = await request.put(`/api/templates/${name}`, { data: {
+    kind: "command", command: "sleep 300", yolo: false, recipe: "session-ready", destination: { folder: "~" },
+  } });
+  expect(saved.ok(), await saved.text()).toBe(true);
+  const stops = await recipeChoices(page, build);
+  stops.push(await drainedRoute(page, "**/api/preferences", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const response = await route.fetch();
+    const preferences = await response.json();
+    await route.fulfill({ response, json: { ...preferences, template_shortcuts: { "1": name } } });
+  }));
+  const bodies: any[] = [];
+  stops.push(await drainedRoute(page, "**/api/sandbox-sessions", async (route) => {
+    bodies.push(route.request().postDataJSON());
+    await route.fulfill({ status: 409, headers: { "x-farhelm-build": build }, body: "template recipe fixture refused" });
+  }));
+  try {
+    await page.goto("/");
+    await expect(page.locator(".template-number-trigger")).toHaveCount(10);
+    await page.keyboard.press("Control+Shift+Digit1");
+    const question = page.getByRole("alertdialog", { name: "Create a sandbox for this session?", exact: true });
+    await expect(question).toContainText("session-ready");
+    expect(bodies).toEqual([]);
+    await question.getByRole("button", { name: "Create and launch", exact: true }).click();
+    await expect(page.locator(".create-session-form").getByRole("alert")).toContainText("template recipe fixture refused");
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({ recipe: "session-ready", confirmed: true });
+    expect(bodies[0].request).not.toHaveProperty("host");
+  } finally {
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ...stops.map((stop, index): [string, () => Promise<void>] => [`template route ${index}`, stop]),
+      ["template", async () => {
+        const removed = await request.delete(`/api/templates/${name}`);
+        expect(removed.ok() || removed.status() === 404).toBe(true);
+      }],
+    ]);
+  }
+});
+
+/** The editor must display a stored recipe on mount and distinguish a newly
+ * added, empty Host field from a target that disappeared after it was saved. */
+test("template Host selection retains a recipe and starts an added field empty", async ({ page, request }, testInfo) => {
+  const name = `e2e-recipe-editor-${Date.now()}`;
+  const ordinary = `${name}-ordinary`;
+  const response = await request.get("/api/hosts");
+  const build = response.headers()["x-farhelm-build"];
+  expect(build).toBeTruthy();
+  for (const [target, fields] of [
+    [name, { recipe: "session-ready" }], [ordinary, { kind: "command", command: "sleep 300", yolo: false }],
+  ] as const) {
+    const saved = await request.put(`/api/templates/${target}`, { data: fields });
+    expect(saved.ok(), await saved.text()).toBe(true);
+  }
+  const stops = await recipeChoices(page, build);
+  try {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Templates", exact: true }).click();
+    const dialog = page.locator('.templates-dialog[role="dialog"]');
+    await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+    await dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) }).click();
+    const host = dialog.getByRole("combobox", { name: "Host", exact: true });
+    await expect(host).toHaveValue("recipe:session-ready");
+    await expect(host.locator("option:checked")).toHaveText("New sandbox · session-ready");
+    await dialog.locator(".templates-row").filter({ has: page.getByText(ordinary, { exact: true }) }).click();
+    await dialog.locator(".templates-add").click();
+    await dialog.locator(".templates-add-menu").getByRole("button", { name: "Host", exact: true }).click();
+    await expect(host).toHaveValue("host:");
+    await expect(host.locator("option:checked")).toHaveText("Choose a host");
+  } finally {
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ["page", () => page.goto("about:blank").then(() => {})],
+      ...stops.map((stop, index): [string, () => Promise<void>] => [`editor route ${index}`, stop]),
+      ...[name, ordinary].map((target): [string, () => Promise<void>] => [target, async () => {
+        const removed = await request.delete(`/api/templates/${target}`);
+        expect(removed.ok() || removed.status() === 404).toBe(true);
+      }]),
+    ]);
+  }
+});
+
+/** Row Stop-and-suspend is available even when ordinary Stop skips its question.
+ * Its own question covers the sandbox-wide consequence, and dispatch uses the combined
+ * helm endpoint rather than a client-side chain of independent mutations. */
+test("Resume restores owned controls and Stop and suspend keeps its host-wide question", async ({ page, request }, testInfo) => {
+  const fixture = await ownedHost(page, request);
+  const previous = await readPreferences(request);
+  const session = await createSession(request, { title: "owned-resume", host: fixture.remote.id });
+  const requests: any[] = [];
+  let activityReads = 0;
+  fixture.stops.push(await drainedRoute(page, "**/api/sessions?**", async (route) => {
+    if (route.request().method() !== "GET" || new URL(route.request().url()).searchParams.get("host") !== String(fixture.remote.id)) {
+      return route.fallback();
+    }
+    const reply = await route.fetch();
+    const json = await reply.json();
+    expect(json.sessions.some((current: any) => current.id === session.id), "activity read contains the owned agent").toBe(true);
+    activityReads++;
+    json.sessions = json.sessions.map((current: any) => current.id === session.id
+      ? { ...current, stale: false, status: { state: "running" } }
+      : current);
+    await route.fulfill({ response: reply, json });
+  }));
+  fixture.stops.push(await drainedRoute(page, `**/api/sessions/${encodeURIComponent(session.id)}/stop-and-suspend`, async (route) => {
+    expect(route.request().method()).toBe("POST");
+    requests.push(route.request().postDataJSON());
+    await route.fulfill({ status: 409, headers: { "x-farhelm-build": fixture.build }, body: "combined action fixture refused" });
+  }));
+  try {
+    await patchPreferences(request, { skip_session_confirmations: true });
+    await pinAutoSelect(page, session.id);
+    await page.goto("/");
+    const card = page.getByRole("region", { name: "Session unavailable", exact: true });
+    await expect(card).toContainText("Session suspended");
+    await card.getByRole("button", { name: "Resume", exact: true }).click();
+    await expect.poll(() => fixture.calls).toEqual(["resume"]);
+    await expect(card).toHaveCount(0);
+    await expect(page.locator(".header-stop")).toBeEnabled();
+    await expect(page.locator(".header-stop-anchor > .sandbox-session-controls")
+      .getByRole("button", { name: "Suspend", exact: true })).toBeVisible();
+    const row = page.locator(".session-row").filter({ hasText: "owned-resume" });
+    await expect(row).toHaveCount(1);
+    await openRowMenu(row);
+    await page.getByRole("menuitem", { name: "Replace with", exact: true }).click();
+    const replacement = page.locator(".create-session-form");
+    await expect(replacement).toBeVisible();
+    await expect(replacement.getByRole("combobox", { name: "Host", exact: true })).toContainText("Owned sandbox");
+    await replacement.locator(".launch-composer-cancel").click();
+    await expect(replacement).toHaveCount(0);
+    await openRowMenu(row);
+    const beforeActivity = activityReads;
+    await page.getByRole("menuitem", { name: /^Stop and suspend/ }).click();
+    const question = page.getByRole("alertdialog", { name: "Stop and suspend sandbox?", exact: true });
+    await expect(question).toContainText("Every other process freezes");
+    expect(activityReads).toBeGreaterThan(beforeActivity);
+    expect(requests).toEqual([]);
+    await question.getByRole("button", { name: "Stop and suspend", exact: true }).click();
+    await expect.poll(() => requests.length).toBe(1);
+    await expect(page.locator(".sandbox-session-controls").getByRole("alert")).toContainText("combined action fixture refused");
+    expect(fixture.calls).toEqual(["resume"]);
+  } finally {
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ...fixture.stops.map((stop, index): [string, () => Promise<void>] => [`resume route ${index}`, stop]),
+      ["session", () => cleanupSession(request, session.id)],
+      ["preferences", () => patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null })],
+    ]);
+  }
+});
+
+/** Suspension preserves the real session while its owned-machine presentation
+ * disables supervisor actions. Delete must still ask with the global skip on,
+ * and then explicitly authorize whole-resource destruction without Resume. */
+test("owned suspended sessions keep Hosts visibility and mandatory whole-sandbox Delete", async ({ page, request }, testInfo) => {
+  const fixture = await ownedHost(page, request);
+  const previous = await readPreferences(request);
+  const session = await createSession(request, { title: "owned-suspended", host: fixture.remote.id });
+  let deletes = 0;
+  fixture.stops.push(await drainedRoute(page, `**/api/sessions/${encodeURIComponent(session.id)}?delete_sandbox=true`, async (route) => {
+    expect(route.request().method()).toBe("DELETE");
+    deletes++;
+    await route.fulfill({ status: 409, headers: { "x-farhelm-build": fixture.build }, body: "sandbox deletion fixture refused" });
+  }));
+  try {
+    await patchPreferences(request, { skip_session_confirmations: true });
+    await pinAutoSelect(page, session.id);
+    await page.goto("/");
+    const card = page.getByRole("region", { name: "Session unavailable", exact: true });
+    await expect(card).toContainText("Session suspended");
+    await expect(card).toContainText("processes are preserved");
+    await expect(page.locator(".header-stop")).toBeDisabled();
+    await expect(page.locator(".restart-primary")).toBeDisabled();
+    await expect(page.locator(".header-replace")).toBeDisabled();
+    const row = page.locator(".session-row").filter({ hasText: "owned-suspended" });
+    await expect(row).toHaveClass(/\bstale\b/);
+    await expect(row).toContainText("session-ready sandbox");
+    await expect(row.locator(".status-badge").filter({ hasText: "Suspended" }).locator("svg")).toHaveCount(1);
+    await expect(page.locator(".header-stop-anchor > .sandbox-session-controls")
+      .getByRole("button", { name: "Resume", exact: true })).toHaveClass(/\bbtn-primary\b/);
+    await expect(page.locator(".host-rail-avatar").first()).toBeVisible();
+    await expect(page.locator(`.host-rail [data-rail-host-id="${fixture.remote.id}"]`)).toHaveCount(0);
+    await page.locator(".header-delete").click();
+    const question = page.locator(".header-delete-confirm");
+    await expect(question).toContainText("Every session");
+    await expect(question).toContainText("snapshot");
+    await expect(question).toContainText("farhelm-sess-e2e-owned");
+    expect(deletes).toBe(0);
+    await question.getByRole("button", { name: "Delete session and sandbox", exact: true }).click();
+    await expect.poll(() => deletes).toBe(1);
+    expect(fixture.calls).toEqual([]);
+    await openHostsPanel(page);
+    await expect(page.locator(`.host-row[data-host-id="${fixture.remote.id}"]`)).toContainText("Owned sandbox");
+  } finally {
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ...fixture.stops.map((stop, index): [string, () => Promise<void>] => [`owned route ${index}`, stop]),
+      ["session", () => cleanupSession(request, session.id)],
+      ["preferences", () => patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null })],
+    ]);
+  }
+});

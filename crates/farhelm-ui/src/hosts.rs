@@ -1777,7 +1777,10 @@ enum HostRequestDisplay {
 /// nothing about whether an agent is working now, so both require consent.
 /// This checks one row only; the caller also requires a connected host after
 /// the listing read, since an empty offline cache has no rows to check.
-fn suspend_status_needs_confirmation(status: &crate::SessionStatus, stale: bool) -> bool {
+pub(crate) fn suspend_status_needs_confirmation(
+    status: &crate::SessionStatus,
+    stale: bool,
+) -> bool {
     use crate::SessionStatus::*;
     stale
         || match status {
@@ -2880,7 +2883,9 @@ pub(crate) fn HostsPanel(
                 }
             }
             if let Some(list) = read.hosts() {
-                for host in list {
+                // Owned sandboxes keep ordinary Hosts diagnostics, updates and
+                // attention. Only their permanent navigation icon is omitted.
+                for host in list.iter().filter(|host| !host.is_session_owned) {
                     HostRailAvatar { key: "{host.id}", host: host.clone(),
                         selected: selected_host == Some(host.id),
                         menu_open: *host_menu_open.read() == Some(host.id)

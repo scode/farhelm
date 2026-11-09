@@ -256,6 +256,7 @@ impl RestartBridge {
 /// request outlives the keyed session view, and ListView consumes it once.
 #[derive(Clone, PartialEq)]
 pub(crate) struct HeaderDeleteRequest {
+    pub(crate) sandbox: Option<HostId>,
     pub(crate) id: String,
     /// The precondition the header's render, as the user saw it, covered
     /// (see `status::delete_guard`).
@@ -1123,6 +1124,9 @@ pub(crate) fn ListView(
     let end_row_op = move |id: &String| {
         end_row_operation(row_pending, row_ops, id);
     };
+    // Session-facing host controls claim the same page/row exclusion as the
+    // header. Their activity read must not race a separate row mutation.
+    use_context_provider(move || crate::ops::PaneGate::new(ops, row_ops));
     // At most one row's actions menu is open, and this parent owns which.
     // A per-row boolean would let two menus fight, and the parent is the
     // only place "opening yours closes mine" can live. Defined up here with
@@ -2301,8 +2305,9 @@ pub(crate) fn ListView(
     // under a latched build mismatch, where the feed and the fallback are
     // both withdrawn, "leaves" means for the rest of the page's life.
     let host_mutation_listing = request_listing.clone();
+    let host_mutation_hosts = request_hosts.clone();
     let refresh_hosts = move |_| {
-        request_hosts(Trigger::Explicit);
+        host_mutation_hosts(Trigger::Explicit);
         host_mutation_listing(Trigger::Explicit);
     };
 
@@ -2365,7 +2370,8 @@ pub(crate) fn ListView(
     // when the request is finally polled.
     let mut admit_stop = move |id: String,
                                refuse_if_tabs_open: bool,
-                               refuse_if_agent_running: bool|
+                               refuse_if_agent_running: bool,
+                               suspend: bool|
           -> Option<RowWork> {
         // Cross-guard against an open row question, not just
         // `row_pending`: the stop/delete buttons are only ABSENT from the
@@ -2421,8 +2427,13 @@ pub(crate) fn ListView(
             // badge only ever reflects what the NEXT poll observes, so a
             // stop that silently failed can never leave the UI claiming a
             // session is exited when tmux still disagrees.
-            let outcome =
-                stop_session(&base, &id, refuse_if_tabs_open, refuse_if_agent_running).await;
+            let outcome = if suspend {
+                api::stop_and_suspend(&base, &id, refuse_if_tabs_open, refuse_if_agent_running)
+                    .await
+                    .map(|()| farhelm_proto::SessionStopOutcome::default())
+            } else {
+                stop_session(&base, &id, refuse_if_tabs_open, refuse_if_agent_running).await
+            };
             match outcome {
                 Err(e) => {
                     errors.write().insert(id.clone(), format!("Stop: {e}"));
@@ -2507,6 +2518,18 @@ pub(crate) fn ListView(
     };
     let mut bulk_admit_stop = admit_stop.clone();
     let mut stop_confirmed = admit_stop.clone();
+    let mut stop_suspend_confirmed = admit_stop.clone();
+    let confirm_stop_suspend = move |(id, token, no_tabs, ended): super::row::StopConfirmation| {
+        if ops.busy_now()
+            || *token.key() != RowQuestion::Stop
+            || row_questions.take(&id, &token).is_none()
+        {
+            return;
+        }
+        if let Some(work) = stop_suspend_confirmed(id, no_tabs, ended, true) {
+            spawn(work);
+        }
+    };
     // Capture consent from the clicked render, never a fresh listing. The
     // question keeps the menu open so its ordinary prompt layout owns focus.
     let on_stop = move |target: DeleteTarget| {
@@ -2522,9 +2545,12 @@ pub(crate) fn ListView(
         }
         if target.tabs > 0 && !skip_session_confirmations {
             row_questions.open(target.id, RowQuestion::Stop, ());
-        } else if let Some(work) =
-            admit_stop(target.id, target.tabs == 0, target.status.has_ended())
-        {
+        } else if let Some(work) = admit_stop(
+            target.id,
+            target.tabs == 0,
+            target.status.has_ended(),
+            false,
+        ) {
             spawn(work);
         }
     };
@@ -2540,7 +2566,8 @@ pub(crate) fn ListView(
         {
             return;
         }
-        if let Some(work) = stop_confirmed(id, refuse_if_tabs_open, refuse_if_agent_running) {
+        if let Some(work) = stop_confirmed(id, refuse_if_tabs_open, refuse_if_agent_running, false)
+        {
             spawn(work);
         }
     };
@@ -2556,124 +2583,172 @@ pub(crate) fn ListView(
     // its request: bulk queues keep that claim while earlier rows finish.
     let delete_refresh = request_listing.clone();
     let delete_popovers = popovers.clone();
+    let delete_open_host = open_host.clone();
     // `guard` comes from the rendered question or direct-click snapshot,
     // including when questions are skipped. A queued request must not expand
     // that authority from a fresh read when its host is finally ready.
     //
     // The single-action wrapper below preserves the header's synchronous
     // started/not-started answer while bulk callers await the returned core.
-    let mut admit_delete = move |id: String, guard: crate::DeleteGuard| -> Option<RowWork> {
-        if rename_editor
-            .peek()
-            .as_ref()
-            .is_some_and(|editor| editor.id == id)
-            || !begin_row_op(&id)
-        {
-            return None;
-        }
-        // Shown from here until the reply: the row and, if this session is
-        // open, the header switch to their in-progress state. Cleared beside
-        // each `end_row_op` below, on success and on failure alike.
-        deleting.write().insert(id.clone());
-        super::trash::capture_row(&id);
-        let base = delete_base.clone();
-        let refresh = delete_refresh.clone();
-        let popovers = delete_popovers.clone();
-        Some(Box::pin(async move {
-            let outcome = delete_session(&base, &id, guard).await;
-            let archived = outcome.as_ref().is_ok_and(|reply| reply.archived);
-            super::trash::finish_row_cue(&id, archived);
-            if let Ok(reply) = &outcome {
-                delete_notice.publish(reply.notice.clone());
-                if reply.archived {
-                    trash_revision.write().request(Trigger::Explicit);
-                }
+    let mut admit_delete =
+        move |id: String, guard: crate::DeleteGuard, sandbox: Option<HostId>| -> Option<RowWork> {
+            if rename_editor
+                .peek()
+                .as_ref()
+                .is_some_and(|editor| editor.id == id)
+                || !begin_row_op(&id)
+            {
+                return None;
             }
-            match outcome.err() {
-                Some(e) => {
-                    errors.write().insert(id.clone(), format!("Delete: {e}"));
-                    deleting.write().remove(&id);
-                    end_row_op(&id);
-                    // A refusal changed nothing on the host, so no fleet
-                    // event will correct a stale row; read the listing now,
-                    // so a row the supervisor found alive shows that and
-                    // the next Delete decides from current state under the
-                    // same session-confirmation preference.
-                    refresh(Trigger::Explicit);
-                }
-                None => {
-                    errors.write().remove(&id);
-                    // Removed from the LOCAL listing immediately, before
-                    // releasing `pending` — the one deliberate optimistic
-                    // exception in this file (PLAN_M2.md's "no optimistic
-                    // status flips" is about STATUS badges specifically;
-                    // this is acting on a delete response already in
-                    // hand, not guessing). Waiting for the next poll
-                    // instead would leave the stale row's delete button
-                    // re-enabled with nothing left server-side to delete
-                    // — a second click in that window would 404 against
-                    // an id that no longer exists, a confusing failure
-                    // for an action that had already succeeded.
-                    if let Some(Ok(current)) = listing.write().as_mut() {
-                        let open_anchor = popovers.first_open_row(AnchorRegion::Sessions);
-                        // Judged on the displayed order, which an order hold
-                        // can make differ from the served one. The menu and
-                        // bell exclude each other; check their sole anchor
-                        // before removal discards the old layout baseline.
-                        let held = order_hold.peek().clone();
-                        if remove_row_reporting_menu_move(
-                            &mut current.sessions,
-                            &id,
-                            open_anchor.as_deref(),
-                            held.as_ref(),
-                        ) {
-                            // The old paired clear also wrote the closed slot.
-                            // Keep those effect notifications, including when
-                            // removal took the anchor itself out of the list.
-                            popovers.close_registered(AnchorRegion::Sessions);
-                        }
+            // Shown from here until the reply: the row and, if this session is
+            // open, the header switch to their in-progress state. Cleared beside
+            // each `end_row_op` below, on success and on failure alike.
+            deleting.write().insert(id.clone());
+            // This is display cleanup after confirmed resource deletion, not
+            // membership evidence used to authorize it. Include an open peer
+            // even when the sidebar's current filter hides that session.
+            let mut removed_ids = if let Some(host) = sandbox {
+                listing
+                    .peek()
+                    .as_ref()
+                    .and_then(|answer| answer.as_ref().ok())
+                    .map(|listing| {
+                        listing
+                            .sessions
+                            .iter()
+                            .filter(|session| session.host == Some(host))
+                            .map(|session| session.id.raw().to_string())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            if sandbox.is_some_and(|host| {
+                delete_open_host
+                    .as_ref()
+                    .is_some_and(|open| open.id == host)
+            }) && let Some(open) = selected.peek().clone()
+            {
+                removed_ids.push(open);
+            }
+            removed_ids.push(id.clone());
+            removed_ids.sort();
+            removed_ids.dedup();
+            if sandbox.is_none() {
+                super::trash::capture_row(&id);
+            }
+            let base = delete_base.clone();
+            let refresh = delete_refresh.clone();
+            let popovers = delete_popovers.clone();
+            Some(Box::pin(async move {
+                let outcome = if sandbox.is_some() {
+                    api::delete_sandbox_session(&base, &id).await
+                } else {
+                    delete_session(&base, &id, guard).await
+                };
+                let archived = outcome.as_ref().is_ok_and(|reply| reply.archived);
+                super::trash::finish_row_cue(&id, archived);
+                if let Ok(reply) = &outcome {
+                    delete_notice.publish(reply.notice.clone());
+                    if reply.archived {
+                        trash_revision.write().request(Trigger::Explicit);
                     }
-                    // A listing read already in flight started before the
-                    // helm finished this delete, and it would otherwise
-                    // commit as the newest read (the refresh below only
-                    // queues behind it), putting the deleted row back with
-                    // its Delete button live until the refresh lands. The
-                    // fence supersedes every read that started before this
-                    // confirmed delete (see `ReadGate::fence`).
-                    listing_reads.write().fence();
-                    deleting.write().remove(&id);
-                    end_row_op(&id);
-                    // AFTER the local bookkeeping, so a selection change
-                    // this triggers repaints against the already-updated
-                    // listing: the owner clears the right pane if the
-                    // session it shows is the one that just went away.
-                    on_removed.call(id.clone());
-                    // The optimistic removal takes the ROW and nothing else:
-                    // the fleet total, the matching count and the truncation
-                    // flag all still describe a list that included it, and
-                    // this client cannot recompute any of them (a truncated
-                    // walk does not even know whether the row it dropped was
-                    // one of the ones it was counting). The feed's own
-                    // notification would settle that — except under a latched
-                    // build mismatch, where the feed and the fallback are both
-                    // withdrawn and this explicit read is the ONLY thing that
-                    // will ever correct the banner.
-                    refresh(Trigger::Explicit);
                 }
-            }
-        }))
-    };
+                match outcome.err() {
+                    Some(e) => {
+                        errors.write().insert(id.clone(), format!("Delete: {e}"));
+                        deleting.write().remove(&id);
+                        end_row_op(&id);
+                        // A refusal changed nothing on the host, so no fleet
+                        // event will correct a stale row; read the listing now,
+                        // so a row the supervisor found alive shows that and
+                        // the next Delete decides from current state under the
+                        // same session-confirmation preference.
+                        refresh(Trigger::Explicit);
+                    }
+                    None => {
+                        errors.write().remove(&id);
+                        // Removed from the LOCAL listing immediately, before
+                        // releasing `pending` — the one deliberate optimistic
+                        // exception in this file (PLAN_M2.md's "no optimistic
+                        // status flips" is about STATUS badges specifically;
+                        // this is acting on a delete response already in
+                        // hand, not guessing). Waiting for the next poll
+                        // instead would leave the stale row's delete button
+                        // re-enabled with nothing left server-side to delete
+                        // — a second click in that window would 404 against
+                        // an id that no longer exists, a confusing failure
+                        // for an action that had already succeeded.
+                        if let Some(Ok(current)) = listing.write().as_mut() {
+                            let open_anchor = popovers.first_open_row(AnchorRegion::Sessions);
+                            // Judged on the displayed order, which an order hold
+                            // can make differ from the served one. The menu and
+                            // bell exclude each other; check their sole anchor
+                            // before removal discards the old layout baseline.
+                            let held = order_hold.peek().clone();
+                            let mut moved = false;
+                            for removed in &removed_ids {
+                                // Every cached peer must leave the list, even after
+                                // an earlier removal already moved the menu anchor.
+                                moved |= remove_row_reporting_menu_move(
+                                    &mut current.sessions,
+                                    removed,
+                                    open_anchor.as_deref(),
+                                    held.as_ref(),
+                                );
+                            }
+                            if moved {
+                                // The old paired clear also wrote the closed slot.
+                                // Keep those effect notifications, including when
+                                // removal took the anchor itself out of the list.
+                                popovers.close_registered(AnchorRegion::Sessions);
+                            }
+                        }
+                        // A listing read already in flight started before the
+                        // helm finished this delete, and it would otherwise
+                        // commit as the newest read (the refresh below only
+                        // queues behind it), putting the deleted row back with
+                        // its Delete button live until the refresh lands. The
+                        // fence supersedes every read that started before this
+                        // confirmed delete (see `ReadGate::fence`).
+                        listing_reads.write().fence();
+                        deleting.write().remove(&id);
+                        end_row_op(&id);
+                        // AFTER the local bookkeeping, so a selection change
+                        // this triggers repaints against the already-updated
+                        // listing: the owner clears the right pane if the
+                        // session it shows is the one that just went away.
+                        for removed in &removed_ids {
+                            on_removed.call(removed.clone());
+                        }
+                        // The optimistic removal takes the ROW and nothing else:
+                        // the fleet total, the matching count and the truncation
+                        // flag all still describe a list that included it, and
+                        // this client cannot recompute any of them (a truncated
+                        // walk does not even know whether the row it dropped was
+                        // one of the ones it was counting). The feed's own
+                        // notification would settle that — except under a latched
+                        // build mismatch, where the feed and the fallback are both
+                        // withdrawn and this explicit read is the ONLY thing that
+                        // will ever correct the banner.
+                        refresh(Trigger::Explicit);
+                    }
+                }
+            }))
+        };
     let mut bulk_admit_delete = admit_delete.clone();
     // The header still receives synchronous started/not-started acceptance.
     // Both callers own exactly the completion returned by the same admission.
-    let mut do_delete = move |id: String, guard: crate::DeleteGuard| -> bool {
-        if let Some(work) = admit_delete(id, guard) {
-            spawn(work);
-            true
-        } else {
-            false
-        }
-    };
+    let mut do_delete =
+        move |id: String, guard: crate::DeleteGuard, sandbox: Option<HostId>| -> bool {
+            if let Some(work) = admit_delete(id, guard, sandbox) {
+                spawn(work);
+                true
+            } else {
+                false
+            }
+        };
 
     // The delete button's initial click: decides whether this id needs
     // confirming at all. A skipped question uses the same request and guard
@@ -2752,7 +2827,7 @@ pub(crate) fn ListView(
             // spawned. There is no lingering process tree to worry about,
             // not because nothing ever ran, but because the one thing
             // that could have left descendants never got the chance to.
-            do_delete_on_confirm(target.id, guard);
+            do_delete_on_confirm(target.id, guard, target.sandbox);
         } else {
             // Unknown must not borrow a live status's "is still running" claim
             // it has no basis for — SPEC.md's no-guessing rule means an
@@ -2797,22 +2872,26 @@ pub(crate) fn ListView(
     let mut header_do_delete = do_delete.clone();
     // `guard` and `token` come from the row render that drew the prompt the
     // user answered (`status::delete_guard`), not from the row as it reads now.
-    let confirm_delete =
-        move |(id, token, guard): (String, ConfirmToken<RowQuestion>, crate::DeleteGuard)| {
-            // Refused OUTRIGHT while the shared token is held, BEFORE the
-            // question is touched: `do_delete`'s own `begin_row_op`
-            // would refuse anyway, but by then the question is gone and the
-            // prompt has silently dismissed itself with nothing deleted —
-            // the confirmation must survive a refusal so the user can answer
-            // it again once the other pane's operation finishes.
-            if ops.busy_now() {
-                return;
-            }
-            if *token.key() != RowQuestion::Delete || row_questions.take(&id, &token).is_none() {
-                return;
-            }
-            do_delete(id, guard);
-        };
+    let confirm_delete = move |(id, token, guard, sandbox): (
+        String,
+        ConfirmToken<RowQuestion>,
+        crate::DeleteGuard,
+        Option<HostId>,
+    )| {
+        // Refused OUTRIGHT while the shared token is held, BEFORE the
+        // question is touched: `do_delete`'s own `begin_row_op`
+        // would refuse anyway, but by then the question is gone and the
+        // prompt has silently dismissed itself with nothing deleted —
+        // the confirmation must survive a refusal so the user can answer
+        // it again once the other pane's operation finishes.
+        if ops.busy_now() {
+            return;
+        }
+        if *token.key() != RowQuestion::Delete || row_questions.take(&id, &token).is_none() {
+            return;
+        }
+        do_delete(id, guard, sandbox);
+    };
 
     // The inline prompt's cancel button: closes the opening it was drawn
     // for, and nothing later. No API call, no `row_pending` involvement —
@@ -2836,7 +2915,7 @@ pub(crate) fn ListView(
             return;
         };
         header_delete.set(None);
-        if !header_do_delete(request.id.clone(), request.guard) {
+        if !header_do_delete(request.id.clone(), request.guard, request.sandbox) {
             errors.write().insert(
                 request.id,
                 "Delete: not started, another operation is in progress; try again".to_string(),
@@ -3848,13 +3927,37 @@ pub(crate) fn ListView(
                 }
                 return;
             }
+            let sandbox_ids = targets
+                .iter()
+                .filter(|target| target.sandbox)
+                .map(|target| target.id.raw().to_owned())
+                .collect::<HashSet<_>>();
+            let target_hosts = targets
+                .iter()
+                .map(|target| (target.id.raw().to_owned(), target.host))
+                .collect::<HashMap<_, _>>();
+            let mut seen_sandboxes = HashSet::new();
+            let targets = targets
+                .into_iter()
+                .filter(|target| {
+                    action != LifecycleAction::Delete
+                        || !target.sandbox
+                        || seen_sandboxes.insert(target.host)
+                })
+                .collect();
             let work = lifecycle::admit_batch(
                 targets,
                 |id, guard, refuse_if_tabs_open, refuse_if_agent_running| match action {
                     LifecycleAction::Stop => {
-                        bulk_admit_stop(id, refuse_if_tabs_open, refuse_if_agent_running)
+                        bulk_admit_stop(id, refuse_if_tabs_open, refuse_if_agent_running, false)
                     }
-                    LifecycleAction::Delete => bulk_admit_delete(id, guard),
+                    LifecycleAction::Delete => {
+                        let sandbox = sandbox_ids
+                            .contains(&id)
+                            .then(|| target_hosts.get(&id).copied().flatten())
+                            .flatten();
+                        bulk_admit_delete(id, guard, sandbox)
+                    }
                 },
                 |id| {
                     errors.write().insert(id, action.not_started());
@@ -3884,7 +3987,14 @@ pub(crate) fn ListView(
             .map(|host| host.id);
         let targets: Vec<_> = targets
             .iter()
-            .map(|row| DeleteSnapshot::for_session(row, local))
+            .map(|row| {
+                DeleteSnapshot::for_session(row, local).with_sandbox(
+                    crate::sandbox_sessions::owned_host(
+                        row,
+                        hosts.peek().hosts().unwrap_or_default(),
+                    ),
+                )
+            })
             .collect();
         if targets.is_empty() {
             return;
@@ -3999,6 +4109,7 @@ pub(crate) fn ListView(
     // closure's captured state. New row actions must join this same ownership.
     let on_stop = use_callback(on_stop);
     let confirm_stop = use_callback(confirm_stop);
+    let confirm_stop_suspend = use_callback(confirm_stop_suspend);
     let cancel_stop = use_callback(cancel_stop);
     let on_delete = use_callback(on_delete);
     let confirm_delete = use_callback(confirm_delete);
@@ -4109,6 +4220,7 @@ pub(crate) fn ListView(
     // the same "do not wait for the feed" nudge `do_replace` gives an
     // ordinary replace's own success path.
     let created_listing = request_listing.clone();
+    let created_hosts = request_hosts.clone();
     // The order hold that applies to the list being shown, if any, as the
     // slots and original pins `rows::held_display_order` keeps. Read rather
     // than peeked so a hold starting or ending re-renders the rows.
@@ -5119,6 +5231,9 @@ pub(crate) fn ListView(
                             submitted_launch,
                             new_was_never_shown,
                         } = created;
+                        if !hosts.peek().hosts().unwrap_or_default().iter().any(|host| Some(host.id) == session.host) {
+                            created_hosts(Trigger::Explicit);
+                        }
                         // Reads begun before creation cannot prove this new
                         // session absent. Invalidate them before its selection
                         // can trigger reconciliation against a late old reply.
@@ -5458,6 +5573,7 @@ pub(crate) fn ListView(
                                 on_cancel_replace: cancel_replace,
                                 on_stop,
                                 on_confirm_stop: confirm_stop,
+                                on_confirm_stop_suspend: confirm_stop_suspend,
                                 on_cancel_stop: cancel_stop,
                                 on_delete,
                                 on_confirm_delete: confirm_delete,

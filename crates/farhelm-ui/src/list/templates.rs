@@ -594,7 +594,7 @@ impl Field {
             Self::Command => f.command.is_some(),
             Self::Yolo => f.yolo.is_some(),
             Self::Resume => f.resume_command.is_some(),
-            Self::Host => f.host.is_some(),
+            Self::Host => f.host.is_some() || f.recipe.is_some(),
             Self::Destination => f.destination.is_some(),
             Self::Name => f.name.is_some(),
         }
@@ -680,7 +680,10 @@ impl Field {
             Self::Command => f.command = None,
             Self::Yolo => f.yolo = None,
             Self::Resume => f.resume_command = None,
-            Self::Host => f.host = None,
+            Self::Host => {
+                f.host = None;
+                f.recipe = None;
+            }
             Self::Destination => f.destination = None,
             Self::Name => {
                 f.name = None;
@@ -1072,7 +1075,12 @@ fn template_summary_parts(fields: &TemplateFields) -> Vec<DetailPart> {
             "Resume default"
         })]);
     }
-    if fields.host.is_some() {
+    if let Some(recipe) = &fields.recipe {
+        push(vec![
+            DetailPart::text("New sandbox · "),
+            DetailPart::peer(recipe.clone()),
+        ]);
+    } else if fields.host.is_some() {
         push(vec![DetailPart::text("Host")]);
     }
     if fields.destination.is_some() {
@@ -1205,6 +1213,7 @@ fn FieldEditor(
     field: Field,
     mut draft: Signal<Draft>,
     hosts: Vec<HostOption>,
+    #[props(default)] recipes: Vec<String>,
     catalog: Option<Vec<LaunchCatalogModel>>,
     disabled: bool,
 ) -> Element {
@@ -1394,17 +1403,53 @@ fn FieldEditor(
             span { class: "templates-hint", "An empty input sets the default. Placeholders: {{cwd}}, {{farhelm_args}}, {{conversation}}; each must be a whole argument." }
         },
         Field::Host => {
-            let value = current.host.unwrap_or_default();
-            let mut options: Vec<_> = hosts
+            // This select's prefix is presentation only. Recipe names and
+            // opaque installation identities stay separate in stored templates;
+            // a catalog failure must not clear a retained unavailable target.
+            let value = current
+                .recipe
+                .as_ref()
+                .map(|name| format!("recipe:{name}"))
+                .unwrap_or_else(|| format!("host:{}", current.host.as_deref().unwrap_or_default()));
+            let options: Vec<_> = hosts
                 .into_iter()
-                .filter_map(|h| h.identity.map(|id| (id, display_peer(&h.name))))
+                .filter(|host| !host.session_owned)
+                .filter_map(|h| {
+                    h.identity
+                        .map(|id| (format!("host:{id}"), display_peer(&h.name)))
+                })
                 .collect();
-            if value.is_empty() {
-                options.insert(0, (String::new(), "Choose a host".into()));
-            } else if !options.iter().any(|(id, _)| id == &value) {
-                options.push((value.clone(), "An install no host here has".into()));
-            }
-            rsx! { Choice { label, value, options, disabled, on_change: move |v: String| draft.with_mut(|d| d.fields.host = Some(v)) } }
+            let missing = if let Some(recipe) = &current.recipe {
+                !recipes.contains(recipe)
+            } else {
+                !options.iter().any(|(id, _)| id == &value)
+            };
+            let empty =
+                current.recipe.is_none() && current.host.as_deref().unwrap_or_default().is_empty();
+            rsx! { label { class: "templates-field",
+                span { "{label}" }
+                // Same hover text `Choice` gave this field before recipes
+                // needed their own option groups.
+                select { value: value.clone(), disabled, aria_label: "Host",
+                    "data-tooltip": "{label}: the value this template applies",
+                    onchange: move |event| draft.with_mut(|draft| {
+                        let value = event.value();
+                        if let Some(recipe) = value.strip_prefix("recipe:") {
+                            draft.fields.recipe = Some(recipe.to_string()); draft.fields.host = None;
+                        } else if let Some(host) = value.strip_prefix("host:") {
+                            draft.fields.host = Some(host.to_string()); draft.fields.recipe = None;
+                        }
+                    }),
+                    if empty { option { value: "host:", selected: true, "Choose a host" } }
+                    else if missing { option { value: value.clone(), selected: true, "Unavailable target (retained)" } }
+                    optgroup { label: "Hosts", for (id, name) in options {
+                        option { value: id.clone(), selected: id == value, "{name}" }
+                    } }
+                    optgroup { label: "New sandbox for each session", for name in recipes {
+                        option { value: "recipe:{name}", selected: value == format!("recipe:{name}"), "New sandbox · {display_peer(&name)}" }
+                    } }
+                }
+            } }
         }
         Field::Name => rsx! {
             div { class: "templates-field",
@@ -1785,6 +1830,24 @@ pub(super) fn TemplatesDialog(
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let mut preferences = use_context::<super::SharedPreferences>();
+    // Authoring needs names, not account readiness. Launch applies the saved
+    // name against its own current catalog and prerequisites.
+    let recipe_base = base.clone();
+    let recipe_catalog = use_resource(move || {
+        let base = recipe_base.clone();
+        async move { crate::api::fetch_recipes(&base).await }
+    });
+    let recipe_names = recipe_catalog
+        .read()
+        .as_ref()
+        .and_then(|answer| answer.as_ref().ok())
+        .map(|recipes| {
+            recipes
+                .iter()
+                .map(|recipe| recipe.name.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let mut dialog_epoch = use_signal(|| 0_u64);
     let number_launch_chord = TEMPLATE_SHORTCUTS.number_chord("number");
     let quick_launch_chord = TEMPLATE_SHORTCUTS
@@ -2470,7 +2533,7 @@ pub(super) fn TemplatesDialog(
                             if inferred { p { class: "templates-hint templates-inferred", "This stored template does not switch the launcher yet. Saving will store the switch inferred from its fields." } }
                             h4 { class: "templates-sets-heading", "Sets" }
                             for field in Field::ALL.into_iter().filter(|f| f.is_set(&current.fields)) {
-                                FieldEditor { key: "{editor_source}-{field.key()}", field, draft, hosts: hosts.clone(), catalog: catalog_rows.clone(), disabled }
+                                FieldEditor { key: "{editor_source}-{field.key()}", field, draft, hosts: hosts.clone(), recipes: recipe_names.clone(), catalog: catalog_rows.clone(), disabled }
                             }
                             div { class: "templates-add-area",
                                 button { r#type: "button", class: "btn btn-neutral templates-add", disabled, aria_expanded: add_open(), "data-tooltip": "Add a field this template will set; fields not shown are left as is", onclick: move |_| add_open.toggle(), "+ Add field" }
