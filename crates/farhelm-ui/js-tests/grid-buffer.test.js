@@ -13,8 +13,16 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const grid = require("../assets/grid-model.js");
 const buffer = require("../assets/grid-buffer.js");
+const { encode } = require("./grid-test-encoder.js");
 
 const PLAIN = [0, -1, -1];
+
+/** Exercise lazy history through its binary input, retaining readable test rows.
+ * Selection and link consumers must see the same data after on-demand decoding.
+ */
+function apply(model, message) {
+  model.apply(message.t === "history" ? grid.decodeFrame(encode(message)) : message);
+}
 
 /** A wire row from `[col, text]` pairs (plain style), each ASCII text one run. */
 function wire(pieces, wrapped = false) {
@@ -28,7 +36,8 @@ function cells(runs, wrapped = false) {
 
 /**
  * A model with `history` (wire rows at `historyCols`) above a screen of
- * `screen` wire rows at `cols`, history numbered from 100.
+ * `screen` wire rows at `cols`, history numbered from 100. History uses
+ * binary input and lazy reads so all consumers exercise compact storage.
  */
 function build({ cols = 10, screen = [], history = [], historyCols = cols, links } = {}) {
   const model = new grid.GridModel();
@@ -37,7 +46,7 @@ function build({ cols = 10, screen = [], history = [], historyCols = cols, links
     model.apply({ t: "rows", rows: screen.map((row, y) => [y, row]), links });
   }
   model.apply({ t: "frame", rev: 1, cols, rows: Math.max(1, screen.length), cursor: { x: 0, y: 0, visible: true, shape: "block", blink: true } });
-  if (history.length) model.apply({ t: "history", first: 100, cols: historyCols, rows: history, links });
+  if (history.length) apply(model, { t: "history", first: 100, cols: historyCols, rows: history, links });
   return model;
 }
 
@@ -540,7 +549,7 @@ test("a double click on a very long wrapped line searches only near the click", 
   const model = new grid.GridModel();
   model.apply({ t: "hello", cols, rows: 1, history_cap: 1000 });
   model.apply({ t: "frame", rev: 1, cols, rows: 1, cursor: { x: 0, y: 0, visible: true, shape: "block", blink: true } });
-  model.apply({ t: "history", first: 0, cols, rows });
+  apply(model, { t: "history", first: 0, cols, rows });
   const started = process.hrtime.bigint();
   const word = buffer.wordRange(buffer.modelSource(model), at(150, 5));
   const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
@@ -558,7 +567,7 @@ test("the word search's bound counts cells, so wide history next to a narrow scr
   model.apply({ t: "hello", cols: 1, rows: 1, history_cap: 1000 });
   model.apply({ t: "rows", rows: [[0, wire([[0, "x"]])]] });
   model.apply({ t: "frame", rev: 1, cols: 1, rows: 1, cursor: { x: 0, y: 0, visible: true, shape: "block", blink: true } });
-  model.apply({ t: "history", first: 0, cols: 1000, rows });
+  apply(model, { t: "history", first: 0, cols: 1000, rows });
   const source = buffer.modelSource(model);
   const span = buffer.wrappedSpan(source, model.screenBase, Infinity, 2048);
   assert.equal(model.screenBase - span.first, 2, "two 1,000-cell lines fit in 2,048 cells");

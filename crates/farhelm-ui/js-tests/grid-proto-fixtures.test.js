@@ -242,10 +242,27 @@ function prepare(message, observe) {
   return model;
 }
 
-/** Decode a fixture's bytes and apply it after the plain prelude, as a refusal check does. */
+/** Refuse malformed bytes through the real decoder and synchronous model drain.
+ * History now indexes before validating row contents; stopping at decodeFrame
+ * would miss malformed retained rows and weaken the shared fixture contract.
+ */
 function applyPlain(bytes) {
   const message = grid.decodeFrame(bytes);
   prepare(message, false).apply(message);
+}
+
+/** Recover history descriptions explicitly, without changing production storage.
+ * Rust's independent JSON includes unused links and underline presence, which
+ * normalized historyLine output cannot describe. Each row read shares the
+ * production binary walker, while the expected description still comes from
+ * the fixture file rather than either JavaScript codec.
+ */
+function wireDescription(message) {
+  if (message.t !== "history") return message;
+  const rows = Array.from({ length: message.binaryRows.offsets.length - 1 }, (_, index) => grid.historyRowDescription(message, index));
+  const description = { t: "history", first: message.first, cols: message.cols, rows };
+  if (message.links.length) description.links = message.links.map(({ id, uri }) => [id, uri]);
+  return description;
 }
 
 /**
@@ -619,7 +636,7 @@ test("Rust binary fixtures decode exactly and the test producer writes identical
   for (const stem of BINARY_VALID) {
     const description = jsonOf(category, `${stem}.json`);
     const bytes = bytesOf(category, `${stem}.bin`);
-    assert.deepEqual(grid.decodeFrame(bytes), description, `${stem}: exact decoded fields`);
+    assert.deepEqual(wireDescription(grid.decodeFrame(bytes)), description, `${stem}: exact decoded fields`);
     assert.deepEqual(Buffer.from(encode(description)), bytes, `${stem}: JS producer matches Rust`);
     assertModelHolds(acceptFixture(category, `${stem}.bin`), description, stem);
   }

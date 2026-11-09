@@ -1865,6 +1865,22 @@ terminal; no test reads xterm.js for them any more. The client sends no flow-con
 message as it arrives, applying a large history in slices between frames so that the screen stays usable, and the helm
 pauses a grid stream on its own queue instead.
 
+History stays in binary form until a reader asks for a row. Arrival owns an exact copy of the message's row region and a
+typed offset index, validates its declared links once, and checks every row envelope. The existing sliced drain then
+validates each retained row in full before storing it; malformed content fails there even if nobody scrolls to it. Each
+applied line owns its exact body bytes, original width and only the immutable links it references, indexed by their
+original wire numbers. `GridModel.historyLine` constructs a fresh row and styles for that call; selection, copy, word
+and link readers keep their existing interface. Historical styles never enter the screen's style interner, and there is
+no decoded-history cache.
+
+Hover and asynchronous link answers use a separate stable token for each applied history line. That token points at
+neither the body nor its links, so a pending answer cannot retain evicted output. A reset gives replacement lines new
+tokens even if their numbers and text repeat. Eviction clears each dropped record immediately. Queued partial drains and
+trims advance offsets rather than copy the remaining suffix on every append: at most one partly consumed message keeps
+its bounded row region (under 1 MiB), typed index (under 0.6 MiB) and declared links until its final queued row goes.
+Fully discarded entries release those allocations; empty appends retain numbering only. A real reset drops the old queue
+on arrival and clears the applied history at its existing drain boundary.
+
 Not built for grid terminals, a near-term entry in `TODO.md`: showing an input method's composition at the cursor
 (committed text is sent).
 

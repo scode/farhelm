@@ -19,10 +19,11 @@
 // range, colors are one of the three encodings, text is within its per-cell
 // byte budget, runs are ordered and inside the row. A violation throws
 // `GridProtocolError`; the caller treats that as the format says (report a
-// protocol error and reconnect), and the model is left as it was before the
-// offending message, because a commit validates everything it will touch
-// before it mutates anything. Nothing here ever builds markup or CSS from a
-// wire string: text stays text, styles stay integers (grid-style.js maps
+// protocol error and reconnect). Screen commits validate everything they will
+// touch before mutating the screen. History validates one whole row before
+// storing it; earlier rows in a failing drain may already have been applied.
+// Nothing here ever builds markup or CSS from a wire string: text stays
+// text, styles stay integers (grid-style.js maps
 // them to CSS from fixed tables).
 //
 // ## The model
@@ -35,6 +36,9 @@
 //   absolute line number that only grows, each with the width it was
 //   written at. Appends must be contiguous; the oldest lines past
 //   `history_cap` are dropped. grid-terminal.js shows it as scrollback.
+//   Each retained line owns its binary body and only its referenced links.
+//   historyLine decodes a fresh row on demand; identity checks use a separate
+//   token with no backlink to the stored bytes, never a decoded-row cache.
 // - The HISTORY QUEUE holds `history` and `history_reset` messages that
 //   have been accepted but not yet applied. An attach sends up to the whole
 //   history (12,000 lines by default, in many messages) right after the
@@ -202,6 +206,22 @@
       }
     }
 
+    /** Validate printable ASCII in place when history needs no string yet.
+     * Those bytes are already valid UTF-8 and have one column each. Leave
+     * the position unchanged on any other byte so the fatal text decoder
+     * still handles controls, non-ASCII and malformed UTF-8 normally.
+     */
+    skipAscii(length, maximum) {
+      if (length > maximum) fail("binary text past its byte bound");
+      this.need(length);
+      const end = this.at + length;
+      for (let at = this.at; at < end; at++) {
+        if (this.bytes[at] < 0x20 || this.bytes[at] > 0x7e) return false;
+      }
+      this.at = end;
+      return true;
+    }
+
     /** A count is plausible only when even its smallest entries fit. */
     count(minimum, maximum = Number.MAX_SAFE_INTEGER) {
       const count = this.u32();
@@ -234,17 +254,21 @@
     return links;
   }
 
-  /** Read a row's structural envelope; decodeRow applies the shared semantic rules.
-   * Optional colors save ordinary default-colored runs their repeated fields.
-   * Foreground/background defaults have one canonical spelling: absence.
-   * An explicit default underline remains distinct, as in the Rust type.
+  /** Walk a bounded row without allocating runs or styles unless a reader asks.
+   * History is fully checked before storage, but its text is only retained in
+   * bytes. The wire collector preserves presence metadata for fixture comparison;
+   * the decoded collector supplies the public row shape without an interner.
+   * Screen reads keep their existing structural-only boundary: their semantics
+   * still belong to decodeRow and the committing frame's eventual width.
    */
-  function binaryRow(reader, maxCols) {
+  function walkBinaryRow(reader, maxCols, links, collect, validate = true) {
     const wrap = reader.u8();
     if (wrap > 1) fail("bad binary row wrap flag");
     const count = reader.u16();
     if (count > maxCols || count > Math.floor((reader.bytes.length - reader.at) / 8)) fail("bad binary run count");
-    const runs = [];
+    const runs = collect ? [] : null;
+    let end = 0;
+    let usedLinks = null;
     for (let i = 0; i < count; i++) {
       const col = reader.u16();
       const width = reader.u16();
@@ -253,18 +277,56 @@
       const fg = meta & 0x1000 ? reader.i32() : -1;
       const bg = meta & 0x2000 ? reader.i32() : -1;
       if ((meta & 0x1000 && fg === -1) || (meta & 0x2000 && bg === -1)) fail("noncanonical binary default color");
-      const style = [meta & KNOWN_FLAGS, fg, bg];
-      if (meta & 0x4000) style.push(reader.i32());
-      const link = meta & 0x8000 ? reader.u16() : null;
-      const run = [col, width, reader.text(length, MAX_TEXT_BYTES_PER_CELL * width), style];
-      if (link !== null) run.push(link);
-      runs.push(run);
+      const ul = meta & 0x4000 ? reader.i32() : -1;
+      const flags = meta & KNOWN_FLAGS;
+      const index = meta & 0x8000 ? reader.u16() : null;
+      let text;
+      if (validate && !collect && reader.skipAscii(length, MAX_TEXT_BYTES_PER_CELL * width)) {
+        // Validating millions of single-cell colors must not allocate a
+        // temporary string for each run. Printable ASCII is fully checked
+        // from its bytes; a later row reader still materializes its text.
+        validateRunPosition(col, width, maxCols, end);
+        if (length === 0) fail("empty run text");
+        if (length !== width) fail("an ASCII run's width is not its length");
+      } else {
+        text = reader.text(length, MAX_TEXT_BYTES_PER_CELL * width);
+        if (validate) validateRun(col, width, text, maxCols, end, length);
+      }
+      let link = null;
+      if (validate) {
+        validateStyle(flags, fg, bg, ul);
+        if (index !== null) {
+          link = links instanceof Map ? links.get(index) : links && links[index];
+          if (!link) fail("run link out of range");
+          if (!collect) {
+            if (!usedLinks) usedLinks = new Map();
+            usedLinks.set(index, link);
+          }
+        }
+      }
+      if (collect === "wire") {
+        const style = [flags, fg, bg];
+        if (meta & 0x4000) style.push(ul);
+        const run = [col, width, text, style];
+        if (index !== null) run.push(index);
+        runs.push(run);
+      } else if (collect === "decoded") {
+        runs.push({ col, width, text, style: makeStyle(flags, fg, bg, ul), link });
+      }
+      end = col + width;
     }
     reader.end();
-    return { w: wrap === 1, r: runs };
+    if (collect === "wire") return { w: wrap === 1, r: runs };
+    if (collect === "decoded") return { wrapped: wrap === 1, runs, end };
+    return usedLinks;
   }
 
-  /** Binary replaces only row-bearing output and its commit, never control or input JSON. */
+  /** Decode screen messages and index history without constructing history runs.
+   * A history descriptor owns exactly its row region and typed boundaries;
+   * links are already validated immutable objects, unlike raw screen links.
+   * Indexing checks lengths only. Full row validation stays in drainHistory
+   * so a large catch-up can yield between rows before any reader sees them.
+   */
   function decodeBinary(bytes) {
     const reader = new BinaryReader(bytes);
     reader.u8();
@@ -290,25 +352,60 @@
       const cols = kind === 3 ? reader.u16() : null;
       const links = binaryLinks(reader);
       const count = reader.count(kind === 1 ? 9 : 7);
-      const rows = [];
-      for (let i = 0; i < count; i++) {
-        const y = kind === 1 ? reader.u16() : null;
-        const row = binaryRow(reader.row(), kind === 1 ? MAX_DIMENSION : cols);
-        rows.push(kind === 1 ? [y, row] : row);
+      if (kind === 3) {
+        const start = reader.at;
+        const offsets = new Uint32Array(count + 1);
+        for (let i = 0; i < count; i++) {
+          offsets[i] = reader.at - start;
+          const length = reader.u32();
+          if (length < 3) fail("bad binary row length");
+          reader.need(length);
+          reader.at += length;
+        }
+        offsets[count] = reader.at - start;
+        // Buffer.slice is a view, unlike Uint8Array.slice. An explicit plain
+        // copying constructor bounds ownership even for a tiny Buffer view.
+        const owned = new Uint8Array(bytes.subarray(start, reader.at));
+        message = { t: "history", first, cols, binaryRows: { bytes: owned, offsets }, links: decodeLinks(links) };
+      } else {
+        const rows = [];
+        for (let i = 0; i < count; i++) {
+          const y = reader.u16();
+          const row = walkBinaryRow(reader.row(), MAX_DIMENSION, null, "wire", false);
+          rows.push([y, row]);
+        }
+        message = { t: "rows", rows };
+        if (links.length) message.links = links;
       }
-      message = kind === 1 ? { t: "rows", rows } : { t: "history", first, cols, rows };
-      if (links.length) message.links = links;
     } else return fail("unknown binary grid message type");
     reader.end();
     return message;
+  }
+
+  /** Materialize one history row's exact wire description for explicit readers.
+   * This preserves underline presence and original message-local link indices;
+   * normalized historyLine rows cannot recover those distinctions. It does not
+   * apply a row or establish its identity, and retains no decoded result.
+   */
+  function historyRowDescription(message, index) {
+    const rows = message.binaryRows;
+    if (!rows || !isInt(index, 0, rows.offsets.length - 2)) return undefined;
+    return walkBinaryRow(historyRowReader(rows, index), message.cols, message.links, "wire");
+  }
+
+  /** The index already established boundaries; each walk stays inside one body. */
+  function historyRowReader(rows, index) {
+    return new BinaryReader(rows.bytes.subarray(rows.offsets[index] + 4, rows.offsets[index + 1]));
   }
 
   /**
    * Turn one supervisor-to-client data frame into a message object, or
    * throw `GridProtocolError`.
    *
-   * Binary reads enforce field boundaries, UTF-8 and the representation's
-   * own bounds. JSON controls require an object with a string `t`.
+   * Binary reads enforce envelope boundaries and the representation's own
+   * bounds. Screen text and all link fields decode as fatal UTF-8 here;
+   * indexed history row content is checked in full as it drains. JSON
+   * controls require an object with a string `t`.
    * Shared semantic rules are checked when the message is applied (or a
    * queued history row drains), because a screen row's final width belongs
    * to its committing frame. Row-bearing JSON is never a wire fallback.
@@ -357,12 +454,47 @@
    */
   function decodeStyle(raw) {
     if (!Array.isArray(raw) || (raw.length !== 3 && raw.length !== 4)) fail("bad style");
-    if (!isInt(raw[0], 0, KNOWN_FLAGS)) fail("bad style flags");
     const flags = raw[0];
-    const fg = decodeColor(raw[1], "foreground");
-    const bg = decodeColor(raw[2], "background");
-    const ul = raw.length === 4 ? decodeColor(raw[3], "underline") : -1;
+    const fg = raw[1];
+    const bg = raw[2];
+    const ul = raw.length === 4 ? raw[3] : -1;
+    validateStyle(flags, fg, bg, ul);
+    return makeStyle(flags, fg, bg, ul);
+  }
+
+  /** Scalar checks are shared by raw screen rows and non-allocating history validation. */
+  function validateStyle(flags, fg, bg, ul) {
+    if (!isInt(flags, 0, KNOWN_FLAGS)) fail("bad style flags");
+    decodeColor(fg, "foreground");
+    decodeColor(bg, "background");
+    decodeColor(ul, "underline");
+  }
+
+  /** Only actual row readers need a style object or its renderer cache key. */
+  function makeStyle(flags, fg, bg, ul) {
     return { flags, fg, bg, ul, key: `${flags},${fg},${bg},${ul}` };
+  }
+
+  /** Raw rows and byte-only ASCII validation share the same cell geometry. */
+  function validateRunPosition(col, width, maxCols, end) {
+    if (!isInt(col, end, maxCols - 1)) fail("run column out of order or past the row");
+    if (!Number.isInteger(width) || width < 1) fail("bad run width");
+    if (width > maxCols - col) fail("run width past the row");
+  }
+
+  /** Validate the format's cell contract without guessing terminal character widths.
+   * Binary callers already know the UTF-8 byte length; raw callers measure it.
+   * Both paths enforce the same ordering, text budget and ASCII/non-ASCII rules.
+   */
+  function validateRun(col, width, text, maxCols, end, bytes) {
+    validateRunPosition(col, width, maxCols, end);
+    if (typeof text !== "string" || (bytes === undefined ? utf8Length(text) : bytes) > MAX_TEXT_BYTES_PER_CELL * width) {
+      fail("bad run text");
+    }
+    if (text === "") fail("empty run text");
+    if (PRINTABLE_ASCII.test(text)) {
+      if (text.length !== width) fail("an ASCII run's width is not its length");
+    } else if (width > 2) fail("a non-ASCII run holds more than one cell");
   }
 
   /**
@@ -404,17 +536,7 @@
     for (const run of raw.r) {
       if (!Array.isArray(run) || (run.length !== 4 && run.length !== 5)) fail("bad run");
       const [col, width, text, style] = run;
-      if (!isInt(col, end, maxCols - 1)) fail("run column out of order or past the row");
-      if (!Number.isInteger(width) || width < 1) fail("bad run width");
-      if (width > maxCols - col) fail("run width past the row");
-      if (typeof text !== "string" || utf8Length(text) > MAX_TEXT_BYTES_PER_CELL * width) fail("bad run text");
-      // Never empty: blank cells are the columns no run covers.
-      if (text === "") fail("empty run text");
-      if (PRINTABLE_ASCII.test(text)) {
-        if (text.length !== width) fail("an ASCII run's width is not its length");
-      } else if (width > 2) {
-        fail("a non-ASCII run holds more than one cell");
-      }
+      validateRun(col, width, text, maxCols, end);
       let link = null;
       if (run.length === 5) {
         if (!isInt(run[4], 0, links.length - 1)) fail("run link out of range");
@@ -432,9 +554,9 @@
   const STYLE_TABLE_LIMIT = 65536;
 
   /**
-   * The model's one object for a style, so the many runs in history that
-   * share a handful of styles share their objects too (history is kept up
-   * to `history_cap` lines whether or not it is drawn).
+   * Share styles only among decoded screen rows. History validation and lazy
+   * reads must not populate this table: doing so retains historical colors
+   * even when their compact rows have been evicted.
    */
   function internStyle(style, styles) {
     if (!styles) return style;
@@ -509,10 +631,8 @@
    * array is compacted once the dead prefix outgrows the live part.
    *
    * A dropped line's slot is cleared as it is dropped, not at compaction:
-   * the rows are the expensive part (their runs and text), and holding a
-   * cap's worth of evicted rows until the next compaction doubled the
-   * history's memory at cap turnover (measured: 168 MiB instead of 84 MiB
-   * for 12,000 per-cell-styled lines at 200 columns).
+   * each record owns its body's exact allocation and used links, so keeping
+   * a dead slot would retain that output until an unrelated later append.
    */
   class LineStore {
     constructor() {
@@ -593,7 +713,7 @@
       // MAX_DIMENSION, so this holds at most that many rows however many
       // `rows` messages arrive before their frame.
       this.pending = new Map();
-      // Decoded styles by key (see `internStyle`).
+      // Decoded screen styles by key (history never enters this interner).
       this.styles = new Map();
       // Whether a screen update has begun (a `rows` message) and not been
       // committed, and the clipboard write whose parts are still arriving:
@@ -614,8 +734,9 @@
       // is checked when a message arrives, not when it is applied.
       this.historyExpected = null;
       // See "The HISTORY QUEUE" in this file's header. Entries are
-      // `{reset: true}` (`trim: true` when `trimQueue` made it) or `{first, cols, rows, links, offset}` with `rows`
-      // and `links` still raw; `queuedRows` counts the rows not yet applied.
+      // `{reset: true}` (`trim: true` when `trimQueue` made it) or an indexed
+      // binary row region with validated links, a row count and moving offset.
+      // Empty appends carry numbering only. No queued row has a run/style tree.
       this.deferHistory = false;
       this.historyQueue = [];
       this.queuedRows = 0;
@@ -744,26 +865,32 @@
 
     /**
      * Accept a `history` message: check what can be checked without
-     * decoding its rows (the line numbers, contiguity, the width, the links
-     * table) and queue it. The rows are validated as they are applied
-     * (`drainHistory`), so a bad row is reported then.
+     * decoding its rows (line numbers, contiguity and width) and queue it.
+     * decodeFrame has already bounded its row region and validated its links;
+     * this accepts only that indexed input shape. Rows are fully validated
+     * as they are applied (`drainHistory`), so a bad row is reported then.
      */
     applyHistory(message) {
       if (!Number.isSafeInteger(message.first) || message.first < 0) fail("bad history line number");
       if (this.historyExpected !== null && message.first !== this.historyExpected) fail("history is not contiguous");
-      if (!Array.isArray(message.rows)) fail("bad history rows");
+      const rows = message.binaryRows;
+      if (!rows || !(rows.bytes instanceof Uint8Array) || !(rows.offsets instanceof Uint32Array) || rows.offsets.length === 0) {
+        fail("bad history rows");
+      }
+      const count = rows.offsets.length - 1;
       // Compared by subtraction: the sum itself can round back into range.
-      if (message.rows.length > 0 && message.rows.length - 1 > Number.MAX_SAFE_INTEGER - message.first) {
+      if (count > 0 && count - 1 > Number.MAX_SAFE_INTEGER - message.first) {
         fail("history line numbers past the largest safe integer");
       }
       // Each history line keeps the width it was written at (its message's
       // `cols`), which need not be the screen's: joining soft-wrapped lines
       // for selection needs it to keep their trailing blanks.
       if (!isInt(message.cols, 1, MAX_DIMENSION)) fail("bad history width");
-      const links = decodeLinks(message.links);
-      this.historyExpected = message.first + message.rows.length;
-      this.historyQueue.push({ first: message.first, cols: message.cols, rows: message.rows, links, offset: 0 });
-      this.queuedRows += message.rows.length;
+      this.historyExpected = message.first + count;
+      this.historyQueue.push(count
+        ? { first: message.first, cols: message.cols, bytes: rows.bytes, offsets: rows.offsets, links: message.links, count, offset: 0 }
+        : { first: message.first, count: 0, offset: 0 });
+      this.queuedRows += count;
       this.trimQueue();
       if (!this.deferHistory) this.drainHistory();
     }
@@ -783,8 +910,12 @@
      * applied. So they are dropped now, unread, behind a reset that clears
      * the applied lines when it is reached. This bounds what the queue holds
      * by the cap however far applying falls behind the socket, and a row
-     * dropped this way is never decoded (its bounds are never checked, which
-     * is harmless: nothing ever reads it).
+     * dropped this way is never semantically validated, which is harmless:
+     * nothing ever reads it. Partial trims advance offsets instead of copying
+     * the kept suffix; repeated one-row appends must stay linear in new data.
+     * Only the first live entry can be partly consumed, retaining at most one
+     * bounded frame's row region (<1 MiB), index (<0.6 MiB), and links until
+     * its last queued row goes. There are no dead per-row objects in that slack.
      */
     trimQueue() {
       let excess = this.queuedRows - this.historyCap;
@@ -797,7 +928,7 @@
       const kept = [{ reset: true, trim: !queueHadRealReset }];
       for (const entry of this.historyQueue) {
         if (entry.reset) continue;
-        const left = entry.rows.length - entry.offset;
+        const left = entry.count - entry.offset;
         // An empty append drops nothing, but still settles where history
         // starts, so it stays.
         if (left > 0 && excess >= left) {
@@ -841,10 +972,16 @@
           continue;
         }
         if (this.historyNext === null) this.historyFirst = entry.first + entry.offset;
-        while (entry.offset < entry.rows.length) {
-          const row = decodeRow(entry.rows[entry.offset], entry.cols, entry.links, this.styles);
-          row.cols = entry.cols;
-          this.history.push(row);
+        while (entry.offset < entry.count) {
+          const reader = historyRowReader(entry, entry.offset);
+          const links = walkBinaryRow(reader, entry.cols, entry.links, null);
+          // Validate before copying or assigning identity. Each applied row
+          // owns only its exact body and referenced immutable links, so one
+          // kept row cannot pin its message's other rows or unused targets.
+          // Keep the allocation without a permanent byte-view wrapper for
+          // every retained line. Lazy readers create that view only while
+          // reading; they still share no decoded row or style cache.
+          this.history.push({ body: new Uint8Array(reader.bytes).buffer, cols: entry.cols, links, token: {} });
           entry.offset++;
           this.queuedRows--;
           this.historyNext = entry.first + entry.offset;
@@ -854,7 +991,7 @@
             this.historyFirst++;
           }
           if (shouldYield && shouldYield()) {
-            if (entry.offset >= entry.rows.length) this.historyQueue.shift();
+            if (entry.offset >= entry.count) this.historyQueue.shift();
             return this.historyQueue.length > 0;
           }
         }
@@ -943,9 +1080,26 @@
       return damage;
     }
 
-    /** History line `index` (0 = the oldest kept), or undefined. */
+    /** Decode only the requested applied history line (0 = oldest kept).
+     * Every call returns an independent row/run/style tree with its original
+     * width; no decoded tree or style is cached by the record or model. Links
+     * remain shared immutable values. An absent or queued line is undefined.
+     */
     historyLine(index) {
-      return this.history.get(index);
+      const record = this.history.get(index);
+      if (!record) return undefined;
+      const row = walkBinaryRow(new BinaryReader(new Uint8Array(record.body)), record.cols, record.links, "decoded");
+      row.cols = record.cols;
+      return row;
+    }
+
+    /** Stable evidence for hover and late answers without decoding a row.
+     * The token has no backlink to storage, so a pending answer cannot pin an
+     * evicted body. Resets create new tokens even when line numbers repeat.
+     */
+    historyIdentity(index) {
+      const record = this.history.get(index);
+      return record && record.token;
     }
 
     get historyLength() {
@@ -1037,6 +1191,7 @@
     GridProtocolError,
     GridModel,
     decodeFrame,
+    historyRowDescription,
     decodeStyle,
     displayText,
     layoutRun,
