@@ -126,3 +126,75 @@ could consume space the fallback calculation had reserved for answers. The measu
 regression resolved it. The same reviewer cleared the final CSS and test deltas with no outstanding findings. A separate
 own-model scope check confirmed the small long-host button-wrapping correction needed no new mechanism. Commit and PR
 wording passed its cold read, and every touched file received a separate documentation pass.
+
+### Landing
+
+Landed alone, as #3273. After the executor's last rebase, main gained the **Always update** button in the sidebar's host
+update prompt and a TODO.md entry. The only conflict was textual, in TODO.md, where this plan's entry and the update
+prompt's entry were both removed. A fresh-context review read the change against main. The two plans share no styles,
+and the request region is sized from the main pane, so the update prompt's new button and error line cannot change its
+space. The permission labels the cards reuse from the session list were not touched by the other change. The plan also
+relies on the order of answers, the 700ms pause before answers count, and the ID shortening; the review found all of
+these still hold.
+
+#### Fixes made at landing
+
+- The new From line showed the full host, session title and requester ID on hover through the browser's own tooltip.
+  Farhelm's rule (SPEC_impl.md, hover help) is that no element uses the browser tooltip, because its delay of a second
+  or more cannot be shortened, especially in the Mac app's WebKit. The page-wide check for that rule never opens a
+  request card, so it did not catch it. All three now use Farhelm's own tooltip, with the same text. The plan's tests
+  that checked the hover text, and the docs-screenshot review capture that checks the requester ID, now look for
+  Farhelm's tooltip. This is the change the reviewer proposed; the fix itself was not reviewed again, and the checks
+  below ran on it.
+
+#### Things you should know
+
+From the review, left as they are:
+
+- When **Always allow** cannot turn the host's setting on, the reason appears at the bottom of the card's scrolling
+  details. On a card whose details overflow, the user sees the answer buttons do nothing and has to scroll the details
+  to see why. Moving the reason up next to the answer bar would fix it; that changes the card's measured layout, so it
+  was not done at landing. This one is worth a follow-up.
+- For screen readers, the From line's ID carries the full ID as its label, and the host and title are labelled "From
+  host" and "From session". Those labels sit on plain text, where screen readers treat them unevenly: some ignore them
+  and read only the shortened ID, others read "From host" or "From session" in place of the host name or title.
+- On template cards the "asserted YOLO" chip stretches across the whole value column and comes out in italics.
+- A few of the new layout tests are weaker than they read: one card-height check always passes, the narrow-pane test no
+  longer checks that labels stack above their values, and the narrow short-queue test accepts either layout.
+
+#### Checks
+
+Run on the plan rebased onto main with the landing fix, the tree that merged, on this development machine and, as the
+maintainer asked for the landings of 2026-11-09, on Tensorlake sandboxes:
+
+- Here: `cargo fmt --all -- --check`, `dprint check`, `python3 releasing/check-changelog.py format`, the test-sleep
+  checker, `node --check` on the layout script, `scripts/check-desktop-assets.sh`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo clippy -p farhelm-ui --features desktop --all-targets -- -D warnings` and the UI's JavaScript unit tests
+  (`node --test`) passed.
+- Here, recorded `cargo nextest run -p farhelm-ui --features desktop --lib`: 1,120 passed, none skipped (run
+  `1f963d06`).
+- Tensorlake, browser, using the release web build, on Chromium and WebKit: the `approval-layout` spec (all of the
+  plan's layout tests), the specs the executor chose for real approval answers, focus and keyboard scrolling (`spawn`,
+  `github-checkouts`, `keyboard-scroll`, `modal-trap`, `terminal-replay-rename`, `provisioning`), and `host-updates`,
+  whose sidebar change landed just before. 411 passed, one failed, and two skipped. The skips are the real-agent spawn
+  test, skipped once per engine because it runs only with vendor credentials. Runs `9c795d47`, `b0705d5e`, `fe0d996d`,
+  `ed71cc13`, `5b2521ed`, `52560fd6`, `ee09cda8`, `5ee19fec`, `0a574057` and `206decae`.
+- The failure, in run `5b2521ed` (Chromium), was `expanded setup failure closes the menu below it` in the provisioning
+  spec: a host's menu in Hosts never opened. That test is an open flake already recorded in FLAKES.md (2026-11-05) with
+  this symptom. The plan does not touch Hosts or its menus. Run alone five times on Chromium on a sandbox, on this
+  build, it passed every time (run `30999f77`), and it passed on WebKit in the main run.
+- Tensorlake, the separate set of tests for old tmux terminals: `terminal-link-clicks`, which covers links under a
+  request card, on both engines. 36 passed (runs `1f90e3e8`, `c277e3bd`).
+- The browser runs went through the recorder's general command mode, because its Playwright mode always runs both
+  engines and the runs here split the engines across sandboxes; the recorder still keeps each run's output and result,
+  and under the sandbox image's Node 24, a slightly older release than this machine's. Every sandbox reported that the
+  services the tests rely on (a per-user systemd and SSH to itself) worked.
+
+Reused: nothing from the executor's runs.
+
+Skipped: the docs-screenshot review capture whose assertion the landing fix changed (it needs the staged docs fleet and
+only photographs for development review; the same attribute is checked by `approval-layout`), the rest of the browser
+suite (the change is confined to the request cards, which the specs above cover), the workspace's other Rust tests (no
+helm, supervisor or protocol code changed), the desktop smoke (no desktop-only code changed) and hosted CI (manual-only,
+not dispatched).
