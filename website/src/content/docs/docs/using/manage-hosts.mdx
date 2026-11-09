@@ -142,7 +142,8 @@ host's [details](#see-more-about-each-host). **Remove** still works. A few less 
 refused too, with the reason shown in a dialog: a remote Mac with the Farhelm desktop app installed, a Linux host where
 Farhelm was set up by running `farhelm helm setup` on the host itself (its own `farhelm uninstall` removes it), one whose
 Farhelm runs from somewhere unexpected, and one whose
-`~/.local/lib/farhelm` directory is a symbolic link or has something mounted on or inside it. **Remove** still works for all of them.
+`~/.local/lib/farhelm` directory is a symbolic link or has something mounted on or inside it. On a Mac the mount check is
+best effort: a mount whose name contains " (" or " on " can go unnoticed. **Remove** still works for all of them.
 
 If something goes wrong partway, the host stays in the list and its details show which steps finished. Choose
 **Uninstall** again to finish the job; it picks up where it stopped. Once a failed uninstall has removed the service

@@ -3007,9 +3007,12 @@ impl ProvisioningBackend for SystemBackend {
     /// two `0` flags, two empty paths and a `0` flag, through `%s` because
     /// a literal `\00` would read the second flag's digit as part of an
     /// octal escape), then the mount points at or below
-    /// each asked path's two spellings ([`MOUNT_POINTS_SH`]), ended by an
-    /// empty field. A failing `systemctl show` or unreadable mount table fails
-    /// the whole command rather than reading as empty values. `readlink -f`
+    /// each asked path's two spellings ([`MOUNT_POINTS_SH`], or on a Mac
+    /// [`super::macos::MAC_MOUNT_POINTS_SH`]), ended by an empty field. A
+    /// failing `systemctl show` or an unreadable Linux mount table fails the
+    /// whole command rather than reading as empty values; a Mac's mount check
+    /// is best effort and reports no mounts when its table cannot be read or
+    /// parsed. `readlink -f`
     /// rather than `realpath`: both GNU and BusyBox provide it.
     async fn inspect_uninstall(
         &self,
@@ -3442,8 +3445,9 @@ resolve() {
 /// Field 5 of `/proc/self/mountinfo` is a resolved path with `\ooo` octal
 /// escapes for space, tab, newline and backslash, decoded here through
 /// `printf %b`'s `\0ooo` form so it compares with `readlink -f` output.
-/// Supported hosts are Linux, so an unreadable mount table fails the caller
-/// rather than reading as "no mounts".
+/// This is the Linux check: an unreadable mount table fails the caller
+/// rather than reading as "no mounts". A Mac uses
+/// [`super::macos::MAC_MOUNT_POINTS_SH`] instead, which is best effort.
 const MOUNT_POINTS_SH: &str = r#"mount_points() {
     [ -r /proc/self/mountinfo ] || {
         printf '%s\n' 'cannot read the mount table /proc/self/mountinfo' >&2

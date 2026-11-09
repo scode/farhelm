@@ -7742,9 +7742,11 @@ setup-owned marker because `farhelm helm setup` does not install a Mac job. Laun
 same frozen action list as Linux actions, without a separate service-manager abstraction.
 
 Shared file transfers report their temporary file size with BSD `stat` on Darwin and GNU `stat` on Linux. Artifact mode
-inspection makes the same platform choice. Mac uninstall uses the native mount table to reject a mount on or inside the
-lib directory; it does not use `/proc/self/mountinfo`. The ownership, canonical-path and shared-directory permission
-rules below still apply.
+inspection makes the same platform choice. Mac uninstall uses the native mount table as best-effort protection: it
+rejects only a mount read unambiguously on or inside the lib directory. Ambiguous, malformed or non-absolute lines are
+silently skipped; an empty table or a failed read reports no mounts. An ambiguously named nested mount therefore goes
+undetected. Linux retains its `/proc/self/mountinfo` check and read-failure refusal. The ownership, canonical-path and
+shared-directory permission rules below still apply.
 
 ADD and UPDATE both retain that concrete plan behind an opaque, one-use confirmation id. Planning is inspection-only;
 consuming the id revalidates the host and registry facts the plan relied on, and only then admits the host-scoped run.

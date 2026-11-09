@@ -9,3 +9,6 @@ Update action starts Farhelm again.
 The remote Mac runs Farhelm as a background job that restarts it after a crash, without needing tmux. The desktop app's
 local supervisor is unchanged. On the SSH-only test Mac the job did not return after reboot and reconnecting; running
 setup again restored it. Automatic startup at screen login is unverified.
+
+Uninstall's check for filesystems mounted inside the installation is best effort: ambiguous mount names and unreadable
+mount lists no longer block it. A nested mount with an ambiguous name can go undetected.
