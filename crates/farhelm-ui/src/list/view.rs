@@ -969,9 +969,12 @@ pub(crate) fn ListView(
     let skip_session_confirmations = preferences.0.read().skip_session_confirmations == Some(true);
     let mut deleting = deleting;
     let mut listing = use_signal(|| None::<Result<SessionListing, String>>);
-    // A confirmed local archive and an observed managed row disappearing both
-    // invalidate the count. The trash reads only on these edges, never a timer.
-    let mut trash_revision = use_signal(|| 0_u64);
+    // Deliver local archive changes, content-free feed news and weak fallback
+    // ticks without losing their authority before the per-host reader sees them.
+    // Only hosts already removing files have a separate completion cadence.
+    let mut trash_revision = use_signal(super::trash::TrashRefresh::default);
+    let trash_actions = use_signal(|| None::<super::trash::TrashActions>);
+    let notices_reader = crate::notices::use_notice_reader();
     // The same generation discipline the hosts read has, for the same
     // reason and against a slower race: a listing read that started before
     // a delete can easily still be in flight when the delete's own refresh
@@ -1323,6 +1326,16 @@ pub(crate) fn ListView(
     // Presentation never owns the list reader, selection, or disclosure.
     // Both surfaces stay mounted so hidden host work can finish normally.
     let mut hosts_panel_open = use_signal(|| false);
+    let rail_notices =
+        super::rail_notices::use_rail_notices(notices_reader, trash_actions, layout_epoch);
+    let open_notice_trash = use_callback(move |_| {
+        // The Trash dialog's permanent owner sits under the sessions heading.
+        // Reveal that ancestor before opening, including during page-local marking.
+        hosts_panel_open.set(false);
+        if let Some(actions) = *trash_actions.peek() {
+            actions.open.call(());
+        }
+    });
     let attention_rows = use_memo(move || {
         attention_list::classify(
             hosts.read().hosts().unwrap_or_default(),
@@ -1868,7 +1881,7 @@ pub(crate) fn ListView(
                     })
                 });
             if managed_disappeared {
-                trash_revision += 1;
+                trash_revision.write().request(Trigger::Explicit);
             }
             // Close any row question whose session is gone from
             // this fetch entirely — the counterpart to the "a poll
@@ -2189,7 +2202,7 @@ pub(crate) fn ListView(
     });
 
     // The feed's consumer (PLAN_M6_75.md item 6): every revision
-    // notification re-reads BOTH surfaces through the same doors, because
+    // notification refreshes the displayed surfaces through their own readers, because
     // the notification says only that something changed — a status flip, a
     // rename, a host going down and a registry edit are indistinguishable on
     // that channel by design, so the honest answer is to re-read whatever
@@ -2203,6 +2216,11 @@ pub(crate) fn ListView(
     let feed_acted_on = use_feed_reader(move || {
         feed_listing(Trigger::Notice);
         feed_hosts(Trigger::Notice);
+        notices_reader.request.call(Trigger::Notice);
+        // The feed is content-free. Another client's accepted cleanup must
+        // start this idle client's existing Trash reader, even if that client
+        // closes before recursive removal fails. No new timer or channel.
+        trash_revision.write().request(Trigger::Notice);
     });
 
     // The documented fallback (PLAN_M6_75.md item 6). The timer runs
@@ -2217,7 +2235,7 @@ pub(crate) fn ListView(
     // page stands down entirely rather than polling a helm whose vocabulary
     // it does not share.
     //
-    // Both surfaces on one timer, unlike the mount reads: a fallback is not
+    // All surfaces share this timer, unlike the mount reads: a fallback is not
     // where the independence argument pays, and one loop is one thing to
     // reason about when the interesting question is whether it runs at all.
     // A tick that lands while the previous one's read is still walking adds
@@ -2236,6 +2254,8 @@ pub(crate) fn ListView(
                 if fallback_polls_now() {
                     listing(Trigger::Scheduled);
                     hosts(Trigger::Scheduled);
+                    notices_reader.request.call(Trigger::Scheduled);
+                    trash_revision.write().request(Trigger::Scheduled);
                 }
             }
         }
@@ -2543,7 +2563,7 @@ pub(crate) fn ListView(
             if let Ok(reply) = &outcome {
                 delete_notice.publish(reply.notice.clone());
                 if reply.archived {
-                    trash_revision += 1;
+                    trash_revision.write().request(Trigger::Explicit);
                 }
             }
             match outcome.err() {
@@ -4732,6 +4752,11 @@ pub(crate) fn ListView(
             }
         }
         AppBar { layout_epoch,
+        notices_toggle: rsx! { super::rail_notices::NoticesToggle { ui: rail_notices.clone(), reader: notices_reader } },
+        notices_panel: rsx! { super::rail_notices::NoticesPanel {
+            ui: rail_notices.clone(), reader: notices_reader, hosts, actions: trash_actions,
+            on_open_trash: open_notice_trash,
+        } },
         hosts_toggle: rsx! {
             button {
                 r#type: "button", class: "btn btn-neutral hosts-panel-toggle",
@@ -4868,6 +4893,7 @@ pub(crate) fn ListView(
                 div { class: if effective_marks.is_empty() { "session-heading-actions" } else { "session-heading-actions marking" },
                     super::trash::TrashControl {
                         hosts, revision: trash_revision,
+                        actions: trash_actions,
                         gate: crate::ops::PaneGate::new(ops, row_ops),
                         trigger_hidden: !effective_marks.is_empty(),
                     }

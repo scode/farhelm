@@ -49,6 +49,8 @@ mod lifecycle;
 /// Page-local marks and toolbar controls, independent of the open session.
 mod marking;
 mod quick_switcher;
+/// The rail's shared notices reuse this list's permanent Trash owner.
+mod rail_notices;
 mod row;
 /// Save a snapshot of the launcher without changing the draft being launched.
 mod save_template;

@@ -702,6 +702,12 @@ pub(crate) fn AppBar(
     /// ListView owns presentation; this footer only hosts its persistent control.
     #[props(default = rsx! {})]
     hosts_toggle: Element,
+    /// The list owns notice reads and cleanup; AppBar supplies only placement.
+    #[props(default = rsx! {})]
+    notices_toggle: Element,
+    /// Flyouts remain outside the footer's stacking context and button styles.
+    #[props(default = rsx! {})]
+    notices_panel: Element,
     children: Element,
 ) -> Element {
     let mut settings_open = use_signal(|| false);
@@ -974,6 +980,7 @@ pub(crate) fn AppBar(
         // These triggers stay in AppBar's scope: moving chrome must not
         // replace the settings/help owners or their pending dialog work.
         div { class: "host-rail-footer",
+            {notices_toggle}
             {hosts_toggle}
             button {
                 r#type: "button",
@@ -1020,6 +1027,7 @@ pub(crate) fn AppBar(
                 span { class: "host-rail-label", "aria-hidden": "true", "Collapse" }
             }
         }
+        {notices_panel}
         // Mounted only beneath the authenticated preference gate, like Cmd+K's
         // relay. Capture-phase JS records terminal focus before clicking it.
         button {

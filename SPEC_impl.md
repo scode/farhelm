@@ -4287,13 +4287,21 @@ Load, connection changes, its own affirmative archive Delete, a managed row disa
 listings, dialog open and cleanup completion trigger reads. A host whose last successful same-incarnation listing says
 `removing` is re-read every three seconds until a successful listing says otherwise. Only that host is polled, with
 sizes while the dialog is open; an unavailable read retains its last removal report. Each host has one owner-scoped poll
-task, which waits for its own read and skips reads during this page's delete requests or another read of that host. A
-same-connection count remains visible during measurement, but an old read generation cannot overwrite this client's
-deletion result. Host-local request ordering also prevents an older poll from replacing a newer measurement or completed
-removal, without invalidating unrelated hosts' reads. Other clients' cleanup can leave the count stale until the dialog
-opens. Host-list refresh failures are disclosed rather than treated as proof of current reachability. Unknown host
-counts stay unknown; the global cleanup requires successful, settled listings from every reachable host, and refuses a
-host above the protocol's 10,000-ID batch limit rather than silently omitting it.
+task, whose scheduled ticks share that host's single-flight reader and add no demand while a read or retry is already
+owed. Reads stay suspended during this page's delete requests. A same-connection count remains visible during
+measurement, but an old read generation cannot overwrite this client's deletion result. Host-local request ordering also
+prevents an older poll from replacing a newer measurement or completed removal, without invalidating unrelated hosts'
+reads. The existing content-free fleet revision also invalidates Trash, so another client's accepted cleanup starts this
+client's existing removal poll; the initiator need not remain open. The page's existing feed/fallback owner requests
+shared notice reads too, with an explicit initial read and the existing SurfaceReader retry/coalescing policy. No
+additional timer or channel is mounted. Per-host read children are keyed by host and connection incarnation, retaining
+independent demand and retry lifetimes. Explicit, feed and scheduled delivery counters preserve the strongest
+undelivered cause across reactive batching; registry uncertainty retains the owner without dispatching RPCs, and a
+recovered registry supplies unattended news. Each attempt samples current measurement mode and mutation generation. A
+discarded pre-mutation reply is not an answer unless a replacement actually satisfies that demand. Host-list refresh
+failures are disclosed rather than treated as proof of current reachability. Unknown host counts stay unknown; the
+global cleanup requires successful, settled listings from every reachable host, and refuses a host above the protocol's
+10,000-ID batch limit rather than silently omitting it.
 
 Confirmations freeze deduplicated IDs and observed host incarnations. Diagnostic IDs are selectable for explicit
 forgetting, while every diagnostic remains visible, including several for one ID. Before dispatch the UI rechecks
@@ -8086,6 +8094,19 @@ quarter on hover or keyboard focus; during a visible check that glyph owns the s
 separate ring. The web/no-updater branch stays a plain span. A verification warning keeps its leading mark and check
 action. Its hover text carries the updater's state, so a check the user started ends visibly there. The update menu and
 the `?` menu are one bar-menu component given different items.
+
+The rail's shared notification bell occupies one 40px row above Hosts; footer height and the rail's bottom offset are
+both 208px. It reuses BellIcon at 16px and the existing danger-strong token for unread fill and count. ListView owns its
+notice reader and close-time exact shown IDs. Toggle and panel render through separate AppBar slots so the panel sits
+outside the footer's stacking context and rail-button styles. Existing popover registration, measured placement, outside
+dismissal and guarded focus handback own its opening. Successful read marks fence older GETs before updating only
+acknowledged IDs; failure leaves shared read state unchanged until another explicit close. Clear re-reads actual server
+history instead of hiding rows optimistically. A narrow callback published by permanently mounted TrashControl opens
+that same dialog or freezes a current stuck single-ID Retry through its existing dispatch. It supplies no second cleanup
+owner or generic command bus. Open Trash first reveals session content and remembers the visible bell for modal return
+focus, including while marking conceals the ordinary Trash trigger. Retry callbacks outlive the panel because ListView
+owns them; acceptance is not notice resolution. A helm-only notice-save warning is displayed separately from archive
+rows and selectable diagnostics, preserving known totals and ordinary completion polling.
 
 The bar's hover is selected by a pure function of the window build, any reported helm build and the updater's readout. A
 mismatch names both builds; a development window identifies itself as a development build rather than a release. Without

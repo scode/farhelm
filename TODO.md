@@ -87,12 +87,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Bootstrap a Podman image on a remote host.** Automatically bootstrap a Podman image on a remote host, with some
   reasonable defaults, as a supported flow. Plan: `plans/queue/podman-environments.md`.
 
-- **Show the user when the trash cannot finish freeing space.** With `instant-trash-delete`, a deleted checkout leaves
-  the trash at once and the host removes its files in the background, retrying after restarts when it cannot (files
-  owned by a container's root user, say). Decided on 2026-11-07 while planning it: for now such a folder only gets a
-  logged warning, and nothing may get stuck or break because of it. Consider improving how visible this is to the user.
-  Plan: `plans/queue/rail-notification-bell.md`.
-
 - **Restore automatic recovery from a withdrawn waiting update.** On 2026-10-14 the signed release advisories plan was
   narrowed to warning about a withdrawn running version and refusing to install a withdrawn release; a withdrawn release
   that is already installed and waiting for a restart now needs manual recovery, and an ordinary relaunch may still open

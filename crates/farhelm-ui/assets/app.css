@@ -653,7 +653,7 @@ html.host-rail-open { --host-rail-width: 220px; }
   position: absolute;
   top: var(--sidebar-title-height);
   left: 0;
-  bottom: 168px;
+  bottom: 208px;
   width: var(--host-rail-width);
   z-index: 4;
   box-sizing: border-box;
@@ -777,7 +777,7 @@ html.host-rail-open .host-rail-footer .app-bar-menu > .btn { flex: 1 1 auto; }
   bottom: 0;
   left: 0;
   width: var(--host-rail-width);
-  height: 168px;
+  height: 208px;
   box-sizing: border-box;
   /* Preserve the old centered 40px controls inside the bordered 56px rail.
      Explicit left alignment keeps that same icon/menu x when rows widen. */
@@ -790,6 +790,25 @@ html.host-rail-open .host-rail-footer .app-bar-menu > .btn { flex: 1 1 auto; }
   z-index: 5;
 }
 .host-rail-footer .app-bar-menu { display: flex; }
+/* The bell adds one ordinary 40px footer row; the rail's bottom offset above
+   reserves the same space. Its geometry stays shared with session bells. */
+.host-rail-footer .rail-notices-toggle.loud { color: var(--danger-strong); }
+.rail-notices-toggle .bell-glyph { width: 16px; height: 16px; }
+.rail-notices-toggle .host-rail-icon { position: relative; }
+.rail-notices-count { position: absolute; top: -6px; right: -8px; min-width: 12px; font-size: 10px; line-height: 13px; font-weight: 700; }
+.host-row-menu-flyout.rail-notices-flyout { width: 360px; }
+.rail-notices-panel { display: flex; flex-direction: column; overflow: hidden; }
+.rail-notices-panel > p { margin: 10px 12px; }
+.rail-notices-entries { overflow-y: auto; min-height: 0; }
+.rail-notice { overflow-wrap: anywhere; }
+.rail-notice h3 { font-size: inherit; font-weight: 600; margin: 0 0 6px; }
+.rail-notice p { margin: 6px 0; }
+.rail-notice-checkout, .rail-notice-time { color: var(--fg-2); font-size: 11px; }
+.rail-notice-reason { color: var(--danger-strong); }
+.rail-notice.resolved .rail-notice-reason { color: inherit; }
+.rail-notice-actions, .rail-notices-footer { display: flex; flex-wrap: wrap; gap: 8px; }
+.rail-notices-footer { padding: 10px 12px; border-top: 1px solid var(--border-row); justify-content: space-between; }
+.checkout-trash-notice-error { color: var(--danger-strong); }
 /* The filter remains selected while management is shown, but its quieter
    outline leaves the filled footer toggle as the current view's landmark. */
 .app-sidebar:has(.hosts-panel-toggle[aria-pressed="true"]) .host-rail .btn[aria-pressed="true"] {

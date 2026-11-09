@@ -5,7 +5,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
-import { localHostId, stubFeed } from "./helpers/fleet";
+import { localHostId, observeFeedReaders, readFeedReaders, stubFeed } from "./helpers/fleet";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 import { expectKeyboardScroll, expectKeyboardScrollFromControl } from "./helpers/keyboard-scroll";
 import { recordPage } from "./helpers/timeline";
@@ -118,7 +118,12 @@ async function stubArchives(page: Page, request: APIRequestContext, names: strin
     const { host } = route.request().postDataJSON();
     listings.push(host);
     expect(ids, "only hosts supplied by the fixture are listed").toContain(host);
-    expect(unavailable.has(host), "unreachable hosts must not be listed").toBe(false);
+    // Fleet news refreshes host facts and Trash independently. A read using
+    // the last connected snapshot can arrive before the page learns the host
+    // is unavailable; that real server boundary refuses instead of succeeding.
+    if (unavailable.has(host)) return fulfillAsHelm(route, {
+      status: 503, contentType: "text/plain", body: "fixture host unavailable",
+    });
     await fulfillAsHelm(route, { json: { removing: removing.has(host), issues: issues.get(host) ?? [], checkouts: Array.from({ length: count }, (_, i) => ({
       id: `archive-${host}-${i}`, name: `archived-checkout-${i}`, repository: "example/repository",
       path: `/work/checkouts/.farhelm-trash/archive-${i}`,
@@ -221,7 +226,7 @@ for (const fails of [false, true]) {
   /** A held single reply proves immediate selection and busy admission; later
    * listings must preserve neighbours on the same host and on another host. */
   test(`one trash entry deletes immediately and preserves neighbours after ${fails ? "failure" : "success"}`, async ({page, request}) => {
-    const {ids, removed, unavailable, issues} = await stubArchives(page, request, ["single-local", "single-remote", "single-down"], 2);
+    const {ids, removed, unavailable, issues, listings} = await stubArchives(page, request, ["single-local", "single-remote", "single-down"], 2);
     unavailable.add(ids[2]);
     issues.set(ids[1], [{id: "unconfirmed-archive", path: "/work/trash/unconfirmed", message: "fixture archive identity unconfirmed"}]);
     let release!: () => void;
@@ -290,6 +295,7 @@ for (const fails of [false, true]) {
       await expect(local.locator(".trash-entry-delete").last()).toBeEnabled();
       if (fails) await expect(local.locator(".checkout-trash-issue")).toContainText("cleanup reply could not be confirmed");
       expect(calls).toHaveLength(1);
+      expect(listings, "a host unavailable in the initial registry never gets a reader").not.toContain(ids[2]);
     } finally {
       release();
       await page.unrouteAll({behavior: "wait"});
@@ -390,6 +396,9 @@ test("an unrelated trash success retains an uncertain outcome until its own retr
 test("trash notices survive outages and disappear when their host is removed", async ({page, request}) => {
   const {ids, unavailable, registry} = await stubArchives(page, request, ["retained-local", "removable-remote"], 1);
   const feed = await stubFeed(page);
+  // These cases control registry news, not a feed outage. An ungreeted feed
+  // would add fallback reads while a pointer action is crossing its guards.
+  feed.notifyOnConnect(0);
   await page.route("**/api/checkout-trash/delete", route =>
     fulfillAsHelm(route, {status: 503, contentType: "text/plain", body: "fixture remote cleanup failure"}));
   await page.goto("/");
@@ -429,6 +438,7 @@ test("trash notices survive outages and disappear when their host is removed", a
 test("a late failed trash reply cannot restore notices for a removed host", async ({page, request}) => {
   const {ids, registry} = await stubArchives(page, request, ["kept-local", "removed-remote"], 1);
   const feed = await stubFeed(page);
+  feed.notifyOnConnect(0);
   const held = deletionGate();
   let sent = false;
   let answered = false;
@@ -476,6 +486,7 @@ test("a late failed trash reply cannot restore notices for a removed host", asyn
 test("single trash delete requires settled listings and a healthy host refresh", async ({page, request}) => {
   const {registry} = await stubArchives(page, request, ["eligibility-local"], 2);
   const feed = await stubFeed(page);
+  feed.notifyOnConnect(0);
   let release!: () => void;
   const held = new Promise<void>((resolve) => { release = resolve; });
   let measured = false;
@@ -721,13 +732,32 @@ for (const failure of ["http", "transport"] as const) {
   });
 }
 
+/** Retire delivered demand before a strict request-count assertion. The clock
+ * is paused by callers, so a completed HTTP response cannot hide a queued
+ * follow-up or retry sleeper behind the counted boundary. */
+async function waitForTrashReadersIdle(page: Page, ids: number[]) {
+  let last: Awaited<ReturnType<typeof readFeedReaders>> = [];
+  await expect.poll(async () => {
+    last = (await readFeedReaders(page)).filter((entry) => entry.role === "trash");
+    return last.length === ids.length && last.every((entry) => ids.includes(entry.host!) &&
+      entry.caught_up === true && entry.readers.length === 1 && entry.readers.every((reader) =>
+        !reader.running && !reader.task && reader.demand === "None"));
+  }, { message: "Trash readers must retire delivered work", timeout: 15_000 }).toBe(true).catch((error) => {
+    throw new Error(`${String(error)}\nlast Trash readers: ${JSON.stringify(last)}`);
+  });
+}
+
 /** A request's completion hands the indicator to the host's actual remover.
- * Only that host is polled, including across one failed read; an explicit false
- * reply ends the cadence even though a refused leftover could still exist. */
+ * Only that host has a completion cadence. A failed poll retains progress and
+ * the shared reader's retry; a successful false reply ends the cadence. */
 test("trash polls only the host freeing space and stops on its completion", async ({page, request}) => {
   await page.clock.install();
+  await observeFeedReaders(page);
+  const feed = await stubFeed(page);
+  feed.notifyOnConnect(0);
   const {ids, removed, removing, listings} = await stubArchives(page, request, ["removing-local", "idle-remote"], 1);
   const held = deletionGate();
+  const failedPoll = deletionGate();
   let sent = false;
   await page.route("**/api/checkout-trash/delete", async route => {
     const selected = route.request().postDataJSON();
@@ -739,6 +769,7 @@ test("trash polls only the host freeing space and stops on its completion", asyn
   });
   try {
     await page.goto("/");
+    await feed.waitForConnection(1);
     const trigger = page.locator(".checkout-trash-button");
     await expect(trigger).toHaveAttribute("data-count", "2");
     await trigger.click();
@@ -762,45 +793,76 @@ test("trash polls only the host freeing space and stops on its completion", asyn
     ]);
     await expect(trigger.locator(".trash-delete-icon")).toHaveClass(/\bdeleting\b/);
     await expect(trigger).toHaveAttribute("data-tooltip", /freeing space on removing-local/);
+    // Freeze after the modal's measurement/focus work. Only explicit clock
+    // steps below may now run the completion timer or the reader's retry.
+    await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now()) + 1_000));
+    await waitForTrashReadersIdle(page, ids);
     const reads = listings.length;
     let failNext = true;
     await page.route("**/api/checkout-trash/list", async route => {
       if (route.request().postDataJSON().host === ids[0] && failNext) {
         failNext = false;
         listings.push(ids[0]);
+        // The failed response cannot arm a retry inside the clock step that
+        // counts this poll; HTTP completion timing must not choose the count.
+        await failedPoll.ready;
         return fulfillAsHelm(route, {status: 503, contentType: "text/plain", body: "fixture read unavailable"});
       }
       await route.fallback();
     });
-    await page.clock.runFor(3_100);
+    await page.clock.runFor(3_000);
     await expect.poll(() => listings.length, {message: "the removing host is polled"}).toBe(reads + 1);
+    failedPoll.release();
+    await expect.poll(async () => {
+      const host = (await readFeedReaders(page)).find((entry) => entry.role === "trash" && entry.host === ids[0]);
+      return host?.readers[0].running === false && host.readers[0].task && host.readers[0].demand === "Retry";
+    }, {message: "the failed poll has retired into its owned retry sleeper"}).toBe(true);
     await expect(trigger.locator(".trash-delete-icon")).toHaveClass(/\bdeleting\b/);
-    await page.clock.runFor(3_100);
+    // SurfaceReader's first retry is 500ms; scheduled ticks cannot wake it.
+    await page.clock.runFor(500);
     await expect.poll(() => listings.length, {message: "a failed poll retains the last running report"}).toBe(reads + 2);
+    await waitForTrashReadersIdle(page, ids);
     expect(listings.slice(reads)).toEqual([ids[0], ids[0]]);
     removing.delete(ids[0]);
-    await page.clock.runFor(3_100);
+    await page.clock.runFor(3_000);
     await expect(trigger.locator(".trash-delete-icon")).not.toHaveClass(/\bdeleting\b/);
+    await waitForTrashReadersIdle(page, ids);
     const stopped = listings.length;
     await page.clock.runFor(9_100);
     expect(listings, "an idle host and a completed remover have no polling cadence").toHaveLength(stopped);
   } finally {
     held.release();
+    failedPoll.release();
     await page.unrouteAll({behavior: "wait"});
   }
 });
 
-/** A poll begun before a confirmed delete is stale even when it answers after
- * the delete's fresh listing. It must restore neither the entry nor animation. */
+/** A poll begun before Delete cannot restore a row while its coalesced repair
+ * is held. Dispatch of that repair proves the old read retired before the
+ * assertion, so a fresh reply cannot silently mask a missing mutation fence. */
 test("a late trash poll cannot restore a confirmed deletion", async ({page, request}) => {
   await page.clock.install();
+  await observeFeedReaders(page);
+  const feed = await stubFeed(page);
+  feed.notifyOnConnect(0);
   const {ids, removed, removing, listings} = await stubArchives(page, request, ["stale-local"], 1);
   removing.add(ids[0]);
   const held = deletionGate();
+  const repair = deletionGate();
   let holdPoll = false;
   let pollHeld = false;
-  let pollReturned = false;
+  let holdRepair = false;
+  let repairHeld = false;
   await page.route("**/api/checkout-trash/list", async route => {
+    if (holdRepair && !holdPoll) {
+      holdRepair = false;
+      repairHeld = true;
+      listings.push(ids[0]);
+      expect(removed.get(ids[0])?.has(`archive-${ids[0]}-0`)).toBe(true);
+      expect(removing.has(ids[0])).toBe(false);
+      await repair.ready;
+      return fulfillAsHelm(route, {json: {removing: false, issues: [], checkouts: []}});
+    }
     if (!holdPoll) return route.fallback();
     holdPoll = false;
     pollHeld = true;
@@ -810,7 +872,6 @@ test("a late trash poll cannot restore a confirmed deletion", async ({page, requ
       id: `archive-${ids[0]}-0`, name: "archived-checkout-0", repository: "example/repository",
       path: "/work/checkouts/.farhelm-trash/archive-0", archived_at: 1_700_000_000, bytes: 1024,
     }]}});
-    pollReturned = true;
   });
   await page.route("**/api/checkout-trash/delete", async route => {
     const selected = route.request().postDataJSON();
@@ -820,6 +881,7 @@ test("a late trash poll cannot restore a confirmed deletion", async ({page, requ
   });
   try {
     await page.goto("/");
+    await feed.waitForConnection(1);
     const trigger = page.locator(".checkout-trash-button");
     await expect(trigger).toHaveAttribute("data-count", "1");
     await trigger.click();
@@ -827,17 +889,21 @@ test("a late trash poll cannot restore a confirmed deletion", async ({page, requ
     await expect(dialog.locator(".trash-delete-all")).toBeEnabled();
     await dialog.locator(".trash-delete-all").click();
     await expect(dialog.locator(".trash-confirm-submit")).toBeFocused();
+    await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now()) + 1_000));
+    await waitForTrashReadersIdle(page, ids);
     holdPoll = true;
     await page.clock.runFor(3_100);
     await expect.poll(() => pollHeld, {message: "the pre-delete poll remains in flight"}).toBe(true);
     await dialog.locator(".trash-confirm-submit").click();
     await expect(dialog).toHaveCount(0);
     await expect(trigger).toHaveAttribute("data-count", "0");
-    await expect(trigger.locator(".trash-delete-icon")).not.toHaveClass(/\bdeleting\b/);
+    holdRepair = true;
     held.release();
-    await expect.poll(() => pollReturned, {message: "the stale reply was delivered after the fresh empty listing"}).toBe(true);
+    await expect.poll(() => repairHeld, {message: "the stale read retired and its post-delete repair is held"}).toBe(true);
     await expect(trigger).toHaveAttribute("data-count", "0");
+    repair.release();
     await expect(trigger.locator(".trash-delete-icon")).not.toHaveClass(/\bdeleting\b/);
+    await waitForTrashReadersIdle(page, ids);
     const settledReads = listings.length;
     await page.clock.runFor(6_100);
     expect(listings, "the stale running flag cannot restart polling").toHaveLength(settledReads);
@@ -846,6 +912,7 @@ test("a late trash poll cannot restore a confirmed deletion", async ({page, requ
     await expect(dialog.locator(".checkout-trash-empty")).toBeVisible();
   } finally {
     held.release();
+    repair.release();
     await page.unrouteAll({behavior: "wait"});
   }
 });

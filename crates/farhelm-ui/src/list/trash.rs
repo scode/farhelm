@@ -20,16 +20,21 @@ use crate::modal_dialog::{
 };
 use crate::ops::{ConfirmSlot, ConfirmToken, PaneGate, use_confirm_slot};
 use crate::peer::display_peer;
+use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::{ApiBase, Host, HostId, HostPhase};
 use dioxus::prelude::*;
 use farhelm_proto::{CheckoutTrashIssue, CheckoutTrashListing};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::rc::Rc;
 
 const DIALOG: &str = ".checkout-trash-dialog";
 /// Only whole-dialog dismissal returns here; cancelling a confirmation stays inside.
 /// A retained mark can become visible during cleanup, concealing the old trigger.
 const RETURN_FOCUS: &str = "(document.querySelector('.marked-menu-toggle') ?? document.querySelector('.checkout-trash-button'))?.focus({preventScroll:true});";
+const RETURN_TO_BELL: &str =
+    "document.querySelector('.rail-notices-toggle')?.focus({preventScroll:true});";
 // The host rejects larger batches; disclose this rather than silently omitting
 // a host from a global destructive confirmation.
 const MAX_SELECTION: usize = 10_000;
@@ -44,6 +49,43 @@ const SETTLE_MS: u64 = 700;
 /// A host's running report or capable cleanup receipt starts this cadence.
 /// A failed read preserves progress, so a temporary outage cannot imply completion.
 const REMOVAL_POLL_MS: u64 = 3_000;
+
+/// Preserve each trigger's authority until a host's effect delivers it to its
+/// reader. A single last-trigger value would lose an explicit request when a
+/// scheduled tick arrived before the render effect ran. These are delivery
+/// counters only; SurfaceReader owns all demand, retry and task policy.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct TrashRefresh {
+    explicit: u64,
+    notice: u64,
+    scheduled: u64,
+}
+
+impl TrashRefresh {
+    /// Record the cause at its existing call site without spawning a read.
+    pub(super) fn request(&mut self, trigger: Trigger) {
+        let counter = match trigger {
+            Trigger::Explicit => &mut self.explicit,
+            Trigger::Notice => &mut self.notice,
+            Trigger::Scheduled => &mut self.scheduled,
+        };
+        *counter = counter.wrapping_add(1);
+    }
+
+    /// Coalesced reactive writes deliver their strongest changed cause. Weak
+    /// ticks cannot erase attended work that has not reached the reader yet.
+    fn since(self, previous: Self) -> Option<Trigger> {
+        if self.explicit != previous.explicit {
+            Some(Trigger::Explicit)
+        } else if self.notice != previous.notice {
+            Some(Trigger::Notice)
+        } else if self.scheduled != previous.scheduled {
+            Some(Trigger::Scheduled)
+        } else {
+            None
+        }
+    }
+}
 
 /// Count wording stays grammatical at the destructive confirmation boundary.
 fn checkouts(count: usize) -> &'static str {
@@ -84,6 +126,9 @@ struct HostTrash {
     /// The last same-incarnation progress report or accepted cleanup awaiting
     /// confirmation. Read failures retain it until a successful list settles it.
     removing: bool,
+    /// A helm storage failure cannot replace successfully read archive facts.
+    /// Keep it separate from selectable issues and clear it on a healthy reply.
+    notice_error: Option<String>,
     /// A host-local request order: polling one host cannot supersede another's read.
     read_serial: u64,
 }
@@ -169,7 +214,7 @@ fn read_host(
     mut state: Signal<HashMap<HostId, HostTrash>>,
     generation: Signal<u64>,
     current: u64,
-) -> impl std::future::Future<Output = ()> {
+) -> impl std::future::Future<Output = bool> {
     let serial = (*generation.peek() == current).then(|| {
         let mut states = state.write();
         let entry = states.entry(host).or_default();
@@ -185,23 +230,27 @@ fn read_host(
     });
     async move {
         let Some(serial) = serial else {
-            return;
+            return false;
         };
         let reply = crate::api::fetch_checkout_trash(&base, host, incarnation, measure).await;
         if *generation.peek() != current {
-            return;
+            return false;
         }
+        let answered = reply.is_ok();
         if let Some(entry) = state
             .write()
             .get_mut(&host)
             .filter(|entry| entry.incarnation == incarnation && entry.read_serial == serial)
         {
-            if let Ok(listing) = &reply {
-                entry.removing = listing.removing;
+            if let Ok(reply) = &reply {
+                entry.removing = reply.listing.removing;
+                entry.notice_error = reply.notice_error.clone();
             }
-            entry.reply = Some(reply);
+            entry.reply = Some(reply.map(|reply| reply.listing));
             entry.loading = false;
+            return answered;
         }
+        false
     }
 }
 
@@ -243,6 +292,9 @@ enum Selection {
     /// own Delete). Its targets come from the click-time host by design, and
     /// starting it closes whatever band is open.
     Entry(Target),
+    /// The rail freezes one current stuck entry through this same owner. Its
+    /// completion reports acceptance or refusal, never that space was freed.
+    Retry(Target, RetryCompletion),
     /// The band opening the user confirmed, as the render that drew its
     /// "Delete permanently" button saw it. The run deletes exactly the
     /// targets that opening froze, and starting it consumes the opening.
@@ -261,7 +313,7 @@ impl Selection {
     /// before any step that could close the band or refresh the listing.
     fn targets(&self, slot: &ConfirmSlot<Confirmation>) -> Option<Vec<Target>> {
         match self {
-            Self::Entry(target) => Some(vec![target.clone()]),
+            Self::Entry(target) | Self::Retry(target, _) => Some(vec![target.clone()]),
             Self::Band(answered) => slot
                 .is_current(answered)
                 .then(|| answered.key().targets.clone()),
@@ -277,13 +329,28 @@ impl Selection {
     /// for a busy page leaves its band up to be answered again.
     fn commit(&self, slot: &mut ConfirmSlot<Confirmation>) -> bool {
         match self {
-            Self::Entry(_) => {
+            Self::Entry(_) | Self::Retry(..) => {
                 slot.clear();
                 true
             }
             Self::Band(answered) => slot.take(answered).is_some(),
         }
     }
+}
+
+/// A Retry reply reports admission or refusal, never confirmed disk reclamation.
+/// Keeping that meaning named prevents panel callbacks from implying resolution.
+pub(super) type RetryCompletion = Callback<Result<(), String>>;
+
+/// The permanently mounted Trash owner publishes only these two entry points.
+/// The rail cannot create another cleanup owner or bypass current listing and
+/// connection checks; the memo is presentation, and Retry rechecks on dispatch.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) struct TrashActions {
+    pub(super) open: Callback<()>,
+    pub(super) can_open: Memo<bool>,
+    pub(super) retry: Callback<(HostId, String, RetryCompletion)>,
+    pub(super) retryable: Memo<HashSet<(HostId, String)>>,
 }
 
 /// Only connected rows can contribute current archives or accept cleanup.
@@ -412,6 +479,20 @@ fn entry_target(host: &Host, state: Option<&HostTrash>, id: &str) -> Option<Targ
     Some(selected)
 }
 
+/// A retained notice alone grants no cleanup authority. Retry requires the
+/// current capable host listing to identify this same entry as stuck, then
+/// inherits every ordinary single-entry guard and the frozen incarnation.
+fn retry_target(host: &Host, state: Option<&HostTrash>, id: &str) -> Option<Target> {
+    let listing = state?.reply.as_ref()?.as_ref().ok()?;
+    (listing.reports_retired
+        && listing
+            .checkouts
+            .iter()
+            .any(|entry| entry.id == id && entry.stuck.is_some()))
+    .then(|| entry_target(host, state, id))
+    .flatten()
+}
+
 /// Acceptance starts cleanup; only a later capable listing proves the files are gone.
 ///
 /// Older supervisors hide accepted rows themselves. Their optimistic disappearance
@@ -441,7 +522,7 @@ fn accepted_cleanup(state: &mut HostTrash, ids: &[String]) {
 
 /// Human-readable allocated space, with units that do not imply byte precision
 /// when a host could measure only part of its trash.
-fn space(bytes: u64, partial: bool) -> String {
+pub(super) fn space(bytes: u64, partial: bool) -> String {
     let units = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
     let mut unit = 0;
@@ -475,7 +556,7 @@ fn archived_when(seconds: Option<i64>) -> Element {
 
 /// Render the host's recorded time without substituting a client or filesystem clock.
 /// Archive dates and cleanup failures share this display but have distinct causes.
-fn utc_timestamp(seconds: i64) -> String {
+pub(super) fn utc_timestamp(seconds: i64) -> String {
     let (year, month, day) = farhelm_proto::time::civil_from_days(seconds.div_euclid(86400));
     let time = seconds.rem_euclid(86400);
     format!(
@@ -611,6 +692,121 @@ fn ConfirmBand(
     } }
 }
 
+/// A keyed connection owns one existing reader and its active-removal timer.
+/// Other hosts never wait behind this host's network or retry ladder. Registry
+/// uncertainty retains the owner; only removal, disconnection or a new
+/// incarnation retires it. Every actual attempt samples current authority and
+/// measurement mode, so coalesced news cannot retain an obsolete request.
+#[component]
+fn HostTrashReader(
+    host: HostId,
+    incarnation: u64,
+    hosts: Signal<HostsRead>,
+    state: Signal<HashMap<HostId, HostTrash>>,
+    open: Signal<bool>,
+    generation: Signal<u64>,
+    deletion: Signal<HashMap<HostId, bool>>,
+    revision: Signal<TrashRefresh>,
+) -> Element {
+    let base = use_context::<ApiBase>().0;
+    let reader = use_signal(SurfaceReader::default);
+    let eligible = use_memo(move || {
+        let hosts = hosts.read();
+        hosts.refresh_error().is_none()
+            && deletion.read().is_empty()
+            && hosts.hosts().unwrap_or_default().iter().any(|entry| {
+                entry.id == host && entry.incarnation == incarnation && connected(entry)
+            })
+    });
+    let request = use_callback(move |trigger: Trigger| {
+        let base = base.clone();
+        request_read(reader, trigger, move || {
+            let base = base.clone();
+            let current = *generation.peek();
+            let measure = *open.peek();
+            async move {
+                if !*eligible.peek() {
+                    return false;
+                }
+                read_host(base, host, incarnation, measure, state, generation, current).await
+            }
+        });
+    });
+    // Remember only delivered counters. A paused host must retain the cause
+    // of an explicit request; registry recovery supplies unattended news,
+    // rather than turning unrelated registry refreshes into attended reads.
+    let delivered = use_hook(|| Rc::new(RefCell::new(None::<(TrashRefresh, bool, bool)>)));
+    // Pull-only browser observation establishes delivery and retirement without
+    // another effect that could change the scheduling boundary being tested.
+    let observed_delivery = delivered.clone();
+    crate::reader::use_test_reader_snapshot(move || {
+        serde_json::json!({
+            "role": "trash",
+            "host": host,
+            "incarnation": incarnation,
+            "caught_up": observed_delivery.borrow().is_some_and(|(seen, measure, ready)|
+                ready && seen == *revision.peek() && measure == *open.peek()),
+            "readers": [reader.peek().test_snapshot()],
+        })
+    });
+    use_effect(move || {
+        let next = revision();
+        let measure = open();
+        let ready = eligible();
+        if !ready {
+            if let Some(previous) = delivered.borrow_mut().as_mut() {
+                previous.2 = false;
+            }
+            return;
+        }
+        let previous = delivered.borrow_mut().replace((next, measure, true));
+        let trigger = match previous {
+            None => Some(Trigger::Explicit),
+            Some((previous, old_measure, was_ready)) => {
+                let changed = next.since(previous);
+                if measure != old_measure || changed == Some(Trigger::Explicit) {
+                    Some(Trigger::Explicit)
+                } else if !was_ready {
+                    Some(Trigger::Notice)
+                } else {
+                    changed
+                }
+            }
+        };
+        if let Some(trigger) = trigger {
+            request.call(trigger);
+        }
+    });
+    let removing = use_memo(move || {
+        state
+            .read()
+            .get(&host)
+            .is_some_and(|entry| entry.incarnation == incarnation && entry.removing)
+    });
+    let mut polling = use_signal(|| false);
+    use_effect(move || {
+        if !removing() || polling() {
+            return;
+        }
+        polling.set(true);
+        spawn(async move {
+            loop {
+                crate::reader::sleep_ms(REMOVAL_POLL_MS).await;
+                if !*removing.peek() {
+                    break;
+                }
+                if *eligible.peek() {
+                    // Scheduled demand neither queues behind a slow read nor
+                    // wakes a retry sleeper. The same reader owns all traffic.
+                    request.call(Trigger::Scheduled);
+                }
+            }
+            polling.set(false);
+        });
+    });
+    rsx! {}
+}
+
 /// Keep the button and its dialog mounted under the list owner, so a session
 /// deletion or selection change cannot drop an in-flight cleanup task.
 /// Marking may conceal the trigger after a listing refresh, but never this
@@ -618,16 +814,18 @@ fn ConfirmBand(
 #[component]
 pub(super) fn TrashControl(
     hosts: Signal<HostsRead>,
-    revision: Signal<u64>,
+    revision: Signal<TrashRefresh>,
     gate: PaneGate,
+    mut actions: Signal<Option<TrashActions>>,
     #[props(default)] trigger_hidden: bool,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let popovers = use_context::<MovementOwner>();
     let mut open = use_signal(|| false);
+    let mut opened_from_bell = use_signal(|| false);
     let mut state = use_signal(HashMap::<HostId, HostTrash>::new);
     let mut generation = use_signal(|| 0_u64);
-    let mut refresh = use_signal(|| 0_u64);
+    let mut refresh = revision;
     // The one confirmation band, keyed by what it shows. Answers name the
     // opening their render drew; see `Selection` and `cancel_confirmation`.
     let mut confirmation = use_confirm_slot::<Confirmation, ()>();
@@ -638,7 +836,6 @@ pub(super) fn TrashControl(
     // removal revokes it for the rest of that request, even if a later registry
     // refresh fails. This fence ends with the request; no host history remains.
     let mut deletion = use_signal(HashMap::<HostId, bool>::new);
-    let mut polling = use_signal(HashSet::<(HostId, u64)>::new);
     // The layout the dialog last drew and whether entry deletes have settled
     // since it changed (see `SETTLE_MS`). The generation keeps an older timer
     // from settling a newer layout.
@@ -656,12 +853,8 @@ pub(super) fn TrashControl(
             read.hosts().is_some() && read.refresh_error().is_none(),
         )
     });
-    let read_base = base.clone();
     use_effect(move || {
         let (signature, hosts_known) = signature();
-        let _ = revision();
-        let _ = refresh();
-        let measure = open();
         if hosts_known {
             // Reconcile notices even while deletes suspend filesystem reads.
             // Unreachable hosts remain in this authoritative registry signature.
@@ -686,86 +879,16 @@ pub(super) fn TrashControl(
         if !deletion().is_empty() {
             return;
         }
-        let current = generation.peek().wrapping_add(1);
-        generation.set(current);
         if !hosts_known {
             return;
         }
         state
             .write()
             .retain(|id, _| signature.iter().any(|(host, _, _)| host == id));
-        for (host, incarnation, reachable) in signature {
+        for (host, _, reachable) in signature {
             if !reachable {
                 state.write().remove(&host);
-                continue;
             }
-            let base = read_base.clone();
-            spawn(read_host(
-                base,
-                host,
-                incarnation,
-                measure,
-                state,
-                generation,
-                current,
-            ));
-        }
-    });
-    let poll_base = base.clone();
-    use_effect(move || {
-        let active: Vec<_> = state
-            .read()
-            .iter()
-            .filter(|(_, entry)| entry.removing)
-            .map(|(host, entry)| (*host, entry.incarnation))
-            .collect();
-        for (host, incarnation) in active {
-            // This set owns timers, not read authority. A render or another
-            // host's reply cannot create a second loop for the same connection.
-            if !polling.write().insert((host, incarnation)) {
-                continue;
-            }
-            let base = poll_base.clone();
-            spawn(async move {
-                loop {
-                    crate::reader::sleep_ms(REMOVAL_POLL_MS).await;
-                    let connected_now =
-                        hosts
-                            .peek()
-                            .hosts()
-                            .unwrap_or_default()
-                            .iter()
-                            .any(|entry| {
-                                entry.id == host
-                                    && connected(entry)
-                                    && entry.incarnation == incarnation
-                            });
-                    let status = state
-                        .peek()
-                        .get(&host)
-                        .filter(|entry| entry.incarnation == incarnation)
-                        .map(|entry| (entry.removing, entry.loading));
-                    let Some((true, loading)) = status.filter(|_| connected_now) else {
-                        break;
-                    };
-                    if loading || !deletion.peek().is_empty() {
-                        continue;
-                    }
-                    let current = *generation.peek();
-                    let measure = *open.peek();
-                    read_host(
-                        base.clone(),
-                        host,
-                        incarnation,
-                        measure,
-                        state,
-                        generation,
-                        current,
-                    )
-                    .await;
-                }
-                polling.write().remove(&(host, incarnation));
-            });
         }
     });
     let host_error = hosts.read().refresh_error().map(str::to_owned);
@@ -817,16 +940,28 @@ pub(super) fn TrashControl(
     // Both entry clicks and confirmed bulk choices cross the same authority,
     // operation-guard and completion boundary. Only selection/confirmation differ.
     let dispatch = use_callback(move |selection: Selection| {
+        let completion = match &selection {
+            Selection::Retry(_, completion) => Some(*completion),
+            _ => None,
+        };
+        let refuse = |message: &str| {
+            if let Some(completion) = completion {
+                completion.call(Err(message.to_owned()));
+            }
+        };
         if !deletion.peek().is_empty() || gate.busy_now() {
+            refuse("Another operation is still in progress. Try again when it finishes.");
             return;
         }
         // A stale band answer stops here, before the host check below can
         // close the band now on screen or refresh the listing under it.
         let Some(targets) = selection.targets(&confirmation) else {
+            refuse("The selected cleanup is no longer current.");
             return;
         };
         // An empty selection has no reply that could retire a run or its gate.
         if targets.is_empty() {
+            refuse("The selected checkout is no longer available.");
             return;
         }
         // Host changes invalidate a frozen selection before dispatch;
@@ -843,11 +978,13 @@ pub(super) fn TrashControl(
                 })
         };
         if !valid {
+            refuse("The host connection changed. Wait for Trash to refresh before retrying.");
             confirmation.clear();
-            refresh += 1;
+            refresh.write().request(Trigger::Explicit);
             return;
         }
         if !selection.commit(&mut confirmation) {
+            refuse("The selected cleanup is no longer current.");
             return;
         }
         deletion.set(targets.iter().map(|target| (target.host, true)).collect());
@@ -855,12 +992,18 @@ pub(super) fn TrashControl(
         if matches!(selection, Selection::Band(_)) {
             // The persistent owner keeps the requests alive after its modal
             // disappears. Returning focus belongs to submission, not completion.
-            DialogHandle::new(DIALOG).close(RETURN_FOCUS);
+            DialogHandle::new(DIALOG).close(if *opened_from_bell.peek() {
+                RETURN_TO_BELL
+            } else {
+                RETURN_FOCUS
+            });
             open.set(false);
         }
         for target in targets {
             let base = delete_base.clone();
             spawn(async move {
+                let mut outcome =
+                    Err("The host connection changed; cleanup was not sent.".to_owned());
                 let valid = {
                     let hosts = hosts.peek();
                     hosts.refresh_error().is_none()
@@ -892,6 +1035,11 @@ pub(super) fn TrashControl(
                         &target.ids,
                     )
                     .await;
+                    outcome = match &result {
+                        Ok(reply) if target.ids.iter().all(|id| reply.removed.contains(id)) => Ok(()),
+                        Ok(reply) => Err(reply.issues.first().map(|issue| issue.message.clone()).unwrap_or_else(|| "The host did not confirm this cleanup. Open Trash to inspect its current state.".into())),
+                        Err(error) => Err(format!("The cleanup reply could not be confirmed; some files may already be removed. {error}")),
+                    };
                     // Healthy removal revokes this request's notice authority.
                     // The pending flag also remembers a removal observed before
                     // a subsequent registry outage; checking only today's error
@@ -939,10 +1087,88 @@ pub(super) fn TrashControl(
                 }
                 deletion.write().remove(&target.host);
                 if deletion.peek().is_empty() {
-                    refresh += 1;
+                    refresh.write().request(Trigger::Explicit);
+                }
+                if let Some(completion) = completion {
+                    completion.call(outcome);
                 }
             });
         }
+    });
+    let retryable = use_memo(move || {
+        if gate.busy() || !deletion().is_empty() || !settled() {
+            return HashSet::new();
+        }
+        let hosts = hosts.read();
+        if hosts.refresh_error().is_some() {
+            return HashSet::new();
+        }
+        let states = state.read();
+        hosts
+            .hosts()
+            .unwrap_or_default()
+            .iter()
+            .flat_map(|host| {
+                let entry = states.get(&host.id);
+                entry
+                    .and_then(|entry| entry.reply.as_ref())
+                    .and_then(|reply| reply.as_ref().ok())
+                    .into_iter()
+                    .flat_map(move |listing| {
+                        listing
+                            .checkouts
+                            .iter()
+                            .filter(move |checkout| {
+                                retry_target(host, entry, &checkout.id).is_some()
+                            })
+                            .map(move |checkout| (host.id, checkout.id.clone()))
+                    })
+            })
+            .collect()
+    });
+    let open_from_bell = use_callback(move |_| {
+        if !gate.busy_now() {
+            confirmation.clear();
+            opened_from_bell.set(true);
+            open.set(true);
+        }
+    });
+    let can_open = use_memo(move || !gate.busy());
+    let retry = use_callback(
+        move |(host_id, id, completion): (HostId, String, Callback<Result<(), String>>)| {
+            let selected = {
+                let hosts = hosts.peek();
+                let states = state.peek();
+                hosts
+                    .hosts()
+                    .unwrap_or_default()
+                    .iter()
+                    .find(|host| host.id == host_id)
+                    .and_then(|host| {
+                        hosts
+                            .refresh_error()
+                            .is_none()
+                            .then(|| retry_target(host, states.get(&host.id), &id))
+                            .flatten()
+                    })
+            };
+            if let Some(target) = selected.filter(|_| *settled.peek()) {
+                dispatch.call(Selection::Retry(target, completion));
+            } else {
+                completion.call(Err(
+                    "This checkout is not currently available for Retry. Open Trash to inspect it."
+                        .into(),
+                ));
+            }
+        },
+    );
+    use_effect(move || {
+        actions.set(Some(TrashActions {
+            open: open_from_bell,
+            can_open,
+            retry,
+            retryable,
+        }))
     });
     // The band opening this render reads from the slot. Its buttons, and
     // the dialog's Close and Escape, answer only this opening. A host band
@@ -985,7 +1211,17 @@ pub(super) fn TrashControl(
         let pending = entry.is_none_or(|entry| entry.loading);
         let notices = notices.read().get(&host.id).map(Vec::len);
         let deleting = pending_hosts.contains_key(&host.id);
-        (host.id, connected(host), pending, rows, notices, deleting).hash(&mut layout);
+        let notice_error = entry.and_then(|entry| entry.notice_error.as_deref());
+        (
+            host.id,
+            connected(host),
+            pending,
+            rows,
+            notices,
+            notice_error,
+            deleting,
+        )
+            .hash(&mut layout);
     }
     let layout = layout.finish();
     if *drawn.peek() != Some(layout) {
@@ -1007,7 +1243,11 @@ pub(super) fn TrashControl(
             CloseAction::Dismiss(shown) => cancel_confirmation(confirmation, shown),
             CloseAction::Nothing => {}
             CloseAction::CloseDialog => {
-                DialogHandle::new(DIALOG).close(RETURN_FOCUS);
+                DialogHandle::new(DIALOG).close(if *opened_from_bell.peek() {
+                    RETURN_TO_BELL
+                } else {
+                    RETURN_FOCUS
+                });
                 open.set(false);
             }
         }
@@ -1052,7 +1292,12 @@ pub(super) fn TrashControl(
         };
         tooltip = format!("{activity} {tooltip}");
     }
-    if notices.read().values().any(|issues| !issues.is_empty()) {
+    if notices.read().values().any(|issues| !issues.is_empty())
+        || state
+            .read()
+            .values()
+            .any(|entry| entry.notice_error.is_some())
+    {
         tooltip.push_str(" Some checkouts could not be deleted. Open the trash to see why.");
     }
     let accessible_name = format!("Checkout trash, {summary}");
@@ -1088,12 +1333,17 @@ pub(super) fn TrashControl(
                     .is_none_or(|entry| entry.loading || reply_partial(entry.reply.as_ref()))
             });
     rsx! {
+        for host in current_hosts.iter().filter(|host| connected(host)) {
+            HostTrashReader { key: "read:{host.id}:{host.incarnation}", host: host.id, incarnation: host.incarnation,
+                hosts, state, open, generation, deletion, revision,
+            }
+        }
         button {
             class: if full { "btn btn-neutral checkout-trash-button full" } else { "btn btn-neutral checkout-trash-button" },
             hidden: trigger_hidden,
             r#type: "button", aria_label: accessible_name, aria_haspopup: "dialog", "data-count": "{count}",
             "data-tooltip": tooltip, disabled: gate.busy(),
-            onclick: move |_| { if !gate.busy_now() { confirmation.clear(); open.set(true); } },
+            onclick: move |_| { if !gate.busy_now() { confirmation.clear(); opened_from_bell.set(false); open.set(true); } },
             span { class: if emptying { "trash-delete-icon deleting" } else { "trash-delete-icon" }, TrashIcon { full } }
             if let Some(text) = count_text { span { class: "checkout-trash-count", "{text}" } }
         }
@@ -1135,7 +1385,8 @@ pub(super) fn TrashControl(
                             let host_target = if hosts_known { target(host, entry) } else { None };
                             let action_host = host.clone();
                             let deleting = pending_hosts.contains_key(&host.id);
-                            let show = deleting || !connected(host) || pending || listing.is_none_or(|listing| !listing.checkouts.is_empty() || !listing.issues.is_empty()) || !host_notices.is_empty();
+                            let notice_error = entry.and_then(|entry| entry.notice_error.as_ref());
+                            let show = deleting || !connected(host) || pending || listing.is_none_or(|listing| !listing.checkouts.is_empty() || !listing.issues.is_empty()) || !host_notices.is_empty() || notice_error.is_some();
                             let name = host.name.escaped();
                             let totals = listing.map(listing_totals);
                             let host_count = totals.as_ref().map_or_else(|| "Count unknown".into(), ListingTotals::count_label);
@@ -1170,6 +1421,12 @@ pub(super) fn TrashControl(
                                         }
                                         if !connected(host) { p { "Not reachable, so they can't be checked or deleted" } }
                                         if let Some(Err(error)) = entry.and_then(|entry| entry.reply.as_ref()) { div { class: "checkout-trash-issue peer-value", dir: "ltr", "{display_peer(error)}" } }
+                                        if let Some(error) = notice_error {
+                                            p { class: "checkout-trash-issue checkout-trash-notice-error",
+                                                "The notification bell could not be updated: "
+                                                span { class: "peer-value", dir: "ltr", "{display_peer(error)}" }
+                                            }
+                                        }
                                         if let Some(listing) = listing {
                                             if selection_size(listing) > MAX_SELECTION { p { "This host exceeds the 10,000-entry cleanup limit. Cleanup is unavailable for this listing." } }
                                             for checkout in listing.checkouts.iter() {
@@ -1315,6 +1572,27 @@ pub(super) fn finish_row_cue(id: &str, archived: bool) {
 mod tests {
     use super::*;
     use farhelm_proto::ArchivedCheckout;
+
+    /// Reactive delivery may combine several causes before an effect runs.
+    /// A fallback tick must not erase a user's pending read, and consuming one
+    /// batch must leave genuinely later news distinguishable from that batch.
+    #[farhelm_testtrace::test]
+    fn refresh_delivery_preserves_stronger_undelivered_authority() {
+        let mut refresh = TrashRefresh::default();
+        let initial = refresh;
+        refresh.request(Trigger::Explicit);
+        refresh.request(Trigger::Scheduled);
+        refresh.request(Trigger::Notice);
+        assert_eq!(refresh.since(initial), Some(Trigger::Explicit));
+        let delivered = refresh;
+        assert_eq!(refresh.since(delivered), None);
+        refresh.request(Trigger::Notice);
+        refresh.request(Trigger::Scheduled);
+        assert_eq!(refresh.since(delivered), Some(Trigger::Notice));
+        let delivered = refresh;
+        refresh.request(Trigger::Scheduled);
+        assert_eq!(refresh.since(delivered), Some(Trigger::Scheduled));
+    }
 
     /// Lost replies can cover several IDs. Resolving one or starting a later
     /// uncertain attempt for a neighbour must preserve every unresolved ID;
@@ -1835,6 +2113,8 @@ mod tests {
     /// without allowing another immediate Retry; older peers keep their
     /// established optimistic disappearance instead. A diagnostic-only ID also
     /// needs that poll because its receipt can accept newly readable work.
+    /// The rail can retry only a capable, same-incarnation, settled stuck row;
+    /// retained notice history alone must never grant cleanup authority.
     #[farhelm_testtrace::test]
     fn accepted_cleanup_keeps_capable_rows_until_an_authoritative_list() {
         let host = host();
@@ -1864,6 +2144,17 @@ mod tests {
                 })),
                 ..HostTrash::default()
             };
+            assert_eq!(
+                retry_target(&host, Some(&state), "selected").is_some(),
+                capable
+            );
+            assert!(retry_target(&host, Some(&state), "neighbour").is_none());
+            state.loading = true;
+            assert!(retry_target(&host, Some(&state), "selected").is_none());
+            state.loading = false;
+            state.incarnation += 1;
+            assert!(retry_target(&host, Some(&state), "selected").is_none());
+            state.incarnation = host.incarnation;
             accepted_cleanup(&mut state, &["selected".into()]);
             let listing = state.reply.as_ref().unwrap().as_ref().unwrap();
             assert_eq!(listing.checkouts.last().unwrap().id, "neighbour");
