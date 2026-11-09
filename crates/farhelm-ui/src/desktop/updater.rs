@@ -24,7 +24,10 @@
 //!   ring and the script matches its entry there ([`install_release`]), and
 //!   the script is handed those verified checksums for every archive it
 //!   downloads. A release that fails that check leaves a notice that
-//!   this app must be reinstalled ([`UpdaterState::needs_reinstall`]).
+//!   this app must be reinstalled ([`UpdaterState::reinstall`]).
+//! - An installer that refuses the upgrade floor leaves that same lasting
+//!   warning with an uninstall-first remedy. Verification failures keep their
+//!   ordinary reinstall advice; retryable lock/state changes set neither.
 //!
 //! The network, the installer, the clock and the setting are all reached
 //! through [`Deps`], plain functions the worker is handed, so the decisions
@@ -125,17 +128,17 @@ pub(crate) struct UpdaterState {
     /// A successful user-visible check ended with an update waiting. This is
     /// announcement provenance, not the source of truth for the red readout.
     pub(crate) user_update_ready: bool,
-    /// A release this app tried to install failed verification (no key in
-    /// its ring verified the signature, the signature was for another
-    /// version, or the installer did not match its signed checksum), so the
-    /// app cannot update itself and must be reinstalled. Shown whether the
+    /// Why this app cannot update itself and must be reinstalled: a release
+    /// failed verification, or its installer refused the source's upgrade
+    /// floor. The reason keeps verification's ordinary reinstall advice
+    /// separate from the floor refusal's uninstall-first remedy. Shown whether the
     /// check was automatic or the user's, and kept while this app runs until
     /// a later check verifies and installs or finds nothing newer, or a
     /// newer Farhelm is installed some other way. It lives in memory only:
     /// a relaunched app shows it again once its first check fails the same
     /// way (at startup, with automatic updates on). Network and HTTP
     /// failures never set it.
-    pub(crate) needs_reinstall: bool,
+    pub(crate) reinstall: Option<ReinstallReason>,
     /// The installation's ownership record, read under the installation
     /// lock at the last check, says an install or uninstall was interrupted
     /// (an odd generation with the lock free). Automatic updates stay off
@@ -147,6 +150,15 @@ pub(crate) struct UpdaterState {
     /// Last authenticated snapshot for this run. Failed or missing downloads
     /// retain it; a later verified file can lift a withdrawal.
     advisories: Advisories,
+}
+
+/// Recovery advice for a lasting update refusal; never persisted across launches.
+/// Both causes share the same lifetime, but verification alone does not require
+/// removing a usable installation before running a verified newer installer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReinstallReason {
+    Verification,
+    UpgradeFloor,
 }
 
 /// Which kind of run left the installation unfinished.
@@ -586,9 +598,17 @@ pub(crate) fn readout(state: &UpdaterState) -> crate::app_updater::Readout {
             ..readout
         };
     }
-    if !state.needs_reinstall {
+    let Some(reason) = state.reinstall else {
         return readout;
-    }
+    };
+    let advice = match reason {
+        ReinstallReason::Verification => {
+            "This Farhelm can no longer verify its updates, so it cannot update itself."
+        }
+        ReinstallReason::UpgradeFloor => {
+            "This installation cannot update to the newer release. Stop local sessions and their terminal tabs, quit Farhelm, and run farhelm uninstall first; your data stays on disk but may not carry over cleanly."
+        }
+    };
     // Shown whatever the updater is doing: this app can no longer update
     // itself, and nothing else on screen would say so.
     crate::app_updater::Readout {
@@ -597,8 +617,7 @@ pub(crate) fn readout(state: &UpdaterState) -> crate::app_updater::Readout {
         // it, because the user retypes it from a hover: trailing
         // punctuation would read as part of it.
         tooltip: format!(
-            "This Farhelm can no longer verify its updates, so it cannot update itself. {} \
-             Reinstall it by running this in a terminal: {REINSTALL_COMMAND}",
+            "{advice} {} Reinstall it by running this in a terminal: {REINSTALL_COMMAND}",
             readout.tooltip
         ),
         ..readout
@@ -695,8 +714,8 @@ struct Status {
     user_update_ready: bool,
     /// A user's request has not been picked up by the worker yet.
     requested: bool,
-    /// See [`UpdaterState::needs_reinstall`].
-    needs_reinstall: bool,
+    /// See [`UpdaterState::reinstall`].
+    reinstall: Option<ReinstallReason>,
     /// See [`UpdaterState::interrupted`].
     interrupted: Option<Interrupted>,
 }
@@ -717,7 +736,7 @@ impl Status {
             // the user had just finished another check. Expiry identity stays.
             self.user_update_ready = false;
             if newer_installed(installed.as_deref(), &self.running) {
-                self.needs_reinstall = false;
+                self.reinstall = None;
                 // A retained failure said an update did not install. Once a
                 // newer version is installed by any route (the installer run
                 // from a terminal, say) it is stale, and nothing else would
@@ -743,7 +762,7 @@ impl Shared {
             activity: Activity::Idle,
             notice_id: 0,
             user_update_ready: false,
-            needs_reinstall: false,
+            reinstall: None,
             interrupted: None,
             advisories: Advisories::default(),
         });
@@ -760,7 +779,7 @@ impl Shared {
                 notice_id: 0,
                 user_update_ready: false,
                 requested: false,
-                needs_reinstall: false,
+                reinstall: None,
                 interrupted: None,
                 advisories: Advisories::default(),
             }),
@@ -818,7 +837,7 @@ impl Shared {
             activity,
             notice_id: status.notice_id,
             user_update_ready: status.user_update_ready,
-            needs_reinstall: status.needs_reinstall,
+            reinstall: status.reinstall,
             interrupted: status.interrupted,
             advisories: status.advisories.clone(),
         };
@@ -939,9 +958,9 @@ impl Engine {
     }
 
     /// Set or clear the reinstall notice and publish it.
-    fn set_needs_reinstall(&self, needs: bool) {
+    fn set_needs_reinstall(&self, reason: Option<ReinstallReason>) {
         let mut status = self.shared.status.lock().expect("updater status poisoned");
-        status.needs_reinstall = needs;
+        status.reinstall = reason;
         self.shared.publish(&status);
     }
 
@@ -1191,7 +1210,7 @@ impl Engine {
         if !build_is_newer(&latest, &baseline) {
             tracing::info!("updater: {latest} is the latest release; {baseline} is installed");
             // Nothing newer to verify, so nothing this app cannot install.
-            self.set_needs_reinstall(false);
+            self.set_needs_reinstall(None);
             return CheckResult::Success(Activity::UpToDate(latest));
         }
         // Automatic updates may have been turned off while the probe was
@@ -1230,16 +1249,22 @@ impl Engine {
                 // has stopped updating, and must say so (SPEC.md,
                 // "Installation and updates").
                 tracing::warn!("updater: refusing Farhelm {latest}: {error:#}");
-                self.set_needs_reinstall(true);
+                self.set_needs_reinstall(Some(ReinstallReason::Verification));
                 return CheckResult::VerificationFailed(format!(
                     "Farhelm {latest} could not be verified, so it was not installed"
+                ));
+            }
+            if error.downcast_ref::<InstallerTooOld>().is_some() {
+                self.set_needs_reinstall(Some(ReinstallReason::UpgradeFloor));
+                return CheckResult::InstallFailed(format!(
+                    "Farhelm {latest} requires uninstalling this installation before reinstalling; the app's log has the details"
                 ));
             }
             tracing::warn!("updater: installing {latest} failed: {error:#}");
         }
         if (self.deps.read_installed)().as_deref() == Some(latest.as_str()) {
             tracing::info!("updater: {latest} is installed; a restart finishes the update");
-            self.set_needs_reinstall(false);
+            self.set_needs_reinstall(None);
             let running = self
                 .shared
                 .status
@@ -1392,9 +1417,9 @@ fn latest_from_site(body: &[u8]) -> anyhow::Result<String> {
 
 /// A release this updater refused to install because it did not verify: the
 /// signature, the version it was signed for, or the installer's checksum.
-/// Distinct from every other install failure because it is the one that
-/// will not go away on retry and that the user must hear about
-/// ([`UpdaterState::needs_reinstall`]).
+/// Distinct from an ordinary install failure because retry alone cannot
+/// fix its trust chain, and the user must hear about it
+/// ([`UpdaterState::reinstall`]).
 #[derive(Debug)]
 struct UnverifiableRelease(String);
 
@@ -1508,6 +1533,22 @@ impl std::fmt::Display for InstallerBusy {
 
 impl std::error::Error for InstallerBusy {}
 
+/// The target installer refused unsupported source mechanics, not a busy run.
+/// Keep this typed through install_release so the engine can retain recovery
+/// advice even when an automatic check has no visible outcome yet.
+#[derive(Debug)]
+struct InstallerTooOld;
+
+impl std::fmt::Display for InstallerTooOld {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            "the installation does not meet the target release's upgrade-floor requirements",
+        )
+    }
+}
+
+impl std::error::Error for InstallerTooOld {}
+
 fn run_installer(version: &str, expectation: Option<&Expectation>) -> anyhow::Result<()> {
     let dir = private_temp_dir()?;
     let fetch = |name: &str, cap: usize| {
@@ -1573,6 +1614,8 @@ fn spawn_installer(
         Err(StateChanged.into())
     } else if status.code() == Some(farhelm_supervisor::installation::install::BUSY) {
         Err(InstallerBusy.into())
+    } else if status.code() == Some(farhelm_supervisor::installation::install::UPGRADE_TOO_OLD) {
+        Err(InstallerTooOld.into())
     } else {
         bail!("the installer exited with {status}")
     }
@@ -2375,7 +2418,7 @@ mod tests {
     fn the_reinstall_notice_shows_beside_a_waiting_update() {
         for installed in [Some("1.0.0"), Some("1.1.0")] {
             let state = UpdaterState {
-                needs_reinstall: true,
+                reinstall: Some(ReinstallReason::Verification),
                 ..state(installed, Activity::Idle)
             };
             let shown = readout(&state);
@@ -2871,6 +2914,83 @@ mod tests {
         );
     }
 
+    /// The real child status distinguishes unsupported update mechanics from a
+    /// transient lock or changed installation. Injecting only an error into the
+    /// engine would miss a broken status decoder in the shipped installer path.
+    #[farhelm_testtrace::test]
+    fn installer_statuses_keep_floor_refusal_distinct_from_retry_and_failure() {
+        for code in [0, 1, 74, 75, 76] {
+            let dir = tempfile::tempdir().unwrap();
+            let script = dir.path().join("install.sh");
+            let text = format!("#!/bin/sh\nexit {code}\n");
+            std::fs::write(&script, &text).unwrap();
+            assert_eq!(std::fs::read_to_string(&script).unwrap(), text);
+            let result =
+                spawn_installer(dir.path(), &script, &dir.path().join("sums"), "1.1.0", None);
+            if code == 0 {
+                result.expect("successful installer");
+                continue;
+            }
+            let error = result.expect_err("nonzero installer status");
+            assert_eq!(
+                error.is::<InstallerTooOld>(),
+                code == 76,
+                "{code}: {error:#}"
+            );
+            assert_eq!(error.is::<InstallerBusy>(), code == 74, "{code}: {error:#}");
+            assert_eq!(error.is::<StateChanged>(), code == 75, "{code}: {error:#}");
+        }
+    }
+
+    /// Unsupported source mechanics keep actionable advice after either trigger.
+    /// A later download failure cannot erase it, and an external installation
+    /// clears it promptly without waiting for the next daily check. Verification
+    /// retains its own non-destructive remedy rather than inheriting uninstall.
+    #[farhelm_testtrace::test]
+    fn a_floor_refusal_keeps_uninstall_advice_until_a_newer_installation_arrives() {
+        for manual in [false, true] {
+            let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), false);
+            *rig.automatic.lock().unwrap() = !manual;
+            rig.engine.deps.install = Box::new(|_, _| Err(InstallerTooOld.into()));
+            if manual {
+                rig.engine.shared.check_now();
+            }
+            rig.engine.wake_once();
+            let state = rig.published();
+            assert_eq!(state.reinstall, Some(ReinstallReason::UpgradeFloor));
+            let shown = readout(&state);
+            assert!(shown.needs_reinstall);
+            assert!(shown.tooltip.contains("farhelm uninstall first"));
+            assert!(!shown.tooltip.contains("can no longer verify"));
+            assert!(shown.tooltip.ends_with(REINSTALL_COMMAND));
+
+            rig.engine.deps.install = Box::new(|_, _| bail!("download failed"));
+            rig.advance(CHECK_INTERVAL);
+            if manual {
+                rig.engine.shared.check_now();
+            }
+            rig.engine.wake_once();
+            assert_eq!(
+                rig.published().reinstall,
+                Some(ReinstallReason::UpgradeFloor)
+            );
+
+            let probes = rig.probes.load(Ordering::SeqCst);
+            *rig.installed.lock().unwrap() = Some("1.1.0".into());
+            rig.engine.wake_once();
+            assert!(rig.published().reinstall.is_none());
+            assert!(rig.published().update_ready());
+            assert_eq!(rig.probes.load(Ordering::SeqCst), probes);
+        }
+        let verification = UpdaterState {
+            reinstall: Some(ReinstallReason::Verification),
+            ..state(Some("1.0.0"), Activity::Idle)
+        };
+        let shown = readout(&verification);
+        assert!(shown.tooltip.contains("can no longer verify"));
+        assert!(!shown.tooltip.contains("uninstall"));
+    }
+
     /// Spec: an automatic check whose install is refused as unverifiable
     /// publishes the reinstall notice even though no user is
     /// watching; a later check that finds nothing newer clears it, and so
@@ -2889,7 +3009,7 @@ mod tests {
         });
         rig.engine.wake_once();
         let state = rig.published();
-        assert!(state.needs_reinstall, "set by an automatic check");
+        assert!(state.reinstall.is_some(), "set by an automatic check");
         assert_eq!(state.activity, Activity::Idle, "no user was watching");
         assert!(readout(&state).needs_reinstall);
         assert!(readout(&state).tooltip.contains(REINSTALL_COMMAND));
@@ -2899,7 +3019,7 @@ mod tests {
         rig.advance(CHECK_INTERVAL);
         rig.engine.wake_once();
         assert!(
-            rig.published().needs_reinstall,
+            rig.published().reinstall.is_some(),
             "a failed download is not news"
         );
 
@@ -2908,7 +3028,7 @@ mod tests {
         rig.advance(CHECK_INTERVAL);
         rig.engine.wake_once();
         assert!(
-            !rig.published().needs_reinstall,
+            rig.published().reinstall.is_none(),
             "cleared when nothing newer"
         );
 
@@ -2919,7 +3039,7 @@ mod tests {
         });
         rig.advance(CHECK_INTERVAL);
         rig.engine.wake_once();
-        assert!(rig.published().needs_reinstall);
+        assert!(rig.published().reinstall.is_some());
         let installed = Arc::clone(&rig.installed);
         rig.engine.deps.install = Box::new(move |version, _expectation| {
             *installed.lock().unwrap() = Some(version.to_string());
@@ -2928,7 +3048,7 @@ mod tests {
         rig.engine.shared.check_now();
         rig.engine.wake_once();
         assert!(
-            !rig.published().needs_reinstall,
+            rig.published().reinstall.is_none(),
             "cleared by a verified install"
         );
 
@@ -2943,7 +3063,7 @@ mod tests {
             }),
         );
         rig.engine.wake_once();
-        assert!(rig.published().needs_reinstall);
+        assert!(rig.published().reinstall.is_some());
         rig.engine.deps.install = install;
         rig.engine.shared.check_now();
         rig.engine.wake_once();
@@ -2951,7 +3071,7 @@ mod tests {
         assert_eq!(state.installed.as_deref(), Some("1.0.0"));
         assert!(!state.update_ready());
         assert!(
-            !state.needs_reinstall,
+            state.reinstall.is_none(),
             "cleared by a verified install of the running version"
         );
     }
@@ -2971,13 +3091,16 @@ mod tests {
         });
         rig.engine.shared.check_now();
         rig.engine.wake_once();
-        assert!(rig.published().needs_reinstall, "set by the user's check");
+        assert!(
+            rig.published().reinstall.is_some(),
+            "set by the user's check"
+        );
 
         let probes = rig.probes.load(Ordering::SeqCst);
         *rig.installed.lock().unwrap() = Some("1.1.0".to_string());
         rig.engine.wake_once();
         let state = rig.published();
-        assert!(!state.needs_reinstall, "cleared by the newer install");
+        assert!(state.reinstall.is_none(), "cleared by the newer install");
         assert!(state.update_ready());
         assert_eq!(rig.probes.load(Ordering::SeqCst), probes, "without a check");
     }
@@ -3533,7 +3656,7 @@ mod tests {
         });
         rig.engine.wake_once();
         let state = rig.published();
-        assert!(state.needs_reinstall);
+        assert!(state.reinstall.is_some());
         assert_eq!(state.activity, Activity::Idle);
         assert_eq!(state.notice_id, 0);
         assert_eq!(*rig.streak.lock().unwrap(), None);
@@ -3991,7 +4114,7 @@ mod tests {
                 let state = rig.published();
                 let shown = readout(&state);
                 assert!(shown.withdrawn && shown.tooltip.contains("Farhelm 1.0.0 was withdrawn"));
-                assert!(!state.needs_reinstall);
+                assert!(state.reinstall.is_none());
                 assert_eq!(rig.shared.status.lock().unwrap().current, Activity::Idle);
                 assert!(!rig.shared.status.lock().unwrap().user_waiting);
                 assert_eq!(
@@ -4028,7 +4151,7 @@ mod tests {
                 assert!(!shown.update_ready && !state.update_ready() && !shown.user_update_ready);
                 assert!(shown.withdrawn && shown.tooltip.contains("Manual recovery is required"));
                 assert!(!shown.tooltip.contains("Restart to update"));
-                assert!(!state.needs_reinstall);
+                assert!(state.reinstall.is_none());
                 assert_eq!(rig.shared.status.lock().unwrap().current, Activity::Idle);
                 if manual {
                     assert!(
@@ -4099,7 +4222,7 @@ mod tests {
             }
             rig.engine.wake_once();
             assert!(rig.installs.lock().unwrap().is_empty());
-            assert!(!rig.published().needs_reinstall);
+            assert!(rig.published().reinstall.is_none());
             assert!(rig.streak.lock().unwrap().is_none());
             if manual {
                 assert!(
@@ -4209,7 +4332,7 @@ mod tests {
                 }
                 rig.engine.wake_once();
                 assert_eq!(*rig.installs.lock().unwrap(), ["1.2.0"], "{failure}");
-                assert!(!rig.published().needs_reinstall);
+                assert!(rig.published().reinstall.is_none());
                 assert_eq!(rig.shared.status.lock().unwrap().current, Activity::Idle);
                 assert!(!rig.shared.status.lock().unwrap().user_waiting);
                 rig.shared.check_now();
@@ -4234,7 +4357,7 @@ mod tests {
                 Activity::RestartFailed,
             ] {
                 let mut state = state(Some(installed), activity.clone());
-                state.needs_reinstall = true;
+                state.reinstall = Some(ReinstallReason::Verification);
                 state.advisories = withdrawn(&["1.0.0", "1.1.0"]);
                 let shown = readout(&state);
                 assert_eq!(shown.activity, activity);
@@ -4340,7 +4463,7 @@ mod tests {
             activity,
             notice_id: 0,
             user_update_ready: false,
-            needs_reinstall: false,
+            reinstall: None,
             interrupted: None,
         }
     }
@@ -4463,7 +4586,7 @@ mod tests {
                         Some(if ready { "1.1.0" } else { "1.0.0" }),
                         activity.clone(),
                     );
-                    published.needs_reinstall = warning;
+                    published.reinstall = warning.then_some(ReinstallReason::Verification);
                     let shown = readout(&published);
                     assert_eq!(shown.activity, activity);
                     assert_eq!(shown.update_ready, ready);
@@ -4493,7 +4616,7 @@ mod tests {
         ] {
             let mut state = state(Some("1.1.0"), activity);
             let activity_text = readout(&state).tooltip;
-            state.needs_reinstall = true;
+            state.reinstall = Some(ReinstallReason::Verification);
             let shown = readout(&state);
             assert!(shown.update_ready);
             assert!(shown.needs_reinstall);

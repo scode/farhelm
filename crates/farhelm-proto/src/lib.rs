@@ -149,7 +149,7 @@ pub use launch::{
     LaunchSelection, NamedConversationStart, check_permission_flags, check_wrapper_prefix,
     split_permission_flags, split_wrapper_prefix,
 };
-pub use version::is_development_build;
+pub use version::{UPGRADE_FLOOR, below_upgrade_floor, is_development_build};
 /// Native Bash placeholder admission and original-source rendering.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod command_shell;

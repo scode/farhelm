@@ -10,6 +10,14 @@ use super::*;
 use crate::installation::{COMPAT_LOCK_FOLDER, InstallState, OwnershipRecord, RECORD_FILE};
 use std::path::{Path, PathBuf};
 
+/// Keep installation mechanics independent of the release's mutable floor.
+/// This shadows the glob import deliberately: broad fixtures use historical
+/// versions, while floor-policy tests call `install_with_floor` with their own
+/// explicit boundary. A future floor raise must not change either test's role.
+fn install(request: &InstallRequest, hook: StepHook<'_>) -> Result<Installed, Refusal> {
+    super::install_with_floor(request, "0.0.0", hook)
+}
+
 /// The inode of `path`, as `install.sh` hands it over to vouch for an
 /// older app (`InstallRequest::replace_legacy_bundle`).
 fn inode(path: &Path) -> u64 {
@@ -161,6 +169,134 @@ fn a_fresh_install_builds_the_app_with_a_new_installation_id() {
         home.app().join("Contents/MacOS/farhelm")
     );
     assert!(home.no_leftovers_beside_the_app());
+}
+
+/// Both installer entry paths refuse an old source before any new app write.
+/// The failure must leave a usable old install, its ownership generation and
+/// command link intact, rather than merely returning a recognizable message.
+#[farhelm_testtrace::test]
+fn an_update_below_the_floor_preserves_the_existing_installation() {
+    for update_only in [false, true] {
+        let home = Home::new();
+        home.install("1.2.3").unwrap();
+        assert!(home.launchable(), "premise: a usable existing installation");
+        assert_eq!(home.read("Contents/Versions/installed"), "1.2.3\n");
+        let paths = [
+            "Contents/.farhelm-installation",
+            "Contents/Versions/installed",
+            "Contents/Versions/1.2.3/farhelm",
+            "Contents/MacOS/farhelm-desktop",
+            "Contents/MacOS/farhelm",
+            "Contents/Resources/Farhelm.icns",
+            "Contents/Info.plist",
+        ];
+        let before: Vec<_> = paths
+            .iter()
+            .map(|p| std::fs::read(home.app().join(p)).unwrap())
+            .collect();
+        let link = std::fs::read_link(home.path().join(".local/bin/farhelm")).unwrap();
+        let mut request = home.request("1.3.0");
+        request.update_only = update_only;
+        let mut steps = Vec::new();
+        let refusal = install_with_floor(&request, "1.2.4", &mut |at| {
+            steps.push(at);
+            Ok(())
+        })
+        .expect_err("source predates the floor");
+        assert_eq!(refusal.status, UPGRADE_TOO_OLD);
+        assert!(refusal.message.contains("1.2.3") && refusal.message.contains("1.2.4"));
+        let advice = refusal.advice.join(" ");
+        assert!(advice.contains("farhelm uninstall"));
+        assert!(
+            advice.contains("data stays on disk") && advice.contains("may not carry over cleanly")
+        );
+        assert!(steps.is_empty(), "no update/rebuild step began");
+        let after: Vec<_> = paths
+            .iter()
+            .map(|p| std::fs::read(home.app().join(p)).unwrap())
+            .collect();
+        assert_eq!(after, before);
+        assert_eq!(std::fs::read_link(&request.link).unwrap(), link);
+        assert_eq!(home.versions(), ["1.2.3"]);
+        assert!(home.launchable());
+        assert!(home.no_leftovers_beside_the_app());
+    }
+}
+
+/// The floor gates the source, never a fresh installation or an unknown build.
+/// Exact equality and build metadata pin the supported boundary independently
+/// from whatever minimum a future release chooses for production.
+#[farhelm_testtrace::test]
+fn fresh_and_supported_or_unknown_sources_can_install() {
+    let home = Home::new();
+    install_with_floor(&home.request("1.0.0"), "2.0.0", &mut |_| Ok(()))
+        .expect("fresh install has no source to refuse");
+    for source in [
+        "1.2.0",
+        "1.2.1",
+        "1.2.0+build",
+        "0.0.0-unreleased",
+        "unknown",
+        "",
+    ] {
+        let home = Home::new();
+        home.install("1.2.0").unwrap();
+        std::fs::write(home.app().join("Contents/Versions/installed"), source).unwrap();
+        assert_eq!(
+            home.read("Contents/Versions/installed"),
+            source,
+            "premise: {source}"
+        );
+        install_with_floor(&home.request("1.3.0"), "1.2.0", &mut |_| Ok(()))
+            .unwrap_or_else(|error| panic!("{source:?} should update: {error:?}"));
+        assert_eq!(home.read("Contents/Versions/installed"), "1.3.0\n");
+        assert!(home.launchable());
+    }
+}
+
+/// An absent or unreadable Installed record cannot authorize an update, while
+/// the updater's stale expectation must still win first. Oversize is a portable
+/// unreadable fixture even when a privileged runner could read mode-000 files.
+#[farhelm_testtrace::test]
+fn unknown_installation_records_refuse_and_expectations_still_run_first() {
+    for oversized in [false, true] {
+        let home = Home::new();
+        home.install("1.2.3").unwrap();
+        let installed = home.app().join("Contents/Versions/installed");
+        if oversized {
+            std::fs::write(&installed, vec![b'x'; 4097]).unwrap();
+        } else {
+            std::fs::remove_file(&installed).unwrap();
+        }
+        let before = std::fs::read(&installed).ok();
+        let record = std::fs::read(home.app().join("Contents").join(RECORD_FILE)).unwrap();
+        let refusal = install_with_floor(&home.request("1.3.0"), "1.2.0", &mut |_| {
+            panic!("no new installation work with an unknown source")
+        })
+        .expect_err("cannot establish the source");
+        assert_eq!(refusal.status, UPGRADE_TOO_OLD);
+        assert!(refusal.message.contains("missing or unreadable"));
+        assert!(refusal.advice.join(" ").contains("cannot start"));
+        assert_eq!(std::fs::read(&installed).ok(), before);
+        assert_eq!(
+            std::fs::read(home.app().join("Contents").join(RECORD_FILE)).unwrap(),
+            record
+        );
+        assert!(!home.app().join("Contents/Versions/1.3.0").exists());
+    }
+    let home = Home::new();
+    home.install("1.2.3").unwrap();
+    let mut request = home.request("1.3.0");
+    request.expect = Some(super::super::Expectation {
+        id: Some("00000000000000000000000000000000".into()),
+        generation: 2,
+        installed: Some("1.2.3".into()),
+    });
+    let refusal = install_with_floor(&request, "1.2.4", &mut |_| Ok(())).unwrap_err();
+    assert_eq!(
+        refusal.status, STATE_CHANGED,
+        "expectation precedes the floor"
+    );
 }
 
 /// A public command arriving after inspection belongs to its writer. Refusal
@@ -554,7 +690,19 @@ fn a_rebuild_never_moves_or_replaces_an_app_swapped_in_meanwhile() {
         }
         Ok(())
     };
-    let refusal = install(&request, &mut hook).expect_err("the app at the place changed");
+    // Legacy updates are now gated before rebuilding. Exercise the retained
+    // rebuild's own inode fence directly so its race protection stays covered.
+    let lock = lock_installation(&request.applications, Duration::ZERO).unwrap();
+    let identity = dirs::identity_at(lock.applications(), APP_NAME).unwrap();
+    assert_eq!(identity.unwrap().1, request.replace_legacy_bundle.unwrap());
+    let ctx = Context {
+        request: &request,
+        applications: lock.applications(),
+        app_path: &app,
+    };
+    let refusal = ctx
+        .rebuild(None, identity, &mut hook)
+        .expect_err("the app at the place changed");
     assert!(
         refusal
             .message
@@ -733,11 +881,13 @@ fn locks_held_by_others_refuse_before_anything_changes() {
     assert_eq!(home.read("Contents/Versions/installed"), "1.2.3\n");
 }
 
-/// An app at the usual place that is not this layout's is refused unless
-/// the script vouched for it as an older layout this installer built, in
-/// which case it is replaced whole with a fresh id.
+/// Ownership approval does not bypass the floor for a known pre-versioned app.
+/// Foreign apps retain their original ownership refusal; a vouched legacy app
+/// gets the distinct reinstall remedy from either entry path without replacing
+/// or deleting that app. In particular, update-only must not misreport an
+/// existing recordless app as absent before the floor can explain recovery.
 #[farhelm_testtrace::test]
-fn a_foreign_app_is_refused_and_a_vouched_older_one_is_rebuilt() {
+fn a_foreign_app_and_a_vouched_legacy_app_are_both_preserved() {
     let home = Home::new();
     std::fs::create_dir_all(home.app().join("Contents/MacOS")).unwrap();
     std::fs::write(home.app().join("Contents/MacOS/other"), b"someone else's").unwrap();
@@ -749,13 +899,36 @@ fn a_foreign_app_is_refused_and_a_vouched_older_one_is_rebuilt() {
     );
     assert!(home.app().join("Contents/MacOS/other").exists());
 
-    let mut request = home.request("1.2.3");
-    request.replace_legacy_bundle = Some(inode(&home.app()));
-    let done = install(&request, &mut |_| Ok(())).expect("rebuilt");
-    assert!(done.updated);
-    assert!(home.launchable());
-    assert!(!home.app().join("Contents/MacOS/other").exists());
-    assert!(home.no_leftovers_beside_the_app());
+    for update_only in [false, true] {
+        let mut request = home.request("1.2.3");
+        request.update_only = update_only;
+        request.replace_legacy_bundle = Some(inode(&home.app()));
+        let refusal = install_with_floor(&request, "1.0.0", &mut |_| {
+            panic!("a legacy update must not start rebuilding")
+        })
+        .expect_err("below the floor despite ownership approval");
+        assert_eq!(refusal.status, UPGRADE_TOO_OLD);
+        assert!(refusal.advice.join(" ").contains("farhelm uninstall"));
+        assert!(home.app().join("Contents/MacOS/other").exists());
+        assert!(home.no_leftovers_beside_the_app());
+    }
+
+    let home = Home::new();
+    home.install("1.2.3").unwrap();
+    std::fs::remove_dir_all(home.app().join("Contents/Versions")).unwrap();
+    assert!(
+        home.record().id.is_some(),
+        "premise: an owned unversioned layout"
+    );
+    for update_only in [false, true] {
+        let mut request = home.request("1.3.0");
+        request.update_only = update_only;
+        let refusal = install_with_floor(&request, "1.0.0", &mut |_| {
+            panic!("owned legacy layout must not rebuild")
+        })
+        .unwrap_err();
+        assert_eq!(refusal.status, UPGRADE_TOO_OLD);
+    }
 }
 
 /// The script's approval to replace an older app holds only for the folder
