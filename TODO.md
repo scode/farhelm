@@ -525,10 +525,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
-- **Show the effort level as "xhigh".** The sentence-case pass (steel-sentence-case) made the launcher and its summaries
-  show the extra-high effort level as "Xhigh"; it should read "xhigh", lowercase. Plan:
-  `plans/queue/xhigh-effort-label.md`.
-
 ## Mid term
 
 - **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
