@@ -691,7 +691,7 @@ pub(crate) fn SettingsDialog(
                                 "Checkouts"
                             }
                             crate::checkout_root::CheckoutRootField {
-                                note: "Managed checkouts are cloned into this folder on every host. ~ means each host's own home folder. A missing folder is created on first use. A host given its own folder from the command line keeps that folder. Save an empty field to clear it.",
+                                note: "Used by hosts without their own folder, which you set in a host's settings. ~ means each host's home folder. A missing folder is created on first use. Changes affect new checkouts only. Save an empty field to clear the default.",
                                 on_saved: move |_| {},
                             }
                             crate::checkout_post_clone::CheckoutPostCloneField {}

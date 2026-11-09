@@ -584,12 +584,24 @@ pub(crate) async fn mark_announcements_shown(base: &str, ids: Vec<String>) -> Re
     Ok(())
 }
 
-/// Only the all-hosts folder crosses this route; host overrides and the
-/// separately saved command must not expand its reply shape.
+/// The write body is root-only for both folder routes; null clears its scope.
+/// Keeping it separate from the read snapshot prevents the inherited default
+/// or any separately saved command from becoming a writable field.
 #[derive(Deserialize, serde::Serialize)]
 struct CheckoutRootBody {
     #[serde(deserialize_with = "serde::Deserialize::deserialize")]
     root: Option<String>,
+}
+
+/// A folder editor reads the stored choice, never a resolved host path.
+/// The host route adds the global default for an inheritance placeholder;
+/// the unchanged global route omits that field. Neither route returns commands.
+#[derive(Deserialize)]
+pub(crate) struct CheckoutRootConfig {
+    #[serde(deserialize_with = "serde::Deserialize::deserialize")]
+    pub root: Option<String>,
+    #[serde(default)]
+    pub default: Option<String>,
 }
 
 /// Load the helm's ntfy form snapshot; the stored token never crosses this route.
@@ -708,18 +720,30 @@ pub(crate) async fn test_tensorlake_settings(
         .map_err(|_| "Could not read the Tensorlake test result".to_string())
 }
 
-/// Seed an explicitly saved field with the global folder, still unexpanded.
-/// A host's effective folder is a separate concern: its CLI override may win.
-pub(crate) async fn fetch_checkout_root(base: &str) -> Result<Option<String>, String> {
-    let url = format!("{base}/api/checkout-root");
+/// Seed an explicitly saved field without expanding paths or contacting a host.
+/// A host-scoped read keeps its override separate from the inherited default,
+/// so showing an inherited value cannot accidentally turn it into an override.
+pub(crate) async fn fetch_checkout_root(
+    base: &str,
+    host: Option<HostId>,
+) -> Result<CheckoutRootConfig, String> {
+    let url = checkout_root_url(base, host);
     let resp = send(client().get(&url)).await?;
     if !resp.status().is_success() {
         return Err(read_failure("GET", &url, resp).await);
     }
-    resp.json::<CheckoutRootBody>()
+    resp.json::<CheckoutRootConfig>()
         .await
-        .map(|body| body.root)
         .map_err(|e| e.to_string())
+}
+
+/// Choose configuration scope independently of the target host's connectivity.
+/// The global URL stays unchanged; host configuration has its own protected route.
+fn checkout_root_url(base: &str, host: Option<HostId>) -> String {
+    match host {
+        Some(id) => format!("{base}/api/hosts/{id}/checkout-root"),
+        None => format!("{base}/api/checkout-root"),
+    }
 }
 
 /// Save only on user request and return the helm's refusal to the field.
@@ -729,9 +753,10 @@ pub(crate) async fn fetch_checkout_root(base: &str) -> Result<Option<String>, St
 /// initial read after the already-declared save.
 pub(crate) fn save_checkout_root(
     base: &str,
+    host: Option<HostId>,
     root: Option<String>,
 ) -> impl Future<Output = Result<(), String>> + use<> {
-    let url = format!("{base}/api/checkout-root");
+    let url = checkout_root_url(base, host);
     let sending = send_save(client().put(&url).json(&CheckoutRootBody { root }));
     async move {
         let resp = sending.await?;

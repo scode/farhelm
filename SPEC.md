@@ -260,26 +260,30 @@ time, so it survives address changes, while wiping and reinstalling a supervisor
 predecessor's sessions are gone with the old install. Removing a host from the registry merely forgets it — the
 supervisor and its sessions are untouched and reappear on re-registration. Registry entries are editable: an SSH
 destination can be corrected without touching the host's identity or its sessions. Every host, the local one included,
-has a settings dialog in the GUI that holds its destination (SSH hosts), its alias, a chosen icon and color, whether it
-starts YOLO sessions without asking, whether its sessions manage sessions on this same host without asking, whether it
-runs `farhelm` commands from its sessions without asking, and separate permissions to open public and local-network
-links without asking (see Agent-spawned sessions). The header and footer, including the close controls and the note that
-changes save as you make them, stay visible while only the settings between them scroll. A remote host offers sixteen
-icons, with the cloud as the default, and the default foreground or one of seven identity colors: lavender, orchid,
-teal, steel, sand, copper and red. The local host starts with the laptop in red, but offers the same choices. The choice
-is kept by the helm and shared with every client. It tints the icon, and the host's terminal frames when **Color
-terminal frames by host** is on, never a status or the host name; red identifies a host and says nothing about its
-state. Every host except a new Tensorlake host asks before YOLO launches, and every host asks before carrying out an
-acting `farhelm` command from one of its sessions. **Manage sessions on this host without asking** and both link
-permissions start off on every host, Tensorlake sandboxes included, until the user explicitly turns them on, including
-hosts that existed before the settings did. Adopting a new identity for a host, described next, resets all five
-permissions to asking: each is a judgment about the install the user knew, and a new identity, whether a reinstall or a
-different machine, is one they have not judged. If a destination turns out to present a different identity than recorded
-(a wiped and reinstalled host, a recycled address), the helm says so and asks whether to adopt the new host or fix the
-destination — it never silently merges. An entry that reaches a machine another entry already holds connects nothing: it
-says which entry holds the machine, by name, and asks the user to remove that entry or change this one's destination and
-then press Retry. Farhelm never connects two entries to one machine and never resolves this on its own. Last-known
-sessions of a host that is permanently gone are disposed of by removing the host from the registry.
+has a settings dialog in the GUI that holds its destination (SSH hosts), its alias, a chosen icon and color, its
+checkout folder, whether it starts YOLO sessions without asking, whether its sessions manage sessions on this same host
+without asking, whether it runs `farhelm` commands from its sessions without asking, and separate permissions to open
+public and local-network links without asking (see Agent-spawned sessions). The header and footer, including the close
+controls and the note that the checkout folder needs an explicit Save while other changes save as you make them, stay
+visible while only the settings between them scroll. Its **Checkouts** section sits between Appearance and Permissions,
+for every host kind. An empty folder uses the default from Settings → Checkouts, shown as a placeholder; **Use default**
+clears a saved override. Saving checks the path's shape without contacting the host. Changes apply to new checkouts;
+existing ones stay where they are. A remote host offers sixteen icons, with the cloud as the default, and the default
+foreground or one of seven identity colors: lavender, orchid, teal, steel, sand, copper and red. The local host starts
+with the laptop in red, but offers the same choices. The choice is kept by the helm and shared with every client. It
+tints the icon, and the host's terminal frames when **Color terminal frames by host** is on, never a status or the host
+name; red identifies a host and says nothing about its state. Every host except a new Tensorlake host asks before YOLO
+launches, and every host asks before carrying out an acting `farhelm` command from one of its sessions. **Manage
+sessions on this host without asking** and both link permissions start off on every host, Tensorlake sandboxes included,
+until the user explicitly turns them on, including hosts that existed before the settings did. Adopting a new identity
+for a host, described next, resets all five permissions to asking: each is a judgment about the install the user knew,
+and a new identity, whether a reinstall or a different machine, is one they have not judged. If a destination turns out
+to present a different identity than recorded (a wiped and reinstalled host, a recycled address), the helm says so and
+asks whether to adopt the new host or fix the destination — it never silently merges. An entry that reaches a machine
+another entry already holds connects nothing: it says which entry holds the machine, by name, and asks the user to
+remove that entry or change this one's destination and then press Retry. Farhelm never connects two entries to one
+machine and never resolves this on its own. Last-known sessions of a host that is permanently gone are disposed of by
+removing the host from the registry.
 
 A host that is a Tensorlake sandbox Farhelm created is the exception to two of those rules, because Farhelm owns the
 machine and not only the entry: removing it is not merely forgetting it, and its destination cannot be corrected.
@@ -1372,17 +1376,18 @@ the source's actual directory; a managed checkout then requires an explicit repo
 setup, or a template that sets one. `farhelm agent clone` keeps its existing-directory behavior.
 
 The helm owns a working-copy root and optional post-clone command, globally with per-host overrides. There is no default
-root. The all-hosts checkout folder and post-clone command can be set or cleared under **Checkouts** in Settings or with
-the command line; per-host overrides remain command-line only. Settings saves each field explicitly, shows a refused
-value's reason, and clears it when an all-whitespace field is saved. The command field preserves all other spacing and
-newlines. An explicitly disabled command displays as an empty field, but opening Settings never rewrites any stored
-value. Browser-readable configuration replies may contain the all-hosts folder and command, never host overrides. A
-missing root and its parents are created on the target host at the first checkout, using the ordinary umask;
-configuration, discovery and preview create nothing. Existing symlink ancestors resolve to their canonical directory,
-while unresolved `..` in a missing suffix and dangling symlinks are refused. A root whose resolution changed since
-preview is still refused. `~` expands there, using the supervisor's captured home. Clearing an override restores
-inheritance; an empty hook override disables the inherited hook. Configuration changes affect new attempts, not an
-already accepted attempt or its retries.
+root. The default checkout folder and all-hosts post-clone command can be set or cleared under **Checkouts** in Settings
+or with the command line. Each host's settings also offers its own checkout folder; per-host post-clone overrides remain
+command-line only. The default is resolved at launch, never copied when a host is added. Settings saves each field
+explicitly, shows a refused value's reason, and clears it when an all-whitespace field is saved. The command field
+preserves all other spacing and newlines. An explicitly disabled command displays as an empty field, but opening
+Settings never rewrites any stored value. Browser-readable configuration replies may contain the default folder, a
+host's own folder and the all-hosts command, never per-host command overrides. A missing root and its parents are
+created on the target host at the first checkout, using the ordinary umask; configuration, discovery and preview create
+nothing. Existing symlink ancestors resolve to their canonical directory, while unresolved `..` in a missing suffix and
+dangling symlinks are refused. A root whose resolution changed since preview is still refused. `~` expands there, using
+the supervisor's captured home. Clearing an override restores inheritance; an empty hook override disables the inherited
+hook. Configuration changes affect new attempts, not an already accepted attempt or its retries.
 
 Settings offers an off-by-default, all-hosts choice under **Agent trust** to answer Claude's "trust this folder?" for
 new managed checkouts, including agent-requested checkouts and checkouts initially started with another agent. It never
@@ -1430,10 +1435,11 @@ switch but no hint band: its project-resource approval is not currently recogniz
 session snapshots default the new hint evidence to absent; the legacy Claude hint remains Claude-only.
 
 When the selected host has no checkout folder in effect, the launcher's managed-checkout destination offers the same
-explicit-save field, explaining that it sets the folder for every host and can be changed later in Settings. Refusal
-keeps the draft editable; success refreshes repository suggestions and the checkout preview without reopening the
-launcher. Selecting a repository before setup does not hide the field. A host with a command-line override keeps its
-folder and is never offered this setup. The template editor keeps its ordinary destination control.
+explicit-save field, explaining that it sets the default for hosts without their own folder and can be changed later in
+Settings → Checkouts or overridden in each host's settings. Refusal keeps the draft editable; success refreshes
+repository suggestions and the checkout preview without reopening the launcher. Selecting a repository before setup does
+not hide the field. A host with its own folder keeps that folder and is never offered this setup. The template editor
+keeps its ordinary destination control.
 
 Farhelm is not designed for a working-copy root that other local accounts can write to, such as a group-shared folder or
 a sticky, `/tmp`-style directory. Keeping the root, and so its checkouts and the archive folder inside it, in a location
@@ -2148,26 +2154,27 @@ are explicitly saved helm configuration, shared by every client, outside the pre
 inline. The stored token is never returned: the form shows whether one exists and allows replacing or clearing it.
 Changing to another server clears a saved token unless a new one is entered, and the form says so before saving. **Send
 test** uses the saved configuration, even while disabled, and reports success or failure inline. The **Checkouts**
-section holds the explicitly saved all-hosts checkout folder and, below it, a monospace multi-line post-clone command
+section holds the explicitly saved **Default checkout folder** and, below it, a monospace multi-line post-clone command
 field and the default-on **Keep a checkout ready for faster launches** switch (see
 [Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository and
 host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create or
 after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
-first-use folder creation, and that command-line host overrides keep their folder. The command's help explains that it
-runs in each new checkout on its host, after cloning and before the agent starts, that changes affect future checkouts
-only, and that command-line host overrides keep their command. The installed desktop app's dialog also has an **App**
-section with a switch for installing updates automatically (see [Installation and updates](#installation-and-updates));
-unlike the host choices it is a setting of that app installation, kept with the app rather than by the helm, and a
-browser never shows it. The two host confirmation choices apply to every host and client of this helm; existing controls
-with a natural place in the main UI stay there. No client keeps its own copy: every client reads the helm's preference
-once after authenticating and writes it on change, so a browser tab and the desktop app open in the same order and on
-the same session. Per-client persistence — browser storage, a desktop state file, anything that lets two clients
-remember different answers — is not wanted for these shared preferences, including welcome-card and announcement
-dismissal (appearance, sidebar width, host rail expansion, terminal text size and sound switches, by contrast, are
-deliberately per device; see Session list, Terminal experience and Status). A client that asks the helm for no
-particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by
-the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
-`farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
+first-use folder creation, and that the default applies to hosts without their own folder, set in each host's settings.
+The command's help explains that it runs in each new checkout on its host, after cloning and before the agent starts,
+that changes affect future checkouts only, and that command-line host overrides keep their command. The installed
+desktop app's dialog also has an **App** section with a switch for installing updates automatically (see
+[Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of that app
+installation, kept with the app rather than by the helm, and a browser never shows it. The two host confirmation choices
+apply to every host and client of this helm; existing controls with a natural place in the main UI stay there. No client
+keeps its own copy: every client reads the helm's preference once after authenticating and writes it on change, so a
+browser tab and the desktop app open in the same order and on the same session. Per-client persistence — browser
+storage, a desktop state file, anything that lets two clients remember different answers — is not wanted for these
+shared preferences, including welcome-card and announcement dismissal (appearance, sidebar width, host rail expansion,
+terminal text size and sound switches, by contrast, are deliberately per device; see Session list, Terminal experience
+and Status). A client that asks the helm for no particular order gets creation time. No mandatory hierarchy. Sessions
+may carry an optional parent reference usable by the API, but parentage does not nest the list and implies nothing about
+VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create`
+and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 296px and 656px, with 396px as the default. Its 56px host
 rail leaves the session column between 240px and 600px, with 340px as the default. Double-click the edge to reset it, or

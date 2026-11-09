@@ -315,12 +315,12 @@ that wait; only the remaining budget reaches HTTP. Completion, refusal, timeout 
 failure or writer loss releases readers. A lost reply still has an unknown remote outcome: later requests can proceed
 while the helm may still apply that save, with no new retry or remote-order guarantee.
 
-Read/unread and notification marks, every preference field other than the template bindings, and host settings register
-no tickets; host mutations can wait on remote operations and must not hold every read behind them. These requests still
-wait for preceding tracked configuration saves. Reads and actions remain concurrent with each other. Terminals, the
-event feed and the page JavaScript's own HTTP calls (attachments, file stat/download, client log and clipboard) bypass
-this Rust funnel and are unaffected. No helm or protocol change is involved, and separate clients remain
-last-writer-wins.
+Read/unread and notification marks, every preference field other than the template bindings, and host settings other
+than checkout-folder saves register no tickets; host mutations can wait on remote operations and must not hold every
+read behind them. These requests still wait for preceding tracked configuration saves. Reads and actions remain
+concurrent with each other. Terminals, the event feed and the page JavaScript's own HTTP calls (attachments, file
+stat/download, client log and clipboard) bypass this Rust funnel and are unaffected. No helm or protocol change is
+involved, and separate clients remain last-writer-wins.
 
 The sort travels as the bare word `?sort=` takes and is validated against that vocabulary at the write; the selection is
 the full entry-bound session reference. Its entry UUID prevents a remembered selection from following a removed host's
@@ -926,22 +926,26 @@ focus the agent's switch and scroll its block into view. Escape or either close 
 focus to the gear. The host setup and removal permanent answers each name that gear as the way to turn confirmation back
 on.
 
-The all-hosts checkout folder uses a shared explicit-save field rather than the preference queue: invalid path text must
-have a visible refusal, and a draft is not configuration. `GET`/`PUT /api/checkout-root` is an ordinary protected route
-with a required nullable `root` and no host or command fields. It calls the existing global setter/clearer; the revision
-watcher is the sole invalidation publisher for HTTP and CLI writes. The saving field refetches on success and invokes
-its caller's callback so dependent reads need not wait for the watcher. A submitted save is app-owned and survives
-dismissal; its outcome and callback touch component-owned state only while the field remains mounted. The browser reads
-only the global folder through that route. The field keeps its refused draft and reports success.
+The default and per-host checkout folders use a shared scoped explicit-save field rather than the preference queue:
+invalid path text must have a visible refusal, and a draft is not configuration. `GET`/`PUT /api/checkout-root` is an
+ordinary protected route with a required nullable `root` and no host or command fields. It calls the existing global
+setter/clearer; the revision watcher is the sole invalidation publisher for HTTP and CLI writes. The saving field
+refetches on success and invokes its caller's callback so dependent reads need not wait for the watcher. A submitted
+save is app-owned and survives dismissal; its outcome and callback touch component-owned state only while the field
+remains mounted. The browser reads only the global folder through that route. `GET`/`PUT /api/hosts/{id}/checkout-root`
+checks host existence (404 if absent) and reads only its stored `root` and the global `default`, or sets/clears that
+host's root with the existing helpers. Neither route contacts a host; path validation is shape-only. The host field
+stays empty while inheriting, with the default as its placeholder and a Use default button while an override is saved.
+The field keeps its refused draft and reports success.
 
 The all-hosts post-clone command uses its own protected `GET`/`PUT /api/checkout-post-clone` route with a required
 nullable `command` and no other fields. Null is unset, an empty string is explicitly disabled, and nonempty text is
-stored verbatim; neither configuration route exposes host overrides. The handler checks the shared 16 KiB cap before
-calling the existing global setter/clearer, returning a visible 400 refusal without quoting the command or changing the
-revision. Its Settings-only multi-line field follows the folder field's draft, refusal, app-owned save and refetch
-contract; Enter inserts a newline. Only an explicit save maps an all-whitespace draft to null. Opening the dialog
-displays an explicit disable as an empty draft without writing it. Existing revision checks and frozen supervisor launch
-specs keep an accepted preparation and its retries on the command accepted with it.
+stored verbatim; no browser configuration route exposes a host's command override. The handler checks the shared 16 KiB
+cap before calling the existing global setter/clearer, returning a visible 400 refusal without quoting the command or
+changing the revision. Its Settings-only multi-line field follows the folder field's draft, refusal, app-owned save and
+refetch contract; Enter inserts a newline. Only an explicit save maps an all-whitespace draft to null. Opening the
+dialog displays an explicit disable as an empty draft without writing it. Existing revision checks and frozen supervisor
+launch specs keep an accepted preparation and its retries on the command accepted with it.
 
 The repository-discovery REST reply carries `needs_checkout_root`, derived from the selected host's effective
 configuration, without changing the supervisor protocol. The launcher retains an accepted setup observation, including
@@ -949,7 +953,7 @@ either answer, for that host connection and installation so selecting a reposito
 its first check. It continues discovery while choosing, awaiting that first answer, or needing setup; a successful save
 restarts discovery and advances preview authority explicitly. Once a reply confirms a folder is in effect, selected
 repositories return to preview-only behavior. Global-root reads and message text never decide host setup eligibility, so
-command-line overrides remain authoritative.
+host overrides remain authoritative.
 
 The host actions menu follows the session menu's anchor, pointer, raised surface, header, grouped inset commands, line
 icons, muted descriptions, roving keyboard focus, and one-menu-at-a-time dismissal rules. The add-host fields, probe
@@ -5200,7 +5204,8 @@ Schema 27 adds global checkout settings, per-host overrides and a monotonically 
 are read in one SQLite snapshot. The configuration CLI opens only an existing current-schema database; it neither
 creates missing state nor migrates a database owned by another running process. Clearing a setting restores inheritance,
 whereas an empty hook override explicitly disables it. Configuration stays with the registry row on adoption; history
-stays with the installation identity.
+stays with the installation identity. Host settings exposes the root override only; the effective root continues to
+resolve from the current global default at launch rather than being copied when a host is added.
 
 `POST /api/github-checkout-preview` asks the target supervisor to expand/canonicalize the configured root and propose
 the exact destination, without writing it. Responses include the configuration revision and installation/incarnation
@@ -6846,9 +6851,9 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
 - `farhelm helm checkout-config show`, `set-root <path>`, `clear-root`, `set-post-clone <command>` and
   `clear-post-clone` — inspect/edit existing helm checkout settings. Each accepts `--state-dir`; `--host <id>` selects a
   registered host override instead of the global value. An empty post-clone command disables inheritance explicitly. The
-  all-hosts folder and command can also be saved in Settings; per-host overrides remain CLI-only. The command neither
-  initializes missing state nor migrates an incompatible database, and never creates target directories or runs the
-  hook.
+  default folder and all-hosts command can also be saved in Settings; host settings exposes each host's folder, while
+  per-host command overrides remain CLI-only. The command neither initializes missing state nor migrates an incompatible
+  database, and never creates target directories or runs the hook.
 - `farhelm helm run` — run the helm (flags: `--port`, `--state-dir`, `--ui-dist`, `--ensure-hosts <file>`,
   `--payload-dir <dir>` (env `FARHELM_HELM_PAYLOAD_DIR`), `--release-base-url <url>` (env `FARHELM_RELEASE_BASE_URL`)).
   The last two select where "Add host" provisioning payloads come from — an operator-staged directory (verified not at

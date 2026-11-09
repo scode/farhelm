@@ -12,7 +12,8 @@
 //! module deliberately touches no host, creates no directories, and never
 //! runs the configured hook.
 //! Dedicated authenticated browser routes expose the all-hosts root and
-//! post-clone command. Per-host overrides remain outside these replies.
+//! post-clone command, and each host's own root alongside its global default.
+//! Per-host post-clone overrides remain outside browser replies.
 //!
 //! ## Inheritance semantics (binding)
 //!
@@ -993,6 +994,64 @@ pub(crate) async fn put_checkout_root(
     axum::http::StatusCode::NO_CONTENT.into_response()
 }
 
+/// The host editor needs the stored override and the default separately:
+/// an inherited folder stays an empty draft even when the default is set.
+/// Hook configuration must never become part of this browser reply.
+#[derive(serde::Serialize)]
+struct HostCheckoutRootState {
+    root: Option<String>,
+    default: Option<String>,
+}
+
+/// Read a registered host's own folder and the global default in one snapshot.
+/// Registry existence, rather than a connected actor, decides whether the host
+/// is configurable. No path is expanded or checked on the target machine.
+pub(crate) async fn get_host_checkout_root(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
+    axum::extract::Path(host): axum::extract::Path<HostId>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if let Err(error) = crate::hosts::registry_row(&state, host).await {
+        return crate::http_error(error);
+    }
+    match state.store.checkout_config_snapshot(Some(host)).await {
+        Ok(snapshot) => axum::Json(HostCheckoutRootState {
+            root: snapshot.host_override.and_then(|value| value.root),
+            default: snapshot.global_root,
+        })
+        .into_response(),
+        Err(error) => crate::http_error(error),
+    }
+}
+
+/// Save or clear only this host's folder, including while it is disconnected.
+/// Null restores inheritance; non-null text uses the CLI's shape validation
+/// and stays unexpanded. The existing revision watcher publishes committed
+/// changes, and accepted creates keep their original configuration.
+pub(crate) async fn put_host_checkout_root(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
+    axum::extract::Path(host): axum::extract::Path<HostId>,
+    axum::Json(body): axum::Json<CheckoutRootBody>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if let Err(error) = crate::hosts::registry_row(&state, host).await {
+        return crate::http_error(error);
+    }
+    if let Some(root) = &body.root
+        && let Err(error) = validate_root(root)
+    {
+        return (axum::http::StatusCode::BAD_REQUEST, error.to_string()).into_response();
+    }
+    let result = match body.root {
+        Some(root) => state.store.set_checkout_root(Some(host), &root).await,
+        None => state.store.clear_checkout_root(Some(host)).await,
+    };
+    match result {
+        Ok(()) => axum::http::StatusCode::NO_CONTENT.into_response(),
+        Err(error) => crate::http_error(error),
+    }
+}
+
 /// Preserve unset and explicitly disabled commands as distinct stored states.
 /// A missing key is invalid rather than an implicit clear; this route never
 /// accepts or serializes a host override.
@@ -1289,7 +1348,8 @@ impl HelmStore {
     /// (no revision bump) when the value already equals the target, and
     /// otherwise write the value and bump the revision in that same
     /// transaction. A named host must exist in the registry — a typo'd id
-    /// is an error, never a silent write against nothing.
+    /// is a typed not-found error, never a silent write against nothing, even
+    /// when the host was removed after an HTTP route checked its existence.
     async fn write_setting(
         &self,
         host: Option<HostId>,
@@ -1313,7 +1373,7 @@ impl HelmStore {
                     .optional()
                     .context("checking the host exists")?;
                 if known.is_none() {
-                    anyhow::bail!("no host with id {host} is registered in this helm");
+                    return Err(crate::store::HostStoreError::HostNotFound(host).into());
                 }
             }
             let current = read_field(&tx, host, field)?;
@@ -1993,6 +2053,295 @@ mod root_route_tests {
                 serde_json::json!({"root": "/saved-checkouts"})
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod host_root_route_tests {
+    use crate::rest_harness;
+    use crate::store::HostId;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    /// Use the registered route so authentication and strict JSON extraction
+    /// remain part of the configuration contract under test.
+    fn request(host: HostId, method: &str, body: serde_json::Value) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(format!("/api/hosts/{host}/checkout-root"))
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    /// A registry-only host has no actor to answer a configuration request.
+    /// This premise prevents a connected fixture from hiding a live-host check.
+    async fn disconnected_host(harness: &rest_harness::Harness) -> HostId {
+        let host = harness
+            .store
+            .add_ssh_host("host-root-route.invalid", None, None)
+            .await
+            .unwrap();
+        assert!(harness.store.entry_uuid_of(host).await.unwrap().is_some());
+        assert!(harness.manager.state(host).is_none());
+        assert_eq!(harness.fleet.dials(host), 0);
+        host
+    }
+
+    /// Bound reply reads and compare full objects at call sites: a permissive
+    /// field lookup would miss accidental disclosure of hook configuration.
+    async fn read(harness: &rest_harness::Harness, host: HostId) -> serde_json::Value {
+        let response = harness
+            .router()
+            .oneshot(request(host, "GET", serde_json::Value::Null))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), 8192)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    /// Host settings distinguish an unset override from its current default,
+    /// including a host whose only override is private hook text. Reading this
+    /// editor must never reveal either scope's post-clone command.
+    #[farhelm_testtrace::test]
+    async fn get_separates_override_from_default_and_hides_hooks() {
+        let harness = rest_harness::idle_helm().await;
+        let host = disconnected_host(&harness).await;
+        assert_eq!(
+            read(&harness, host).await,
+            serde_json::json!({"root": null, "default": null})
+        );
+        harness
+            .store
+            .set_checkout_root(None, "~/default")
+            .await
+            .unwrap();
+        harness
+            .store
+            .set_checkout_post_clone(None, "global-private-hook")
+            .await
+            .unwrap();
+        harness
+            .store
+            .set_checkout_post_clone(Some(host), "host-private-hook")
+            .await
+            .unwrap();
+        let snapshot = harness
+            .store
+            .checkout_config_snapshot(Some(host))
+            .await
+            .unwrap();
+        assert_eq!(
+            snapshot.global_post_clone.as_deref(),
+            Some("global-private-hook")
+        );
+        assert_eq!(
+            snapshot.host_override.unwrap().post_clone.as_deref(),
+            Some("host-private-hook")
+        );
+        assert_eq!(
+            read(&harness, host).await,
+            serde_json::json!({"root": null, "default": "~/default"})
+        );
+        harness
+            .store
+            .set_checkout_root(Some(host), "/host-folder")
+            .await
+            .unwrap();
+        assert_eq!(
+            read(&harness, host).await,
+            serde_json::json!({"root": "/host-folder", "default": "~/default"})
+        );
+    }
+
+    /// Set and clear work without a connection, preserve hooks and the global
+    /// folder, and bump the stored revision only for actual changes. After a
+    /// clear, changing the default is reflected immediately rather than copied
+    /// into the host's configuration at save time.
+    #[farhelm_testtrace::test]
+    async fn put_sets_and_clears_disconnected_host_without_changing_other_settings() {
+        let harness = rest_harness::idle_helm().await;
+        let host = disconnected_host(&harness).await;
+        harness
+            .store
+            .set_checkout_root(None, "~/default")
+            .await
+            .unwrap();
+        harness
+            .store
+            .set_checkout_post_clone(None, "global-hook")
+            .await
+            .unwrap();
+        harness
+            .store
+            .set_checkout_post_clone(Some(host), "host-hook")
+            .await
+            .unwrap();
+        let mut revision = harness
+            .store
+            .checkout_config_snapshot(Some(host))
+            .await
+            .unwrap()
+            .revision;
+        for (root, changed) in [
+            (Some("~/host-folder"), true),
+            (Some("~/host-folder"), false),
+            (None, true),
+            (None, false),
+        ] {
+            let response = harness
+                .router()
+                .oneshot(request(host, "PUT", serde_json::json!({"root": root})))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            assert_eq!(
+                read(&harness, host).await,
+                serde_json::json!({"root": root, "default": "~/default"})
+            );
+            let snapshot = harness
+                .store
+                .checkout_config_snapshot(Some(host))
+                .await
+                .unwrap();
+            assert_eq!(snapshot.revision, revision + i64::from(changed));
+            assert_eq!(snapshot.global_root.as_deref(), Some("~/default"));
+            assert_eq!(snapshot.global_post_clone.as_deref(), Some("global-hook"));
+            let own = snapshot.host_override.unwrap();
+            assert_eq!(own.root.as_deref(), root);
+            assert_eq!(own.post_clone.as_deref(), Some("host-hook"));
+            revision = snapshot.revision;
+        }
+        harness
+            .store
+            .set_checkout_root(None, "/new-default")
+            .await
+            .unwrap();
+        assert_eq!(
+            read(&harness, host).await,
+            serde_json::json!({"root": null, "default": "/new-default"})
+        );
+        assert!(harness.manager.state(host).is_none());
+        assert_eq!(harness.fleet.dials(host), 0);
+    }
+
+    /// An unknown registry id must not look like an inherited configuration or
+    /// become a generic storage failure. Neither a set nor a clear may write
+    /// configuration or bump its revision for a nonexistent host.
+    #[farhelm_testtrace::test]
+    async fn unknown_host_get_and_put_return_not_found() {
+        let harness = rest_harness::idle_helm().await;
+        let host = i64::MAX;
+        assert!(harness.store.entry_uuid_of(host).await.unwrap().is_none());
+        let before = harness.store.checkout_config_snapshot(None).await.unwrap();
+        for (method, body) in [
+            ("GET", serde_json::Value::Null),
+            ("PUT", serde_json::json!({"root": "/host-folder"})),
+            ("PUT", serde_json::json!({"root": null})),
+        ] {
+            let response = harness
+                .router()
+                .oneshot(request(host, method, body))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+            assert_eq!(
+                harness.store.checkout_config_snapshot(None).await.unwrap(),
+                before
+            );
+        }
+    }
+
+    /// Path-shape refusals retain the existing override and revision. This
+    /// protects an offline edit from turning a typo into an inherited value.
+    #[farhelm_testtrace::test]
+    async fn invalid_path_preserves_configuration() {
+        let harness = rest_harness::idle_helm().await;
+        let host = disconnected_host(&harness).await;
+        harness
+            .store
+            .set_checkout_root(Some(host), "/saved")
+            .await
+            .unwrap();
+        let before = harness
+            .store
+            .checkout_config_snapshot(Some(host))
+            .await
+            .unwrap();
+        for root in ["relative", "~another", ""] {
+            let response = harness
+                .router()
+                .oneshot(request(host, "PUT", serde_json::json!({"root": root})))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let bytes = axum::body::to_bytes(response.into_body(), 8192)
+                .await
+                .unwrap();
+            assert!(!bytes.is_empty(), "a refused path needs a visible reason");
+            assert_eq!(
+                harness
+                    .store
+                    .checkout_config_snapshot(Some(host))
+                    .await
+                    .unwrap(),
+                before
+            );
+        }
+    }
+
+    /// The per-host route uses the same explicit nullable-root grammar as the
+    /// global route. Missing fields cannot clear an override, and neither hook
+    /// text nor a caller-supplied default can enter this write surface.
+    #[farhelm_testtrace::test]
+    async fn route_requires_authentication_and_strict_root_body() {
+        let harness = rest_harness::idle_helm().await;
+        let host = disconnected_host(&harness).await;
+        harness
+            .store
+            .set_checkout_root(Some(host), "/saved")
+            .await
+            .unwrap();
+        let before = harness
+            .store
+            .checkout_config_snapshot(Some(host))
+            .await
+            .unwrap();
+        for method in ["GET", "PUT"] {
+            let response = harness
+                .unauthenticated_router()
+                .oneshot(request(host, method, serde_json::json!({"root": null})))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        }
+        for body in [
+            serde_json::json!({}),
+            serde_json::json!({"root": null, "post_clone": "private"}),
+            serde_json::json!({"root": null, "default": "/other"}),
+            serde_json::json!({"root": null, "host": 1}),
+            serde_json::json!({"root": 3}),
+        ] {
+            let response = harness
+                .router()
+                .oneshot(request(host, "PUT", body))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        }
+        assert_eq!(
+            harness
+                .store
+                .checkout_config_snapshot(Some(host))
+                .await
+                .unwrap(),
+            before
+        );
     }
 }
 

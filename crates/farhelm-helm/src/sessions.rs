@@ -313,7 +313,7 @@ pub(crate) async fn github_repositories(
             // bounded actionable status, including when the scan itself fails.
             .map_err(|error| repository_discovery_failure(&error))
     } else if config.root.is_none() {
-        Err("no checkout folder is configured; set one in Settings".to_string())
+        Err("no checkout folder is configured; set one in this host's settings or a default in Settings → Checkouts".to_string())
     } else {
         Err("repository discovery is unavailable while this host is offline; recent repositories are still available".to_string())
     };
@@ -413,7 +413,7 @@ pub(crate) async fn preview_github_checkout(
     let Some(root) = config.root.clone() else {
         return Err(anyhow::Error::new(SupervisorError::helm(
             ErrorKind::InvalidRequest,
-            "no checkout folder is configured; set one in Settings".to_string(),
+            "no checkout folder is configured; set one in this host's settings or a default in Settings → Checkouts".to_string(),
         )));
     };
     let request = farhelm_proto::GithubPreviewRequest {
@@ -1164,7 +1164,7 @@ fn github_checkout_resolution(
     let Some(root) = config.root.clone() else {
         return Some(Err(anyhow::Error::new(SupervisorError::helm(
             ErrorKind::InvalidRequest,
-            "no checkout folder is configured; set one in Settings".to_string(),
+            "no checkout folder is configured; set one in this host's settings or a default in Settings → Checkouts".to_string(),
         ))));
     };
     let repo = farhelm_proto::parse_github_repo(&checkout.repo)
