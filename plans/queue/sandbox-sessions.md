@@ -838,25 +838,64 @@ The maintainer approved proceeding after discussing both Replace failure behavio
 This authorization applies to the simplified sandbox-session work; it does not restart the stopped drain of other plans,
 authorize changes to the live installation, or authorize merging the draft stack.
 
-## Blocked
+### 2026-11-09: answer to a blocked question
 
-Blocked on 2026-11-09 (claim f6643b).
+The question, as the executor put it:
 
-### Sandbox-session ownership and failure recovery
+> Blocked on 2026-11-09 (claim f6643b).
+>
+> ### Sandbox-session ownership and failure recovery
+>
+> The maintainer stopped implementation because the plan had grown a protocol for tracking which sessions remain in a
+> sandbox after a failed Replace. The existing Decisions make Delete destroy the sandbox only with its last session and
+> sometimes require Resume first to prove that fact. This went beyond the original intent: deleting a sandbox session
+> throws away its disposable computer.
+>
+> The maintainer has now answered the following questions in the executor's conversation and authorized proceeding. This
+> block and its answer record that discussion in the shared plan, rather than leaving the revised requirements in the
+> executor's local log. The answer is already supplied by the maintainer; do not substitute a monitor's judgment.
+>
+> Should Delete always destroy the sandbox, while a failed Replace preserves the existing sandbox and files? May failed
+> normal launches discard only their newly created sandbox? Should agent requests be refused without notifications?
+> Should session-owned hosts remain in the Hosts list and normal sidebar attention area, with only their permanent rail
+> icons hidden? May additive conveniences be deferred without creating a design that must be rewritten to add them?
+>
+> The existing draft specification, storage and policy PRs and unpublished lifecycle work must be reconciled with the
+> answer. They have not merged. The earlier design and their passing reviews do not override the maintainer's new
+> choices.
 
-The maintainer stopped implementation because the plan had grown a protocol for tracking which sessions remain in a
-sandbox after a failed Replace. The existing Decisions make Delete destroy the sandbox only with its last session and
-sometimes require Resume first to prove that fact. This went beyond the original intent: deleting a sandbox session
-throws away its disposable computer.
+The maintainer's answer:
 
-The maintainer has now answered the following questions in the executor's conversation and authorized proceeding. This
-block and its answer record that discussion in the shared plan, rather than leaving the revised requirements in the
-executor's local log. The answer is already supplied by the maintainer; do not substitute a monitor's judgment.
+### Clarifications: remove obsolete machinery and accept whole-sandbox destruction
 
-Should Delete always destroy the sandbox, while a failed Replace preserves the existing sandbox and files? May failed
-normal launches discard only their newly created sandbox? Should agent requests be refused without notifications? Should
-session-owned hosts remain in the Hosts list and normal sidebar attention area, with only their permanent rail icons
-hidden? May additive conveniences be deferred without creating a design that must be rewritten to add them?
+These clarify the maintainer-approved simplification immediately above; they do not reopen the superseded choices. The
+maintainer reviewed the remaining ambiguities and directed the executor to take the simplest coherent approach, defer UI
+tuning, and remove the mechanisms that existed only for the old guarantees.
 
-The existing draft specification, storage and policy PRs and unpublished lifecycle work must be reconciled with the
-answer. They have not merged. The earlier design and their passing reviews do not override the maintainer's new choices.
+Explicit Delete destroys the whole sandbox even if a failed Replace left another session there, including one absent
+from Farhelm's current records. Its confirmation warns that every session, process, file and snapshot in that sandbox
+will be destroyed. Any session names it displays come from Farhelm's existing records; they are illustrative, not a
+complete membership claim. No fresh listing, membership proof, or session-count completeness check is required. Losing a
+leftover session through this explicitly confirmed whole-sandbox deletion is an accepted consequence, not a defect for a
+reviewer to fix by restoring peer-preservation or finality machinery. Failed Replace itself still never destroys the
+existing sandbox or files.
+
+Remove the stored membership sets, uncertainty/finality tracking and FULL-sync marks, qualified membership RPC and read
+leases, connection-revocation/handshake changes introduced for membership proof, and the associated protocol additions
+from the unmerged drafts. Remove the persistent supervisor agent-refusal policy, its database state, acknowledgement
+before connection admission, and sandbox-specific notification machinery. Agent refusal belongs in the helm's existing
+request path. Do not retain any of these as unused groundwork. Keep only the small resource-ownership record needed to
+manage the sandbox and find cleanup leftovers, along with mechanisms independently needed by the reduced feature.
+
+Host visibility is a pragmatic first-version choice. Keep sandbox hosts off the permanent rail, show them in Hosts and
+the existing sidebar attention area, and reuse applicable ordinary host controls. A user-confirmed host-level Delete
+sandbox already has the approved whole-sandbox consequence and need not be prohibited merely because deletion is also
+available from the session. Refuse agent destruction as before. Avoid offering a disposable session-owned host as an
+ordinary launcher/template destination or in agent host listings; launch and Clone use its recipe to create a new
+sandbox. Defer additional UI tuning and do not build a separate management framework to enforce presentation purity.
+
+The earlier last-session-only Delete answer and the monitor's unknown-finality/Resume-before-Delete answer are
+superseded. The first SSH-registration preflight answer remains valid. Remove the obsolete TODO reminder to revisit the
+monitor's unknown-finality answer when revising the feature's code/spec drafts. Earlier acceptance criteria requiring
+notifications, hidden Hosts rows, membership proof or the deferred additive conveniences cannot revive them during
+review. Every implementation reviewer must receive these Decisions and the amended specifications.
