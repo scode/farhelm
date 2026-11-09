@@ -759,3 +759,26 @@ suspended sandbox directly. No automatic Resume, and no whole-sandbox destructio
 narrow exception in the specification: an actually last session may need a Resume in that uncertain state, briefly
 restarting compute billing. The alternative (an explicit "destroy the whole sandbox" choice) was not taken because it
 could kill a surviving session and delete its files.
+
+## Blocked
+
+Blocked on 2026-11-09 (claim 2eac5a).
+
+### Sandbox-session ownership and failure recovery
+
+The maintainer stopped implementation because the plan had grown a protocol for tracking which sessions remain in a
+sandbox after a failed Replace. The existing Decisions make Delete destroy the sandbox only with its last session and
+sometimes require Resume first to prove that fact. This went beyond the original intent: deleting a sandbox session
+throws away its disposable computer.
+
+The maintainer has now answered the following questions in the executor's conversation and authorized proceeding. This
+block and its answer record that discussion in the shared plan, rather than leaving the revised requirements in the
+executor's local log. The answer is already supplied by the maintainer; do not substitute a monitor's judgment.
+
+Should Delete always destroy the sandbox, while a failed Replace preserves the existing sandbox and files? May failed
+normal launches discard only their newly created sandbox? Should agent requests be refused without notifications? Should
+session-owned hosts remain in the Hosts list and normal sidebar attention area, with only their permanent rail icons
+hidden? May additive conveniences be deferred without creating a design that must be rewritten to add them?
+
+The existing draft specification, storage and policy PRs and unpublished lifecycle work must be reconciled with the
+answer. They have not merged. The earlier design and their passing reviews do not override the maintainer's new choices.
