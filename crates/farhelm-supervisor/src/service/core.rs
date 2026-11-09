@@ -277,7 +277,7 @@ pub const UPLOAD_PROGRESS_TIMEOUT: Duration = Duration::from_secs(60);
 /// out, and — because the publication holds the session's lifecycle claim
 /// — would take that session's stop, restart, and delete down with it.
 ///
-/// Generous enough that no working disk reaches it (a 256 KiB write and an
+/// Generous enough that no working disk reaches it (a 32 KiB write and an
 /// fsync are milliseconds), short enough that a session is not held
 /// hostage for long. A blocking operation cannot actually be cancelled, so
 /// what this bounds is how long the TRANSFER waits: past it the operation

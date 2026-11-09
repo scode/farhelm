@@ -234,7 +234,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_70` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_71` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -245,7 +245,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 70;
+pub const PROTOCOL_VERSION: u32 = 71;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -1806,9 +1806,12 @@ pub struct TabInfo {
 /// Ceiling for one attachment-upload data frame's body (PLAN_M4.md item
 /// 1). Uploads are chunked well below [`MAX_FRAME_LEN`] for the same
 /// reason terminal output is — no bulk payload may monopolize the
-/// framing layer — and the specific value bounds how long any single
-/// frame can occupy the shared connection ahead of latency-sensitive
-/// terminal input. Rechunking is the PROTOCOL-FRAME SENDER's job,
+/// framing layer. The 32 KiB cap matches OpenSSH's session-channel packet
+/// size; larger frames bought little on remote hosts. With the helm's
+/// four-frame bulk allowance it reduces bulk queued ahead of terminal
+/// input from about 1 MiB to 128 KiB. That bounds queued payload, not
+/// latency: bytes already in the pipe, ssh and TCP buffers remain in flight.
+/// Rechunking is the PROTOCOL-FRAME SENDER's job,
 /// independent of whatever boundaries the bytes arrived with: the helm
 /// relay splits at this size no matter how its HTTP body stream chunked,
 /// and any client speaking this protocol directly owes the same. The
@@ -1823,7 +1826,7 @@ pub struct TabInfo {
 /// channel-correlated way: [`ControlMsg::UploadAborted`] on that
 /// channel, temp cleaned — never an uncorrelated `Error` some other
 /// upload might claim.
-pub const UPLOAD_CHUNK_BYTES: usize = 256 * 1024;
+pub const UPLOAD_CHUNK_BYTES: usize = 32 * 1024;
 
 /// Maximum bytes an upload sender may have in flight beyond the highest
 /// cumulative [`ControlMsg::UploadAck`] it has seen (PLAN_M4.md item 1).
@@ -5676,8 +5679,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_70() {
-        assert_eq!(PROTOCOL_VERSION, 70);
+    fn protocol_version_is_pinned_at_71() {
+        assert_eq!(PROTOCOL_VERSION, 71);
     }
 
     /// A follow-up is an approved mutation even though its success has no
@@ -8872,7 +8875,7 @@ mod tests {
     /// which understates how much of a frame a chunk actually occupies.
     #[farhelm_testtrace::test]
     fn upload_consts_are_pinned() {
-        assert_eq!(UPLOAD_CHUNK_BYTES, 256 * 1024);
+        assert_eq!(UPLOAD_CHUNK_BYTES, 32 * 1024);
         assert!(
             UPLOAD_CHUNK_BYTES + 5 < MAX_FRAME_LEN as usize / 2,
             "a chunk plus its frame header must leave real headroom below MAX_FRAME_LEN, not \

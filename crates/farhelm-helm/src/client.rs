@@ -268,7 +268,7 @@ const UPLOAD_ACK_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 /// The credit window is not enough on its own, and `UPLOAD_CHUNK_BYTES`'s
 /// own docs say why: "the credit window bounds transit, the sender bounds
 /// queue occupancy". A sender that only respected the window could hand
-/// the writer a full 4 MiB — sixteen back-to-back bulk frames — and every
+/// the writer a full 4 MiB — 128 back-to-back bulk frames — and every
 /// keystroke, resize and control reply enqueued after that would wait
 /// behind megabytes of attachment data on a queue that carries them all.
 ///
@@ -283,7 +283,8 @@ const UPLOAD_ACK_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 ///
 /// Four is small on purpose: one frame in the writer's hands plus a few
 /// queued keeps the transport busy on a fast link, while capping how much
-/// bulk data an input frame can ever find ahead of it at about a megabyte.
+/// bulk data an input frame can find ahead of it at 128 KiB. This does not
+/// bound bytes already accepted by the pipe or ssh/TCP buffers, or latency.
 const UPLOAD_ENQUEUE_FRAMES: usize = 4;
 
 /// How many agent upcalls one connection will answer at a time.
@@ -8017,7 +8018,7 @@ mod tests {
         let channel = 9;
 
         // UPLOAD_WINDOW_BYTES is an exact multiple of UPLOAD_CHUNK_BYTES
-        // (4 MiB / 256 KiB = 16), so "one chunk past the window" lands on
+        // (4 MiB / 32 KiB = 128), so "one chunk past the window" lands on
         // a clean chunk boundary and the assertions below need no
         // rounding.
         let total = UPLOAD_WINDOW_BYTES as usize + UPLOAD_CHUNK_BYTES;
@@ -8947,7 +8948,7 @@ mod tests {
     ///
     /// `UPLOAD_CHUNK_BYTES`'s docs are explicit that the credit window
     /// alone does not deliver this: a sender obeying only the window may
-    /// hand the writer a whole 4 MiB — sixteen frames — and everything
+    /// hand the writer a whole 4 MiB — 128 frames — and everything
     /// enqueued afterwards waits behind all of it. With the enqueue
     /// allowance in place, a control frame sent DURING an upload burst
     /// finds at most [`UPLOAD_ENQUEUE_FRAMES`] of bulk data ahead of it.
