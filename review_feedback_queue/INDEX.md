@@ -118,6 +118,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   silently overwrite an agent settings save made after its final digest check and before replacement. The new comparison
   protects earlier edits but leaves this narrower window.
 
+- [`mac-update-gnu-stat-path.md`](mac-update-gnu-stat-path.md) — A remote Mac with GNU stat first on its SSH PATH can
+  pass inspection but repeatedly fail Update or recovery on existing files until command selection is repaired.
+
 ## Other: correctness, diagnostics, cleanup, or convenience
 
 - [`removed-host-strands-tunnel-listeners.md`](removed-host-strands-tunnel-listeners.md) — Removing a host leaves its
@@ -2228,3 +2231,31 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`rust-sandbox-staging-misquotes-checkout-path.md`](rust-sandbox-staging-misquotes-checkout-path.md) — The Rust
   sandbox runner cannot stage an ordinary checkout whose absolute path contains spaces, because nested remote shell
   commands interpolate that path without quoting it.
+
+- [`mac-uninstall-test-lacks-live-host-premise.md`](mac-uninstall-test-lacks-live-host-premise.md) — The native Mac
+  uninstall test can pass without establishing that a retained agent terminal host was still alive before uninstall.
+
+- [`mac-fixture-cleanup-stop-budget.md`](mac-fixture-cleanup-stop-budget.md) — Mac test cleanup uses a shorter deadline
+  than production permits for the same stop script; no actual timeout was observed.
+
+- [`mac-setup-confirmation-misses-installed-app.md`](mac-setup-confirmation-misses-installed-app.md) — An old Mac setup
+  confirmation can install the remote supervisor after Farhelm.app is installed; the pre-confirmation exception's scope
+  remains uncertain.
+
+- [`mac-uninstall-unresolved-loaded-plist.md`](mac-uninstall-unresolved-loaded-plist.md) — A removed loaded plist can
+  bypass uninstall's service-path comparison; the nonstandard-layout exception's applicability remains uncertain.
+
+- [`mac-rosetta-ssh-classification.md`](mac-rosetta-ssh-classification.md) — Unverified after investigation: translated
+  SSH inspection may refuse Apple-silicon hardware; the exact supported command chain remains unestablished.
+
+- [`mac-host-start-same-build-contract.md`](mac-host-start-same-build-contract.md) — Remote Mac Update contradicts the
+  declared same-build startup invariant; no incompatible startup data or runtime failure was demonstrated.
+
+- [`devbuild-rust-llvm-layout-unverified.md`](devbuild-rust-llvm-layout-unverified.md) — Unverified after investigation:
+  local Mac devbuild may need the release LLVM repair; the exact pinned Rust artifact's loader layout remains missing.
+
+- [`centos-rustup-missing-pin.md`](centos-rustup-missing-pin.md) — Standalone CentOS validation cannot install its
+  target with Rustup 1.28.0 when the pinned compiler is absent; current Rustup auto-install avoids this route.
+
+- [`devbuild-rustup-active-name.md`](devbuild-rustup-active-name.md) — Mac devbuild misparses Rustup 1.28.0's multiline
+  active-toolchain output and aborts preflight even with the compiler installed; current one-line output is unaffected.
