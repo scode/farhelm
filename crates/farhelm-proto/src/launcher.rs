@@ -296,6 +296,11 @@ pub struct TemplateFields {
     pub resume_command: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
+    /// A new disposable sandbox from this immutable recipe name, mutually
+    /// exclusive with an installed host. GUI recipe templates never travel
+    /// through agent catalogs, whose older decoders reject unknown fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub destination: Option<TemplateDestination>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -560,6 +565,9 @@ pub struct LauncherState {
     pub command_agent: Option<LaunchHarness>,
     pub resume_command: Option<String>,
     pub host: Option<String>,
+    /// Placement selects either an installed host or a fresh recipe sandbox.
+    /// Applying either choice clears the other; an absent choice preserves it.
+    pub recipe: Option<String>,
     pub destination: Option<TemplateDestination>,
     pub name: Option<String>,
     /// The source template's name policy, retained beside its unnumbered base.
@@ -577,6 +585,9 @@ pub struct TemplateContext<'a> {
     pub catalog: &'a [LaunchCatalogModel],
     /// The install identities of the hosts the launcher can target.
     pub known_hosts: &'a [String],
+    /// Saved recipe names the caller can launch. Agent callers supply no
+    /// recipes; GUI callers use their current catalog rather than guessing.
+    pub known_recipes: &'a [String],
     /// Refuse any remaining host assignment when the caller holds it fixed.
     /// UI dialogs remove equal held assignments before calling this function;
     /// callers such as `farhelm spawn` retain the strict presence-based rule.
@@ -879,6 +890,12 @@ pub fn apply_template(
     }
 
     // 5. The destination and the session's name.
+    if fields.host.is_some() && fields.recipe.is_some() {
+        return Err(refuse(
+            "host",
+            "cannot name both an installed host and a recipe".into(),
+        ));
+    }
     if let Some(host) = &fields.host {
         if context.host_fixed {
             return Err(refuse(
@@ -894,9 +911,39 @@ pub fn apply_template(
             ));
         }
         next.host = Some(host.clone());
+        next.recipe = None;
+    }
+    if let Some(recipe) = &fields.recipe {
+        if context.host_fixed {
+            return Err(refuse(
+                "host",
+                "cannot change here: this dialog keeps the session's host".into(),
+            ));
+        }
+        if !context.known_recipes.contains(recipe) {
+            return Err(refuse(
+                "host",
+                "names a recipe that is unavailable here".into(),
+            ));
+        }
+        next.recipe = Some(recipe.clone());
+        next.host = None;
+        if !matches!(next.destination, Some(TemplateDestination::Github(_))) {
+            next.destination = Some(TemplateDestination::Folder("~".into()));
+        }
     }
     if let Some(destination) = &fields.destination {
         next.destination = Some(destination.clone());
+    }
+    if next.recipe.is_some()
+        && let Some(TemplateDestination::Folder(path)) = &next.destination
+        && path != "~"
+        && !path.is_empty()
+    {
+        return Err(refuse(
+            "folder",
+            "a new sandbox starts in its home directory".into(),
+        ));
     }
     if let Some(name) = &fields.name {
         next.name = Some(name.clone());
@@ -922,6 +969,86 @@ pub fn apply_templates<'t>(
 
 #[cfg(test)]
 mod tests {
+    /// Recipe and installed-host choices are one placement field. Applying
+    /// either clears the other, preserves repository intent, and never carries
+    /// an old machine's folder into a new disposable sandbox.
+    #[test]
+    fn recipe_template_placement_is_exclusive_and_never_reuses_an_old_folder() {
+        let context = TemplateContext {
+            catalog: &[],
+            known_hosts: &["ordinary-install".into()],
+            known_recipes: &["dev".into()],
+            host_fixed: false,
+        };
+        let original = LauncherState {
+            host: Some("ordinary-install".into()),
+            destination: Some(TemplateDestination::Folder("/existing/work".into())),
+            ..Default::default()
+        };
+        let recipe = template(
+            "sandbox",
+            TemplateFields {
+                recipe: Some("dev".into()),
+                ..Default::default()
+            },
+        );
+        let fresh = apply_template(&original, &recipe, &context).unwrap();
+        assert_eq!(fresh.host, None);
+        assert_eq!(fresh.recipe.as_deref(), Some("dev"));
+        assert_eq!(
+            fresh.destination,
+            Some(TemplateDestination::Folder("~".into()))
+        );
+        let ordinary = template(
+            "ordinary",
+            TemplateFields {
+                host: Some("ordinary-install".into()),
+                ..Default::default()
+            },
+        );
+        let returned = apply_template(&fresh, &ordinary, &context).unwrap();
+        assert_eq!(returned.host.as_deref(), Some("ordinary-install"));
+        assert_eq!(returned.recipe, None);
+        let repository = LauncherState {
+            destination: Some(TemplateDestination::Github("example/project".into())),
+            ..original.clone()
+        };
+        assert_eq!(
+            apply_template(&repository, &recipe, &context)
+                .unwrap()
+                .destination,
+            repository.destination
+        );
+        for bad in [
+            TemplateFields {
+                host: Some("ordinary-install".into()),
+                ..recipe.fields.clone()
+            },
+            TemplateFields {
+                recipe: Some("missing".into()),
+                ..Default::default()
+            },
+            TemplateFields {
+                destination: Some(TemplateDestination::Folder("/old".into())),
+                ..recipe.fields.clone()
+            },
+        ] {
+            assert!(apply_template(&original, &template("bad", bad), &context).is_err());
+        }
+        assert_eq!(original.host.as_deref(), Some("ordinary-install"));
+        assert!(
+            apply_template(
+                &original,
+                &recipe,
+                &TemplateContext {
+                    host_fixed: true,
+                    ..context
+                }
+            )
+            .is_err()
+        );
+    }
+
     /// A shortcut must have the choice required by its active tab. A command's
     /// declared agent cannot substitute for its missing command, and kindless
     /// stored templates retain New's Agent default rather than inferring a tab.
@@ -1031,6 +1158,7 @@ mod tests {
         let context = TemplateContext {
             catalog: &[],
             known_hosts: &[],
+            known_recipes: &[],
             host_fixed: false,
         };
         let base =
@@ -1117,6 +1245,7 @@ mod tests {
         let context = super::TemplateContext {
             catalog: &[],
             known_hosts: &[],
+            known_recipes: &[],
             host_fixed: false,
         };
         let applied =
@@ -1186,6 +1315,7 @@ mod tests {
         let context = super::TemplateContext {
             catalog: &[],
             known_hosts: &[],
+            known_recipes: &[],
             host_fixed: false,
         };
         let custom =
@@ -1357,6 +1487,7 @@ mod tests {
         TemplateContext {
             catalog,
             known_hosts: hosts,
+            known_recipes: &[],
             host_fixed,
         }
     }

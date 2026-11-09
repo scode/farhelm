@@ -764,6 +764,12 @@ pub type HostId = i64;
 pub struct Host {
     pub id: HostId,
     pub kind: HostKind,
+    /// The sandbox was created for a session launch. This is resource-lifecycle
+    /// metadata, not a count of its sessions or extra command authority. Hosts
+    /// and attention surfaces still use its ordinary diagnostics and controls.
+    /// Older helms omit it and describe ordinary hosts.
+    #[serde(default)]
+    pub is_session_owned: bool,
     /// `None` for the local row, always present for an ssh row.
     pub destination: Option<peer::PeerText>,
     /// The optional stored alias, editable from the host row's "⋯" menu.
@@ -2769,6 +2775,39 @@ mod tests {
         let present: Session =
             serde_json::from_value(body(Some(serde_json::json!("install-a")))).unwrap();
         assert_eq!(present.host_identity, Some(Some("install-a".into())));
+    }
+
+    /// Old host payloads remain ordinary, while a current Tensorlake row keeps
+    /// its explicit lifecycle ownership. Use the shared HTTP fixture so the
+    /// true case has a real sandbox binding and also checks the helm's encoding.
+    #[farhelm_testtrace::test]
+    fn session_ownership_decodes_legacy_absence_and_explicit_tensorlake_values() {
+        let mut body: serde_json::Value = serde_json::from_str(include_str!(
+            "../../farhelm-helm/http-contract/host-list.json"
+        ))
+        .unwrap();
+        let rows = body["hosts"].as_array_mut().unwrap();
+        let owned = rows.iter().find(|host| host["id"] == 11).unwrap().clone();
+        let ordinary = rows.iter().find(|host| host["id"] == 12).unwrap().clone();
+        let decoded: Host = serde_json::from_value(owned.clone()).unwrap();
+        assert_eq!(decoded.kind, HostKind::Tensorlake);
+        assert!(
+            decoded.tensorlake.is_some(),
+            "premise: ownership belongs to a sandbox"
+        );
+        assert!(decoded.is_session_owned);
+        assert!(
+            !serde_json::from_value::<Host>(ordinary)
+                .unwrap()
+                .is_session_owned
+        );
+        let mut legacy = owned;
+        legacy.as_object_mut().unwrap().remove("is_session_owned");
+        assert!(
+            !serde_json::from_value::<Host>(legacy)
+                .unwrap()
+                .is_session_owned
+        );
     }
 
     /// `Session::seen_activity_at`'s three wire shapes (review TEST-2),

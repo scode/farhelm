@@ -840,8 +840,8 @@ async fn ordinary_ssh_convergence_requires_tensorlake_install_admission() {
 /// Why: an upgraded helm's existing hosts must stay exactly what they were;
 /// only a row Farhelm registers as a sandbox may become one.
 ///
-/// Spec: a database rewound to schema 71 without its Tensorlake columns (and
-/// with an ssh host in it) reopens at the current version with all eight
+/// Spec: a database rewound to schema 71 without its Tensorlake columns or
+/// the schema-82 session owner (and with an ssh host in it) reopens at the current version with all eight
 /// present and null, and the ssh host still decodes as an ordinary ssh host
 /// with no binding. Reopening runs the schema-72 binding migration, the
 /// schema-73 pending-create migration and the schema-77 credential-delivery
@@ -855,6 +855,11 @@ async fn schema_72_leaves_every_existing_host_ordinary() {
     let ssh = store.add_ssh_host("user@box", None, None).await.unwrap();
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
+    // Schema 82's session-ownership column carries a CHECK that names
+    // tensorlake_sandbox, so SQLite refuses to drop that column while the
+    // owner column is still there. Schema 71 had neither; drop the owner first.
+    conn.execute_batch("ALTER TABLE hosts DROP COLUMN session_owned;")
+        .unwrap();
     for column in [
         "tensorlake_sandbox",
         "tensorlake_sandbox_id",
@@ -1226,6 +1231,194 @@ async fn a_recipe_in_use_cannot_be_deleted() {
 // ---------------------------------------------------------------------------
 // Removal through the REST route
 // ---------------------------------------------------------------------------
+
+/// A suspended disposable resource with two cached sessions and an explicitly
+/// incomplete listing. Delete must use whole-resource consent, never infer that
+/// the selected session is its last member or reconnect to find out.
+async fn suspended_session_sandbox(api: &FakeApi) -> (crate::rest_harness::Harness, HostId) {
+    let harness = crate::rest_harness::FleetBuilder::new()
+        .await
+        .tensorlake_api(Arc::new(api.clone()))
+        .start()
+        .await;
+    harness
+        .store
+        .save_tensorlake_config(SaveSettings {
+            api_key: Some(KEY.into()),
+            ..Default::default()
+        })
+        .await
+        .ok()
+        .unwrap();
+    let host = harness
+        .store
+        .register_session_sandbox(crate::store::NewTensorlakeHost {
+            destination: super::test_support::destination("farhelm-sess-k7q2-owned-abcd"),
+            entry: crate::store::NewHostEntry::new(Some("Owned sandbox")).unwrap(),
+            sandbox: "farhelm-sess-k7q2-owned-abcd".into(),
+            recipe: "dev".into(),
+            resources: farhelm_proto::tensorlake::recipes::RecipeSize {
+                cpus: 1,
+                memory_gb: 1,
+                disk_gb: 10,
+            },
+        })
+        .await
+        .unwrap();
+    harness
+        .store
+        .set_tensorlake_sandbox_id(host, "sbx-1")
+        .await
+        .unwrap();
+    let stored = row(&harness.store, host).await;
+    harness
+        .store
+        .record_first_contact(host, &crate::store::DialedAs::of(&stored), "owned-install")
+        .await
+        .unwrap();
+    let sessions = ["selected", "leftover"]
+        .into_iter()
+        .map(|id| {
+            crate::store::CachedRow::new(host, crate::rest_harness::session(id, 123)).unwrap()
+        })
+        .collect();
+    harness
+        .store
+        .replace_host_sessions(host, "owned-install", sessions, true)
+        .await
+        .unwrap();
+    harness.manager.sync_registry().await.unwrap();
+    assert!(
+        harness
+            .manager
+            .hold_connection(
+                host,
+                HostState::Suspended {
+                    observed_at: 123,
+                    suspended_by_farhelm_at: None,
+                    resume_failed: None,
+                }
+            )
+            .await
+    );
+    assert!(
+        harness.manager.status(host).unwrap().client.is_none(),
+        "premise: no supervisor is reachable"
+    );
+    assert_eq!(harness.store.cached_sessions(host).await.unwrap().len(), 2);
+    assert!(
+        row(&harness.store, host).await.cache_truncated,
+        "premise: cached names are not a complete inventory"
+    );
+    (harness, host)
+}
+
+/// Exercise consent and route ownership through the authenticated user API.
+async fn delete_sandbox_session(
+    harness: &crate::rest_harness::Harness,
+    host: HostId,
+    query: &str,
+) -> (axum::http::StatusCode, String) {
+    use tower::ServiceExt as _;
+    let request = axum::http::Request::builder()
+        .method("DELETE")
+        .uri(format!(
+            "/api/sessions/{}{}",
+            harness.session_ref(host, "selected"),
+            query
+        ))
+        .header("host", "127.0.0.1:7433")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = harness.router().oneshot(request).await.unwrap();
+    let status = response.status();
+    let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    (status, String::from_utf8(body.to_vec()).unwrap())
+}
+
+/// Whole-sandbox Delete is deliberately destructive for every leftover. It
+/// works suspended with an incomplete cache and needs explicit unconditional
+/// consent, so an old page cannot silently inherit this new consequence.
+#[farhelm_testtrace::test]
+async fn session_delete_destroys_the_whole_suspended_sandbox_with_explicit_consent() {
+    let api = FakeApi::default()
+        .with_sandbox(
+            "sbx-1",
+            "farhelm-sess-k7q2-owned-abcd",
+            SandboxStatus::Suspended,
+        )
+        .with_snapshot("snapshot", "sbx-1")
+        .with_snapshot("other-snapshot", "sbx-2");
+    let (harness, host) = suspended_session_sandbox(&api).await;
+    for query in ["", "?delete_sandbox=true&only_if_agent_ended=true"] {
+        let (status, text) = delete_sandbox_session(&harness, host, query).await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
+        assert!(
+            api.calls().is_empty(),
+            "refusal must precede every vendor mutation"
+        );
+        assert_eq!(harness.store.cached_sessions(host).await.unwrap().len(), 2);
+    }
+    let (status, text) = delete_sandbox_session(&harness, host, "?delete_sandbox=true").await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{text}");
+    assert!(
+        !harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .iter()
+            .any(|row| row.id == host)
+    );
+    assert!(
+        harness
+            .store
+            .cached_sessions(host)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(api.snapshot_ids(), ["other-snapshot"]);
+    let calls = api.calls();
+    assert!(
+        calls.iter().any(|call| call == "terminate sbx-1"),
+        "{calls:?}"
+    );
+    assert!(
+        !calls.iter().any(|call| call.starts_with("resume ")),
+        "{calls:?}"
+    );
+    let outcome: farhelm_proto::SessionDeleteOutcome = serde_json::from_str(&text).unwrap();
+    assert_eq!(outcome, farhelm_proto::SessionDeleteOutcome::default());
+}
+
+/// A failed snapshot sweep must keep the named resource and both cached
+/// sessions as the retry handle. A later explicit Delete finishes that same
+/// cleanup; no last-session proof or automatic retry is introduced.
+#[farhelm_testtrace::test]
+async fn failed_session_sandbox_cleanup_stays_visible_for_explicit_retry() {
+    let api = FakeApi::default()
+        .with_sandbox(
+            "sbx-1",
+            "farhelm-sess-k7q2-owned-abcd",
+            SandboxStatus::Suspended,
+        )
+        .with_snapshot("snapshot", "sbx-1")
+        .failing(
+            "delete-snapshot",
+            TensorlakeError::Transport("retry later".into()),
+        );
+    let (harness, host) = suspended_session_sandbox(&api).await;
+    let (status, text) = delete_sandbox_session(&harness, host, "?delete_sandbox=true").await;
+    assert!(!status.is_success(), "{text}");
+    assert!(row(&harness.store, host).await.is_session_owned());
+    assert_eq!(harness.store.cached_sessions(host).await.unwrap().len(), 2);
+    let (status, text) = delete_sandbox_session(&harness, host, "?delete_sandbox=true").await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{text}");
+    assert!(api.snapshot_ids().is_empty());
+}
 
 /// A helm over `api` with the key saved and one planted Tensorlake host,
 /// reconciled so it has an actor like any listed host.

@@ -27,7 +27,8 @@
           "sessions": 3,
           "status": "ok"
         }
-      }
+      },
+      "is_session_owned": false
     },
     {
       "alias": "alias2",
@@ -51,7 +52,8 @@
         "last_error": "connection refused",
         "phase": "connecting",
         "stage": "setting-up"
-      }
+      },
+      "is_session_owned": false
     },
     {
       "alias": "alias3",
@@ -74,7 +76,8 @@
         "cause": "transport-failure",
         "last_error": "timed out",
         "phase": "unreachable-reprobing"
-      }
+      },
+      "is_session_owned": false
     },
     {
       "alias": "alias4",
@@ -100,7 +103,8 @@
         "peer_protocol": 28,
         "phase": "version-skew",
         "remediation": "Update the host."
-      }
+      },
+      "is_session_owned": false
     },
     {
       "alias": "alias5",
@@ -123,7 +127,8 @@
         "phase": "identity-mismatch",
         "recorded": "old",
         "reported": "new"
-      }
+      },
+      "is_session_owned": false
     },
     {
       "alias": "alias6",
@@ -145,7 +150,8 @@
       "state": {
         "phase": "identity-unverified",
         "recorded": "old"
-      }
+      },
+      "is_session_owned": false
     },
     {
       "alias": "alias7",
@@ -168,7 +174,8 @@
         "identity": "identity2",
         "phase": "duplicate",
         "twin": 2
-      }
+      },
+      "is_session_owned": false
     },
     {
       "alias": "alias8",
@@ -190,7 +197,8 @@
       "state": {
         "phase": "retired",
         "reason": "removed"
-      }
+      },
+      "is_session_owned": false
     },
     {
       "alias": "alias9",
@@ -219,7 +227,8 @@
           "error": "list failed",
           "status": "failed"
         }
-      }
+      },
+      "is_session_owned": false
     },
     {
       "alias": "alias10",
@@ -247,7 +256,8 @@
         "refresh": {
           "status": "pending"
         }
-      }
+      },
+      "is_session_owned": false
     },
     {
       "alias": "alias11",
@@ -285,7 +295,8 @@
           "status": "ok",
           "sessions": 1
         }
-      }
+      },
+      "is_session_owned": true
     },
     {
       "alias": "alias12",
@@ -318,7 +329,8 @@
         "observed_at": 1700000100000,
         "suspended_by_farhelm_at": 1700000000000,
         "resume_failed": null
-      }
+      },
+      "is_session_owned": false
     }
   ]
 }

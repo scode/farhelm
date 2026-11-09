@@ -112,8 +112,8 @@ pub(super) enum ProbeResponse {
 /// background.
 #[derive(Debug, Serialize)]
 pub(crate) struct RunAccepted {
-    pub(super) host_id: HostId,
-    pub(super) run_id: String,
+    pub(crate) host_id: HostId,
+    pub(crate) run_id: String,
 }
 
 /// A frozen UPDATE or UNINSTALL plan with the helm's step descriptions.
@@ -300,7 +300,7 @@ pub(crate) async fn provisioning_state(
 /// Map provisioning's own typed refusals without parsing their diagnostics.
 /// Only the Remove remedy carries a machine-readable header: the response
 /// body can include remote text and is never authority for a UI action.
-fn provisioning_error(error: anyhow::Error) -> Response {
+pub(crate) fn provisioning_error(error: anyhow::Error) -> Response {
     if error.is::<BackendFailure>() {
         return (StatusCode::BAD_GATEWAY, format!("{error:#}")).into_response();
     }

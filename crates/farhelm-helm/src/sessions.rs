@@ -69,6 +69,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::warn;
 
+mod sandbox;
+pub(crate) use sandbox::{create_sandbox_session, stop_and_suspend};
+
 /// Query parameters for `GET /api/sessions`: the filters and order. There is
 /// no cursor and no page size, by contract (SPEC.md's
 /// Session list section): the reply is the whole list.
@@ -444,6 +447,48 @@ pub(crate) async fn preview_github_checkout(
             })
         }
         Err(error) => Err(error),
+    }
+}
+
+/// Resolve a template base name before dispatching any create. Both agent
+/// templates and new sandbox launches may search for an unused name, but only
+/// a supervisor's explicit Occupied reply permits advancing the sequence.
+/// An ambiguous create never comes back through this preview-only search.
+pub(crate) async fn preview_named_github_checkout(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    client: &SupervisorClient,
+    repo: &str,
+    title: &mut Option<String>,
+    name_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
+) -> anyhow::Result<GithubCheckoutPreviewBody> {
+    let base = (name_kind == Some(farhelm_proto::launcher::TemplateNameKind::Base))
+        .then(|| title.clone())
+        .flatten();
+    let mut sequence = farhelm_proto::github_checkout::CheckoutNameSequence::default();
+    loop {
+        match preview_github_checkout(state, claim, client, repo.to_string(), title.clone()).await {
+            Ok(preview) => return Ok(preview),
+            Err(error) => {
+                // This endpoint uses supervisor Conflict only for Occupied.
+                // A helm-side conflict, such as a missing installation identity,
+                // cannot authorize silently selecting another directory.
+                let occupied = error
+                    .downcast_ref::<SupervisorError>()
+                    .is_some_and(|error| {
+                        error.origin() == crate::client::ErrorOrigin::SupervisorReply
+                            && error.kind() == ErrorKind::Conflict
+                    });
+                if let Some(base) = &base
+                    && occupied
+                    && sequence.advance(false)
+                {
+                    *title = Some(sequence.name(base));
+                } else {
+                    return Err(error);
+                }
+            }
+        }
     }
 }
 
@@ -978,7 +1023,7 @@ fn refusal_text(host: store::HostId, state: &manager::HostState) -> String {
 /// by name (the compatibility rule in SPEC_impl.md's "What running sessions
 /// hold across versions": a retired spelling is refused with its
 /// replacement named, never silently ignored).
-#[derive(Deserialize, Default)]
+#[derive(Clone, Deserialize, Default)]
 pub(crate) struct RetiredCreateFields {
     #[serde(default)]
     invocation: Option<serde::de::IgnoredAny>,
@@ -1010,7 +1055,7 @@ impl RetiredCreateFields {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub(crate) struct CreateReq {
     /// Sent only by this create, never retained as a recent setup or launch.
     prompt: Option<String>,
@@ -1092,6 +1137,67 @@ pub(crate) struct CreateReq {
     /// they reach the supervisor directly, never this body, and the
     /// supervisor's restricted dispatcher refuses the create outright.
     github_checkout: Option<farhelm_proto::GithubCheckoutRequest>,
+}
+
+impl CreateReq {
+    /// Refuse an invalid recipe launch before any sandbox can start billing.
+    /// Placement belongs to the recipe route, and Folder means the new home;
+    /// accepting an installed host or stale folder here would disguise reuse.
+    pub(crate) async fn validate_sandbox_launch(&self, state: &AppState) -> anyhow::Result<()> {
+        if self.host.is_some() || self.expected_incarnation.is_some() {
+            return Err(invalid_request(
+                "a recipe launch cannot also select an installed host".into(),
+            ));
+        }
+        if let Some(checkout) = &self.github_checkout {
+            farhelm_proto::parse_github_repo(&checkout.repo)
+                .map_err(|error| invalid_request(format!("invalid GitHub repository: {error}")))?;
+            if checkout.preview.is_some() {
+                return Err(invalid_request(
+                    "a new sandbox cannot use an existing host's checkout preview".into(),
+                ));
+            }
+            if self.conversation.is_some() {
+                return Err(invalid_request(
+                    "named conversations cannot start in a new managed checkout; choose an existing folder".into(),
+                ));
+            }
+            if let (Some(outer), Some(inner)) = (&self.title, &checkout.title)
+                && outer != inner
+            {
+                return Err(invalid_request(
+                    "managed checkout and session titles must agree".into(),
+                ));
+            }
+            if state
+                .store
+                .resolve_checkout_config(None)
+                .await?
+                .root
+                .is_none()
+            {
+                return Err(invalid_request(
+                    "set a default checkout folder in Settings → Checkouts before launching a repository in a new sandbox".into(),
+                ));
+            }
+        } else {
+            if !self.cwd.is_empty() && self.cwd != "~" {
+                return Err(invalid_request(
+                    "a new sandbox's Folder must be its home directory".into(),
+                ));
+            }
+        }
+        // Ordinary create consumes its selectors. Validate a copy here so a
+        // future local refusal applies before billing as well as before RPC.
+        let launch = create_mode(&mut self.clone())?;
+        launch
+            .validate_initial_prompt(self.prompt.as_deref(), self.conversation.is_some())
+            .map_err(invalid_request)?;
+        if let Some(conversation) = &self.conversation {
+            launches::named_start(&launch, conversation.clone()).map_err(invalid_request)?;
+        }
+        Ok(())
+    }
 }
 
 /// Freeze client-controlled launch fields before mode compilation consumes
@@ -1360,6 +1466,19 @@ fn create_target(
                 )?
                 .id,
         };
+    // A disposable host is not a destination for unrelated ordinary creates.
+    // Its initial recipe launch and Replace use their captured host internally.
+    if state
+        .manager
+        .status(host)
+        .is_some_and(|status| status.is_session_owned)
+    {
+        return Err(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            "Choose the recipe to create a new sandbox; this sandbox belongs to its existing session"
+                .to_string(),
+        )));
+    }
     host_client(state, host)
 }
 
@@ -1495,11 +1614,69 @@ async fn forget_session(state: &AppState, claim: &manager::SessionClaim, session
 /// installation. See [`crate::precondition`].
 pub(crate) async fn create_session(
     State(state): State<Arc<AppState>>,
-    axum::Json(mut req): axum::Json<CreateReq>,
+    axum::Json(req): axum::Json<CreateReq>,
 ) -> impl IntoResponse {
-    // The router owns this action through recording the new session and its
-    // launch history; a dropped request must lose only the reply.
+    match create_session_request(&state, req, None).await {
+        Ok((claim, session)) => session_reply(&claim.entry_uuid, session),
+        Err(error) => http_error(error),
+    }
+}
 
+/// Create the first session on the resource this launch just registered.
+/// Normal creation refuses disposable destinations. This narrow entry point
+/// uses the already captured new host and shares all ordinary launch validation,
+/// workspace trust, checkout admission and cache publication.
+pub(crate) async fn create_in_session_sandbox(
+    state: &AppState,
+    host: store::HostId,
+    mut req: CreateReq,
+    name_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
+) -> anyhow::Result<farhelm_proto::SessionInfo> {
+    anyhow::ensure!(
+        crate::hosts::registry_row(state, host)
+            .await?
+            .is_session_owned(),
+        "the launch host is not a session-owned sandbox"
+    );
+    req.host = Some(host);
+    if let Some(checkout) = &mut req.github_checkout {
+        let (claim, client) = host_client(state, host)?;
+        let mut title = req.title.clone().or_else(|| checkout.title.clone());
+        // The machine did not exist at confirmation time. Resolve the accepted
+        // repository and naming policy on this new installation, then retain
+        // the same exact-preview admission used by an ordinary managed launch.
+        let preview = preview_named_github_checkout(
+            state,
+            &claim,
+            &client,
+            &checkout.repo,
+            &mut title,
+            name_kind,
+        )
+        .await?;
+        req.cwd = preview.binding.cwd.clone();
+        req.expected_incarnation = Some(preview.incarnation);
+        req.title = title.clone();
+        checkout.title = title;
+        checkout.preview = Some(preview);
+    } else {
+        req.cwd = "~".to_string();
+        req.expected_incarnation = None;
+    }
+    let (claim, session) = create_session_request(state, req, Some(host)).await?;
+    qualify_session_info(&claim.entry_uuid, session)
+}
+
+/// Resolve and create one user launch, retaining its captured host for the reply.
+/// The optional owned target is supplied only by initial sandbox provisioning;
+/// it does not turn a public host selector into permission to reuse that host.
+/// The router owns this through cache/history publication: disconnecting the
+/// browser loses only its reply, never the accepted session's bookkeeping.
+async fn create_session_request(
+    state: &AppState,
+    mut req: CreateReq,
+    owned_target: Option<store::HostId>,
+) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
     // FIRST, before mode resolution or target routing: a fresh-checkout
     // request's repository-text parse error must win over any
     // selector-shape error a body might also carry (the user should hear
@@ -1510,7 +1687,7 @@ pub(crate) async fn create_session(
     if let Some(checkout) = req.github_checkout.as_ref()
         && let Err(error) = farhelm_proto::parse_github_repo(&checkout.repo)
     {
-        return http_error(anyhow::Error::new(SupervisorError::helm(
+        return Err(anyhow::Error::new(SupervisorError::helm(
             ErrorKind::InvalidRequest,
             format!(
                 "invalid GitHub repository {:?}: {error}",
@@ -1522,21 +1699,18 @@ pub(crate) async fn create_session(
     // first so later reconciliation does not depend on mutable catalogs.
     let client_identity = fresh_create_request_identity(&req);
     let ordinary_mode = if req.github_checkout.is_none() {
-        match create_mode(&mut req) {
-            Ok(mode) => Some(mode),
-            Err(e) => return http_error(e),
-        }
+        Some(create_mode(&mut req)?)
     } else {
         None
     };
-    let (claim, client) = match create_target(&state, req.host) {
-        Ok(target) => target,
-        Err(e) => return http_error(e),
+    let (claim, client) = match owned_target {
+        Some(host) => host_client(state, host)?,
+        None => create_target(state, req.host)?,
     };
     if req.github_checkout.is_some() {
         let intent_key = req.intent_key.clone();
-        return match create_fresh_session(
-            &state,
+        let session = create_fresh_session(
+            state,
             &claim,
             &client,
             req,
@@ -1544,11 +1718,8 @@ pub(crate) async fn create_session(
             client_identity,
             None,
         )
-        .await
-        {
-            Ok(session) => session_reply(&claim.entry_uuid, session),
-            Err(error) => http_error(error),
-        };
+        .await?;
+        return Ok((claim, session));
     }
     // Checked HERE, and once, because routing and claim-taking are one read
     // for a create: `create_target` resolves the host, takes the connection,
@@ -1558,26 +1729,17 @@ pub(crate) async fn create_session(
     // revalidates the same claim under the host's write lock; the remembered
     // default does not, by design: it is a helm-wide suggestion rather than
     // a claim about the install currently behind this registry row.
-    if let Err(e) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
-        return http_error(e);
-    }
+    crate::precondition::incarnation_holds(&claim, req.expected_incarnation)?;
     let mode = ordinary_mode.expect("fresh requests returned through their shared admission path");
-    let mode =
-        match normalize_launch_workspace_trust(&state, &client, mode, &mut req.cwd, false).await {
-            Ok(mode) => mode,
-            Err(error) => return http_error(error),
-        };
-    let named_start = match req
+    let mode = normalize_launch_workspace_trust(state, &client, mode, &mut req.cwd, false).await?;
+    let named_start = req
         .conversation
         .take()
         .map(|value| launches::named_start(mode.as_launch(), value))
         .transpose()
-    {
-        Ok(start) => start,
-        Err(message) => return http_error(invalid_request(message)),
-    };
-    match do_create_session(
-        &state,
+        .map_err(invalid_request)?;
+    let session = do_create_session(
+        state,
         &claim,
         &client,
         CreateSpec {
@@ -1603,11 +1765,8 @@ pub(crate) async fn create_session(
             request_fingerprint: None,
         },
     )
-    .await
-    {
-        Ok(session) => session_reply(&claim.entry_uuid, session),
-        Err(e) => http_error(e),
-    }
+    .await?;
+    Ok((claim, session))
 }
 
 /// One create, with its host and its mode already resolved — everything
@@ -1832,7 +1991,12 @@ async fn accept_created_session(
     // Suggestions are a convenience written only after the session exists.
     // A database failure here must not turn a successful supervisor create
     // into an HTTP error that tempts the caller to submit it again.
-    if let Some(identity) = claim.identity.as_deref() {
+    if let Some(identity) = claim.identity.as_deref()
+        && !state
+            .manager
+            .status(claim.host)
+            .is_some_and(|status| status.is_session_owned)
+    {
         let history = match store::CachedRow::new(claim.host, session.clone()) {
             Ok(checked) => {
                 state
@@ -3113,6 +3277,10 @@ pub(crate) struct DeleteQuery {
     only_if_nothing_alive: bool,
     #[serde(default)]
     only_if_agent_ended: bool,
+    /// The caller showed the always-on whole-sandbox confirmation. Omission
+    /// must not let an older page's ordinary session Delete destroy a machine.
+    #[serde(default)]
+    delete_sandbox: bool,
 }
 
 /// `DELETE /api/sessions/{id}` — remove a session and all its stored state
@@ -3159,6 +3327,11 @@ pub(crate) async fn delete_session(
         query.only_if_nothing_alive,
         query.only_if_agent_ended,
     );
+    match sandbox::delete_if_owned(&state, &key, query.delete_sandbox, guard).await {
+        Ok(Some(outcome)) => return axum::Json(outcome).into_response(),
+        Ok(None) => {}
+        Err(error) => return http_error(error),
+    }
     match do_delete_session(&state, &key, guard, None).await {
         Ok(outcome) => axum::Json(outcome).into_response(),
         Err(e) => http_error(e),
@@ -3176,6 +3349,14 @@ pub(crate) async fn do_delete_session(
     guard: farhelm_proto::DeleteGuard,
     agent_connection: Option<u64>,
 ) -> anyhow::Result<farhelm_proto::SessionDeleteOutcome> {
+    // This helper also serves agents. Resource deletion has its own explicit
+    // user consent above; Replace removes its source directly on the supervisor.
+    if crate::hosts::registry_row(state, key.host)
+        .await?
+        .is_session_owned()
+    {
+        return Err(sandbox::user_only_delete());
+    }
     let id = key.session_id.as_str();
     let (claim, client) = route_session(state, key).await?;
     if agent_connection.is_some_and(|expected| expected != client.connection_id()) {
@@ -3644,6 +3825,38 @@ pub(crate) struct ReplaceReq {
 /// resolved. A recorded result uses its durable snapshot; an unknown key must
 /// still satisfy the accepted preview's current incarnation and revision.
 pub(crate) async fn do_replace_session(
+    state: &AppState,
+    key: &store::SessionKey,
+    intent_key: Option<String>,
+    with: Option<CreateReq>,
+    guard: farhelm_proto::DeleteGuard,
+    confirm_yolo: bool,
+) -> anyhow::Result<Replaced> {
+    let result = replace_session_inner(state, key, intent_key, with, guard, confirm_yolo).await;
+    match result {
+        Err(error) => {
+            let row = crate::hosts::registry_row(state, key.host).await.ok();
+            if let Some(binding) = row
+                .as_ref()
+                .filter(|row| row.is_session_owned())
+                .and_then(|row| row.tensorlake.as_ref())
+            {
+                Err(error.context(format!(
+                    "Replace did not finish. Sandbox {} and its files were retained. User-confirmed Delete destroys the whole sandbox",
+                    binding.sandbox
+                )))
+            } else {
+                Err(error)
+            }
+        }
+        success => success,
+    }
+}
+
+/// Ordinary create-then-remove replacement. Its internal source deletion is
+/// deliberately session-only even on a disposable host; failure never authorizes
+/// whole-resource cleanup of a sandbox containing the user's existing files.
+async fn replace_session_inner(
     state: &AppState,
     key: &store::SessionKey,
     intent_key: Option<String>,

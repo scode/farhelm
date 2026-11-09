@@ -80,6 +80,7 @@ fn catalog() -> Vec<LaunchCatalogModel> {
 pub(crate) fn template_host_identities(views: &[HostView]) -> Vec<String> {
     views
         .iter()
+        .filter(|view| !view.is_session_owned)
         .filter(|view| !matches!(view.state, HostStateView::IdentityMismatch { .. }))
         .filter_map(|view| view.identity.clone())
         .collect()
@@ -89,7 +90,8 @@ pub(crate) fn template_host_identities(views: &[HostView]) -> Vec<String> {
 /// [`template_host_identities`] states.
 pub(crate) fn template_host_row<'v>(views: &'v [HostView], identity: &str) -> Option<&'v HostView> {
     views.iter().find(|view| {
-        view.identity.as_deref() == Some(identity)
+        !view.is_session_owned
+            && view.identity.as_deref() == Some(identity)
             && !matches!(view.state, HostStateView::IdentityMismatch { .. })
     })
 }
@@ -165,6 +167,7 @@ pub(crate) fn resolve(
     let context = TemplateContext {
         catalog: &catalog,
         known_hosts,
+        known_recipes: &[],
         host_fixed: spawn,
     };
     let state =

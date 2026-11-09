@@ -2167,6 +2167,7 @@ mod tests {
             yolo_without_asking: false,
             commands_without_asking: false,
             own_sessions_without_asking: false,
+            is_session_owned: false,
             links_without_asking: false,
             local_links_without_asking: false,
         };
@@ -2311,6 +2312,7 @@ mod tests {
             yolo_without_asking: false,
             commands_without_asking: false,
             own_sessions_without_asking: false,
+            is_session_owned: false,
             links_without_asking: false,
             local_links_without_asking: false,
         };

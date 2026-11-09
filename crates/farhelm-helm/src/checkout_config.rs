@@ -3329,6 +3329,8 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE hosts DROP COLUMN links_without_asking;
                  ALTER TABLE hosts DROP COLUMN local_links_without_asking;
+                 -- Schema 82's ownership check refers to the Tensorlake columns.
+                 ALTER TABLE hosts DROP COLUMN session_owned;
                  -- Schema 72 added the Tensorlake host columns.
                  ALTER TABLE hosts DROP COLUMN tensorlake_sandbox;
                  ALTER TABLE hosts DROP COLUMN tensorlake_sandbox_id;

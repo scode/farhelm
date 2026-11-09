@@ -44,7 +44,7 @@ pub use backend::{LocalSupervisorDiscovery, discover_local_supervisor};
 // snapshot builder's ssh runner rather than copied there.
 pub(crate) use backend::{CommandLauncher, SystemLauncher, capture_child, isolate_process_group};
 pub(crate) use http::{
-    probe_host, provision_host, provisioning_state, uninstall_host, update_host,
+    probe_host, provision_host, provisioning_error, provisioning_state, uninstall_host, update_host,
 };
 pub(crate) use payloads::PayloadSelection;
 pub use release_payloads::{RELEASE_KEY_RING, verify_signed_metadata, verify_signed_sums};
@@ -1058,6 +1058,7 @@ mod tests {
                 yolo_without_asking: false,
                 commands_without_asking: false,
                 own_sessions_without_asking: false,
+                session_owned: false,
                 links_without_asking: false,
                 local_links_without_asking: false,
                 icon: Default::default(),
@@ -1117,6 +1118,7 @@ mod tests {
             yolo_without_asking: false,
             commands_without_asking: false,
             own_sessions_without_asking: false,
+            session_owned: false,
             links_without_asking: false,
             local_links_without_asking: false,
             icon: Default::default(),
@@ -1347,6 +1349,7 @@ mod tests {
             yolo_without_asking: false,
             commands_without_asking: false,
             own_sessions_without_asking: false,
+            session_owned: false,
             links_without_asking: false,
             local_links_without_asking: false,
             icon: Default::default(),

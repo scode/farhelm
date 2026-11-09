@@ -46,7 +46,7 @@ fn answer(result: anyhow::Result<()>) -> Response {
 /// live viewers when the sandbox is already running. A real resume still
 /// withdraws that old connection before success, even if the actor missed an
 /// external suspension.
-async fn change(state: &AppState, host: HostId, resume: bool) -> anyhow::Result<()> {
+pub(crate) async fn change(state: &AppState, host: HostId, resume: bool) -> anyhow::Result<()> {
     let _lock = state.manager.try_host_provision_lock(host).ok_or_else(|| {
         refusal(
             ErrorKind::Conflict,

@@ -336,7 +336,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 81;
+pub(crate) const SCHEMA_VERSION: i64 = 82;
 
 /// Named secrets have their own table so list responses never need to decode a
 /// secret-bearing configuration object. The monotonically increasing revision
@@ -918,6 +918,10 @@ pub struct HostRow {
     /// Retargeting and adopting an installation preserve it; removal and re-addition do not.
     pub entry_uuid: String,
     pub kind: HostKind,
+    /// This Tensorlake resource was registered for a session launch. It keeps
+    /// ordinary host diagnostics and connection machinery; the marker records
+    /// its disposable lifecycle, not a session inventory or a permission grant.
+    pub session_owned: bool,
     pub destination: Option<String>,
     /// An optional user-facing label. When present it replaces the derived
     /// destination or local label everywhere except the details view.
@@ -962,6 +966,17 @@ pub struct HostRow {
     pub tensorlake: Option<TensorlakeBinding>,
 }
 
+impl HostRow {
+    /// Whether a session launch owns this sandbox's whole-resource lifecycle.
+    ///
+    /// Ownership is fixed at registration and survives ordinary row changes.
+    /// It says nothing about how many sessions remain after a failed Replace;
+    /// explicit sandbox deletion does not require that information.
+    pub fn is_session_owned(&self) -> bool {
+        self.session_owned
+    }
+}
+
 /// A `hosts` row's `kind` and three nullable text columns, read by a single
 /// row lookup; the alias keeps clippy's `type_complexity` lint quiet, and
 /// each reader's `SELECT` says which three columns it holds.
@@ -999,6 +1014,7 @@ type RawHostRow = (
     Option<i64>,
     // Schema 73: an unresolved create must survive a helm restart.
     Option<i64>,
+    bool,
     bool,
 );
 
@@ -1936,10 +1952,11 @@ impl NewHostEntry {
     }
 }
 
-/// A Tensorlake host about to be registered
-/// ([`HelmStore::register_tensorlake_host`]): the destination and sandbox
-/// name Farhelm chose, the user's name for the host (its alias), and the
-/// recipe and size the sandbox will be created from.
+/// The resource facts recorded before ordinary or session-owned sandbox creation.
+///
+/// Both registration entry points take the same chosen destination and name,
+/// optional alias, recipe and size. The caller chooses resource ownership;
+/// recording these facts does not contact Tensorlake or validate launch prerequisites.
 pub(crate) struct NewTensorlakeHost {
     pub(crate) destination: String,
     pub(crate) entry: NewHostEntry,
@@ -2522,6 +2539,8 @@ pub struct HelmStore {
 ///   retained across an interrupted create without opening connection admission.
 /// - 80: default-off authority for agents to manage sessions on their own host.
 /// - 81: shared condition notices, retaining existing hosts and preferences.
+/// - 82: default-off session ownership on Tensorlake hosts, without rebuilding
+///   hosts or adding session-membership state.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2629,6 +2648,8 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
                  tensorlake_prepared_install_json TEXT,
                  -- Appended like the upgrade's ADD COLUMN; existing hosts receive no grant.
                  own_sessions_without_asking INTEGER NOT NULL DEFAULT 0 CHECK (own_sessions_without_asking IN (0, 1)),
+                 -- A session launch owns the resource lifecycle, without tracking members.
+                 session_owned INTEGER NOT NULL DEFAULT 0 CHECK (session_owned IN (0, 1) AND (session_owned = 0 OR tensorlake_sandbox IS NOT NULL)),
                  CHECK (
                      (kind = 'local' AND destination IS NULL AND remote_farhelm IS NULL
                           AND remote_state_dir IS NULL)
@@ -2849,7 +2870,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 81;",
+              PRAGMA user_version = 82;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
         ))
@@ -4618,6 +4639,24 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         tx.execute_batch("PRAGMA user_version = 81;")
             .context("migrating helm.db to schema version 81")?;
         version = 81;
+    }
+    if version == 81 {
+        // Append in place: rebuilding hosts would cascade its dependent rows.
+        // Version-only historical fixtures may already carry this column; keep
+        // their explicit ownership rather than inferring it from names or sessions.
+        // Its CHECK names tensorlake_sandbox: historical-shape fixtures must
+        // drop ownership first before removing the older Tensorlake columns.
+        let exists: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM pragma_table_info('hosts') WHERE name = 'session_owned'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            tx.execute_batch("ALTER TABLE hosts ADD COLUMN session_owned INTEGER NOT NULL DEFAULT 0 CHECK (session_owned IN (0, 1) AND (session_owned = 0 OR tensorlake_sandbox IS NOT NULL));")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 82;")
+            .context("migrating helm.db to schema version 82")?;
+        version = 82;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -6481,7 +6520,7 @@ impl HelmStore {
                      host_identity, cache_truncated, yolo_without_asking, commands_without_asking, icon, color, \
                      links_without_asking, local_links_without_asking, entry_uuid, \
                      tensorlake_sandbox, tensorlake_sandbox_id, tensorlake_recipe, \
-                     tensorlake_resources, tensorlake_suspended_at, tensorlake_pending_create_at, own_sessions_without_asking \
+                     tensorlake_resources, tensorlake_suspended_at, tensorlake_pending_create_at, own_sessions_without_asking, session_owned \
                      FROM hosts ORDER BY id ASC",
                 )
                 .context("preparing host list query")?;
@@ -6510,6 +6549,7 @@ impl HelmStore {
                                 r.get(19)?,
                                 r.get(20)?,
                                 r.get(21)?,
+                                r.get(22)?,
                             ))
                         })
                         .context("querying hosts")?
@@ -6540,6 +6580,7 @@ impl HelmStore {
                                 tensorlake_suspended_at,
                                 tensorlake_pending_create_at,
                                 own_sessions_without_asking,
+                                session_owned,
                             )| {
                                 let host_kind =
                                     HostKind::from_columns(&kind, tensorlake_sandbox.as_deref())?;
@@ -6556,6 +6597,7 @@ impl HelmStore {
                                 Ok(HostRow {
                                     id,
                                     kind: host_kind,
+                                    session_owned,
                                     entry_uuid: decode_entry_uuid(entry_uuid)?,
                                     destination,
                                     alias,
@@ -6745,10 +6787,10 @@ impl HelmStore {
             .await
     }
 
-    /// Register a Tensorlake host whose sandbox does not exist yet: the row
+    /// Register an ordinary Tensorlake host whose sandbox does not exist yet: the row
     /// is the record of what Farhelm is about to create (P3), so it is
-    /// written before anything billed happens, and removing it later deletes
-    /// the sandbox ([`Self::remove_host_row`]).
+    /// written before anything billed happens. Forgetting the row later requires
+    /// proof that the sandbox and its snapshots are gone ([`Self::remove_host_row`]).
     ///
     /// One transaction refuses a destination that is already an entry and a
     /// name another host displays as ([`new_entry_conflict`], the same
@@ -6759,6 +6801,31 @@ impl HelmStore {
     pub(crate) async fn register_tensorlake_host(
         &self,
         new: NewTensorlakeHost,
+    ) -> anyhow::Result<HostId> {
+        self.register_tensorlake(new, false).await
+    }
+
+    /// Record a session launch's sandbox ownership before any billed work.
+    ///
+    /// Uses ordinary Tensorlake registration's validation and permissions in
+    /// the same insert transaction. The marker is present before this returns,
+    /// even though the sandbox and its initial session do not yet exist. This
+    /// records resource ownership only; it does not track session membership.
+    pub(crate) async fn register_session_sandbox(
+        &self,
+        new: NewTensorlakeHost,
+    ) -> anyhow::Result<HostId> {
+        self.register_tensorlake(new, true).await
+    }
+
+    /// Keep ordinary and session-owned registrations on one atomic write path.
+    ///
+    /// The caller chooses the resource lifecycle; neither choice changes host
+    /// permissions, collision checks, transport or the retained creation facts.
+    async fn register_tensorlake(
+        &self,
+        new: NewTensorlakeHost,
+        session_owned: bool,
     ) -> anyhow::Result<HostId> {
         if !destination_is_usable(&new.destination) {
             return Err(anyhow::Error::new(HostStoreError::InvalidDestination(
@@ -6779,9 +6846,9 @@ impl HelmStore {
                         concat!(
                             "INSERT INTO hosts (kind, destination, alias, entry_uuid, \
                              yolo_without_asking, tensorlake_sandbox, tensorlake_recipe, \
-                             tensorlake_resources) VALUES ('",
+                             tensorlake_resources, session_owned) VALUES ('",
                             host_kind_sql!(ssh),
-                            "', ?1, ?2, ?3, 1, ?4, ?5, ?6)"
+                            "', ?1, ?2, ?3, 1, ?4, ?5, ?6, ?7)"
                         ),
                         rusqlite::params![
                             new.destination,
@@ -6790,6 +6857,7 @@ impl HelmStore {
                             new.sandbox,
                             new.recipe,
                             resources,
+                            session_owned,
                         ],
                     )
                     .context("inserting the Tensorlake host")?;
@@ -9970,6 +10038,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
+                 ALTER TABLE hosts DROP COLUMN session_owned;
                  ALTER TABLE hosts DROP COLUMN own_sessions_without_asking;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
@@ -15429,6 +15498,286 @@ mod tests {
         assert_eq!(store.launch_templates().await.unwrap(), vec![template]);
     }
 
+    /// A registration input before any vendor work. No recipe lookup or cloud
+    /// fixture is needed to establish the durable resource-ownership record.
+    fn sandbox_registration(name: &str) -> NewTensorlakeHost {
+        NewTensorlakeHost {
+            destination: format!("{name}@{name}.sandbox.tensorlake.ai"),
+            entry: NewHostEntry::new(Some(name)).unwrap(),
+            sandbox: name.into(),
+            recipe: "test-recipe".into(),
+            resources: farhelm_proto::tensorlake::recipes::RecipeSize {
+                cpus: 1,
+                memory_gb: 1,
+                disk_gb: 10,
+            },
+        }
+    }
+
+    /// Session ownership must be durable before creation, keep ordinary host
+    /// permissions, and survive unrelated changes. A name alone must never
+    /// classify an ordinary Tensorlake registration as session-owned.
+    #[farhelm_testtrace::test]
+    async fn session_sandbox_registration_persists_ownership_without_changing_defaults() {
+        let (dir, store) = fresh_store().await;
+        store
+            .add_ssh_host("ordinary.example", None, None)
+            .await
+            .unwrap();
+        let ordinary = store
+            .register_tensorlake_host(sandbox_registration("farhelm-sess-ordinary"))
+            .await
+            .unwrap();
+        let owned = store
+            .register_session_sandbox(sandbox_registration("owned"))
+            .await
+            .unwrap();
+        let rows = store.list_hosts().await.unwrap();
+        assert_eq!(rows.len(), 4, "owned hosts stay in the ordinary registry");
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.is_session_owned())
+                .map(|row| row.id)
+                .collect::<Vec<_>>(),
+            [owned]
+        );
+        for host in [ordinary, owned] {
+            let row = rows.iter().find(|row| row.id == host).unwrap();
+            assert_eq!(row.kind, HostKind::Tensorlake);
+            assert!(row.yolo_without_asking);
+            assert!(!row.commands_without_asking && !row.own_sessions_without_asking);
+            assert!(!row.links_without_asking && !row.local_links_without_asking);
+            assert!(row.tensorlake.as_ref().unwrap().sandbox_id.is_none());
+            assert!(row.remote_farhelm.is_none() && row.remote_state_dir.is_none());
+        }
+        assert!(
+            store
+                .register_session_sandbox(sandbox_registration("owned"))
+                .await
+                .is_err()
+        );
+        let mut collision = sandbox_registration("other");
+        collision.entry = NewHostEntry::new(Some("owned")).unwrap();
+        assert!(store.register_session_sandbox(collision).await.is_err());
+        assert_eq!(
+            store.list_hosts().await.unwrap(),
+            rows,
+            "refused registrations leave no partial row"
+        );
+
+        store
+            .update_alias(owned, Some("Kept sandbox"))
+            .await
+            .unwrap();
+        store.set_yolo_without_asking(owned, false).await.unwrap();
+        store
+            .set_tensorlake_pending_create(owned, Some(42))
+            .await
+            .unwrap();
+        store
+            .set_tensorlake_sandbox_id(owned, "sandbox-id")
+            .await
+            .unwrap();
+        store
+            .admit_tensorlake_install(owned, "/fixture/farhelm", "/fixture/state")
+            .await
+            .unwrap();
+        store
+            .record_first_contact(owned, &dialed_as(&store, owned).await, "owned-install")
+            .await
+            .unwrap();
+        store
+            .set_tensorlake_suspended_at(owned, Some(100))
+            .await
+            .unwrap();
+        let changed = store.list_hosts().await.unwrap();
+        let retained = changed.iter().find(|row| row.id == owned).unwrap();
+        assert!(retained.is_session_owned());
+        assert_eq!(retained.host_identity.as_deref(), Some("owned-install"));
+        assert_eq!(
+            retained.tensorlake.as_ref().unwrap().sandbox_id.as_deref(),
+            Some("sandbox-id")
+        );
+        drop(store);
+        let path = dir.path().join("helm.db");
+        let reopened = HelmStore::open(&path).await.unwrap();
+        assert_eq!(reopened.list_hosts().await.unwrap(), changed);
+        drop(reopened);
+        // Some historical migration fixtures rewind only the version. Replaying
+        // that ladder must preserve an already-recorded lifecycle owner.
+        Connection::open(&path)
+            .unwrap()
+            .pragma_update(None, "user_version", 81)
+            .unwrap();
+        let reopened = HelmStore::open(&path).await.unwrap();
+        assert_eq!(reopened.list_hosts().await.unwrap(), changed);
+    }
+
+    /// Adding the owner must not rebuild hosts: dependent cache and viewer rows
+    /// cascade from it. Exercise the genuine missing-column upgrade, retain
+    /// existing Tensorlake facts, then register an owned resource on that schema.
+    #[farhelm_testtrace::test]
+    async fn schema_82_adds_ownership_without_cascading_host_rows() {
+        let (dir, store) = fresh_store().await;
+        store
+            .add_ssh_host("upgrade-ssh.example", None, None)
+            .await
+            .unwrap();
+        let host = store
+            .register_tensorlake_host(sandbox_registration("upgrade"))
+            .await
+            .unwrap();
+        store
+            .set_tensorlake_pending_create(host, Some(42))
+            .await
+            .unwrap();
+        store
+            .record_first_contact(host, &dialed_as(&store, host).await, "kept")
+            .await
+            .unwrap();
+        store
+            .replace_host_sessions(
+                host,
+                "kept",
+                admitted_rows(host, vec![session("kept-session", 123)]),
+                false,
+            )
+            .await
+            .unwrap();
+        let key = SessionKey::new(host, "kept-session");
+        store.mark_seen(&key, 123).await.unwrap();
+        store.set_pinned(&key, true).await.unwrap();
+        store
+            .raise_notification_marks(&key, 3, NotificationMark::Read)
+            .await
+            .unwrap();
+        store
+            .record_create_history(host, "kept", &session("kept-session", 123))
+            .await
+            .unwrap();
+        let rows = store.list_hosts().await.unwrap();
+        let cached = store.cached_sessions(host).await.unwrap();
+        let history = history_counts(&store, host, "kept");
+        let seen = store
+            .seen_activity(std::slice::from_ref(&key))
+            .await
+            .unwrap();
+        let pins = store
+            .pinned_sessions(std::slice::from_ref(&key))
+            .await
+            .unwrap();
+        let marks = store
+            .notification_marks(std::slice::from_ref(&key))
+            .await
+            .unwrap();
+        assert_eq!(
+            cached.len(),
+            1,
+            "premise: cache can be lost to a host cascade"
+        );
+        assert!(
+            history.0 > 0,
+            "premise: launch history can be lost to a host cascade"
+        );
+        assert_eq!(
+            seen.get(&key),
+            Some(&123),
+            "premise: a seen stamp is present"
+        );
+        assert!(pins.contains(&key), "premise: a pin is present");
+        assert_eq!(
+            marks.get(&key),
+            Some(&(3, 0)),
+            "premise: read, but not dismissed, is recorded"
+        );
+        let path = dir.path().join("helm.db");
+        drop(store);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("PRAGMA foreign_keys = ON; ALTER TABLE hosts DROP COLUMN session_owned; PRAGMA user_version = 81;").unwrap();
+            assert_eq!(
+                conn.query_row(
+                    "SELECT count(*) FROM pragma_table_info('hosts') WHERE name = 'session_owned'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+                0,
+                "premise: this is a genuine 81-to-82 upgrade"
+            );
+        }
+        let migrated = HelmStore::open(&path).await.unwrap();
+        assert_eq!(migrated.list_hosts().await.unwrap(), rows);
+        assert_eq!(migrated.cached_sessions(host).await.unwrap(), cached);
+        assert_eq!(history_counts(&migrated, host, "kept"), history);
+        assert_eq!(
+            migrated
+                .seen_activity(std::slice::from_ref(&key))
+                .await
+                .unwrap(),
+            seen
+        );
+        assert_eq!(
+            migrated
+                .pinned_sessions(std::slice::from_ref(&key))
+                .await
+                .unwrap(),
+            pins
+        );
+        assert_eq!(
+            migrated
+                .notification_marks(std::slice::from_ref(&key))
+                .await
+                .unwrap(),
+            marks
+        );
+        let fresh = HelmStore::open(&dir.path().join("fresh.db")).await.unwrap();
+        assert_eq!(
+            schema_objects(&migrated.conn.lock()),
+            schema_objects(&fresh.conn.lock())
+        );
+        for store in [&migrated, &fresh] {
+            let ordinary = store.list_hosts().await.unwrap();
+            assert!(ordinary.iter().all(|row| !row.is_session_owned()));
+            let owned = store
+                .register_session_sandbox(sandbox_registration("after-upgrade"))
+                .await
+                .unwrap();
+            {
+                let conn = store.conn.lock();
+                for row in ordinary.iter().filter(|row| row.tensorlake.is_none()) {
+                    assert!(
+                        conn.execute("UPDATE hosts SET session_owned = 1 WHERE id = ?1", [row.id])
+                            .is_err(),
+                        "ordinary hosts cannot acquire sandbox ownership"
+                    );
+                }
+                assert!(
+                    conn.execute("UPDATE hosts SET session_owned = 2 WHERE id = ?1", [owned])
+                        .is_err()
+                );
+                assert!(
+                    conn.execute(
+                        "UPDATE hosts SET tensorlake_sandbox = NULL WHERE id = ?1",
+                        [owned]
+                    )
+                    .is_err(),
+                    "ownership cannot outlive its resource binding"
+                );
+            }
+            assert!(
+                store
+                    .list_hosts()
+                    .await
+                    .unwrap()
+                    .iter()
+                    .find(|row| row.id == owned)
+                    .unwrap()
+                    .is_session_owned()
+            );
+        }
+    }
+
     /// A prepared create needs its own facts across restart, without admitting
     /// a supervisor early. Recording the vendor ID settles ownership but must
     /// retain those facts until the exact clone is admitted.
@@ -16051,6 +16400,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
+                 ALTER TABLE hosts DROP COLUMN session_owned;
                  ALTER TABLE hosts DROP COLUMN own_sessions_without_asking;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;

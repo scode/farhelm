@@ -668,6 +668,7 @@ mod tests {
         let context = TemplateContext {
             catalog: &[],
             known_hosts: &["host-install".into()],
+            known_recipes: &[],
             host_fixed: false,
         };
         for state in [
