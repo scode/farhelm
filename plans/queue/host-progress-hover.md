@@ -325,3 +325,33 @@ passed its review gate, and the last code PR makes the TODO.md changes the accep
 If a `## Decisions` section exists, its latest entry must also be satisfied. Then close the plan per
 `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write
 a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-11-09 (claim 7be251).
+
+### Long host diagnostics cannot fit beside a readable current step
+
+This plan gives the Hosts progress line and the sidebar's working host row the same hover card: every step and its
+status, the current step, and connection detail including the last SSH failure. The recorded decision includes the run's
+own message when present. The card stays non-interactive, and the current step must remain visible in a short window.
+
+The shared card is implemented, but review found an overflow conflict. A normal composed SSH error can be longer than a
+300-pixel-high window. Keeping that diagnosis fixed while shrinking only the steps can hide the current step and clip
+the error's tail. Browser checks reproduced current-step clipping on Chromium and WebKit while an update was running and
+its host was reconnecting. Both the required code reviewer and an independent scope review found that the existing
+plain-tooltip line limit does not authorize truncating this card.
+
+How should the card handle connection detail or a run message that cannot fit alongside a readable current step?
+
+- Keep the card non-interactive and show a bounded diagnostic preview, visibly saying that full details are in Hosts.
+  Preserve space for the current step. Clicking the existing host identity still opens Hosts, where the full diagnosis
+  is available. This is the smallest change, but a user may have to open Hosts to read the important tail of a long
+  error; it is an explicit exception to the full-detail-on-hover requirement.
+- Allow a scrollable diagnostic region inside the card so the whole message can be read there while the current step
+  stays visible. This preserves access to the text on hover but changes the agreed non-interactive behavior, including
+  pointer ownership, dismissal and keyboard access, and needs more implementation and testing.
+
+Recommendation: the bounded preview with a visible full-details indication. No preview, extra interaction or new
+overflow mechanism has been implemented without this decision. The draft work remains incomplete and must not land until
+this choice is recorded and its behavior is implemented and reviewed.
