@@ -72,7 +72,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   that measures memory, attach size and attach time before and after. Plan: `plans/queue/grid-binary-stream.md`.
 
 - **Bootstrap a Podman image on a remote host.** Automatically bootstrap a Podman image on a remote host, with some
-  reasonable defaults, as a supported flow.
+  reasonable defaults, as a supported flow. Plan: `plans/queue/podman-environments.md`.
 
 - **Show the user when the trash cannot finish freeing space.** With `instant-trash-delete`, a deleted checkout leaves
   the trash at once and the host removes its files in the background, retrying after restarts when it cannot (files
@@ -145,7 +145,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `plans/queue/muse-session-tracking.md`.
 
 - **Podman rigor: review findings for containerized sessions.** Future work for the experimental feature, from the
-  2026-11-04 triage; these findings were assessed from source, not reproduced at runtime.
+  2026-11-04 triage; these findings were assessed from source, not reproduced at runtime. Plan:
+  `plans/queue/podman-environments.md` (the two approval-card findings go to
+  `plans/queue/environment-agent-operations.md`).
   - Launch approval cards must show the container settings, reusing the template card's rows.
   - Container-bearing approval cards must use a card kind older pages cannot decode, as prompt-bearing and
     shortcut-moving cards already do, before or together with "Containerized sessions: `farhelm spawn` and CLI flags".
@@ -169,16 +171,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Containerized sessions: Farhelm integration inside the container.** The first, experimental containerized sessions
   (rootless podman) run like a launch with conversation hooks turned off: no hooks, no conversation capture for Restart,
   no `farhelm agent` commands or spawning, no attachments from inside. Add the full integration, restricted so a
-  containerized agent cannot ask for a session outside its container.
+  containerized agent cannot ask for a session outside its container. Plan:
+  `plans/queue/environment-agent-operations.md`.
 
 - **Containerized sessions: Restart.** Containerized sessions cannot be restarted, because Farhelm captures no
   conversation inside the container; Replace starts over in a new container instead. Support Restart (and Restart with)
   by resuming the conversation the agent recorded in the session's container. Needs the conversation capture from the
-  integration entry above.
+  integration entry above. Plan: `plans/queue/podman-environments.md`.
 
 - **Containerized sessions: `farhelm spawn` and CLI flags.** Let `farhelm spawn` and the other CLI entry points request
   a containerized launch directly; today only the launcher, templates and launches copied from another session carry the
-  settings.
+  settings. Plan: `plans/queue/environment-agent-operations.md`.
 
 - **Stop containers an agent started through podman before killing processes.** Today Stop, tab close and Delete end a
   podman container that an agent or tab started (`podman run -d`, say) only by killing its processes, because the
@@ -227,11 +230,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Containerized sessions: localhost tunnels and file links.** Make localhost tunnels reach services listening inside a
   session's container, and make file links in terminal output work for container paths outside the checkout. Until then,
   a tunnel offered for a localhost URL a containerized agent prints reaches that port on the host, not in the container,
-  and file links are offered only inside the checkout.
+  and file links are offered only inside the checkout. Plan: `plans/queue/podman-environments.md`.
 
 - **Containerized sessions: plain folders.** Consider allowing the Containerized option for "Where: folder" launches,
   which only managed checkouts get today. Git breaks inside the container for a folder that is a git worktree or a
-  subfolder of a repository, since only the folder itself is mounted.
+  subfolder of a repository, since only the folder itself is mounted. Plan: `plans/queue/podman-environments.md`.
 
 - **Release stable from the approved RC without rebuilding.** When an RC has been built and declared correct, releasing
   stable should default to promoting that RC's artifacts, not rebuilding everything for the stable tag. Today a stable
@@ -306,7 +309,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Credentials for containerized sessions and ordinary hosts.** The Credentials section of Settings (planned in
   `plans/queue/settings-credentials.md`) serves only Tensorlake hosts, through their recipes. Extend it so containerized
   sessions and ordinary SSH hosts can use the same named credentials, for example a GitHub token in place of the
-  containerized sessions' token file.
+  containerized sessions' token file. Plan: `plans/queue/podman-environments.md` (the containerized half; ordinary SSH
+  hosts stay).
 
 - **After tmux and xterm.js are dropped entirely: simplify terminal kind tracking.** While old terminals (tmux, drawn by
   xterm.js) and new terminals (terminal hosts, drawn by the grid) coexist, every layer tracks which kind each terminal
@@ -436,6 +440,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   ask for. It should not reach the user's other hosts any further than it could from anywhere else (the trust questions
   in `lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md` and SPEC.md's "Local authority and trust between
   hosts"). Then allow that much. Spawning another sandbox session from the same recipe is the obvious first candidate.
+  Plan: `plans/queue/environment-agent-operations.md`.
 
 - **Auto-suspend forgotten sandbox sessions.** A sandbox session bills its CPU and memory for as long as its sandbox
   runs. While the helm is connected, Tensorlake's idle timeout never fires, because the helm's connection counts as
