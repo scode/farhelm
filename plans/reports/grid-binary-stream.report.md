@@ -161,3 +161,94 @@ rebase: no actionable findings. Commit/PR wording passed cold readers. The three
 verified open, draft and correctly based at heads 18ab54fd (#3245), 1690bc88 (#3252) and 2dd41cf7 (#3255). The report's
 required cold read checked decision context and public-repository hygiene before delivery. No PR was marked ready or
 merged by the executor.
+
+### Landing
+
+Landed alone in its round. Since its stack was based, main had gained the rail notification bell, smaller bulk-transfer
+chunks (mux-chunk-size, which raised the protocol version to 71), a queue-picking rule for plan executors, and planning
+bookkeeping. A fresh-context review read the plan against all of that and found nothing that must change before merging,
+and two things worth fixing at landing (below). The steadier terminal sizing on session switch was already in the plan's
+base. This plan's change to the grid component only touches how a link hover recognizes its lines, so the fix that keeps
+text from shifting on a session switch is intact. Grid messages do not travel through the transfer path mux-chunk-size
+shrank: they still go one message per frame, the supervisor packs rows into messages of about 32 KiB (a single huge row
+can go alone, up to 1 MiB), and the helm passes them on unread. Browser input stays JSON within its 64 KiB bound.
+
+You decided while this plan was blocked that typical output's memory staying essentially unchanged does not fail it,
+since the goal is cutting the extremes. The report and the specs record that exception.
+
+#### Fixes made at landing
+
+- The protocol version is now 72. The rebase had dropped this plan's own bump to 71, because mux-chunk-size had already
+  taken that number. But main had then been speaking 71 with the old JSON rows for several hours, and this plan makes 71
+  mean binary rows. A development helm and supervisor from either side of this landing would have connected and then
+  failed inside the terminal stream, with reconnect loops instead of a clear version refusal. No release carries 71 (the
+  newest tags, the v0.38.0 release candidates, are at 70), so 72 costs nothing for users. The pinned version test,
+  SPEC_impl.md and the commit message now say 72 (#3252). Where the executor's report says the change uses protocol 71,
+  read 72.
+- A by-hand Rust measurement of attach cost in the supervisor, ignored in normal runs and described in the check
+  inventory (`.agents/validation.md`), looked for the screen frame by its JSON text. With this plan's binary frames it
+  no longer reported when the screen arrives, and its optional dump wrote binary messages one per line, which cannot be
+  split back. It now recognizes the binary frame record, and the dump is length-prefixed; the inventory says so (#3255).
+  The report's attach-cost figures come from the browser benchmark this plan adds, not from this measurement, so they
+  stand. Rerun after the fix, the measurement put the screen at 1.7 s for typical output and about 0.6 s for the two
+  colored kinds over its simulated 10 Mbit/s link.
+- Another TODO.md entry still referred to the encoding overhaul entry this plan completes and removes; it now names this
+  plan (#3255).
+
+#### Things you should know
+
+- Remote hosts need updating after this release anyway (mux-chunk-size); with 72, a host or helm on a development build
+  from the last few hours of main is refused with a version mismatch rather than half-working.
+- From the review, small and left as they are: two helm comments still call grid messages "JSON"; the benchmark imports
+  `playwright` without declaring it in `e2e/package.json` (it is installed as part of `@playwright/test`); the
+  link-hover lookup in `grid-terminal.js` repeats a line mapping that also lives in `grid-buffer.js`, so a change to one
+  must change both.
+
+#### Checks
+
+Run on the plan stacked on main before the landing fixes (top at `980ac423`), on this development machine and, at the
+maintainer's request, on Tensorlake sandboxes:
+
+- Here: `cargo fmt --all -- --check`, `dprint check`, `python3 releasing/check-changelog.py format`,
+  `python3 scripts/check-agents-md.py`, the test-sleep checker, `scripts/check-desktop-assets.sh` (no desktop asset was
+  added or removed), `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+  `cargo check -p farhelm-ui --features desktop` passed.
+- Here, run directly rather than through the test recorder, so without run ids (their output was read in full): the UI's
+  JavaScript unit tests and the benchmark's own tests (`node --test`), all passing with none skipped; and the grid
+  component's browser suite (`npx playwright test --config grid-client/playwright.config.ts`, Chromium and WebKit), 204
+  passed.
+- Tensorlake, browser, using the release web build: `grid-terminal`, `terminal`, `terminal-switch-geometry`,
+  `terminal-reconnect`, `terminal-clipboard`, `terminal-links`, `terminal-unicode`, `grid-flood`, `terminal-flood` and
+  `terminal-tabs` on Chromium and WebKit: 295 passed, none failed, skipped or retried. Runs `30ad9da2`, `12d95394`,
+  `bb88f060`, `bdc6f228`, `27403bf2`, `9c4e4025`, `81da8c8a` and `90fdba94`, in the recorder's plain command mode (its
+  Playwright mode cannot pick one engine per file) under the sandbox's slightly older Node 24. Every sandbox reported
+  its per-user systemd manager and its SSH to itself working. I also asked for `terminal-scroll-freeze`, which belongs
+  to the old-terminal set that only a separate run includes, so its two sandboxes found no such project and ran nothing
+  (runs `9ead4f3c`, `7f5e4344`). That spec is about old terminals, which this plan does not change.
+- Tensorlake, Rust: every Rust test in the workspace except the desktop app's (the sandboxes cannot build it; the
+  desktop compile check above covers its code), from one archive over nine sandboxes. Runs `a501bfb4`, `b989bfca`,
+  `1701c463`, `d230a97e`, `51c036ad`, `837e35b0`, `1ff1c1f2`, `67c4a065` and `ced86e3c`. Two tests failed, neither in
+  code this plan touches:
+  - `attribute_compile_contract_matrix` needs a nested `cargo` the sandboxes lack; its crate is untouched, and it passed
+    here in an earlier round on a tree differing only outside it (run `05991d87`).
+  - `service::core::tests::a_failed_create_replays_its_error_and_a_changed_override_conflicts` (run `d230a97e`,
+    retained) timed out waiting 10 seconds for a create reply on a loaded sandbox, as it did in the previous round. It
+    passed five times in a row here on the merged tree (run `9f342a7d`). It is recorded as a latent flake in a separate
+    bookkeeping PR after this landing.
+
+After the landing fixes (protocol 72, the measurement test, documentation), run here: formatting, `dprint check`,
+`python3 scripts/check-agents-md.py`, `cargo clippy --all-targets -- -D warnings`, and recorded
+`cargo nextest run -p farhelm-proto -p farhelm-helm -p farhelm-supervisor -p farhelm --lib --test e2e` filtered to the
+protocol version pins and version-skew tests, the grid encoding and the grid stream: 109 passed (run `b7d9f262`). The
+version-skew tests are written against the constant, so they followed the bump. The ignored attach-cost measurement then
+ran by hand for all three kinds of output (run `cb939566`) and again reports when the screen arrives. Nothing else was
+rerun: the fixes changed one constant that only the pinned test names, one ignored test, and documentation. Main after
+the merge differs from the tested tree only by planning bookkeeping that landed meanwhile.
+
+Reused: the earlier-round pass of `attribute_compile_contract_matrix` named above, and the pre-fix runs carried to the
+merged tree for the reason given (the fixes touched one constant, one ignored test and documentation). Nothing from the
+executor's own runs is relied on.
+
+Skipped: the rest of the browser suite (the specs above cover the terminal paths this plan changes), the old-terminal
+browser set (old terminals are unchanged), the desktop smoke (no desktop-only code changed) and hosted CI (manual-only,
+not dispatched).
