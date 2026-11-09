@@ -523,11 +523,13 @@ pub(crate) struct DeleteCheckoutTrashReq {
 }
 
 /// Read one host independently so a slow or unreachable host does not delay
-/// answers from the others. The helm keeps no archived-checkout cache.
+/// answers from the others. The helm keeps no archived-checkout cache, but a
+/// capable answer records shared condition notices before returning it.
 pub(crate) async fn list_checkout_trash(
     State(state): State<Arc<AppState>>,
     axum::Json(req): axum::Json<CheckoutTrashReq>,
 ) -> impl IntoResponse {
+    let request_guard = state.trash_requests.lock(req.host).await;
     let (claim, client) = match host_client(&state, req.host) {
         Ok(target) => target,
         Err(error) => return http_error(error),
@@ -536,9 +538,32 @@ pub(crate) async fn list_checkout_trash(
         return http_error(error);
     }
     match client.list_checkout_trash(req.measure_sizes).await {
-        Ok(listing) => axum::Json(listing).into_response(),
+        Ok(listing) => {
+            let notice_error =
+                crate::notices::observe_trash(&state, claim, listing.clone(), request_guard)
+                    .await
+                    .err()
+                    .map(|_| {
+                        "Could not save shared notices. Open Trash again to retry.".to_owned()
+                    });
+            axum::Json(CheckoutTrashBody {
+                listing,
+                notice_error,
+            })
+            .into_response()
+        }
         Err(error) => http_error(error),
     }
+}
+
+/// A local notice-save failure must remain visible without hiding the host's
+/// actual trash answer or making a remote cleanup look like it failed.
+#[derive(Serialize)]
+struct CheckoutTrashBody {
+    #[serde(flatten)]
+    listing: farhelm_proto::CheckoutTrashListing,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notice_error: Option<String>,
 }
 
 /// Empty an explicitly selected set on one observed host. The router owns
@@ -547,6 +572,7 @@ pub(crate) async fn delete_checkout_trash(
     State(state): State<Arc<AppState>>,
     axum::Json(req): axum::Json<DeleteCheckoutTrashReq>,
 ) -> impl IntoResponse {
+    let _request_guard = state.trash_requests.lock(req.host).await;
     let (claim, client) = match host_client(&state, req.host) {
         Ok(target) => target,
         Err(error) => return http_error(error),
@@ -555,7 +581,14 @@ pub(crate) async fn delete_checkout_trash(
         return http_error(error);
     }
     match client.delete_checkout_trash(req.ids).await {
-        Ok(deleted) => axum::Json(deleted).into_response(),
+        Ok(deleted) => {
+            // Acceptance is enough to make other clients re-read this host;
+            // it is never evidence that the underlying files are gone.
+            if !deleted.removed.is_empty() {
+                state.manager.events().bump();
+            }
+            axum::Json(deleted).into_response()
+        }
         Err(error) => http_error(error),
     }
 }

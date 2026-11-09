@@ -3342,6 +3342,8 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN tensorlake_prepared_install_json;
                  -- Schema 80 added the own-host session grant.
                  ALTER TABLE hosts DROP COLUMN own_sessions_without_asking;
+                 -- Schema 81 added the shared condition notices.
+                 DROP TABLE notices;
                  -- Schema 62 added host entry UUIDs, which v26 did not have.
                  DROP INDEX hosts_entry_uuid;
                  ALTER TABLE hosts DROP COLUMN entry_uuid;

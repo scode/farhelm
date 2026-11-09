@@ -4325,6 +4325,24 @@ refetches after all requests settle. Close and Escape stay available. The archiv
 persistent trash button, consumes it on the local Delete reply, and uses finite Web Animations with reduced-motion
 refusal. No global geometry cache or new asset file is introduced.
 
+The helm keeps shared non-session condition notices in one host-cascading table. Each notice has a non-reused integer
+ID, its host/kind/checkout key, first raise time, read and resolved flags, and a tagged content snapshot. The initial
+kind is stuck trash. A repeated failure updates its reason and time without changing its ID, raise time or read state;
+unknown disk usage preserves the last known size. A capable successful listing resolves only IDs absent from both its
+checkouts and diagnostic IDs, and a host-wide diagnostic prevents resolution. Queued Retry, an old host's listing,
+unreachability and a cleanup receipt establish no resolution. Resolution persists read as well as resolved, so reopening
+retained history never re-alerts it. Host removal cascades its notices.
+
+`GET /api/notices` returns newest-first history; `POST /api/notices/marks` requires an explicit action and exact IDs,
+marking those read or deleting only their resolved rows. A per-host trash gate serializes forwarded reads and Deletes
+across clients without holding session/cache or provisioning locks during the RPC. Before recording, the existing brief
+registry write fence revalidates the entry, connection incarnation and installation identity; the SQLite transaction
+checks the stored binding too. Started blocking work owns both gates and its changed-only fleet invalidation through
+commit even if the HTTP reader is cancelled. Successful nonempty cleanup receipts also invalidate the fleet, without
+resolving notices. An observation-save failure preserves the host's successful listing and returns a separate optional
+`notice_error`; it never fabricates a selectable trash issue or hides actual archives. No extra observer, timer or
+channel records these notices.
+
 ### Runtime state
 
 - State in SQLite (rusqlite) at `~/.local/state/farhelm/supervisor.db`: sessions and their metadata (SPEC.md's

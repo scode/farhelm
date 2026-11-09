@@ -141,6 +141,9 @@ mod ensure;
 /// polling loops (PLAN_M6_75.md item 5).
 mod events;
 
+/// Shared condition notices, initially stuck archived-checkout removal.
+mod notices;
+
 /// `POST /api/feedback` — sends the UI's feedback submission to the project's
 /// feedback endpoint; the helm's explicit feedback connection carrying user text.
 mod feedback;
@@ -521,6 +524,9 @@ struct AppState {
     /// counter instead of against the endpoint, which is the half that can
     /// actually forget to admit.
     event_subscriber_cap: usize,
+    /// Order trash observations across clients without holding the host's
+    /// session/cache or provisioning locks during remote work.
+    trash_requests: notices::TrashRequests,
     /// The one in-flight provisioning authority shared by every browser.
     provisioning: Arc<provisioning::ProvisioningService>,
     /// Own the event-driven updater independently of any connected interface.
@@ -651,6 +657,7 @@ impl AppState {
             store: store.clone(),
             auth: auth::AuthState::for_mode(store, mode),
             event_subscriber_cap: events::MAX_SUBSCRIBERS,
+            trash_requests: notices::TrashRequests::default(),
             provisioning,
             client_log_rate: std::sync::Mutex::new(client_log::RateWindow::new(
                 std::time::Instant::now(),
@@ -691,6 +698,8 @@ fn api_router(state: Arc<AppState>) -> Router {
             get(sessions::list_sessions).post(sessions::create_session),
         )
         .route("/api/launch-catalog", get(sessions::launch_catalog))
+        .route("/api/notices", get(notices::get))
+        .route("/api/notices/marks", axum::routing::post(notices::marks))
         .route("/api/sessions/{id}/tunnels", get(tunnels::list_tunnels))
         .route(
             "/api/sessions/{id}/tunnels/{tunnel_id}",
@@ -957,8 +966,9 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/sessions/{id}/tunnels/open",
             axum::routing::post(tunnels::open_tunnel),
         )
-        // Read-only POSTs retain cancellable lookup/remote work. Browse may
-        // refine suggestion history atomically, but that is best effort and
+        // Read-only POSTs retain cancellable lookup/remote work. A started
+        // trash-notice commit owns its narrow guards through DB completion.
+        // Browse may refine suggestion history atomically, but that is best effort and
         // repaired by the next browse/create, not an accepted mutation tail.
         .route(
             "/api/checkout-trash/list",
