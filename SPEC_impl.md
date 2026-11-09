@@ -7555,9 +7555,12 @@ layout.
 Update also checks the probed supervisor version against the shared upgrade floor at planning and at execution, on both
 connected and protocol-skewed paths, beside the downgrade and newer-schema refusals. A single refusal helper takes the
 floor as an input and uses the probed program and data paths in its manual recovery advice: stop the host's Farhelm
-supervisor service, remove its program directory, optionally remove the data directory if losing that data is accepted,
-then remove the host from Farhelm and set it up again. Development builds and unparseable versions stay exempt. No
-protocol field, host state or automatic-update scheduling rule changes.
+supervisor service, remove its dedicated Farhelm installation directory, optionally remove the data directory if losing
+that data is accepted, then remove the host from Farhelm and set it up again. The reported executable can live in a
+shared or custom binary directory: its parent is not assumed to be Farhelm-owned, and the advice says to remove only
+Farhelm-owned files there, preserving the shared parent. A missing data path stays unknown rather than being inferred
+from the executable. Development builds and unparseable versions stay exempt. No protocol field, host state or
+automatic-update scheduling rule changes.
 
 The supervisor-unit ownership rule in SPEC.md is enforced twice on remote Linux hosts. The reach check reports whether
 the user-unit directory already holds a `farhelm-supervisor.service` whose first line is setup's managed-by marker (the

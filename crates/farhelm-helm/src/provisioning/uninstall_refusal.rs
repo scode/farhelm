@@ -40,7 +40,8 @@ pub(super) fn unusable_host(state: &HostState, twin: Option<(&str, HostKind)>) -
                     "Farhelm can't uninstall from this host yet: it runs farhelm {host}, which is \
                      too old for this helm ({helm}) to talk to, so Farhelm can't check whether any \
                      of its sessions are still running. Update the host first (its update button \
-                     in the host list), then choose uninstall again"
+                     in the host list), then choose uninstall again. If Update refuses because \
+                     Farhelm is too old to update, follow its manual removal instructions"
                 )
             } else {
                 // A development or prerelease label is not a stable upgrade target.

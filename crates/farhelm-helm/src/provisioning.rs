@@ -2952,6 +2952,182 @@ mod tests {
         assert!(backend.operations.lock().unwrap().is_empty());
     }
 
+    /// A floor refusal must describe the answering installation without
+    /// treating a shared binary directory as disposable Farhelm state.
+    /// Missing data coordinates stay unknown, and remote controls remain
+    /// escaped text rather than changing a terminal's rendering.
+    #[farhelm_testtrace::test]
+    fn upgrade_floor_advice_preserves_shared_directories_and_unknown_data() {
+        for program in [
+            Path::new("/home/fixture/.local/lib/farhelm/farhelm"),
+            Path::new("/opt/shared/bin/farhelm"),
+        ] {
+            let data = Path::new("/srv/farhelm-data");
+            let text = service::upgrade_floor_refusal("0.9.0", "1.0.0", program, Some(data))
+                .expect("the literal source is below the literal floor");
+            assert!(text.contains(&crate::manager::peer_text(program.to_str().unwrap())));
+            assert!(text.contains(&crate::manager::peer_text(data.to_str().unwrap())));
+            assert!(text.contains("only if that directory is dedicated to Farhelm"));
+            assert!(text.contains("remove only the Farhelm-owned files"));
+            assert!(text.contains("do not delete the shared parent directory"));
+            assert!(text.contains("only if you accept losing"));
+        }
+        let program = Path::new("/opt/shared/\u{1b}[31mfarhelm");
+        let text = service::upgrade_floor_refusal("0.9.0", "1.0.0", program, None).unwrap();
+        assert!(text.contains(&crate::manager::peer_text(program.to_str().unwrap())));
+        assert!(!text.contains('\u{1b}'));
+        assert!(text.contains("did not report its data directory"));
+        assert!(!text.contains("Its data directory is"));
+    }
+
+    /// Update refuses a below-floor source on both protocol paths, first
+    /// while planning and again for the exact admitted run at confirmation.
+    /// A host can change between those probes, so the second refusal must
+    /// name the newly observed coordinates without saving them or mutating
+    /// the host. Literal policy inputs survive future production floor raises.
+    #[farhelm_testtrace::test]
+    async fn update_refuses_a_host_below_its_upgrade_floor() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let registered_program = root.path().join("registered/bin/farhelm");
+        let registered_data = root.path().join("registered/data");
+        let host = harness
+            .store
+            .add_ssh_host(
+                "floor.example",
+                registered_program.to_str(),
+                registered_data.to_str(),
+            )
+            .await
+            .unwrap();
+        harness.manager.sync_registry().await.unwrap();
+        let before = harness.store.list_hosts().await.unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let mut service = service(&harness, backend.clone(), root.path());
+        Arc::get_mut(&mut service)
+            .expect("the fresh injected service has no other owners")
+            .upgrade_floor = "1.0.0";
+        *service.helm_build_override.lock().unwrap() = Some("2.0.0".to_string());
+        let observed_program = root.path().join("observed/shared/bin/farhelm");
+        let observed_data = root.path().join("observed/data");
+        assert_ne!(registered_program, observed_program);
+        assert_ne!(registered_data, observed_data);
+        let observe = |skewed: bool, build: &str, program: &Path, data: &Path| {
+            Some(Ok(if skewed {
+                ProbeObservation::SkewedSupervisor {
+                    database_schema: None,
+                    peer_build: build.to_string(),
+                    dial_farhelm: program.to_path_buf(),
+                    dial_state_dir: Some(data.to_path_buf()),
+                }
+            } else {
+                ProbeObservation::Supervisor {
+                    database_schema: None,
+                    build_version: build.to_string(),
+                    host_identity: None,
+                    dial_farhelm: program.to_path_buf(),
+                    dial_state_dir: Some(data.to_path_buf()),
+                }
+            }))
+        };
+        for skewed in [false, true] {
+            *backend.probe.lock().unwrap() =
+                observe(skewed, "0.9.0", &observed_program, &observed_data);
+            let error = service
+                .plan_update(host)
+                .await
+                .expect_err("the source is too old");
+            assert!(matches!(
+                error.downcast_ref::<http::ProvisioningRequestError>(),
+                Some(http::ProvisioningRequestError::Refused(_))
+            ));
+            let text = format!("{error:#}");
+            for expected in [
+                "0.9.0",
+                "1.0.0",
+                "stop its Farhelm supervisor service",
+                observed_program.to_str().unwrap(),
+                observed_data.to_str().unwrap(),
+                "Then remove the host from Farhelm and set it up again",
+            ] {
+                assert!(text.contains(expected), "{expected}: {text}");
+            }
+            assert!(
+                !text.contains(registered_program.to_str().unwrap()),
+                "{text}"
+            );
+            assert!(backend.operations.lock().unwrap().is_empty());
+            assert_eq!(harness.store.list_hosts().await.unwrap(), before);
+
+            for build in [
+                "1.0.0",
+                "1.1.0",
+                "0.0.0-unreleased",
+                "0.0.0-other+build",
+                "unknown",
+                "",
+            ] {
+                *backend.probe.lock().unwrap() =
+                    observe(skewed, build, &observed_program, &observed_data);
+                service
+                    .plan_update(host)
+                    .await
+                    .unwrap_or_else(|error| panic!("{build:?}, skewed={skewed}: {error:#}"));
+            }
+            *backend.probe.lock().unwrap() =
+                observe(skewed, "1.0.0", &observed_program, &observed_data);
+            let preview = service
+                .plan_update(host)
+                .await
+                .expect("the floor itself plans");
+            assert_eq!(preview.plan.farhelm_path, observed_program);
+            assert_eq!(preview.plan.state_dir, observed_data);
+            assert_eq!(harness.store.list_hosts().await.unwrap(), before);
+            let changed_program = root.path().join("changed/shared/bin/farhelm");
+            let changed_data = root.path().join("changed/data");
+            assert_ne!(changed_program, observed_program);
+            assert_ne!(changed_data, observed_data);
+            *backend.probe.lock().unwrap() =
+                observe(skewed, "0.9.0", &changed_program, &changed_data);
+            let accepted = service
+                .start_update(
+                    host,
+                    ProvisionRequest {
+                        probe_id: preview.probe_id,
+                    },
+                )
+                .await
+                .expect("the admitted run rechecks its source");
+            // An earlier failed run can still occupy the published view.
+            // Wait for this acceptance's identity, not any terminal status.
+            let view = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    let view = service.view(host).await.unwrap();
+                    if view.run_id.as_deref() == Some(accepted.run_id.as_str())
+                        && matches!(view.status, RunStatus::Completed | RunStatus::Failed)
+                    {
+                        break view;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("accepted run {} did not finish", accepted.run_id));
+            assert_eq!(view.status, RunStatus::Failed);
+            let message = view.message.unwrap_or_default();
+            for expected in [
+                "upgrade floor",
+                changed_program.to_str().unwrap(),
+                changed_data.to_str().unwrap(),
+            ] {
+                assert!(message.contains(expected), "{expected}: {message}");
+            }
+            assert!(!message.contains("host stderr"), "{message}");
+            assert!(backend.operations.lock().unwrap().is_empty());
+            assert_eq!(harness.store.list_hosts().await.unwrap(), before);
+        }
+    }
+
     /// Update refuses a host whose supervisor database schema is newer than
     /// the one this helm's supervisor opens, at planning and at confirmation.
     ///
