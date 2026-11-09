@@ -41,6 +41,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **One-click "update and always auto-update" in the sidebar's host update prompt.** The prompt at the top of the
+  sidebar offers Update, and Update all when several hosts qualify, while making future updates automatic lives only in
+  Settings, as the "Update remote hosts automatically" checkbox. Add an action beside them that updates the listed
+  update hosts now and turns that preference on, so the user does not have to find the setting afterwards. The label
+  must be short, with the full meaning in its tooltip; the preference save needs the checkbox's failure handling so a
+  write that fails is visible rather than leaving the user believing the hosts will keep themselves updated.
+
 - **Let a remote Mac's uninstall work when a volume name contains " (" or " on ".** Before removing Farhelm's
   directories from a remote Mac, uninstall reads the Mac's mount table to make sure nothing is mounted inside them, both
   when planning and again at the final directory removal, after the supervisor's job is already gone. The parser refuses
