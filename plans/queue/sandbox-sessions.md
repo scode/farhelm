@@ -760,25 +760,80 @@ narrow exception in the specification: an actually last session may need a Resum
 restarting compute billing. The alternative (an explicit "destroy the whole sandbox" choice) was not taken because it
 could kill a surviving session and delete its files.
 
-## Blocked
+### 2026-11-09: answer to a blocked question
 
-Blocked on 2026-11-09 (claim 2eac5a).
+The question, as the executor put it:
 
-### Sandbox-session ownership and failure recovery
+> Blocked on 2026-11-09 (claim 2eac5a).
+>
+> ### Sandbox-session ownership and failure recovery
+>
+> The maintainer stopped implementation because the plan had grown a protocol for tracking which sessions remain in a
+> sandbox after a failed Replace. The existing Decisions make Delete destroy the sandbox only with its last session and
+> sometimes require Resume first to prove that fact. This went beyond the original intent: deleting a sandbox session
+> throws away its disposable computer.
+>
+> The maintainer has now answered the following questions in the executor's conversation and authorized proceeding. This
+> block and its answer record that discussion in the shared plan, rather than leaving the revised requirements in the
+> executor's local log. The answer is already supplied by the maintainer; do not substitute a monitor's judgment.
+>
+> Should Delete always destroy the sandbox, while a failed Replace preserves the existing sandbox and files? May failed
+> normal launches discard only their newly created sandbox? Should agent requests be refused without notifications?
+> Should session-owned hosts remain in the Hosts list and normal sidebar attention area, with only their permanent rail
+> icons hidden? May additive conveniences be deferred without creating a design that must be rewritten to add them?
+>
+> The existing draft specification, storage and policy PRs and unpublished lifecycle work must be reconciled with the
+> answer. They have not merged. The earlier design and their passing reviews do not override the maintainer's new
+> choices.
 
-The maintainer stopped implementation because the plan had grown a protocol for tracking which sessions remain in a
-sandbox after a failed Replace. The existing Decisions make Delete destroy the sandbox only with its last session and
-sometimes require Resume first to prove that fact. This went beyond the original intent: deleting a sandbox session
-throws away its disposable computer.
+The maintainer's answer:
 
-The maintainer has now answered the following questions in the executor's conversation and authorized proceeding. This
-block and its answer record that discussion in the shared plan, rather than leaving the revised requirements in the
-executor's local log. The answer is already supplied by the maintainer; do not substitute a monitor's judgment.
+### Maintainer-approved simplification: disposable sandbox ownership
 
-Should Delete always destroy the sandbox, while a failed Replace preserves the existing sandbox and files? May failed
-normal launches discard only their newly created sandbox? Should agent requests be refused without notifications? Should
-session-owned hosts remain in the Hosts list and normal sidebar attention area, with only their permanent rail icons
-hidden? May additive conveniences be deferred without creating a design that must be rewritten to add them?
+These requirements replace contrary text in this plan, its acceptance criteria, and earlier Decisions. In particular,
+the earlier last-session-only Delete decision and the later unknown-finality/Resume-before-Delete decision are
+superseded. Amend the draft SPEC.md and SPEC_impl.md changes to match before continuing implementation. Existing
+unmerged code and previous review approvals are not requirements to preserve.
 
-The existing draft specification, storage and policy PRs and unpublished lifecycle work must be reconciled with the
-answer. They have not merged. The earlier design and their passing reviews do not override the maintainer's new choices.
+The maintainer confirmed that deleting a sandbox session destroys its whole sandbox. This was the original intent.
+Explicit Delete always confirms that the sandbox, every session and running process in it, its files and snapshots go
+away. It works while the supervisor is disconnected or the sandbox is suspended, subject to the ordinary Tensorlake API
+and credential requirements. Delete does not depend on proving that a session is the last member and never resumes the
+sandbox to count sessions. If cleanup fails, retain the resource and its reason for a later explicit retry.
+
+For an ordinary new launch, failure may discard the new sandbox created for that launch, including when the session
+creation reply was lost. Attempt cleanup and report the launch failure. A failed cleanup or interrupted launch must
+leave the named resource discoverable for explicit deletion; do not add transparent reconciliation or exactly-once
+recovery merely to hide rare failures.
+
+Replace is different because it operates on a sandbox holding existing user work. Keep Replace in the existing sandbox.
+Create the replacement before removing the old session. Replace's internal removal of the old session is session-only;
+it must never call the user's whole-sandbox Delete. No failed or ambiguous Replace may automatically destroy the
+existing sandbox or its files. A partial failure may leave two sessions or uncertainty about whether the old session was
+removed. Report what is known and identify the retained sandbox; in a rare unrecoverable case, a clear message directing
+the user to recover data manually is acceptable. Do not build membership/finality proof or a new recovery protocol to
+conceal that case. A later user-confirmed Delete still destroys the whole sandbox.
+
+Refuse agent operations from sandbox sessions, with enforcement at the helm and the existing fail-closed behavior when
+no helm is attached. The maintainer approved enforcement without notifications: remove the sandbox-specific
+bell/notification requirement and the persistent supervisor restriction and acknowledgement machinery introduced to
+serve it. Keep agents from creating or destroying billed sandboxes through other hosts or recipe templates. Do not treat
+a supervisor running as the agent's own Unix account as a new security boundary.
+
+Hide session-owned hosts only from permanent navigation-rail icons by default. Opening Hosts lists them with the
+ordinary host diagnostics and applicable controls. Preserve their ordinary update eligibility and the sidebar's existing
+attention area for updates, problems and progress, even when Hosts is closed. A visibility filter must not remove their
+underlying host records, update tracking or attention entries. Reuse these existing surfaces rather than duplicating all
+host diagnostics in the session UI. They remain session-owned; listing them does not turn their disposable machine into
+an ordinary destination for unrelated session creation.
+
+Keep the core recipe/template launch, Clone into a new sandbox, individual Suspend/Resume, Stop and suspend, deliberate
+Delete and discoverable failed cleanup. Plain Suspend preserves running processes. Defer additive conveniences such as
+bulk Suspend/Resume/Stop and suspend and recipe recent setups when they would expand the implementation. The maintainer
+directly authorizes such scope reductions without asking again, provided they do not sacrifice existing user data or
+create a shortcut that requires rewriting the design to add the deferred feature later. Do not replace removed
+complexity with speculative extension frameworks.
+
+The maintainer approved proceeding after discussing both Replace failure behavior and the host-list/rail distinction.
+This authorization applies to the simplified sandbox-session work; it does not restart the stopped drain of other plans,
+authorize changes to the live installation, or authorize merging the draft stack.
