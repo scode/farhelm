@@ -105,11 +105,12 @@ session's terminal shows your tmux instead. To leave Farhelm's terminals alone, 
 
 ## tmux is still needed
 
-Farhelm still requires tmux for now, and checks its version, even after you move every session: keep it installed. On
-your Mac, Farhelm does not start without a new enough tmux;
-[Install Farhelm](/docs/get-started/install/#if-the-installer-asks-for-tmux) says which version. Setting up a remote
-host still checks the host's tmux too, and brings Farhelm's own copy when the host has no new enough one
-([Add a remote host](/docs/get-started/add-a-remote-host/) covers that).
+The Farhelm desktop app and setup on Linux hosts still require tmux for now and check its version, even after you move
+every session: keep it installed on those machines. On your local Mac, the desktop app does not start without a new
+enough tmux; [Install Farhelm](/docs/get-started/install/#if-the-installer-asks-for-tmux) says which version. Setting up
+a remote Linux host still checks the host's tmux too, and brings Farhelm's own copy when the host has no new enough one.
+Remote Macs set up over SSH do not require or install tmux ([Add a remote host](/docs/get-started/add-a-remote-host/)
+covers both).
 
 Farhelm's tmux only runs for old terminals, though. Farhelm runs no tmux on a host whose sessions all have new
 terminals, and on a host that still has old terminals, Farhelm's tmux stops by itself once the last of them is gone

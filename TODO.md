@@ -310,11 +310,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     ("no resumable conversation yet"), and whether to offer optional nesting protection (only admit a report when a
     process with a named executable sits between the pane and the reporter).
 
-- **Support adding remote macOS hosts.** V1 provisioning targets Linux hosts with a usable systemd user manager
-  (SPEC.md, Topology); a Mac can only be added today by running the supervisor binary by hand, and the remote
-  provisioning and remote Update flows do not cover it. Make adding a macOS machine as a remote host a supported flow.
-  Plan: `plans/queue/macos-remote-hosts.md`.
-
 - **Run the desktop app's own supervisor as the same launchd job remote Macs get.** Asked for by the maintainer on
   2026-11-08 while planning remote macOS hosts: once that plan has landed and remote Macs are validated as stable, move
   the local Mac's supervisor from being started detached by the desktop app to the same per-user launchd job, so every

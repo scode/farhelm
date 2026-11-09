@@ -23,14 +23,15 @@ absolutely catastrophically major mistake with huge user impact."
 
 ## Concepts
 
-- **Host**: a machine that runs sessions. The local Mac is a host; each remote Linux machine is a host. Every host runs
-  a supervisor — at most one per user, and Farhelm operates entirely within one user account per host.
+- **Host**: a machine that runs sessions. The local Mac is a host; each remote Linux machine or Mac is a host. Every
+  host runs a supervisor — at most one per user, and Farhelm operates entirely within one user account per host.
 - **Supervisor**: the per-host service that manages sessions on that host — launching agents, owning their terminals,
   receiving attachments, handling spawn requests — and nothing else. It has no UI and no knowledge of other hosts.
   Supervisors are the authority on their sessions, and sessions outlive supervisors (see Durability). Supervisors
-  themselves outlive clients and the helm: on Linux under systemd, and on the Mac because the app starts its supervisor
-  detached, so quitting the app leaves the supervisor running (the helm lives in the app and stops with it). Nothing
-  restarts a Mac supervisor that crashes while the app is closed, and nothing starts one at login; opening the app does.
+  themselves outlive clients and the helm: on Linux under systemd, on remote Macs under launchd (see Topology), and on
+  the local Mac because the app starts its supervisor detached, so quitting the app leaves the supervisor running (the
+  helm lives in the app and stops with it). Nothing restarts that local Mac supervisor if it crashes while the app is
+  closed, and nothing starts it at login; opening the app does.
 - **Helm**: the single control-plane process. The user runs exactly one helm, on whichever machine is convenient — the
   Mac or a Linux host. It holds the host registry, connects directly to each registered supervisor, aggregates their
   sessions, and serves the UI. The helm holds no authoritative session state — supervisors are the authority — but its
@@ -90,45 +91,48 @@ Linux host — can register and drive. The supervisor is a plain command-line pr
 `farhelm supervisor run` in a terminal and you have a working host — that path always exists, on any platform, and is
 how you try Farhelm without a bunch of fuss. System integration is layered on top of that, not baked in. On Linux, v1
 ships that layer as user-level systemd units (auto-start at boot, which the durability promises assume) — never system
-units, never root. On the Mac, v1 ships no system integration at all: the native app starts the supervisor and leaves it
-running when it quits, or the user starts it manually; nothing starts it at login or restarts it after a crash. Crude,
-and deliberately so — a Linux-helm setup can drive Mac agents today, and better Mac availability is packaging work for
-later, not an architecture change. In that setup, "run the supervisor" means the manual binary: the native app has no
-helmless mode in v1, so launching it alongside a Linux helm would start a second helm — the unsupported state.
+units, never root. The Mac desktop app starts its local supervisor and leaves it running when it quits; nothing starts
+that local supervisor at login or restarts it after a crash before the app is opened again. A remote Apple-silicon Mac
+set up over SSH instead gets a per-user launchd job, which runs the supervisor right away and restarts it after a crash.
+After a reboot, reconnecting over SSH does not load the job; choosing Update in the host menu starts it. Automatic
+loading at screen login is unverified. The native app has no helmless mode in v1: launching it alongside a standalone
+helm would start a second helm — the unsupported state.
 
 Remote provisioning: the helm can set up a remote supervisor itself, in the style of `herdr --remote`. There is at most
 one supervisor per user per host, and adding a host is discovery-first: the helm connects over SSH and looks for that
 user's supervisor. If one is already running — say one the user started interactively by hand — the helm uses it as-is;
 it never restarts or replaces a running supervisor. If none exists, the user is asked whether to set one up
-automatically, and on confirmation one action installs the supervisor binary, sets up the per-user systemd layer, and
-registers the host — no separate host-side setup. The setup question names the concrete files and systemd unit it will
-write, and that the supervisor runs persistently and starts at boot (or at login when lingering is refused). The user
-may choose to skip this setup question for later additions from the same helm; that choice is shared by every client and
-does not change discovery of an already-running supervisor. Passwordless SSH is the prerequisite on the HOST side, plus,
-on the helm's own machine, access to the configured release source (get.farhelm.io by default) or a staged payload
-directory (a developer-facing, best-effort option; see [Supported host setup](#supported-host-setup)). With that in
-place, provisioning and everyday operation just work out of the box — reaching supervisors needs no port forwards, no
-opened firewall ports, and no address configuration beyond the SSH destination. (The web UI's own loopback-plus-forward
-story is separate; see Security.) Downloads go directly to that configured release-asset source — get.farhelm.io by
-default, whose archive links redirect to the project's GitHub releases; neither it, GitHub, nor a configured mirror is a
-relay or rendezvous service for Farhelm sessions or connections, and the no-relay guarantee below still holds. Nothing
-the supervisor does requires root: install, updates, and operation all happen as the SSH user (user-level systemd, files
-in user-owned directories). If some optional step cannot be done without privileges on a given host, provisioning says
-so and continues without it rather than escalating. Before touching the host for initial setup, the helm states exactly
-what it is about to do in concrete terms — the files it will place and where, the systemd units it will create, and that
-the supervisor will run persistently and start at boot — and proceeds only on confirmation. Remote updates use the same
-one-use plan mechanism behind the same authority, but the user's Update click or explicit automatic-update opt-in is the
-authorization: no plan is shown for confirmation. Update never downgrades a host: it installs the helm's own build, so a
-host whose supervisor reports a newer build is refused with both versions named, and the user updates the helm instead.
-It also refuses a host whose supervisor reports a database schema newer than the helm's build can open, which happens
-after a development build ran there; that host needs a build at least that new. While an update is running, its host row
-stays folded and shows `Updating…` until a progress snapshot is available, then shows the current step, completed-step
-count, and client-measured elapsed time inline in the status spot; hovering that status shows the count, the elapsed
-time, and every step of the run with its status and the current one highlighted (in a window too short for the whole
-list, the list keeps the current step in view), since the sidebar is too narrow to show a long step name, let alone the
-rest of the run. Reduced-motion settings replace the animated indicator with a static one. Remote binary upload appears
-as a separate step before installation, so the user can tell when network transfer is still underway. The row and its
-hover use the helm's readable names for the same steps in the plan, with completed work checked green, the running step
+automatically, and on confirmation one action installs the supervisor binary, sets up its per-user background service,
+and registers the host — no separate host-side setup. The setup question names the concrete files and systemd unit or
+launchd job it will write. On Linux it says the supervisor runs persistently and starts at boot (or at login when
+lingering is refused); on a remote Mac it names the job's label, says it runs now and restarts after a crash, and states
+the measured reboot behavior. The user may choose to skip this setup question for later additions from the same helm;
+that choice is shared by every client and does not change discovery of an already-running supervisor. Passwordless SSH
+is the prerequisite on the HOST side, plus, on the helm's own machine, access to the configured release source
+(get.farhelm.io by default) or a staged payload directory (a developer-facing, best-effort option; see
+[Supported host setup](#supported-host-setup)). With that in place, provisioning and everyday operation just work out of
+the box — reaching supervisors needs no port forwards, no opened firewall ports, and no address configuration beyond the
+SSH destination. (The web UI's own loopback-plus-forward story is separate; see Security.) Downloads go directly to that
+configured release-asset source — get.farhelm.io by default, whose archive links redirect to the project's GitHub
+releases; neither it, GitHub, nor a configured mirror is a relay or rendezvous service for Farhelm sessions or
+connections, and the no-relay guarantee below still holds. Nothing the supervisor does requires root: install, updates,
+and operation all happen as the SSH user (user-level systemd on Linux or launchd on a remote Mac, files in user-owned
+directories). If some optional step cannot be done without privileges on a given host, provisioning says so and
+continues without it rather than escalating. Before touching the host for initial setup, the helm states exactly what it
+is about to do in concrete terms — the files it will place and where, the background service it will create, and its
+persistence behavior — and proceeds only on confirmation. Remote updates use the same one-use plan mechanism behind the
+same authority, but the user's Update click or explicit automatic-update opt-in is the authorization: no plan is shown
+for confirmation. Update never downgrades a host: it installs the helm's own build, so a host whose supervisor reports a
+newer build is refused with both versions named, and the user updates the helm instead. It also refuses a host whose
+supervisor reports a database schema newer than the helm's build can open, which happens after a development build ran
+there; that host needs a build at least that new. While an update is running, its host row stays folded and shows
+`Updating…` until a progress snapshot is available, then shows the current step, completed-step count, and
+client-measured elapsed time inline in the status spot; hovering that status shows the count, the elapsed time, and
+every step of the run with its status and the current one highlighted (in a window too short for the whole list, the
+list keeps the current step in view), since the sidebar is too narrow to show a long step name, let alone the rest of
+the run. Reduced-motion settings replace the animated indicator with a static one. Remote binary upload appears as a
+separate step before installation, so the user can tell when network transfer is still underway. The row and its hover
+use the helm's readable names for the same steps in the plan, with completed work checked green, the running step
 pulsing amber (static under reduced motion), pending work grey, unchanged work grey, degraded work as an amber warning,
 and failure red with the helm's reason. Success returns the status spot to its normal label and leaves the row folded
 unless global details are on. Failure or an uncertain outcome still expands the row so its step list and diagnostic
@@ -153,14 +157,22 @@ rule. The badge remains, and a manual Update from the host menu can show the ref
 failure surface. Turning the switch off prevents new automatic starts, including planning still in flight; it does not
 cancel an accepted run.
 
-V1 provisioning targets any Linux host with a usable systemd user manager, on the two architectures cross-compiled
-supervisor binaries exist for. The distribution is not a requirement — nothing provisioning does is
-distribution-specific — so the plan names whichever one it found rather than refusing; CI exercises Ubuntu. Hosts whose
-basic command-line tools come from BusyBox rather than GNU coreutils or its usual replacements are not a supported
-target: Farhelm accommodates them only where that takes a trivial change, and spends no further complexity on them.
-Everything else — no usable systemd user manager, or an architecture with no payload — falls back to the manual path
-(run the binary yourself), which always remains available, on the best-effort basis described in
-[Supported host setup](#supported-host-setup).
+V1 provisioning targets Linux hosts with a usable systemd user manager on x86_64 or aarch64, and Apple-silicon Macs over
+SSH. An Intel Mac has no payload and cannot be set up this way. On Linux the distribution is not a requirement — nothing
+provisioning does is distribution-specific — so the plan names whichever one it found rather than refusing; CI exercises
+Ubuntu. Hosts whose basic command-line tools come from BusyBox rather than GNU coreutils or its usual replacements are
+not a supported target: Farhelm accommodates them only where that takes a trivial change, and spends no further
+complexity on them. On Linux, no usable systemd user manager or an architecture with no payload falls back to the manual
+path (run the binary yourself), on the best-effort basis described in [Supported host setup](#supported-host-setup).
+
+A remote Mac's setup installs `farhelm` in `~/.local/lib/farhelm`, keeps its state in `~/.local/state/farhelm`, and
+writes `~/Library/LaunchAgents/io.farhelm.supervisor.plist` for the SSH user's launchd domain. Setup, Update and
+uninstall do not check for, install, run or mention tmux on this path; old tmux terminals on remote Macs are
+unsupported. There is no macOS version floor: inspection refuses a Mac missing a command the path needs, naming that
+command. Setup, Update (manual, Update all and automatic) and uninstall are unsupported when the Farhelm desktop app is
+installed in `~/Applications/Farhelm.app` or `/Applications/Farhelm.app`, and the refusal says so without suggesting
+starting a supervisor by hand. Discovery still adopts a supervisor already running there, including the app's, without
+restarting or replacing it. The desktop app's own local supervisor and Homebrew tmux requirement are unchanged.
 
 Tensorlake's prepared snapshots include the login-manager and lingering preparation: Farhelm uses passwordless sudo to
 start the login manager and enable lingering for the sandbox user before installing its supervisor in the snapshot.
@@ -175,11 +187,12 @@ intact. Losing the helm never strands a provisioned host.
 
 Removing Farhelm from a remote host is a host action too, the uninstall item in that host's menu, with no command-line
 counterpart. The helm plans the removal over SSH and shows it before touching the host: the supervisor's user service
-and its unit file go, the host's private tmux server and any terminal hosts are ended, and Farhelm's private lib
-directory with the binary and any private tmux in it is removed, each named by its path on the host (the private tmux
-server and the terminal hosts are named without their socket paths); terminal hosts that cannot be confirmed ended keep
-the lib directory in place and the host listed, for a retry; the host's Farhelm data directory stays, named by its path,
-with a note that deleting it by hand removes the data too. Nothing changes until the user confirms. Setup and uninstall
+and its unit file or launchd plist go, any terminal hosts are ended, and Farhelm's private lib directory with the binary
+is removed. On Linux the private tmux server is ended too, and any private tmux binary goes with the lib directory; a
+remote Mac has no tmux step. Each file or directory is named by its path on the host (the private tmux server and the
+terminal hosts are named without their socket paths); terminal hosts that cannot be confirmed ended keep the lib
+directory in place and the host listed, for a retry; the host's Farhelm data directory stays, named by its path, with a
+note that deleting it by hand removes the data too. Nothing changes until the user confirms. Setup and uninstall
 planning show their action in the folded row while the helm prepares a dialog; neither action changes the global details
 switch. Confirming closes the dialog, and the running row expands once to show the helm's steps on the same rail as the
 plan. The user may fold that run, and it stays folded until another run begins; the inline status still says setting up
@@ -198,9 +211,10 @@ the remedy and offers Remove. Success removes the host from the list, cached ses
 the window that confirmed shows a one-line removal notice. Its hover text names the kept data directory, a copy control
 copies that path, and × dismisses the notice. A run that fails partway keeps the host listed with its steps showing what
 is left, and choosing uninstall again continues from there. Such a retry may go ahead without a connection only once the
-unit file is gone, since nothing can start the supervisor again after that, and only while the supervisor unit is not
-running, since a running supervisor may have sessions the retry cannot check. Linger is left as it is. The helm's own
-machine has no uninstall in the panel: Farhelm there is removed with `farhelm uninstall` (see
+unit file or plist is gone, and only while the systemd unit is not running or the launchd job is not loaded, since a
+running or startable supervisor may have sessions the retry cannot check. A loaded-but-idle launchd job still counts as
+able to start, so deleting its plist alone does not permit an offline retry. Linger on Linux is left as it is. The
+helm's own machine has no uninstall in the panel: Farhelm there is removed with `farhelm uninstall` (see
 [Uninstall scope and interaction](#uninstall-scope-and-interaction)).
 
 Connections are direct: the helm connects straight to each registered supervisor, over the user's own SSH access —
@@ -577,16 +591,16 @@ workspace edits approved automatically and other actions asking), and `approve` 
 running/idle status, a settled scope decision rather than a detection gap. Provider capabilities may clamp or reject a
 requested effort.
 
-Standard operation must never require falling back to SSH or a separate command line, with four v1 carve-outs:
-transport, web-token bootstrap, bringing up the helm's own machine, and starting the v1 Mac supervisor by hand when a
-Linux helm drives Mac agents. Reaching a remote helm's web UI takes a user-managed SSH port forward, and obtaining or
-rotating that UI's token happens on the helm's machine (see Security) — accepted v1 friction, deliberately outside
-"standard operation". Bringing up a Linux helm machine is `farhelm helm setup`, run once there: that machine's systemd
-units are written by one owner rather than by whichever surface got there first, which is why the hosts panel refers to
-it instead of installing a supervisor locally (see Topology). On provisionable hosts, install and updates are the helm's
-job (over the user's SSH access); what may legitimately require manual host-side work is that same transport and token
-pair, on hosts provisioning does not cover. Everything else — session operations, template management, directory
-browsing — must work from the client. SSH otherwise remains an escape hatch, never a requirement.
+Standard operation must never require falling back to SSH or a separate command line, with three v1 carve-outs:
+transport, web-token bootstrap, and bringing up the helm's own machine. Reaching a remote helm's web UI takes a
+user-managed SSH port forward, and obtaining or rotating that UI's token happens on the helm's machine (see Security) —
+accepted v1 friction, deliberately outside "standard operation". Bringing up a Linux helm machine is
+`farhelm helm setup`, run once there: that machine's systemd units are written by one owner rather than by whichever
+surface got there first, which is why the hosts panel refers to it instead of installing a supervisor locally (see
+Topology). On provisionable hosts, install and updates are the helm's job (over the user's SSH access); what may
+legitimately require manual host-side work is that same transport and token pair, on hosts provisioning does not cover.
+Everything else — session operations, template management, directory browsing — must work from the client. SSH otherwise
+remains an escape hatch, never a requirement.
 
 ## Install and uninstall
 
@@ -2613,33 +2627,33 @@ whatever the agent renders is what you see. There is no composer, no message abs
   it stops, not at every step.
 - A terminal host keeps a bounded amount of the program's output beyond the supervisor's latest checkpoint of the
   terminal: 32 MiB by default, a few minutes of an agent redrawing as fast as it can, hours of a shell. When more than
-  that arrives while no supervisor reads it (a supervisor that crashed and is not started again soon; on the Mac nothing
-  starts it again until the app is opened), the oldest of it is dropped, which leaves a **gap**; the program runs on
-  unhindered. A gap can also happen while a supervisor runs, rarely: a single escape sequence longer than the bound, or
-  output the supervisor cannot checkpoint as fast as it arrives, such as full scrollback colored cell by cell at high
-  sustained rates. At about 11 MiB/s on the measured hardware, encoding one such snapshot alone can fill the remaining
-  journal space; catching up and machine load can make a gap possible at lower rates. The dropped output is everything
-  since the latest checkpoint that no longer fits, so it can include output a supervisor had already shown before it
-  crashed. After a gap the terminal carries on from its state before the lost output (after a supervisor restart, its
-  latest checkpoint) with the output kept after it, the supervisor asks the program to redraw by making its terminal one
-  row smaller and back, and the terminal shows "Some earlier output could not be recovered" above its scrollback until
-  the supervisor next restarts. What a gap cannot bring back: the lines the lost output put into the scrollback; the
-  screen, until the program redraws it (agents and other full-screen programs redraw when their terminal is resized; a
-  shell at its prompt does not, so its screen can show older contents with newer output drawn over them); any mode the
-  lost output changed, such as the alternate screen, mouse reporting, bracketed paste or application cursor keys, and
-  the same for the other terminal settings it made, such as the title, redefined colors, line-drawing characters, the
-  scroll region and the cursor's style. A program sets these again only when it chooses to, and many set their modes
-  only when they start, so such a setting can stay wrong until the program is restarted; meanwhile keys, pastes and
-  mouse input can reach the program encoded for the wrong mode. A multi-line paste into a shell may then run line by
-  line instead of arriving as one block. A query in the lost output that no supervisor had answered before the bytes
-  were lost is never answered (the program waits out its own timeout), and a clipboard write there is not carried out
-  during the recovery; either may already have happened, if a supervisor saw that output before it crashed. A gap never
-  restarts a program or throws away a working terminal. Separately, a checkpoint too large for the terminal host (16
-  MiB, far more than a full scrollback of ordinary output takes) can leave out old title-stack entries, the oldest
-  scrollback lines and, if that is not enough, the screen's contents. The running terminal is not affected, but a
-  recovery from that checkpoint rebuilds the terminal without them: it shows the same notice when scrollback was left
-  out, which then stays until the program clears its scrollback or the scrollback has turned over, and asks the program
-  to redraw when the screen was left out.
+  that arrives while no supervisor reads it (a supervisor that crashed and is not started again soon; the Mac desktop
+  app's local supervisor returns only when the app or binary is started), the oldest of it is dropped, which leaves a
+  **gap**; the program runs on unhindered. A gap can also happen while a supervisor runs, rarely: a single escape
+  sequence longer than the bound, or output the supervisor cannot checkpoint as fast as it arrives, such as full
+  scrollback colored cell by cell at high sustained rates. At about 11 MiB/s on the measured hardware, encoding one such
+  snapshot alone can fill the remaining journal space; catching up and machine load can make a gap possible at lower
+  rates. The dropped output is everything since the latest checkpoint that no longer fits, so it can include output a
+  supervisor had already shown before it crashed. After a gap the terminal carries on from its state before the lost
+  output (after a supervisor restart, its latest checkpoint) with the output kept after it, the supervisor asks the
+  program to redraw by making its terminal one row smaller and back, and the terminal shows "Some earlier output could
+  not be recovered" above its scrollback until the supervisor next restarts. What a gap cannot bring back: the lines the
+  lost output put into the scrollback; the screen, until the program redraws it (agents and other full-screen programs
+  redraw when their terminal is resized; a shell at its prompt does not, so its screen can show older contents with
+  newer output drawn over them); any mode the lost output changed, such as the alternate screen, mouse reporting,
+  bracketed paste or application cursor keys, and the same for the other terminal settings it made, such as the title,
+  redefined colors, line-drawing characters, the scroll region and the cursor's style. A program sets these again only
+  when it chooses to, and many set their modes only when they start, so such a setting can stay wrong until the program
+  is restarted; meanwhile keys, pastes and mouse input can reach the program encoded for the wrong mode. A multi-line
+  paste into a shell may then run line by line instead of arriving as one block. A query in the lost output that no
+  supervisor had answered before the bytes were lost is never answered (the program waits out its own timeout), and a
+  clipboard write there is not carried out during the recovery; either may already have happened, if a supervisor saw
+  that output before it crashed. A gap never restarts a program or throws away a working terminal. Separately, a
+  checkpoint too large for the terminal host (16 MiB, far more than a full scrollback of ordinary output takes) can
+  leave out old title-stack entries, the oldest scrollback lines and, if that is not enough, the screen's contents. The
+  running terminal is not affected, but a recovery from that checkpoint rebuilds the terminal without them: it shows the
+  same notice when scrollback was left out, which then stays until the program clears its scrollback or the scrollback
+  has turned over, and asks the program to redraw when the screen was left out.
 - Opening a session attaches to it — and opening a CLIENT counts as opening a session. A freshly loaded client and a
   client whose open session disappears use the same choice: the first currently listed session in the helm's shared
   visit history, excluding the session just removed, else the newest-created listed session. While history is empty, the
@@ -2702,25 +2716,25 @@ whatever the agent renders is what you see. There is no composer, no message abs
   host's private tmux server runs only while it holds old terminals: a host whose terminals are all new runs no tmux
   server and uses no tmux, the server ends with the host's last old terminal (left to end as the user's sessions and
   reboots retire them), and old terminals whose server is not running, or that the host's tmux cannot serve (missing, or
-  below the supported version), are reported as not running. Installing Farhelm still requires a supported tmux. While
-  the session's host creates new terminals, a session in which something still runs in an old terminal (its agent
-  running in one, or an open old tab) shows a loud band at the top of the session view, below the top row, linking to
-  the docs page that explains the move. Every message asks the user to act as soon as possible, because an upcoming
-  release will forcibly terminate whatever still runs in an old terminal as part of moving away from tmux, without
-  naming a date. When the agent is running in an old terminal, it asks the user to restart (keeping the conversation),
-  replace, stop or delete the session, or, when Restart is unavailable for the session, to replace, stop or delete it,
-  with a note that the session cannot be restarted because Farhelm does not yet know the agent's conversation or because
-  the session has no way to resume one. Otherwise, when some tabs are old, it names those tabs as the tab strip labels
-  them and asks the user to close them and open new ones, since restarting a session restarts only its agent, not its
-  tabs. Its × hides that message until the session is next opened, never on a timer (a different message the session
-  comes to need meanwhile still shows), and the dismissal is that view's alone: nothing is stored or shared. No band
-  shows for a session shown from a disconnected host's last known state, or for one with no old tab whose agent is not
-  running in an old terminal: an agent that stopped or ended in an old terminal leaves it only so its last screen stays
-  readable, and the session's next run gets a new terminal. The old-terminal notification (see Status) uses the same
-  condition, so a session nobody opens hears about it too. The bottom bar names the session's terminal kinds (old, new,
-  or both, with each terminal listed in its tooltip and accessible text) while its host creates new terminals or any of
-  its terminals is new; a host that only creates old terminals shows neither the band nor the kinds, so its sessions
-  look as they always have.
+  below the supported version), are reported as not running. Installing Farhelm still requires a supported tmux, except
+  on a remote Mac set up over SSH, which never uses tmux (see Topology). While the session's host creates new terminals,
+  a session in which something still runs in an old terminal (its agent running in one, or an open old tab) shows a loud
+  band at the top of the session view, below the top row, linking to the docs page that explains the move. Every message
+  asks the user to act as soon as possible, because an upcoming release will forcibly terminate whatever still runs in
+  an old terminal as part of moving away from tmux, without naming a date. When the agent is running in an old terminal,
+  it asks the user to restart (keeping the conversation), replace, stop or delete the session, or, when Restart is
+  unavailable for the session, to replace, stop or delete it, with a note that the session cannot be restarted because
+  Farhelm does not yet know the agent's conversation or because the session has no way to resume one. Otherwise, when
+  some tabs are old, it names those tabs as the tab strip labels them and asks the user to close them and open new ones,
+  since restarting a session restarts only its agent, not its tabs. Its × hides that message until the session is next
+  opened, never on a timer (a different message the session comes to need meanwhile still shows), and the dismissal is
+  that view's alone: nothing is stored or shared. No band shows for a session shown from a disconnected host's last
+  known state, or for one with no old tab whose agent is not running in an old terminal: an agent that stopped or ended
+  in an old terminal leaves it only so its last screen stays readable, and the session's next run gets a new terminal.
+  The old-terminal notification (see Status) uses the same condition, so a session nobody opens hears about it too. The
+  bottom bar names the session's terminal kinds (old, new, or both, with each terminal listed in its tooltip and
+  accessible text) while its host creates new terminals or any of its terminals is new; a host that only creates old
+  terminals shows neither the band nor the kinds, so its sessions look as they always have.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, down to a floor below which it is detached as stalled. No viewer can stop a
@@ -3036,12 +3050,15 @@ Sessions depend on exactly one thing staying up: their host. Every other compone
   agent processes outlive the supervisor process; only a host reboot takes sessions down. This is what makes updates,
   the desktop app's automatic ones included, routine instead of scary.
 
-Local sessions have full behavioral parity with remote ones; what differs in v1 is availability, not behavior. The Mac's
-supervisor is started by the app and keeps running after the app quits (or is started manually — see Topology); nothing
-starts it at login or restarts it after a crash before the app is opened again. Per the rule above, its sessions keep
-running while the supervisor is down and reattach when it returns. While no supervisor runs, a new terminal keeps only a
-bounded amount of its program's output; past that bound the oldest of it is lost, as
-[Terminal experience](#terminal-experience) describes under gaps. Sessions persist across app restarts.
+Local sessions have full behavioral parity with remote ones; what differs is availability, not behavior. The Mac desktop
+app's local supervisor is started by the app and keeps running after the app quits (or is started manually — see
+Topology); nothing starts it at login or restarts it after a crash before the app is opened again. A remote Mac set up
+over SSH has its supervisor restarted by launchd after a crash, and an Update replaces only that supervisor: its
+terminal hosts, agents and terminal-tab shells keep running. After a reboot, choose Update in the host menu to start the
+job; automatic loading at screen login is unverified. Per the rule above, sessions keep running while the supervisor is
+down and reattach when it returns. While no supervisor runs, a new terminal keeps only a bounded amount of its program's
+output; past that bound the oldest of it is lost, as [Terminal experience](#terminal-experience) describes under gaps.
+Sessions persist across app restarts.
 
 Conversation tracking keeps working while a host's supervisor is down: when an agent reports which conversation it is in
 (a new session, a `/clear`), the report waits on the host and the supervisor applies it when it returns, so a later
@@ -3080,21 +3097,22 @@ functions from the login shell are not inherited. Bash honors an inherited `BASH
 functions, which can change its subsequent environment. The shim still supplies its restored PATH, markers and working
 directory to Bash. An agent launch without a wrapper and a legacy session keep direct exec.
 
-When a host reboots, its supervisor starts automatically on hosts with the system-integration layer; on the v1 Mac it
-returns when the app or binary is next started, and interruption is classified at that point — whenever the supervisor
-comes back. After a boot, sessions last known running show as **Interrupted** — explicitly a lost-track state, not a
-claim about what happened in between: the agent may have exited on its own moments before the reboot, the supervisor
-cannot know, and interrupted says exactly that. Sessions already known exited (including user-stopped ones) keep their
-status; an exit during supervisor downtime with no reboot involved shows as exited — with the true exit code when the
-surviving terminal still holds it, unknown code otherwise (reporting a code the terminal genuinely retains is not
-guessing; inventing one where nothing retains it would be). Interrupted sessions' terminal contents are gone — there is
-no conversation history store (see Terminal experience) — but the conversation itself is recoverable. Opening an
-interrupted session shows a centered neutral card in the empty terminal area explaining that the host restart paused the
-session and that it needs an intentional restart. The card offers Restart when the session can resume its conversation
-(see Lifecycle operations), and Replace, which starts a fresh session under the same settings and keeps its inline
-destructive confirmation; a session that cannot resume offers only Replace and says why. Nothing respawns unattended —
-an agent (especially one launched with permissive flags) only restarts or replaces when the user chooses and confirms.
-The system must not presume the original OS process survived the reboot.
+When a host reboots, its supervisor starts automatically on Linux hosts with the system-integration layer; the desktop
+app's local Mac supervisor returns when the app or binary is next started. A remote Mac's reboot behavior is stated in
+the setup plan (see Topology). Interruption is classified whenever the supervisor comes back. After a boot, sessions
+last known running show as **Interrupted** — explicitly a lost-track state, not a claim about what happened in between:
+the agent may have exited on its own moments before the reboot, the supervisor cannot know, and interrupted says exactly
+that. Sessions already known exited (including user-stopped ones) keep their status; an exit during supervisor downtime
+with no reboot involved shows as exited — with the true exit code when the surviving terminal still holds it, unknown
+code otherwise (reporting a code the terminal genuinely retains is not guessing; inventing one where nothing retains it
+would be). Interrupted sessions' terminal contents are gone — there is no conversation history store (see Terminal
+experience) — but the conversation itself is recoverable. Opening an interrupted session shows a centered neutral card
+in the empty terminal area explaining that the host restart paused the session and that it needs an intentional restart.
+The card offers Restart when the session can resume its conversation (see Lifecycle operations), and Replace, which
+starts a fresh session under the same settings and keeps its inline destructive confirmation; a session that cannot
+resume offers only Replace and says why. Nothing respawns unattended — an agent (especially one launched with permissive
+flags) only restarts or replaces when the user chooses and confirms. The system must not presume the original OS process
+survived the reboot.
 
 The resume promise is per-session: for agents with conversation-identity integration, the supervisor captures which
 agent conversation belongs to each session, and restart resumes exactly that conversation (e.g.
@@ -4666,10 +4684,10 @@ not promise that cleanup preserved the terminal or its scrollback.
 
 Provisioning may enforce permissions on directories dedicated to Farhelm: its private lib directory and the supervisor
 state directory. It must preserve permissions on existing shared directories merely used to hold its executable or
-service files, which are the systemd user-unit directory and, when the registered binary lives outside the lib
-directory, that binary's own directory. A missing shared directory is created; an existing one is left exactly as it is.
-If those permissions prevent installation, report the obstacle rather than silently changing them. Trust in the helm
-does not authorize incidental changes to unrelated host configuration.
+service files, which are the systemd user-unit directory or the Mac's `~/Library/LaunchAgents` and, when the registered
+binary lives outside the lib directory, that binary's own directory. A missing shared directory is created; an existing
+one is left exactly as it is. If those permissions prevent installation, report the obstacle rather than silently
+changing them. Trust in the helm does not authorize incidental changes to unrelated host configuration.
 
 Farhelm is not designed for install directories that other local accounts can write to, whether provisioning's lib,
 state, or binary directory on a host, a shared directory it writes into, or the standalone installer's install directory
@@ -4683,12 +4701,16 @@ restricting a file right after creating it, whether or not this spec names that 
 complexity on defence in depth against a user's broad umask, such as closing the brief window between creating a file
 and restricting it.
 
-On a host provisioned from the hosts panel, the supervisor unit (`farhelm-supervisor.service`) has one owner. A unit
-without `farhelm helm setup`'s managed-by marker belongs to provisioning: ADD and UPDATE may replace it, and uninstall
-may remove it. A unit that carries the marker belongs to setup on that host: provisioning refuses to touch it, both when
-planning and at the moment of writing or removing, and says setup manages it there, the same hand-off the helm's own
-machine gets. A hand-written unit under that exact name on a host the user asks Farhelm to provision is the user's to
-move aside first; provisioning does not try to tell it apart from its own.
+On a Linux host provisioned from the hosts panel, the supervisor unit (`farhelm-supervisor.service`) has one owner. A
+unit without `farhelm helm setup`'s managed-by marker belongs to provisioning: ADD and UPDATE may replace it, and
+uninstall may remove it. A unit that carries the marker belongs to setup on that host: provisioning refuses to touch it,
+both when planning and at the moment of writing or removing, and says setup manages it there, the same hand-off the
+helm's own machine gets. A hand-written unit under that exact name on a host the user asks Farhelm to provision is the
+user's to move aside first; provisioning does not try to tell it apart from its own.
+
+A remote Mac uses the unmarked `io.farhelm.supervisor` launchd job instead. Its loaded plist must be the planned plist
+before setup replaces a loaded job or uninstall stops it. The desktop-app refusal above keeps those operations from
+sharing the app's installation. A hand-edited plist has the same best-effort status as a hand-edited systemd unit.
 
 ### First-class harnesses
 
@@ -4796,16 +4818,18 @@ panel's uninstall. Every other way a host can end up with a supervisor works on 
 working on Farhelm itself: a supervisor started by hand with `farhelm supervisor run`, one installed with `install.sh`,
 one run by a unit the user wrote or changed with drop-ins, one at paths other than the layout setup installs, or a host
 provisioning does not target. Do not spend significant complexity making setup or Update detect, adapt to, coexist with,
-or preserve such setups; refusing with a clear message is enough. Setup and Update may treat the layout they install as
-their own, including re-applying the settings they manage, such as start at boot and linger, on every run. The rules
-above about shared directories and unrelated host configuration still hold.
+or preserve such setups; refusing with a clear message is enough. A remote Mac with the desktop app installed is refused
+for setup, Update and uninstall as Topology specifies; it is not offered a manual-start workaround. Setup and Update may
+treat the layout they install as their own, including re-applying their background-service settings and, on Linux, start
+at boot and linger, on every run. The rules above about shared directories and unrelated host configuration still hold.
 
 Confirmed 2026-10-14: editing a Farhelm service unit by hand voids Farhelm's guarantees about how operations that read
 that unit identify its owning installation and treat its service. This applies to `farhelm helm setup` (including its
 uninstall), `farhelm uninstall`, and the hosts panel's setup, Update and uninstall. An edited unit may be attributed to
 the wrong installation, causing an operation to overwrite, stop or remove another installation's service. Farhelm need
 not detect or defend against these edits; its ownership and refusal guarantees, including the service-type refusal
-below, do not cover them. The guarantees for unedited Farhelm units remain unchanged.
+below, do not cover them. The guarantees for unedited Farhelm units remain unchanged. The same hand-edit exception
+applies to a remote Mac's launchd plist.
 
 Confirmed 2026-10-11: switching a remote host to `farhelm helm setup` or another best-effort setup while a panel setup
 or Update is queued or running is best effort too. The panel run may act on the binary that setup now uses, and a

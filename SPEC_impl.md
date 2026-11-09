@@ -1892,17 +1892,17 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   socket path is always shorter than the supervisor's own, and every state directory that works today works for hosts
   under macOS's 104-byte socket path limit. Names mean nothing; what a host is for is in its tag.
 - **Starting a host** runs the supervisor's own executable (`/proc/self/exe` on Linux, which stays the running build
-  through an update's rename; its own versioned program on the Mac, never the forwarder) as
-  `internal terminal-host --socket <path>` (the path made absolute), with an empty environment, writes the child spec to
-  its stdin, and takes readiness from its first stage's exit status alone. The empty environment keeps the session
-  markers that Stop's sweep searches for, and any credential, off the host; the child's environment travels only in the
-  spec. A start that does not finish (the deadline, a first stage killed by a signal, a failed wait) is never reported
-  as a clean refusal: the host may have reported ready just before, and a tab found later by its tag would pass for one
-  the user was told never opened. The spawn kills and reaps the first stage, ends whatever answers at the socket (a
-  second stage that has not reported yet ends itself when its report finds no reader), and returns either "nothing left"
-  or the socket where something may remain. A caller may choose the socket name itself and start the first stage apart
-  from giving it the spec, which the first stage needs whole before it starts anything: in between it learns the first
-  stage's process, pinned to its start identity, and can record it ("Creating agents in hosts" below).
+  through an update's rename; its own program on the Mac, the versioned one when run by the desktop app, never the
+  forwarder) as `internal terminal-host --socket <path>` (the path made absolute), with an empty environment, writes the
+  child spec to its stdin, and takes readiness from its first stage's exit status alone. The empty environment keeps the
+  session markers that Stop's sweep searches for, and any credential, off the host; the child's environment travels only
+  in the spec. A start that does not finish (the deadline, a first stage killed by a signal, a failed wait) is never
+  reported as a clean refusal: the host may have reported ready just before, and a tab found later by its tag would pass
+  for one the user was told never opened. The spawn kills and reaps the first stage, ends whatever answers at the socket
+  (a second stage that has not reported yet ends itself when its report finds no reader), and returns either "nothing
+  left" or the socket where something may remain. A caller may choose the socket name itself and start the first stage
+  apart from giving it the spec, which the first stage needs whole before it starts anything: in between it learns the
+  first stage's process, pinned to its start identity, and can record it ("Creating agents in hosts" below).
 - **The client tag** records the session, the role (agent with its launch generation, or tab with its tab id and whether
   it runs in its own scope) and the spawn time in nanoseconds, which orders a session's tabs without new persistence.
   Its encoding is permanent, because a host keeps its tag across every update: every tag starts with the magic `FHTG`
@@ -1947,16 +1947,16 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   Through another spelling of the state directory than the supervisor used (a symlink to it), a live host still stops
   through the protocol, but one that cannot take `Shutdown` stays unconfirmed, since the signal needs the exact
   spelling. A host whose socket file was deleted by hand inside an intact `hosts` directory is not found, as a tmux
-  server whose socket was deleted is not. In production the remote uninstall's stop of the supervisor's unit ends such
-  hosts with the unit's control group while the unit is still running; a host left behind by a unit that was already
-  inactive or failed, with its socket deleted by hand, is not found, as with tmux. Hosts are handled at once. The whole
-  command takes at most 30 seconds: finding and stopping the hosts at most 29, after which a listing not finished, or a
-  host still being handled, counts as not confirmed; then at most one second for its report on stderr, which it gives up
-  on rather than wait for a reader that stopped reading. (In the Mac app's version layout the version hold every
-  `farhelm` command takes first can add its own wait of up to five seconds before that.) Stdout stays empty; stderr has
-  one line per host for people and logs, which nothing may parse. It ends the hosts and nothing else: the programs in
-  them get the terminal's hangup, descendants that ignore it are left to the session's scope or the supervisor's unit as
-  with tmux, and it takes no lock, so a supervisor still running there loses its hosts. **Exit status 0 is the only
+  server whose socket was deleted is not. On Linux the remote uninstall's stop of the supervisor's unit ends such hosts
+  with the unit's control group while the unit is still running; a host left behind by a unit that was already inactive
+  or failed, with its socket deleted by hand, is not found, as with tmux. Hosts are handled at once. The whole command
+  takes at most 30 seconds: finding and stopping the hosts at most 29, after which a listing not finished, or a host
+  still being handled, counts as not confirmed; then at most one second for its report on stderr, which it gives up on
+  rather than wait for a reader that stopped reading. (In the Mac app's version layout the version hold every `farhelm`
+  command takes first can add its own wait of up to five seconds before that.) Stdout stays empty; stderr has one line
+  per host for people and logs, which nothing may parse. It ends the hosts and nothing else: the programs in them get
+  the terminal's hangup, descendants that ignore it are left to the session's scope or the supervisor's unit as with
+  tmux, and it takes no lock, so a supervisor still running there loses its hosts. **Exit status 0 is the only
   success**, and all it means is this: every host whose socket the listing found directly in `<dir>/hosts` was confirmed
   stopped, and `<dir>/hosts` was listed whole as a real directory (or does not exist). The directory is listed once, so
   a host that a supervisor still running there starts afterwards is not covered; callers stop the supervisor first.
@@ -2820,9 +2820,11 @@ journal cap and `MAX_SNAPSHOT`.
 This section covers the old terminals for as long as both kinds exist. Terminals created with the supervisor's switch on
 run in terminal hosts instead ("Terminal host"), and a session moves its agent there one Restart at a time, its old tabs
 staying in tmux until they are closed. Installation keeps requiring, installing and version-checking tmux exactly as
-below for the whole transition (the installer, the desktop app's preflight, provisioning and `farhelm helm setup`). The
-running supervisor does not: it uses tmux only for old terminals, and only while a private server holding them runs.
-This path changes only for what the switch needs and for bug fixes.
+below for the whole transition (the installer, the desktop app's preflight, Linux provisioning and
+`farhelm helm setup`). Remote Mac provisioning is the exception: it supports only terminal hosts and has no tmux
+inspection, payload, installation, version check or uninstall action. This does not change the desktop app's local tmux
+preflight. The running supervisor does not: it uses tmux only for old terminals, and only while a private server holding
+them runs. This path changes only for what the switch needs and for bug fixes.
 
 A supervisor's old terminals live in a dedicated tmux server on a private socket (`~/.local/state/farhelm/tmux.sock`)
 with a locked-down generated config: status bar off, `history-limit` sized to SPEC.md's replay floor,
@@ -7463,13 +7465,47 @@ still matters for installed apps, not only for fresh installs.
 
 ## Provisioning
 
-Implemented in the helm over the same system-ssh access: stream the cross-compiled `farhelm` binary (plus a private
-static tmux build when the host has no tmux) into `~/.local/lib/farhelm/` through the same `ssh` command every other
-step uses (`cat` into a nonce temporary, then a digest check before the rename; not sftp, whose own destination grammar
-reads an IPv6 literal or an `ssh://` URI as a different host than ssh does), write user-level systemd units,
-`systemctl --user enable --now`, `loginctl enable-linger` as the optional-step (proceed-without-if-privileged per
-SPEC.md). Discovery-first: probe for a running supervisor via `farhelm internal stdio` before proposing any of this, and
-show the full concrete action list before touching the host for initial setup.
+Implemented in the helm over the same system-ssh access: stream the target's `farhelm` binary (plus a private static
+tmux build on Linux when the host has no acceptable tmux) into `~/.local/lib/farhelm/` through the same `ssh` command
+every other step uses (`cat` into a nonce temporary, then a digest check before the rename; not sftp, whose own
+destination grammar reads an IPv6 literal or an `ssh://` URI as a different host than ssh does). On Linux, write
+user-level systemd units, `systemctl --user enable --now`, `loginctl enable-linger` as the optional-step
+(proceed-without-if-privileged per SPEC.md). Discovery-first: probe for a running supervisor via
+`farhelm internal stdio` before proposing any of this, and show the full concrete action list before touching the host
+for initial setup.
+
+Inspection chooses the OS with `uname -s` before any systemd or tmux command. The combined payload target is Linux
+x86_64, Linux aarch64 or macOS aarch64; its serialized Linux architecture names remain `x86_64` and `aarch64`.
+Apple-silicon Macs select the existing `farhelm-aarch64-apple-darwin.tar.gz` from either signed releases or staged
+payloads. A Mac tmux request fails before downloads or materialization. Intel Macs have no supported payload. Mac
+inspection requires the commands the native path uses, including a working `readlink -f`, and refuses with the missing
+command's name rather than maintaining a macOS version floor or fallback implementations. It also checks for
+`~/Applications/Farhelm.app` and `/Applications/Farhelm.app`: setup, Update and uninstall refuse when either is present.
+Discovery still runs first, so an answering supervisor is adopted unchanged even on such a Mac.
+
+The remote Mac's background service is `~/Library/LaunchAgents/io.farhelm.supervisor.plist`, loaded into `user/<uid>`
+for the inspected SSH user, never a system daemon or a `gui/<uid>` job. Its `LimitLoadToSessionType=Background` permits
+starting it from an SSH-only login. `RunAtLoad` starts it immediately; `KeepAlive={SuccessfulExit=false}` restarts it
+after failure without restarting a clean exit. On the tested SSH-only Mac, the job was absent at the first post-reboot
+SSH observation and throughout a further 30-second observation window; explicit setup recovery started it again.
+Automatic loading at screen login is unverified, so setup tells users to choose Update in the host menu after reboot.
+The plist's `ProgramArguments` launch the same foreground `farhelm supervisor run --state-dir <state>` with
+`/usr/bin/env -u` removing `FARHELM_SESSION_ID`, `FARHELM_AGENT_ID` and `FARHELM_TAB_ID`, as the systemd unit removes
+them below. Arguments are XML strings, never shell command text. Its PATH starts with the binary's directory, followed
+by the Homebrew and system binary directories.
+
+`AbandonProcessGroup=true` keeps terminal hosts and their agents and tab shells alive when launchd replaces or restarts
+the supervisor. Setup bootstraps an absent job; an already loaded job must name the planned plist and is kickstarted
+without killing a running process. Update removes the loaded registration with `bootout`, confirms it is absent and
+bootstraps the new plist. Rewriting a plist alone would leave launchd's old loaded configuration in use. Neither path
+uses `launchctl disable`, whose persistent override would prevent a later setup from starting the job. The plist has no
+setup-owned marker because `farhelm helm setup` does not install a Mac job. Launchd actions are explicit members of the
+same frozen action list as Linux actions, without a separate service-manager abstraction.
+
+Shared file transfers report their temporary file size with BSD `stat` on Darwin and GNU `stat` on Linux. Artifact mode
+inspection makes the same platform choice. Mac uninstall uses the native mount table to reject a mount on or inside the
+lib directory; it does not use `/proc/self/mountinfo`. The ownership, canonical-path and shared-directory permission
+rules below still apply.
 
 ADD and UPDATE both retain that concrete plan behind an opaque, one-use confirmation id. Planning is inspection-only;
 consuming the id revalidates the host and registry facts the plan relied on, and only then admits the host-scoped run.
@@ -7483,40 +7519,40 @@ Discovery records the resolved supervisor binary, state directory, and identity 
 installation that answered the probe. UPDATE starts from those recorded coordinates rather than assuming the standard
 layout.
 
-The supervisor-unit ownership rule in SPEC.md is enforced twice on remote hosts. The reach check reports whether the
-user-unit directory already holds a `farhelm-supervisor.service` whose first line is setup's managed-by marker (the same
-test `units::is_managed` applies), and such a host gets the `SetupManaged` outcome every operation refuses on, before
-any plan exists, each in its own words (installing or updating there is the host's installer and setup; removing is its
-`farhelm uninstall`). The remote unit write repeats the test in the same shell command that renames the new unit into
-place, and uninstall's unit removal repeats it in the same shell command as the `rm`, because a retained plan is
+The supervisor-unit ownership rule in SPEC.md is enforced twice on remote Linux hosts. The reach check reports whether
+the user-unit directory already holds a `farhelm-supervisor.service` whose first line is setup's managed-by marker (the
+same test `units::is_managed` applies), and such a host gets the `SetupManaged` outcome every operation refuses on,
+before any plan exists, each in its own words (installing or updating there is the host's installer and setup; removing
+is its `farhelm uninstall`). The remote unit write repeats the test in the same shell command that renames the new unit
+into place, and uninstall's unit removal repeats it in the same shell command as the `rm`, because a retained plan is
 confirmed later and setup may have run on the host in between. The local executor branch has no such check: the panel
 never installs a unit on the helm's own machine.
 
 UNINSTALL is the third operation on the same machinery: `POST /api/hosts/{id}/uninstall` plans without a body and
 consumes the plan's id from a body, like update's route, but the user sees and confirms the same numbered plan as setup,
-with the kept-data note outside the action rail. Its actions disable the supervisor unit, remove the unit file, reload
-the user manager, stop the unit with its terminal hosts and tmux server, remove the lib directory, and finally forget
-the host. Removing the file before stopping keeps the supervisor answering until nothing can start it again: up to the
-unit file's removal the host stays connected and the ordinary checks apply, and after it a retry may proceed without a
-connection. Reloading after the file is gone makes systemd forget the unit's `KillMode=process` and use its default
-`control-group`: the stop ends the supervisor and the private tmux server, including any ended sessions' retained panes
-(this default behavior was verified on a real user manager when uninstall was built), and the terminal hosts in the
-unit's group (see "Terminal host"). The same stop action then ends the terminal hosts of the host's state directory, and
-after them any server still reachable at this host's private state-directory socket. That covers an inactive supervisor
-whose process-only policy left hosts or tmux alive before systemd forgot its removed unit. The hosts are ended by the
-installed `farhelm internal stop-terminal-hosts --state-dir <state dir>`, run with the binary the plan names, which is
-still in place because the lib directory goes after this step. The command runs whenever the state directory's `hosts`
-exists, whatever it holds (the command's contract has callers decide by that, and judges what is there) and whatever
-kind of entry it is (the command refuses one that is not a real directory); only a missing `hosts`, an install from
-before terminal hosts, skips it. Only its exit status 0 counts; any other status, including the 2 of a `farhelm` from
-before the command, fails the step with the command's lines and leaves the host listed for a retry. After a 0 the step
-removes the socket files left in `hosts` (the command only notes one it could not remove) and then `hosts` itself, so
-that the retry after the lib directory's removal, which has no `farhelm` to run, finds no `hosts` and skips. Anything
-else in `hosts` (a file, a symlink, a directory), or a removal or listing that fails, fails the step while the `farhelm`
-is still there, naming what is left. A `hosts` whose `farhelm` is already gone, which only a removal from outside
-uninstall leaves, fails the step with how to end the hosts by hand. This helm allows the command 30 seconds, plus room
-for starting it, on top of the bound of the step's other commands; that figure is this build's own bound for the
-command, not a promise every release's `farhelm` keeps. The command accepts only an absolute state directory, so
+with the kept-data note outside the action rail. On Linux its actions disable the supervisor unit, remove the unit file,
+reload the user manager, stop the unit with its terminal hosts and tmux server, remove the lib directory, and finally
+forget the host. Removing the file before stopping keeps the supervisor answering until nothing can start it again: up
+to the unit file's removal the host stays connected and the ordinary checks apply, and after it a retry may proceed
+without a connection. Reloading after the file is gone makes systemd forget the unit's `KillMode=process` and use its
+default `control-group`: the stop ends the supervisor and the private tmux server, including any ended sessions'
+retained panes (this default behavior was verified on a real user manager when uninstall was built), and the terminal
+hosts in the unit's group (see "Terminal host"). The same stop action then ends the terminal hosts of the host's state
+directory, and after them any server still reachable at this host's private state-directory socket. That covers an
+inactive supervisor whose process-only policy left hosts or tmux alive before systemd forgot its removed unit. The hosts
+are ended by the installed `farhelm internal stop-terminal-hosts --state-dir <state dir>`, run with the binary the plan
+names, which is still in place because the lib directory goes after this step. The command runs whenever the state
+directory's `hosts` exists, whatever it holds (the command's contract has callers decide by that, and judges what is
+there) and whatever kind of entry it is (the command refuses one that is not a real directory); only a missing `hosts`,
+an install from before terminal hosts, skips it. Only its exit status 0 counts; any other status, including the 2 of a
+`farhelm` from before the command, fails the step with the command's lines and leaves the host listed for a retry. After
+a 0 the step removes the socket files left in `hosts` (the command only notes one it could not remove) and then `hosts`
+itself, so that the retry after the lib directory's removal, which has no `farhelm` to run, finds no `hosts` and skips.
+Anything else in `hosts` (a file, a symlink, a directory), or a removal or listing that fails, fails the step while the
+`farhelm` is still there, naming what is left. A `hosts` whose `farhelm` is already gone, which only a removal from
+outside uninstall leaves, fails the step with how to end the hosts by hand. This helm allows the command 30 seconds,
+plus room for starting it, on top of the bound of the step's other commands; that figure is this build's own bound for
+the command, not a promise every release's `farhelm` keeps. The command accepts only an absolute state directory, so
 planning refuses a host whose state directory is not one. The tmux client is the accepted host executable when
 available, otherwise the private lib-directory executable; the `farhelm` binary, the state directory, the client and the
 socket are all frozen in the plan before confirmation. An absent server skips the tmux cleanup, including a retry after
@@ -7531,46 +7567,56 @@ re-derived at run time. A retry without a connection also needs the unit no long
 the uninstall inspection): the probe reads a custom command name that stopped resolving as no supervisor answering, so
 its evidence alone would let a retry stop a supervisor whose sessions were never checked.
 
+On a remote Mac, uninstall instead removes the plist, removes the exact frozen job with `launchctl bootout` and confirms
+it is no longer loaded, then runs the same installed `stop-terminal-hosts` command before removing the lib directory and
+forgetting the host. Bootout deliberately leaves the job's children alone, so explicit terminal-host termination is
+required. There is no tmux cleanup. A loaded job, even one with no running PID, is treated as active because launchd
+could start it; an offline retry needs both the plist gone and the job absent. Inspection first verifies that the user's
+launchd domain is available, and accepts only launchctl's specific missing-job answer as absence. Other command failures
+refuse rather than passing for an already stopped job. A loaded job's plist path must match the frozen planned path,
+using the same canonical-path and home-normalization guards as the Linux unit fragment. A stop failure or an unconfirmed
+terminal host keeps the lib directory and host listed. The kept-data note and retry behavior are the same as Linux.
+
 The checks run at planning and again under the run's lock at confirmation, by planning again and requiring the same
 plan, so one piece of code decides every fact the plan rests on. A connected host needs a fresh session list (a live
 round trip, never the cache) with no session that has not ended and none with a live tab, a list the supervisor did not
-truncate, its supervisor unit running (a connected supervisor whose unit is not running was started some other way, and
-removing its lib directory would leave it running from deleted files), and the fresh probe reporting exactly the
-recorded identity, a missing one included, since the probe dials the destination again and uninstall must not act on a
-machine it has not verified. The unit systemd loaded (`FragmentPath`) must be the planned unit file after the home-only
-normalization below, including its full-path same-file guard, so neither "no unit file left" nor the removal can miss a
-unit loaded from elsewhere. A host that is not connected is refused when a supervisor answers there but cannot be used
-(version skew, an identity problem), and otherwise needs the probe's positive evidence that no supervisor answers and
-its unit file already gone; when its lib directory is gone too, the registered binary is no longer checked, since there
-is nothing left to protect and the check would strand the retry. The binary the probe dialed must lie inside the lib
-directory and the host's state directory must not, compared as canonical paths the host resolves (`readlink -f`), since
-the lib directory is removed with `rm -rf` and a state directory symlinked into it would otherwise go with it; a path
-the host cannot resolve refuses. For every inspected path, including the unit fragment, the inspection walks from that
-resolved path toward the root to find an ancestor that is the same folder (`-ef`) as the SSH login's resolved home. It
-replaces only that prefix with the login home's spelling, and keeps the replacement only when both full paths name the
-same file (`-ef`). That final guard matters for a non-recursive home bind with different nested mounts. An absent,
-empty, unresolvable or root home leaves the resolved spelling unchanged; so does an unavailable identity comparison or a
-failed same-file guard. No other folder aliases are normalized. The three guards still compare the resulting paths as
-text, preserving refusals for shared unit folders, shared installs and hard-linked unit copies at a different path.
-Those comparisons cannot see a lib directory that is itself a symlink, since the binary resolves inside the link's
-target, while `rm -rf` of the link removes only the link; so the inspection also reports, per path, whether the path
-itself is a symlink (`[ -L ]`, which sees a dangling link too), and planning refuses a symlinked lib directory before
-any other check of the inspection, the resolution check included, so that a dangling link gets the refusal that points
-to Remove rather than "cannot tell where it leads". The removal command repeats the `-L` test in the same shell as the
-`rm`, as the unit removal does for setup's marker, and refuses a lib directory that became a link after confirmation as
-a failed step. A row with no recorded state directory uses the supervisor's default as the host's own environment
-resolves it, `XDG_STATE_HOME` included. A session started between the confirmation check and the stop is not locked out
-and may be ended with the unit. The confirmation-time check is sufficient; nothing requires another check during the
-removal. Local `farhelm uninstall` keeps its separate scope and behavior. The state check also compares the spellings
-from before home normalization. Each path is respelled on its own, so the lib directory can come back in the home's
-spelling while the state directory inside it keeps the alias spelling, because its same-file guard failed (below a
-nested mount the bind lacks, or for a state directory that does not exist). The inspection therefore also reports each
-resolved path before normalization, and the state check refuses when the state directory is inside the lib directory in
-either spelling. The state check also refuses on the host's same-folder test, an identity answer it never uses to accept
-a path: the inspection reports, per path, whether its unnormalized resolution or a folder above it is the same folder
-(`-ef`) as the lib directory, which catches the lib and the state reached through two binds of the home with a mount
-over a folder above the lib visible through only one, where no spelling shows the containment and no mount lies inside
-the lib.
+truncate, its supervisor service running (on Linux its unit, on a Mac its loaded launchd job; a connected supervisor
+whose service is absent was started some other way, and removing its lib directory would leave it running from deleted
+files), and the fresh probe reporting exactly the recorded identity, a missing one included, since the probe dials the
+destination again and uninstall must not act on a machine it has not verified. The unit systemd loaded (`FragmentPath`),
+or the plist launchd loaded, must be the planned service file after the home-only normalization below, including its
+full-path same-file guard, so neither "no unit file left" nor the removal can miss a unit loaded from elsewhere. A host
+that is not connected is refused when a supervisor answers there but cannot be used (version skew, an identity problem),
+and otherwise needs the probe's positive evidence that no supervisor answers and its unit file or plist already gone;
+when its lib directory is gone too, the registered binary is no longer checked, since there is nothing left to protect
+and the check would strand the retry. The binary the probe dialed must lie inside the lib directory and the host's state
+directory must not, compared as canonical paths the host resolves (`readlink -f`), since the lib directory is removed
+with `rm -rf` and a state directory symlinked into it would otherwise go with it; a path the host cannot resolve
+refuses. For every inspected path, including the unit fragment, the inspection walks from that resolved path toward the
+root to find an ancestor that is the same folder (`-ef`) as the SSH login's resolved home. It replaces only that prefix
+with the login home's spelling, and keeps the replacement only when both full paths name the same file (`-ef`). That
+final guard matters for a non-recursive home bind with different nested mounts. An absent, empty, unresolvable or root
+home leaves the resolved spelling unchanged; so does an unavailable identity comparison or a failed same-file guard. No
+other folder aliases are normalized. The three guards still compare the resulting paths as text, preserving refusals for
+shared unit folders, shared installs and hard-linked unit copies at a different path. Those comparisons cannot see a lib
+directory that is itself a symlink, since the binary resolves inside the link's target, while `rm -rf` of the link
+removes only the link; so the inspection also reports, per path, whether the path itself is a symlink (`[ -L ]`, which
+sees a dangling link too), and planning refuses a symlinked lib directory before any other check of the inspection, the
+resolution check included, so that a dangling link gets the refusal that points to Remove rather than "cannot tell where
+it leads". The removal command repeats the `-L` test in the same shell as the `rm`, as the unit removal does for setup's
+marker, and refuses a lib directory that became a link after confirmation as a failed step. A row with no recorded state
+directory uses the supervisor's default as the host's own environment resolves it, `XDG_STATE_HOME` included. A session
+started between the confirmation check and the stop is not locked out and may be ended with the unit. The
+confirmation-time check is sufficient; nothing requires another check during the removal. Local `farhelm uninstall`
+keeps its separate scope and behavior. The state check also compares the spellings from before home normalization. Each
+path is respelled on its own, so the lib directory can come back in the home's spelling while the state directory inside
+it keeps the alias spelling, because its same-file guard failed (below a nested mount the bind lacks, or for a state
+directory that does not exist). The inspection therefore also reports each resolved path before normalization, and the
+state check refuses when the state directory is inside the lib directory in either spelling. The state check also
+refuses on the host's same-folder test, an identity answer it never uses to accept a path: the inspection reports, per
+path, whether its unnormalized resolution or a folder above it is the same folder (`-ef`) as the lib directory, which
+catches the lib and the state reached through two binds of the home with a mount over a folder above the lib visible
+through only one, where no spelling shows the containment and no mount lies inside the lib.
 
 The last action deletes the row from inside the run, which already holds the host's provisioning lock and is the host's
 own run task, so it cannot go through Remove's entry point, which takes that lock and aborts the host's task. Both share
@@ -7642,9 +7688,9 @@ Artifacts land under temporary names in their final flat directories and are ato
 version directories or `current` symlinks: a failed transfer leaves the installed file intact, while a running binary
 keeps its old inode until the explicit supervisor restart. Sessions on the host keep whatever the old binary handed
 them, so the new one must accept it (see "What running sessions hold across versions"). Hash checks skip identical
-payloads and unit files are written only when their content differs, so rerunning provisioning converges from wherever
-an earlier run stopped. Remote plans report binary upload and installation as separate actions. Upload verifies the
-nonce temporary's digest; installation checks it again before the atomic rename. The upload's stall timeout (SPEC.md
+payloads and service files are written only when their content differs, so rerunning provisioning converges from
+wherever an earlier run stopped. Remote plans report binary upload and installation as separate actions. Upload verifies
+the nonce temporary's digest; installation checks it again before the atomic rename. The upload's stall timeout (SPEC.md
 "Provisioning transfers time out only on stalls") starts once the host's temporary file first exists and renews only on
 its verified growth. The upload command reports that size on its own ssh stdout every two seconds and once at EOF; no
 second command runs while the upload is active. Local writes into ssh are not progress evidence, including while the
@@ -7656,23 +7702,23 @@ timeout of its own for it. Both actions use the same staged payload snapshot, an
 action because they do not transfer over the network. Matching content also repairs installed-file mode drift.
 Provisioning may create directories with explicit modes and repair permissions on directories dedicated to Farhelm; the
 supervisor state directory is private to its user (`0700`). Existing shared directories, including a shared executable
-directory or the systemd user-unit directory, must retain their permissions. If those permissions prevent installation,
-report the obstacle rather than changing them. Each plan's `EnsureDirectories` step marks every directory dedicated or
-shared: a dedicated one converges on its mode with `install -d -m` (which chmods an existing directory, and that is the
-point), while a shared one is handed to `install -d` only when it is missing, and the confirmation text says an existing
-one keeps its permissions.
+directory, the systemd user-unit directory or the Mac's `Library/LaunchAgents`, must retain their permissions. If those
+permissions prevent installation, report the obstacle rather than changing them. Each plan's `EnsureDirectories` step
+marks every directory dedicated or shared: a dedicated one converges on its mode with `install -d -m` (which chmods an
+existing directory, and that is the point), while a shared one is handed to `install -d` only when it is missing, and
+the confirmation text says an existing one keeps its permissions.
 
-The supervisor unit uses `KillMode=process`. Sessions started through Farhelm belong to their terminals, which live in
-the unit's control group: each new terminal's terminal host, and for old sessions the private tmux server an earlier
-supervisor launched. systemd's default `control-group` policy would kill them and every session whenever an explicit
-UPDATE restarts the supervisor. Limiting the unit stop to its main process preserves the same ownership model as running
-`farhelm supervisor run` manually: stopping the supervisor detaches management, while the terminals continue to own the
-session processes until the user deletes them, the host reboots, or Farhelm is uninstalled from the host, which ends the
-terminal hosts and the private tmux server on purpose.
+The Linux supervisor unit uses `KillMode=process`. Sessions started through Farhelm belong to their terminals, which
+live in the unit's control group: each new terminal's terminal host, and for old sessions the private tmux server an
+earlier supervisor launched. systemd's default `control-group` policy would kill them and every session whenever an
+explicit UPDATE restarts the supervisor. Limiting the unit stop to its main process preserves the same ownership model
+as running `farhelm supervisor run` manually: stopping the supervisor detaches management, while the terminals continue
+to own the session processes until the user deletes them, the host reboots, or Farhelm is uninstalled from the host,
+which ends the terminal hosts and the private tmux server on purpose.
 
-The supervisor unit also sets `UnsetEnvironment=FARHELM_SESSION_ID FARHELM_AGENT_ID FARHELM_TAB_ID`. The kill sweep
-claims every process carrying a session's markers and has no exemption for the supervisor or its private tmux server. A
-tab's startup file that runs a bare `systemctl --user import-environment`, or
+The Linux supervisor unit also sets `UnsetEnvironment=FARHELM_SESSION_ID FARHELM_AGENT_ID FARHELM_TAB_ID`. The kill
+sweep claims every process carrying a session's markers and has no exemption for the supervisor or its private tmux
+server. A tab's startup file that runs a bare `systemctl --user import-environment`, or
 `dbus-update-activation-environment --systemd --all`, copies that tab's markers into the user manager; a supervisor
 started afterwards would inherit them, and deleting that session or closing that tab would make it signal itself, and a
 tmux server it started would take every old session's panes with it. A systemd-managed supervisor never legitimately
@@ -7683,27 +7729,27 @@ services that inherited them, are not protected, and the sweep deliberately has 
 Motivation for shipping tmux ourselves when absent or too old: apt needs root, and SPEC.md forbids requiring it; a
 static tmux under our own lib dir keeps the no-root promise without asking the user to install anything.
 
-The provisioning payloads — linux-musl `farhelm` binaries for both architectures plus the static tmux builds — are no
-longer embedded in the helm's own distribution (D2). This REVERSES the earlier "provisioning must work with no
-third-party downloads" posture: a release-shaped build (D13 — one that embedded the web UI) downloads them, on demand,
-from its own version's release on get.farhelm.io (`https://get.farhelm.io/v<version>/`, whose archive links redirect to
-where the archives are hosted, followed over https only), verifies them, and caches them under helm state before pushing
-them over SSH exactly as before. A release-shaped build of main, whose version is the development sentinel (see "Version
-and skew"), has no release to download from and refuses by default, naming `--payload-dir` and payloads built from the
-same commit (`UnreleasedPayloads`). A developer build defaults to no payloads at all (`NoPayloads`, D13) rather than to
-a download, and `--payload-dir <dir>` (env `FARHELM_HELM_PAYLOAD_DIR`) selects an operator-staged directory instead —
-files in an explicitly selected local directory are treated as operator-trusted and are not verified, on ANY build,
-developer or release. The desktop app's embedded helm takes the same directory from the same environment variable, so a
-desktop build from a working copy can update hosts with Linux payloads built from that working copy
-(`scripts/devbuild-mac.sh`). The downloading source is `ReleasePayloadSource` (`provisioning/release_payloads.rs`),
-which caches one release's assets, their extracted binaries, and the signed checksum file under
-`<state_dir>/payloads/v{version}-<first 12 hex of sha256(base_url)>/` — keyed by version so an upgraded helm never
-reuses the previous release's binaries, and by base URL so a mirror or test server can neither read nor poison what the
-real release wrote. Motivation for reversing the embedding: bundling every target's binaries inside every platform's own
-artifact cost tens of MB per download and coupled a payload's presence to whichever platform happened to embed it; a
-download keeps the size cost where it belongs (paid once, by the host actually being provisioned) while keeping the same
-"provisioned host runs exactly what the provisioning helm expects" property, because the default download always names
-the provisioning helm's own version.
+The provisioning payloads — linux-musl `farhelm` binaries for both architectures, the Apple-silicon Darwin `farhelm`,
+and the Linux static tmux builds — are no longer embedded in the helm's own distribution (D2). This REVERSES the earlier
+"provisioning must work with no third-party downloads" posture: a release-shaped build (D13 — one that embedded the web
+UI) downloads them, on demand, from its own version's release on get.farhelm.io (`https://get.farhelm.io/v<version>/`,
+whose archive links redirect to where the archives are hosted, followed over https only), verifies them, and caches them
+under helm state before pushing them over SSH exactly as before. A release-shaped build of main, whose version is the
+development sentinel (see "Version and skew"), has no release to download from and refuses by default, naming
+`--payload-dir` and payloads built from the same commit (`UnreleasedPayloads`). A developer build defaults to no
+payloads at all (`NoPayloads`, D13) rather than to a download, and `--payload-dir <dir>` (env
+`FARHELM_HELM_PAYLOAD_DIR`) selects an operator-staged directory instead — files in an explicitly selected local
+directory are treated as operator-trusted and are not verified, on ANY build, developer or release. The desktop app's
+embedded helm takes the same directory from the same environment variable, so a desktop build from a working copy can
+update hosts with target payloads built from that working copy (`scripts/devbuild-mac.sh`). The downloading source is
+`ReleasePayloadSource` (`provisioning/release_payloads.rs`), which caches one release's assets, their extracted
+binaries, and the signed checksum file under `<state_dir>/payloads/v{version}-<first 12 hex of sha256(base_url)>/` —
+keyed by version so an upgraded helm never reuses the previous release's binaries, and by base URL so a mirror or test
+server can neither read nor poison what the real release wrote. Motivation for reversing the embedding: bundling every
+target's binaries inside every platform's own artifact cost tens of MB per download and coupled a payload's presence to
+whichever platform happened to embed it; a download keeps the size cost where it belongs (paid once, by the host
+actually being provisioned) while keeping the same "provisioned host runs exactly what the provisioning helm expects"
+property, because the default download always names the provisioning helm's own version.
 
 Verification chain (D3): every release is published on one origin, `https://get.farhelm.io`, in a fixed layout that is a
 permanent contract with every client: `/latest` is one line naming the latest stable tag (never a prerelease; 404 before
@@ -7788,17 +7834,18 @@ fails it.
 
 ## Cross-compilation and targets
 
-Supervisor-side artifacts: `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`, static, built by cargo-dist on
+Linux supervisor artifacts: `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`, static, built by cargo-dist on
 a native runner per architecture with `musl-tools` for the C half of the link (audited: rusqlite-bundled static musl
 builds work for both). Cross-compiling them with cargo-zigbuild, which the retired hand-written release workflow did, is
 no longer necessary now that GitHub's arm64 Linux runners are generally available; zig remains the toolchain for the
 private tmux builds, which are C and cross-compile cleanly. The Mac artifacts (`aarch64-apple-darwin`: `farhelm` and
-`farhelm-desktop`) are built on a macOS runner with the native toolchain — cross-building them from Linux was audited
-and rejected: zig cannot link the Apple frameworks wry needs (WebKit, AppKit) without a licensed macOS SDK, and cross
-ships no darwin images. Dropping the `.app` bundle removed a third reason (`dx bundle` produces bundles only on the
-native platform) but not those two, and it added one: `farhelm-desktop` is built through `dx build`, which patches the
-asset names into the linked binary and so has to run where that binary is linked. The macOS runner stays. Signing and
-notarization are deferred (D11) and the artifacts ship unsigned, so signing is not among today's reasons — it would
+`farhelm-desktop`) are built on a macOS runner with the native toolchain. The Darwin `farhelm` is also the remote Mac
+supervisor payload; `farhelm-desktop` remains local to the desktop installation. Cross-building them from Linux was
+audited and rejected: zig cannot link the Apple frameworks wry needs (WebKit, AppKit) without a licensed macOS SDK, and
+cross ships no darwin images. Dropping the `.app` bundle removed a third reason (`dx bundle` produces bundles only on
+the native platform) but not those two, and it added one: `farhelm-desktop` is built through `dx build`, which patches
+the asset names into the linked binary and so has to run where that binary is linked. The macOS runner stays. Signing
+and notarization are deferred (D11) and the artifacts ship unsigned, so signing is not among today's reasons — it would
 become one if that changes.
 
 Motivation: musl-static sidesteps glibc version skew across Ubuntu releases, which matters because provisioning drops
