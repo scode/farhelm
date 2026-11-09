@@ -293,12 +293,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (cache the encoded bytes of history rows and re-encode only the screen and new rows, producing the same v1 blob as
   today). The repository records no reason for the original choice of whole snapshots.
 
-- **Per-host checkout directory.** Settings → Checkouts has one global **Checkout folder** for every host, but one
-  directory rarely suits every machine: an absolute path from one machine may not exist or be writable on another, and
-  hosts can differ in where projects belong. Let the user set the checkout directory per host in the UI, with the global
-  value as the default. Today the only per-host override is `farhelm helm checkout-config set-root --host <id>`, which
-  takes a numeric host ID that nothing shows the user. Plan: `plans/queue/per-host-checkout-folder.md`.
-
 - **Credentials for containerized sessions and ordinary hosts.** The Credentials section of Settings (planned in
   `plans/queue/settings-credentials.md`) serves only Tensorlake hosts, through their recipes. Extend it so containerized
   sessions and ordinary SSH hosts can use the same named credentials, for example a GitHub token in place of the

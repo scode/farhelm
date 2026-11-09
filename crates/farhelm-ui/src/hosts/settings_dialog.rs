@@ -1,23 +1,25 @@
 //! The host settings dialog: connection details, host identity appearance,
-//! and permission choices, in a modal over the whole page.
+//! checkout folder, and permission choices, in a modal over the whole page.
 //!
 //! It replaced a panel that expanded inline inside the host's sidebar row.
 //! The sidebar is too narrow for that: the destination was cut off, the edit
 //! buttons crowded the values, and the YOLO explanation wrapped awkwardly.
-//! The dialog shows every value in full and edits one field at a time, in
-//! place, saving each change on its own (there is no dialog-wide Save).
+//! The dialog shows every value in full and saves each setting independently
+//! (there is no dialog-wide Save). The checkout folder has an explicit Save;
+//! the identity editors and permission switches keep their own save behavior.
 //! A host-specific header identifies the peer and its reported connection
-//! state, while Connection, Appearance and Permissions group
-//! the controls. The refresh has its own CSS class because the base dialog styles also serve
-//! unrelated modals. The switches remain native checkboxes, including their
+//! state, while Connection, Appearance, Checkouts and Permissions group the
+//! controls. The refresh has its own CSS class because the base dialog styles
+//! also serve unrelated modals. The switches remain native checkboxes, including their
 //! write-disable, refused-write reset and keyboard contracts.
 //! Each permission's label, explanation and outcome form one spacing group,
 //! so adjacent independent grants do not look like one setting.
 //!
-//! What this module owns is presentation and focus. The state it renders
-//! (which host is open, which field is being edited, the draft, the outcome
-//! of the last write) belongs to `HostsPanel`, which also performs every
-//! write through its ordinary `run` path. The dialog is rendered by the panel
+//! What this module owns is presentation and focus. Apart from the shared
+//! checkout-folder field, whose explicit-save draft and outcome are local,
+//! the state it renders (which host is open, the active identity editor and its
+//! draft, and identity/permission outcomes) belongs to `HostsPanel`. Those
+//! settings write through the panel's ordinary `run` path. The dialog is rendered by the panel
 //! rather than by the row for the reason `HostDestinationForm` records: a
 //! host mutation landing rebuilds the rows, and anything a row owns goes
 //! with it.
@@ -419,10 +421,11 @@ pub(crate) fn HostDialogHeader(
 
 /// Edit one host's settings without giving a refresh ownership of its draft.
 ///
-/// The panel owns every value and write handler so a host-list refresh can
-/// update the header and controls without discarding an editor or its outcome.
-/// Grouping and switch styling do not introduce a dialog-wide save: each
-/// change still uses the panel's operation token and existing focus recovery.
+/// The panel owns the identity and permission editors; the checkout field owns
+/// its independent explicit-save draft. A host-list refresh updates the header
+/// and controls without discarding either editor. There is no dialog-wide save:
+/// identity and permission changes keep the panel's existing write/focus path,
+/// and checkout saves use the shared field's dismissal-safe request lifetime.
 #[component]
 pub(super) fn HostSettingsDialog(
     host: Host,
@@ -666,6 +669,18 @@ pub(super) fn HostSettingsDialog(
                         {outcome_for(SettingsField::Appearance)}
                     }
                 }
+                section { class: "host-settings-section", aria_label: "Checkouts",
+                    h3 { class: "host-settings-section-title", "Checkouts" }
+                    crate::checkout_root::CheckoutRootField {
+                        // The read-once draft belongs to this registry entry,
+                        // even if the dialog switches hosts without closing.
+                        key: "checkout-root-{id}",
+                        host: id,
+                        disabled: busy || editing.is_some(),
+                        note: "An empty field uses the default from Settings → Checkouts. ~ means this host's home folder. Changes apply to new checkouts; existing checkouts stay where they are.",
+                        on_saved: move |_| {},
+                    }
+                }
                 section { class: "host-settings-section", aria_label: "Permissions",
                     h3 { class: "host-settings-section-title", "Permissions" }
                 div { class: "host-settings-yolo setting-group",
@@ -753,7 +768,7 @@ pub(super) fn HostSettingsDialog(
                 }
                 }
                 crate::modal_dialog::DialogFooter { class: "host-settings-actions",
-                    span { class: "dialog-footer-hint", "Changes save as you make them" }
+                    span { class: "dialog-footer-hint", "Checkout folder saves with Save; other changes save as you make them" }
                     crate::modal_dialog::DialogActions {
                         button {
                             r#type: "button",

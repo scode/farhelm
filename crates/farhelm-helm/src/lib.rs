@@ -795,6 +795,13 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/hosts/{id}/appearance",
             axum::routing::post(hosts::set_appearance),
         )
+        // Configuration stays editable without a host connection. This reply
+        // exposes the folder override only; host hook overrides stay private.
+        .route(
+            "/api/hosts/{id}/checkout-root",
+            get(checkout_config::get_host_checkout_root)
+                .put(checkout_config::put_host_checkout_root),
+        )
         .route(
             "/api/hosts/{id}/yolo-without-asking",
             axum::routing::post(hosts::set_yolo_without_asking),
@@ -836,8 +843,8 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/announcements/shown",
             axum::routing::post(announcements::shown),
         )
-        // Separate explicit saves expose only global checkout configuration.
-        // Per-host overrides never enter these authenticated browser replies.
+        // Separate explicit saves expose only global checkout configuration;
+        // the host folder has its own route above, with no hook override.
         .route(
             "/api/checkout-root",
             get(checkout_config::get_checkout_root).put(checkout_config::put_checkout_root),

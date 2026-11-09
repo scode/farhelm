@@ -272,7 +272,8 @@ choosing **Managed checkout** asks for it.
   alt="The launcher in managed checkout mode asking for the checkout folder, with the field and its save button explained."
 />
 
-To change the directory later, or save an empty field to clear it, use the same field under **Checkouts** in **Settings**,
+This sets the default for hosts without a directory of their own. To change it later, or save an empty field to clear it,
+use **Default checkout folder** under **Checkouts** in **Settings**,
 opened from the gear at the foot of the [navigation rail](/docs/using/manage-hosts/), the column of icons down the left
 edge of the sidebar.
 
@@ -338,10 +339,15 @@ trust allows the repository's own Claude hooks and commands to run.
 
 ### Checkout management
 
-The directory and the command apply to every host. To give one host a directory or command of its own, run
+Each host can have a checkout directory of its own in its [settings](/docs/using/manage-hosts/#host-settings).
+An empty **Checkout folder** uses the default from **Settings → Checkouts**; **Use default** restores that choice.
+Changing the default affects each host without its own directory at its next launch, including hosts already added.
+Existing checkouts stay where they are.
+
+The post-clone command applies to every host. To give one host a command of its own, run
 `farhelm helm checkout-config` on the machine that runs the helm (the program that serves the Farhelm app; see
 [The pieces](/docs/how-it-works/the-pieces/)); `farhelm helm checkout-config --help` lists the options. A host given its
-own directory or command there keeps it whatever **Settings** says.
+own command there keeps it whatever **Settings** says.
 
 Farhelm owns the managed checkouts it makes, the directory they go into, their prepared checkouts and their trash. Work in a checkout as usual,
 but do not restore a backup or filesystem snapshot over them, and keep them on an ordinary filesystem rather than one

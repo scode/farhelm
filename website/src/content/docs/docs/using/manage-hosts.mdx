@@ -77,6 +77,12 @@ appears on the navigation rail, beside its sessions, in the host list and quick 
 host picker. Each choice saves
 as you make it and appears in your other open Farhelm windows. Your Mac starts with a red laptop mark, which you can change.
 
+Under **Checkouts**, **Checkout folder** chooses where this host's new managed checkouts go. Leave it empty to use the
+default shown in grey from **Settings → Checkouts**. Save an empty field, or choose **Use default**, to follow that
+default again. This field needs **Save**; it can be changed while the host is disconnected or suspended, and existing
+checkouts stay where they are. [Start from a managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout)
+covers launching one.
+
 In Settings, **Color terminal frames by host** under **Sessions** adds a thin frame around every terminal in its host's
 color. It starts off. The terminal background and text colors stay the same. The switch is kept by the
 [helm](/docs/how-it-works/the-pieces/), so it applies in every Farhelm window; other open windows pick up a change when
@@ -189,7 +195,7 @@ discards those drafts, except that an edited Tensorlake recipe asks whether to s
 [session actions and shell-tab close](/docs/using/stop-restart-resume/#stop-or-delete) without changing these host
 choices or YOLO and trash questions. **Terminal** holds the [terminal link choices](/docs/using/session-list/#terminal-links)
 and, in the desktop app, file types to open with a modifier-click and
-[tunnels](/docs/using/work-in-a-session/#open-a-remote-localhost-link). **Checkouts** holds **Checkout folder**, **Post-clone command** and
+[tunnels](/docs/using/work-in-a-session/#open-a-remote-localhost-link). **Checkouts** holds **Default checkout folder**, **Post-clone command** and
 [**Keep a checkout ready for faster launches**](/docs/using/start-a-session/#prepared-checkouts), while **Agent trust** holds the managed-checkout trust switches; both are covered in
 [Start a session](/docs/using/start-a-session/#start-from-a-managed-checkout). **Credentials** holds the GitHub tokens,
 agent logins and API endpoint tokens that [Tensorlake recipes](/docs/using/tensorlake-sandboxes/#save-named-credentials)

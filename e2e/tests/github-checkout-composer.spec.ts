@@ -317,7 +317,7 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
       .getByRole("button", { name: "Managed checkout", exact: true }).click();
     await expect(form.locator(".launch-composer-repository-note")).toBeVisible();
     const field = form.locator(".checkout-root-field");
-    const folder = field.getByRole("textbox", { name: "Checkout folder", exact: true });
+    const folder = field.getByRole("textbox", { name: "Default checkout folder", exact: true });
     await expect(folder).toBeEditable();
     await expect(folder).toHaveValue("");
     await expect(field).toContainText("Settings");
@@ -1407,7 +1407,7 @@ test("switching hosts rejects the old checkout preview and checks setup for the 
     // setup check. Its pending preview supplies no setup signal; discovery's
     // host-bound flag is the only authority for this field.
     await expect(form.locator(".checkout-root-field")
-      .getByRole("textbox", { name: "Checkout folder", exact: true })).toBeEditable();
+      .getByRole("textbox", { name: "Default checkout folder", exact: true })).toBeEditable();
     releaseLocal();
     await expect.poll(() => localFinished).toBe(true);
     await expect(form.locator(".create-session-submit")).toBeDisabled();

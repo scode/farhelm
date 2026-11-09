@@ -7259,7 +7259,7 @@ pub(super) fn CreateSessionForm(
                             {host_notes.clone()}
                             if show_checkout_root_setup {
                                 crate::checkout_root::CheckoutRootField {
-                                    note: "Managed checkouts use this folder on every host. ~ means each host's home folder. You can change it later in Settings. Hosts with a command-line folder keep it.",
+                                    note: "Sets the default checkout folder for every host without its own. ~ means each host's home folder. Change the default later in Settings → Checkouts, or set a host's own folder in its settings.",
                                     on_saved: move |_| {
                                         // Refresh both immediately after explicit setup,
                                         // without waiting for history's next configuration

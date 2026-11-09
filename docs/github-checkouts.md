@@ -6,8 +6,8 @@ launches still work without any checkout configuration.
 
 ## Configure the destination
 
-Set the all-hosts **checkout folder** in Settings and save it, or run this on the machine running the helm, against its
-existing state:
+Set **Default checkout folder** under Settings → Checkouts and save it, or run this on the machine running the helm,
+against its existing state:
 
 ```sh
 farhelm helm checkout-config set-root '~/work'
@@ -19,9 +19,15 @@ does not expand it or create the root. Farhelm creates a missing root and its pa
 checkout. There is no default root. If the helm uses a custom state directory, pass `--state-dir /path/to/state` to each
 configuration command.
 
-The setting above is global. Add `--host <id>` to a command to configure a registered host's override. The root and hook
-inherit independently. `clear-root --host <id>` removes that override and restores the global root; `clear-root` without
-a host removes the global setting. `show --host <id>` shows the selected host's stored and effective values.
+Each host's settings has a **Checkouts** section with its own **Checkout folder**. Leave it empty to use the default
+shown as a placeholder; saving an empty field or choosing **Use default** clears its override. This works while the host
+is disconnected or suspended: saving checks the path's shape, and the host checks the directory at launch. Changing
+either setting affects new checkouts, not existing ones. The default is read at launch, not copied when you add a host.
+
+The command above sets the default. Add `--host <id>` to configure a registered host's override from the command line.
+The root and hook inherit independently. `clear-root --host <id>` removes that override and restores the global root;
+`clear-root` without a host removes the global setting. `show --host <id>` shows the selected host's stored and
+effective values.
 
 An optional post-clone shell command runs inside each new checkout, on its host, after cloning and before the agent. Set
 the all-hosts **post-clone command** in Settings and save it, or use the command line. For example, if `jj` is installed

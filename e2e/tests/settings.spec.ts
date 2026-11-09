@@ -1579,7 +1579,7 @@ test("settings saves and clears the all-hosts checkout folder", async ({ page, r
   const read = () => readCheckoutRoot(request);
   const previous = await read();
   const field = dialog.locator(".checkout-root-field");
-  const folder = field.getByRole("textbox", { name: "Checkout folder", exact: true });
+  const folder = field.getByRole("textbox", { name: "Default checkout folder", exact: true });
   const save = field.getByRole("button", { name: "Save", exact: true });
   const chosen = "~/managed-checkouts";
   const submitted: Request[] = [];
@@ -1678,7 +1678,7 @@ test("checkout drafts survive switching sections and are discarded on close", as
   });
   await page.goto("/");
   const dialog = await openSettings(page, "checkouts");
-  const folder = dialog.getByRole("textbox", { name: "Checkout folder", exact: true });
+  const folder = dialog.getByRole("textbox", { name: "Default checkout folder", exact: true });
   const command = dialog.getByRole("textbox", { name: "Post-clone command", exact: true });
   await expect(folder).toBeEditable();
   await expect(command).toBeEditable();
@@ -1737,7 +1737,7 @@ test("an untouched checkout folder save writes nothing and edited paths are trim
     await page.goto("/");
     await openSettings(page, "checkouts");
     const field = page.getByRole("dialog", { name: "Settings", exact: true }).locator(".checkout-root-field");
-    const folder = field.getByRole("textbox", { name: "Checkout folder", exact: true });
+    const folder = field.getByRole("textbox", { name: "Default checkout folder", exact: true });
     await expect(folder).toBeEditable();
     await expect(folder).toHaveValue(literal);
     /** Each Save needs its own terminal reply; an old success notice cannot
@@ -1801,7 +1801,7 @@ test("a pending checkout folder save survives closing settings", async ({ page, 
     await page.goto("/");
     await openSettings(page, "checkouts");
     const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
-    const folder = dialog.getByRole("textbox", { name: "Checkout folder", exact: true });
+    const folder = dialog.getByRole("textbox", { name: "Default checkout folder", exact: true });
     await expect(folder).toBeEditable();
     await expect(folder).toHaveValue(previous.root ?? "");
     await folder.fill("~/save-survives-close");
