@@ -105,3 +105,76 @@ The documentation review found an unavailable recovery-menu label and an outdate
 supervisors; both were corrected, including the matching setup-plan and changelog wording. Each original reviewer
 checked its corrections and found no remaining issues. Both PRs remain drafts; the executor has neither marked them
 ready nor merged them.
+
+### Landing
+
+Landed alone in its round. Since the stack was based, main had gained: the per-host permission for agents to manage
+sessions on their own host (own-host-sessions-without-asking), lower memory use when a terminal's saved snapshot is
+restored (snapshot-in-place-paint), a correction to the OMP agent docs, and test and tooling changes. Saved Tensorlake
+sandbox templates (prepared-snapshots) were already in the base, and the executor's rebase handled them. A fresh-context
+review read the plan's diff against all of that and found no functional conflict. A Mac set up over SSH goes through the
+ordinary add flow, so it starts with all five host permissions off, like any other new host. The plan constructs no host
+record directly, so the new permission needed no change in its code.
+
+#### Fixes made at landing
+
+- SPEC.md still said "Installing Farhelm still requires a supported tmux", which the plan's own Topology text now
+  contradicts: setting up a remote Mac over SSH never installs or uses tmux. The sentence now names that exception
+  (#3214).
+- A Mac with the Farhelm desktop app installed is still offered Update, Update all and automatic updates, and then
+  refused with no way forward. The refusal message, and the Manage hosts docs page, now say to update Farhelm from the
+  desktop app on that Mac (#3213, #3214). The changelog entry already says such a Mac is not supported and needed no
+  change. The new message was checked by the helm's tests, not on a real Mac.
+- On the Manage hosts docs page, the host-settings screenshot's description said "four permission switches". It was
+  stale since the own-host permission landed, and now says five. "Your Mac's destination cannot be changed" is ambiguous
+  now that remote Macs are hosts too, so it now says "the local Mac's destination" (#3214).
+
+#### Gaps the report leaves out
+
+- Uninstall on a remote Mac reads the Mac's mount table to check that nothing is mounted inside the directories it
+  removes: when planning, and again just before it removes Farhelm's program directory, after the background job is
+  gone. The parser refuses the whole table when any line is ambiguous. So one unrelated mounted volume whose name
+  contains " (" or " on " (say `/Volumes/Backup (old)`) makes uninstall refuse. Nothing is removed that should not be.
+  If the refusal comes at the second check, the Mac is left with Farhelm's background job removed and its program
+  directory still in place, and the host stays listed with the remaining steps. Unmounting that volume and choosing
+  uninstall again finishes it. You asked for this in conversation during this landing, so it is now a Near term TODO
+  entry, added by #3228. It was not fixed at landing because the parser change needs tests of its own.
+- To tell "no background job" apart from launchd failing, setup, Update and uninstall match the exact message and exit
+  status seen on macOS 26.6. On a macOS release that words it differently, all three refuse and show launchd's own
+  output, not a plain explanation. That is safe, but the error will be hard to read.
+- The two new real-Mac tests (one of them reboots the Mac) are ignored by default and gated by environment variables.
+  `.agents/validation.md` does not list them, so a later agent has to find them in the code. I left that as is.
+- The README introduction, the docs Overview (which mirrors it, and is frozen until you ask for a change) and the
+  desktop app's welcome screen still describe remote hosts as Linux machines.
+
+#### A correction to the report
+
+The report and the docs say to choose Update after a remote Mac reboots. The executor's real reboot test recovered by
+running setup again, not Update. Update ends with the same launchd start, so it should work the same way, but that is
+inferred, not measured.
+
+#### Checks
+
+Run on the stacked tree before the landing fixes (`35bddf0d`), on this development machine:
+
+- `cargo fmt --all -- --check`, `dprint check`, `python3 releasing/check-changelog.py format` and the test-sleep checker
+  passed.
+- `cargo clippy -p farhelm-helm --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings` (the
+  shipped binary, which includes the helm) passed.
+- Recorded `cargo nextest run -p farhelm-helm` (the whole helm crate, including provisioning against a local and an
+  ssh-to-localhost host): 1642 passed, run `f6d22f75`. The only two skipped tests are the plan's ignored real-Mac tests.
+- The website build passed (36 pages, internal links checked).
+
+After the landing fixes (one refusal message and documentation wording): formatting, `dprint check`, clippy on the helm
+crate, recorded `cargo nextest run -p farhelm-helm --lib -E 'test(/^provisioning::/)'` (340 passed, run `e45fc76e`) and
+the website build all passed. Main then differed from the tested tree only by those fixes and the TODO entry above.
+
+Reused from the executor's report: the real Mac lifecycle on an Apple-silicon Mac (setup, Update, crash restart,
+discovery from an existing and a fresh helm, uninstall keeping data), the authorized reboot measurement, the CentOS
+provisioning run, and the run that downloaded and verified a published release's Mac program and uploaded it over SSH.
+Main's changes since the executor's base touch none of the Mac paths. The CentOS harness gained only cleanup of
+containers left by killed runs.
+
+Skipped: browser tests (no change to the web UI's code; the new setup steps reach it as plain text) and the rest of the
+workspace's Rust tests (the plan's code changes are all in the helm crate, and main's own changes were tested when they
+landed). Hosted CI is manual-only and was not dispatched.
