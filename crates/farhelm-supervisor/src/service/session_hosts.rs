@@ -549,37 +549,48 @@ impl SessionHosts {
         Ok(roots)
     }
 
-    /// The scope units of the session's tab hosts whose tags say their
-    /// program runs in a scope of its own: named this way since a tab in a
-    /// host has no tmux window to read its id from. A tab runtime's tag was
-    /// read at its open or adoption ([`HostTab::scoped`]).
-    pub(crate) fn scoped_tab_units(&self, session_id: &str) -> Vec<String> {
-        let held = self
-            .tabs
-            .iter()
-            .filter(|tab| tab.scoped)
-            .filter_map(|tab| crate::scope::tab_unit_name(session_id, &tab.tab_id));
-        self.hosts
-            .iter()
-            .filter_map(|host| match host {
+    /// Carry every host tab's containment selection into Delete, including
+    /// placeholders whose tag could not be read. Only adding true tags
+    /// would let the agent's scope hide unscoped tabs from the fallback.
+    /// Existing derived-name manager policy is preserved independently.
+    pub(crate) fn add_tab_scopes(&self, session_id: &str, units: &mut super::sweep::ScopeUnits) {
+        use crate::terminal_process::TabScope;
+        for tab in self.tabs.iter().chain(&self.placeholder_tabs) {
+            let selection = if tab.scoped {
+                TabScope::Scoped
+            } else {
+                TabScope::Unscoped
+            };
+            units.extend_tab(
+                crate::scope::tab_unit_name(session_id, &tab.tab_id),
+                selection,
+            );
+        }
+        for host in &self.hosts {
+            match host {
                 RecordedHost::Ours {
                     tag:
                         HostTag {
-                            role:
-                                HostRole::Tab {
-                                    tab_id,
-                                    scoped: true,
-                                },
+                            role: HostRole::Tab { tab_id, scoped },
                             ..
                         },
                     ..
-                } => crate::scope::tab_unit_name(session_id, tab_id),
-                RecordedHost::Ours { .. }
-                | RecordedHost::Gone { .. }
-                | RecordedHost::Unreadable { .. } => None,
-            })
-            .chain(held)
-            .collect()
+                } => {
+                    let selection = if *scoped {
+                        TabScope::Scoped
+                    } else {
+                        TabScope::Unscoped
+                    };
+                    units.extend_tab(crate::scope::tab_unit_name(session_id, tab_id), selection);
+                }
+                // Without a tag this host may have held an unscoped tab.
+                // Its absence says nothing about detached marked jobs.
+                RecordedHost::Gone { .. } | RecordedHost::Unreadable { .. } => {
+                    units.require_sweep()
+                }
+                RecordedHost::Ours { .. } => {}
+            }
+        }
     }
 
     /// Why Delete's guard cannot let anything through, if it cannot: a
@@ -845,12 +856,71 @@ async fn join_until<'a, T>(
 
 #[cfg(test)]
 mod tests {
-    //! The bounded join. Everything that needs hosts is in
+    //! Metadata retained for cleanup and the bounded join. Host execution is in
     //! `service::core::tests::host_terminals` (stand-in hosts) and
     //! `crates/farhelm/tests/e2e/host_terminals.rs` and `host_creates.rs`
     //! (real ones).
 
     use super::*;
+
+    /// A scoped agent cannot cover a tab's unscoped or unavailable launch.
+    /// Check both held and placeholder inputs: omitting placeholders used
+    /// to drop exactly the evidence that prevents a false scope-only result.
+    /// The ended handles below hold no socket or real host process.
+    #[farhelm_testtrace::test]
+    async fn delete_keeps_every_host_tabs_containment_selection() {
+        let session = uuid::Uuid::new_v4().to_string();
+        for placeholder in [false, true] {
+            for scoped in [false, true] {
+                let tab = HostTab {
+                    tab_id: uuid::Uuid::new_v4().to_string(),
+                    created_ns: 0,
+                    scoped,
+                    host: HostTerminal::gone(std::path::Path::new("unused-host.sock"), None),
+                    end_failed: false,
+                    failed_ends: 0,
+                    retry_at: None,
+                };
+                let mut hosts = SessionHosts {
+                    session_id: session.clone(),
+                    hosts: Vec::new(),
+                    tabs: Vec::new(),
+                    placeholder_tabs: Vec::new(),
+                    budget: Duration::from_secs(1),
+                };
+                if placeholder {
+                    hosts.placeholder_tabs.push(tab);
+                } else {
+                    hosts.tabs.push(tab);
+                }
+                let mut units =
+                    super::super::sweep::ScopeUnits::recorded(crate::scope::unit_name(&session, 0));
+                hosts.add_tab_scopes(&session, &mut units);
+                units.normalize();
+                assert_eq!(
+                    units.needs_sweep(),
+                    !scoped,
+                    "placeholder={placeholder}, scoped={scoped}"
+                );
+            }
+        }
+        let hosts = SessionHosts {
+            session_id: session.clone(),
+            hosts: vec![RecordedHost::Gone {
+                socket: PathBuf::from("unread-tag.sock"),
+            }],
+            tabs: Vec::new(),
+            placeholder_tabs: Vec::new(),
+            budget: Duration::from_secs(1),
+        };
+        let mut units =
+            super::super::sweep::ScopeUnits::recorded(crate::scope::unit_name(&session, 0));
+        hosts.add_tab_scopes(&session, &mut units);
+        assert!(
+            units.needs_sweep(),
+            "a missing tag cannot establish containment of old tab jobs"
+        );
+    }
 
     /// The bounded join reports what finished and gives up on the rest at
     /// its deadline.

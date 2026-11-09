@@ -3458,13 +3458,11 @@ pub(crate) fn proc_starttime(pid: u32) -> Option<u64> {
 /// A marked process spawned OUTSIDE the session's cgroup, killed and
 /// reaped on drop.
 ///
-/// The instrument that makes "the backstop sweep still ran" observable at
-/// all. Both of stop's mechanisms leave the same end state — nothing
-/// running — so the only way to tell them apart is a process exactly one
-/// of them can reach: this one is findable ONLY by the marker scan (it is
-/// in no scope, and is a child of the test process rather than of the
-/// pane), while the cloaked daemon is killable ONLY by the cgroup. A stop
-/// that ends both provably ran both.
+/// Makes invocation or omission of the marker sweep observable. This
+/// process carries the session marker but belongs to neither its scope
+/// nor its terminal's descendant tree. A scoped Stop must leave it alive;
+/// an unscoped Stop finds it through the marker. A cloaked daemon inside
+/// the scope provides the complementary proof of scope cleanup.
 ///
 /// Owns the `Child` rather than handing back a bare pid so the zombie is
 /// reaped: this IS a child of the test process, and the sweep under test

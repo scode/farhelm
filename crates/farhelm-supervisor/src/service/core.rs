@@ -1147,9 +1147,8 @@ pub struct SupervisorSeams {
     /// A seam because the two paths must BOTH be provable on one host:
     /// `ScopeManager::disabled()` pins the fallback (the M2 behavior) on any
     /// machine that has a manager, and `ScopeManager::fake` makes the
-    /// ordering of the scope kill and the backstop sweep observable, which
-    /// nothing about the end
-    /// state can show — both mechanisms leave the same corpse.
+    /// scope confirmation and conditional portable fallback observable,
+    /// which an end state cannot show when both mechanisms reach a process.
     pub scopes: Arc<crate::scope::ScopeManager>,
     /// The shell every launch of this supervisor runs through, overriding
     /// [`crate::launch::resolve_shell`]'s `$SHELL`/passwd chain.
@@ -12163,8 +12162,9 @@ impl Supervisor {
                         // FIRST. "tmux has no session" is not that proof —
                         // a window that ran far enough to create its scope
                         // and daemonize something leaves exactly this
-                        // shape — so the scope and the marker sweep are
-                        // both asked. An unconfirmed reap RETAINS the row
+                        // shape — so the reap confirms its scope, keeping
+                        // the portable sweep when containment is uncertain.
+                        // An unconfirmed reap RETAINS the row
                         // (the same rule the ambiguous arms below follow)
                         // rather than orphaning what it could not reach.
                         if !container_cleanup.expect("error returned above")
@@ -12602,9 +12602,9 @@ impl Supervisor {
     /// that pane, its terminal, and the agent that ran in it. This is the
     /// 2026-08-16 incident. Proceeding without a pane root and without
     /// stop-consent is then both safe and correct: there is no husk left
-    /// to clean up, and any daemonized survivor of the dead run is the
-    /// marker sweep's job, which SPEC.md already sanctions without
-    /// consent.
+    /// to clean up, and any daemonized survivor of the dead run is left
+    /// to the cleanup's scope or, where containment is uncertain, its
+    /// marker sweep, which SPEC.md already sanctions without consent.
     ///
     /// **Unknown owner ⇒ assume it may be OUR live terminal.** A pane
     /// whose session name we do not recognize is most cheaply explained by
@@ -12866,9 +12866,9 @@ impl Supervisor {
     ///
     /// 1. Stops the agent through the SHARED stop lifecycle
     ///    ([`stop_live_agent`]) when it is alive and the user consented, or
-    ///    otherwise runs the marker sweep on its own — either way the prior
-    ///    run's descendants (including daemons an already-exited agent left
-    ///    behind) die BEFORE the new launch, never alongside it (SPEC.md:
+    ///    otherwise reaps the prior run directly. Confirmed containment or
+    ///    the portable fallback ends its descendants within the cleanup
+    ///    guarantee BEFORE the new launch, never alongside it (SPEC.md:
     ///    "Restart reaps any leftover descendants of the prior run before
     ///    relaunching").
     /// 2. Hands off to [`Supervisor::relaunch`] for everything destructive,
@@ -13719,8 +13719,8 @@ impl Supervisor {
                 // Note what the derivation then names on the definitive
                 // path: the ABANDONED generation's unit, which by
                 // construction was never created (that is what makes the
-                // failure definitive), so a later stop finds no unit and
-                // falls through to the sweep. That is not a lost kill — the
+                // failure definitive), so a later stop finds no unit. That
+                // absent handle does not conceal a lost kill — the
                 // PREVIOUS run's own scope was already reaped before this
                 // generation was ever opened, by the stop or the leftover
                 // reap the restart performs first.
@@ -14525,9 +14525,9 @@ impl Supervisor {
         let error = artifacts
             .remove_unconsumed_relaunch_fail_closed(error)
             .await;
-        // The marker sweep, not just tmux: a launch that got far enough to
-        // start the login shell can have left descendants even though tmux
-        // now reports nothing running.
+        // Reap ownership, not just the tmux pane: a launch can have left
+        // descendants even though tmux reports nothing running. The shared
+        // reaper chooses confirmed containment or the portable fallback.
         if let Err(sweep) = reap_process_tree(
             &self.seams.scopes,
             ScopeUnits::recorded(scope.map(str::to_string)),
@@ -15143,24 +15143,60 @@ impl Supervisor {
     /// catches strays anyway, but the explicit list must not depend on it
     /// — the glob is the belt for units tmux can no longer name at all.
     /// A tab in a terminal host is listed too, exited or not, until its
-    /// close or Delete ends its host.
+    /// close or Delete ends its host. Carry each tab's scope selection too:
+    /// an absent guessed unit cannot prove that an unscoped tab's detached
+    /// jobs were contained, even when the agent had a scope.
+    /// The second result says whether that selection is complete: no agent
+    /// terminal, or an old tmux session missing from the listing, leaves no
+    /// inventory of its former unscoped tabs. Manager globs cannot fill that
+    /// gap, since only scoped jobs leave units to discover.
     pub(crate) async fn session_tabs_including_dead(
         &self,
         entry: &SessionEntry,
-    ) -> anyhow::Result<Vec<TabInfo>> {
-        let mut tabs = match entry.terminal.as_ref() {
+    ) -> anyhow::Result<(Vec<(TabInfo, TabScope)>, bool)> {
+        let (mut tabs, complete) = match entry.terminal.as_ref() {
             Some(terminal) => {
                 let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, terminal);
                 let states = self.tmux.pane_states().await?;
-                tabs_from_pane_states(states.values(), &tmux_name, agent_pane)
-                    .into_iter()
-                    .map(DiscoveredTab::tab_info)
-                    .collect()
+                // A generation-zero host was created in a host and never
+                // had old tmux tabs. A later host may have migrated from
+                // tmux; current-presence caches and host tags cannot prove
+                // its old unscoped tab jobs ended after that server died.
+                let complete = matches!(terminal, Terminal::Host(_)) && entry.generation == 0
+                    || states.values().any(|pane| pane.session_name == tmux_name);
+                let mut tabs = Vec::new();
+                for tab in tabs_from_pane_states(states.values(), &tmux_name, agent_pane) {
+                    let scope = self
+                        .tmux
+                        .tab_scope_marker(&tmux_name, &tab.pane, &tab.id)
+                        .await
+                        .unwrap_or_else(|error| {
+                            // This extra read only permits omitting the
+                            // sweep. Its failure must not newly refuse a
+                            // Delete whose existing discovery succeeded.
+                            warn!(session = %entry.info.id, tab = %tab.id, %error,
+                                "could not read tab containment; retaining the portable sweep");
+                            TabScope::Unknown
+                        });
+                    tabs.push((tab.tab_info(), scope));
+                }
+                (tabs, complete)
             }
-            None => Vec::new(),
+            None => (Vec::new(), false),
         };
-        tabs.extend(host_tabs::listed_host_tabs(&entry.session.host_tabs, true));
-        Ok(tabs)
+        tabs.extend(
+            host_tabs::host_tabs_of(&entry.session.host_tabs)
+                .into_iter()
+                .map(|tab| {
+                    let scope = if tab.scoped {
+                        TabScope::Scoped
+                    } else {
+                        TabScope::Unscoped
+                    };
+                    (tab.tab_info(), scope)
+                }),
+        );
+        Ok((tabs, complete))
     }
 
     /// Stop must find old tmux tabs even without an agent terminal or with
@@ -16655,13 +16691,13 @@ impl Supervisor {
             })
     }
 
-    /// Reap one tab's process tree: its own cgroup scope where one exists,
-    /// then the marker sweep keyed on that tab's marker.
+    /// Reap one tab through its own cgroup scope where sufficient, otherwise
+    /// retain the portable sweep keyed on that tab's marker.
     ///
     /// Shared by `close_tab` and by the failed-open unwind so both reap
     /// identically. It takes the [`Terminal`], not the tmux handles those
     /// tmux window steps hold, because none of this is window machinery:
-    /// the scope and marker sweep is the same for every kind of terminal,
+    /// the scope/fallback decision is the same for every kind of terminal,
     /// and the live-root probe and its refusal go through `Terminal`'s
     /// exhaustive dispatches. The pane's own pid is looked up here rather than
     /// passed in, and the answers are NOT the same: a live pane is
@@ -16744,8 +16780,8 @@ impl Supervisor {
     }
 
     /// [`Self::reap_tab_tree`] past its root: the tab's scope unit (by the
-    /// provenance `tab_scope` gives it) and the marker sweep for `tab_id`,
-    /// rooted at `root_identity` when the caller has a live, pinned root.
+    /// provenance `tab_scope` gives it) and any required portable fallback
+    /// for `tab_id`, rooted at `root_identity` when a live root is pinned.
     /// Also for a failed tab-host open whose runtime never existed
     /// (`host_tabs`), which has no root it could trust and passes `None`.
     async fn reap_tab_processes(
@@ -16773,23 +16809,14 @@ impl Supervisor {
         // since such a tab then looks exactly like one on a host that never
         // had a manager, where refusing would leave it unclosable.
         let tab_unit = crate::scope::tab_unit_name(session_id, tab_id);
-        let units = match tab_scope {
-            TabScope::Scoped => ScopeUnits::recorded(tab_unit),
-            TabScope::Unscoped => ScopeUnits::derived(tab_unit.into_iter().collect()),
-            TabScope::Unknown => {
-                let session_scoped = self
-                    .sessions
-                    .lock()
-                    .await
-                    .get(session_id)
-                    .is_some_and(|entry| entry.scope.is_some());
-                if session_scoped {
-                    ScopeUnits::recorded(tab_unit)
-                } else {
-                    ScopeUnits::possible(tab_unit)
-                }
-            }
-        };
+        let session_scoped = tab_scope == TabScope::Unknown
+            && self
+                .sessions
+                .lock()
+                .await
+                .get(session_id)
+                .is_some_and(|entry| entry.scope.is_some());
+        let units = ScopeUnits::tab(tab_unit, tab_scope, session_scoped);
         // `session_id` is carried purely for the log lines inside the
         // sweep; `SweepTarget::Tab` is what actually selects processes
         // here, by the session marker AND this tab's own id.

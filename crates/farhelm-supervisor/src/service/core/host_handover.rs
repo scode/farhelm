@@ -172,7 +172,8 @@
 //! a tab, not a launch generation, and the agent's Restart leaves the
 //! session's tabs as they are. Ending the host hangs up its program, whose
 //! own Restart stopped it before the new launch began; a descendant that
-//! survives a hangup is left to the session's next marker sweep.
+//! survives a hangup is left to the session's next cleanup (its scope, or
+//! the marker sweep where containment is uncertain).
 //!
 //! ## Adopting again
 //!

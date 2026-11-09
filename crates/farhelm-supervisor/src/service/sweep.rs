@@ -3,20 +3,19 @@
 //! Everything here answers one question honestly: is anything still
 //! running under a session (or one of its tabs) that a stop, restart, or
 //! delete needs to be sure is gone before it reports success? The
-//! process-table sweep is the portable backstop that always RUNS (it can
-//! still miss a descendant that scrubbed its markers — see the marker
-//! docs below); the systemd scope kill (`kill_scope`/`reap_process_tree`)
-//! closes that residual gap where a user manager exists. See
-//! `reap_process_tree`'s own docs for how the two combine, and
-//! PLAN_M3.md's process-tree-ownership section for why neither alone was
-//! ever enough.
+//! confirmed systemd scope is the containment boundary where one exists.
+//! Otherwise the portable process-table sweep finds descendants and
+//! marked daemons, subject to the marker residuals below. A surviving
+//! explicit root, an unconfirmed scope, incomplete target discovery or a
+//! tmux server inside a trusted scope also requires that sweep. See
+//! [`reap_process_tree`] for the shared decision every caller uses.
 //!
 //! "Portable" is now literal rather than aspirational. Every read of the
 //! process table goes through [`crate::procs`] — `/proc` on Linux,
 //! `sysctl` on macOS — and NOTHING in this module knows which. The PPID
 //! closure, the marker union, start-time validation, the escalation, and
-//! the confirmation are one implementation on both platforms, because
-//! what stop promises a user must not vary by host.
+//! the confirmation are one implementation on both platforms. Only the
+//! availability of confirmed scope containment changes which mechanism runs.
 
 use super::core::{SessionEntry, Supervisor};
 use super::launch_artifacts::stopped_before_start;
@@ -1091,9 +1090,9 @@ async fn poll_until_gone(
 /// a host with a systemd user manager the launch's cgroup catches it
 /// before this ever runs; on a host without one, that gap is still open
 /// and is exactly what M2 shipped with. Nothing in this function changed
-/// with the cgroup work — it remains the whole mechanism wherever no
-/// manager exists, and the backstop everywhere else, so this is still the
-/// function to reason about when asking what stop guarantees at minimum.
+/// with the cgroup work — it remains the whole mechanism for unscoped
+/// launches, and the fallback when a scope or an explicit root cannot be
+/// confirmed gone. Confirmed scopes otherwise replace this machine-wide walk.
 async fn kill_process_tree(
     roots: impl IntoIterator<Item = (u32, u64)>,
     session_id: &str,
@@ -1255,12 +1254,17 @@ pub(crate) struct ScopeUnits {
     recorded: Vec<String>,
     possible: Vec<String>,
     derived: Vec<String>,
+    /// Scope names also encode re-probe policy, so even a `recorded` name
+    /// is not proof every target was contained (legacy tabs are inferred).
+    /// Required unscoped or uncertain targets keep this true across merges.
+    needs_sweep: bool,
 }
 
 impl ScopeUnits {
     /// Start with a scope selection read from a durable launch row.
     pub(crate) fn recorded(unit: Option<String>) -> Self {
         Self {
+            needs_sweep: unit.is_none(),
             recorded: unit.into_iter().collect(),
             ..Self::default()
         }
@@ -1271,6 +1275,7 @@ impl ScopeUnits {
     pub(crate) fn possible(unit: Option<String>) -> Self {
         Self {
             possible: unit.into_iter().collect(),
+            needs_sweep: true,
             ..Self::default()
         }
     }
@@ -1279,8 +1284,53 @@ impl ScopeUnits {
     pub(crate) fn derived(derived: Vec<String>) -> Self {
         Self {
             derived,
+            needs_sweep: true,
             ..Self::default()
         }
+    }
+
+    /// Preserve a tab's own containment selection independently of the
+    /// session-based fallback used only for legacy re-probe/error policy.
+    pub(crate) fn tab(
+        unit: Option<String>,
+        selection: crate::terminal_process::TabScope,
+        session_scoped: bool,
+    ) -> Self {
+        use crate::terminal_process::TabScope;
+        let mut units = match selection {
+            TabScope::Scoped => Self::recorded(unit),
+            TabScope::Unscoped => Self::derived(unit.into_iter().collect()),
+            TabScope::Unknown if session_scoped => Self::recorded(unit),
+            TabScope::Unknown => Self::possible(unit),
+        };
+        units.needs_sweep |= selection != TabScope::Scoped;
+        units
+    }
+
+    /// Unreadable selection is not evidence of containment. Keep optional
+    /// scope handles, but require the portable fallback for this target.
+    pub(crate) fn require_sweep(&mut self) {
+        self.needs_sweep = true;
+    }
+
+    /// Delete historically treats tab names as derived cleanup handles.
+    /// Retain that manager policy while keeping the tab's actual selection
+    /// for the independent decision about omitting the portable sweep.
+    pub(crate) fn extend_tab(
+        &mut self,
+        unit: Option<String>,
+        selection: crate::terminal_process::TabScope,
+    ) {
+        self.needs_sweep |=
+            unit.is_none() || selection != crate::terminal_process::TabScope::Scoped;
+        self.derived.extend(unit);
+    }
+
+    /// Let caller-metadata tests observe the fact Delete must preserve,
+    /// without launching real hosts just to test scope selection.
+    #[cfg(test)]
+    pub(crate) fn needs_sweep(&self) -> bool {
+        self.needs_sweep
     }
 
     /// Add independently discovered names without changing their provenance.
@@ -1303,28 +1353,30 @@ impl ScopeUnits {
     }
 }
 
-/// Reap one launch's whole process tree: its cgroup scope first, then —
-/// always, unconditionally — the portable sweep (PLAN_M3.md item 10).
+/// Reap through confirmed scopes, falling back to the portable sweep when
+/// containment or a carried process root is not enough to confirm cleanup.
 ///
 /// This is the ONE entry point every stop, delete, and restart-reap goes
-/// through, which is what makes "the sweep still runs" a property of the
-/// code rather than a rule call sites are asked to remember.
+/// through, so callers cannot disagree about when a machine-wide walk is
+/// necessary. Terminal cleanup remains each caller's responsibility.
 ///
-/// # Why both, in this order
+/// # When the scope is enough
 ///
-/// SPEC_impl.md's belt-and-suspenders rule. The scope kill is strictly
-/// MORE complete than the sweep — cgroup membership is inherited across
-/// fork and exec and cannot be shed, so it catches the double-forked,
-/// environment-scrubbed descendant lore/2026-07-27-m2-process-tree-stop.md
-/// names as the sweep's one blind spot — but it is also strictly NARROWER:
-/// it can only reach what this launch's `systemd-run` actually placed in
-/// the cgroup. A process that carries the session marker but was never in
-/// the scope (a survivor of an earlier, unscoped launch of the same
-/// session; anything the user started with the marker in its environment)
-/// is invisible to it and visible to the sweep. Neither subsumes the
-/// other, so both run, and the scope runs first because a cgroup kill is
-/// one round trip that empties most of the tree before the sweep pays for
-/// enumerating it.
+/// Complete containment of the required targets, at least one named scope,
+/// a usable manager, every scope confirmed
+/// collected, and no surviving validated explicit root permit skipping the
+/// sweep. Root checks read only those pids, never the process table. This
+/// preserves Restart's earlier-generation roots even when its named scope
+/// covers only the current generation. An unreadable root takes the fallback.
+/// Before killing any scope, bounded membership inspection must rule out a
+/// tmux server in each: stock tmux can move panes into sibling scopes, whose
+/// hangup-immune jobs still need the marker sweep. Incomplete inspection or
+/// target discovery keeps the sweep too, without adding a new refusal.
+///
+/// The maintainer chose this containment boundary on 2026-11-08 to avoid
+/// reading every process's environment on scoped stops. A program that moves
+/// itself into another group, or only carries a marker without belonging to
+/// the scope, is outside that boundary. Unscoped launches keep the sweep.
 ///
 /// # When a scope failure fails the operation
 ///
@@ -1365,6 +1417,32 @@ pub(crate) async fn reap_process_tree(
     target: &SweepTarget,
     scope_kill_failure: ScopeKillFailure,
 ) -> anyhow::Result<()> {
+    reap_process_tree_with_sweep(
+        scopes,
+        units,
+        roots,
+        session_id,
+        scope_kill_failure,
+        |roots| kill_process_tree(roots, session_id, target),
+    )
+    .await
+}
+
+/// Keep the machine-wide walk lazy and injectable: tests can refuse any
+/// invocation, proving that scope-only cleanup does not enumerate processes.
+/// Production supplies the unchanged portable sweep through the sole wrapper.
+async fn reap_process_tree_with_sweep<F, Fut>(
+    scopes: &crate::scope::ScopeManager,
+    units: ScopeUnits,
+    roots: impl IntoIterator<Item = (u32, u64)>,
+    session_id: &str,
+    scope_kill_failure: ScopeKillFailure,
+    sweep: F,
+) -> anyhow::Result<()>
+where
+    F: FnOnce(Vec<(u32, u64)>) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<()>>,
+{
     // The caller captured these pairs at its pane liveness boundary, before
     // any asynchronous teardown work. Re-read each here before adopting its
     // pane as a PPID root: if the pane exited and the kernel recycled its
@@ -1394,8 +1472,9 @@ pub(crate) async fn reap_process_tree(
     // the caller's `ScopeKillFailure` policy decides, which for Stop, Restart,
     // Delete and tab close means failing visibly (SPEC.md "Lifecycle
     // operations": believing there is no user manager does not excuse
-    // skipping a scope the launch had). The sweep below still runs. A
+    // skipping a scope the launch had). That failure keeps the sweep. A
     // `possible` unit also earns the re-probe, but is skipped when it fails.
+    let mut needs_sweep = units.needs_sweep;
     let mut scope_errors: Vec<String> = Vec::new();
     let earns_reprobe = !units.recorded.is_empty() || !units.possible.is_empty();
     let units: Vec<&String> =
@@ -1435,10 +1514,24 @@ pub(crate) async fn reap_process_tree(
             }
             Vec::new()
         };
+    // Observe every scope we would trust BEFORE killing any of them. A
+    // systemd-linked tmux server stays here while moving its panes into
+    // sibling scopes; killing it first erases the evidence that we need the
+    // marker sweep for their hangup-immune jobs. Uncertainty only forfeits
+    // the optimization, without changing the existing scope failure policy.
+    if !needs_sweep {
+        for unit in &units {
+            if scopes.needs_tmux_sweep(unit).await {
+                needs_sweep = true;
+                break;
+            }
+        }
+    }
     // Every unit is killed even when an earlier one failed, for
     // `kill_scope`'s own accumulate-never-short-circuit reason one level
     // up: a delete that stopped at the first unresponsive tab scope would
     // skip the agent's, which is the one most likely to have worked.
+    let had_scopes = !units.is_empty();
     for unit in units {
         if let Err(e) = kill_scope(scopes, unit, session_id).await {
             scope_errors.push(format!("{e:#}"));
@@ -1446,10 +1539,18 @@ pub(crate) async fn reap_process_tree(
     }
     let scope_error = (!scope_errors.is_empty()).then(|| scope_errors.join("; "));
 
-    match (
-        kill_process_tree(validated, session_id, target).await,
-        scope_error,
-    ) {
+    if !needs_sweep && had_scopes && scope_error.is_none() {
+        // Reuse the confirmation oracle with no wait: only these identities
+        // are read. Zombies and reused pids are gone; unreadable roots remain
+        // unconfirmed and therefore require the portable fallback.
+        let roots = validated.iter().copied().collect();
+        let (survivors, errors) = poll_until_gone(&roots, Duration::ZERO).await;
+        if survivors.is_empty() && errors.is_empty() {
+            return Ok(());
+        }
+    }
+
+    match (sweep(validated).await, scope_error) {
         (Ok(()), Some(e)) => match scope_kill_failure {
             ScopeKillFailure::Warn => {
                 // The sweep proved the tree is gone, so this stop is complete
@@ -1649,8 +1750,8 @@ const SCOPE_GRACE_POLL: Duration = Duration::from_millis(200);
 /// user manager restarted without its state, can drop a unit whose
 /// processes still run. That is no weaker than the pre-existing
 /// early return for a unit that is already gone before anything is
-/// signalled, and the process-tree sweep that always runs after this is
-/// the backstop for exactly such a survivor.
+/// signalled. `reap_process_tree` still checks its explicitly carried roots,
+/// but otherwise trusts collection rather than looking for escaped members.
 async fn kill_scope(
     scopes: &crate::scope::ScopeManager,
     unit: &str,
@@ -1700,8 +1801,7 @@ async fn kill_scope_with_grace(
             // already-exited agent takes this path.
             debug!(
                 session = %session_id, unit,
-                "the launch's cgroup scope is already gone; the process-tree sweep is the \
-                 whole mechanism for this stop"
+                "the launch's cgroup scope is already gone"
             );
             return Ok(());
         }
@@ -1713,7 +1813,7 @@ async fn kill_scope_with_grace(
     }
     info!(
         session = %session_id, unit,
-        "killing the launch's cgroup scope before the backstop process-tree sweep"
+        "killing the launch's cgroup scope before checking whether a process-tree sweep is needed"
     );
     if let Err(e) = signal_scope(scopes, unit, session_id, "SIGTERM").await {
         advisory.push(format!("{e:#}"));
@@ -1991,7 +2091,7 @@ pub(crate) async fn stop_live_agent(
         container.stop().await.map_err(StopFailure::Sweep)?;
     }
     let exit_code = dead_pane_exit_code(sup, entry.terminal.as_ref(), session_id).await;
-    // The sweep ended this launch's writers. Sample its spec before any
+    // The cleanup above ended this launch's writers. Sample its spec before any
     // cleanup can remove the startup evidence; an observer may already have
     // committed the same choice, which the store preserves monotonically.
     let stopped_before_start =
@@ -2499,6 +2599,18 @@ mod tests {
         }
     }
 
+    /// Keep an owned sleeper bounded even when an assertion unwinds before
+    /// the expected sweep can end it. Child retains its waited status, so
+    /// cleanup remains safe after a successful test already reaped it.
+    struct FixtureChild(std::process::Child);
+
+    impl Drop for FixtureChild {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
     /// Spawn a process carrying `FARHELM_SESSION_ID=<id>`, returning its
     /// pid — the only thing the marker sweep can find in a unit test.
     ///
@@ -2544,20 +2656,6 @@ mod tests {
     /// so the identity passed to the guard cannot name an unrelated process.
     #[farhelm_testtrace::test]
     async fn stopped_process_guard_resumes_a_stopped_owned_process() {
-        /// Own termination even outside the production guard's lifetime.
-        /// That guard only resumes recorded processes; an assertion before
-        /// it is armed or after it is dropped can leave this sleeper stopped
-        /// forever. Child retains the exit status after manual reaping, so
-        /// Drop also remains safe on the success path.
-        struct FixtureChild(std::process::Child);
-
-        impl Drop for FixtureChild {
-            fn drop(&mut self) {
-                let _ = self.0.kill();
-                let _ = self.0.wait();
-            }
-        }
-
         let session_id = uuid::Uuid::new_v4().to_string();
         let mut child = FixtureChild(spawn_marked_process(&session_id));
         let pid = child.0.id();
@@ -2624,18 +2722,11 @@ mod tests {
         child.0.wait().expect("the owned fixture must be reaped");
     }
 
-    /// The ORDER of stop's two mechanisms, which nothing about the end
-    /// state can show: both the cgroup kill and the marker sweep leave the
-    /// same corpse, so "scope, then sweep" and "sweep, then scope" are
-    /// indistinguishable afterwards. This pins it by watching a process only
-    /// the SWEEP can reach and asking, at every scope operation, whether it
-    /// is still alive — the answer is yes for all of them if and only if the
-    /// sweep has not started yet.
-    ///
-    /// Worth pinning because the order is a real decision and a silent one:
-    /// SPEC_impl.md's belt-and-suspenders rule says the sweep is the
-    /// BACKSTOP, which is a claim about sequence. A refactor that ran the
-    /// sweep first would still pass every other test in this file.
+    /// A root outside the confirmed scope still requires the portable
+    /// sweep, after scope cleanup finishes. Restart can carry a root from
+    /// an earlier generation, so a successful current-scope kill is not
+    /// enough. The owned marked child stays alive through every fake scope
+    /// operation, then dies in the real sweep, distinguishing both phases.
     ///
     /// The escalation itself is pinned in the same pass, including the
     /// post-SIGKILL confirmation: `systemctl kill` returning proves delivery,
@@ -2646,7 +2737,7 @@ mod tests {
     /// Runs everywhere, systemd or not: the manager is a fake, and the only
     /// real process involved is one this test spawns itself.
     #[farhelm_testtrace::test]
-    async fn the_backstop_sweep_runs_after_the_scope_kill_never_before() {
+    async fn a_surviving_root_requires_the_sweep_after_the_scope_kill() {
         let session_id = uuid::Uuid::new_v4().to_string();
         let mut child = spawn_marked_process(&session_id);
         let decoy = child.id();
@@ -2691,9 +2782,167 @@ mod tests {
         );
         assert!(
             marked_process_gone(decoy),
-            "the backstop sweep must still have run afterwards and reaped the marked process"
+            "the surviving-root fallback must run after scope cleanup and reap the marked process"
         );
         let _ = child.wait();
+    }
+
+    /// The optimization must omit the machine-wide mechanism itself, not
+    /// merely leave an outside process unsignalled after scanning it. The
+    /// callback is the only route to enumeration and fails on invocation.
+    /// Multiple confirmed scopes model Delete's agent and tab combination.
+    #[farhelm_testtrace::test]
+    async fn complete_confirmed_scopes_never_invoke_the_portable_sweep() {
+        let session = uuid::Uuid::new_v4().to_string();
+        let scopes =
+            crate::scope::ScopeManager::fake_vanishing_after_signal("SIGTERM", Arc::new(|_| {}));
+        let mut units = ScopeUnits::recorded(crate::scope::unit_name(&session, 0));
+        units.extend_tab(
+            crate::scope::tab_unit_name(&session, &uuid::Uuid::new_v4().to_string()),
+            crate::terminal_process::TabScope::Scoped,
+        );
+        reap_process_tree_with_sweep(
+            &scopes,
+            units,
+            None,
+            &session,
+            ScopeKillFailure::Refuse,
+            |_| async { panic!("confirmed containment must not read the process table") },
+        )
+        .await
+        .expect("every scope was confirmed collected");
+    }
+
+    /// A server in the second scope must be observed before the first
+    /// scope is killed. Otherwise earlier kills can erase the role evidence
+    /// that explains pane jobs outside these units. Detection retains the
+    /// portable fallback but must still attempt every selected scope kill.
+    #[farhelm_testtrace::test]
+    async fn tmux_inspection_precedes_every_scope_kill_and_keeps_the_sweep() {
+        use crate::scope::ScopeOp;
+        let session = uuid::Uuid::new_v4().to_string();
+        let agent = crate::scope::unit_name(&session, 0).unwrap();
+        let tab = crate::scope::tab_unit_name(&session, &uuid::Uuid::new_v4().to_string()).unwrap();
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let observed = Arc::clone(&observed);
+            Arc::new(move |op: &ScopeOp| observed.lock().unwrap().push(op.clone()))
+                as crate::scope::ScopeOpSink
+        };
+        let scopes = crate::scope::ScopeManager::fake_vanishing_after_signal("SIGTERM", sink)
+            .with_tmux_sweep_units(vec![tab.clone()]);
+        let mut units = ScopeUnits::recorded(Some(agent.clone()));
+        units.extend_tab(Some(tab.clone()), crate::terminal_process::TabScope::Scoped);
+        let error = reap_process_tree_with_sweep(
+            &scopes,
+            units,
+            None,
+            &session,
+            ScopeKillFailure::Refuse,
+            |_| async { anyhow::bail!("portable fallback reached") },
+        )
+        .await
+        .expect_err("tmux panes may live outside the selected scopes");
+        assert_eq!(error.to_string(), "portable fallback reached");
+        let observed = observed.lock().unwrap();
+        let first_kill = observed
+            .iter()
+            .position(|op| matches!(op, ScopeOp::Kill { .. }))
+            .unwrap();
+        assert!(observed[..first_kill].contains(&ScopeOp::Inspect(agent.clone())));
+        assert!(observed[..first_kill].contains(&ScopeOp::Inspect(tab.clone())));
+        for expected in [agent, tab] {
+            assert!(
+                observed
+                    .iter()
+                    .any(|op| matches!(op, ScopeOp::Kill { unit, .. } if unit == &expected)),
+                "fallback must not skip the scope {expected}: {observed:?}"
+            );
+        }
+    }
+
+    /// Scope-name success must never erase an unscoped or unknown target.
+    /// An absent guessed unit is the regression case: it never contained
+    /// the tab, even though its cleanup reports success on a usable manager.
+    /// The explicit callback error proves fallback without real signalling.
+    #[farhelm_testtrace::test]
+    async fn unscoped_and_unknown_targets_keep_the_sweep_when_the_manager_is_usable() {
+        use crate::terminal_process::TabScope;
+        let session = uuid::Uuid::new_v4().to_string();
+        for (agent_scoped, tab) in [
+            (false, None),
+            (false, Some(TabScope::Scoped)),
+            (true, Some(TabScope::Unscoped)),
+            (true, Some(TabScope::Unknown)),
+        ] {
+            let scopes = crate::scope::ScopeManager::fake_vanishing(0, Arc::new(|_| {}));
+            let mut units = ScopeUnits::recorded(
+                agent_scoped.then(|| crate::scope::unit_name(&session, 0).unwrap()),
+            );
+            if let Some(selection) = tab {
+                units.extend_tab(
+                    crate::scope::tab_unit_name(&session, &uuid::Uuid::new_v4().to_string()),
+                    selection,
+                );
+            }
+            units.normalize();
+            let error = reap_process_tree_with_sweep(
+                &scopes,
+                units,
+                None,
+                &session,
+                ScopeKillFailure::Refuse,
+                |_| async { anyhow::bail!("portable fallback reached") },
+            )
+            .await
+            .expect_err("an uncontained target requires the sweep");
+            assert_eq!(error.to_string(), "portable fallback reached");
+        }
+        for selection in [TabScope::Unscoped, TabScope::Unknown] {
+            let scopes = crate::scope::ScopeManager::fake_vanishing(0, Arc::new(|_| {}));
+            let units = ScopeUnits::tab(
+                crate::scope::tab_unit_name(&session, &uuid::Uuid::new_v4().to_string()),
+                selection,
+                true,
+            );
+            let error = reap_process_tree_with_sweep(
+                &scopes,
+                units,
+                None,
+                &session,
+                ScopeKillFailure::Refuse,
+                |_| async { anyhow::bail!("portable fallback reached") },
+            )
+            .await
+            .expect_err("an absent guessed tab scope cannot suppress the sweep");
+            assert_eq!(error.to_string(), "portable fallback reached");
+        }
+    }
+
+    /// An earlier-generation root may survive the current scope. Checking
+    /// only carried identities must notice it and preserve that exact root
+    /// for the fallback; no process is signalled in this controlled test.
+    #[farhelm_testtrace::test]
+    async fn a_surviving_explicit_root_invokes_the_portable_sweep() {
+        let session = uuid::Uuid::new_v4().to_string();
+        let root = capture_process_identity(std::process::id())
+            .unwrap()
+            .unwrap();
+        let scopes = crate::scope::ScopeManager::fake_vanishing(0, Arc::new(|_| {}));
+        let error = reap_process_tree_with_sweep(
+            &scopes,
+            ScopeUnits::recorded(crate::scope::unit_name(&session, 0)),
+            Some(root),
+            &session,
+            ScopeKillFailure::Refuse,
+            |roots| async move {
+                assert_eq!(roots, vec![root]);
+                anyhow::bail!("portable fallback reached")
+            },
+        )
+        .await
+        .expect_err("the current scope does not contain the carried root");
+        assert_eq!(error.to_string(), "portable fallback reached");
     }
 
     /// Under `Warn`, a cgroup that never empties must not be reported as
@@ -2830,7 +3079,10 @@ mod tests {
     /// What is specified: the full escalation still runs (existence check,
     /// TERM, re-check, KILL, confirmation — the failing reports must not
     /// short-circuit it), the reap returns `Ok` under REFUSE and under WARN,
-    /// and the sweep still reaps the marked process either way. The
+    /// and the sweep still reaps the explicitly carried surviving root
+    /// either way. The fake scope never contains that owned child, so this
+    /// intentionally tests required fallback after successful collection,
+    /// not the scope-only omission tested above. The
     /// companion assertion in
     /// `a_broken_user_manager_splits_warn_from_refuse` pins
     /// the other half: the same failing kills against a unit that never
@@ -2839,8 +3091,11 @@ mod tests {
     async fn a_failed_kill_exit_status_is_forgiven_once_the_unit_is_confirmed_gone() {
         for policy in [ScopeKillFailure::Refuse, ScopeKillFailure::Warn] {
             let session_id = uuid::Uuid::new_v4().to_string();
-            let mut child = spawn_marked_process(&session_id);
-            let decoy = child.id();
+            let mut child = FixtureChild(spawn_marked_process(&session_id));
+            let decoy = child.0.id();
+            let root = capture_process_identity(decoy)
+                .expect("owned child is readable")
+                .expect("owned child is alive before the reap");
 
             let observed: Arc<std::sync::Mutex<Vec<crate::scope::ScopeOp>>> =
                 Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -2860,7 +3115,7 @@ mod tests {
             reap_process_tree(
                 &scopes,
                 ScopeUnits::recorded(Some(unit.clone())),
-                None,
+                Some(root),
                 &session_id,
                 &SweepTarget::AgentOnly,
                 policy,
@@ -2876,9 +3131,9 @@ mod tests {
             assert_escalation_shape(&observed, &unit, true);
             assert!(
                 marked_process_gone(decoy),
-                "the backstop sweep must still have reaped the marked process under {policy:?}"
+                "the surviving-root fallback must reap the marked process under {policy:?}"
             );
-            let _ = child.wait();
+            let _ = child.0.wait();
         }
     }
 

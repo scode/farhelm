@@ -14,10 +14,10 @@
 //!
 //! Keeping platform reads separate is the point. Hook attribution additionally
 //! inspects native executable identity through the same platform boundary.
-//! Linux and macOS must run the SAME sweep rather than two sweeps that happen to agree,
-//! because the promise stop and delete make to a user — "nothing this
-//! session started is still running" — is supposed to mean the same thing
-//! on both. Until this module existed the sweep read `/proc` inline, so on
+//! Linux and macOS share the same portable sweep decisions. Confirmed
+//! Linux scopes can replace that sweep; this module remains the fallback
+//! for unscoped or unconfirmed cleanup on either platform. Until this
+//! module existed the sweep read `/proc` inline, so on
 //! macOS every enumeration failed with "reading /proc: No such file or
 //! directory" and, since the sweep fails CLOSED by design, stop and delete
 //! failed with it (SPEC_impl.md recorded the Mac variant as deferred; this

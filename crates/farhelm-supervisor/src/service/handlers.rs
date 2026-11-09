@@ -837,13 +837,13 @@ async fn handle_stop_session(
         }
         // A dead or absent pane, or a terminal-less (restart-gap)
         // entry, all mean there is no live pid worth walking
-        // ancestry from — but the environment-marker sweep still
-        // runs regardless (`root_identity: None`), because SPEC.md
-        // assigns reaping any leftover descendants of a PAST run
-        // to the session's next stop or delete, and the marker
-        // scan is the only mechanism that can still find such a
-        // survivor once there is no live pane to walk from at
-        // all. See `service::sweep`'s `kill_process_tree` docs.
+        // ancestry from (`root_identity: None`). SPEC.md assigns
+        // reaping any leftover descendants of a PAST run to the
+        // session's next stop or delete: a confirmed scope covers
+        // them where the launch had one, and otherwise the
+        // environment-marker sweep is the only mechanism that can
+        // still find such a survivor. `service::sweep`'s
+        // `reap_process_tree` docs say when the sweep is kept.
         let pane_state = match entry.terminal.as_ref() {
             Some(terminal) => match terminal.probe_process(&sup).await {
                 Ok(TerminalProbe::Owned(pane)) => Some(pane),

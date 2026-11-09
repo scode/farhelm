@@ -223,15 +223,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   - The experimental containerized sessions stop their own container by name; this entry is about containers an agent
     starts itself, in any session.
 
-- **Make the process sweep cheaper where scopes exist.** The stop, tab-close and Delete sweep finds escaped processes by
-  reading the environment of every process on the machine (`/proc/<pid>/environ`), which costs one read per process on
-  the host (about 900 on a dev box on 2026-10-28, against 5 in one session's scope). Where a launch or tab has its own
-  scope, selecting by the scope's `cgroup.procs` covers the same processes for a fraction of the cost. SPEC_impl.md
-  calls the marker sweep the backstop that always runs, including where a scope exists, because a scope can be left by a
-  process that runs `systemd-run --user --scope` itself; changing that is a SPEC decision, so weigh what the backstop
-  still catches against its cost before changing it. Hosts without a usable user manager keep the full sweep. Plan:
-  `plans/queue/scoped-stop-without-sweep.md`.
-
 - **Containerized sessions: localhost tunnels and file links.** Make localhost tunnels reach services listening inside a
   session's container, and make file links in terminal output work for container paths outside the checkout. Until then,
   a tunnel offered for a localhost URL a containerized agent prints reaches that port on the host, not in the container,
