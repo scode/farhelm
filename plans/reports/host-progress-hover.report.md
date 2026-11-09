@@ -2,84 +2,131 @@
 
 ## Since the last review
 
-The existing draft #3272 now implements the recorded answer to its overflow block: long diagnostics become a preview
-only when needed to preserve a readable current step, with a visible pointer to full details in Hosts. It was rebased
-onto the landed Always update work; the hover change itself survived unchanged.
+Draft #3272 now resolves the failure that stopped its landing. A short window can make the host list scroll to reveal
+its working host. That scroll sometimes arrived after the test entered the host button and intentionally dismissed its
+pending hover. The test now reveals the button before a fresh pointer entry. It still checks the visible card, readable
+current step, diagnostic preview, and live changes while the card is open.
+
+Review also found a separate product sizing error: the step list counted its padding twice, clipping the full-details
+notice. The correction preserves that notice in full. A run whose steps have not arrived yet now uses the same preview
+rule. No PR was added or dropped; #3272 remains one draft, at `82d8fb85`.
 
 ## What this was about
 
 Following a running setup, update or uninstall used to give different detail in Hosts and the sidebar. The sidebar's bar
-gave only a count, and the Hosts hover left out the connection diagnosis. Both now show the same card with the host,
-operation, count, elapsed time, all steps and explanations, the current step, and available diagnostics. The sidebar
-also names the current step, and keyboard focus on its host button opens the card.
+gave only a count, and the Hosts hover omitted the connection diagnosis. Both now show the same card with the host,
+operation, count, elapsed time, every step and explanation, the current step, and available diagnostics. The sidebar
+also names the current step; keyboard focus on its host button opens the card.
 
 ## Things you should know
 
-The card remains non-interactive. An oversized diagnosis can require opening Hosts to read its tail; the card says
-`Full details in Hosts` when that happens. Messages that fit stay whole, and the existing host identity opens Hosts for
-the full diagnosis. The current step retains its space and follows progress changes while the card is open.
+The card stays non-interactive. Only a diagnosis too long to fit beside a readable current step becomes a preview, with
+`Full details in Hosts` visible in full. A message that fits stays whole. The host identity opens Hosts; turn on Details
+there to read the complete connection diagnosis. The current step follows progress changes while the card remains open.
+Ordinary scrolling still dismisses hover help.
+
+The cloud failure was reproduced locally with the browser processes restricted to two CPUs. Event records established
+the late reveal-scroll ordering; loaded fonts, a replaced host button, and a missing card source did not explain those
+failures. A separate empty computed-style result was consistent with the elapsed clock replacing a clone, but that
+particular detached-node state was not recorded. Its assertion now observes one connected, displayed clone. The
+established test failure and retained evidence are recorded in FLAKES.md.
 
 ## Open questions and possible follow-ups
 
-None identified.
+The landing monitor will repeat the checks on Tensorlake sandboxes, on both engines, as the latest Decision requires.
+This executor performed local verification only. No product choice remains unanswered.
 
 ## PRs
 
-- [#3272: share host progress details on hover](https://github.com/scode/farhelm/pull/3272/changes) — one draft PR
-  covering both progress surfaces, the specification, changelog fragment and TODO removal.
+- [#3272: share host progress details on hover](https://github.com/scode/farhelm/pull/3272/changes) — the existing draft
+  covers both surfaces, the specification, changelog fragment, original TODO removal and these corrections.
 
 ## Checks run, reused and skipped
 
-- `node --test crates/farhelm-ui/js-tests/tooltip.test.js`: 23 passed, recorder `fa51e728-d562-4115-bb19-19b3e55786d9`.
-  This covers allocation, list following and shared tooltip decisions.
-- Focused `cargo nextest run -p farhelm-ui --lib -E '<card, summary and attention cases>'`: 4 passed, 918 selected out,
-  recorder `1713d0a7-cb87-4bb9-8d1c-5f31adb2c34d`. This covers peer-safe diagnostics, connection state, summary data and
-  progress precedence.
-- `npx playwright test 'host-updates\.spec\.ts|tooltip\.spec\.ts'`: 58 passed, 29 per engine, recorder
-  `fdb1ab98-3da1-4462-9eaf-84fc30b429ce`. Chromium and WebKit covered both surfaces, keyboard entry, long-diagnostic
-  previews, fitting multiline messages and ordinary session cards.
-- Selected provisioning and Tensorlake progress cases on both engines: 7 passed and 1 failed, recorder
-  `1b9326ce-fe65-44d2-bb29-c327fd0bcb97`. The failed WebKit dark-theme case sampled text geometry once while the elapsed
-  clock could replace the card. Its screenshot showed the text readable. The assertion now polls the same complete
-  visibility oracle; the exact WebKit case passed in `014556d8-71fd-443b-98b7-e76f8538f4f9`. The original failure
-  remains retained. Together these observations cover both engines' inline progress, short-window following and migrated
-  Tensorlake hover; they do not turn the failed command into a passing one.
-- After rebasing, a focused card/header integration selection reported 6 passed and 2 failed in
-  `b6286c3c-c3cf-40bd-9e70-800e73d57512`. Both failures came from assuming the pointer still hovered the same host after
-  a resize moved the rows; WebKit's screenshot showed another host's tooltip. The test now re-establishes hover and
-  requires the card visible at each size. Both corrected cases passed in `3302ef90-56b7-4280-b5cd-6260cce2a0e9`. The
-  original failures remain retained; the six other passing cases cover surface agreement, fitting messages and
-  progress-only menu preservation on both engines.
-- `cargo build -p farhelm` passed using the CLI inputs at `cb163bb8`; those inputs remain identical at final head
-  `37fe8462`. The pinned `dx build --package farhelm-ui --platform web --release` passed again at `41880b8c`, after the
-  Always update rebase. The later changes were a test-only pointer correction and TODO/queue bookkeeping, so the web
-  build's shipped inputs are unchanged. These build commands were not run through the test recorder.
-- Formatting, targeted Markdown formatting, whitespace, changelog format and the isolated test-sleep checker passed; 429
-  delay calls had a rationale.
+Run in this round, on Chromium and WebKit where both engines are named:
 
-The Rust and JavaScript checks ran at `cb163bb8` with the hover working diff; the initial browser runs ran at
-`e91db5b3`, with the narrow retry adding only the test-readiness correction. Their relevant card, tooltip, summary and
-provisioning inputs remain unchanged by the final rebase. The incoming Always update work changes the attention header
-and its preference handling; the final integration checks cover its interaction with the card and progress-only menu
-preservation. The CLI is reused because that incoming work changes no CLI, helm, supervisor or protocol input. No
-runtime `SKIPPED` messages occurred in these retained runs.
+- Exact unchanged Chromium overflow case, six repetitions with one worker, two allowed CPUs and zero retries: 5 passed,
+  1 failed (`cebeb182-cf4e-4038-b139-1b3cd476bcf3`). The same case with bounded diagnostic event logging, ten
+  repetitions under the same restriction: 6 passed, 4 failed (`27210f18-b266-44b8-bbd2-f85f1e85dbce`). These reproduced
+  the landing's missing/hidden card and empty style symptoms. Both failed runs and their traces remain retained. They
+  tested `aeb2b4d5`, with only diagnostic logging added in the second run.
+- After correcting pointer preparation and the style observation, ten repetitions per engine under that same CPU and
+  worker restriction passed: 20 observations (`420fd204-7912-479b-897f-8c2d0f6c562c`). This preceded the stronger
+  full-notice text check and sizing fix, so it is evidence for the hover correction, not for the final notice geometry.
+  These three repetition commands used the recorder's generic mode and Playwright's explicit repeat/project options.
+- The stronger full-notice glyph assertion failed before the sizing correction on both engines: 0 passed, 2 failed
+  (`67ac982e-d699-4e5d-b622-e2da369f048a`). In both cases the current step was readable and the notice was clipped. The
+  failed run remains retained; the CSS correction resolved this product bug.
+- Final selected `host-updates`, `provisioning` and `tooltip` browser cases: 18 passed, nine per engine, with no skips,
+  failures or retries (`7bf1e625-dc89-4b44-8021-97fffb47bb00`). This used the recorder's controlled Playwright mode,
+  three workers and the rebuilt web bundle. It covers both surfaces and keyboard entry, three-step and zero-step long
+  diagnostics, complete notice/current-step glyphs, whole-text restoration, live diagnosis changes, fitting one-step
+  messages, inline progress in both themes, current-step following and the existing session card.
+- `node --test crates/farhelm-ui/js-tests/tooltip.test.js`: 23 passed, none skipped
+  (`9cf4a257-2f2b-4a51-b7a8-8bd8c14e184c`). This and the final browser command captured the same complete source
+  fingerprint at `aeb2b4d5` plus the final four-file correction. Folding that correction into `82d8fb85` changed no
+  inputs.
+- `cargo build -p farhelm` passed on the rebased draft. The pinned
+  `dx build --package farhelm-ui --platform web --release` passed again after the final CSS/JavaScript correction. These
+  were builds, not recorded runtime tests. The CLI's inputs did not change during this round.
+- Targeted Markdown formatting, JavaScript syntax, whitespace, changelog formatting and the isolated test-sleep checker
+  passed; 429 delay calls had a rationale. No runtime `SKIPPED` messages occurred in this round's retained output.
 
-The blocked round retained `614128e5-e99e-4f37-a79a-0dd0dbb77bd6` (3 passed, 5 failed) and
-`a06eeb91-1cc1-46e9-83e6-69b0ee16d95a` (one WebKit case failed). Three failures in the first run and the later WebKit
-failure showed a long connection diagnosis crowding the current step out of a short card. The recorded preview decision
-and its implementation resolve that product failure; the final inline and long-diagnostic checks above exercise it on
-both engines. The first run's other failures were test defects: reading a replaced clone's paint and counting fixture
-events from an earlier case. Those corrections are included in this draft and their cases pass in the current evidence.
-Both old failed runs remain retained.
+Reused from the previous execution: the four focused Rust card/summary/attention tests at `cb163bb8` with its recorded
+working diff (`1713d0a7-cb87-4bb9-8d1c-5f31adb2c34d`, four passed, 918 selected out). Their Rust inputs remain unchanged
+through `37fe8462` and `82d8fb85`; this round changed no Rust. The earlier 58-case host-update/tooltip pass at
+`e91db5b3` (`fdb1ab98-3da1-4462-9eaf-84fc30b429ce`) remains evidence for unaffected interactions, while the changed
+sizing and pointer boundaries were checked again above. The unchanged Tensorlake hover cases passed in the prior
+selected run `1b9326ce-fe65-44d2-bb29-c327fd0bcb97`; that command had seven passes and one unrelated WebKit
+text-readiness failure, corrected and passed narrowly in `014556d8-71fd-443b-98b7-e76f8538f4f9`. It remains a failed
+command, not a retroactive pass. Earlier blocked-round overflow failures (`614128e5` and `a06eeb91`) also remain
+retained; the current preview and complete-glyph cases replace their missing product coverage.
 
-The full workspace, remaining browser suite, desktop smoke, installer and real cloud provisioning were skipped: this
-change is confined to shared UI rendering and the focused cases cover its integration risks. Hosted CI is manual-only
-and was not dispatched.
+The browser and focused Rust child selections were as follows. Each ran through the recorder in the mode and with the
+run ID described above; the repetition commands' private output destinations are redacted.
+
+```sh
+# cebeb182: unchanged Chromium, six repetitions
+taskset -c 0,1 npx playwright test --project=chromium-host-updates \
+  -g 'host progress previews only diagnostics that cannot fit beside its current step' \
+  --repeat-each=6 --workers=1 --retries=0 --output='<private-output>'
+# 27210f18: the same selection with diagnostic logging, ten repetitions
+taskset -c 0,1 npx playwright test --project=chromium-host-updates \
+  -g 'host progress previews only diagnostics that cannot fit beside its current step' \
+  --repeat-each=10 --workers=1 --retries=0 --output='<private-output>'
+# 420fd204: pointer/style correction, ten repetitions per engine
+taskset -c 0,1 npx playwright test --project=chromium-host-updates --project=webkit-host-updates \
+  -g 'host progress previews only diagnostics that cannot fit beside its current step' \
+  --repeat-each=10 --workers=1 --retries=0 --output='<private-output>'
+# 67ac982e: complete-notice regression before the sizing correction
+npx playwright test 'host-updates\.spec\.ts' \
+  -g 'host progress previews only diagnostics that cannot fit beside its current step'
+# 7bf1e625: final controlled selection, both engines
+npx playwright test 'host-updates\.spec\.ts|provisioning\.spec\.ts|tooltip\.spec\.ts' \
+  -g 'host progress (cards agree|previews)|a one-step host card|an open Update card follows|single Update shows inline|a card follows only|a session.s title and open area'
+# 1713d0a7: reused focused Rust tests
+cargo nextest run -p farhelm-ui --lib \
+  -E 'test(folded_progress_card_keeps_peer_diagnostics_and_live_connection) | test(decoded_progress_keeps_name_fallbacks_and_raw_summary_diagnostics) | test(update_progress_summary_counts_steps_and_requires_the_tracked_live_run) | test(progress_wins_and_display_order_keeps_registry_order_within_groups)'
+# fdb1ab98: earlier full host-update/tooltip specs, both engines
+npx playwright test 'host-updates\.spec\.ts|tooltip\.spec\.ts'
+# 1b9326ce: earlier selected provisioning/Tensorlake cases, both engines
+npx playwright test 'provisioning\.spec\.ts|tensorlake-hosts\.spec\.ts' \
+  -g 'an open Update card follows|single Update shows inline progress|adding a Tensorlake host confirms billing'
+# 014556d8: exact WebKit readiness correction
+npx playwright test --project=webkit-provisioning \
+  -g 'single Update shows inline progress without opening its row in dark' --retries=0
+```
+
+The careful rebase read every incoming main change. The landed approval-card layout and its styles are separate from
+host progress; there was no feature interdiff. Main did not move again before the final push. The full workspace,
+remaining browser suite, desktop smoke, installer and real cloud provisioning were skipped: these corrections concern UI
+sizing and test preparation, and the focused checks cover their integration risks. Hosted CI is manual-only and was not
+dispatched.
 
 ## Review gate's outcome
 
-The required single fresh gpt-6.1-sol/high reviewer reviewed the complete PR. Its fractional-height sizing finding was
-fixed and its correction verified. The same reviewer cleared the later test-readiness and pointer-premise corrections. A
-fresh scope reassessment found no unnecessary product mechanism and endorsed the narrow test correction. The resume
-audit and commit/PR wording cold read passed. Every touched file received a separate documentation pass. No rejected
-finding, unanswered product choice or scope departure remains.
+The required fresh, single gpt-6.1-sol/high reviewer reviewed the full PR and found the padding/minimum-height mismatch.
+It was reproduced, corrected and verified by that same reviewer, which cleared the final correction with no outstanding
+finding. Own-model scope reassessment confirmed the reveal boundary and empty-step correction fulfill the existing
+Decisions without a new mechanism. Resume and commit/PR wording checks passed. Every file touched in this round received
+a separate documentation pass. No rejected finding or omitted required behavior remains.
