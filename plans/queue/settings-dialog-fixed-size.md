@@ -273,3 +273,39 @@ passed its review gate, and the last code PR makes the TODO.md changes the accep
 If a `## Decisions` section exists, its latest entry must also be satisfied. Then close the plan per
 `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write
 a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-11-09 (claim db591c).
+
+### May Notifications scroll inside the fixed Settings dialog?
+
+This plan fixes Settings jumping and moving its Close button when you switch sections. It calls for a fixed height of
+about 640px, capped by the window, and says every ordinary section except Agent trust and long Tensorlake or Credentials
+lists should fit without scrolling.
+
+The partial draft uses 780px. Measurements showed that the desktop Terminal controls need about 727px including the
+header and footer, and Checkouts needs about 774px. The draft keeps the frame and Close button fixed while longer
+content scrolls inside the body.
+
+The remaining fit requirement does not match Notifications' existing form. A browser sizing check using the current
+stylesheet, fonts and default form measured a required frame of about 972px. The real application also shows that form
+scrolling on Chromium and WebKit. A 900px-tall window permits only 810px after the existing margins, so increasing the
+fixed height alone cannot make it fit there. The sizing fixture does not run the native desktop app.
+
+May Notifications scroll inside the fixed 780px frame, or should this plan expand to rearrange that form so it fits?
+
+Recommendation: keep 780px and allow Notifications to scroll, along with the other long sections. This preserves the
+requested stable dialog and Close button without changing the form. Rearranging or condensing Notifications would be
+additional UI work and would change more than the dialog's size. Merely raising the fixed height to about 972px would
+still leave it scrolling in shorter windows and would make short sections mostly empty in tall ones.
+
+The partial draft, [#3231](https://github.com/scode/farhelm/pull/3231/changes), must remain unlanded until this decision
+is recorded. Application measurements are retained in browser run `2c8a6413-b945-4750-b15f-de4825f0c03d`, with
+native-Terminal sizing in `7c44be84-05e6-42bf-9dd1-b060430b01eb` and default Notifications sizing in
+`4135b862-a8bb-42e9-8f2d-e133e9d36cb0`.
+
+The final 780px application check, run `b3ead4c5-ecac-4012-9f61-b93492fcf776`, passed all four selected layout cases
+across both engines, including Checkouts fitting and stable frame and Close positions across every section on desktop
+and phone. Notifications still measured 823px of content in a 631px body. This pass validates the partial fixed-frame
+change; it does not resolve the plan's Notifications fit requirement.
