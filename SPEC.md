@@ -1594,14 +1594,15 @@ Global confirmation appears in its own bounded, keyboard-scrollable region direc
 brought into view and focused when it opens, and cancelling returns focus to Delete all. Per-host confirmations stay
 inside their host sections. Initial focus stays on footer Close; sequential Tab follows header close, archive body, then
 footer actions. Confirming a bulk delete closes the dialog immediately and sends one request per host with its frozen
-IDs; the hosts progress independently. An entry's own Delete keeps the dialog open, and its row leaves when the host
-confirms it. Close, header close and Escape remain available during that request. Trash requests keep their
-fifteen-minute deadline for older hosts that still remove files before answering. They do not block other page actions,
-while the trash control prevents overlapping requests of its own. The listing is rechecked after the requests settle.
-Refusals and uncertain replies remain visible on the next dialog opening; an uncertain reply warns that some folders may
-already be deleted. The trash button's tooltip tells the user to open the trash to see why. Deleting unrelated checkouts
-does not clear an uncertain outcome. Notices for a host disappear when a successful host registry refresh confirms that
-the host has been removed; disconnection or a failed refresh does not acknowledge them.
+IDs; the hosts progress independently. An entry's own Delete keeps the dialog open. On a host that reports accepted
+cleanup, the row stays marked as removing until a later listing confirms it is gone; older hosts keep their existing
+row-disappearance behavior. Close, header close and Escape remain available during that request. Trash requests keep
+their fifteen-minute deadline for older hosts that still remove files before answering. They do not block other page
+actions, while the trash control prevents overlapping requests of its own. The listing is rechecked after the requests
+settle. Refusals and uncertain replies remain visible on the next dialog opening; an uncertain reply warns that some
+folders may already be deleted. The trash button's tooltip tells the user to open the trash to see why. Deleting
+unrelated checkouts does not clear an uncertain outcome. Notices for a host disappear when a successful host registry
+refresh confirms that the host has been removed; disconnection or a failed refresh does not acknowledge them.
 
 While this page has a delete request in flight or a host reports that it is freeing space, only the trash button's can
 turns upside down and bobs (static but still upside down under Reduce Motion). Its tooltip names the hosts freeing
@@ -1619,12 +1620,14 @@ Missing or mismatched records can be discarded without touching a replacement fo
 remain available for retry.
 
 After those checks, permanent cleanup moves each selected folder aside inside the same trash directory and answers
-without waiting for recursive removal. Its existing working-copy record remains until the files are gone, and the folder
-no longer appears in the trash. One background remover frees the space sequentially without blocking launches, restarts
-or session Deletes. A restarted supervisor resumes accepted removals. A failed removal logs a warning and keeps its
-hidden folder and record for another attempt at the next startup, without retrying in a running supervisor. The trash
-listing optionally reports whether this supervisor is currently removing folders; retained failures alone do not count
-as removal in progress, and older supervisors omit the indication.
+without waiting for recursive removal. Its existing working-copy record remains until the files are gone. The trash
+keeps that folder listed while removal is queued or running; its files may already be partly removed, so it is no longer
+an untouched archive to recover from. One background remover frees the space sequentially without blocking launches,
+restarts or session Deletes. A restarted supervisor resumes accepted removals. A failed removal keeps its folder and
+record listed with the reason and failure time. **Retry** asks for one more attempt through the same cleanup checks;
+Farhelm never changes permissions or removes files as another user. There is no timed retry in a running supervisor. The
+listing reports queued or running removal separately from a retained failure. Older supervisors omit these facts and
+keep their existing trash behavior.
 
 New sessions, including fresh checkouts whose configured root is inside the trash, cannot enter a directory accepted for
 removal or its unresolved original location. Canonical aliases follow the same refusal. Startup also preserves an

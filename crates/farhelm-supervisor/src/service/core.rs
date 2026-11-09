@@ -5979,17 +5979,22 @@ impl Supervisor {
     /// Legacy trash migrates before lookup; missing archives can then be pruned.
     /// Neither step needs directory admission. Migration holds the database
     /// lock against allocation; individual archive opens and sizing do not.
+    /// Removal state is merged after browsing. A read-start revision preserves
+    /// polling when completion raced the filesystem snapshot, without calling
+    /// an unqueued retained journal permanently in progress.
     pub(crate) async fn list_checkout_trash(
         &self,
         measure_sizes: bool,
     ) -> anyhow::Result<farhelm_proto::CheckoutTrashListing> {
         let db = self.store.conn.clone();
+        let revision = self.trash_remover.revision();
         let mut listing =
             Self::run_directory_worker(Arc::clone(&self.directory_browse_workers), move || {
                 crate::checkout_trash::list(&db, measure_sizes)
             })
             .await?;
-        listing.removing = self.trash_remover.removing();
+        self.trash_remover.annotate(&mut listing, revision);
+        listing.removing |= self.trash_remover.removing();
         Ok(listing)
     }
 
@@ -5998,6 +6003,8 @@ impl Supervisor {
     /// after its live-session guard has been checked.
     /// Request timing begins before admission, so completion logs expose time
     /// waiting behind other directory operations. Recursive removal is separate.
+    /// Retry authority is frozen before waiting: a duplicate that saw one
+    /// attempt cannot become a new Retry of a later failure while queued here.
     pub(crate) async fn delete_checkout_trash(
         &self,
         ids: Vec<String>,
@@ -6005,6 +6012,7 @@ impl Supervisor {
         if ids.len() > crate::checkout_trash::DELETE_ID_CAP {
             anyhow::bail!("too many archived checkouts selected");
         }
+        let observed = self.trash_remover.observe(&ids);
         let mut timing = crate::checkout_trash::DeleteTiming::default();
         let admission = Arc::clone(&self.working_copy_operations).lock_owned().await;
         timing.admission = timing.started.elapsed();
@@ -6014,12 +6022,39 @@ impl Supervisor {
         // would let two wedged passive reads freeze every session operation.
         let (reply, started) = tokio::task::spawn_blocking(move || {
             let _admission = admission;
+            // Admission gives this marker exactly one owner. Declaring it
+            // second clears it (and advances the read revision) before
+            // admission is released on return, error or unwind. The owned
+            // closure keeps both alive even when the request is cancelled.
+            let _retirement = remover.retiring();
             let reading = std::time::Instant::now();
             let live = crate::store::session_directory_paths(&db.lock());
             timing.session_paths = reading.elapsed();
             let live = live
                 .inspect_err(|_| crate::checkout_trash::log_delete_read_failure(&ids, &timing))?;
-            let batch = crate::checkout_trash::delete_timed(&db, &ids, &live, timing)?;
+            let (eligible, coalesced) = remover.select(&ids, observed);
+            let failed_before = remover.failed_ids();
+            let mut batch = crate::checkout_trash::delete_timed(&db, &eligible, &live, timing)?;
+            let removed: HashSet<_> = batch.reply.removed.iter().map(String::as_str).collect();
+            // A refused Retry is still a newly observed failure. Preserve
+            // ordinary first-time Delete diagnostics as diagnostics only. Use
+            // the batch's disposition rather than another fallible registry
+            // read: postprocessing must not lose its already accepted queue.
+            for issue in &batch.reply.issues {
+                if failed_before.contains(&issue.id) && !removed.contains(issue.id.as_str()) {
+                    remover.failed(&issue.id, &anyhow::anyhow!(issue.message.clone()));
+                }
+            }
+            let queued: HashSet<_> = batch.queued.iter().map(String::as_str).collect();
+            for id in batch
+                .reply
+                .removed
+                .iter()
+                .filter(|id| !queued.contains(id.as_str()))
+            {
+                remover.succeeded(id);
+            }
+            batch.reply.removed.extend(coalesced);
             let started = remover.enqueue(batch.queued)?;
             Ok::<_, anyhow::Error>((batch.reply, started))
         })

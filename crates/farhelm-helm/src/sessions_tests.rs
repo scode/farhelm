@@ -11214,9 +11214,12 @@ async fn checkout_trash_routes_pass_host_results_and_fence_stale_deletion() {
                         path: "/remote/checkouts/.farhelm-trash/project-1-20260101T000000Z".into(),
                         archived_at: Some(1767225600),
                         bytes: Some(4096),
+                        removing: false,
+                        stuck: None,
                     }],
                     issues: vec![],
                     removing: true,
+                    reports_retired: false,
                 },
             })
             .await

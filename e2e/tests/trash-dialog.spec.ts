@@ -128,6 +128,95 @@ async function stubArchives(page: Page, request: APIRequestContext, names: strin
   return { ids, removed, removing, unavailable, registry, listings, issues };
 }
 
+/**
+ * Accepted cleanup is still a retained row on capable hosts. A real rendered
+ * Retry uses the same frozen single-ID request, clears its old failure while
+ * queued, and stays visible until a later capable list proves removal finished.
+ * Holding and failing the first list distinguishes receipt handling from the
+ * poll's answer, and proves a failed immediate refresh cannot lose that poll.
+ */
+test("stuck trash retries in place until its host confirms the files are gone", async ({ page, request }) => {
+  await page.clock.install();
+  const { ids } = await stubArchives(page, request, ["stuck-local"], 1);
+  const held = deletionGate();
+  const calls: { host: number; ids: string[]; expected_incarnation: number }[] = [];
+  let phase: "stuck" | "removing" | "gone" = "stuck";
+  let runningReadHeld = false;
+  let runningReadReturned = false;
+  await page.route("**/api/checkout-trash/list", async (route) => {
+    const { host } = route.request().postDataJSON();
+    expect(host).toBe(ids[0]);
+    const observed = phase;
+    if (observed === "removing" && !runningReadHeld) {
+      runningReadHeld = true;
+      await held.ready;
+      await fulfillAsHelm(route, { status: 503, contentType: "text/plain", body: "fixture cleanup refresh unavailable" });
+      runningReadReturned = true;
+      return;
+    }
+    await fulfillAsHelm(route, { json: {
+      reports_retired: true, removing: observed === "removing", issues: [],
+      checkouts: observed === "gone" ? [] : [{
+        id: "stuck-checkout", name: "archived-work", repository: "example/repository",
+        path: "/work/checkouts/.farhelm-trash/.rm:archived-work", archived_at: 1_700_000_000, bytes: 4096,
+        removing: observed === "removing",
+        ...(observed === "stuck" ? { stuck: { reason: "Permission denied in the retained folder", at: 1_700_000_060 } } : {}),
+      }],
+    } });
+  });
+  await page.route("**/api/checkout-trash/delete", async (route) => {
+    const selected = route.request().postDataJSON();
+    calls.push(selected);
+    phase = "removing";
+    await fulfillAsHelm(route, { json: { removed: selected.ids, issues: [] } });
+  });
+  try {
+    await page.goto("/");
+    const trigger = page.locator(".checkout-trash-button");
+    await expect(trigger).toHaveAttribute("data-count", "1");
+    await trigger.click();
+    const dialog = page.locator(".checkout-trash-dialog");
+    const row = dialog.locator(".checkout-trash-entry");
+    await expect(row).toHaveCount(1);
+    await expect(row.locator(".checkout-trash-stuck")).toContainText("Could not free space");
+    await expect(row.locator(".checkout-trash-stuck")).toContainText("Permission denied in the retained folder");
+    await expect(dialog.locator(".checkout-trash-total")).toContainText("4.0 KiB");
+    await expect(dialog.locator(".checkout-trash-total")).not.toContainText("partial");
+    const retry = row.getByRole("button", { name: "Retry cleanup of archived-work", exact: true });
+    await expect(retry).toBeEnabled();
+    await retry.click();
+    await expect.poll(() => calls.length, { message: "Retry dispatched one frozen cleanup request" }).toBe(1);
+    expect(calls[0]).toMatchObject({ host: ids[0], ids: ["stuck-checkout"] });
+    expect(calls[0].expected_incarnation).toBeGreaterThan(0);
+    await expect.poll(() => runningReadHeld, { message: "the first post-receipt listing remains held" }).toBe(true);
+    await expect(row).toHaveCount(1);
+    await expect(row.getByRole("button")).toHaveText("Removing…");
+    await expect(row.getByRole("button")).toBeDisabled();
+    await expect(row.locator(".checkout-trash-stuck")).toHaveCount(0);
+    const hostDelete = dialog.locator(".trash-host-delete");
+    await expect(hostDelete).toBeDisabled();
+    held.release();
+    await expect.poll(() => runningReadReturned, { message: "the first refresh fails after acceptance" }).toBe(true);
+    await expect(dialog.locator(".checkout-trash-issue")).toContainText("fixture cleanup refresh unavailable");
+    await expect(trigger.locator(".trash-delete-icon")).toHaveClass(/\bdeleting\b/);
+    await expect(hostDelete).toBeDisabled();
+    await page.clock.runFor(3_100);
+    // A settled host action proves that the successful poll was committed
+    // before advancing the following completion poll.
+    await expect(hostDelete).toBeEnabled();
+    await expect(row.getByRole("button")).toHaveText("Removing…");
+    await expect(trigger).toHaveAttribute("data-count", "1");
+    phase = "gone";
+    await page.clock.runFor(3_100);
+    await expect(row).toHaveCount(0);
+    await expect(trigger).toHaveAttribute("data-count", "0");
+    await expect(trigger.locator(".trash-delete-icon")).not.toHaveClass(/\bdeleting\b/);
+  } finally {
+    held.release();
+    await page.unrouteAll({ behavior: "wait" });
+  }
+});
+
 for (const fails of [false, true]) {
   /** A held single reply proves immediate selection and busy admission; later
    * listings must preserve neighbours on the same host and on another host. */
