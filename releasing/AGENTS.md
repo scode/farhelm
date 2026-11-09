@@ -32,6 +32,26 @@ carry the settled announcements over without asking again. After those request-t
 build waits for the maintainer: the build gate takes the longest and finds the failures to fix forward, so it starts as
 soon as the pre-tag checks pass.
 
+At request time, compare `UPGRADE_FLOOR` in `crates/farhelm-proto/src/version.rs` between the previous promoted stable
+and the proposed product-source base. A previous release without the constant has the earlier documented v0.23.0
+boundary. Tell the maintainer whether the floor differs. For a raise, show the old and new floors and the new floor
+release's dated stable heading in `CHANGELOG.md`. Label that date as when the notes were written, not when the release
+was promoted: the stable procedure writes notes before building and promotion. Show the actual promotion date and its
+age when the available history establishes them; otherwise state that they are unknown, with the changelog date only as
+context. Also show how many later stable releases were promoted through the previous stable, excluding RCs, dev
+releases, draft sections and unpromoted tags. If the available history cannot establish promotion or that count, say so
+rather than inferring either from a heading or a tag. The maintainer accepts the raise or chooses an earlier base before
+release work proceeds. There is no minimum age or release count. Settle this alongside the request's other decisions,
+never as a deferred pre-tag question. If the proposed product-source base changes, compare its floor again before
+continuing: an unchanged floor reuses the answer, while a different floor needs the decision settled for that new base.
+A re-cut follows the same rule. A change that needs earlier upgrade logic raises the constant and
+`releasing/mac-vm-test/brick_test.py`'s matching literal in its own PR and explains the raise in its PR and changelog
+fragment.
+
+For a stable release, choosing an earlier base pauses the default main-based procedure before step 1. Settle a
+compatible release path with the maintainer before continuing; this decision does not authorize silently copying,
+cherry-picking or backporting source into the ordinary main-based release.
+
 The workflow builds the release, validates it, and publishes its archives on a GitHub release. It signs nothing: CI
 never sees a signing key. A release reaches users only once the maintainer has signed its `SHA256SUMS` (the six payloads
 plus its `install.sh`) and published it on get.farhelm.io, from a trusted host with tooling that deliberately lives

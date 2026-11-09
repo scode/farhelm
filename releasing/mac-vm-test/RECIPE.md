@@ -21,8 +21,12 @@ give the preceding promoted stable version while the candidate's version-path ar
 `/latest` to make the test runnable. After promotion it gives the candidate: find the preceding stable in the release
 history, excluding RC and dev releases. `CHANGELOG.md` has stable `## vX.Y.Z` sections; cross-check the selected tags
 against published releases and the site, since notes alone do not prove the bytes are available. Verify the ordering; do
-not accidentally test candidate-to-itself. Choose a previous release from v0.23.0 onwards and require the candidate to
-be newer by SemVer precedence.
+not accidentally test candidate-to-itself. Choose a previous release at or above the candidate's upgrade floor
+(initially v0.23.0) and require the candidate to be newer by SemVer precedence.
+
+Before planning, perform BRICK-TEST.md's candidate-tag floor comparison. The coordinator's literal and candidate's floor
+must agree; the agreement test for the running checkout alone cannot prove that an earlier-base candidate has the same
+boundary.
 
 Require the candidate's `install.sh`, `SHA256SUMS`, signature and needed payloads at
 `https://get.farhelm.io/v<version>/`. The same applies to the previous release. A candidate already named by `/latest`
@@ -30,11 +34,12 @@ can be tested, but that run cannot prevent its initial exposure to users. This r
 promotion. Capture `/latest` at the time the update path is selected, not only when the run starts.
 
 Read the release's changelog fragments and protocol/schema changes to draft the addendum. The baseline below tests one
-previous stable; SPEC.md requires clean upgrades from **every** stable release from v0.23.0 onward until upgrade epochs
-exist. For this pre-promotion gate, the baseline range ends at the promoted stable named by `/latest`; an intervening
-unpromoted tag is not another installed stable baseline merely because it exists. A passing previous-stable pair does
-not prove that entire range. Name older-version risks and extra pairs in the addendum, and report the versions actually
-covered.
+previous stable; SPEC.md requires clean upgrades from **every** stable release at or above the candidate's upgrade
+floor. `UPGRADE_FLOOR` in `brick_test.py` defines that baseline and the portable unit suite checks its agreement with
+the shared Rust constant. For this pre-promotion gate, the range ends at the promoted stable named by `/latest`; an
+intervening unpromoted tag is not another installed stable baseline merely because it exists. A passing previous-stable
+pair does not prove that entire range. Name older-version risks and extra pairs in the addendum, and report the versions
+actually covered.
 
 Record the genuine agent CLIs selected with the maintainer in the addendum; Codex is the bring-up baseline. Additional
 agents expand coverage and need their own authentication and conversation checks. Name omitted agents in the result.
