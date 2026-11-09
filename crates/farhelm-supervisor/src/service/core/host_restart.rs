@@ -1168,10 +1168,10 @@ impl Supervisor {
     /// confirmed ended ([`Supervisor::end_launch_host`], by the protocol
     /// or the verified signal, never a host another tag names), has its
     /// unconsumed spec, waypoint and launch record removed and its process
-    /// tree swept (`scope` is the failed launch's own unit, which the scope
+    /// tree reaped (`scope` is the failed launch's own unit, which the scope
     /// wrapper may have created): definitive, so the previous run's record
     /// and terminal come back. A host that cannot be confirmed ended, or a
-    /// sweep that cannot be confirmed, keeps the launching record and the
+    /// reap that cannot be confirmed, keeps the launching record and the
     /// launch record, ambiguous: an agent may run under the new
     /// generation.
     async fn unwind_failed_host_relaunch(
@@ -1203,7 +1203,9 @@ impl Supervisor {
                 error.context("and the failed relaunch's launch host record could not be removed");
         }
         // The start's child may have run for a moment (a host that ended
-        // before it could be adopted); the sweep reaches what it started.
+        // before it could be adopted). Reap through its confirmed scope
+        // when sufficient, otherwise through the portable sweep; ending
+        // the host alone does not establish that its descendants are gone.
         if let Err(sweep) = reap_process_tree(
             &self.seams.scopes,
             ScopeUnits::recorded(scope.map(str::to_string)),

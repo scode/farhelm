@@ -3074,7 +3074,7 @@ mod tests {
             .await
             .expect("session_tabs_including_dead");
         assert_eq!(
-            with_dead.len(),
+            with_dead.0.len(),
             3,
             "the teardown-facing listing must still name every dead tab's scope-bearing id"
         );

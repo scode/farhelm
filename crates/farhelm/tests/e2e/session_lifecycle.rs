@@ -5745,30 +5745,26 @@ async fn stop_kills_an_unmarked_child_of_a_reparented_daemon_via_closure_seeding
     wait_until_pid_gone(unmarked_child_pid, 15).await;
 }
 
-/// The headline cgroup acceptance test (PLAN_M3.md item 10, acceptance
-/// 10): on a host with a systemd user manager, stop must kill through the
-/// launch's own scope AND still run the backstop sweep afterwards.
+/// A confirmed scoped Stop kills contained daemons without scanning for
+/// processes that merely wear the session's marker outside its scope.
 ///
-/// Both halves are asserted through processes only ONE mechanism can
-/// reach, because the end state is otherwise identical:
+/// This distinguishes the scope-only decision from the old always-run
+/// backstop: the cloaked daemon dies, while the marked decoy survives.
 ///
 /// - the cloaked daemon (double-forked to init, marker stripped) is
 ///   invisible to both halves of `kill_process_tree`, so its death can
-///   only have come from the cgroup — this is the residual
-///   lore/2026-07-27-m2-process-tree-stop.md accepted and this milestone
-///   closes;
-/// - the marked decoy is outside the scope entirely, so its death can only
-///   have come from the marker sweep — which is SPEC_impl.md's
-///   belt-and-suspenders rule made observable.
+///   only have come from the cgroup;
+/// - the marked decoy is outside the scope entirely and the agent's tree,
+///   so a portable marker sweep would kill it. Its survival at Stop's
+///   return makes omission of that sweep observable.
 ///
-/// The recorded selection is checked too: a run where the manager was
-/// present but the launch fell back would kill the decoy and leave the
-/// daemon, and reading the column is what turns that into a clear failure
-/// rather than a puzzling one.
+/// Readiness, live process state, actual cgroup membership and the recorded
+/// launch selection establish the fixture before Stop; a fallback launch
+/// cannot accidentally satisfy this test's containment premise.
 #[farhelm_testtrace::test]
-async fn a_scope_launched_stop_kills_through_the_cgroup_and_still_runs_the_sweep() {
+async fn a_scope_launched_stop_kills_through_the_cgroup_without_the_marker_sweep() {
     let Some((h, _scopes)) = scope_gated_harness(
-        "a_scope_launched_stop_kills_through_the_cgroup_and_still_runs_the_sweep",
+        "a_scope_launched_stop_kills_through_the_cgroup_without_the_marker_sweep",
     )
     .await
     else {
@@ -5819,18 +5815,217 @@ async fn a_scope_launched_stop_kills_through_the_cgroup_and_still_runs_the_sweep
 
     let decoy = MarkedDecoy::spawn(&session.id);
     let decoy_pid = decoy.pid();
+    let unit = format!("farhelm-{}-0.scope", session.id);
 
     assert_eq!(
         launch_scope_of(&h, &session.id).await,
-        Some(format!("farhelm-{}-0.scope", session.id)),
+        Some(unit.clone()),
         "a launch on a manager-equipped host must record its generation-scoped unit"
+    );
+    let scope_suffix = format!("/{unit}");
+    for pid in [self_pid, cloaked_pid, decoy_pid] {
+        assert!(
+            !process_is_gone(pid),
+            "test setup: fixture process {pid} must still be alive before Stop"
+        );
+        let cgroup = std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+            .expect("the owned fixture's cgroup must be readable");
+        let in_scope = cgroup
+            .lines()
+            .any(|line| line.trim_end_matches('/').ends_with(&scope_suffix));
+        assert_eq!(
+            in_scope,
+            pid != decoy_pid,
+            "test setup: only the agent and cloaked daemon belong to {unit}; \
+             pid {pid} has cgroup {cgroup:?}"
+        );
+    }
+    assert!(
+        marked_pids(&session.id).contains(&decoy_pid),
+        "test setup: the outside decoy must carry the session marker the skipped scan would find"
     );
 
     h.client.stop_session(&session.id).await.expect("stop");
 
+    assert!(
+        !process_is_gone(decoy_pid),
+        "the marker-only decoy outside the launch's scope must survive when Stop returns"
+    );
     wait_until_pid_gone(self_pid, 15).await;
     wait_until_pid_gone(cloaked_pid, 15).await;
-    wait_until_pid_gone(decoy_pid, 15).await;
+}
+
+/// A tmux server first started by a scoped session still owns its pane jobs.
+///
+/// Stock tmux linked with systemd moves panes into sibling `tmux-spawn`
+/// scopes. Killing only Farhelm's scope therefore ends the server but misses
+/// a pane job that ignores SIGHUP. The server must be observed before that
+/// kill so Stop retains the marker sweep. Actual server and pane membership,
+/// the job's ignored-signal mask, and its marker establish this distinction;
+/// a tmux build without pane migration cannot exercise this regression.
+#[farhelm_testtrace::test]
+async fn a_scoped_stop_reaps_jobs_in_a_session_started_stock_tmux_server() {
+    let stock_tmux = std::path::Path::new("/usr/bin/tmux");
+    if !stock_tmux.is_file() {
+        eprintln!(
+            "SKIPPED a_scoped_stop_reaps_jobs_in_a_session_started_stock_tmux_server: \
+             no stock tmux at /usr/bin/tmux; the pinned harness tmux is not this substrate"
+        );
+        return;
+    }
+    let Some((h, _scopes)) =
+        scope_gated_harness("a_scoped_stop_reaps_jobs_in_a_session_started_stock_tmux_server")
+            .await
+    else {
+        return;
+    };
+    let version = tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio::process::Command::new(stock_tmux)
+            .arg("-V")
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .expect("stock tmux version query must finish")
+    .expect("stock tmux must execute");
+    assert!(version.status.success(), "{version:?}");
+    eprintln!(
+        "stock tmux scoped-cleanup substrate: {}",
+        String::from_utf8_lossy(&version.stdout).trim()
+    );
+
+    let work = farhelm_teststate::tempdir().unwrap();
+    let socket = work.path().join("user-tmux.sock");
+    let pane_script = work.path().join("tmux-pane.sh");
+    let launch_script = work.path().join("start-user-tmux.sh");
+    let job_pid_path = work.path().join("tmux-job.pid");
+    let server_pid_path = work.path().join("tmux-server.pid");
+    // The pane publishes only after ignoring HUP, and exec preserves that
+    // disposition. Both sleeps bound leaks if the whole test process dies.
+    std::fs::write(
+        &pane_script,
+        format!(
+            "trap '' HUP\nprintf '%s\\n' \"$$\" > {}\nexec /usr/bin/sleep 120\n",
+            shell_words::quote(&job_pid_path.to_string_lossy())
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        &launch_script,
+        format!(
+            "/usr/bin/tmux -S {socket} -f /dev/null new-session -d -s owned-stock \
+             {pane_command} || exit 1\n\
+             /usr/bin/tmux -S {socket} display-message -p -t owned-stock '#{{pid}}' \
+             > {server} || exit 1\nexec /usr/bin/sleep 120\n",
+            socket = shell_words::quote(&socket.to_string_lossy()),
+            pane_command = shell_words::quote(&format!(
+                "/bin/sh {}",
+                shell_words::quote(&pane_script.to_string_lossy())
+            )),
+            server = shell_words::quote(&server_pid_path.to_string_lossy()),
+        ),
+    )
+    .unwrap();
+    // Capture the chosen executable before launch. This owns only the new
+    // socket; the harness's pinned private server remains a separate fixture.
+    let _stock_server = TmuxServerGuard::with_program(socket, stock_tmux);
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &format!(
+                "/bin/sh {}",
+                shell_words::quote(&launch_script.to_string_lossy())
+            ),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create session that starts its own stock tmux server");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    let server_pid = wait_for_pid_file(&server_pid_path, 15).await;
+    let _server_cleanup = PidKillGuard::arm(server_pid);
+    let job_pid = wait_for_pid_file(&job_pid_path, 15).await;
+    let _job_cleanup = PidKillGuard::arm(job_pid);
+
+    let maps = std::fs::read_to_string(format!("/proc/{server_pid}/maps"))
+        .expect("the owned stock server's mappings must be readable");
+    if !maps.lines().any(|line| line.contains("libsystemd.so")) {
+        eprintln!(
+            "SKIPPED a_scoped_stop_reaps_jobs_in_a_session_started_stock_tmux_server: \
+             stock tmux is not linked with systemd, so it does not supply the pane-migration premise"
+        );
+        return;
+    }
+    assert_eq!(
+        std::fs::read_link(format!("/proc/{server_pid}/exe")).unwrap(),
+        stock_tmux.canonicalize().unwrap(),
+        "the fixture must run the stock executable, not the pinned harness tmux"
+    );
+    assert_eq!(
+        std::fs::read_to_string(format!("/proc/{server_pid}/comm"))
+            .unwrap()
+            .trim(),
+        "tmux: server",
+        "the pre-kill observation must distinguish the real server from its exited client"
+    );
+    let unit = format!("farhelm-{}-0.scope", session.id);
+    assert_eq!(launch_scope_of(&h, &session.id).await, Some(unit.clone()));
+    let scope_suffix = format!("/{unit}");
+    for pid in [agent_pid(&h, &session.id).await, server_pid, job_pid] {
+        assert!(
+            !process_is_gone(pid),
+            "fixture premise: process {pid} must be alive before Stop"
+        );
+        let cgroup = std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+            .expect("the owned fixture's cgroup must be readable");
+        assert_eq!(
+            cgroup
+                .lines()
+                .any(|line| line.trim_end_matches('/').ends_with(&scope_suffix)),
+            pid != job_pid,
+            "fixture premise: the server, but not its pane job, belongs to {unit}; \
+             pid {pid} has cgroup {cgroup:?}"
+        );
+        if pid == job_pid {
+            assert!(
+                cgroup.lines().any(|line| {
+                    line.rsplit('/').next().is_some_and(|name| {
+                        name.starts_with("tmux-spawn-") && name.ends_with(".scope")
+                    })
+                }),
+                "stock tmux must actually have moved its pane to a tmux-spawn scope: {cgroup:?}"
+            );
+        }
+    }
+    let status = std::fs::read_to_string(format!("/proc/{job_pid}/status")).unwrap();
+    let ignored = status
+        .lines()
+        .find_map(|line| line.strip_prefix("SigIgn:"))
+        .map(|mask| u64::from_str_radix(mask.trim(), 16).unwrap())
+        .expect("the job's ignored-signal mask");
+    assert_ne!(
+        ignored & (1 << (libc::SIGHUP - 1)),
+        0,
+        "the pane job must ignore HUP, so server death alone cannot satisfy the test"
+    );
+    assert!(
+        marked_pids(&session.id).contains(&job_pid),
+        "the out-of-scope job must retain the marker the portable fallback uses"
+    );
+
+    h.client.stop_session(&session.id).await.expect("stop");
+
+    assert!(
+        process_is_gone(job_pid),
+        "Stop returned while the SIGHUP-immune stock-tmux pane job still ran outside Farhelm's scope"
+    );
+    assert!(
+        process_is_gone(server_pid),
+        "the owned server must also end"
+    );
 }
 
 /// The recorded selection must survive a supervisor restart, and the

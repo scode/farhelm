@@ -5028,8 +5028,8 @@ Web Animations with reduced-motion refusal. No global geometry cache or new asse
   The sweep sends SIGTERM, allows a short grace, quiesces with SIGSTOP, re-enumerates, sends SIGKILL, and polls for
   confirmed disappearance. PID/start-time revalidation narrows reuse races; it does not make the separate identity read
   and signal syscall atomic or guarantee globally unique start timestamps. `systemd-run --user --scope` cgroup scopes
-  layer on top as the Linux hardening (M3): where a functional systemd user manager exists — probed by actually running
-  a trivial transient scope and then showing, killing, and confirming the collection of it, not by `which`, and through
+  provide containment on Linux (M3): where a functional systemd user manager exists — probed by actually running a
+  trivial transient scope and then showing, killing, and confirming the collection of it, not by `which`, and through
   absolute binary paths so a login shell's `$PATH` cannot substitute what the probe approved — each launch is wrapped in
   its own generation-named scope (audited on systemd 255: the wrapper execs in place, so the pane's process tree, exit
   codes, and liveness checks see exactly the unwrapped shape), the per-launch SELECTION is recorded durably as a boolean
@@ -5047,24 +5047,55 @@ Web Animations with reduced-motion refusal. No global geometry cache or new asse
   retry after the minute probes again and succeeds once the manager answers. A definite negative stays cached, except
   that teardown with evidence of a scope gets one re-probe: a unit its durable row says was scoped, a tab whose window
   records that it was opened in a scope, an unmarked tab of a scoped session, and an unmarked tab of an unscoped session
-  (skipped quietly if the manager is still unusable, since nothing shows it ever had a scope). The sweep ALWAYS runs
-  afterwards as the backstop, and is the whole mechanism where no user manager exists — a missing manager never degrades
-  stop below the sweep's guarantees. A broken one does not silently pass either: for a scoped launch or tab, a scope
-  that cannot be confirmed collected fails the operation even when the sweep found nothing (SPEC.md, Lifecycle
-  operations), since the scope is what catches the processes the sweep cannot see. A silent Farhelm waypoint step sits
-  between the login shell and wrapper, outside the scope, and execs onward without changing the eventual process tree. A
-  wrapper that fails runs before the shim can write its exec-failure sentinel; the generation's waypoint and unconsumed
-  spec on an owned dead pane distinguish that **error** from a login shell that exited first.
+  (skipped quietly if the manager is still unusable, since nothing shows it ever had a scope).
+
+  Confirmed 2026-11-08: the shared reaper skips the machine-wide marker scan and PPID walk only when containment is
+  established for every target, a usable manager handles at least one named scope, every named scope is confirmed
+  collected, and no validated explicit root survives afterwards. It checks only those root identities, not the process
+  table, before deciding. Confirmed 2026-11-09: before the first scope kill, the reaper checks the scopes it would trust
+  for a running tmux server. A server keeps the full portable sweep: stock systemd-linked tmux moves panes into sibling
+  `tmux-spawn-*.scope` units, and ending the server alone does not end a pane program that ignores SIGHUP. This is
+  ordinary tmux behavior, not the deliberate escape accepted below. The check reads only the selected scopes and their
+  processes, with bounded observations; an unavailable, capped or unreadable observation keeps the sweep rather than
+  proving that no server is present. Scope killing still attempts every selected unit and uses the existing error
+  policy. The tmux check grants no signal authority and does not enumerate the process table.
+
+  When the conditions for scope-only cleanup do not hold, the reaper runs the existing portable sweep unchanged. A named
+  scope that is no longer loaded reads as an empty group, which the tmux check cannot tell from an unreadable one, so it
+  keeps the sweep too: scope-only cleanup applies only while every named scope is still live. Deleting a session whose
+  agent or a tab already exited, a Stop or Restart after the agent exited, and a containerized Delete therefore always
+  sweep. Scope-name provenance and containment completeness are separate inputs: a guessed name that is absent does not
+  prove that a target was scoped. An unscoped launch, an unscoped tab or unavailable selection keeps the sweep required
+  even when optional scope names are added. Delete combines the agent's and every tab's selection, including host tags
+  and tmux scope markers, so a scoped agent cannot hide an unscoped tab's cleanup requirement. It also keeps the sweep
+  when discovery is incomplete: no agent terminal, or an old tmux session absent from its pane listing, means historical
+  unscoped tab jobs may remain. A systemd glob can supply scope handles in those cases, but cannot prove that no such
+  jobs exist. Existing discovery errors still refuse Delete; a successful empty listing does not acquire that new
+  meaning.
+
+  A host at generation zero cannot have migrated from tmux. A later-generation host may still have old tmux tabs, so
+  when its tmux session is absent Delete conservatively keeps the sweep; current presence and host records do not retain
+  that history. This also costs the sweep for restarted host-only sessions in that state, avoiding a separate persisted
+  history mechanism for the optimization.
+
+  This is the maintainer's decision to trust containment and trade the always-run backstop for cost, with the tmux and
+  incomplete-discovery exceptions above. The sweep remains the whole mechanism where no user manager exists. A broken
+  manager does not silently pass either: for a scoped launch or tab, a scope that cannot be confirmed collected fails
+  the operation even when the sweep found nothing (SPEC.md, Lifecycle operations), since the scope is what catches the
+  processes the sweep cannot see. A silent Farhelm waypoint step sits between the login shell and wrapper, outside the
+  scope, and execs onward without changing the eventual process tree. A wrapper that fails runs before the shim can
+  write its exec-failure sentinel; the generation's waypoint and unconsumed spec on an owned dead pane distinguish that
+  **error** from a login shell that exited first.
 
   Terminal tabs also receive separate scopes, named from the session and tab IDs. A tab has no database row, so whether
   its open selected a scope is recorded as an option on its tmux window, and closing the tab decides from that whether
   an unconfirmable scope fails the close. The session's own launch is no substitute: the agent and a later tab can see
-  different verdicts about the user manager. A window opened before that option existed is treated as scoped when the
-  session's launch was, and otherwise still gets the one re-check of the manager, its scope skipped only if the manager
-  stays unusable. Delete collects those units both from tmux-discovered tabs and independently from the systemd manager
-  using the session-specific tab-unit glob. The second source preserves a cleanup handle when tmux no longer supplies
-  tab IDs. A manager enumeration failure is distinct from having no usable manager; it can refuse Delete before the
-  portable sweep.
+  different verdicts about the user manager. A window opened before that option existed is treated as scoped for
+  re-probe and failure policy when the session's launch was, but its unknown selection still requires the portable
+  sweep. Otherwise it still gets the one re-check of the manager, its scope skipped only if the manager stays unusable.
+  Delete collects those units both from tmux-discovered tabs and independently from the systemd manager using the
+  session-specific tab-unit glob. The second source preserves a cleanup handle when tmux no longer supplies tab IDs. A
+  manager enumeration failure is distinct from having no usable manager; it can refuse Delete before the portable sweep.
 
   Containment starts at the agent launch, after login-shell initialization: the cgroup wrapper and the shim's
   environment markers deliberately exclude services started by shell startup files. A detached startup-file service may
@@ -5075,42 +5106,42 @@ Web Animations with reduced-motion refusal. No global geometry cache or new asse
   Terminal tabs are the deliberate opposite. A tab's session and tab markers are set on the tmux window before its login
   shell starts, and its scope wraps that shell, so everything the shell's startup files start is inside the tab's
   containment and is reaped on close, auto-reap, and Delete, subject to the same residuals as the agent's processes (see
-  below; on a host without a usable user manager, a detached tab-started process whose environment is unreadable escapes
-  the sweep). The tab shell is itself what closing the tab promises to kill, and a tab has no shim that could run after
-  initialization to apply containment later. The agent launch has normally already run the same startup files outside
-  containment, so guarded startup logic usually reuses that instance, with one routine exception for a tmux autostart
-  guarded by `TMUX` being unset. In an old terminal the launch removes the private server's `TMUX` and `TMUX_PANE` only
-  after those files ran, so such an autostart fires in the first tab instead, and when no tmux server of the user's is
-  running yet, that tab starts and owns it (with `exec tmux`, a detach ends both the tab and the server). In a new
-  terminal no `TMUX` is set at any point, so the autostart runs during the agent's launch, and one that execs tmux keeps
-  the agent from starting (SPEC.md, "Session view"). A shared service dies with a tab only when the tab's startup files
-  are the first to start it.
+  below; for an unscoped tab, a detached tab-started process whose environment is unreadable escapes the sweep). The tab
+  shell is itself what closing the tab promises to kill, and a tab has no shim that could run after initialization to
+  apply containment later. The agent launch has normally already run the same startup files outside containment, so
+  guarded startup logic usually reuses that instance, with one routine exception for a tmux autostart guarded by `TMUX`
+  being unset. In an old terminal the launch removes the private server's `TMUX` and `TMUX_PANE` only after those files
+  ran, so such an autostart fires in the first tab instead, and when no tmux server of the user's is running yet, that
+  tab starts and owns it (with `exec tmux`, a detach ends both the tab and the server). In a new terminal no `TMUX` is
+  set at any point, so the autostart runs during the agent's launch, and one that execs tmux keeps the agent from
+  starting (SPEC.md, "Session view"). A shared service dies with a tab only when the tab's startup files are the first
+  to start it.
 
   **What the cgroup does and does not promise.** It targets ACCIDENTAL daemonization — the dev server, MCP server, or
   build watcher that double-forks and execs away its environment marker, which is exactly the shape the sweep provably
-  cannot find. It does NOT contain a deliberately adversarial descendant: one that runs `systemd-run --user --scope` on
-  itself migrates into a sibling unit under the same user manager, and with its marker scrubbed is then invisible to
-  both mechanisms (reproduced, not theorized). Containing that needs a delegation boundary — a parent slice the
-  supervisor owns, with the manager refusing migrations out of it — which v1 does not build and SPEC.md does not
-  promise. Agent descendants run with the user's own privileges by design, so a descendant determined to outlive its
-  session can always arrange to; the honest claim is that stop reaps what a normal program leaves behind. macOS has no
-  /proc, so the three reads the sweep needs — the same-euid process table, one pid's parent/start-time/zombie state, and
-  one pid's environment — go through a platform seam that answers them with `sysctl` there (`KERN_PROC_ALL`,
-  `KERN_PROC_PID`, and `KERN_PROCARGS2`) and with /proc on Linux; every decision above it, and therefore everything stop
-  promises, is one shared implementation. The Mac marker source is deliberately narrowed to the environment region of
-  `KERN_PROCARGS2` with argv discarded, so that neither platform can claim a process for marker text that merely appears
-  on its command line. One Mac residual on top of the shared ones: macOS 26+ withholds that environment region for Apple
-  platform binaries even from a same-uid parent (observed on real hardware, pinned by a macOS-only test), so a
-  reparented descendant exec'd into `/bin/sh` or another platform binary escapes the marker scan there; the PPID closure
-  still reaps it while it remains in the pane's tree. The planned close is a session-id membership channel — tmux panes
-  are session leaders and a SID survives fork, exec, and reparenting — deferred until the gap proves to matter in
-  practice. See lore/2026-07-27-m2-process-tree-stop.md for the alternatives as they looked when this was decided.
-  Another residual applies to every host without a usable user manager, for agent and tab cleanup alike: a detached
-  descendant whose environment its own user cannot read. `ssh-agent` marks itself non-dumpable, which makes
-  `/proc/<pid>/environ` unreadable even to its owner (observed, not theorized), and it calls `setsid`; a setuid
-  program's environment is unreadable the same way. The sweep treats an unreadable environment as unmarked, so once such
-  a process has left the pane's tree nothing claims it. Only cgroup containment closes this; the session-id channel
-  would not, because `setsid` gives the process a new session id.
+  cannot find. It does not contain a descendant that runs `systemd-run --user --scope` on itself: that migrates into a
+  sibling unit under the same user manager (reproduced, not theorized). Scope-only cleanup does not chase it even when
+  its marker remains, nor a process that merely carries the session's marker without ever having entered its scope.
+  Containing a deliberate migration needs a delegation boundary — a parent slice the supervisor owns, with the manager
+  refusing migrations out of it — which v1 does not build and SPEC.md does not promise. Agent descendants run with the
+  user's own privileges by design, so a descendant determined to outlive its session can always arrange to; the honest
+  claim is that stop reaps what a normal program leaves behind. macOS has no /proc, so the three reads the sweep needs —
+  the same-euid process table, one pid's parent/start-time/zombie state, and one pid's environment — go through a
+  platform seam that answers them with `sysctl` there (`KERN_PROC_ALL`, `KERN_PROC_PID`, and `KERN_PROCARGS2`) and with
+  /proc on Linux; the portable sweep's decisions above that seam are one shared implementation. The Mac marker source is
+  deliberately narrowed to the environment region of `KERN_PROCARGS2` with argv discarded, so that neither platform can
+  claim a process for marker text that merely appears on its command line. One Mac residual on top of the shared ones:
+  macOS 26+ withholds that environment region for Apple platform binaries even from a same-uid parent (observed on real
+  hardware, pinned by a macOS-only test), so a reparented descendant exec'd into `/bin/sh` or another platform binary
+  escapes the marker scan there; the PPID closure still reaps it while it remains in the pane's tree. The planned close
+  is a session-id membership channel — tmux panes are session leaders and a SID survives fork, exec, and reparenting —
+  deferred until the gap proves to matter in practice. See lore/2026-07-27-m2-process-tree-stop.md for the alternatives
+  as they looked when this was decided. Another residual applies to unscoped launches and tabs, including every host
+  without a usable user manager: a detached descendant whose environment its own user cannot read. `ssh-agent` marks
+  itself non-dumpable, which makes `/proc/<pid>/environ` unreadable even to its owner (observed, not theorized), and it
+  calls `setsid`; a setuid program's environment is unreadable the same way. The sweep treats an unreadable environment
+  as unmarked, so once such a process has left the pane's tree nothing claims it. Only cgroup containment closes this;
+  the session-id channel would not, because `setsid` gives the process a new session id.
 
   **Process-number reuse inside a short window is accepted, for now.** Decided 2026-10-05. Code that signals or adopts a
   process by its number may lose the race in which that process exits and the kernel hands the number to an unrelated

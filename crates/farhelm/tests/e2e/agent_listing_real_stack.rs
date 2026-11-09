@@ -837,26 +837,24 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
 /// asker OR any session the helm knows"): the reply names a session the
 /// asking connection was never attached to at all.
 ///
-/// This is not only a style choice. `stop` ends with the
-/// supervisor's process-tree SWEEP, which claims every same-user process
-/// on the machine whose environment carries the TARGET session's exact
-/// `FARHELM_SESSION_ID` marker (`sweep.rs`'s environment-marker scan,
-/// documented there as intentionally host-wide — it is what catches a
-/// descendant that broke its PPID chain). A `farhelm agent` process
-/// necessarily carries that marker FOR THE SESSION IT AUTHENTICATES AS, so
-/// a command explicitly targeting that same session races its own triggered
-/// sweep and may be SIGTERM'd before it can print a confirmation. That is a property of an unattended CLI
-/// process racing a kill sweep it started against itself, not a defect in
-/// the relay or in `HelmAgentRequests`: nothing is supposed to survive a
-/// self-stop, including the disposable CLI invocation, since ending the
-/// whole tree is exactly what the verb was asked to do. What is lost is
-/// only the confirmation LINE, and only for a caller that both asked-as
-/// and acted-on one session. Routing `stop` at a
-/// SEPARATE target session sidesteps the race entirely — the controller's
-/// marker never matches the target's sweep — which is what makes this
-/// fixture deterministic. `rename` triggers no sweep at all, so it safely
-/// covers a deliberate self-action with the controller's exact ID and
-/// observed title.
+/// This is not only a style choice. `stop` reaps the target's processes,
+/// trusting confirmed scopes when sufficient and otherwise running the
+/// portable process-tree sweep. That sweep claims every same-user process
+/// on the machine whose environment carries the TARGET session's exact `FARHELM_SESSION_ID`
+/// marker (`sweep.rs`'s intentionally host-wide environment-marker scan,
+/// which catches a descendant that broke its PPID chain). A `farhelm agent`
+/// process necessarily carries that marker FOR THE SESSION IT AUTHENTICATES
+/// AS, so a command targeting that same session races its own cleanup and
+/// may be SIGTERM'd before it can print a confirmation. This is a property
+/// of a CLI process racing cleanup it started against itself, not a defect
+/// in the relay or in `HelmAgentRequests`: the disposable invocation is part
+/// of the tree it asked to end. Only the confirmation LINE is lost, and
+/// only for a caller that both asked-as and acted-on one session. Routing
+/// `stop` at a SEPARATE target avoids the race: the controller is outside
+/// the target's scope and its marker never matches the target's sweep.
+/// That makes this fixture deterministic. `rename` triggers no cleanup,
+/// so it safely covers a deliberate self-action with the controller's
+/// exact ID and observed title.
 ///
 /// `GET /api/sessions/{id}` is the read used to observe each effect rather
 /// than the listing table, because it is documented to answer LIVE for a

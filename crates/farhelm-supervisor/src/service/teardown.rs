@@ -332,9 +332,9 @@ impl Supervisor {
         // notice — that is the one acceptable consequence of not
         // holding the lock here, not an oversight.
         //
-        // Same dead/absent/terminal-less handling as `StopSession`:
-        // the marker sweep still runs even with no live pane pid, for
-        // the same leftover-reaping reason documented there.
+        // A dead pane does not prove its detached jobs ended. The reap
+        // trusts confirmed containment only; missing tab discovery below
+        // keeps the portable sweep even without a live pane root.
         //
         // The pane's identity is captured right after the probe, before tab
         // discovery, scope enumeration, and archive work can give the
@@ -356,9 +356,9 @@ impl Supervisor {
                 // hard error, and delete became impossible for the rest of
                 // the supervisor's life. A RECOGNIZED owner means exactly
                 // that recycle, so there is no live pane root here and
-                // nothing of the old terminal left to remove; the sweep
-                // below still reaps by environment marker and through the
-                // session's cgroup scopes (enumeration only NAMES those
+                // nothing of the old terminal left to remove; the reap
+                // below still uses the session's cgroup scopes or the
+                // required portable marker fallback (enumeration only NAMES those
                 // units — `reap_process_tree` is what kills), neither of
                 // which needs a pane. Using the stranger's pid instead
                 // would reap THEIR process tree, which is the outcome the
@@ -382,7 +382,7 @@ impl Supervisor {
                     warn!(
                         session = %session_id, foreign_owner = %owner,
                         "this session's recorded pane now belongs to another tmux session; \
-                         deleting on the marker sweep and cgroup scopes alone"
+                         deleting through scoped or portable cleanup without that pane"
                     );
                     None
                 }
@@ -480,18 +480,25 @@ impl Supervisor {
             // Strict: "we could not ask tmux" is not "there
             // are no tabs", and a delete that assumed the
             // latter would skip live tab scopes.
-            let tabs = self
+            let (tabs, complete) = self
                 .session_tabs_including_dead(entry)
                 .await
                 .map_err(TeardownError::TabRediscovery)?;
-            units.extend_derived(
-                tabs.iter()
-                    .filter_map(|tab| crate::scope::tab_unit_name(session_id, &tab.id)),
-            );
+            if !complete {
+                units.require_sweep();
+            }
+            for (tab, selection) in tabs {
+                units.extend_tab(crate::scope::tab_unit_name(session_id, &tab.id), selection);
+            }
+        } else {
+            // No terminal means no historical tab inventory. A unit glob
+            // can find scoped leftovers, never detached unscoped tab jobs.
+            units.require_sweep();
         }
-        // A tab in a host has no window to read its id from; its tag names
-        // the tab and says whether it runs in a scope of its own.
-        units.extend_derived(hosts.scoped_tab_units(session_id));
+        // A tab in a host has no window to read its id from. Include its
+        // false or unavailable scope selection too: an agent's scope must
+        // not conceal an unscoped tab's detached jobs from cleanup.
+        hosts.add_tab_scopes(session_id, &mut units);
         // Settle a stale "no manager" verdict BEFORE enumerating. The row's
         // recorded launch unit is the durable evidence that earns one
         // re-probe, and the sweep below would spend it anyway; spending it
@@ -1577,6 +1584,91 @@ mod tests {
     /// politely does.
     fn working_scopes() -> crate::scope::ScopeManager {
         crate::scope::ScopeManager::fake_vanishing_after_signal("SIGTERM", Arc::new(|_| {}))
+    }
+
+    /// Model the lost inventory independently of containment: the recorded
+    /// agent scope confirms successfully, while a live tab-marked child has
+    /// never belonged to it. Only Delete's portable marker fallback can end
+    /// this child. The custom sleeper's environment is readable on modern
+    /// macOS, unlike /bin/sleep's; the guard owns cleanup during unwinding.
+    async fn assert_incomplete_discovery_reaps_unscoped_tab(missing_terminal: bool) {
+        let id = uuid::Uuid::new_v4().to_string();
+        let (_state, sup, original) = scoped_session(working_scopes(), &id).await;
+        let terminal = (!missing_terminal).then(|| {
+            Terminal::Tmux(super::super::terminals::TmuxTerminal {
+                tmux_name: session_tmux_name(&id),
+                pane: "%0".to_owned(),
+            })
+        });
+        let mut entry = entry_with(terminal, LastOutcome::Running);
+        entry.info.id = id.clone();
+        entry.scope = original.scope.clone();
+        let entry = Arc::new(entry);
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.clone(), Arc::clone(&entry));
+        let (tabs, complete) = sup
+            .session_tabs_including_dead(&entry)
+            .await
+            .expect("empty discovery");
+        assert!(
+            tabs.is_empty() && !complete,
+            "fixture has no historical tab inventory"
+        );
+        /// Own the portable sleeper through assertions and async teardown;
+        /// failed cleanup must not leave its fixture running until timeout.
+        struct ChildGuard(std::process::Child);
+        impl Drop for ChildGuard {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let tab_id = uuid::Uuid::new_v4().to_string();
+        let mut child = ChildGuard(crate::procs::sleeper::spawn(&[
+            (crate::launch::SESSION_ID_ENV_VAR, &id),
+            (crate::launch::TAB_ID_ENV_VAR, &tab_id),
+        ]));
+        let pid = child.0.id();
+        assert!(matches!(
+            crate::procs::read_process(pid),
+            Ok(Some((_, _, crate::procs::ProcessState::Running)))
+        ));
+        let environment = crate::procs::read_environ(pid).expect("fixture markers readable");
+        assert!(
+            environment
+                .split(|byte| *byte == 0)
+                .any(|field| field == format!("FARHELM_SESSION_ID={id}").as_bytes())
+        );
+        assert!(
+            sup.teardown_session(&entry, &id, test_admission(&sup).await)
+                .await
+                .is_ok(),
+            "incomplete discovery keeps marker cleanup"
+        );
+        assert!(
+            matches!(
+                crate::procs::read_process(pid),
+                Ok(None | Some((_, _, crate::procs::ProcessState::Zombie)))
+            ),
+            "successful Delete must reap the job even though the confirmed agent scope never contained it"
+        );
+        child.0.wait().expect("reap owned fixture child");
+    }
+
+    /// A missing agent terminal cannot prove former tabs were scoped, even
+    /// when its durable launch scope is known and confirms collected.
+    #[farhelm_testtrace::test]
+    async fn delete_without_a_terminal_sweeps_former_unscoped_tab_jobs() {
+        assert_incomplete_discovery_reaps_unscoped_tab(true).await;
+    }
+
+    /// A valid empty listing after an old tmux server died describes no
+    /// current panes, not the containment of jobs its tabs left behind.
+    #[farhelm_testtrace::test]
+    async fn delete_with_a_missing_old_tmux_session_sweeps_unscoped_tab_jobs() {
+        assert_incomplete_discovery_reaps_unscoped_tab(false).await;
     }
 
     /// Delete removes the deleted session's files (uploaded attachments,

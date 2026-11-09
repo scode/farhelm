@@ -89,18 +89,32 @@ async fn an_agent_wearing_an_ambient_tab_marker_and_its_own_tab_are_stopped() {
 
 /// A daemon left behind by a session launched BEFORE either kind marker
 /// existed — session-marked and nothing else — must still be reaped by
-/// stop.
+/// an unscoped Stop.
 ///
 /// The legacy bucket is the third root set `SweepTarget::AgentOnly`
 /// claims, and it exists because a purely agent-marker-keyed stop would
 /// silently stop reaching such processes on every host that upgraded.
 /// `MarkedDecoy` is exactly that shape: the session marker, no kind
-/// marker, and outside every cgroup this session owns.
+/// marker, and outside every cgroup this session owns. Disable scopes
+/// explicitly: a scoped Stop deliberately trusts its containment and
+/// would leave this marker-only process alone.
 #[farhelm_testtrace::test]
 async fn a_session_marked_process_with_no_kind_marker_is_still_reaped_by_stop() {
-    let h = harness().await;
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
     let (session, _work) = basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    assert_eq!(
+        crate::session_lifecycle::launch_scope_of(&h, &session.id).await,
+        None,
+        "the legacy marker case must exercise the unscoped portable sweep"
+    );
 
     let (_chan, mut seen, mut rx) = h
         .client
@@ -111,6 +125,10 @@ async fn a_session_marked_process_with_no_kind_marker_is_still_reaped_by_stop() 
 
     let legacy = MarkedDecoy::spawn(&session.id);
     let legacy_pid = legacy.pid();
+    assert!(
+        !process_is_gone(legacy_pid) && marked_pids(&session.id).contains(&legacy_pid),
+        "test setup: the outside legacy process must be alive and carry this session's marker"
+    );
     h.client.stop_session(&session.id).await.expect("stop");
     wait_until_pid_gone(legacy_pid, 15).await;
 }
@@ -120,9 +138,9 @@ async fn a_session_marked_process_with_no_kind_marker_is_still_reaped_by_stop() 
 ///
 /// The bug this pins: a test runner that itself lives inside a Farhelm
 /// session carries `FARHELM_AGENT_ID` (or, from a tab, `FARHELM_TAB_ID`),
-/// and a decoy inheriting either stops being the legacy shape the tests
-/// above depend on — the sweep reads the marker as "already claimed" and
-/// correctly refuses the decoy, timing out both sweep-backstop tests. That
+/// and a decoy inheriting either stops being the legacy shape the test
+/// above depends on — the sweep reads the marker as "already claimed" and
+/// correctly refuses the decoy, so the legacy cleanup assertion fails. That
 /// failure only manifests on such a host, so a live-child check would pass
 /// on clean CI even with the scrub deleted. Asserting the CONFIGURED
 /// operations on the builder (`Command::get_envs`, where an `env_remove`

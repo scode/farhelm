@@ -37,6 +37,36 @@ async fn host_entry() -> (Arc<SessionEntry>, HostTerminal, TestHost) {
     (entry, host, test_host)
 }
 
+/// After migration, a host can still have old tmux tabs whose jobs outlive
+/// their server. Its current host tag cannot establish that old inventory.
+/// A fresh host's zero generation is the existing evidence that it never
+/// migrated, so only that case can treat an absent tmux session as complete.
+#[farhelm_testtrace::test]
+async fn a_later_host_generation_without_tmux_keeps_tab_discovery_incomplete() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let (host, _test_host) = adopt_test_host(None).await;
+    for generation in [0, 1, 3] {
+        let mut entry = entry_with(Some(Terminal::Host(host.clone())), LastOutcome::Running);
+        entry.generation = generation;
+        let (tabs, complete) = sup
+            .session_tabs_including_dead(&entry)
+            .await
+            .expect("tab discovery");
+        assert!(
+            tabs.is_empty(),
+            "fixture has no old tmux session or host tabs"
+        );
+        assert_eq!(
+            complete,
+            generation == 0,
+            "generation {generation} has no historical tmux evidence"
+        );
+    }
+}
+
 /// Wait until `condition` holds for `host`, re-checking on every change of
 /// its status.
 async fn wait_for(host: &HostTerminal, what: &str, condition: impl Fn(&HostTerminal) -> bool) {
