@@ -6652,6 +6652,63 @@ Preparation invokes no credential delivery or gh setup and creates no tunnels. A
 base is left intact, with the base author responsible for it; this is not a claim that prepared snapshots are free of
 inherited credentials. Farhelm's selected authentication and tunnels remain per-host connection/setup work.
 
+## Tensorlake sandbox sessions
+
+Session ownership is one durable marker on the existing Tensorlake host row, added without rebuilding `hosts`. Existing
+columns retain the recipe, chosen reserved-prefix name, canonical sandbox ID and recorded create facts. The ordinary
+host actor supplies reconnect, credentials, tunnels, updates and session aggregation. HostView retains the row; only
+permanent rail icons and ordinary launch/template/agent host choices filter it. Hosts and the existing sidebar attention
+list use their ordinary rows and remedies. Do not create a second diagnostic projection or management path.
+
+A recipe launch has a distinct protected route. Older ordinary-create decoders ignore unknown fields and default an
+absent host to local, so a recipe request must never fall through to ordinary creation on an older helm. The helm
+composes prepared-snapshot, Tensorlake add-run and session-create facilities with existing progress and run limits. It
+records the owned row and `farhelm-sess-<tag>-…` name before billed work. API key, readable local SSH pair and a built
+snapshot are prerequisites; local key presence does not prove account registration. Reuse the registration remedy for
+SSH public-key refusal. Missing software snapshots are not built by session launch. Set `timeout_secs: 1800` and
+`auto_resume: false`; credentials and tunnels keep ordinary Add warning semantics.
+
+For managed checkouts, carry repository and naming intent until the new supervisor connects, then use its existing
+preview, allocation and create admission. Confirmed creation keeps ordinary terminal clone, hook and error behavior.
+Before a confirmed create reply, a failed normal launch attempts whole-sandbox cleanup through the existing bounded
+Tensorlake deletion calls and resource proof. The row is retained if cleanup cannot complete. Lost create replies need
+no special reconciliation: the newly created resource may be destroyed. Interrupted owned resources remain visible in
+Hosts, and resources without a row are discoverable by the reserved prefix. There is no new launch journal, retained
+request fingerprint, exactly-once launch guarantee or startup continuation worker.
+
+Explicit session Delete calls the existing whole-sandbox removal path after an always-on confirmation authorizing all
+processes, files and snapshots in that resource. It validates the host/resource binding and deletion consent, not the
+number of sessions. Any names displayed come from the ordinary cache and make no completeness claim. The same deletion
+works while the supervisor is unreachable or suspended; it never asks for Resume to inspect membership. Existing bounded
+termination and snapshot cleanup precede forgetting the actor and host-owned rows. Failure retains the resource and
+reason. Host Delete sandbox uses that same path and confirmation. Bulk Delete coalesces targets by host ID without
+requiring a complete member set or a designated last session.
+
+Replace stays in the same sandbox and retains ordinary create-before-source-removal ordering. Its internal source
+removal calls ordinary supervisor session deletion, never whole-sandbox removal. Failures preserve the resource and
+report known outcomes and its name; rare unresolved cases can require manual recovery. Explicit whole-sandbox Delete may
+subsequently destroy any leftover session, listed or unlisted. This is accepted product behavior, so do not add stored
+session membership, finality tracking, or protocol and connection changes to prove which session remains.
+
+Suspend and Resume reuse host lifecycle tasks. Stop and suspend completes ordinary Stop first, then applies the host
+Suspend rule to the whole resource; failure or incomplete Stop withholds Suspend. No path automatically resumes it. Bulk
+lifecycle conveniences and recipe recent setups are deferred. The ordinary per-host provisioning/lifecycle guard
+protects conflicting resource work; do not introduce new membership-specific locks or ordering.
+
+Templates represent a recipe separately from the existing opaque install-identity host field; both together are an
+inapplicable Host field. Shared template application treats them as one placement choice. Clone resolves an owned source
+to its recipe and creates a new sandbox. Restart/Replace retain the actual host internally; ordinary creates reject
+owned host destinations. Agents cannot list, read, write or launch recipe templates; agent template verbs naming one are
+refused. Changes to the shared template encoding must preserve the existing strict-decoder and old-page failure
+behavior; a protocol bump, if needed for that encoding, is separate from the removed supervisor policy and membership
+protocol.
+
+After the existing global prompts-off refusal and origin-liveness check, the helm's agent dispatcher refuses a
+session-owned origin before verb handling, permissions or approval. It also refuses agent Delete/Clone of sandbox
+sessions and recipe launch after template resolution. Use the ordinary refusal kind and relay. Do not add a notification
+kind, generation bookkeeping, supervisor metadata or acknowledged connection policy for this restriction. All policy
+belongs to the owning helm; the ordinary relay already refuses when no owning helm connection exists.
+
 ## Tensorlake hosts
 
 A Tensorlake host is a `hosts` row with `kind = 'ssh'` and a non-null `tensorlake_sandbox` (schema 72 added that column
@@ -6805,21 +6862,25 @@ clients, cancels connection actors and joins their supervisors, which await the 
 leases therefore drop while the runtime still exists. Sessions continue on their supervisors. No tunnel child,
 parent-death signal or platform-specific lifetime helper remains.
 
-Protected `/api/tensorlake/orphans` lists reserved-name sandboxes not named by a host row or a deterministic builder
-name of any saved recipe. `/api/tensorlake/orphans/{id}` DELETE rechecks both the prefix and local ownership, terminates
-the sandbox, waits for termination, and deletes snapshots by source sandbox ID using the existing bounded removal calls.
-The delete runs on a helm-owned task so closing Settings cannot cancel cleanup. The service retains in-flight and failed
+Protected `/api/tensorlake/orphans` recognizes `farhelm-sess-` alongside the ordinary host, builder and preparer
+prefixes. It lists reserved-name sandboxes not owned by a host row or a deterministic builder/preparer name of a saved
+recipe. A session-owned launch or cleanup leftover with a host row stays visible in Hosts; no session membership
+evidence is needed to make it manageable. `/api/tensorlake/orphans/{id}` DELETE rechecks the prefix and current
+ownership under the host provisioning lock. An owned resource uses host Delete sandbox instead. It terminates the
+sandbox, waits for termination, and deletes snapshots by source sandbox ID using the existing bounded removal calls. The
+delete runs on a helm-owned task so closing Settings cannot cancel cleanup. The service retains in-flight and failed
 explicit cleanup operations in memory, including canonical sandbox ID, display facts and the failure reason; the list
 overlays those operations on vendor discovery because terminated sandboxes disappear from that discovery. Settings shows
 running cleanup and offers Retry cleanup after failure, including after closing/reopening Settings or losing the
 vendor's terminated sandbox record. A retry still rechecks local ownership. Only a successful snapshot sweep removes the
-operation; nothing retries automatically. A helm restart loses this in-memory operation state. No persistent ownership
-ledger or automatic reconciliation is added. Settings re-reads on invalidations and offers Refresh for changes outside
-this helm. A failed discovery pauses automatic reads until Refresh, a key save/clear in this dialog, a successful Test
-of the saved key, or remounting Settings; unrelated fleet changes must not keep resending a rejected key. Key
-replacement in this dialog triggers discovery even when a key was already saved. A successful Test resumes failed
-discovery with one reload. Another tab's key save is not observed automatically: this tab needs Refresh, Test or
-reopening Settings.
+operation; nothing retries automatically. A helm restart loses this in-memory operation state; a session-owned leftover
+still has its durable host resource record and remains visible in Hosts. Other unowned sandboxes gain no persistent
+ownership ledger, and neither path adds automatic startup reconciliation. Settings re-reads on invalidations and offers
+Refresh for changes outside this helm. A failed discovery pauses automatic reads until Refresh, a key save/clear in this
+dialog, a successful Test of the saved key, or remounting Settings; unrelated fleet changes must not keep resending a
+rejected key. Key replacement in this dialog triggers discovery even when a key was already saved. A successful Test
+resumes failed discovery with one reload. Another tab's key save is not observed automatically: this tab needs Refresh,
+Test or reopening Settings.
 
 `OrphanList` keeps local checking and last-successful-check feedback beside its existing rows, discovery error and
 generation. A saved key keeps its section mounted when discovery is empty; Refresh sits beside the heading and is
@@ -8688,8 +8749,9 @@ Writers validate that a kind has a name, then omit base from both storage and th
 without a database migration. Only fixed adds a stored field. The shared application function carries name and kind
 together, and a name-only agent edit keeps the previous kind. Protocol 61 adds this strict field: an older same-protocol
 supervisor would refuse a fixed-template reply during control-frame decoding and drop its helm connection, so the bump
-refuses it at hello instead. The normal update path remains available. A host is named by its recorded install identity.
-Unknown fields are refused on decode, so a misspelled field is an error rather than a silently ignored edit. The retired
+refuses it at hello instead. The normal update path remains available. A host is named by its recorded install identity;
+a sandbox recipe instead uses the separate optional recipe field described under Tensorlake sandbox sessions. Unknown
+fields are refused on decode, so a misspelled field is an error rather than a silently ignored edit. The retired
 `workspace_trust` field remains readable in `TemplateFields`, but application ignores it and every save drops it. The
 editor clears it in its draft and on delete undo; Save as template never offers it. This keeps old records usable
 without letting their trust choices bypass the agent trust section in Settings. The GUI's writes go through
