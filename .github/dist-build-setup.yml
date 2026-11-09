@@ -56,10 +56,10 @@
 #   signed. Cold builds cost minutes and remove the question. (It also
 #   sidesteps the disk-exhaustion failure that made `ci.yml`'s desktop job
 #   drop its `restore-keys`.)
-# - NO `setup-rust-toolchain`. dist's build jobs use the runner image's
-#   preinstalled stable toolchain and add target triples with rustup
-#   themselves; introducing a second toolchain manager ahead of them would be
-#   a new failure mode in the release path for no gain on a hosted runner.
+# - NO `setup-rust-toolchain`. The runner supplies rustup; its proxies read
+#   the checked-out rust-toolchain.toml and install the pinned toolchain on
+#   first use. dist adds release target triples to that same toolchain.
+#   No second toolchain manager or copy of the version is needed here.
 #
 # These steps do NOT run in the global job, which is where dist builds the
 # `extra-artifacts` tmux binaries. `scripts/build-tmux-assets.sh` therefore
@@ -430,7 +430,8 @@
   # shape the nix rustc packagers adopted (nix-community/fenix#253); it is
   # guarded so a toolchain that already resolves the library (an older Rust,
   # or a future rustc component that ships it in place) is left untouched.
-  # Drop this step once the image's Rust resolves `rust-objcopy` on its own.
+  # The pinned Rust 1.99.1 archive still has this layout and these rpaths.
+  # Drop this step once the pinned Rust resolves `rust-objcopy` on its own.
   if: runner.os == 'macOS'
   run: |
     sysroot=$(rustc --print sysroot)

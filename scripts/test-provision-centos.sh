@@ -256,10 +256,16 @@ trap cleanup EXIT
 # --------------------------------------------------------------------------
 
 echo "== building the musl-static farhelm payload"
-if ! rustup target list --installed 2>/dev/null | grep -qx "$target_triple"; then
-  rustup target add "$target_triple"
-fi
-(cd "$repo" && cargo build -p farhelm --target "$target_triple" --locked)
+# Select the checkout's Rust for both target installation and compilation, even
+# when this script was invoked from outside it. Otherwise rustup can add musl to
+# the caller's default toolchain while Cargo builds with the repository's pin.
+(
+  cd "$repo" || exit 1
+  if ! rustup target list --installed 2>/dev/null | grep -qx "$target_triple"; then
+    rustup target add "$target_triple" || exit 1
+  fi
+  cargo build -p farhelm --target "$target_triple" --locked
+)
 "$repo/scripts/check-static-elf.sh" "$farhelm_payload" "$target_triple"
 
 # `build-tmux-assets.sh` is the release's producer and builds BOTH published
