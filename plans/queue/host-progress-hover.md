@@ -373,3 +373,42 @@ is readable. Record this in the specification as a narrow exception to the full-
 that does not fit is cut, and a message that fits is shown whole as before. A scrollable region inside the card was not
 taken, because it would make the card interactive (pointer ownership, dismissal, keyboard access) against the decision
 that it stays non-interactive, and would need more implementation and testing for a rare long error.
+
+## Blocked
+
+Blocked while landing on 2026-11-09 (claim 9f0cb9).
+
+### A new progress-card test fails on the cloud machines used for landing checks
+
+The landing of this plan stopped before merging anything. Main holds none of #3272.
+
+The plan gives the Hosts progress line and the sidebar's working host row one shared hover card. Its new browser test
+`host progress previews only diagnostics that cannot fit beside its current step` (in `e2e/tests/host-updates.spec.ts`)
+gives a working host a long connection error and shrinks the window to 300 pixels high. It then hovers the host's
+identity button in the sidebar and expects the card, with its "Full details in Hosts" preview. The landing ran the
+browser tests on Tensorlake sandboxes, cloud Linux machines the maintainer asked the landing monitor to use on
+2026-11-09 (not Tensorlake hosts in the product). There the test fails on the plan as rebased onto current main:
+
+- In the landing's run of the host update, tooltip, provisioning, Tensorlake-hosts, rail-warning and request-card specs,
+  it was the only failure: Chromium, the card never appeared after the hover (run `197c18fb`). Everything else passed,
+  WebKit's copy of this test included.
+- Run alone ten times per engine on sandboxes, it failed 10 of 10 on Chromium (run `9640bd72`) and 2 of 10 on WebKit
+  (run `589e5217`). On Chromium the card was not found after the first hover at 300 pixels (line 608) in 9 runs; in the
+  other failures the card was found but then hidden or replaced (line 627 read the card's pointer style as empty, and
+  line 639 found it hidden after the window was made short again).
+- On the landing machine the same build passed it 6 of 6 on both engines (run `96062ef9`).
+
+So the result depends on the environment. The sandboxes run the same Playwright browser builds from the same packed
+checkout, but on a different machine shape (likely fewer CPUs, possibly other installed fonts) with a slightly older
+Node; the card is also rebuilt every second by its elapsed-time clock, which the executor's earlier report already found
+could replace a card mid-check. Either the test relies on timing or geometry that only holds on some machines, or the
+card really fails to show (or is replaced while hovered) in a window this short under some font or layout conditions. A
+user with a short window could then see no card at all.
+
+How should this go forward? The options are to send the plan back to find which it is and fix it (the test, the card, or
+both), keeping the requirement that a short window still shows the card with a readable current step; or to land it as
+it is and record the failure as a known problem. Failing 10 of 10 on Chromium is not a flake: every later sandbox
+browser run would fail on it unless it were skipped there. Recommendation: send it back, since the test is the plan's
+own evidence for the overflow decision and it currently fails on a common machine. The executor has no sandbox access of
+its own; it can look for the cause locally (CPU throttling, a font change, holding the clock), and the landing monitor
+reruns the test on sandboxes when it lands the plan again.
