@@ -66,3 +66,68 @@ the limitation above.
 The required fresh-context gpt-6.1-sol reviewer at high effort found no correctness, design or idiomatic-code issues. It
 checked the existing patch and retained application evidence against the accepted Notifications decision. Earlier
 review's native Terminal sizing finding was addressed; the remaining acceptance issue is resolved by that decision.
+
+### Landing
+
+Landed alone in its round. Since the stack was based, main gained the Rust compiler pin, the lowercase "xhigh" effort
+label, landing-monitor tooling, planning and review-queue bookkeeping, and a fix that lets the Tensorlake test runner be
+started directly; none of it touches Settings. A fresh-context review checked the plan against all of that and found
+nothing that must change. Only the dialog labelled "Settings" gets the fixed height: five other dialogs share its
+styling and still fit their content. The rule is the same in the browser and the desktop app, at every window size, and
+the dialog's body stays the only part that scrolls, with the header and footer pinned.
+
+The height is 780px or the window's height less the usual margin above and below the dialog, whichever is smaller. You
+decided while this plan was blocked that Notifications may scroll inside it; the code, SPEC.md and SPEC_impl.md follow
+that.
+
+#### Fixes made at landing
+
+- The changelog entry now also says that in a tall window Settings no longer grows to show a long section, such as Agent
+  trust or Notifications, in full; it scrolls instead.
+- The style sheet's comment explaining the 780px named only the desktop Terminal section (about 727px). The section that
+  needs 780px is Checkouts (about 774px, and a browser test asserts that it fits), so the comment now names both. No
+  behavior changed. The executor's report already names both sections correctly.
+
+#### Things you should know
+
+- In a window taller than about 870px, Settings used to grow with a long section and now stays at 780px with that
+  section scrolling. That follows from your decision and is in the changelog entry; the executor's report describes the
+  fixed height but not this consequence.
+- No test checks that the desktop app's Terminal section fits, because the web build the browser tests use lacks its
+  tunnel and file-opening controls. The executor measured that section with a sizing script, not in the native app.
+- The navigation test still records two layout measurements from the investigation in its test output on every run,
+  without checking them. That looks intentional, as a diagnostic for a future fit failure; removing them would be a
+  small follow-up if you prefer.
+
+#### Checks
+
+Run on the plan stacked on main (`3331b433`), before the two text fixes above:
+
+- `dprint check`, `python3 releasing/check-changelog.py format`, the test-sleep checker and
+  `scripts/check-desktop-assets.sh` passed.
+- `cargo build` and the release web build, then every browser spec file that works inside Settings, on Chromium and
+  WebKit, on Tensorlake sandboxes at the maintainer's request: `settings`, `credentials-settings`,
+  `tensorlake-settings`, `ntfy-settings`, `sounds`, `workspace-trust`, `claude-trust` and `appearance`. That is 16
+  file-and-engine pairs split over eight sandboxes: 142 tests passed, none failed, skipped or retried (retries are off).
+  Each sandbox is its own recorder run: `839ec2cd`, `e94c5300`, `6f1f7451`, `32e8e23e`, `90899d32`, `33518e70`,
+  `42453e88` and `beb51fd0`. They used the recorder's plain command mode, because its Playwright mode cannot pick one
+  engine per file, and the sandbox's Node 24 release, which is a little older than this machine's. Every sandbox
+  reported the background services the specs need (systemd's per-user manager and SSH to itself, which the second test
+  host uses) as working, so no spec was skipped for lack of them. The two trust specs matter most here: they open
+  Settings from a trust hint in a 900px-tall window, where the new height makes the dialog shorter than before, and
+  check that the switch is scrolled into view.
+
+After the fixes (the changelog text and a style-sheet comment): `dprint check` and the changelog format check passed. No
+runtime check was rerun, since neither change alters behavior. Main then differed from the tested tree only by those
+fixes and the review-queue bookkeeping that landed meanwhile.
+
+Reused from the executor: its sizing measurements of the Notifications and desktop Terminal sections, which chose the
+height.
+
+Skipped:
+
+- Rust tests: no Rust changed.
+- The rest of the browser suite: no other dialog changes size.
+- The desktop smoke: it checks that the desktop app starts, embeds its assets and keeps its terminal working, not
+  Settings' layout, so it would not show whether the desktop Terminal section fits either.
+- Hosted CI is manual-only and was not dispatched.
