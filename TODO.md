@@ -342,6 +342,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   keyed off actual width pressure. Fix the trigger, and add a browser test that the actions keep their normal metrics
   when no pill is visible. Plan: `plans/queue/header-actions-compact.md`.
 
+- **Enforce that one helm owns each supervisor.** SPEC.md (Topology) says the helm that registers a host owns its
+  supervisor and every session on it, and that neither moves between helms, but nothing enforces that: a supervisor
+  treats every full-authority connection alike, so a second helm can register a host another helm owns and drive its
+  sessions. Enforcing it needs each host to store the identity of its owning helm, refuse connections from any other
+  helm, and make taking a host over an explicit operation the user asks for. That takeover has to cover what SPEC.md
+  already supports implicitly, adding a host again from a brand-new helm whose registry was lost, so that losing the
+  helm still never strands a host; and the stored identity has to stay the same across everything that does not change
+  the owner (restarts, updates, reconnects, and the desktop app and a standalone helm taking turns on one state
+  directory). Asked for on 2026-11-08, when agent commands from sessions that were not on screen turned out to fail
+  because the supervisor's routing was built on the assumption that several helms might share one supervisor.
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's

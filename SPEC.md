@@ -87,16 +87,17 @@ product has — a standalone helm's web UI, or the local app's internal window. 
 mode: a helm running on a Linux host is reached through its web UI, period.
 
 The Mac is not architecturally special: it runs a normal supervisor that any helm — the app's embedded one, or one on a
-Linux host — can register and drive. The supervisor is a plain command-line process on every platform:
-`farhelm supervisor run` in a terminal and you have a working host — that path always exists, on any platform, and is
-how you try Farhelm without a bunch of fuss. System integration is layered on top of that, not baked in. On Linux, v1
-ships that layer as user-level systemd units (auto-start at boot, which the durability promises assume) — never system
-units, never root. The Mac desktop app starts its local supervisor and leaves it running when it quits; nothing starts
-that local supervisor at login or restarts it after a crash before the app is opened again. A remote Apple-silicon Mac
-set up over SSH instead gets a per-user launchd job, which runs the supervisor right away and restarts it after a crash.
-After a reboot, reconnecting over SSH does not load the job; choosing Update in the host menu starts it. Automatic
-loading at screen login is unverified. The native app has no helmless mode in v1: launching it alongside a standalone
-helm would start a second helm — the unsupported state.
+Linux host — can register and drive, and the helm that registers it then owns it (see the ownership rule below). The
+supervisor is a plain command-line process on every platform: `farhelm supervisor run` in a terminal and you have a
+working host — that path always exists, on any platform, and is how you try Farhelm without a bunch of fuss. System
+integration is layered on top of that, not baked in. On Linux, v1 ships that layer as user-level systemd units
+(auto-start at boot, which the durability promises assume) — never system units, never root. The Mac desktop app starts
+its local supervisor and leaves it running when it quits; nothing starts that local supervisor at login or restarts it
+after a crash before the app is opened again. A remote Apple-silicon Mac set up over SSH instead gets a per-user launchd
+job, which runs the supervisor right away and restarts it after a crash. After a reboot, reconnecting over SSH does not
+load the job; choosing Update in the host menu starts it. Automatic loading at screen login is unverified. The native
+app has no helmless mode in v1: launching it alongside a standalone helm would start a second helm — the unsupported
+state.
 
 Remote provisioning: the helm can set up a remote supervisor itself, in the style of `herdr --remote`. There is at most
 one supervisor per user per host, and adding a host is discovery-first: the helm connects over SSH and looks for that
@@ -384,10 +385,23 @@ destination change that does not adopt a new identity keeps the host's settings,
 contacted. The identity rules above still hold: adopting a new identity resets all five permissions to asking, and the
 New dialog's default host and recent setups stay tied to the install the user saw.
 
-Exactly one helm runs at a time. Running several concurrently is unsupported in v1. The invariant supervisors enforce is
-at most one attachment per session, last attach wins — so a second helm cannot corrupt a session, but it can seize one,
-exactly like any other client taking control. "Exactly one" is an operating assumption, not something enforced; that
-invariant is the backstop.
+Exactly one helm owns each supervisor, and every session on it. The helm that registers a host owns that host's
+supervisor and all of its sessions from then on, and a helm that restarts, updates or reconnects is still the same helm.
+Sessions and supervisors do not move between helms. A second helm reaching a supervisor another helm owns is outside the
+design, not a case the rest of the system tolerates, and no behavior is specified or implemented on the assumption that
+it might happen. Policy lives in the owning helm: approvals of agent actions, each host's permission settings, launch
+templates and the helm's other catalogs are that helm's, and the host's supervisor answers to that helm alone. Running
+several helms at once is unsupported in v1. Taking a host over from another helm, if it is ever supported, will be an
+explicit operation the user asks for, never the side effect of a second helm connecting. Adding a host again from a
+brand-new helm whose registry was lost (provisioning doubles as that recovery; see Remote provisioning above) is the
+replacement Farhelm supports today: the new helm registers the host and owns it from then on.
+
+NOTE: ownership is stated, not enforced. Nothing yet stops a second helm from registering a host another helm owns, or
+from driving its sessions once it has. Enforcing it needs each host to store the identity of its owning helm, refuse
+connections from any other helm, and make taking a host over, the lost-registry case above included, an explicit user
+operation. The supervisor's one-attachment-per-session rule (Terminal experience) is about the clients of one helm and
+is unchanged: a second client attaching a session visibly detaches the first, which is a takeover between clients, not
+between helms.
 
 The helm is a plain command-line process too, with the same layering as supervisors: on Linux, v1 ships user-level
 systemd units for it, so a reboot of the helm's machine brings the web UI back; on the Mac, the helm lives and dies with

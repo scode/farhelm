@@ -1239,7 +1239,8 @@ impl Harness {
     }
 
     /// Open a second, independent connection to this harness's
-    /// supervisor — a stand-in for "another helm" or a restarted one.
+    /// supervisor — a stand-in for the helm's next connection after a
+    /// reconnect or restart, or for any other full-authority client.
     /// Its channel ids number from 1 like any client's, which is the
     /// collision the cross-connection tests rely on.
     pub(crate) async fn second_client(&self) -> Arc<SupervisorClient> {

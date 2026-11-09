@@ -3501,6 +3501,25 @@ either writer, a 60-second window with no byte progress ends the entire connecti
 window without dropping or retrying a partial frame; a flush that never completes is bounded too. This is separate from
 a terminal's pause deadline and from an upload's progress deadlines.
 
+### One owning helm per supervisor
+
+SPEC.md (Topology) makes one helm the owner of each supervisor and every session on it. Design for exactly that. Do not
+add code, state or protocol whose purpose is to let a supervisor or session be shared between helms or move from one to
+another, and do not justify a choice by it ("this is the rule that stays correct if several helms connect" is not a
+reason). When the supervisor has to pick a helm connection to send something to, it picks the owning helm's connection;
+which connection a session's terminal happens to be attached through says nothing about ownership. Policy (approvals,
+permissions, templates) belongs to the owning helm, so the supervisor never has to reconcile policy from more than one.
+
+What a supervisor does see more than one of is connections, all from the same owner or from tools that are not helms:
+the helm's host connection, its previous one while a reconnect leaves the old one half-open, the helm's provisioning and
+update probe, other full-authority tools, and session-authenticated peers such as an agent's `farhelm` command.
+Per-connection state (channel ids, request ids, attachments, tunnel claims) stays per connection, and the guards that
+keep a reconnecting helm's overlapping connections apart are correct and stay. They are not multi-helm accommodations.
+
+Ownership is not enforced yet: the supervisor stores no owning-helm identity and treats every full-authority connection
+alike (TODO.md, Near term). Until it is, a second helm connecting is out of scope rather than handled. Code need not
+detect it, defend against it, or degrade gracefully under it.
+
 ### What the helm believes from a supervisor
 
 The helm's trust in an attached supervisor is scoped by effect, not by connection. A supervisor is believed about things
@@ -6061,9 +6080,10 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   fleet-events revision only when the stored value actually changed — a client re-marking the SAME stamp it already
   recorded — which happens when a session is reopened with no new activity behind it, or when a client retries a PUT
   whose response it missed — must not wake every other connected client to redraw a dot that has not moved. Deleting a
-  session drops its `session_seen` row explicitly, since the viewer row is independent of the cache; a session deleted
-  through ANOTHER helm can leave a row behind until its host entry is removed, which is accepted as garbage bounded by
-  the number of sessions that ever existed, at a few dozen bytes each.
+  session drops its `session_seen` row explicitly, since the viewer row is independent of the cache. A session that
+  disappears from its host's listing without being deleted through the helm leaves its row behind until its host entry
+  is removed, which is accepted as garbage bounded by the number of sessions that ever existed, at a few dozen bytes
+  each.
 
 - Helm schema 63 re-keys `session_seen`, `session_pins` and `session_notification_marks` from bare IDs to
   `(host_id, session_id)`. Migration retains a legacy row only when exactly one cached host claims its ID; ownerless or
@@ -8835,11 +8855,11 @@ until then.
 
 Running-agent prompts use their own `AgentVerb::Prompt`, `AgentReply::Prompted` and approval kind. The helm resolves the
 target before asking, then reads `PromptTargetInfo` from that routed supervisor. Its `PromptTarget` reply carries the
-current `SessionInfo` and an attachment snapshot across every terminal belonging to that session, including views on
-another helm connection. The helm's channel registry cannot answer that question. The card renders the full message
-through the same escaped, scrollable peer block as an initial prompt and reuses the session list's permission-shield
-classification. The requesting and target connections are revalidated after approval; this path never composes a launch
-or applies the launch-only YOLO guard.
+current `SessionInfo` and an attachment snapshot across every terminal belonging to that session, terminal tabs
+included. The supervisor's attachment table is the authority on which terminals are held; the helm's channel registry
+cannot answer that question. The card renders the full message through the same escaped, scrollable peer block as an
+initial prompt and reuses the session list's permission-shield classification. The requesting and target connections are
+revalidated after approval; this path never composes a launch or applies the launch-only YOLO guard.
 
 `PromptSession` is an accepted supervisor-owned mutation, so losing the requesting connection does not cancel a paste
 between its opening marker and submit. It takes the target lifecycle claim through the final confirmed send, reads its
@@ -9027,10 +9047,10 @@ away cannot be allowed into acting for it.
 
 Protocol 52 adds `AgentVerb::Delete`, `AgentReply::Deleted` and `DeleteSession::refuse_if_agent_request_in_flight`. An
 agent delete sets the flag: the target supervisor tries its existing agent-request fence without waiting, refusing with
-Conflict when held. This prevents two sessions' crossing deletes from each waiting on the other's retained relay fence,
-including requests carried by different helms. UI deletion and Replace keep their ordinary waiting behavior. Self-delete
-is refused at both relay and helm before destructive dispatch, because the relay holds that same fence for its own
-request and deletion would revoke its credential before returning.
+Conflict when held. This prevents two sessions' crossing deletes from each waiting on the other's retained relay fence.
+UI deletion and Replace keep their ordinary waiting behavior. Self-delete is refused at both relay and helm before
+destructive dispatch, because the relay holds that same fence for its own request and deletion would revoke its
+credential before returning.
 
 The same protocol bump adds the optional one-time create prompt. Prompt-free retry encodings stay byte-for-byte
 unchanged. Prompt-bearing ordinary and named creates bind their text separately from launch; fresh-checkout recovery
