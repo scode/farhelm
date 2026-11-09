@@ -6,7 +6,7 @@ use super::backend::{
     ProvisioningBackend, Reach, ReachOutcome, UninstallInspection,
 };
 use super::payloads::PayloadSource;
-use super::plan::{DirectorySpec, PayloadArch, PayloadKind, ProvisioningTarget};
+use super::plan::{DirectorySpec, PayloadKind, PayloadTarget, ProvisioningTarget};
 use anyhow::{Context as _, bail};
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -314,9 +314,10 @@ impl ProvisioningBackend for E2eProvisioningBackend {
             E2eInspectOutcome::Supported => Ok(ReachOutcome::Supported(Reach {
                 home: PathBuf::from(behavior.home),
                 user_unit_dir: PathBuf::from(behavior.user_unit_dir),
-                arch: PayloadArch::X86_64,
+                arch: PayloadTarget::LinuxX86_64,
                 distro_id: "ubuntu".to_string(),
                 needs_tmux: behavior.needs_tmux,
+                launchd_domain: None,
                 host_tmux: (!behavior.needs_tmux).then(|| PathBuf::from("/usr/bin/tmux")),
             })),
             E2eInspectOutcome::Manual => Ok(ReachOutcome::Manual(behavior.message)),
@@ -434,6 +435,7 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         &self,
         target: &ProvisioningTarget,
         _unit: &str,
+        _launchd_domain: Option<&str>,
         paths: &[&Path],
         removed: &Path,
     ) -> Result<UninstallInspection, BackendFailure> {
@@ -522,7 +524,7 @@ pub(super) struct E2ePayloads(pub(super) PathBuf);
 
 #[async_trait]
 impl PayloadSource for E2ePayloads {
-    async fn path(&self, _payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
+    async fn path(&self, _payload: PayloadKind, _arch: PayloadTarget) -> anyhow::Result<PathBuf> {
         Ok(self.0.clone())
     }
 }

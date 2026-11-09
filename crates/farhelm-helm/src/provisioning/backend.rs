@@ -1,7 +1,7 @@
 //! The system-facing half of provisioning executes the same action vocabulary
 //! for a local host or through the user's SSH access.
 
-use super::plan::{DirectorySpec, PayloadArch, PayloadKind, ProvisioningTarget};
+use super::plan::{DirectorySpec, PayloadKind, PayloadTarget, ProvisioningTarget};
 use crate::manager::peer_text;
 use async_trait::async_trait;
 use farhelm_proto::ControlMsg;
@@ -140,25 +140,26 @@ pub async fn discover_local_supervisor(
 }
 
 /// Host facts needed to select payloads and render absolute install paths,
-/// including the unit directory the running user manager actually searches.
+/// including the native service-file directory and, on a Mac, launchd domain.
 #[derive(Debug, Clone)]
 pub(super) struct Reach {
     pub(super) home: PathBuf,
     pub(super) user_unit_dir: PathBuf,
-    pub(super) arch: PayloadArch,
-    /// The `/etc/os-release` `ID` field, verbatim, empty when the host has
-    /// no such file.
+    pub(super) arch: PayloadTarget,
+    /// The Linux `/etc/os-release` `ID`, empty when absent, or `macOS`.
     ///
     /// Informational only: nothing in this struct's construction branches
     /// on it, because it predicts none of the capabilities provisioning
-    /// actually needs (a payload architecture, a usable systemd user
-    /// manager, a resolvable unit directory, an acceptable tmux). It is
+    /// actually needs (the native payload, service manager and commands). It is
     /// carried through purely so the plan text can name the host it
     /// inspected — see `ProvisioningPlan::confirmation`.
     pub(super) distro_id: String,
     pub(super) needs_tmux: bool,
+    /// The inspected per-user launchd domain on a Mac. Kept in frozen plan
+    /// actions so execution cannot switch the service to a different user.
+    pub(super) launchd_domain: Option<String>,
     /// The host's OWN tmux executable, absolute, when it cleared the
-    /// floor — `None` whenever `needs_tmux` is set.
+    /// floor — `None` whenever `needs_tmux` is set, and always on a Mac.
     ///
     /// The whole executable, not just its directory, because the plan has
     /// to be able to name it: an accepted host tmux is pinned into the
@@ -170,8 +171,8 @@ pub(super) struct Reach {
     pub(super) host_tmux: Option<PathBuf>,
 }
 
-/// Supported hosts continue to a plan; every other host keeps the manual
-/// supervisor path without turning platform mismatch into a setup failure.
+/// Supported hosts continue to a plan; refusals retain a reason for the panel.
+/// A Mac owned by its desktop app is refused without a competing-start remedy.
 #[derive(Debug, Clone)]
 pub(super) enum ReachOutcome {
     Supported(Reach),
@@ -468,6 +469,36 @@ pub(super) trait ProvisioningBackend: Send + Sync {
         unit: &str,
     ) -> Result<ActionOutcome, BackendFailure>;
 
+    /// Start or refresh only the frozen per-user launchd registration.
+    async fn launch_agent(
+        &self,
+        _target: &ProvisioningTarget,
+        _domain: &str,
+        _label: &str,
+        _plist: &Path,
+        _refresh: bool,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        Err(BackendFailure::new(
+            "this backend does not support launchd",
+            "",
+        ))
+    }
+
+    /// End a launchd supervisor and confirm its owned terminal hosts ended.
+    async fn stop_launch_agent(
+        &self,
+        _target: &ProvisioningTarget,
+        _domain: &str,
+        _label: &str,
+        _farhelm: &Path,
+        _state: &Path,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        Err(BackendFailure::new(
+            "this backend does not support launchd",
+            "",
+        ))
+    }
+
     /// Read, without changing anything, what UNINSTALL needs to know about
     /// the installation on the target: which of `paths` exist, whether each
     /// is itself a symlink, and where they really lead, the state directory
@@ -476,10 +507,14 @@ pub(super) trait ProvisioningBackend: Send + Sync {
     /// also says whether it lies in `removed`, the folder the uninstall
     /// would delete, by file identity rather than spelling
     /// ([`HostPath::under_removed`]). See [`UninstallInspection`].
+    /// `launchd_domain` selects a Mac job label in `unit`; `None` keeps the
+    /// existing Linux unit inspection. The domain is frozen by host inspection,
+    /// never inferred from the session which later executes the uninstall.
     async fn inspect_uninstall(
         &self,
         target: &ProvisioningTarget,
         unit: &str,
+        launchd_domain: Option<&str>,
         paths: &[&Path],
         removed: &Path,
     ) -> Result<UninstallInspection, BackendFailure>;
@@ -960,12 +995,16 @@ impl SystemBackend {
                 // unchanged symlinked binary or unit was "repaired" by a
                 // chmod through the link on every run, or failed with EPERM.
                 // The local transport already reads the opened target's mode.
+                // This shared path also installs credentials, so choose native
+                // stat syntax here rather than relying on an earlier plan's OS.
                 let output = self
                     .run_shell(
                         target,
                         &format!(
                             "if [ ! -e {path} ]; then exit 44; fi; \
-                             {} && stat -L -c '%a' -- {path}",
+                             {} && os=$(uname -s) && case \"$os\" in \
+                             Darwin) stat -L -f '%Lp' -- {path} ;; \
+                             *) stat -L -c '%a' -- {path} ;; esac",
                             remote_sha256sum(&path)
                         ),
                         COMMAND_TIMEOUT,
@@ -1020,7 +1059,10 @@ impl SystemBackend {
             ProvisioningTarget::Ssh { .. } => {
                 self.require_shell(
                     target,
-                    &format!("chmod {mode:o} -- {}", shell_path(path)?),
+                    // BSD chmod ends option parsing at the mode. Its `--`
+                    // must precede the mode, or it becomes a filename; GNU
+                    // chmod accepts this ordering too.
+                    &format!("chmod -- {mode:o} {}", shell_path(path)?),
                     "repairing installed permissions",
                 )
                 .await?;
@@ -1220,7 +1262,7 @@ impl SystemBackend {
                             "{ownership_guard}actual=$({}) || exit; \
                              [ \"${{actual%% *}}\" = {} ] || {{ \
                                printf '%s\\n' 'uploaded payload digest mismatch' >&2; exit 76; \
-                             }}; {generation_guard}chmod {mode:o} -- {} && mv -f -- {} {}",
+                             }}; {generation_guard}chmod -- {mode:o} {} && mv -f -- {} {}",
                             remote_sha256sum(&shell_path(temporary)?),
                             crate::ssh::shell_quote(source_hash),
                             shell_path(temporary)?,
@@ -1376,7 +1418,7 @@ impl SystemBackend {
                     "actual=$({}) || exit; \
                      [ \"${{actual%% *}}\" = {} ] || {{ \
                        printf '%s\\n' 'uploaded payload digest mismatch' >&2; exit 76; \
-                     }}; chmod {mode:o} -- {} && mv -f -- {} {}",
+                     }}; chmod -- {mode:o} {} && mv -f -- {} {}",
                     remote_sha256sum(&shell_path(temporary)?),
                     crate::ssh::shell_quote(source_hash),
                     shell_path(temporary)?,
@@ -1954,7 +1996,8 @@ pub(super) fn upload_script(remote: &Path) -> Result<String, BackendFailure> {
     let path = shell_path(remote)?;
     let interval = TRANSFER_PROGRESS_POLL.as_secs();
     Ok(format!(
-        "report_size() {{ if test -e {path}; then stat -c %s -- {path} 2>/dev/null; fi; }}; \
+        "case $(uname -s) in Darwin) size_format='-f %z' ;; *) size_format='-c %s' ;; esac; \
+         report_size() {{ if test -e {path}; then stat $size_format -- {path} 2>/dev/null; fi; }}; \
          (while :; do report_size; sleep {interval} >/dev/null 2>&1; done) & \
          reporter=$!; \
          trap 'kill \"$reporter\" 2>/dev/null; wait \"$reporter\" 2>/dev/null' 0; \
@@ -2593,6 +2636,23 @@ impl ProvisioningBackend for SystemBackend {
     }
 
     async fn inspect(&self, target: &ProbeTarget) -> Result<ReachOutcome, BackendFailure> {
+        // The Linux inspection itself runs systemd and tmux commands. Choose
+        // the OS before either, so remote Macs never probe those substrates.
+        let system = self
+            .require_shell(
+                &target.transport,
+                "uname -s",
+                "identifying the host operating system",
+            )
+            .await?;
+        match system.stdout.as_slice() {
+            b"Linux\n" | b"Linux" => {},
+            b"Darwin\n" | b"Darwin" => {
+                let output = self.require_shell(&target.transport, MACOS_REACH_SH, "inspecting the Mac host").await?;
+                return parse_macos_reach_output(&output.stdout);
+            },
+            _ => return Ok(ReachOutcome::Manual("automatic provisioning does not support this host operating system; run the supervisor manually".into())),
+        }
         // Unit discovery must read the user manager's environment, not only
         // the login shell's. Those environments can disagree about
         // XDG_CONFIG_HOME, and writing to the shell's directory would leave
@@ -2893,6 +2953,44 @@ impl ProvisioningBackend for SystemBackend {
         Ok(ActionOutcome::Completed)
     }
 
+    async fn launch_agent(
+        &self,
+        target: &ProvisioningTarget,
+        domain: &str,
+        label: &str,
+        plist: &Path,
+        refresh: bool,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        require_remote(target, "starting the launchd supervisor")?;
+        let script = super::macos::start_script(domain, label, plist, refresh)?;
+        self.require_shell(target, &script, "starting the launchd supervisor")
+            .await?;
+        Ok(ActionOutcome::Completed)
+    }
+
+    async fn stop_launch_agent(
+        &self,
+        target: &ProvisioningTarget,
+        domain: &str,
+        label: &str,
+        farhelm: &Path,
+        state: &Path,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        require_remote(
+            target,
+            "stopping the launchd supervisor and its terminal hosts",
+        )?;
+        let script = super::macos::stop_script(domain, label, farhelm, state)?;
+        self.require_shell_within(
+            target,
+            &script,
+            "stopping the launchd supervisor and its terminal hosts",
+            STOP_SUPERVISOR_TIMEOUT,
+        )
+        .await?;
+        Ok(ActionOutcome::Completed)
+    }
+
     /// Read-only, so it runs on either transport, though only UNINSTALL
     /// planning asks and that refuses the local row before it gets here.
     ///
@@ -2913,6 +3011,7 @@ impl ProvisioningBackend for SystemBackend {
         &self,
         target: &ProvisioningTarget,
         unit: &str,
+        launchd_domain: Option<&str>,
         paths: &[&Path],
         removed: &Path,
     ) -> Result<UninstallInspection, BackendFailure> {
@@ -3013,22 +3112,32 @@ resolve() {
         );
         // Only mounts under each path's spellings (collected in "$@", empty
         // under `sh -c`) leave the host: a whole table can pass the 64 KiB cap.
-        script.push_str(MOUNT_POINTS_SH);
+        script.push_str(if launchd_domain.is_some() {
+            super::macos::MAC_MOUNT_POINTS_SH
+        } else {
+            MOUNT_POINTS_SH
+        });
         for path in paths {
             script.push_str(&format!("resolve {}; ", shell_path(path)?));
             script.push_str("set -- \"$@\" \"$resolved\" \"$raw\"; ");
         }
+        let service_inspection = match launchd_domain {
+            Some(domain) => super::macos::job_inspection_script(domain, unit)?,
+            None => format!(
+                "active=$(systemctl --user show -p ActiveState --value -- {unit}) || exit 1; \
+                fragment=$(systemctl --user show -p FragmentPath --value -- {unit}) || exit 1;",
+                unit = crate::ssh::shell_quote(unit)
+            ),
+        };
         script.push_str(&format!(
             "case \"${{XDG_STATE_HOME-}}\" in /*) state=\"$XDG_STATE_HOME/farhelm\" ;; \
                *) state=\"$HOME/.local/state/farhelm\" ;; esac; \
              printf '%s\\0' \"$state\"; resolve \"$state\"; \
-             active=$(systemctl --user show -p ActiveState --value -- {unit}) || exit 1; \
-             fragment=$(systemctl --user show -p FragmentPath --value -- {unit}) || exit 1; \
+             {service_inspection} \
              printf '%s\\0%s\\0' \"$active\" \"$fragment\"; \
              if [ -n \"$fragment\" ]; then resolve \"$fragment\"; else printf '%s\\0%s\\0\\0\\0%s\\0' 0 0 0; fi; \
              for p in \"$@\"; do if [ -n \"$p\" ]; then \
                mount_points \"$p\" '\\0' || exit 1; fi; done; printf '\\0'",
-            unit = crate::ssh::shell_quote(unit),
         ));
         let output = self
             .require_shell(target, &script, "inspecting the installation to remove")
@@ -3237,8 +3346,24 @@ resolve() {
         path: &Path,
     ) -> Result<ActionOutcome, BackendFailure> {
         require_remote(target, "removing Farhelm's lib directory")?;
+        // This transport helper is also used after the host's binary is gone.
+        // Detect the native mount table directly rather than persist OS state
+        // in the host registry solely for a retry's filesystem guard.
+        let system = self
+            .require_shell(target, "uname -s", "identifying the host filesystem")
+            .await?;
+        let mounts = match system.stdout.as_slice() {
+            b"Darwin\n" | b"Darwin" => super::macos::MAC_MOUNT_POINTS_SH,
+            b"Linux\n" | b"Linux" => MOUNT_POINTS_SH,
+            _ => {
+                return Err(BackendFailure::new(
+                    "unsupported host filesystem inspection",
+                    "",
+                ));
+            }
+        };
         let script = format!(
-            "{MOUNT_POINTS_SH}d={dir}; \
+            "{mounts}d={dir}; \
              if [ ! -e \"$d\" ] && [ ! -L \"$d\" ]; then printf absent; exit 0; fi; \
              if [ -L \"$d\" ]; then \
                printf '%s\\n' \"refusing to remove $d: it has become a symbolic link since uninstall \
@@ -3673,8 +3798,8 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
     }
     let arch_text = String::from_utf8_lossy(fields[3]);
     let arch = match arch_text.as_ref() {
-        "x86_64" => PayloadArch::X86_64,
-        "aarch64" | "arm64" => PayloadArch::Aarch64,
+        "x86_64" => PayloadTarget::LinuxX86_64,
+        "aarch64" | "arm64" => PayloadTarget::LinuxAarch64,
         other => {
             return Ok(ReachOutcome::Manual(format!(
                 "automatic provisioning has no payload for architecture {other:?}. Run the supervisor manually."
@@ -3748,8 +3873,144 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
         arch,
         distro_id,
         needs_tmux: !tmux_ok,
+        launchd_domain: None,
         host_tmux: tmux_ok.then_some(tmux_path),
     }))
+}
+
+/// Mac discovery does not ask about tmux or systemd. A missing command is a
+/// capability refusal, while the desktop app is an ownership refusal shared
+/// by setup, Update and uninstall. The current helm owns this private record.
+const MACOS_REACH_SH: &str = r#"
+missing=''
+for tool in launchctl readlink sha256sum stat install chmod mkdir mv cat head tr rm rmdir find ls grep id uname env sh mount sleep; do
+    if ! command -v "$tool" >/dev/null 2>&1; then missing=$tool; break; fi
+done
+if [ -z "$missing" ] && ! readlink -f -- "$HOME" >/dev/null 2>&1; then missing='readlink -f'; fi
+desktop=''
+if [ -e "$HOME/Applications/Farhelm.app" ] || [ -e /Applications/Farhelm.app ]; then desktop=installed; fi
+printf '%s\0%s\0' farhelm-reach-macos-v1 "${HOME-}"
+uname -m | tr -d '\n'; printf '\0'
+id -u | tr -d '\n'; printf '\0'
+printf '%s\0%s\0' "$missing" "$desktop"
+"#;
+
+/// Validate all fields before any remote value becomes a plan path or a
+/// launchctl domain. Intel Macs stay outside the representable payload set.
+pub(super) fn parse_macos_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendFailure> {
+    let malformed = || BackendFailure::new("the Mac reach check returned malformed output", "");
+    let fields: Vec<_> = output.split(|byte| *byte == 0).collect();
+    if fields.len() != 7 || fields[0] != b"farhelm-reach-macos-v1" || !fields[6].is_empty() {
+        return Err(malformed());
+    }
+    let text = fields
+        .iter()
+        .map(|field| std::str::from_utf8(field))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| malformed())?;
+    if text.iter().any(|field| field.chars().any(char::is_control))
+        || !matches!(text[5], "" | "installed")
+    {
+        return Err(malformed());
+    }
+    if text[5] == "installed" {
+        return Ok(ReachOutcome::Manual("remote setup, Update and uninstall are not supported on a Mac with the Farhelm desktop app installed; update Farhelm from the desktop app on that Mac".into()));
+    }
+    if !matches!(text[2], "arm64" | "aarch64") {
+        return Ok(ReachOutcome::Manual(format!(
+            "automatic provisioning has no payload for Mac architecture {:?}",
+            text[2]
+        )));
+    }
+    if !text[4].is_empty() {
+        return Ok(ReachOutcome::Manual(format!(
+            "remote Mac provisioning requires the command {}",
+            text[4]
+        )));
+    }
+    let home = PathBuf::from(text[1]);
+    if !home.is_absolute() || path_text(&home).is_err() {
+        return Err(BackendFailure::new("the Mac reported an unusable HOME", ""));
+    }
+    let uid = text[3].parse::<u32>().map_err(|_| malformed())?;
+    if text[3] != uid.to_string() {
+        return Err(malformed());
+    }
+    Ok(ReachOutcome::Supported(Reach {
+        user_unit_dir: home.join("Library/LaunchAgents"),
+        home,
+        arch: PayloadTarget::MacosAarch64,
+        distro_id: "macOS".into(),
+        needs_tmux: false,
+        launchd_domain: Some(format!("user/{uid}")),
+        host_tmux: None,
+    }))
+}
+
+#[cfg(test)]
+mod macos_reach_tests {
+    use super::*;
+
+    /// Match the private shell record, including its terminal empty field.
+    fn record(home: &str, arch: &str, uid: &str, missing: &str, desktop: &str) -> Vec<u8> {
+        [
+            "farhelm-reach-macos-v1",
+            home,
+            arch,
+            uid,
+            missing,
+            desktop,
+            "",
+        ]
+        .join("\0")
+        .into_bytes()
+    }
+
+    /// Apple silicon must choose Darwin bytes and freeze the SSH user's
+    /// domain without requiring any tmux or Linux manager evidence.
+    #[test]
+    fn mac_reach_selects_darwin_payload_and_no_tmux() {
+        let ReachOutcome::Supported(reach) =
+            parse_macos_reach_output(&record("/Users/host", "arm64", "501", "", "")).unwrap()
+        else {
+            panic!("supported Mac refused")
+        };
+        assert_eq!(reach.arch, PayloadTarget::MacosAarch64);
+        assert_eq!(reach.launchd_domain.as_deref(), Some("user/501"));
+        assert_eq!(
+            reach.user_unit_dir,
+            Path::new("/Users/host/Library/LaunchAgents")
+        );
+        assert!(!reach.needs_tmux && reach.host_tmux.is_none());
+    }
+
+    /// Capability/ownership refusals must name the obstacle and never send
+    /// a desktop-app owner toward starting a competing supervisor by hand.
+    #[test]
+    fn mac_reach_refuses_intel_missing_commands_and_desktop_ownership() {
+        for (arch, missing, desktop, expected) in [
+            ("x86_64", "", "", "no payload"),
+            ("arm64", "sha256sum", "", "sha256sum"),
+            ("arm64", "", "installed", "desktop app"),
+        ] {
+            let ReachOutcome::Manual(reason) =
+                parse_macos_reach_output(&record("/Users/host", arch, "501", missing, desktop))
+                    .unwrap()
+            else {
+                panic!("unsupported Mac accepted")
+            };
+            assert!(reason.contains(expected), "{reason}");
+            assert!(!reason.contains("manually"));
+        }
+        for bytes in [
+            record("/Users/host", "arm64", "0501", "", ""),
+            record("/Users/host\nother", "arm64", "501", "", ""),
+            record("relative", "arm64", "501", "", ""),
+            b"truncated".to_vec(),
+        ] {
+            assert!(parse_macos_reach_output(&bytes).is_err());
+        }
+    }
 }
 
 #[cfg(test)]

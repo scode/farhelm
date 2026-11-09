@@ -90,24 +90,36 @@ pub enum PayloadKind {
     Tmux,
 }
 
-/// Architectures with release payloads. Reach inspection maps the remote
-/// machine to one of these before confirmation, never during execution.
+/// Release targets accepted before confirmation, with no unsupported OS/CPU pair.
+///
+/// The two Linux wire spellings predate OS-aware provisioning. Keeping them
+/// avoids changing existing serialized plans while adding the Mac target.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "kebab-case")]
-pub enum PayloadArch {
-    X86_64,
-    Aarch64,
+pub enum PayloadTarget {
+    #[serde(rename = "x86_64")]
+    LinuxX86_64,
+    #[serde(rename = "aarch64")]
+    LinuxAarch64,
+    #[serde(rename = "macos-aarch64")]
+    MacosAarch64,
+}
+
+impl PayloadTarget {
+    /// The target selects the OS-specific plan; architecture alone cannot.
+    pub(super) fn is_macos(self) -> bool {
+        matches!(self, Self::MacosAarch64)
+    }
 }
 
 /// The bare architecture spelling (`x86_64`, `aarch64`) used in the
 /// confirmation plan's host line — distinct from the full target triples
 /// `assets.rs` uses for release filenames, which nobody wants to read in
 /// the confirmation text.
-impl std::fmt::Display for PayloadArch {
+impl std::fmt::Display for PayloadTarget {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::X86_64 => "x86_64",
-            Self::Aarch64 => "aarch64",
+            Self::LinuxX86_64 => "x86_64",
+            Self::LinuxAarch64 | Self::MacosAarch64 => "aarch64",
         })
     }
 }
@@ -150,7 +162,7 @@ pub(crate) enum ProvisioningAction {
     /// copy within their install action and have no upload step.
     UploadPayload {
         payload: PayloadKind,
-        arch: PayloadArch,
+        arch: PayloadTarget,
         destination: PathBuf,
         temporary: PathBuf,
     },
@@ -158,7 +170,7 @@ pub(crate) enum ProvisioningAction {
     /// A remote install must not start another network transfer.
     InstallPayload {
         payload: PayloadKind,
-        arch: PayloadArch,
+        arch: PayloadTarget,
         destination: PathBuf,
         temporary: PathBuf,
     },
@@ -167,6 +179,31 @@ pub(crate) enum ProvisioningAction {
         destination: PathBuf,
         temporary: PathBuf,
         content: String,
+    },
+    /// launchd consumes an argv plist, independently of Linux unit syntax.
+    WriteLaunchAgent {
+        destination: PathBuf,
+        temporary: PathBuf,
+        content: String,
+    },
+    /// UPDATE refreshes the loaded registration as well as the plist on
+    /// disk. Domain and label are fixed by inspection and confirmation.
+    StartLaunchAgent {
+        domain: String,
+        label: String,
+        plist: PathBuf,
+        refresh: bool,
+    },
+    RemoveLaunchAgent {
+        destination: PathBuf,
+    },
+    /// launchd leaves terminal hosts alive deliberately; uninstall ends
+    /// them explicitly before removing the binary that performs that stop.
+    StopLaunchAgent {
+        domain: String,
+        label: String,
+        farhelm_program: PathBuf,
+        state_dir: PathBuf,
     },
     DaemonReload,
     EnableSupervisor {
@@ -249,6 +286,11 @@ impl ProvisioningAction {
                 ..
             } => "install-tmux",
             Self::WriteUnit { .. } => "write-unit",
+            Self::WriteLaunchAgent { .. } => "write-launch-agent",
+            Self::StartLaunchAgent { refresh: false, .. } => "start-launch-agent",
+            Self::StartLaunchAgent { refresh: true, .. } => "restart-launch-agent",
+            Self::RemoveLaunchAgent { .. } => "remove-launch-agent",
+            Self::StopLaunchAgent { .. } => "stop-launch-agent",
             Self::DaemonReload => "daemon-reload",
             Self::EnableSupervisor { .. } => "enable-supervisor",
             Self::EnableLinger { .. } => "enable-linger",
@@ -265,7 +307,7 @@ impl ProvisioningAction {
     /// Give every frozen action one user-facing step, including actions that
     /// the old confirmation text hid. The helm owns this wording so a client
     /// cannot promise a different run than the one it was asked to confirm.
-    fn step(&self, home: &Path) -> PlanStep {
+    fn step(&self, home: &Path, target: PayloadTarget) -> PlanStep {
         let (name, paths, explanation): (&str, Vec<&Path>, Option<String>) = match self {
             Self::EnsureDirectories { directories } => (
                 "Create directories",
@@ -309,6 +351,39 @@ impl ProvisioningAction {
                 Some(format!("Unit: {unit}")),
             ),
             Self::DaemonReload => ("Reload systemd user units", vec![], None),
+            Self::WriteLaunchAgent {
+                destination,
+                temporary,
+                ..
+            } => (
+                "Write the per-user launchd job",
+                vec![destination, temporary],
+                None,
+            ),
+            Self::StartLaunchAgent {
+                label,
+                plist,
+                refresh,
+                ..
+            } => (
+                if *refresh {
+                    "Restart the supervisor"
+                } else {
+                    "Start the supervisor"
+                },
+                vec![plist],
+                Some(format!(
+                    "Job: {label}. Runs now and restarts after a crash. After a reboot, choose Update in the host menu to start it. Automatic startup at screen login is unverified."
+                )),
+            ),
+            Self::RemoveLaunchAgent { destination } => {
+                ("Remove the launchd job's plist", vec![destination], None)
+            }
+            Self::StopLaunchAgent { label, .. } => (
+                "Stop the supervisor and its terminal hosts",
+                vec![],
+                Some(format!("Job: {label}")),
+            ),
             Self::EnableSupervisor {
                 unit_path,
                 persistent_run,
@@ -342,7 +417,14 @@ impl ProvisioningAction {
             Self::RemoveDirectory { path } => (
                 "Remove the install directory",
                 vec![path],
-                Some("The Farhelm binary and any private tmux in it are removed.".to_string()),
+                Some(
+                    if target.is_macos() {
+                        "The Farhelm binary is removed."
+                    } else {
+                        "The Farhelm binary and any private tmux in it are removed."
+                    }
+                    .to_string(),
+                ),
             ),
             Self::ForgetHost => ("Remove the host from the list", vec![], None),
         };
@@ -437,14 +519,14 @@ pub(crate) struct ProvisioningPlan {
     /// The inspected host's home directory, frozen with the actions so their
     /// path chips cannot be shortened against this client's own home.
     pub(super) host_home: PathBuf,
-    /// The reach probe's validated `/etc/os-release` `ID`, empty when the
-    /// host had none, and the payload architecture it matched — carried
+    /// The reach probe's validated Linux distribution ID (empty when absent)
+    /// or `macOS`, and the native payload target it matched — carried
     /// through purely for `confirmation()`'s host line. Validation happens
     /// at the reach-record boundary because this value becomes plan text;
     /// provisioning still gates on capabilities, not on this ID (see
     /// `Reach::distro_id`), so nothing here or in execution branches on it.
     pub(super) host_distro_id: String,
-    pub(super) host_arch: PayloadArch,
+    pub(super) host_arch: PayloadTarget,
 }
 
 impl ProvisioningPlan {
@@ -485,7 +567,7 @@ impl ProvisioningPlan {
             steps: self
                 .actions
                 .iter()
-                .map(|action| action.step(&self.host_home))
+                .map(|action| action.step(&self.host_home, self.host_arch))
                 .collect(),
             kept,
         }
@@ -565,6 +647,24 @@ pub(super) struct PlanLayout {
 }
 
 impl PlanLayout {
+    /// Production has one label; fixture unit names also isolate Mac jobs
+    /// without adding another independently configurable identity.
+    pub(super) fn launchd_label(&self) -> &str {
+        if self.unit_name == crate::units::SUPERVISOR_UNIT_NAME {
+            "io.farhelm.supervisor"
+        } else {
+            &self.unit_name
+        }
+    }
+
+    /// Choose the service file from the same inspected target as its actions.
+    fn service_file_name(&self, reach: &Reach) -> String {
+        if reach.arch.is_macos() {
+            format!("{}.plist", self.launchd_label())
+        } else {
+            self.unit_name.clone()
+        }
+    }
     /// Standard per-user paths, with the local supervisor sharing the helm's
     /// state directory as the local transport requires.
     pub(super) fn production(local_state_dir: PathBuf) -> Self {
@@ -613,7 +713,7 @@ impl PlanLayout {
             .override_farhelm_path
             .clone()
             .unwrap_or_else(|| lib_dir.join("farhelm"));
-        let unit_path = unit_dir.join(&self.unit_name);
+        let unit_path = unit_dir.join(self.service_file_name(reach));
         let farhelm_name = farhelm_path.file_name().ok_or_else(|| {
             anyhow::Error::new(ProvisioningRequestError::Refused(format!(
                 "provisioning farhelm destination {:?} has no file name",
@@ -685,6 +785,36 @@ impl PlanLayout {
             destination: farhelm_path.clone(),
             temporary: farhelm_temporary,
         });
+        if reach.arch.is_macos() {
+            let domain = reach.launchd_domain.clone().ok_or_else(|| {
+                BackendFailure::new("the Mac launchd domain was not inspected", "")
+            })?;
+            let label = self.launchd_label().to_string();
+            actions.extend([
+                ProvisioningAction::WriteLaunchAgent {
+                    destination: unit_path.clone(),
+                    temporary: temporary(&unit_path, unit_name),
+                    content: super::macos::supervisor_plist(&farhelm_path, &state_dir, &label)?,
+                },
+                ProvisioningAction::StartLaunchAgent {
+                    domain,
+                    label,
+                    plist: unit_path,
+                    refresh: operation == ProvisioningOperation::Update,
+                },
+                ProvisioningAction::AttachSupervisor,
+            ]);
+            return Ok(ProvisioningPlan {
+                operation,
+                target,
+                farhelm_path,
+                state_dir,
+                actions,
+                host_home: reach.home.clone(),
+                host_distro_id: reach.distro_id.clone(),
+                host_arch: reach.arch,
+            });
+        }
         // Whichever branch runs, `tmux_program` ends up naming the exact
         // executable the supervisor must drive — see `supervisor_unit`
         // for why a directory on PATH is not enough.
@@ -780,7 +910,7 @@ impl PlanLayout {
                 .override_unit_dir
                 .clone()
                 .unwrap_or_else(|| reach.user_unit_dir.clone())
-                .join(&self.unit_name),
+                .join(self.service_file_name(reach)),
             state_dir_override: self.override_state_dir.clone(),
         }
     }
@@ -940,6 +1070,44 @@ impl PlanLayout {
                 paths.lib_dir.display()
             )));
         }
+        if reach.arch.is_macos() {
+            let domain = reach.launchd_domain.clone().ok_or_else(|| {
+                BackendFailure::new("the Mac launchd domain was not inspected", "")
+            })?;
+            let farhelm_path = facts
+                .farhelm
+                .as_ref()
+                .map(|binary| binary.named.clone())
+                .unwrap_or_else(|| paths.lib_dir.join("farhelm"));
+            let mut actions = Vec::new();
+            if facts.unit_file {
+                actions.push(ProvisioningAction::RemoveLaunchAgent {
+                    destination: paths.unit_path.clone(),
+                });
+            }
+            actions.push(ProvisioningAction::StopLaunchAgent {
+                domain,
+                label: self.launchd_label().to_string(),
+                farhelm_program: farhelm_path.clone(),
+                state_dir: facts.state_dir.named.clone(),
+            });
+            if facts.lib_dir.is_some() {
+                actions.push(ProvisioningAction::RemoveDirectory {
+                    path: paths.lib_dir.clone(),
+                });
+            }
+            actions.push(ProvisioningAction::ForgetHost);
+            return Ok(ProvisioningPlan {
+                operation: ProvisioningOperation::Uninstall,
+                target,
+                farhelm_path,
+                state_dir: facts.state_dir.named.clone(),
+                actions,
+                host_home: reach.home.clone(),
+                host_distro_id: reach.distro_id.clone(),
+                host_arch: reach.arch,
+            });
+        }
         let mut actions = Vec::new();
         if facts.unit_file {
             actions.push(ProvisioningAction::DisableSupervisor {
@@ -1071,4 +1239,116 @@ pub(super) fn supervisor_unit(
         tmux: tmux_program,
     })
     .map_err(unit_failure)
+}
+
+#[cfg(test)]
+mod macos_plan_tests {
+    use super::*;
+
+    /// A Mac supplies a launchd domain and deliberately has no tmux path.
+    fn reach() -> Reach {
+        Reach {
+            home: "/Users/host".into(),
+            user_unit_dir: "/Users/host/Library/LaunchAgents".into(),
+            arch: PayloadTarget::MacosAarch64,
+            distro_id: "macOS".into(),
+            needs_tmux: false,
+            launchd_domain: Some("user/501".into()),
+            host_tmux: None,
+        }
+    }
+
+    /// Setup/Update must expose the same frozen native actions in question
+    /// and progress, with no hidden tmux/systemd work or reboot promise.
+    #[test]
+    fn mac_actions_are_explicit_and_linux_serialization_is_preserved() {
+        assert_eq!(
+            serde_json::to_string(&PayloadTarget::LinuxX86_64).unwrap(),
+            "\"x86_64\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PayloadTarget::LinuxAarch64).unwrap(),
+            "\"aarch64\""
+        );
+        let layout = PlanLayout::production("/local/state".into());
+        for operation in [ProvisioningOperation::Add, ProvisioningOperation::Update] {
+            let plan = layout
+                .plan(
+                    operation,
+                    ProvisioningTarget::ssh("mac.example"),
+                    &reach(),
+                    "nonce",
+                )
+                .unwrap();
+            assert_eq!(
+                plan.actions
+                    .iter()
+                    .map(ProvisioningAction::label)
+                    .collect::<Vec<_>>(),
+                [
+                    "create-directories",
+                    "upload-farhelm",
+                    "install-farhelm",
+                    "write-launch-agent",
+                    if operation == ProvisioningOperation::Update {
+                        "restart-launch-agent"
+                    } else {
+                        "start-launch-agent"
+                    },
+                    "attach-supervisor"
+                ]
+            );
+            let text = plan.confirmation();
+            assert!(
+                text.contains("io.farhelm.supervisor.plist")
+                    && text.contains("restarts after a crash")
+            );
+            assert!(!text.contains("tmux") && !text.contains("systemd"));
+        }
+    }
+
+    /// Mac uninstall keeps the shared containment guarantees but has no
+    /// disable override, reload, or private-tmux cleanup to run.
+    #[test]
+    fn mac_uninstall_removes_plist_before_stopping_and_keeps_data() {
+        let layout = PlanLayout::production("/local/state".into());
+        let reach = reach();
+        let paths = layout.uninstall_paths(&reach);
+        let resolved = |path: PathBuf| ResolvedPath {
+            named: path.clone(),
+            canonical: path.clone(),
+            raw: path,
+            under_lib: false,
+        };
+        let facts = UninstallFacts {
+            unit_file: true,
+            lib_dir: Some(resolved(paths.lib_dir.clone())),
+            farhelm: Some(resolved(paths.lib_dir.join("farhelm"))),
+            state_dir: resolved(reach.home.join(".local/state/farhelm")),
+            mounts: vec![],
+        };
+        let plan = layout
+            .plan_uninstall(
+                ProvisioningTarget::ssh("mac.example"),
+                &reach,
+                &paths,
+                &facts,
+            )
+            .unwrap();
+        assert_eq!(
+            plan.actions
+                .iter()
+                .map(ProvisioningAction::label)
+                .collect::<Vec<_>>(),
+            [
+                "remove-launch-agent",
+                "stop-launch-agent",
+                "remove-directory",
+                "forget-host"
+            ]
+        );
+        let text = plan.confirmation();
+        assert!(text.contains("Kept: the host's Farhelm data"));
+        assert!(!text.contains("tmux") && !text.contains("systemd"));
+    }
 }

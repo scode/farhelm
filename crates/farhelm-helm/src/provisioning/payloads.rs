@@ -1,4 +1,4 @@
-//! Host-architecture-specific payload sources own release retrieval and
+//! Host-target-specific payload sources own release retrieval and
 //! materialization so the provisioning executor does not.
 //!
 //! Sources include [`NoPayloads`] for an ordinary developer build
@@ -14,7 +14,7 @@
 //! `Arc<dyn PayloadSource>` the rest of provisioning drives.
 
 use super::assets;
-use super::plan::{PayloadArch, PayloadKind};
+use super::plan::{PayloadKind, PayloadTarget};
 use super::release_payloads::{self, RELEASE_KEY_RING, ReleasePayloadSource};
 use anyhow::{Context as _, bail};
 use async_trait::async_trait;
@@ -59,8 +59,12 @@ const DIRECTORY_PAYLOAD_STAGE_MAX_AGE: Duration = Duration::from_secs(3600);
 static ACTIVE_DIRECTORY_MATERIALIZATIONS: OnceLock<Mutex<HashMap<PathBuf, usize>>> =
     OnceLock::new();
 
-/// Supplies host-architecture-specific artifacts without coupling
+/// Supplies host-target-specific artifacts without coupling
 /// provisioning to how they are obtained.
+///
+/// Materializing sources refuse unsupported payload/target pairs before I/O;
+/// an architecture match alone never permits a different operating system's
+/// executable. Mac hosts have a Farhelm payload and no tmux payload.
 ///
 /// `async` (D16): the download source performs network I/O and awaits a
 /// per-asset lock, and every source — including refusals that touch
@@ -74,7 +78,7 @@ static ACTIVE_DIRECTORY_MATERIALIZATIONS: OnceLock<Mutex<HashMap<PathBuf, usize>
 /// Implementations should render their identity, not their contents.
 #[async_trait]
 pub trait PayloadSource: std::fmt::Debug + Send + Sync {
-    async fn path(&self, payload: PayloadKind, arch: PayloadArch) -> anyhow::Result<PathBuf>;
+    async fn path(&self, payload: PayloadKind, target: PayloadTarget) -> anyhow::Result<PathBuf>;
 }
 
 /// Which payload source `run_with_ready` wires up, resolved from `HelmArgs`
@@ -108,7 +112,7 @@ pub(super) struct NoPayloads;
 
 #[async_trait]
 impl PayloadSource for NoPayloads {
-    async fn path(&self, _payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
+    async fn path(&self, _payload: PayloadKind, _target: PayloadTarget) -> anyhow::Result<PathBuf> {
         bail!(
             "this farhelm was built from source and carries no provisioning payloads; pass \
              --payload-dir <dir> holding the release files, or install a release build (see \
@@ -138,7 +142,7 @@ pub(super) struct UnreleasedPayloads {
 
 #[async_trait]
 impl PayloadSource for UnreleasedPayloads {
-    async fn path(&self, _payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
+    async fn path(&self, _payload: PayloadKind, _target: PayloadTarget) -> anyhow::Result<PathBuf> {
         bail!(
             "this farhelm is an unreleased build (version {}), so no published release carries \
              its provisioning payloads; pass --payload-dir <dir> holding payloads built from the \
@@ -164,7 +168,7 @@ impl std::fmt::Debug for UnavailableReleasePayloads {
 
 #[async_trait]
 impl PayloadSource for UnavailableReleasePayloads {
-    async fn path(&self, _payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
+    async fn path(&self, _payload: PayloadKind, _target: PayloadTarget) -> anyhow::Result<PathBuf> {
         bail!("{}", self.reason)
     }
 }
@@ -244,10 +248,10 @@ impl PayloadSource for DirectoryPayloads {
     /// separate from staging cleanup: [`prune_stale_generations`] runs
     /// best-effort after each success, while [`begin_materialization`] sweeps
     /// crash-orphaned staging files before a new request begins.
-    async fn path(&self, payload: PayloadKind, arch: PayloadArch) -> anyhow::Result<PathBuf> {
+    async fn path(&self, payload: PayloadKind, target: PayloadTarget) -> anyhow::Result<PathBuf> {
         let asset = match payload {
-            PayloadKind::Farhelm => assets::archive_name(assets::farhelm_archive_for(arch)),
-            PayloadKind::Tmux => assets::tmux_name(arch).to_string(),
+            PayloadKind::Farhelm => assets::archive_name(assets::farhelm_archive_for(target)),
+            PayloadKind::Tmux => assets::tmux_name(target)?.to_string(),
         };
         let source = self.dir.join(&asset);
         require_regular_file(&source, "the published release asset")?;
@@ -264,7 +268,7 @@ impl PayloadSource for DirectoryPayloads {
         // stalling whichever tokio worker thread is driving this request.
         match payload {
             PayloadKind::Farhelm => {
-                let member = assets::farhelm_archive_for(arch).member;
+                let member = assets::farhelm_archive_for(target).member;
                 let dest_task = dest.clone();
                 tokio::task::spawn_blocking(move || {
                     let _materialization = materialization;
@@ -1270,6 +1274,56 @@ pub(super) fn production_payloads_with_key(
 mod tests {
     use super::*;
 
+    /// A staged Mac archive must produce its own executable, not the Linux
+    /// arm64 one, while the operator's source archive remains unchanged.
+    #[farhelm_testtrace::test]
+    async fn directory_payloads_extracts_the_macos_archive() {
+        use super::super::release_payloads::test_support::{expected_member, fixture_bytes};
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let root = tempfile::tempdir().unwrap();
+        let staged = root.path().join("staged");
+        std::fs::create_dir(&staged).unwrap();
+        let target = PayloadTarget::MacosAarch64;
+        let asset = assets::archive_name(assets::farhelm_archive_for(target));
+        let original = fixture_bytes(&asset);
+        std::fs::write(staged.join(&asset), &original).unwrap();
+        assert_eq!(std::fs::read(staged.join(&asset)).unwrap(), original);
+
+        let source = DirectoryPayloads::new(staged.clone(), root.path().join("cache"));
+        let binary = source.path(PayloadKind::Farhelm, target).await.unwrap();
+        assert_eq!(
+            std::fs::read(&binary).unwrap(),
+            expected_member("farhelm", "aarch64-apple-darwin")
+        );
+        assert_eq!(
+            std::fs::metadata(&binary).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        assert_eq!(std::fs::read(staged.join(asset)).unwrap(), original);
+    }
+
+    /// A Mac tmux request is unsupported before a directory source is even
+    /// inspected; it must not be mistaken for a missing staged Linux asset.
+    #[farhelm_testtrace::test]
+    async fn directory_payloads_refuses_macos_tmux_before_materialization() {
+        let root = tempfile::tempdir().unwrap();
+        let staged = root.path().join("absent-staging");
+        let cache = root.path().join("absent-cache");
+        assert!(!staged.exists() && !cache.exists());
+        let source = DirectoryPayloads::new(staged.clone(), cache.clone());
+
+        assert_eq!(
+            source
+                .path(PayloadKind::Tmux, PayloadTarget::MacosAarch64)
+                .await
+                .unwrap_err()
+                .to_string(),
+            "remote macOS hosts do not support tmux payloads"
+        );
+        assert!(!staged.exists() && !cache.exists());
+    }
+
     /// Local and developer selections must not depend on TLS being available.
     /// A panicking factory distinguishes lazy selection from a swallowed client
     /// failure, including an explicit directory on a release-shaped build.
@@ -1349,7 +1403,7 @@ mod tests {
             .expect("an unavailable download client must not prevent helm startup");
             for _ in 0..2 {
                 let error = source
-                    .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+                    .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
                     .await
                     .unwrap_err();
                 assert_eq!(

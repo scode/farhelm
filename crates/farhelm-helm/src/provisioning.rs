@@ -27,6 +27,7 @@ pub(crate) mod credential_delivery;
 mod e2e;
 mod http;
 mod installation;
+mod macos;
 mod payloads;
 mod plan;
 mod release_payloads;
@@ -51,6 +52,8 @@ pub(crate) use service::{AutomaticUpdates, ProductionProvisioning, ProvisioningS
 
 #[cfg(test)]
 mod tests {
+    mod macos_real_tests;
+
     #[allow(unused_imports)]
     use super::*;
 
@@ -112,7 +115,11 @@ mod tests {
 
     #[async_trait]
     impl PayloadSource for FixedPayloads {
-        async fn path(&self, _payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
+        async fn path(
+            &self,
+            _payload: PayloadKind,
+            _arch: PayloadTarget,
+        ) -> anyhow::Result<PathBuf> {
             Ok(self.0.clone())
         }
     }
@@ -127,7 +134,11 @@ mod tests {
 
     #[async_trait]
     impl PayloadSource for MissingTmuxPayload {
-        async fn path(&self, payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
+        async fn path(
+            &self,
+            payload: PayloadKind,
+            _arch: PayloadTarget,
+        ) -> anyhow::Result<PathBuf> {
             self.requested.lock().unwrap().push(payload);
             match payload {
                 PayloadKind::Farhelm => Ok(self.farhelm.clone()),
@@ -479,9 +490,10 @@ mod tests {
                 reach: Mutex::new(ReachOutcome::Supported(Reach {
                     user_unit_dir: home.join(".config/systemd/user"),
                     home,
-                    arch: PayloadArch::X86_64,
+                    arch: PayloadTarget::LinuxX86_64,
                     distro_id: "ubuntu".to_string(),
                     needs_tmux: false,
+                    launchd_domain: None,
                     host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
                 })),
                 user_unit: Mutex::new(Ok(None)),
@@ -831,6 +843,7 @@ mod tests {
             &self,
             target: &ProvisioningTarget,
             unit: &str,
+            launchd_domain: Option<&str>,
             paths: &[&Path],
             removed: &Path,
         ) -> Result<UninstallInspection, BackendFailure> {
@@ -840,7 +853,9 @@ mod tests {
                 .push("inspect-uninstall".to_string());
             let script = self.uninstall_script.lock().unwrap().clone();
             if let Some(script) = script {
-                return script.inspect_uninstall(target, unit, paths, removed).await;
+                return script
+                    .inspect_uninstall(target, unit, launchd_domain, paths, removed)
+                    .await;
             }
             let present = self.present.lock().unwrap().clone();
             let symlinks = self.symlinks.lock().unwrap().clone();
@@ -989,9 +1004,10 @@ mod tests {
         let reach = Reach {
             home: root.path().join("home"),
             user_unit_dir: root.path().join("units"),
-            arch: PayloadArch::X86_64,
+            arch: PayloadTarget::LinuxX86_64,
             distro_id: "ubuntu".to_string(),
             needs_tmux: true,
+            launchd_domain: None,
             host_tmux: None,
         };
         assert!(!root.path().join("lib").exists() && !root.path().join("units").exists());
@@ -1021,9 +1037,10 @@ mod tests {
         let reach = Reach {
             home: root.path().join("home"),
             user_unit_dir: root.path().join("units"),
-            arch: PayloadArch::X86_64,
+            arch: PayloadTarget::LinuxX86_64,
             distro_id: "ubuntu".to_string(),
             needs_tmux: true,
+            launchd_domain: None,
             host_tmux: None,
         };
 
@@ -1081,9 +1098,10 @@ mod tests {
         let reach = Reach {
             home: home.clone(),
             user_unit_dir: root.path().join("units"),
-            arch: PayloadArch::X86_64,
+            arch: PayloadTarget::LinuxX86_64,
             distro_id: "ubuntu".to_string(),
             needs_tmux: true,
+            launchd_domain: None,
             host_tmux: None,
         };
         let row = HostRow {
@@ -1187,9 +1205,10 @@ mod tests {
         let reach = Reach {
             home: root.path().to_path_buf(),
             user_unit_dir: root.path().join("units"),
-            arch: PayloadArch::X86_64,
+            arch: PayloadTarget::LinuxX86_64,
             distro_id: "ubuntu".to_string(),
             needs_tmux: false,
+            launchd_domain: None,
             host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
         };
         let plan = layout(root.path())
@@ -1337,9 +1356,10 @@ mod tests {
         let reach = Reach {
             home: root.path().join("home"),
             user_unit_dir: root.path().join("units"),
-            arch: PayloadArch::X86_64,
+            arch: PayloadTarget::LinuxX86_64,
             distro_id: "ubuntu".to_string(),
             needs_tmux: true,
+            launchd_domain: None,
             host_tmux: None,
         };
         let error = layout(root.path())
@@ -3752,9 +3772,10 @@ mod tests {
         *backend.reach.lock().unwrap() = ReachOutcome::Supported(Reach {
             home: root.path().to_path_buf(),
             user_unit_dir: root.path().join("units"),
-            arch: PayloadArch::X86_64,
+            arch: PayloadTarget::LinuxX86_64,
             distro_id: "ubuntu".to_string(),
             needs_tmux: false,
+            launchd_domain: None,
             host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
         });
         *backend.inspect_failure.lock().unwrap() = Some("inspection broke".to_string());
@@ -7636,7 +7657,7 @@ mod tests {
         .unwrap() else {
             panic!("aarch64 Ubuntu with a user manager is supported")
         };
-        assert_eq!(old.arch, PayloadArch::Aarch64);
+        assert_eq!(old.arch, PayloadTarget::LinuxAarch64);
         assert!(old.needs_tmux);
         // A host whose tmux clears the floor is the ONLY case that skips
         // the private payload; without it nothing here would notice an
@@ -8848,6 +8869,7 @@ mod tests {
                 .inspect_uninstall(
                     &ProvisioningTarget::ssh("scripted.example"),
                     "farhelm-supervisor.service",
+                    None,
                     paths,
                     &self.lib,
                 )
@@ -9383,6 +9405,7 @@ mod tests {
             .inspect_uninstall(
                 &target,
                 "farhelm-supervisor.service",
+                None,
                 &[&unit, &lib, &missing, &linked_state],
                 &lib,
             )
@@ -9462,6 +9485,7 @@ mod tests {
             .inspect_uninstall(
                 &target,
                 "farhelm-supervisor.service",
+                None,
                 &[&linked_lib, &dangling_lib, &under_linked_parent],
                 &linked_lib,
             )
@@ -9968,9 +9992,10 @@ mod tests {
                 &Reach {
                     home: root.path().join("home"),
                     user_unit_dir: root.path().join("home/.config/systemd/user"),
-                    arch: PayloadArch::X86_64,
+                    arch: PayloadTarget::LinuxX86_64,
                     distro_id: "ubuntu".to_string(),
                     needs_tmux: true,
+                    launchd_domain: None,
                     host_tmux: None,
                 },
                 "nonce",
@@ -9980,7 +10005,7 @@ mod tests {
             &plan.actions[4],
             ProvisioningAction::InstallPayload {
                 payload: PayloadKind::Tmux,
-                arch: PayloadArch::X86_64,
+                arch: PayloadTarget::LinuxX86_64,
                 destination,
                 ..
             } if destination == &root.path().join("lib/tmux")
@@ -10016,9 +10041,10 @@ mod tests {
         let reach = |distro_id: &str| Reach {
             home: root.path().join("home"),
             user_unit_dir: root.path().join("home/.config/systemd/user"),
-            arch: PayloadArch::Aarch64,
+            arch: PayloadTarget::LinuxAarch64,
             distro_id: distro_id.to_string(),
             needs_tmux: false,
+            launchd_domain: None,
             host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
         };
         let named = layout(root.path())
@@ -10059,9 +10085,10 @@ mod tests {
         let reach = Reach {
             home: home.clone(),
             user_unit_dir: user_units.clone(),
-            arch: PayloadArch::X86_64,
+            arch: PayloadTarget::LinuxX86_64,
             distro_id: "ubuntu".to_string(),
             needs_tmux: false,
+            launchd_domain: None,
             host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
         };
         let layout = PlanLayout::production(local_state.clone());
@@ -11212,6 +11239,67 @@ mod tests {
         assert!(error.rendered().contains("sha256sum missing"));
     }
 
+    /// Update and credential delivery read the target file's mode, including
+    /// through a symlink. Darwin's stat uses different flags from GNU stat;
+    /// executing both branches prevents a Mac-only repair failure from hiding
+    /// behind a fake metadata response.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn remote_metadata_uses_the_hosts_native_stat() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("bin");
+        tokio::fs::create_dir(&bin).await.unwrap();
+        let artifact = root.path().join("artifact with spaces");
+        tokio::fs::write(&artifact, b"native metadata")
+            .await
+            .unwrap();
+        tokio::fs::set_permissions(&artifact, std::fs::Permissions::from_mode(0o640))
+            .await
+            .unwrap();
+        let link = root.path().join("artifact link");
+        std::os::unix::fs::symlink(&artifact, &link).unwrap();
+        let expected_hash = hex_sha256(b"native metadata");
+        let mut backend = test_system_backend(root.path());
+        backend.launcher = Arc::new(FixtureHomeLauncher {
+            home: root.path().to_path_buf(),
+            bin: bin.clone(),
+        });
+        for os in ["Darwin", "Linux"] {
+            write_fake_tool(&bin, "uname", &format!("printf '%s\\n' {os}")).await;
+            let flags = if os == "Darwin" { "-f %Lp" } else { "-c %a" };
+            write_fake_tool(
+                &bin,
+                "stat",
+                &format!(
+                    "[ \"$1 $2 $3 $4\" = {} ] && [ \"$5\" = {} ] || exit 91\nexec /usr/bin/stat -L -c '%a' -- \"$5\"",
+                    crate::ssh::shell_quote(&format!("-L {flags} --")),
+                    shell_path(&link).unwrap(),
+                ),
+            )
+            .await;
+            let metadata = backend
+                .metadata_on_target(&ProvisioningTarget::ssh("fixture.example"), &link)
+                .await
+                .expect("native mode inspection succeeds")
+                .expect("the symlink target exists");
+            assert_eq!(metadata.hash, expected_hash);
+            assert!(matches!(
+                backend
+                    .install_bytes(
+                        &ProvisioningTarget::ssh("fixture.example"),
+                        b"native metadata",
+                        &link,
+                        &root.path().join("unused staging"),
+                        0o640,
+                    )
+                    .await
+                    .expect("unchanged artifact inspection succeeds"),
+                ActionOutcome::Skipped(_)
+            ));
+        }
+    }
+
     /// Remote checksum commands keep filenames out of `sha256sum`'s output,
     /// because GNU coreutils escapes backslashes in argument-based output.
     /// The redirection operand still needs shell quoting for spaces and
@@ -11839,7 +11927,11 @@ mod tests {
 
     #[async_trait]
     impl PayloadSource for MutablePayload {
-        async fn path(&self, payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
+        async fn path(
+            &self,
+            payload: PayloadKind,
+            _arch: PayloadTarget,
+        ) -> anyhow::Result<PathBuf> {
             Ok(match payload {
                 PayloadKind::Farhelm => self.farhelm.lock().unwrap().clone(),
                 PayloadKind::Tmux => self.tmux.clone(),
@@ -12951,7 +13043,13 @@ mod tests {
         backend.remove_unit(&target, &unit_path).await.unwrap();
         backend.daemon_reload(&target).await.unwrap();
         let state = backend
-            .inspect_uninstall(&target, &unit, &[&unit_path], &root.path().join("lib"))
+            .inspect_uninstall(
+                &target,
+                &unit,
+                None,
+                &[&unit_path],
+                &root.path().join("lib"),
+            )
             .await
             .unwrap();
         assert!(
@@ -13624,6 +13722,7 @@ mod tests {
                 .inspect_uninstall(
                     &planned.plan.target,
                     &unit,
+                    None,
                     &[&removed_unit, &removed_lib, &planned.plan.state_dir],
                     &removed_lib,
                 )
@@ -13919,7 +14018,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut original_archives = std::collections::HashMap::new();
         let mut original_tmux = std::collections::HashMap::new();
-        for arch in [PayloadArch::X86_64, PayloadArch::Aarch64] {
+        for arch in [PayloadTarget::LinuxX86_64, PayloadTarget::LinuxAarch64] {
             let archive = farhelm_archive_for(arch);
             write_release_archive(
                 dir.path(),
@@ -13929,7 +14028,7 @@ mod tests {
                 format!("farhelm-bytes-{arch:?}").as_bytes(),
             );
             let tmux_bytes = format!("tmux-bytes-{arch:?}").into_bytes();
-            std::fs::write(dir.path().join(tmux_name(arch)), &tmux_bytes).unwrap();
+            std::fs::write(dir.path().join(tmux_name(arch).unwrap()), &tmux_bytes).unwrap();
             // Distinct, non-executable modes so a regression that chmods a
             // SOURCE instead of only its extracted/copied output cannot
             // hide behind a content-only comparison (F9, review round 2).
@@ -13939,7 +14038,7 @@ mod tests {
             )
             .unwrap();
             std::fs::set_permissions(
-                dir.path().join(tmux_name(arch)),
+                dir.path().join(tmux_name(arch).unwrap()),
                 std::fs::Permissions::from_mode(0o600),
             )
             .unwrap();
@@ -13953,7 +14052,7 @@ mod tests {
             dir.path().to_path_buf(),
             dir.path().join(DIRECTORY_PAYLOAD_CACHE),
         );
-        for arch in [PayloadArch::X86_64, PayloadArch::Aarch64] {
+        for arch in [PayloadTarget::LinuxX86_64, PayloadTarget::LinuxAarch64] {
             let archive = farhelm_archive_for(arch);
             let extracted_dir = dir.path().join(DIRECTORY_PAYLOAD_CACHE);
             let farhelm_asset = archive_name(archive);
@@ -13986,7 +14085,7 @@ mod tests {
                 "extracted farhelm binary must be executable"
             );
 
-            let tmux_asset = tmux_name(arch).to_string();
+            let tmux_asset = tmux_name(arch).unwrap().to_string();
             let tmux_path = payloads.path(PayloadKind::Tmux, arch).await.unwrap();
             assert_eq!(
                 tmux_path.parent(),
@@ -14026,12 +14125,12 @@ mod tests {
                 "materialization must never change the operator's staged archive's mode"
             );
             assert_eq!(
-                std::fs::read(dir.path().join(tmux_name(arch))).unwrap(),
+                std::fs::read(dir.path().join(tmux_name(arch).unwrap())).unwrap(),
                 original_tmux[&arch],
                 "materialization must never mutate the operator's staged tmux binary"
             );
             assert_eq!(
-                std::fs::metadata(dir.path().join(tmux_name(arch)))
+                std::fs::metadata(dir.path().join(tmux_name(arch).unwrap()))
                     .unwrap()
                     .permissions()
                     .mode()
@@ -14053,12 +14152,12 @@ mod tests {
             dir.path().join(DIRECTORY_PAYLOAD_CACHE),
         );
         let error = payloads
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
-        let expected = dir
-            .path()
-            .join(archive_name(farhelm_archive_for(PayloadArch::X86_64)));
+        let expected = dir.path().join(archive_name(farhelm_archive_for(
+            PayloadTarget::LinuxX86_64,
+        )));
         assert!(
             format!("{error:#}").contains(&expected.display().to_string()),
             "error must name {}: {error:#}",
@@ -14073,14 +14172,14 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn directory_payloads_reports_a_directory_at_the_source_path_as_non_regular() {
         let dir = tempfile::tempdir().unwrap();
-        let archive = farhelm_archive_for(PayloadArch::X86_64);
+        let archive = farhelm_archive_for(PayloadTarget::LinuxX86_64);
         std::fs::create_dir_all(dir.path().join(archive_name(archive))).unwrap();
         let payloads = DirectoryPayloads::new(
             dir.path().to_path_buf(),
             dir.path().join(DIRECTORY_PAYLOAD_CACHE),
         );
         let error = payloads
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
         let message = format!("{error:#}");
@@ -14105,7 +14204,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn directory_payloads_reports_a_symlink_loop_as_an_inspection_failure_not_absence() {
         let dir = tempfile::tempdir().unwrap();
-        let archive = farhelm_archive_for(PayloadArch::X86_64);
+        let archive = farhelm_archive_for(PayloadTarget::LinuxX86_64);
         let looped_path = dir.path().join(archive_name(archive));
         std::os::unix::fs::symlink(&looped_path, &looped_path).unwrap();
         let payloads = DirectoryPayloads::new(
@@ -14113,7 +14212,7 @@ mod tests {
             dir.path().join(DIRECTORY_PAYLOAD_CACHE),
         );
         let error = payloads
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
         let message = format!("{error:#}");
@@ -14141,7 +14240,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn directory_payloads_refuses_an_archive_with_no_matching_member() {
         let dir = tempfile::tempdir().unwrap();
-        let archive = farhelm_archive_for(PayloadArch::X86_64);
+        let archive = farhelm_archive_for(PayloadTarget::LinuxX86_64);
         write_release_archive(
             dir.path(),
             archive.package,
@@ -14154,7 +14253,7 @@ mod tests {
             dir.path().join(DIRECTORY_PAYLOAD_CACHE),
         );
         let error = payloads
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
         assert_eq!(
@@ -14179,7 +14278,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn directory_payloads_refuses_an_archive_with_several_matching_members() {
         let dir = tempfile::tempdir().unwrap();
-        let archive = farhelm_archive_for(PayloadArch::X86_64);
+        let archive = farhelm_archive_for(PayloadTarget::LinuxX86_64);
         let archive_path = dir.path().join(archive_name(archive));
         let file = std::fs::File::create(&archive_path).unwrap();
         let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
@@ -14192,7 +14291,7 @@ mod tests {
             dir.path().join(DIRECTORY_PAYLOAD_CACHE),
         );
         let error = payloads
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
         assert_eq!(
@@ -14224,7 +14323,7 @@ mod tests {
             tar::EntryType::Link,
         ] {
             let dir = tempfile::tempdir().unwrap();
-            let archive = farhelm_archive_for(PayloadArch::X86_64);
+            let archive = farhelm_archive_for(PayloadTarget::LinuxX86_64);
             write_archive_with_non_regular_member(
                 dir.path(),
                 archive.package,
@@ -14237,7 +14336,7 @@ mod tests {
                 dir.path().join(DIRECTORY_PAYLOAD_CACHE),
             );
             let error = payloads
-                .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+                .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
                 .await
                 .unwrap_err();
             assert!(
@@ -14265,7 +14364,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt as _;
 
         let dir = tempfile::tempdir().unwrap();
-        let archive = farhelm_archive_for(PayloadArch::X86_64);
+        let archive = farhelm_archive_for(PayloadTarget::LinuxX86_64);
         let archive_path = dir.path().join(archive_name(archive));
         let file = std::fs::File::create(&archive_path).unwrap();
         let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
@@ -14285,7 +14384,7 @@ mod tests {
             dir.path().join(DIRECTORY_PAYLOAD_CACHE),
         );
         payloads
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
 
@@ -14317,7 +14416,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn directory_payloads_snapshots_are_private_and_survive_a_later_refresh() {
         let dir = tempfile::tempdir().unwrap();
-        let archive = farhelm_archive_for(PayloadArch::X86_64);
+        let archive = farhelm_archive_for(PayloadTarget::LinuxX86_64);
         write_release_archive(
             dir.path(),
             archive.package,
@@ -14326,7 +14425,8 @@ mod tests {
             b"generation-one",
         );
         std::fs::write(
-            dir.path().join(tmux_name(PayloadArch::X86_64)),
+            dir.path()
+                .join(tmux_name(PayloadTarget::LinuxX86_64).unwrap()),
             b"tmux-generation-one",
         )
         .unwrap();
@@ -14336,11 +14436,11 @@ mod tests {
             dir.path().join(DIRECTORY_PAYLOAD_CACHE),
         );
         let farhelm_path_one = payloads
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
         let tmux_path_one = payloads
-            .path(PayloadKind::Tmux, PayloadArch::X86_64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
 
@@ -14353,17 +14453,18 @@ mod tests {
             b"generation-two",
         );
         std::fs::write(
-            dir.path().join(tmux_name(PayloadArch::X86_64)),
+            dir.path()
+                .join(tmux_name(PayloadTarget::LinuxX86_64).unwrap()),
             b"tmux-generation-two",
         )
         .unwrap();
 
         let farhelm_path_two = payloads
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
         let tmux_path_two = payloads
-            .path(PayloadKind::Tmux, PayloadArch::X86_64)
+            .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
             .await
             .unwrap();
 
@@ -14535,7 +14636,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt as _;
             let payload_dir =
                 PathBuf::from(std::env::var("FARHELM_HELM_EXTRACTED_MODE_TEST_DIR").unwrap());
-            let archive = farhelm_archive_for(PayloadArch::X86_64);
+            let archive = farhelm_archive_for(PayloadTarget::LinuxX86_64);
             write_release_archive(
                 &payload_dir,
                 archive.package,
@@ -14559,7 +14660,9 @@ mod tests {
                     },
                     |runtime| {
                         runtime
-                            .block_on(payloads.path(PayloadKind::Farhelm, PayloadArch::X86_64))
+                            .block_on(
+                                payloads.path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64),
+                            )
                             .unwrap();
                         let mode = std::fs::metadata(payload_dir.join(DIRECTORY_PAYLOAD_CACHE))
                             .unwrap()
@@ -14609,7 +14712,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn no_payloads_message_is_exactly_the_settled_recovery_text() {
         let error = NoPayloads
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
         assert_eq!(
@@ -14637,7 +14740,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt as _;
         let state_dir = tempfile::tempdir().unwrap();
         let payload_dir = tempfile::tempdir().unwrap();
-        let archive = farhelm_archive_for(PayloadArch::X86_64);
+        let archive = farhelm_archive_for(PayloadTarget::LinuxX86_64);
         write_release_archive(
             payload_dir.path(),
             archive.package,
@@ -14660,7 +14763,7 @@ mod tests {
         )
         .unwrap();
         let result = payloads
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await;
         let after: Vec<_> = std::fs::read_dir(payload_dir.path())
             .unwrap()
@@ -14725,7 +14828,7 @@ mod tests {
         )
         .unwrap();
         let error = payloads
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
         assert!(
@@ -14794,7 +14897,7 @@ mod tests {
         );
 
         let error = payloads
-            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
         assert_eq!(
@@ -14811,7 +14914,7 @@ mod tests {
         for release_build in [false, true] {
             let dir_state = tempfile::tempdir().unwrap();
             let payload_dir = tempfile::tempdir().unwrap();
-            let archive = farhelm_archive_for(PayloadArch::X86_64);
+            let archive = farhelm_archive_for(PayloadTarget::LinuxX86_64);
             write_release_archive(
                 payload_dir.path(),
                 archive.package,
@@ -14827,7 +14930,7 @@ mod tests {
             )
             .unwrap();
             let path = payloads
-                .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+                .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
                 .await
                 .unwrap();
             assert_eq!(
@@ -14926,9 +15029,10 @@ mod tests {
         *backend.reach.lock().unwrap() = ReachOutcome::Supported(Reach {
             user_unit_dir: root.path().join(".config/systemd/user"),
             home: root.path().to_path_buf(),
-            arch: PayloadArch::X86_64,
+            arch: PayloadTarget::LinuxX86_64,
             distro_id: "ubuntu".to_string(),
             needs_tmux: true,
+            launchd_domain: None,
             host_tmux: None,
         });
 
@@ -15423,7 +15527,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt as _;
 
         let dir = tempfile::tempdir().unwrap();
-        let archive = farhelm_archive_for(PayloadArch::X86_64);
+        let archive = farhelm_archive_for(PayloadTarget::LinuxX86_64);
         write_release_archive(
             dir.path(),
             archive.package,
@@ -15459,7 +15563,7 @@ mod tests {
                             runtime.spawn(async move {
                                 barrier.wait().await;
                                 payloads
-                                    .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+                                    .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
                                     .await
                             })
                         })

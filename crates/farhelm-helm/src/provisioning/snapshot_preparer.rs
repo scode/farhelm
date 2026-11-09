@@ -133,7 +133,7 @@ impl SnapshotPreparer for InstallerSnapshotPreparer {
 #[cfg(test)]
 mod tests {
     use super::super::backend::{CommandLauncher, Reach, SystemBackend};
-    use super::super::plan::{PayloadArch, PayloadKind};
+    use super::super::plan::{PayloadKind, PayloadTarget};
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -200,7 +200,7 @@ mod tests {
     struct NoFinalPayloads;
     #[async_trait]
     impl PayloadSource for NoFinalPayloads {
-        async fn path(&self, _: PayloadKind, _: PayloadArch) -> anyhow::Result<PathBuf> {
+        async fn path(&self, _: PayloadKind, _: PayloadTarget) -> anyhow::Result<PathBuf> {
             panic!("finalization must not resolve payloads")
         }
     }
@@ -241,9 +241,10 @@ mod tests {
         let reach = Reach {
             home: root.path().join("remote-home"),
             user_unit_dir: root.path().join("remote-units"),
-            arch: PayloadArch::X86_64,
+            arch: PayloadTarget::LinuxX86_64,
             distro_id: "fixture".into(),
             needs_tmux: false,
+            launchd_domain: None,
             host_tmux: Some("/usr/bin/tmux".into()),
         };
         let plan = layout
