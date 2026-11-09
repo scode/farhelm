@@ -3948,10 +3948,18 @@ a:any-link,
 .setting-row > span { min-width: 0; }
 .app-settings-dialog[aria-label="Settings"] .host-settings-mark svg { width: 28px; height: 28px; }
 
-/* Settings shares the host-dialog frame with unrelated modals. Scope its wider
-   two-column body here; the frame still owns the only scrollport and both exits. */
-.app-settings-dialog[aria-label="Settings"] { width: min(760px, 100%); }
+/* A section change must not move Settings or its Close button. Keep this size
+   local to Settings: other dialogs still fit their content. The body consumes
+   spare height on short sections and remains the only scrollport on long ones.
+   780px is what Checkouts needs (about 774px with header and footer, held by
+   the browser test); the desktop's Terminal section, with its tunnel and
+   file-opening controls, needs about 727px. */
+.app-settings-dialog[aria-label="Settings"] {
+  width: min(760px, 100%);
+  height: min(780px, calc(100dvh - 2 * var(--dialog-vertical-margin)));
+}
 .app-settings-dialog[aria-label="Settings"] > .host-settings-body {
+  flex-grow: 1;
   grid-template-columns: 168px minmax(0, 1fr);
   gap: 20px;
   align-items: start;

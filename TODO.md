@@ -55,11 +55,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   reviewing the stop-closes-tabs plan on 2026-11-08; the behavior predates that plan. Plan:
   `plans/queue/stop-start-message.md`.
 
-- **Stop the Settings dialog resizing when the section changes.** The dialog takes the height of whichever section is
-  showing, so moving between Sessions, Appearance, Credentials and the rest makes the whole modal jump and the footer's
-  Close button move with it. Fix is TBD; keep the dialog one size across sections. Plan:
-  `plans/queue/settings-dialog-fixed-size.md`.
-
 - **Overhaul the grid stream's encoding and the grid client's history storage.** Grid terminals (terminals in a terminal
   host) get their screen and history from the supervisor as JSON messages, and the page keeps every history line
   decoded, as one JavaScript object per run of styled text plus a style object per distinct color pair. Measured in

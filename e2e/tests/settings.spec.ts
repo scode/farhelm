@@ -920,15 +920,22 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
     await expect(dialog).toHaveCount(0);
     await expect(gear).toBeFocused();
   }
-  // Measure the same long pane in a tall window, so the no-overflow proof
-  // cannot pass merely because opening returns to the shorter sessions pane.
+  // Extra viewport space must not stretch the fixed frame. A long section
+  // still scrolls inside it, with both exits staying where the user found them.
   await page.setViewportSize({ width: 1280, height: 5000 });
   await gear.click();
   await selectSettingsSection(page, "agent trust");
   await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(20);
   const tall = await body.evaluate((el) => ({ content: el.scrollHeight, height: el.clientHeight }));
   expect(tall.height).toBeGreaterThan(0);
-  expect(tall.content, "a tall window must fit the settings without scrolling").toBeLessThanOrEqual(tall.height);
+  expect((await dialog.boundingBox())!.height).toBe(780);
+  expect(tall.content, "Agent trust must scroll even when the viewport could fit it").toBeGreaterThan(tall.height);
+  const tallHeader = await dialog.locator(".host-settings-header").boundingBox();
+  const tallFooter = await dialog.locator(".host-settings-footer").boundingBox();
+  await body.evaluate(el => { el.scrollTop = el.scrollHeight; });
+  await expect.poll(() => body.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+  expect(await dialog.locator(".host-settings-header").boundingBox()).toEqual(tallHeader);
+  expect(await dialog.locator(".host-settings-footer").boundingBox()).toEqual(tallFooter);
   await dialog.screenshot({ path: testInfo.outputPath("settings-pinned-tall.png") });
   await close.click();
   await expect(gear).toBeFocused();
@@ -941,9 +948,11 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
  * Computed heading case catches transforms that conceal the displayed label;
  * Notifications' groups remain subordinate to its navigation target, while
  * neither heading level becomes visually smaller than the field labels.
+ * A viewport taller than the fixed frame distinguishes section stability from
+ * the window cap. The same geometry contract covers the phone's list/back path.
  */
-test("settings navigation keeps mounted panes and follows the narrow list path", async ({ page, browserName }) => {
-  await page.setViewportSize({ width: 1280, height: 560 });
+test("settings navigation keeps mounted panes and follows the narrow list path", async ({ page, browserName }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/");
   const dialog = await openSettings(page);
   const navigation = dialog.getByRole("navigation", { name: "Settings sections", exact: true });
@@ -954,6 +963,12 @@ test("settings navigation keeps mounted panes and follows the narrow list path",
   await expect(panels).toHaveCount(webSettingsSections.length);
   await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(20);
   await expect(dialog.getByRole("checkbox", { name: "Skip session confirmations", exact: true })).toBeFocused();
+  await page.evaluate(() => document.fonts.ready);
+  const close = dialog.getByRole("button", { name: "Close", exact: true });
+  const frame = await dialog.boundingBox();
+  const closeBox = await close.boundingBox();
+  expect(frame!.height, "premise: fixed height rather than the viewport cap").toBe(780);
+  await dialog.screenshot({ path: testInfo.outputPath("settings-fixed-short-section.png") });
   for (const section of webSettingsSections) {
     const panel = await selectSettingsSection(page, section);
     await expect(dialog.locator("section.app-settings-panel:visible")).toHaveCount(1);
@@ -976,6 +991,23 @@ test("settings navigation keeps mounted panes and follows the narrow list path",
     await expect(navigation.locator('[aria-pressed="true"]')).toHaveCount(1);
     await expect(dialog.locator("section.app-settings-panel[hidden]")).toHaveCount(webSettingsSections.length - 1);
     if (section !== "sessions") await expect(panel.locator(":scope > h3")).toBeFocused();
+    expect(await dialog.boundingBox(), `${section} must keep the Settings frame still`).toEqual(frame);
+    expect(await close.boundingBox(), `${section} must keep Close still`).toEqual(closeBox);
+    if (["sessions", "Appearance", "hosts", "terminal", "checkouts"].includes(section)) {
+      expect(await body.evaluate(el => el.scrollHeight <= el.clientHeight),
+        `${section} should fit at ordinary desktop size without scrolling`).toBe(true);
+    }
+    if (section === "checkouts" || section === "notifications") {
+      await testInfo.attach(`${section}-layout.json`, {
+        body: JSON.stringify(await body.evaluate(el => ({
+          frame: el.parentElement!.getBoundingClientRect().height,
+          viewport: window.innerHeight,
+          visibleBody: el.clientHeight,
+          content: el.scrollHeight,
+        }))),
+        contentType: "application/json",
+      });
+    }
   }
   const notifications = await selectSettingsSection(page, "notifications");
   await expect(notifications.getByRole("region", { name: "Sounds", exact: true })).toBeVisible();
@@ -1012,10 +1044,24 @@ test("settings navigation keeps mounted panes and follows the narrow list path",
   }
 
   await selectSettingsSection(page, "agent trust");
-  await page.setViewportSize({ width: 390, height: 560 });
+  await page.setViewportSize({ width: 390, height: 900 });
   await expect(navigation).toBeHidden();
   const back = dialog.getByRole("button", { name: "‹ Settings", exact: true });
   await expect(back).toBeVisible();
+  const narrowFrame = await dialog.boundingBox();
+  const narrowClose = await close.boundingBox();
+  expect(narrowFrame!.height).toBe(780);
+  await dialog.screenshot({ path: testInfo.outputPath("settings-fixed-narrow-section.png") });
+  for (const section of webSettingsSections) {
+    await selectSettingsSection(page, section);
+    expect(await dialog.boundingBox(), `${section} must keep the narrow frame still`).toEqual(narrowFrame);
+    expect(await close.boundingBox(), `${section} must keep narrow Close still`).toEqual(narrowClose);
+    await back.click();
+    await expect(navigation).toBeVisible();
+    expect(await dialog.boundingBox(), "the section list shares the panel's frame").toEqual(narrowFrame);
+    expect(await close.boundingBox(), "Back must not move Close").toEqual(narrowClose);
+  }
+  await selectSettingsSection(page, "agent trust");
   expect(await body.evaluate(el => el.scrollHeight > el.clientHeight), "agent trust must overflow before testing scroll reset").toBe(true);
   await body.evaluate(el => { el.scrollTop = el.scrollHeight; });
   await expect.poll(() => body.evaluate(el => el.scrollTop)).toBeGreaterThan(0);

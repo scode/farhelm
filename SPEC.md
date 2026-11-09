@@ -2035,12 +2035,13 @@ The gear at the foot of the host rail opens a settings dialog. Its left sidebar 
 **Hosts**, **Tensorlake**, **Credentials**, **Terminal**, **Checkouts**, **Agent trust** and **Notifications**, followed
 by **App** only in a desktop app whose updater is active. Each section has an icon; the selected one uses the solid
 selection fill. One selected section appears beside the list, with a matching heading; notifications keeps **Sounds**
-and **ntfy alerts** sub-headings. The header and footer stay pinned while the body scrolls. At 620px wide and below, the
-dialog shows either the selected section or the list; **‹ Settings** returns to the list. The gear always opens sessions
-and focuses its first switch, including at phone width. Trust hints instead open agent trust at the relevant switch and
-scroll its block into view. Section buttons follow the platform's normal Tab rules. Switching sections preserves unsaved
-fields, outcome lines and pending saves; closing discards unsaved fields. Escape and either close control return focus
-to the gear.
+and **ntfy alerts** sub-headings. The dialog keeps one height across sections, capped by the window; short sections
+leave space below their content, and longer sections scroll inside the pinned header and footer. At 620px wide and
+below, the dialog shows either the selected section or the list; **‹ Settings** returns to the list. The gear always
+opens sessions and focuses its first switch, including at phone width. Trust hints instead open agent trust at the
+relevant switch and scroll its block into view. Section buttons follow the platform's normal Tab rules. Switching
+sections preserves unsaved fields, outcome lines and pending saves; closing discards unsaved fields. Escape and either
+close control return focus to the gear.
 
 **Credentials**, with a lock icon, holds named GitHub tokens, agent subscription logins and API endpoint tokens in three
 lists. Names use the recipe-name grammar, are unique across all kinds, and cannot be changed after creation; neither can
