@@ -41,6 +41,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   change it before landing; the cheap mitigation is to skip the lock and the transaction when nothing is stuck and the
   host has no unresolved notice, or to read Trash only when a host reports a change.
 
+- **Revisit cutting long connection errors short in the host progress hover card.** Decided on the maintainer's behalf
+  on 2026-11-09 when host-progress-hover blocked: when a host's connection detail or a run's message is too long to fit
+  beside a readable current step, the hover card for a working host shows a shortened preview and says the full details
+  are in Hosts, and stays a plain, non-interactive tooltip. A message that fits is shown whole. The alternative was a
+  scrollable area inside the card, which keeps the whole text readable on hover but makes the card interactive (pointer,
+  dismissal and keyboard handling).
+
 ## Near term
 
 - **Make the approval cards fit their answer controls, and audit every one of them.** A session-start request grew
