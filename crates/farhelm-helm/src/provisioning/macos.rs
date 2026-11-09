@@ -261,40 +261,36 @@ EOF_JOB
 }
 "#;
 
-/// Enumerate mounts on or below a path, preserving spaces in mount-point names.
+/// Report unambiguous mounts on or below a path without wedging uninstall.
 ///
 /// macOS `mount` has no machine-readable `-p` mode. Its C-locale display uses
-/// `source on path (options)`, so ambiguous delimiters or malformed lines refuse
-/// the whole inspection rather than silently missing a nested mount. The caller
-/// supplies the same trusted printf separator (`\0` or `\n`) as the Linux helper
-/// and must honor a nonzero return, including after partial output.
+/// `source on path (options)`. This is best-effort protection: ambiguous or
+/// malformed lines, an empty table and a failed read reveal no mounts. In
+/// particular, a nested mount whose own name contains an ambiguous delimiter
+/// goes undetected. Skipped input stays silent so diagnostics cannot overflow
+/// the caller's bounded command capture and turn this check into a refusal.
+/// The caller supplies the same trusted printf separator (`\0` or `\n`) as
+/// the Linux helper, whose stricter read-failure contract remains unchanged.
 pub(super) const MAC_MOUNT_POINTS_SH: &str = r#"mount_points() {
-    if mount_table=$(LC_ALL=C mount 2>&1); then :; else
-        printf '%s\n' "$mount_table" >&2
-        return 1
-    fi
-    if [ -z "$mount_table" ]; then
-        printf '%s\n' 'cannot inspect an empty mount table' >&2
-        return 1
-    fi
+    if mount_table=$(LC_ALL=C mount 2>/dev/null); then :; else return 0; fi
     while IFS= read -r mount_line; do
         case "$mount_line" in
             *' on '*' ('*')') ;;
-            *) printf '%s\n' "cannot parse mount table line: $mount_line" >&2; return 1 ;;
+            *) continue ;;
         esac
         mount_rest=${mount_line#*' on '}
         mount_source=${mount_line%%' on '*}
         mount_point=${mount_rest%%' ('*}
         mount_options=${mount_rest#*' ('}
         case "$mount_rest" in
-            *' on '*) printf '%s\n' "ambiguous mount table line: $mount_line" >&2; return 1 ;;
+            *' on '*) continue ;;
         esac
         case "$mount_source$mount_options" in
-            *' ('*) printf '%s\n' "ambiguous mount table line: $mount_line" >&2; return 1 ;;
+            *' ('*) continue ;;
         esac
         case "$mount_point" in
             /*) ;;
-            *) printf '%s\n' "non-absolute mount point: $mount_line" >&2; return 1 ;;
+            *) continue ;;
         esac
         case "$mount_point" in
             "$1"|"$1"/*) printf "%s$2" "$mount_point" ;;
@@ -302,6 +298,7 @@ pub(super) const MAC_MOUNT_POINTS_SH: &str = r#"mount_points() {
     done <<EOF_MOUNTS
 $mount_table
 EOF_MOUNTS
+    return 0
 }
 "#;
 
@@ -647,27 +644,55 @@ esac"#,
         }
     }
 
-    /// Nested mounts must be caught without confusing a path's spaces or prefix.
+    /// Positive nested-mount evidence survives skipped lines, while unreadable
+    /// or ambiguous tables never block uninstall, even at the loop's last line.
+    /// Ambiguous nested names deliberately go undetected under the best-effort
+    /// contract; ordinary spaces and the directory boundary remain meaningful.
     #[test]
-    fn mount_guard_preserves_spaces_and_rejects_ambiguous_tables() {
-        for (table, succeeds, expected) in [
+    fn mount_guard_preserves_spaces_and_skips_ambiguous_lines() {
+        for (table, expected) in [
             (
                 "disk on /owned/lib (apfs, local)\nother on /owned/lib/nested mount (apfs)\nthird on /owned/library (apfs)",
-                true,
                 "/owned/lib\0/owned/lib/nested mount\0",
             ),
-            ("source on name on /owned/lib/nested (apfs)", false, ""),
-            ("disk on /owned/lib/odd (name (apfs)", false, ""),
-            ("disk on /owned/lib/new\nline (apfs)", false, ""),
+            ("source on name on /owned/lib/nested (apfs)", ""),
+            ("disk on /owned/lib/odd (name (apfs)", ""),
+            ("disk on /owned/lib/new\nline (apfs)", ""),
+            ("disk on /Volumes/Backup (old) (apfs)", ""),
+            ("disk on /Volumes/Backup on old (apfs)", ""),
+            ("unparsable", ""),
+            ("disk on relative/path (apfs)", ""),
+            ("", ""),
+            (
+                "unparsable\ndisk on /owned/lib/nested (apfs)\nlast line skipped",
+                "/owned/lib/nested\0",
+            ),
         ] {
             let fixture = ShellFixture::new();
             fixture.tool("mount", &format!("printf '%s\\n' {}", shell_quote(table)));
             let result =
                 fixture.run(&(MAC_MOUNT_POINTS_SH.to_owned() + "mount_points /owned/lib '\\0'\n"));
-            assert_eq!(result.status.success(), succeeds);
-            if succeeds {
-                assert_eq!(result.stdout, expected.as_bytes());
-            }
+            assert!(result.status.success(), "table: {table:?}");
+            assert_eq!(result.stdout, expected.as_bytes(), "table: {table:?}");
+            assert!(result.stderr.is_empty(), "table: {table:?}");
+            assert_eq!(fixture.commands(), "mount \n");
         }
+    }
+
+    /// A failed mount command supplies no evidence, including any partial
+    /// stdout, and its diagnostic must not turn into a remote-command failure.
+    #[test]
+    fn mount_guard_ignores_a_failed_mount_read() {
+        let fixture = ShellFixture::new();
+        fixture.tool(
+            "mount",
+            "printf '%s\\n' 'disk on /owned/lib/nested (apfs)'; printf '%s\\n' 'mount failed' >&2; exit 1",
+        );
+        let result =
+            fixture.run(&(MAC_MOUNT_POINTS_SH.to_owned() + "mount_points /owned/lib '\\0'\n"));
+        assert!(result.status.success());
+        assert!(result.stdout.is_empty());
+        assert!(result.stderr.is_empty());
+        assert_eq!(fixture.commands(), "mount \n");
     }
 }

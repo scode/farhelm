@@ -10033,6 +10033,61 @@ mod tests {
         assert!(system.remove_directory(&local, &lib).await.is_err());
     }
 
+    /// Final removal runs after the supervisor job is gone, so an unrelated
+    /// ambiguous Mac mount line must not strand the installation halfway
+    /// through uninstall. Drive the actual backend over the existing local
+    /// SSH stand-in: a positive nested mount first proves the guard is active,
+    /// then an unrelated ambiguous volume permits deletion of the owned tree.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn mac_uninstall_final_removal_skips_unrelated_ambiguous_mounts() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("bin");
+        let lib = root.path().join("lib");
+        tokio::fs::create_dir(&bin).await.unwrap();
+        tokio::fs::create_dir(&lib).await.unwrap();
+        let kept = lib.join("kept");
+        tokio::fs::write(&kept, b"owned installation")
+            .await
+            .unwrap();
+        write_fake_tool(&bin, "uname", "printf '%s\\n' Darwin").await;
+        let system = SystemBackend {
+            launcher: Arc::new(FixtureHomeLauncher {
+                home: root.path().to_path_buf(),
+                bin: bin.clone(),
+            }),
+            ..test_system_backend(root.path())
+        };
+        let target = ProvisioningTarget::ssh("scripted.example");
+        let nested = format!("disk on {}/nested (apfs)", lib.display());
+        write_fake_tool(
+            &bin,
+            "mount",
+            &format!("printf '%s\\n' {}", shell_words::quote(&nested)),
+        )
+        .await;
+        let failure = system.remove_directory(&target, &lib).await.unwrap_err();
+        assert!(
+            failure
+                .rendered()
+                .contains("something is mounted on or inside")
+        );
+        assert_eq!(tokio::fs::read(&kept).await.unwrap(), b"owned installation");
+
+        write_fake_tool(
+            &bin,
+            "mount",
+            "printf '%s\\n' 'disk on /Volumes/Backup (old) (apfs)' 'disk on /Volumes/Backup on old (apfs)'",
+        )
+        .await;
+        assert!(matches!(
+            system.remove_directory(&target, &lib).await.unwrap(),
+            ActionOutcome::Completed
+        ));
+        assert!(!lib.exists());
+        assert!(bin.exists(), "only the installation tree should be removed");
+    }
+
     /// Why this matters: a plan is confirmed some time after the reach check
     /// that approved it, and `farhelm helm setup` may run on the host in
     /// between. The remote unit write re-checks setup's marker in the same
