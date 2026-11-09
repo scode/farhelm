@@ -274,13 +274,35 @@ class InstalledUninstall(unittest.TestCase):
         self.assert_success(self.run_child([str(cli), "uninstall", "--yes"]))
         self.assert_removed()
 
-    def test_update_from_the_old_layout_then_remove(self):
-        """The installer turns the old layout into the app-only one, and the
-        result uninstalls through a link to its Terminal link."""
+    def test_old_layout_update_refuses_without_changing_the_installation(self):
+        """The upgrade floor leaves a legacy installation intact for recovery.
+
+        Native acceptance must agree with the installer's refusal policy:
+        pre-versioned bundles cannot migrate through an ordinary update.
+        Check both the dedicated status and the unchanged files so a generic
+        failure or a partially applied update cannot satisfy this case.
+        """
         self.seed_old_layout()
+        self.assertFalse((self.bundle / "Contents/Versions").exists())
+        old_cli = self.run_child([str(self.install_dir / "farhelm"), "--version"])
+        self.assert_success(old_cli)
+        self.assertEqual(old_cli.stdout.strip(), b"farhelm 0.0.1")
+        before = snapshot(self.home)
+        result = self.run_child(["/bin/sh", str(self.installer)], env=dict(
+            self.env, FARHELM_INSTALL_TEST_BASE_URL=self.url + "/current", FARHELM_VERSION=self.version))
+        self.assertEqual(result.returncode, 76, (result.stdout, result.stderr))
+        self.assertIn(b"predates the versioned app layout", result.stderr)
+        self.assertIn(b"farhelm uninstall", result.stderr)
+        self.assertEqual(snapshot(self.home), before)
+
+    def test_remove_through_an_indirect_terminal_link(self):
+        """An extra symlink must not obscure the installed command's ownership.
+
+        Keep this independent of legacy-layout updates: those now refuse,
+        but an installed CLI reached through another link must still remove
+        its own bundle while preserving the caller's link and user data.
+        """
         cli = self.install()
-        self.assertFalse((self.install_dir / "farhelm-desktop").exists())
-        self.assertFalse((self.install_dir / ".farhelm-installation").exists())
         link = self.home / "cli-link"
         link.symlink_to(cli)
         self.assert_success(self.run_child([str(link), "uninstall", "--yes"]))

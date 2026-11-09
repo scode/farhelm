@@ -784,7 +784,8 @@ that its required systemd or SSH substrate ran.
   become this install's request count.
 - `python3 scripts/record-test-run.py --kind development --selection 'installed uninstall acceptance' --concurrency 'one fixture at a time' --tmux none -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh`
   — macOS-only, after building the CLI: runs the actual installer and installed uninstaller against private fixture
-  homes and release archives. Covers updates, confirmation, dry-run preservation, foreign files and native bundles.
+  homes and release archives. Covers updates, legacy upgrade-floor refusal with the old installation preserved,
+  confirmation, dry-run preservation, foreign files, native bundles and uninstall through an indirect Terminal link.
   Other platforms report a skip; Linux no longer has end-to-end coverage of installer-made installations because the
   installer refuses Linux. The focused macOS CI job and release gate also run
   `cargo nextest run -p farhelm --bin farhelm -E 'test(uninstall::)'`, the version-lock, installation-lock and session
