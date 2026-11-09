@@ -113,3 +113,86 @@ issues in the full feature, including the three returned readiness corrections a
 separate scope assessment supported the commit-time distinction between direct and inferred evidence. Commit and PR
 wording passed its independent cold read. Every changed file received the documentation pass. The rebases preserve the
 reviewed feature patch, so that code review remains applicable.
+
+### Landing
+
+Landed first of three in its round, below upgrade-epochs (the minimum version an installation or host can update from)
+and session-switch-jiggle (terminal text no longer shifting when you switch sessions); since its base, main had gained
+only the fixed-height Settings dialog and review-queue bookkeeping. A fresh-context review read all of them against each
+other and found no interaction. The new stop wording travels in the text the supervisor already attaches to a stopped
+session to say why it stopped, so it needs no protocol change and does not depend on the version floor; the only code
+that compares that text, outside tests, is the session list row, which handles both wordings. No database schema changed
+in any of the three. The landing made no fixes to this plan, and the executor's report still holds.
+
+#### Things you should know
+
+- The review pointed out four browser tests in `terminal.spec.ts` that stop a `sleep 300` session soon after it shows as
+  running and expect "stopped by user", the same pattern as the three Rust tests this plan had to fix. They passed on
+  both engines on the Tensorlake sandboxes (the faster machines where the Rust tests first failed). They do not wait for
+  the agent's own readiness, so they could still flake on a fast machine if the stop beats the start; changing them to
+  wait for a marker the command prints would be a small follow-up.
+- The Tensorlake comparison you authorized while this plan was blocked was run by its executor; this landing's own
+  sandbox run covered the whole workspace's Rust tests, including the three fixed ones.
+
+#### Checks
+
+The three plans were checked together, stacked in queue order on main (`db0750fb` at the top), on this development
+machine and, at the maintainer's request, on Tensorlake sandboxes.
+
+Run on this machine:
+
+- `cargo fmt --all -- --check`, `dprint check`, `python3 releasing/check-changelog.py format`,
+  `python3 scripts/check-agents-md.py`, the test-sleep checker, and
+  `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` passed.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop` and `cargo check -p farhelm-desktop` passed.
+- Recorded `cargo nextest run -p farhelm-ui --features desktop` (the desktop app's own code, including its updater):
+  1111 passed, run `7ea46bc3`.
+- `bash scripts/test-install-sh.sh --farhelm target/debug/farhelm` (the macOS installer driven against fake releases):
+  601 checks passed. This and the next two items are their own harnesses, run directly rather than through the test
+  recorder, so they have no run id; their output was read in full.
+- The release brick-test harness's unit tests
+  (`python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py'`) passed.
+- The UI's JavaScript unit tests (`node --test` in `crates/farhelm-ui/js-tests`) and the grid terminal component's own
+  browser tests (`npx playwright test --config grid-client/playwright.config.ts`, Chromium and WebKit, no stack): 200
+  passed.
+
+Run on Tensorlake sandboxes:
+
+- Twelve terminal-related browser spec files on Chromium and WebKit, 24 file-and-engine pairs over ten sandboxes, using
+  the release web build: `terminal`, `terminal-switch-geometry`, `grid-terminal`, `terminal-font`, `sidebar-resize`,
+  `terminal-reconnect`, `terminal-migration`, `terminal-tabs`, `terminal-restart`, `terminal-attachments`,
+  `terminal-multihost` and `interface-fonts`. 502 passed, none failed, skipped or retried; runs `c1719814`, `bdda5312`,
+  `abf8c3cb`, `480bc664`, `83a819ff`, `91906e53`, `4306834f`, `44a7f61a`, `04e28cba` and `da840416`, in the recorder's
+  plain command mode (its Playwright mode cannot pick one engine per file) under the sandbox's slightly older Node 24.
+  Every sandbox reported its per-user systemd manager and its SSH to itself working.
+- Every Rust test in the workspace except the desktop app's, from one test archive split over nine sandboxes
+  (`cargo nextest archive --workspace --exclude farhelm-desktop`, then a hash partition per sandbox, in the recorder's
+  plain command mode because its nextest mode cannot take an archive): 5901 tests, 5900 passed. Runs `d42950f4`,
+  `10ab214f`, `239bae3e`, `13916f28`, `efe37aea`, `55d9e4b4`, `830ede08`, `750b573b` and `dac5478e`. Rootless Podman and
+  its image were present, so the container tests ran. The one failure, `attribute_compile_contract_matrix` in
+  `farhelm-testtrace-macros` (run `10ab214f`), compiles small crates with a nested `cargo`, which the sandboxes do not
+  have ("spawn: No such file or directory"); it passed here (below). Two tests reported themselves skipped for their
+  substrate, as they do wherever it is missing, and neither concerns these plans: OMP live admission (no Bun on the
+  sandboxes) and one tmux test that needs a tmux older than the supported one on `PATH`.
+
+After the landing fixes to upgrade-epochs (the installer's refusal text and the changelog kind), run here: formatting,
+`dprint check`, the changelog format check,
+`cargo clippy -p farhelm-supervisor -p farhelm --all-targets -- -D warnings`, recorded
+`cargo nextest run -p farhelm-supervisor --lib -E 'test(/installation::/)'` (32 passed, run `39b375a6`), recorded
+`cargo nextest run -p farhelm-testtrace-macros --test compile_contract` (2 passed, run `05991d87`), and
+`test-install-sh.sh` again (601 checks passed). Main after the merges differs from the tested tree only by those fixes
+and TODO.md entries other sessions landed meanwhile.
+
+Reused: the executor's own runs for each plan, as their reports list them; this landing reran broader suites rather than
+relying on them.
+
+Skipped:
+
+- The rest of the browser suite: the specs above cover the terminal, sizing and stop paths these plans change.
+- The desktop smoke: it starts the desktop app and checks its supervisor and terminal, not its updater; the updater's
+  refusal is covered by the desktop tests above, and the smoke cannot run a real update from an old release.
+- The CentOS provisioning run: it sets up a fresh host, which the helm's new refusal (for hosts already running a
+  too-old version) does not affect; the helm's own tests of that refusal ran in the workspace run above.
+- The release workflow itself: it runs only on a tag.
+- Hosted CI is manual-only and was not dispatched.
