@@ -125,26 +125,30 @@ same authority, but the user's Update click or explicit automatic-update opt-in 
 for confirmation. Update never downgrades a host: it installs the helm's own build, so a host whose supervisor reports a
 newer build is refused with both versions named, and the user updates the helm instead. It also refuses a host whose
 supervisor reports a database schema newer than the helm's build can open, which happens after a development build ran
-there; that host needs a build at least that new. While an update is running, its host row stays folded and shows
-`Updating…` until a progress snapshot is available, then shows the current step, completed-step count, and
-client-measured elapsed time inline in the status spot; hovering that status shows the count, the elapsed time, and
-every step of the run with its status and the current one highlighted (in a window too short for the whole list, the
-list keeps the current step in view), since the sidebar is too narrow to show a long step name, let alone the rest of
-the run. Reduced-motion settings replace the animated indicator with a static one. Remote binary upload appears as a
-separate step before installation, so the user can tell when network transfer is still underway. The row and its hover
-use the helm's readable names for the same steps in the plan, with completed work checked green, the running step
-pulsing amber (static under reduced motion), pending work grey, unchanged work grey, degraded work as an amber warning,
-and failure red with the helm's reason. Success returns the status spot to its normal label and leaves the row folded
-unless global details are on. Failure or an uncertain outcome still expands the row so its step list and diagnostic
-remain visible in Hosts. When setup or Update fails or has an uncertain outcome while Hosts is closed, the host's rail
-avatar shows a warning mark until Hosts is opened or a later run of that same action succeeds. Starting a retry does not
-acknowledge the warning, and an unrelated successful action does not clear it. Setup recovery by discovery can resolve
-the same failed setup run. Hosts never opens by itself. The Hosts header's `Update all` action makes the same authorized
-Update request for each remote host whose individual Update action is available at the click. A host already busy with
-setup or another run is skipped rather than queued for a later update; the local host is excluded. Each remote host
-keeps its own validation, progress, and result, so one failure does not hide or delay the others. Having an available
-Update action does not itself mean the host needs an update: the rail's update badge and the attention list's Update
-rows require a compatible older build or a lower protocol, as well as an available remote Update action.
+there; that host needs a build at least that new. A supervisor below this release's upgrade floor is also refused, with
+a manual recovery remedy: stop its Farhelm supervisor service, remove the Farhelm program directory the host reported,
+then remove the host from Farhelm and set it up again. Its data directory can stay, without a promise that the new
+release can use every feature's old data, or the user can delete it too if they accept losing it. While an update is
+running, its host row stays folded and shows `Updating…` until a progress snapshot is available, then shows the current
+step, completed-step count, and client-measured elapsed time inline in the status spot; hovering that status shows the
+count, the elapsed time, and every step of the run with its status and the current one highlighted (in a window too
+short for the whole list, the list keeps the current step in view), since the sidebar is too narrow to show a long step
+name, let alone the rest of the run. Reduced-motion settings replace the animated indicator with a static one. Remote
+binary upload appears as a separate step before installation, so the user can tell when network transfer is still
+underway. The row and its hover use the helm's readable names for the same steps in the plan, with completed work
+checked green, the running step pulsing amber (static under reduced motion), pending work grey, unchanged work grey,
+degraded work as an amber warning, and failure red with the helm's reason. Success returns the status spot to its normal
+label and leaves the row folded unless global details are on. Failure or an uncertain outcome still expands the row so
+its step list and diagnostic remain visible in Hosts. When setup or Update fails or has an uncertain outcome while Hosts
+is closed, the host's rail avatar shows a warning mark until Hosts is opened or a later run of that same action
+succeeds. Starting a retry does not acknowledge the warning, and an unrelated successful action does not clear it. Setup
+recovery by discovery can resolve the same failed setup run. Hosts never opens by itself. The Hosts header's
+`Update all` action makes the same authorized Update request for each remote host whose individual Update action is
+available at the click. A host already busy with setup or another run is skipped rather than queued for a later update;
+the local host is excluded. Each remote host keeps its own validation, progress, and result, so one failure does not
+hide or delay the others. Having an available Update action does not itself mean the host needs an update: the rail's
+update badge and the attention list's Update rows require a compatible older build or a lower protocol, as well as an
+available remote Update action.
 
 **Update remote hosts automatically** in Settings is off by default for new and existing installations. While on, the
 helm starts that same authorized Update for each host with an update by the badge's test, including required protocol
@@ -591,16 +595,16 @@ workspace edits approved automatically and other actions asking), and `approve` 
 running/idle status, a settled scope decision rather than a detection gap. Provider capabilities may clamp or reject a
 requested effort.
 
-Standard operation must never require falling back to SSH or a separate command line, with three v1 carve-outs:
-transport, web-token bootstrap, and bringing up the helm's own machine. Reaching a remote helm's web UI takes a
-user-managed SSH port forward, and obtaining or rotating that UI's token happens on the helm's machine (see Security) —
-accepted v1 friction, deliberately outside "standard operation". Bringing up a Linux helm machine is
-`farhelm helm setup`, run once there: that machine's systemd units are written by one owner rather than by whichever
-surface got there first, which is why the hosts panel refers to it instead of installing a supervisor locally (see
-Topology). On provisionable hosts, install and updates are the helm's job (over the user's SSH access); what may
-legitimately require manual host-side work is that same transport and token pair, on hosts provisioning does not cover.
-Everything else — session operations, template management, directory browsing — must work from the client. SSH otherwise
-remains an escape hatch, never a requirement.
+Standard operation must never require falling back to SSH or a separate command line, with four v1 carve-outs:
+transport, web-token bootstrap, bringing up the helm's own machine, and recovery from a release below the upgrade floor.
+Reaching a remote helm's web UI takes a user-managed SSH port forward, and obtaining or rotating that UI's token happens
+on the helm's machine (see Security) — accepted v1 friction, deliberately outside "standard operation". Bringing up a
+Linux helm machine is `farhelm helm setup`, run once there: that machine's systemd units are written by one owner rather
+than by whichever surface got there first, which is why the hosts panel refers to it instead of installing a supervisor
+locally (see Topology). On provisionable hosts, install and updates are the helm's job (over the user's SSH access);
+what may legitimately require manual host-side work is that same transport and token pair, on hosts provisioning does
+not cover. Everything else — session operations, template management, directory browsing — must work from the client.
+SSH otherwise remains an escape hatch, never a requirement.
 
 ## Install and uninstall
 
@@ -626,13 +630,18 @@ releases without the app resources, are refused before anything installed change
 directory, but installs nothing. Installation does not create or start services. The desktop app manages its own helm
 and local supervisor, as described in [Topology](#topology).
 
-Re-running the installer updates the installation. Its default is the latest stable release; `FARHELM_VERSION` selects a
-specific release, including a prerelease. Updating the software preserves user data. Updating while Farhelm runs is
-supported on the Mac: the running Farhelm keeps working on the version it started with, its sessions keep running, new
-sessions start, and agents' `farhelm` commands and conversation tracking keep working; quitting and reopening Farhelm
-finishes the update, after which sessions started before it use the new version too. An update of an installation
-already in this layout, stopped at any point, leaves an app that launches either the old version or the new one.
-Package-manager installations are outside this initial scope.
+Re-running the installer updates an installation at or above the release's upgrade floor (see
+[Upgrade compatibility and client scale](#upgrade-compatibility-and-client-scale)). Its default is the latest stable
+release; `FARHELM_VERSION` selects a specific release, including a prerelease. An older installation is refused before
+the update starts: stop local sessions and their terminals, quit Farhelm, run `farhelm uninstall`, then run the
+installer. Uninstall keeps the data on disk, but whether the new release can use it is decided per feature. A release
+too old to have uninstall needs its app and installed command files removed by hand, as the installation documentation
+describes. A fresh install is never below the floor. Updating the software preserves user data. Updating while Farhelm
+runs is supported on the Mac: the running Farhelm keeps working on the version it started with, its sessions keep
+running, new sessions start, and agents' `farhelm` commands and conversation tracking keep working; quitting and
+reopening Farhelm finishes the update, after which sessions started before it use the new version too. An update of an
+installation already in this layout, stopped at any point, leaves an app that launches either the old version or the new
+one. Package-manager installations are outside this initial scope.
 
 The installed Mac app also keeps itself up to date, the way Chrome does. An app running from
 `~/Applications/Farhelm.app` in this layout, and not a build from main, checks for the latest stable release shortly
@@ -652,8 +661,10 @@ future value or backwards clock resets it to now, and turning automatic updates 
 installed, and since the app then cannot update itself, its version readout carries a warning saying that this Farhelm
 can no longer verify its updates and must be reinstalled with the installer. The warning stays while the app runs, until
 a later check verifies and installs or finds nothing newer, or a newer Farhelm is installed some other way; after a
-relaunch it returns with the first check that fails the same way. It follows the stable channel only; prereleases are
-not offered.
+relaunch it returns with the first check that fails the same way. The same lasting warning is shown when the installer
+refuses because the existing installation is below its upgrade floor, with instructions to uninstall first and then run
+the installer; apps released before this support show an ordinary install failure with details in their log. It follows
+the stable channel only; prereleases are not offered.
 
 Every check first reads the installation as the installer left it, under the same lock installs and uninstall take. When
 an install or uninstall was interrupted, the updater installs nothing, automatically or on demand, and the version
@@ -3042,10 +3053,10 @@ are not persisted.
 ## Durability and resume
 
 The runtime guarantees below do not establish support for every historical data schema or a downgrade path between
-arbitrary versions. Upgrade compatibility is decided with the maintainer per feature, as specified in the
-maintainer-confirmed decisions below; agents must surface potential data/state loss before proceeding with such changes.
-A schema version bump on its own, where older releases merely refuse the newer data and nothing is lost, need not be
-raised.
+arbitrary versions. The upgrade floor governs the update mechanics; data compatibility is decided with the maintainer
+per feature, as specified in the maintainer-confirmed decisions below; agents must surface potential data/state loss
+before proceeding with such changes. A schema version bump on its own, where older releases merely refuse the newer data
+and nothing is lost, need not be raised.
 
 Sessions depend on exactly one thing staying up: their host. Every other component is disposable:
 
@@ -3867,7 +3878,8 @@ the agent creates it.
   Builds that share a protocol version interoperate (the mixed steady state above); builds on different protocol
   versions never exchange anything beyond the greeting that refuses them. Code and tests therefore do not decode,
   exercise, or shim another protocol version's messages, and reviews should push back on additions that do. Data a build
-  persisted is a separate question, decided per feature (see Upgrade compatibility and client scale).
+  persisted is a separate question, decided per feature; the upgrade floor governs which installed versions the update
+  mechanics support (see Upgrade compatibility and client scale).
 
 ## Feedback
 
@@ -4907,12 +4919,25 @@ copy of the state directory taken before the upgrade, restored together with the
 stored tmux session name other than the one the session's own identity gives (only a hand edit makes one) refuses,
 naming the session (or the pending create request), rather than change it by a guess.
 
-Until upgrade epochs exist (TODO.md), no change may break the upgrade path of the desktop app, the helm, or the
-supervisor. An installation of any stable release from v0.23.0 on, the first one the in-app updater and get.farhelm.io
-serve, must update to the new release through its normal path and come up on its existing state, and the new helm must
-be able to update the supervisors that release installed. A change that cannot meet this waits for upgrade epochs. This
-constrains the update path itself; whether a feature's own data survives the update is still decided per feature, as
-above.
+Every release has an **upgrade floor**, the oldest release it supports updating from, initially v0.23.0. Installations
+at or above that floor must update through their normal path and come up on their existing state, and the new helm must
+be able to update their supervisors. The periods between floor raises are **upgrade epochs**. Raise the floor only when
+an update needs upgrade logic shipped by an earlier release: the new floor is the first release of the previous epoch,
+so an installation can cross one epoch through its normal update path. The change that needs the raise changes the floor
+in its own PR and names it in the PR and changelog fragment. Before a release proceeds, its release procedure shows the
+maintainer the new floor, when it was promoted, its age and how many stable releases have shipped since; the maintainer
+accepts it or chooses an earlier base. There is no automatic waiting threshold.
+
+Below-floor installations are refused by the target release's installer, for both app-initiated and Terminal updates,
+with an uninstall-then-reinstall remedy. The app recognizes that refusal and keeps a reinstall warning; older apps show
+an ordinary install failure instead. The helm refuses Update of a below-floor supervisor, on either protocol path and
+again when a retained plan executes, with the manual host recovery described in Topology. Development builds and
+unparseable versions are not evidence that an installation or host is below the floor. Release candidates and dev
+releases use ordinary SemVer precedence, so a floor release's own prereleases are below it.
+
+The floor constrains update mechanics, not stored-data formats. Uninstall keeps local data, and the remote remedy lets
+the user keep the host's data directory too; a reinstall does not promise that every feature can read that older data.
+Whether a feature's own data survives remains decided per feature, as above.
 
 The helm is optimized for a handful of browser/desktop clients, not a large device fleet. Retaining the 64 newest
 browser credentials is acceptable even when an older credential is actively used. The desktop app's own credentials are
