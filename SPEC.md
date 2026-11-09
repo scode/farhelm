@@ -126,29 +126,30 @@ for confirmation. Update never downgrades a host: it installs the helm's own bui
 newer build is refused with both versions named, and the user updates the helm instead. It also refuses a host whose
 supervisor reports a database schema newer than the helm's build can open, which happens after a development build ran
 there; that host needs a build at least that new. A supervisor below this release's upgrade floor is also refused, with
-a manual recovery remedy: stop its Farhelm supervisor service, remove the Farhelm program directory the host reported,
-then remove the host from Farhelm and set it up again. Its data directory can stay, without a promise that the new
-release can use every feature's old data, or the user can delete it too if they accept losing it. While an update is
-running, its host row stays folded and shows `Updating…` until a progress snapshot is available, then shows the current
-step, completed-step count, and client-measured elapsed time inline in the status spot; hovering that status shows the
-count, the elapsed time, and every step of the run with its status and the current one highlighted (in a window too
-short for the whole list, the list keeps the current step in view), since the sidebar is too narrow to show a long step
-name, let alone the rest of the run. Reduced-motion settings replace the animated indicator with a static one. Remote
-binary upload appears as a separate step before installation, so the user can tell when network transfer is still
-underway. The row and its hover use the helm's readable names for the same steps in the plan, with completed work
-checked green, the running step pulsing amber (static under reduced motion), pending work grey, unchanged work grey,
-degraded work as an amber warning, and failure red with the helm's reason. Success returns the status spot to its normal
-label and leaves the row folded unless global details are on. Failure or an uncertain outcome still expands the row so
-its step list and diagnostic remain visible in Hosts. When setup or Update fails or has an uncertain outcome while Hosts
-is closed, the host's rail avatar shows a warning mark until Hosts is opened or a later run of that same action
-succeeds. Starting a retry does not acknowledge the warning, and an unrelated successful action does not clear it. Setup
-recovery by discovery can resolve the same failed setup run. Hosts never opens by itself. The Hosts header's
-`Update all` action makes the same authorized Update request for each remote host whose individual Update action is
-available at the click. A host already busy with setup or another run is skipped rather than queued for a later update;
-the local host is excluded. Each remote host keeps its own validation, progress, and result, so one failure does not
-hide or delay the others. Having an available Update action does not itself mean the host needs an update: the rail's
-update badge and the attention list's Update rows require a compatible older build or a lower protocol, as well as an
-available remote Update action.
+a manual recovery remedy: stop its Farhelm supervisor service, then remove its dedicated Farhelm installation directory.
+The remedy names the executable the host reported; its parent may be a shared or custom binary directory, in which case
+only Farhelm-owned files are removed and the shared directory stays. Then remove the host from Farhelm and set it up
+again. Its data directory can stay, without a promise that the new release can use every feature's old data, or the user
+can delete it too if they accept losing it. While an update is running, its host row stays folded and shows `Updating…`
+until a progress snapshot is available, then shows the current step, completed-step count, and client-measured elapsed
+time inline in the status spot; hovering that status shows the count, the elapsed time, and every step of the run with
+its status and the current one highlighted (in a window too short for the whole list, the list keeps the current step in
+view), since the sidebar is too narrow to show a long step name, let alone the rest of the run. Reduced-motion settings
+replace the animated indicator with a static one. Remote binary upload appears as a separate step before installation,
+so the user can tell when network transfer is still underway. The row and its hover use the helm's readable names for
+the same steps in the plan, with completed work checked green, the running step pulsing amber (static under reduced
+motion), pending work grey, unchanged work grey, degraded work as an amber warning, and failure red with the helm's
+reason. Success returns the status spot to its normal label and leaves the row folded unless global details are on.
+Failure or an uncertain outcome still expands the row so its step list and diagnostic remain visible in Hosts. When
+setup or Update fails or has an uncertain outcome while Hosts is closed, the host's rail avatar shows a warning mark
+until Hosts is opened or a later run of that same action succeeds. Starting a retry does not acknowledge the warning,
+and an unrelated successful action does not clear it. Setup recovery by discovery can resolve the same failed setup run.
+Hosts never opens by itself. The Hosts header's `Update all` action makes the same authorized Update request for each
+remote host whose individual Update action is available at the click. A host already busy with setup or another run is
+skipped rather than queued for a later update; the local host is excluded. Each remote host keeps its own validation,
+progress, and result, so one failure does not hide or delay the others. Having an available Update action does not
+itself mean the host needs an update: the rail's update badge and the attention list's Update rows require a compatible
+older build or a lower protocol, as well as an available remote Update action.
 
 **Update remote hosts automatically** in Settings is off by default for new and existing installations. While on, the
 helm starts that same authorized Update for each host with an update by the badge's test, including required protocol

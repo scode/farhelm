@@ -162,6 +162,10 @@ pub(crate) struct ProvisioningService {
     manager: Arc<ConnectionManager>,
     layout: PlanLayout,
     local_farhelm: PathBuf,
+    /// The oldest source release whose update mechanics this helm supports.
+    /// Injected services use a fixed floor so release-policy changes cannot
+    /// silently change orchestration fixtures' admission assumptions.
+    pub(super) upgrade_floor: &'static str,
     pub(super) memory: tokio::sync::Mutex<ProvisioningMemory>,
     /// Order policy commits against the final automatic busy/progress claim.
     /// Held only for local authorization and admission, never for host locks or
@@ -330,6 +334,46 @@ fn schema_refusal(host_schema: Option<i64>) -> Option<String> {
     })
 }
 
+/// Explain manual recovery when this helm cannot update the source release.
+///
+/// Dial paths name the installation that actually answered, which can differ
+/// from the registry. A binary's parent is not necessarily Farhelm's private
+/// directory: Update also supports executables in shared bin directories.
+/// Advice therefore conditions directory removal on dedicated ownership and
+/// keeps optional data deletion separate. Unknown and development versions do
+/// not establish an unsupported source; the shared predicate exempts them.
+pub(super) fn upgrade_floor_refusal(
+    host_build: &str,
+    floor: &str,
+    dial_farhelm: &Path,
+    dial_state_dir: Option<&Path>,
+) -> Option<String> {
+    if !farhelm_proto::below_upgrade_floor(host_build, floor) {
+        return None;
+    }
+    let program = peer_text(&dial_farhelm.to_string_lossy());
+    let data = match dial_state_dir {
+        Some(path) => format!(
+            "Its data directory is {}. Keep it, or delete it too only if you accept losing \
+             its Farhelm data; a new installation may not use every feature's older data.",
+            peer_text(&path.to_string_lossy()),
+        ),
+        None => "The supervisor did not report its data directory; locate it before choosing \
+                 to delete data, and delete it only if you accept losing that data."
+            .to_string(),
+    };
+    Some(format!(
+        "the host runs Farhelm {}, older than this helm's upgrade floor of {floor}; it is too \
+         old to update in place. On that host, stop its Farhelm supervisor service. Its Farhelm \
+         executable is {program}. Remove its installation directory only if that directory is \
+         dedicated to Farhelm (normally ~/.local/lib/farhelm). For a shared or custom binary \
+         directory, remove only the Farhelm-owned files, including that executable; do not \
+         delete the shared parent directory. {data} Then remove the host from Farhelm and set \
+         it up again",
+        peer_text(host_build),
+    ))
+}
+
 /// Select transport and payloads before the manager can run a connection hook.
 /// Host setup and credential delivery share their validated backend. Snapshot
 /// preparation selects its one-shot backend here too; a late attachment or a
@@ -448,6 +492,7 @@ impl ProvisioningService {
             manager,
             layout: PlanLayout::production(helm_state_dir),
             local_farhelm,
+            upgrade_floor: farhelm_proto::UPGRADE_FLOOR,
             memory: tokio::sync::Mutex::new(ProvisioningMemory::default()),
             automatic_update_admission: tokio::sync::Mutex::new(()),
             run_slots: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_RUNS)),
@@ -482,6 +527,7 @@ impl ProvisioningService {
             manager,
             layout,
             local_farhelm,
+            upgrade_floor: "0.0.0",
             memory: tokio::sync::Mutex::new(ProvisioningMemory::default()),
             automatic_update_admission: tokio::sync::Mutex::new(()),
             run_slots: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_RUNS)),
@@ -1272,6 +1318,14 @@ impl ProvisioningService {
             } => {
                 if let Some(refusal) = downgrade_refusal(&build_version, &self.helm_build())
                     .or_else(|| schema_refusal(database_schema))
+                    .or_else(|| {
+                        upgrade_floor_refusal(
+                            &build_version,
+                            self.upgrade_floor,
+                            &dial_farhelm,
+                            dial_state_dir.as_deref(),
+                        )
+                    })
                 {
                     return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
                         refusal,
@@ -1317,6 +1371,14 @@ impl ProvisioningService {
             } => {
                 if let Some(refusal) = downgrade_refusal(&peer_build, &self.helm_build())
                     .or_else(|| schema_refusal(database_schema))
+                    .or_else(|| {
+                        upgrade_floor_refusal(
+                            &peer_build,
+                            self.upgrade_floor,
+                            &dial_farhelm,
+                            dial_state_dir.as_deref(),
+                        )
+                    })
                 {
                     return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
                         refusal,
@@ -2195,6 +2257,14 @@ impl ProvisioningService {
                         // confirmation.
                         if let Some(refusal) = downgrade_refusal(&build_version, &self.helm_build())
                             .or_else(|| schema_refusal(database_schema))
+                            .or_else(|| {
+                                upgrade_floor_refusal(
+                                    &build_version,
+                                    self.upgrade_floor,
+                                    &dial_farhelm,
+                                    dial_state_dir.as_deref(),
+                                )
+                            })
                         {
                             // This is the helm's own refusal; the second half
                             // of BackendFailure is reserved for host stderr.
@@ -2238,6 +2308,14 @@ impl ProvisioningService {
                     } => {
                         if let Some(refusal) = downgrade_refusal(&peer_build, &self.helm_build())
                             .or_else(|| schema_refusal(database_schema))
+                            .or_else(|| {
+                                upgrade_floor_refusal(
+                                    &peer_build,
+                                    self.upgrade_floor,
+                                    &dial_farhelm,
+                                    dial_state_dir.as_deref(),
+                                )
+                            })
                         {
                             // Keep the helm's refusal out of the host-stderr
                             // slot, which would misattribute and quote it.
