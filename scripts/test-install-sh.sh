@@ -1360,33 +1360,31 @@ if command -v shellcheck >/dev/null 2>&1; then
 fi
 
 # ===========================================================================
-# Scenario: the one-time move from the layout that copied both binaries
-# into ~/.local/bin and the bundle. Why: that is every existing
-# installation; its copies the installer owns must go, the user's own files
-# must not, and the bundle must become the new layout.
+# Scenario: layouts from before versioned apps cannot meet the upgrade floor.
+# The real binary's distinct refusal must survive the shell handoff, with the
+# old app and command copies intact so the user can remove them deliberately.
 # ===========================================================================
 echo
-echo "== moving from the old layout =="
+echo "== refusing layouts below the upgrade floor =="
 HOME_OLD="$WORKDIR/home-old-layout"
 seed_old_layout "$HOME_OLD" 1.2.3
+OLD_BEFORE=$(find "$HOME_OLD" -type f -exec sha256sum {} \; | sort)
 run_install "$MAC_TOOLS" "$HOME_OLD" "$BASE/good-v2" 1.2.4
-check "old layout: the update exits 0" [ "$RC" -eq 0 ]
-check "old layout: reported as an update" contains "$OUT" "Farhelm 1.2.4 is ready."
-check "old layout: the bundle is the new layout" [ "$(versions_of "$HOME_OLD/Applications/Farhelm.app")" = 1.2.4 ]
-check "old layout: the bundle's record is the new one" assert_current_record "$HOME_OLD"
-check "old layout: farhelm is now the Terminal link" \
-  [ "$(readlink "$HOME_OLD/.local/bin/farhelm")" = "$HOME_OLD/Applications/Farhelm.app/Contents/MacOS/farhelm" ]
-check "old layout: the old farhelm-desktop copy is gone" [ ! -e "$HOME_OLD/.local/bin/farhelm-desktop" ]
-check "old layout: the old bin-directory record is gone" [ ! -e "$HOME_OLD/.local/bin/.farhelm-installation" ]
-check "old layout: no kept copies (they were the installer's)" \
-  [ -z "$(find "$HOME_OLD/.local/bin" -name '*.replaced-*')" ]
-check "old layout: the app is launchable" app_launchable "$HOME_OLD/Applications/Farhelm.app"
+check "old layout: the shell preserves the dedicated floor status" [ "$RC" -eq 76 ]
+check "old layout: the refusal explains its age" contains "$ERR" "too old to update"
+check "old layout: the remedy uninstalls first" contains "$ERR" "farhelm uninstall"
+check "old layout: the remedy keeps data" contains "$ERR" "data stays on disk"
+check "old layout: app and command copies are untouched" \
+  [ "$(find "$HOME_OLD" -type f -exec sha256sum {} \; | sort)" = "$OLD_BEFORE" ]
 
 HOME_LEGACY="$WORKDIR/home-legacy-bundle"
 seed_old_layout "$HOME_LEGACY" 1.2.3 legacy
+LEGACY_BEFORE=$(find "$HOME_LEGACY" -type f -exec sha256sum {} \; | sort)
 run_install "$MAC_TOOLS" "$HOME_LEGACY" "$BASE/good-v2" 1.2.4
-check "recordless legacy bundle: the update exits 0" [ "$RC" -eq 0 ]
-check "recordless legacy bundle: replaced by the new layout" assert_current_record "$HOME_LEGACY"
+check "recordless legacy bundle: dedicated floor refusal" [ "$RC" -eq 76 ]
+check "recordless legacy bundle: manual fallback when uninstall cannot run" contains "$ERR" "uninstall is unavailable"
+check "recordless legacy bundle: all files are preserved" \
+  [ "$(find "$HOME_LEGACY" -type f -exec sha256sum {} \; | sort)" = "$LEGACY_BEFORE" ]
 
 HOME_LEGACY_EXTRA="$WORKDIR/home-legacy-extra"
 seed_old_layout "$HOME_LEGACY_EXTRA" 1.2.3 legacy
@@ -1561,9 +1559,14 @@ check "K2: the closing message mentions no kept copy" not_contains "$OUT" "was n
 
 HOME_K3="$WORKDIR/home-k3"
 seed_old_layout "$HOME_K3" 1.2.3
+# Keep the old command receipts but remove the app, as manual recovery does.
+# A fresh install still has to preserve a command edited since that receipt;
+# keeping the legacy app here would exercise only the earlier floor refusal.
+rm -rf "$HOME_K3/Applications/Farhelm.app"
+check "K3 premise: no old app remains" [ ! -e "$HOME_K3/Applications/Farhelm.app" ]
 printf '#!/bin/sh\necho edited since\n' >"$HOME_K3/.local/bin/farhelm"
 run_install "$TOOLCHAIN_FULL" "$HOME_K3" "$BASE/good-v2" 1.2.4
-check "K3 (an old-layout copy edited since): the update exits 0" [ "$RC" -eq 0 ]
+check "K3 (an old-layout command edited since): the fresh install exits 0" [ "$RC" -eq 0 ]
 check "K3: the edited file is kept" [ "$(cat "$(kept_files "$HOME_K3/.local/bin")")" = "#!/bin/sh
 echo edited since" ]
 

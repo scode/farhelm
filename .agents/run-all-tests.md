@@ -91,7 +91,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - The CI install-script job's Alpine/BusyBox run (the `docker run ... alpine:3` step in `.github/workflows/ci.yml`, with
   a static musl `farhelm` from `cargo build -p farhelm --target x86_64-unknown-linux-musl` passed as `--farhelm`; the
   sweep runs `test-install-sh.sh` only under the host's GNU userland). Both runs include the installer's scenario-scoped
-  request counts and diagnostics for unexpected requests in refused `/latest` cases.
+  request counts and diagnostics for unexpected requests in refused `/latest` cases, plus legacy upgrade-floor refusal,
+  dedicated status propagation and preservation of the old app and command files.
 - `dprint check`
 - `python3 scripts/check-agents-md.py` and `python3 scripts/check-agents-md.py --self-test` (includes both Claude
   instruction-file names in the repository inventory and mixed-case specification pointers)

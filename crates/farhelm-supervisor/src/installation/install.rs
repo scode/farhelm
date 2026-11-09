@@ -34,9 +34,11 @@
 //!    once the rename is on disk;
 //! 8. the Terminal link, and its folder flushed.
 //!
-//! An app without `Versions/` (a fresh install, or an installation from
-//! before the side-by-side layout) is instead built whole under a temporary
-//! name beside its final place, flushed, and renamed into place.
+//! Fresh installs use a whole bundle built beside its final place, flushed,
+//! and renamed into place. The retained rebuild code also understands legacy
+//! layouts, but the upgrade floor refuses those existing installations before
+//! a new rebuild starts. Expectation and ownership checks still precede the
+//! floor; recovery of earlier interrupted work still precedes inspection.
 
 use super::dirs::{self, EntryKind};
 use super::{
@@ -107,7 +109,7 @@ pub struct Installed {
 
 /// The exit status of a run that found the installation no longer what the
 /// updater's expectation said: nothing was changed, and the updater simply
-/// looks again later. 75 is `EX_TEMPFAIL`; every other refusal exits 1.
+/// looks again later. 75 is `EX_TEMPFAIL`; ordinary refusals exit 1.
 pub const STATE_CHANGED: i32 = 75;
 
 /// The exit status of a run that found the installation lock held by
@@ -115,6 +117,13 @@ pub const STATE_CHANGED: i32 = 75;
 /// changed, and the app's updater tries again shortly rather than showing a
 /// failure. 74 so it stays apart from [`STATE_CHANGED`].
 pub const BUSY: i32 = 74;
+
+/// The source installation cannot meet this release's upgrade floor.
+///
+/// Unlike a busy or changed installation, retrying cannot supply missing upgrade
+/// logic. The app uses this distinct status to keep a reinstall warning; older
+/// apps still log the installer's full refusal and show an ordinary failure.
+pub const UPGRADE_TOO_OLD: i32 = 76;
 
 /// Why a run stopped: one line for the error marker, then lines of advice,
 /// and the exit status the script passes on.
@@ -174,6 +183,17 @@ pub type StepHook<'a> = &'a mut dyn FnMut(Step) -> io::Result<()>;
 
 /// Run the locked install.
 pub fn install(request: &InstallRequest, hook: StepHook<'_>) -> Result<Installed, Refusal> {
+    install_with_floor(request, farhelm_proto::UPGRADE_FLOOR, hook)
+}
+
+/// Keep the real locked install testable against a fixed compatibility boundary.
+/// Production always supplies the shared release floor; changing it must not
+/// silently change what the installer tests establish about refusal ordering.
+fn install_with_floor(
+    request: &InstallRequest,
+    floor: &str,
+    hook: StepHook<'_>,
+) -> Result<Installed, Refusal> {
     let app_path = request.applications.join(APP_NAME);
     let fail = |what: &str, error: &dyn std::fmt::Display| {
         Refusal::new(
@@ -217,7 +237,7 @@ pub fn install(request: &InstallRequest, hook: StepHook<'_>) -> Result<Installed
         applications,
         app_path: &app_path,
     };
-    let outcome = ctx.run(hook);
+    let outcome = ctx.run(floor, hook);
     // The folder goes whatever happened; the kernel lock goes with `lock`.
     let released = compat.release();
     let installed = outcome?;
@@ -279,7 +299,7 @@ impl Context<'_> {
         )
     }
 
-    fn run(&self, hook: StepHook<'_>) -> Result<Installed, Refusal> {
+    fn run(&self, floor: &str, hook: StepHook<'_>) -> Result<Installed, Refusal> {
         // Before inspecting, so an app a killed rebuild left aside is back
         // at its place when the run decides what is there.
         self.remove_own_leftovers()?;
@@ -306,6 +326,7 @@ impl Context<'_> {
                 });
             }
         }
+        self.check_upgrade_floor(&found, floor)?;
         if self.request.update_only {
             self.check_update_only(&found)?;
         }
@@ -545,6 +566,79 @@ impl Context<'_> {
             ));
         }
         Ok(())
+    }
+
+    /// Refuse unsupported update mechanics before starting new installation work.
+    ///
+    /// A legacy layout establishes an old source; an unreadable Installed record
+    /// establishes no safe source at all. A readable unknown version stays exempt,
+    /// as development builds do. Recovery of an earlier run's leftovers precedes
+    /// inspection, so this gate judges the installation that recovery restored.
+    fn check_upgrade_floor(&self, found: &Found, floor: &str) -> Result<(), Refusal> {
+        let reason = match found {
+            Found::Replaceable { existing: None } => return Ok(()),
+            Found::Replaceable { existing: Some(_) }
+            | Found::Ours {
+                versioned: false, ..
+            } => "this installation predates the versioned app layout and is too old to update"
+                .to_string(),
+            Found::Ours {
+                contents,
+                versioned: true,
+                ..
+            } => {
+                let installed = dirs::open_folder(contents.as_fd(), "Versions")
+                    .ok()
+                    .flatten()
+                    .and_then(|versions| {
+                        dirs::read_small(versions.as_fd(), "installed", 4096)
+                            .ok()
+                            .flatten()
+                    })
+                    .and_then(|bytes| String::from_utf8(bytes).ok());
+                match installed {
+                    Some(installed) => {
+                        let installed = installed.trim_end();
+                        if !farhelm_proto::below_upgrade_floor(installed, floor) {
+                            return Ok(());
+                        }
+                        format!("Farhelm {installed} is too old to update")
+                    }
+                    None => "the installed version record is missing or unreadable, so the update source cannot be established".to_string(),
+                }
+            }
+        };
+        // The advice names this run's own paths: an installation made with
+        // FARHELM_INSTALL_DIR keeps its links elsewhere than ~/.local/bin, and
+        // telling that user to remove the default paths would miss the real
+        // ones (and could remove another installation's).
+        let bin = &self.request.bin_dir;
+        let manual = [
+            format!(
+                "If uninstall is unavailable, cannot start, or leaves the app, remove {}",
+                self.app_path.display()
+            ),
+            format!(
+                "and only this installation's {} and {} by hand.",
+                bin.join("farhelm").display(),
+                bin.join("farhelm-desktop").display()
+            ),
+        ];
+        Err(Refusal {
+            status: UPGRADE_TOO_OLD,
+            ..Refusal::new(
+                format!("{reason}; this release updates installations from Farhelm {floor} onward"),
+                &[
+                    "Stop local sessions and their terminal tabs, quit Farhelm, then run farhelm uninstall.",
+                    "Your data stays on disk, but may not carry over cleanly after reinstalling.",
+                    "Then install again the way you installed before, for example:",
+                    "curl -fsSL https://get.farhelm.io/install.sh | sh",
+                    &manual[0],
+                    &manual[1],
+                    "Keep your data and unrelated files; stop manually started Farhelm processes before removal.",
+                ],
+            )
+        })
     }
 
     // -- the update path ---------------------------------------------------

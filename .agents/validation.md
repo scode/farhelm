@@ -762,7 +762,8 @@ that its required systemd or SSH substrate ran.
   installer as a real child against a fixture HTTP server, using a Darwin/arm64 `uname` shim on Linux and BusyBox. The
   installer hands its locked work to the release's own `farhelm`, so every fake release's `farhelm` is a wrapper that
   runs this tree's real binary (required; CI builds it static with musl so the Alpine/BusyBox run can use it too).
-  Covers fresh install, updates side by side and interrupted updates finished by a Terminal run or an older app's
+  Covers fresh install, upgrade-floor refusal of legacy layouts with their files preserved and the dedicated status
+  passed through the shell, updates side by side and interrupted updates finished by a Terminal run or an older app's
   updater (the write order stopped after each step is covered by the Rust module tests of
   `farhelm_supervisor::installation::install`), the forwarder, 404, checksums, malformed archives, version
   normalization, missing prerequisites, exact closing messages and tmux advice, terminal styling/progress and plain
