@@ -650,42 +650,58 @@ if Tensorlake refuses the deletion, an explicit cleanup entry is kept so the use
 can therefore briefly create a billed sandbox; that is accepted. Update the specification's wording of the launcher gate
 to match.
 
-## Blocked
+### 2026-11-09: answer to a blocked question
 
-Blocked on 2026-11-08 (claim 86a79e).
+The question, as the executor put it:
 
-### Delete after a partially failed Replace needs an exception
+> Blocked on 2026-11-08 (claim 86a79e).
+>
+> ### Delete after a partially failed Replace needs an exception
+>
+> This plan gives each recipe launch its own Tensorlake sandbox. The agreed model says Restart and Replace stay in that
+> sandbox, Delete removes the sandbox and its files and leaves nothing billing, and Delete works while suspended without
+> first resuming it.
+>
+> Existing Replace creates a new session before removing the source. If source removal fails, Farhelm keeps the new
+> session, reports both sessions, and lets the user check or remove the source by hand. In a sandbox session this can
+> leave both sessions in the same sandbox. Repeated replacements after partial failures can leave more than two.
+>
+> Applying the agreed sandbox Delete to that leftover source would also kill the replacement and delete its files.
+> Making Delete remove only the chosen session would preserve the replacement, but the sandbox and its billing would
+> remain. That is an exception to the approved Delete guarantee. It also cannot work while suspended: removing one
+> session while preserving the others needs the supervisor to be reachable; Tensorlake can only destroy the entire
+> sandbox. Farhelm must not resume it automatically.
+>
+> The leading specification review and a separate scope review found this conflict before implementation. No product PR
+> or real sandbox has been created. The earlier SSH-registration decision is settled and does not need revisiting.
+>
+> Options:
+>
+> - Make Delete terminate the sandbox only when deleting its final session. While failed Replace cleanup leaves other
+>   sessions there, Delete removes only the chosen session and confirms that the other sessions, sandbox, files and
+>   billing remain. This non-final Delete refuses while suspended or unreachable, explaining that the user must Resume
+>   or reconnect first. Final-session Delete still works while suspended and removes the sandbox and snapshots before
+>   forgetting the session. Suspend, Resume and Stop and suspend affect the shared sandbox, so their wording and
+>   confirmation cover all sessions left there. Ordinary additional session creation on that sandbox remains forbidden.
+> - Keep every explicit Delete destructive for the entire sandbox, with a confirmation naming all affected sessions. Add
+>   a separate source-only cleanup action for a failed Replace, available after Resume or reconnect, so users can remove
+>   the old session without destroying its replacement. This preserves Delete's blanket consequence but introduces a new
+>   operation and its UI; an ordinary Replace retry does not currently promise this cleanup after a definite failure.
+>
+> Recommendation: take the first option and record the narrow exceptions to the one-session model and Delete guarantees.
+> It reuses ordinary session removal and preserves the accepted replacement without a new cleanup or retry subsystem.
+> The exception lasts until the user resolves the failed replacement; no automatic cleanup or automatic Resume is added.
 
-This plan gives each recipe launch its own Tensorlake sandbox. The agreed model says Restart and Replace stay in that
-sandbox, Delete removes the sandbox and its files and leaves nothing billing, and Delete works while suspended without
-first resuming it.
+The maintainer's answer:
 
-Existing Replace creates a new session before removing the source. If source removal fails, Farhelm keeps the new
-session, reports both sessions, and lets the user check or remove the source by hand. In a sandbox session this can
-leave both sessions in the same sandbox. Repeated replacements after partial failures can leave more than two.
+The maintainer chose the first option on 2026-11-08, in conversation with the landing monitor.
 
-Applying the agreed sandbox Delete to that leftover source would also kill the replacement and delete its files. Making
-Delete remove only the chosen session would preserve the replacement, but the sandbox and its billing would remain. That
-is an exception to the approved Delete guarantee. It also cannot work while suspended: removing one session while
-preserving the others needs the supervisor to be reachable; Tensorlake can only destroy the entire sandbox. Farhelm must
-not resume it automatically.
-
-The leading specification review and a separate scope review found this conflict before implementation. No product PR or
-real sandbox has been created. The earlier SSH-registration decision is settled and does not need revisiting.
-
-Options:
-
-- Make Delete terminate the sandbox only when deleting its final session. While failed Replace cleanup leaves other
-  sessions there, Delete removes only the chosen session and confirms that the other sessions, sandbox, files and
-  billing remain. This non-final Delete refuses while suspended or unreachable, explaining that the user must Resume or
-  reconnect first. Final-session Delete still works while suspended and removes the sandbox and snapshots before
-  forgetting the session. Suspend, Resume and Stop and suspend affect the shared sandbox, so their wording and
-  confirmation cover all sessions left there. Ordinary additional session creation on that sandbox remains forbidden.
-- Keep every explicit Delete destructive for the entire sandbox, with a confirmation naming all affected sessions. Add a
-  separate source-only cleanup action for a failed Replace, available after Resume or reconnect, so users can remove the
-  old session without destroying its replacement. This preserves Delete's blanket consequence but introduces a new
-  operation and its UI; an ordinary Replace retry does not currently promise this cleanup after a definite failure.
-
-Recommendation: take the first option and record the narrow exceptions to the one-session model and Delete guarantees.
-It reuses ordinary session removal and preserves the accepted replacement without a new cleanup or retry subsystem. The
-exception lasts until the user resolves the failed replacement; no automatic cleanup or automatic Resume is added.
+Delete terminates a sandbox only when it deletes that sandbox's last session. While a failed Replace has left other
+sessions in the same sandbox, Delete removes only the chosen session, and its confirmation says that the other sessions,
+the sandbox, its files and its billing remain. That non-final Delete refuses while the sandbox is suspended or
+unreachable and tells the user to Resume or reconnect first; Farhelm never resumes the sandbox automatically. Deleting
+the final session still works while suspended and removes the sandbox and its snapshots before forgetting the session.
+Suspend, Resume and Stop and suspend act on the shared sandbox, so their wording and confirmation cover every session
+left there. Creating ordinary additional sessions in a sandbox stays forbidden. Record these as narrow exceptions to the
+one-session model and to the Delete guarantee, lasting until the user resolves the failed replacement; no automatic
+cleanup, retry or Resume is added.
