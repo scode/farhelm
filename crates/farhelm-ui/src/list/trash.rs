@@ -1,10 +1,12 @@
-//! Show host-owned archives without treating a stale listing as deletion authority.
+//! Show archives and accepted cleanup without treating a receipt as reclaimed space.
 //!
 //! Idle counts are event-driven; hosts actively freeing space are polled until
 //! their next successful listing says removal has ended. Opening the dialog asks for bounded disk usage;
 //! confirmations and immediate single deletes freeze IDs and connection incarnations, while the supervisor
 //! rechecks ownership before any mutation. Read generations prevent an earlier
 //! count/measurement from restoring entries removed by this client's cleanup.
+//! A capable host retains queued, running and stuck entries; explicit Retry
+//! shares the existing deletion owner rather than starting another cleanup path.
 //! The list gains a named tab stop when none of its actions can take focus,
 //! so keyboard users can still scroll retained host information in WebKit
 //! while a read or deletion is pending.
@@ -39,8 +41,8 @@ const MAX_SELECTION: usize = 10_000;
 /// the checkout that moved there. 700 ms matches the approval cards' answer
 /// pause for the same hazard (SPEC.md, "Agent-spawned sessions").
 const SETTLE_MS: u64 = 700;
-/// Only a host's affirmative running-removal report starts this cadence.
-/// A failed read preserves that report, so a temporary outage cannot imply completion.
+/// A host's running report or capable cleanup receipt starts this cadence.
+/// A failed read preserves progress, so a temporary outage cannot imply completion.
 const REMOVAL_POLL_MS: u64 = 3_000;
 
 /// Count wording stays grammatical at the destructive confirmation boundary.
@@ -79,7 +81,8 @@ struct HostTrash {
     incarnation: u64,
     reply: Option<Result<CheckoutTrashListing, String>>,
     loading: bool,
-    /// The last successful same-incarnation report, retained across read failures.
+    /// The last same-incarnation progress report or accepted cleanup awaiting
+    /// confirmation. Read failures retain it until a successful list settles it.
     removing: bool,
     /// A host-local request order: polling one host cannot supersede another's read.
     read_serial: u64,
@@ -392,16 +395,48 @@ fn target(host: &Host, state: Option<&HostTrash>) -> Option<Target> {
 /// Narrow a settled host selection to a displayed checkout without bypassing
 /// the host's cleanup limit or connection fence. Issue-only records deliberately
 /// remain available only through the bulk actions, which explain their cleanup.
+/// A queued or running entry has no second action; a failed one uses this same
+/// authority boundary for its explicit Retry.
 fn entry_target(host: &Host, state: Option<&HostTrash>, id: &str) -> Option<Target> {
     let mut selected = target(host, state)?;
     let listing = state?.reply.as_ref()?.as_ref().ok()?;
     let checkout = listing.checkouts.iter().find(|entry| entry.id == id)?;
+    if checkout.removing {
+        return None;
+    }
     selected.ids = vec![checkout.id.clone()];
     selected.count = 1;
     selected.unchecked = 0;
     selected.bytes = checkout.bytes.unwrap_or_default();
     selected.partial = checkout.bytes.is_none();
     Some(selected)
+}
+
+/// Acceptance starts cleanup; only a later capable listing proves the files are gone.
+///
+/// Older supervisors hide accepted rows themselves. Their optimistic disappearance
+/// stays unchanged, while a capable peer's retained row keeps the running indicator
+/// and its existing completion poll alive through an explicitly requested Retry.
+fn accepted_cleanup(state: &mut HostTrash, ids: &[String]) {
+    let Some(Ok(listing)) = state.reply.as_mut() else {
+        return;
+    };
+    if listing.reports_retired {
+        // An accepted diagnostic-only ID has no row to mark. Keep the poll
+        // alive for it too: a failed immediate refresh cannot prove that the
+        // newly accepted work finished or that it never started.
+        listing.removing |= !ids.is_empty();
+        state.removing |= !ids.is_empty();
+        for checkout in &mut listing.checkouts {
+            if ids.contains(&checkout.id) {
+                checkout.removing = true;
+                checkout.stuck = None;
+            }
+        }
+    } else {
+        listing.checkouts.retain(|entry| !ids.contains(&entry.id));
+    }
+    listing.issues.retain(|entry| !ids.contains(&entry.id));
 }
 
 /// Human-readable allocated space, with units that do not imply byte precision
@@ -434,14 +469,20 @@ fn archived_when(seconds: Option<i64>) -> Element {
     let Some(seconds) = seconds else {
         return rsx! { "Archive time unknown" };
     };
+    let timestamp = utc_timestamp(seconds);
+    rsx! { "Archived " span { class: "font-mono", "{timestamp}" } }
+}
+
+/// Render the host's recorded time without substituting a client or filesystem clock.
+/// Archive dates and cleanup failures share this display but have distinct causes.
+fn utc_timestamp(seconds: i64) -> String {
     let (year, month, day) = farhelm_proto::time::civil_from_days(seconds.div_euclid(86400));
     let time = seconds.rem_euclid(86400);
-    let timestamp = format!(
+    format!(
         "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
         time / 3600,
         time % 3600 / 60
-    );
-    rsx! { "Archived " span { class: "font-mono", "{timestamp}" } }
+    )
 }
 
 /// Dismiss the band opening `shown`, the one the cancelling render drew
@@ -860,20 +901,15 @@ pub(super) fn TrashControl(
                     {
                         match result {
                             Ok(reply) => {
-                                // These removals are confirmed records, not guessed
-                                // successful files. Always keep overlapping issues.
+                                // The reply confirms accepted IDs, not reclaimed
+                                // space. Retain capable rows until a fresh list;
+                                // the request's own diagnostics stay visible below.
                                 if let Some(entry) = state
                                     .write()
                                     .get_mut(&target.host)
                                     .filter(|entry| entry.incarnation == target.incarnation)
-                                    && let Some(Ok(listing)) = entry.reply.as_mut()
                                 {
-                                    listing
-                                        .checkouts
-                                        .retain(|entry| !reply.removed.contains(&entry.id));
-                                    listing
-                                        .issues
-                                        .retain(|entry| !reply.removed.contains(&entry.id));
+                                    accepted_cleanup(entry, &reply.removed);
                                 }
                                 let mut notices = notices.write();
                                 let retained = notices.entry(target.host).or_default();
@@ -917,7 +953,8 @@ pub(super) fn TrashControl(
     let shown = confirmation.current();
     // Fingerprint everything that decides where entry deletes are drawn (the
     // open band, the reachability error, pending requests, and per host its
-    // state, entries, issues and notices), and re-arm the pause in the same
+    // state, entries (including failure details that change their height),
+    // issues and notices), and re-arm the pause in the same
     // render that moves rows, so no render shows a moved row with its delete
     // enabled.
     let mut layout = DefaultHasher::new();
@@ -930,7 +967,17 @@ pub(super) fn TrashControl(
             .filter(|entry| entry.incarnation == host.incarnation);
         let rows = match entry.and_then(|entry| entry.reply.as_ref()) {
             Some(Ok(listing)) => Some((
-                listing.checkouts.iter().map(|c| &c.id).collect::<Vec<_>>(),
+                listing
+                    .checkouts
+                    .iter()
+                    .map(|c| {
+                        (
+                            &c.id,
+                            c.removing,
+                            c.stuck.as_ref().map(|stuck| (&stuck.reason, stuck.at)),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
                 listing.issues.len(),
             )),
             _ => None,
@@ -1073,7 +1120,7 @@ pub(super) fn TrashControl(
                     ScrollRegion { class: "checkout-trash-body",
                     handle: DialogHandle::new(DIALOG), selector: ".checkout-trash-body", name: "Archived checkouts",
                     recovery: RecoveryFocus::new(".trash-close", None, true, RecoveryDelay::OneFrame),
-                    p { "Folders of managed checkouts whose last session was deleted. They stay here, untouched, until you delete them. To get something back, copy it out of the folder shown under its host." }
+                    p { "Folders of managed checkouts whose last session was deleted. Before cleanup starts, you can copy work out of the folder shown under its host. Once cleanup is accepted, files may already be partly removed. Failed cleanup stays listed with its reason and Retry." }
                     if let Some(error) = &host_error { p { class: "checkout-trash-issue", "Host reachability could not be refreshed. Cleanup is disabled until it can be checked: " span { class: "peer-value", dir: "ltr", "{display_peer(error)}" } } }
                     if hosts_known && count == 0 && current_hosts.iter().filter(|host| connected(host)).all(|host| state.read().get(&host.id).is_some_and(|entry| !entry.loading && matches!(&entry.reply, Some(Ok(reply)) if reply.issues.is_empty()))) {
                         p { class: "checkout-trash-empty", "The trash is empty on reachable hosts." }
@@ -1129,7 +1176,9 @@ pub(super) fn TrashControl(
                                                 {
                                                 let entry_host = host.id;
                                                 let entry_id = checkout.id.clone();
-                                                let delete_label = format!("Delete {} permanently", display_peer(&checkout.name));
+                                                let retry = checkout.stuck.is_some();
+                                                let action = if checkout.removing { "Removing…" } else if retry { "Retry" } else { "Delete" };
+                                                let delete_label = if checkout.removing { format!("Removing {}", display_peer(&checkout.name)) } else if retry { format!("Retry cleanup of {}", display_peer(&checkout.name)) } else { format!("Delete {} permanently", display_peer(&checkout.name)) };
                                                 rsx! {
                                                 div { key: "{checkout.id}", class: "checkout-trash-entry",
                                                     div { class: "checkout-trash-entry-heading", strong { class: "peer-value font-mono", dir: "ltr", "{display_peer(&checkout.name)}" }
@@ -1138,7 +1187,7 @@ pub(super) fn TrashControl(
                                                             // An entry delete has no band of its own: keep it
                                                             // out of reach while a band asks about something
                                                             // else, and while moved rows settle (`SETTLE_MS`).
-                                                            disabled: busy || gate.busy() || host_target.is_none() || shown.is_some() || !settled(),
+                                                            disabled: busy || gate.busy() || host_target.is_none() || shown.is_some() || !settled() || checkout.removing,
                                                             onclick: move |_| {
                                                                 if !*settled.peek() || confirmation.peek_key().is_some() { return; }
                                                                 // Read the click-time host instead of granting a stale
@@ -1151,10 +1200,19 @@ pub(super) fn TrashControl(
                                                                         .and_then(|host| entry_target(host, state.peek().get(&entry_host), &entry_id)) }
                                                                 };
                                                                 if let Some(selected) = selected { dispatch.call(Selection::Entry(selected)); }
-                                                            }, "Delete"
+                                                            }, "{action}"
                                                         }
                                                     }
                                                     div { class: "checkout-trash-entry-meta", BranchIcon {} span { class: "peer-value", dir: "ltr", "{display_peer(&checkout.repository)}" } span { {archived_when(checkout.archived_at)} } }
+                                                    if checkout.removing {
+                                                        div { class: "checkout-trash-entry-meta", "Freeing space; some files may already be gone." }
+                                                    } else if let Some(stuck) = &checkout.stuck {
+                                                        div { class: "checkout-trash-issue checkout-trash-stuck",
+                                                            strong { "Could not free space" }
+                                                            " · " span { class: "font-mono", "{utc_timestamp(stuck.at)}" }
+                                                            div { class: "peer-value", dir: "ltr", "{display_peer(&stuck.reason)}" }
+                                                        }
+                                                    }
                                                 }
                                                 }
                                                 }
@@ -1453,12 +1511,15 @@ mod tests {
             path: format!("/work/trash/{id}"),
             archived_at: None,
             bytes: Some(4096),
+            removing: false,
+            stuck: None,
         };
         let mut state = HostTrash {
             incarnation: host.incarnation,
             loading: false,
             reply: Some(Ok(CheckoutTrashListing {
                 removing: false,
+                reports_retired: false,
                 checkouts: vec![archive("shown")],
                 issues: vec![],
             })),
@@ -1570,11 +1631,14 @@ mod tests {
             path: "/work/trash/old".into(),
             archived_at: None,
             bytes,
+            removing: false,
+            stuck: None,
         };
         for (listing, expected_count, expected_size, expected_unchecked, expected_sidebar) in [
             (
                 CheckoutTrashListing {
                     removing: false,
+                    reports_retired: false,
                     checkouts: vec![],
                     issues: vec![issue.clone(), issue.clone()],
                 },
@@ -1586,6 +1650,7 @@ mod tests {
             (
                 CheckoutTrashListing {
                     removing: false,
+                    reports_retired: false,
                     checkouts: vec![checkout(Some(4096))],
                     issues: vec![
                         issue.clone(),
@@ -1603,6 +1668,7 @@ mod tests {
             (
                 CheckoutTrashListing {
                     removing: false,
+                    reports_retired: false,
                     checkouts: vec![checkout(None)],
                     issues: vec![],
                 },
@@ -1614,6 +1680,7 @@ mod tests {
             (
                 CheckoutTrashListing {
                     removing: false,
+                    reports_retired: false,
                     checkouts: vec![checkout(Some(4096))],
                     issues: vec![],
                 },
@@ -1661,6 +1728,7 @@ mod tests {
         assert!(connected(&host));
         let mut listing = CheckoutTrashListing {
             removing: false,
+            reports_retired: false,
             checkouts: (0..=MAX_SELECTION)
                 .map(|id| ArchivedCheckout {
                     id: id.to_string(),
@@ -1669,6 +1737,8 @@ mod tests {
                     path: "/work/trash/old".into(),
                     archived_at: None,
                     bytes: Some(0),
+                    removing: false,
+                    stuck: None,
                 })
                 .collect(),
             issues: vec![],
@@ -1714,12 +1784,15 @@ mod tests {
             path: format!("/work/trash/{id}"),
             archived_at: None,
             bytes: None,
+            removing: false,
+            stuck: None,
         };
         let mut state = HostTrash {
             incarnation: host.incarnation,
             loading: false,
             reply: Some(Ok(CheckoutTrashListing {
                 removing: false,
+                reports_retired: false,
                 checkouts: vec![checkout("selected"), checkout("neighbour")],
                 issues: vec![CheckoutTrashIssue {
                     id: "issue".into(),
@@ -1757,6 +1830,74 @@ mod tests {
         );
     }
 
+    /// A cleanup receipt is not proof of reclaimed space on a capable peer.
+    /// Retaining the running row keeps its count and completion poll alive,
+    /// without allowing another immediate Retry; older peers keep their
+    /// established optimistic disappearance instead. A diagnostic-only ID also
+    /// needs that poll because its receipt can accept newly readable work.
+    #[farhelm_testtrace::test]
+    fn accepted_cleanup_keeps_capable_rows_until_an_authoritative_list() {
+        let host = host();
+        let checkout = farhelm_proto::ArchivedCheckout {
+            id: "selected".into(),
+            name: "old".into(),
+            repository: "fixture/repo".into(),
+            path: "/work/trash/.rm:old".into(),
+            archived_at: None,
+            bytes: Some(4096),
+            removing: false,
+            stuck: Some(farhelm_proto::CheckoutTrashStuck {
+                reason: "permission denied".into(),
+                at: 1_700_000_000,
+            }),
+        };
+        for capable in [false, true] {
+            let mut neighbour = checkout.clone();
+            neighbour.id = "neighbour".into();
+            neighbour.stuck = None;
+            let mut state = HostTrash {
+                incarnation: host.incarnation,
+                reply: Some(Ok(CheckoutTrashListing {
+                    reports_retired: capable,
+                    checkouts: vec![checkout.clone(), neighbour],
+                    ..CheckoutTrashListing::default()
+                })),
+                ..HostTrash::default()
+            };
+            accepted_cleanup(&mut state, &["selected".into()]);
+            let listing = state.reply.as_ref().unwrap().as_ref().unwrap();
+            assert_eq!(listing.checkouts.last().unwrap().id, "neighbour");
+            if capable {
+                assert_eq!(listing.checkouts.len(), 2);
+                assert!(listing.removing && state.removing);
+                assert!(listing.checkouts[0].removing);
+                assert!(listing.checkouts[0].stuck.is_none());
+                assert!(!listing.checkouts[1].removing);
+                assert!(entry_target(&host, Some(&state), "selected").is_none());
+                assert!(entry_target(&host, Some(&state), "neighbour").is_some());
+            } else {
+                assert_eq!(listing.checkouts.len(), 1);
+                assert!(!listing.removing && !state.removing);
+            }
+        }
+        let mut diagnostic_only = HostTrash {
+            reply: Some(Ok(CheckoutTrashListing {
+                reports_retired: true,
+                issues: vec![farhelm_proto::CheckoutTrashIssue {
+                    id: "selected".into(),
+                    path: "/work/trash/old".into(),
+                    message: "previously unavailable".into(),
+                }],
+                ..CheckoutTrashListing::default()
+            })),
+            ..HostTrash::default()
+        };
+        accepted_cleanup(&mut diagnostic_only, &["selected".into()]);
+        let listing = diagnostic_only.reply.as_ref().unwrap().as_ref().unwrap();
+        assert!(listing.checkouts.is_empty() && listing.issues.is_empty() && listing.removing);
+        assert!(diagnostic_only.removing);
+    }
+
     /// Duplicate messages must not widen a destructive selection, and a
     /// confirmation already shown must not acquire an archive arriving later.
     #[farhelm_testtrace::test]
@@ -1773,6 +1914,7 @@ mod tests {
             loading: false,
             reply: Some(Ok(CheckoutTrashListing {
                 removing: false,
+                reports_retired: false,
                 checkouts: vec![ArchivedCheckout {
                     id: "known".into(),
                     name: "old".into(),
@@ -1780,6 +1922,8 @@ mod tests {
                     path: "/work/trash/old".into(),
                     archived_at: None,
                     bytes: None,
+                    removing: false,
+                    stuck: None,
                 }],
                 issues: vec![issue.clone(), issue],
             })),
@@ -1805,6 +1949,8 @@ mod tests {
                 path: "/work/trash/later".into(),
                 archived_at: None,
                 bytes: Some(4096),
+                removing: false,
+                stuck: None,
             });
         assert_eq!(frozen.ids, ["known", "unchecked"]);
         assert_eq!(target(&host, Some(&state)).unwrap().ids.len(), 3);

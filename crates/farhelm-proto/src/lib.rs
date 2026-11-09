@@ -2727,11 +2727,14 @@ impl DeleteGuard {
     }
 }
 
-/// One recorded, identity-verified archive on the answering supervisor's host.
+/// One recorded archive on the answering supervisor's host. Retained removal
+/// records remain visible even when their files cannot currently be verified.
 /// Paths are recovery information, never client-supplied deletion authority.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ArchivedCheckout {
     pub id: String,
+    /// Display name without the host's private removal-journal prefix. The
+    /// recorded path still names the retained folder, not this display name.
     pub name: String,
     pub repository: String,
     pub path: String,
@@ -2741,6 +2744,23 @@ pub struct ArchivedCheckout {
     /// Allocated disk bytes, including directory and symlink blocks. Unknown
     /// means not requested, inaccessible, or the measurement budget expired.
     pub bytes: Option<u64>,
+    /// Queued or active removal, including an unsettled listing snapshot whose
+    /// next read must observe completion. Older supervisors omit this field.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub removing: bool,
+    /// The last failed attempt in this supervisor process. Retrying clears it
+    /// while work runs; clients may retain their unresolved notice meanwhile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stuck: Option<CheckoutTrashStuck>,
+}
+
+/// A failed or unavailable removal observed this supervisor run, never durable
+/// state. A later attempt updates it without changing the checkout's identity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CheckoutTrashStuck {
+    pub reason: String,
+    /// UTC seconds when the failure was observed, rather than archive time.
+    pub at: i64,
 }
 
 /// A checkout's preservation or incomplete cleanup, with its recovery path.
@@ -2755,16 +2775,22 @@ pub struct CheckoutTrashIssue {
     pub message: String,
 }
 
-/// A host's current trash. Missing and mismatched records are omitted, with
-/// uncertainty named in `issues`; no unrecorded directory enters this list.
+/// A host's current trash, including retained background-removal records when
+/// `reports_retired` is true. Ordinary archive diagnostics stay in `issues`;
+/// known removal failures stay on their entries. No unrecorded folder enters.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CheckoutTrashListing {
     pub checkouts: Vec<ArchivedCheckout>,
     pub issues: Vec<CheckoutTrashIssue>,
-    /// An actual background removal attempt is running in this supervisor.
-    /// Retained failures alone do not set it. Older peers omit the field.
+    /// Background work is queued/running, or completion raced this listing and
+    /// needs a final poll. Retained failures alone do not set it. Older peers
+    /// omit the field.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub removing: bool,
+    /// Successful listings from this supervisor include retained removal
+    /// records. Absence can resolve a notice only when this capability is true.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reports_retired: bool,
 }
 
 /// The disposition of each selected archive. Removed records include absent
@@ -6482,6 +6508,7 @@ mod tests {
             !old.removing,
             "old supervisors do not report live background work"
         );
+        assert!(!old.reports_retired);
         assert_eq!(
             serde_json::to_value(old).unwrap(),
             serde_json::json!({"checkouts": [], "issues": []})
@@ -6499,6 +6526,32 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<ControlMsg>(value).unwrap(),
             message
+        );
+    }
+
+    /// Old hosts have neither per-entry removal state nor the capability that
+    /// makes absence authoritative. New failure data survives real JSON too.
+    #[farhelm_testtrace::test]
+    fn checkout_trash_old_entries_default_and_stuck_entries_roundtrip() {
+        let old = serde_json::json!({
+            "checkouts": [{"id":"id", "name":"repo-20260101T000000Z",
+                "repository":"fixture/repo", "path":"/checkouts/.farhelm-trash/repo",
+                "archived_at":1767225600, "bytes":4096}], "issues":[]
+        });
+        let mut decoded: CheckoutTrashListing = serde_json::from_value(old.clone()).unwrap();
+        assert!(!decoded.reports_retired && !decoded.removing);
+        assert!(!decoded.checkouts[0].removing);
+        assert!(decoded.checkouts[0].stuck.is_none());
+        assert_eq!(serde_json::to_value(&decoded).unwrap(), old);
+        decoded.reports_retired = true;
+        decoded.checkouts[0].stuck = Some(CheckoutTrashStuck {
+            reason: "permission denied".into(),
+            at: 1767225601,
+        });
+        assert_eq!(
+            serde_json::from_value::<CheckoutTrashListing>(serde_json::to_value(&decoded).unwrap())
+                .unwrap(),
+            decoded
         );
     }
 

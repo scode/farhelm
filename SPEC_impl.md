@@ -4230,8 +4230,10 @@ does not resolve unrelated session cwds under admission.
 Retirement journals `.rm:<original archive name>` on the existing retired working-copy row before a descriptor-relative
 no-replace rename in the same trash directory. The colon cannot occur in generated archive names, and its four bytes
 leave even a collision-suffixed archive component below 255 bytes. The moved name is reopened and identity-verified
-before removal is authorized. Known no-move rename refusals restore the ordinary destination; uncertain outcomes retain
-the journal. Listings skip reserved destinations, and a stale passive missing-folder prune compares its observed
+before removal is authorized. A first-time Delete's known no-move rename refusal restores the ordinary destination;
+uncertain outcomes retain the journal. Startup and Retry recovery preserve an already accepted journal even after a
+definite rename refusal, so the next supervisor start still retries that cleanup. Listings include reserved destinations
+as accepted cleanup, distinct from ordinary archives, and a stale passive missing-folder prune compares its observed
 destination before forgetting a record. At startup, before accepting new session admissions, reserved records either
 verify at their hidden name or retry the journaled rename from the original name with the retained-session guard. Both
 branches apply that guard; uncertain recovery keeps the record and warns. The existing create-admission fence also
@@ -4250,23 +4252,35 @@ Passive lists share the two-slot browse worker pool, including a syscall that ou
 never hold directory admission. Retirement uses a separate blocking worker, so wedged browse slots cannot block session
 lifecycle through an empty request. A single serve-owned remover drains newly accepted IDs and the startup recovery set
 sequentially, outside directory admission and the browse pool. IDs rather than opened trees wait in its queue,
-preserving the descriptor budget for large selections. Failed attempts warn and retain their hidden records; they are
-never requeued until the next startup. Successful removal forgets the record only after the traversal finishes. Enqueue
-happens inside owned retirement work, so caller cancellation cannot lose its wake. An idle-worker pickup receipt bridges
-reply and listing without waiting for recursion; a busy remover accepts more IDs immediately. The optional,
-default-false `removing` listing field describes the worker's active sequential run, including transitions between its
-folders, and clears when that run drains. It never follows the mere existence of retained records. Listing without sizes
-does not walk checkout trees. Requested disk usage sums allocated 512-byte blocks from no-follow descriptor-relative
-metadata, deduplicating hardlinks within each checkout. A mount boundary has unknown size rather than counting its
-external data. Traversal holds at most 32 directory levels per operation, leaving process-wide descriptor headroom for
-the two reads and one delete that can run together. Deeper trees have unknown sizes and report a retained partial-delete
-refusal. Removal retries a nonempty directory through its same opened handle at most three times, accommodating entries
-skipped by a directory iterator during unlinking without chasing a concurrent writer forever. Per-record bookkeeping
-failures stay in the batch's issues instead of hiding earlier results. One two-second deadline and 100,000-entry budget
-cover all sizes on a host; an incomplete measurement is unknown, never a partial checkout total. Archive time is parsed
-from the recorded destination after its separately recorded original basename, accepting the archive move's optional
-32-hex collision suffix. Invalid historical dates have no time; directory modification times do not substitute for the
-rename's timestamp.
+preserving the descriptor budget for large selections. Failed attempts warn and retain their records; the remover keeps
+their short reason and UTC failure time in memory, including failures of startup's interrupted-rename recovery. The
+trash listing exposes those rows even when their folder cannot be opened, with unknown size where necessary; a cleanup
+failure is an entry state, not a listing issue that makes otherwise known totals partial. An explicit Retry reuses
+DeleteCheckoutTrash, rechecks the existing journal and guards under directory admission, and queues one attempt; there
+is no timer retry. Active and queued IDs coalesce so repeated requests cannot schedule a second attempt after the one
+they observed fails. Successful removal forgets the record only after the traversal finishes. Enqueue happens inside
+owned retirement work, so caller cancellation cannot lose its wake. An idle-worker pickup receipt bridges reply and
+listing without waiting for recursion; a busy remover accepts more IDs immediately. The optional, default-false
+`removing` listing field describes queued and active work, including transitions between folders, and clears when that
+run drains. It never follows the mere existence of retained failures. Each accepted-cleanup entry separately reports
+whether removal is in progress or stuck, with the latter's reason and time. A default-false `reports_retired` listing
+field distinguishes a capable supervisor's empty list from an older peer that hides accepted cleanup. Missing additive
+fields retain old decode behavior. An async list whose row snapshot predates a removal's completion must keep the
+existing poll alive until a later list can observe the row gone. A short process-local marker spans the admission-owned
+retirement closure through enqueue, so a concurrent listing cannot mistake its journal-to-queue handoff for a failed
+attempt. Its lifetime is serialized by directory admission; passive reads inspect only remover state. A stable journal
+that this run never queued reports unavailable instead of keeping the poll alive forever. Listing without sizes does not
+walk checkout trees. Requested disk usage sums allocated 512-byte blocks from no-follow descriptor-relative metadata,
+deduplicating hardlinks within each checkout. A mount boundary has unknown size rather than counting its external data.
+Traversal holds at most 32 directory levels per operation, leaving process-wide descriptor headroom for the two reads
+and one delete that can run together. Deeper trees have unknown sizes and report a retained partial-delete refusal.
+Removal retries a nonempty directory through its same opened handle at most three times, accommodating entries skipped
+by a directory iterator during unlinking without chasing a concurrent writer forever. Per-record bookkeeping failures
+stay in the batch's issues instead of hiding earlier results. One two-second deadline and 100,000-entry budget cover all
+sizes on a host; an incomplete measurement is unknown, never a partial checkout total. Archive time is parsed from the
+recorded destination after its separately recorded original basename, accepting the archive move's optional 32-hex
+collision suffix. Invalid historical dates have no time; directory modification times do not substitute for the rename's
+timestamp.
 
 The UI reads each connected host independently, without sizes for the sidebar count and with sizes for the open dialog.
 Load, connection changes, its own affirmative archive Delete, a managed row disappearing between complete fleet
@@ -4290,21 +4304,26 @@ completion path without a confirmation. Each host receives one frozen batch, wit
 submission closes the modal before starting those requests; the persistent `TrashControl` owns their lifetime. An entry
 Delete leaves it open, and closing it does not cancel the accepted request. Connection identity is rechecked before
 dispatch. The fifteen-minute trash deadline remains for older supervisors that still remove inside the request; the
-ordinary mutation deadline stays sixty seconds. Confirmed removals immediately leave the listing and its count and size
-totals. Only the persistent trash icon turns upside down and bobs while requests are pending or a connected host's last
-listing reports removal, with stepped timing within the looping-indicator cap, the universal inactive-window pause, and
-no animation under Reduce Motion. Its tooltip names hosts freeing space and independently discloses retained cleanup
-issues. Opening the dialog does not clear issues. Later successful removals clear only their IDs' old issues; new per-ID
-diagnostics replace older diagnostics for those same IDs. Host-level uncertain outcomes retain their frozen unresolved
-IDs privately. A later reply resolves only selected IDs it confirms removed or answers with a per-ID diagnostic;
-unrelated successes leave uncertainty intact. A newer uncertain result replaces only its overlap with an earlier
-uncertain selection, preserving unrelated IDs and ID-specific refusals. A healthy host registry prunes notices only for
-hosts it omits, including while deletes are pending; disconnected hosts and uncertain registry reads retain them. A
-pending request remembers an observed removal until it finishes, so a late reply cannot recreate those notices even if a
-subsequent registry refresh fails. That fence ends with the request. A lost reply warns that some folders may already be
-deleted; other hosts continue, and the UI refetches after all requests settle. Close and Escape stay available. The
-archive cue stores row geometry on the persistent trash button, consumes it on the local Delete reply, and uses finite
-Web Animations with reduced-motion refusal. No global geometry cache or new asset file is introduced.
+ordinary mutation deadline stays sixty seconds. A capable host's accepted IDs stay in the local listing, count and size
+totals as removing, with any old failure cleared, until a later listing confirms absence. Older hosts keep optimistic
+removal on the receipt. A capable receipt starts the existing completion poll immediately, including for an accepted
+diagnostic-only ID, so a failed immediate refresh cannot lose its outcome. The row's Retry uses the same single-ID
+selection and guards as Delete; queued or running rows offer no second action. Failure text and time participate in the
+existing layout-settle fence because they can move other rows' destructive buttons. Only the persistent trash icon turns
+upside down and bobs while requests are pending or a connected host's last listing reports removal, with stepped timing
+within the looping-indicator cap, the universal inactive-window pause, and no animation under Reduce Motion. Its tooltip
+names hosts freeing space and independently discloses retained cleanup issues. Opening the dialog does not clear issues.
+Later successful removals clear only their IDs' old issues; new per-ID diagnostics replace older diagnostics for those
+same IDs. Host-level uncertain outcomes retain their frozen unresolved IDs privately. A later reply resolves only
+selected IDs it confirms removed or answers with a per-ID diagnostic; unrelated successes leave uncertainty intact. A
+newer uncertain result replaces only its overlap with an earlier uncertain selection, preserving unrelated IDs and
+ID-specific refusals. A healthy host registry prunes notices only for hosts it omits, including while deletes are
+pending; disconnected hosts and uncertain registry reads retain them. A pending request remembers an observed removal
+until it finishes, so a late reply cannot recreate those notices even if a subsequent registry refresh fails. That fence
+ends with the request. A lost reply warns that some folders may already be deleted; other hosts continue, and the UI
+refetches after all requests settle. Close and Escape stay available. The archive cue stores row geometry on the
+persistent trash button, consumes it on the local Delete reply, and uses finite Web Animations with reduced-motion
+refusal. No global geometry cache or new asset file is introduced.
 
 ### Runtime state
 

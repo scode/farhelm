@@ -372,19 +372,37 @@ fn should_forget(error: &anyhow::Error) -> bool {
     })
 }
 
-/// Read current on-disk trash, optionally measuring sizes under one budget.
-/// Only missing archives beneath a verified root are pruned on a read. Other
-/// failures recur until a deliberate Delete, so a count fetch cannot consume
-/// the only diagnostic or forget archives on a temporarily unmounted volume.
+/// Read trash with one shared size budget, retaining every removal-intent row.
+/// Ordinary archives keep existing semantics: prune confirmed absence under a
+/// verified root, report uncertainty as issues. A passive read never settles an
+/// interrupted retirement rename or loses a row for an inaccessible root.
 pub(crate) fn list(db: &Db, measure_sizes: bool) -> anyhow::Result<CheckoutTrashListing> {
     let rows = working_copies::all_working_copies(&db.lock())?;
-    let mut listing = CheckoutTrashListing::default();
+    let mut listing = CheckoutTrashListing {
+        reports_retired: true,
+        ..Default::default()
+    };
     let deadline = Instant::now() + SIZE_BUDGET;
     let mut remaining = SIZE_ENTRY_CAP;
     for row in rows.into_iter().filter(|row| {
         row.allocation_state == AllocationState::Retired && row.archive_destination.is_some()
     }) {
         if is_removing(&row) {
+            // The journal may still owe its rename, and an inaccessible root
+            // cannot establish absence. Only recovery/removal settles these
+            // records; a passive read must not resolve their notices by losing
+            // the entry. Opening here grants size evidence only.
+            let bytes = if measure_sizes {
+                open_archive(db, &row, false)
+                    .ok()
+                    .flatten()
+                    .and_then(|archive| {
+                        disk_usage_dir(&archive.directory, deadline, &mut remaining)
+                    })
+            } else {
+                None
+            };
+            listing.checkouts.push(listed_archive(&row, bytes));
             continue;
         }
         if working_copies::member_count(&db.lock(), &row.id)? != 0 {
@@ -399,26 +417,10 @@ pub(crate) fn list(db: &Db, measure_sizes: bool) -> anyhow::Result<CheckoutTrash
         match opened {
             Ok(None) => working_copies::forget_retired_at(&db.lock(), &row)?,
             Ok(Some(archive)) => {
-                let path = archive.path.clone();
                 let bytes = measure_sizes
                     .then(|| disk_usage_dir(&archive.directory, deadline, &mut remaining))
                     .flatten();
-                listing.checkouts.push(ArchivedCheckout {
-                    id: row.id.clone(),
-                    name: row
-                        .archive_destination
-                        .clone()
-                        .expect("filtered archive name"),
-                    repository: format!("{}/{}", row.repo_owner, row.repo_name),
-                    path: path.display().to_string(),
-                    archived_at: archived_at(
-                        &row.original_basename,
-                        row.archive_destination
-                            .as_deref()
-                            .expect("filtered archive name"),
-                    ),
-                    bytes,
-                });
+                listing.checkouts.push(listed_archive(&row, bytes));
             }
             Err(error) => {
                 listing.issues.push(CheckoutTrashIssue {
@@ -435,6 +437,28 @@ pub(crate) fn list(db: &Db, measure_sizes: bool) -> anyhow::Result<CheckoutTrash
             .then_with(|| b.name.cmp(&a.name))
     });
     Ok(listing)
+}
+
+/// Registry metadata remains useful when a retained tree cannot be opened.
+/// Strip the journal marker only for display and time parsing, never for I/O.
+fn listed_archive(row: &WorkingCopyRow, bytes: Option<u64>) -> ArchivedCheckout {
+    let destination = row
+        .archive_destination
+        .as_deref()
+        .expect("filtered archive name");
+    let name = destination
+        .strip_prefix(REMOVING_PREFIX)
+        .unwrap_or(destination);
+    ArchivedCheckout {
+        id: row.id.clone(),
+        name: name.into(),
+        repository: format!("{}/{}", row.repo_owner, row.repo_name),
+        path: diagnostic_path(row),
+        archived_at: archived_at(&row.original_basename, name),
+        bytes,
+        removing: is_removing(row),
+        stuck: None,
+    }
 }
 
 /// Permanently delete exactly the selected terminal records that still match.
@@ -596,7 +620,6 @@ fn delete_with_timing(
             let Some(row) = rows.get(id.as_str()).copied().filter(|row| {
                 row.allocation_state == AllocationState::Retired
                     && row.archive_destination.is_some()
-                    && !is_removing(row)
             }) else {
                 reply.issues.push(CheckoutTrashIssue {
                     id: id.clone(),
@@ -633,22 +656,29 @@ fn delete_with_timing(
             }
             let mut removal_started = false;
             let opened_at = Instant::now();
-            let opened = open_archive(db, row, true);
-            let outcome = opened.and_then(|archive| {
-                let Some(archive) = archive else {
+            let outcome = if is_removing(row) {
+                resume_retirement(db, row, session_directories, &mut removal_started).map(
+                    |queued| {
+                        removal_started = queued;
+                    },
+                )
+            } else {
+                open_archive(db, row, true).and_then(|archive| {
+                    let Some(archive) = archive else {
+                        opening = opened_at.elapsed();
+                        return Ok(());
+                    };
+                    guard_session_paths(row, &archive, session_directories)?;
+                    removal_started = true;
                     opening = opened_at.elapsed();
-                    return Ok(());
-                };
-                guard_session_paths(row, &archive, session_directories)?;
-                removal_started = true;
-                opening = opened_at.elapsed();
-                let removing = Instant::now();
-                let mut journal = Duration::ZERO;
-                let result = retire_archive(db, row, &archive, &mut journal);
-                removal = removing.elapsed().saturating_sub(journal);
-                update = journal;
-                result
-            });
+                    let removing = Instant::now();
+                    let mut journal = Duration::ZERO;
+                    let result = retire_archive(db, row, &archive, &mut journal);
+                    removal = removing.elapsed().saturating_sub(journal);
+                    update = journal;
+                    result
+                })
+            };
             if !removal_started {
                 opening = opened_at.elapsed();
             }
@@ -762,13 +792,22 @@ fn retire_archive(
     persisted?;
     let mut pending = row.clone();
     pending.archive_destination = Some(destination);
-    finish_retirement(db, &pending, archive)
+    finish_retirement(db, &pending, archive, true)
 }
 
 /// Finish only the journaled rename and verify its new name before granting
 /// recursive authority. A swap at the source can move a stranger, but cannot
 /// make that stranger eligible for removal.
-fn finish_retirement(db: &Db, row: &WorkingCopyRow, archive: &OpenArchive) -> anyhow::Result<()> {
+/// Only a first-time Delete can roll back a definite no-move refusal. Recovery
+/// already owes accepted cleanup: retaining its journal preserves the next
+/// startup's retry and both-name admission fence, without granting any new
+/// authority over the original or hidden directory.
+fn finish_retirement(
+    db: &Db,
+    row: &WorkingCopyRow,
+    archive: &OpenArchive,
+    restore_on_refusal: bool,
+) -> anyhow::Result<()> {
     let destination = CString::new(archive_name(row)?)?;
     if let Err(error) = working_copies::rename_at_noreplace(
         archive.parent.as_raw_fd(),
@@ -776,8 +815,9 @@ fn finish_retirement(db: &Db, row: &WorkingCopyRow, archive: &OpenArchive) -> an
         archive.parent.as_raw_fd(),
         &destination,
     ) {
-        if error.kind() == std::io::ErrorKind::AlreadyExists
-            || working_copies::rename_refused_without_moving(&error)
+        if restore_on_refusal
+            && (error.kind() == std::io::ErrorKind::AlreadyExists
+                || working_copies::rename_refused_without_moving(&error))
         {
             // Only the rename's own definite refusal authorizes rollback. A
             // later open/identity/fsync error may follow a completed move.
@@ -796,8 +836,13 @@ fn finish_retirement(db: &Db, row: &WorkingCopyRow, archive: &OpenArchive) -> an
 
 /// Settle interrupted retirements once before accepting new admissions. A
 /// journal written before a crash can still name an unmoved ordinary archive;
-/// recheck sessions before completing that rename. Failures wait for next boot.
-pub(crate) fn resume_retirements(db: &Db, session_directories: &[PathBuf]) -> Vec<String> {
+/// recheck sessions before completing that rename. Report each failure to the
+/// caller for this run's memory; only explicit Retry or a later startup retries.
+pub(crate) fn resume_retirements(
+    db: &Db,
+    session_directories: &[PathBuf],
+    failed: &mut impl FnMut(&str, &anyhow::Error),
+) -> Vec<String> {
     let rows = match working_copies::all_working_copies(&db.lock()) {
         Ok(rows) => rows,
         Err(error) => {
@@ -810,35 +855,13 @@ pub(crate) fn resume_retirements(db: &Db, session_directories: &[PathBuf]) -> Ve
         .into_iter()
         .filter(|row| row.allocation_state == AllocationState::Retired && is_removing(row))
     {
-        let result = (|| {
-            if working_copies::member_count(&db.lock(), &row.id)? != 0 {
-                bail!("a session still references this retired checkout");
-            }
-            if let Some(archive) = open_archive(db, &row, true)? {
-                // A retained row may predate this build's admission fence.
-                // Startup must not erase a stopped session's working files.
-                guard_session_paths(&row, &archive, session_directories)?;
-                return Ok(true);
-            }
-            let mut original = row.clone();
-            original.archive_destination = Some(
-                archive_name(&row)?
-                    .strip_prefix(REMOVING_PREFIX)
-                    .context("missing removal prefix")?
-                    .to_string(),
-            );
-            let Some(archive) = open_archive(db, &original, true)? else {
-                working_copies::forget_retired(&db.lock(), &row.id)?;
-                return Ok(false);
-            };
-            guard_session_paths(&original, &archive, session_directories)?;
-            finish_retirement(db, &row, &archive)?;
-            Ok::<_, anyhow::Error>(true)
-        })();
+        let mut rename_started = false;
+        let result = resume_retirement(db, &row, session_directories, &mut rename_started);
         match result {
             Ok(true) => queued.push(row.id),
             Ok(false) => {}
             Err(error) => {
+                failed(&row.id, &error);
                 tracing::warn!(checkout_id = ?row.id, path = ?diagnostic_path(&row), error = %format!("{error:#}"), "background trash retirement could not resume; retained until next startup")
             }
         }
@@ -846,8 +869,45 @@ pub(crate) fn resume_retirements(db: &Db, session_directories: &[PathBuf]) -> Ve
     queued
 }
 
+/// Recheck both sides of an interrupted rename under directory admission.
+/// Startup and explicit Retry share this boundary: a journal is deletion
+/// intent, not proof of either the move or the absence of retained sessions.
+fn resume_retirement(
+    db: &Db,
+    row: &WorkingCopyRow,
+    session_directories: &[PathBuf],
+    rename_started: &mut bool,
+) -> anyhow::Result<bool> {
+    if working_copies::member_count(&db.lock(), &row.id)? != 0 {
+        bail!("a session still references this retired checkout");
+    }
+    if let Some(archive) = open_archive(db, row, true)? {
+        guard_session_paths(row, &archive, session_directories)?;
+        return Ok(true);
+    }
+    let mut original = row.clone();
+    original.archive_destination = Some(
+        archive_name(row)?
+            .strip_prefix(REMOVING_PREFIX)
+            .context("missing removal prefix")?
+            .to_string(),
+    );
+    let Some(archive) = open_archive(db, &original, true)? else {
+        working_copies::forget_retired(&db.lock(), &row.id)?;
+        return Ok(false);
+    };
+    guard_session_paths(&original, &archive, session_directories)?;
+    // Even a failing verification can follow a completed move. Callers must
+    // retain that journal instead of treating the failure as an initial open
+    // refusal whose unusable ownership record can be deliberately forgotten.
+    *rename_started = true;
+    finish_retirement(db, row, &archive, false)?;
+    Ok(true)
+}
+
 /// Attempt a parked tree exactly once. All failures retain its hidden record;
-/// the next supervisor start is the only retry trigger. No admission is held.
+/// only explicit Retry or the next supervisor start queues another attempt.
+/// No directory admission is held during recursive removal.
 pub(crate) fn remove_retired(db: &Db, id: &str) -> anyhow::Result<()> {
     remove_retired_with(db, id, &mut remove_archive)
 }
@@ -1177,8 +1237,8 @@ mod tests {
         assert!(fields.get("removal_ms").unwrap().parse::<u64>().is_ok());
     }
 
-    /// Leaving visible trash is acceptance, not evidence of freed space. The
-    /// record and marker must survive until the separate remover finishes.
+    /// Moving the files aside is acceptance, not evidence of freed space. The
+    /// listed record and marker survive until the separate remover finishes.
     #[farhelm_testtrace::test]
     async fn retirement_hides_the_tree_but_retains_its_recovery_record() {
         let fixture = Fixture::new().await;
@@ -1200,7 +1260,10 @@ mod tests {
             fs::read(fixture.parked().join("work")).unwrap(),
             b"uncommitted work"
         );
-        assert!(list(&fixture.db, true).unwrap().checkouts.is_empty());
+        let listing = list(&fixture.db, true).unwrap();
+        assert!(listing.reports_retired);
+        assert_eq!(listing.checkouts.len(), 1);
+        assert!(listing.checkouts[0].removing);
         // Reproduce the missing-path prune of a list whose snapshot predates
         // retirement. Its old destination must not erase the new journal.
         working_copies::forget_retired_at(&fixture.db.lock(), &old).unwrap();
@@ -1216,8 +1279,8 @@ mod tests {
         )
         .unwrap();
         assert!(
-            duplicate.queued.is_empty(),
-            "a repeated request must not retry a failed remover"
+            duplicate.queued == [fixture.id.clone()],
+            "Retry admission reuses the recorded destination without another prefix"
         );
         remove_retired(&fixture.db, &fixture.id).unwrap();
         assert!(!fixture.parked().exists());
@@ -1255,7 +1318,7 @@ mod tests {
                 b"uncommitted work"
             );
             assert_eq!(
-                resume_retirements(&fixture.db, &[]),
+                resume_retirements(&fixture.db, &[], &mut |_, _| {}),
                 std::slice::from_ref(&fixture.id)
             );
             assert!(!fixture.archive.exists());
@@ -1273,8 +1336,8 @@ mod tests {
         }
     }
 
-    /// Startup's session snapshot protects even a hidden tree with no registry
-    /// membership, such as one entered before the admission fence existed.
+    /// Startup and Retry protect a retained session on either side of rename,
+    /// even without registry membership, as before the admission fence existed.
     #[farhelm_testtrace::test]
     async fn startup_preserves_retained_session_paths_on_both_sides_of_retirement() {
         for renamed in [false, true] {
@@ -1298,7 +1361,23 @@ mod tests {
                 0
             );
             assert_eq!(fs::read(current.join("work")).unwrap(), b"uncommitted work");
-            assert!(resume_retirements(&fixture.db, &[current.join("retained")]).is_empty());
+            assert!(
+                resume_retirements(&fixture.db, &[current.join("retained")], &mut |_, _| {})
+                    .is_empty()
+            );
+            let retry = delete_timed(
+                &fixture.db,
+                std::slice::from_ref(&fixture.id),
+                &[current.join("retained")],
+                DeleteTiming::default(),
+            )
+            .unwrap();
+            assert!(retry.queued.is_empty() && retry.reply.removed.is_empty());
+            assert!(
+                retry.reply.issues[0]
+                    .message
+                    .contains("a session uses this archive")
+            );
             assert_eq!(fs::read(current.join("work")).unwrap(), b"uncommitted work");
             assert!(
                 working_copies::get_working_copy(&fixture.db.lock(), &fixture.id)
@@ -1398,8 +1477,8 @@ mod tests {
         }
     }
 
-    /// A failed traversal is hidden but recoverable, not forgotten or retried by
-    /// listing. Startup is the explicit boundary that grants one more attempt.
+    /// A failed traversal remains listed and recoverable, never forgotten or
+    /// retried by listing. Startup can explicitly grant one more attempt.
     #[farhelm_testtrace::test]
     async fn failed_background_removal_retains_the_journal_until_next_startup() {
         let fixture = Fixture::new().await;
@@ -1417,13 +1496,13 @@ mod tests {
         })
         .unwrap_err();
         assert!(error.downcast_ref::<std::io::Error>().is_some());
-        assert!(list(&fixture.db, false).unwrap().checkouts.is_empty());
+        assert_eq!(list(&fixture.db, false).unwrap().checkouts.len(), 1);
         assert_eq!(
             fs::read(fixture.parked().join("work")).unwrap(),
             b"uncommitted work"
         );
         assert_eq!(
-            resume_retirements(&fixture.db, &[]),
+            resume_retirements(&fixture.db, &[], &mut |_, _| {}),
             std::slice::from_ref(&fixture.id)
         );
         remove_retired(&fixture.db, &fixture.id).unwrap();
