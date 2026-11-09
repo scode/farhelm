@@ -26,13 +26,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
-- **Show the host dialog's detail on hover over the sidebar's progress for a running host.** The line shows the step
-  count and a truncated step name, and the host dialog shows the numbered steps and the run's own message (the failed
-  connection attempt's error, say). Hovering the line lists the steps but leaves out the run message, and the bar the
-  sidebar shows at the top while the hosts panel is closed has no hover detail at all. Both should give the same
-  information as the dialog: every step with its status, the step in progress, and the run's message. Plan:
-  `plans/queue/host-progress-hover.md`.
-
 - **Revisit the rail bell re-reading every host's Trash on each status change.** Decided on the maintainer's behalf on
   2026-11-09 when landing rail-notification-bell: it landed with each open window re-reading every connected host's
   Trash whenever any session's status changes and on the client's periodic catch-up refresh. Each read uses one of the

@@ -2219,7 +2219,6 @@ html.host-rail-open .session-status-filter .segment-radio > span { padding-inlin
         the sidebar
      12 `.terminal-file-message` — a terminal's download status line, above
         xterm's own layers (its scrollbar is 11) and below everything else
-     15 `.host-update-popup` — below the menus at 20 (see its rule)
      20 `.session-row-menu-panel`, `.host-row-menu-panel`, and the row menus'
         flyouts — a sidebar row's action menu
      25 `.drag-copy-notice` — guidance at the drag-release pointer, allowed
@@ -5851,7 +5850,7 @@ a:any-link,
 
 /* The count and the clock are what the status is for, so they never shrink;
    the step name ellipsizes instead, and hovering the label shows it whole in
-   `.host-update-popup`. */
+   the shared progress hover card. */
 .host-update-count,
 .host-update-elapsed {
   flex: none;
@@ -5865,65 +5864,56 @@ a:any-link,
   white-space: nowrap;
 }
 
-/* The running update's complete text, shown while the pointer is over the
-   inline label. Fixed rather than absolute because `.app-sidebar` scrolls
-   and is positioned, so it would clip an absolutely positioned popup at its
-   right edge, which is exactly where the truncated step name sits. The
-   coordinates come from `UpdateProgressLabel`'s measurement; nothing here
-   sets a position. It borrows the row menus' floating surface so the two
-   read as the same kind of layer, but stays below the menus (z-index 20) and
-   takes no pointer events, since it is display-only and must not keep itself
-   open by sitting under the pointer. */
-.host-update-popup {
-  position: fixed;
-  z-index: 15;
+/* Both host-progress surfaces clone this same card through the shared tooltip.
+   The list gives up height first. The tooltip measures its current step before
+   shortening oversized diagnostics, so those cannot squeeze the step out. */
+.host-progress-card {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 6px 8px;
-  max-width: 320px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-menu);
+  min-width: 0;
+  max-height: calc(100vh - 10px);
   color: var(--fg-1);
-  pointer-events: none;
-  white-space: nowrap;
-  /* A popup taller than the window stays inside it; the step list is the
-     part that shrinks (see `.host-update-popup-steps`). */
-  max-height: calc(100vh - 16px);
   box-sizing: border-box;
   overflow: hidden;
 }
-
-/* The run's full step list, in the expanded row's `provisioning-steps`
-   style; the margins change, since the popup has its own padding. It is
-   the popup's only part that gives up height when the window is too short
-   for all of it (the count and the clock above it do not), and it is then
-   scrolled by `UpdateProgressPopup` to keep the step in progress in view. */
-.host-update-popup-steps {
-  margin: 2px 0 0;
+.host-progress-header { flex: none; padding: 9px 10px 8px; border-bottom: 1px solid var(--border-dim); }
+.host-progress-title { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--fg-0); }
+.host-progress-title .host-kind-icon { flex: none; }
+.host-progress-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; margin-top: 5px; }
+.host-progress-count { min-width: 0; }
+.host-progress-elapsed { flex: none; white-space: nowrap; font-size: 11px; color: var(--fg-2); }
+/* Outrank the expanded panel's later .provisioning-steps defaults. */
+.host-progress-card .host-progress-steps {
+  margin: 0;
+  padding: 7px 10px;
+  /* The tooltip's minimum reserves the current row plus this padding once. */
+  box-sizing: border-box;
   flex: 0 1 auto;
   min-height: 0;
   overflow: hidden;
 }
-
-.host-update-popup .provisioning-step-message {
-  white-space: normal;
-}
-
-.host-update-popup > span {
-  flex: none;
-}
-
-/* The step in progress: the one the inline label names, and the only step
-   name allowed to wrap rather than overflow the popup's own width limit. */
-.host-update-popup-step {
+.host-progress-card .provisioning-step-message { white-space: normal; }
+.host-progress-step-current {
   color: var(--warn);
   font-weight: 600;
   white-space: normal;
   overflow-wrap: anywhere;
 }
+.host-progress-connection, .host-progress-run-message {
+  flex: none;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-dim);
+  color: var(--warn-bright);
+}
+.host-progress-connection > strong { display: block; margin-bottom: 3px; color: var(--fg-0); }
+.host-progress-connection-detail, .host-progress-run-detail { overflow: hidden; }
+.host-progress-preview-notice {
+  flex: none;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border-dim);
+  color: var(--fg-2);
+}
+.host-progress-preview-notice[hidden] { display: none; }
 
 .host-status.connecting {
   font-style: italic;

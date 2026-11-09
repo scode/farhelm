@@ -24,7 +24,7 @@ import { expectKeyboardScroll } from "./helpers/keyboard-scroll";
 import { routeGate } from "./helpers/route-gate";
 import { openSettings } from "./helpers/settings";
 
-type Age = "optional" | "required" | "current" | "newer" | "unreachable";
+type Age = "optional" | "required" | "current" | "newer" | "unreachable" | "connecting";
 type FixtureHost = { id: number; name: string; kind: string; state: Record<string, unknown> } & Record<string, unknown>;
 const IDS = { one: 9411, two: 9412, current: 9413, unreachable: 9414, newer: 9415, busy: 9416 };
 const cleanup: [string, () => unknown | Promise<unknown>][] = [];
@@ -47,6 +47,8 @@ function remote(id: number, name: string, age: Age, build: string): FixtureHost 
       our_build: build,
       remediation: "update the host",
     }
+    : age === "connecting"
+    ? { phase: "connecting", attempt: 2, stage: "waiting-to-connect", last_error: "fixture SSH connection refused" }
     : age === "unreachable"
     ? { phase: "unreachable-reprobing", cause: "transport-failure", last_error: "fixture host is offline" }
     : {
@@ -124,6 +126,8 @@ async function prepare(page: Page, request: APIRequestContext) {
   // known Running view would intentionally raise uncertainty in HostAttention.
   const knownRuns = new Set<number>(busy);
   const completed = new Map<number, number>();
+  const stepCounts = new Map<number, number>();
+  const connectionErrors = new Map<number, string>();
   const updates: { id: number; method: string; body: string | null }[] = [];
   const admission = routeGate();
   releases.push(admission.release);
@@ -142,9 +146,11 @@ async function prepare(page: Page, request: APIRequestContext) {
   ]);
   const hosts = () => [
     local!,
-    ...[...ages].map(([id, age]) =>
-      remote(id, id === IDS.current ? `current-${generation}` : names.get(id)!, age, originalBuild)
-    ),
+    ...[...ages].map(([id, age]) => {
+      const host = remote(id, id === IDS.current ? `current-${generation}` : names.get(id)!, age, originalBuild);
+      if (age === "connecting" && connectionErrors.has(id)) host.state.last_error = connectionErrors.get(id);
+      return host;
+    }),
   ];
   cleanup.push([
     "host replies",
@@ -168,9 +174,10 @@ async function prepare(page: Page, request: APIRequestContext) {
           operation: knownRuns.has(id) ? "add" : null,
           status: busy.has(id) ? "running" : "completed",
           steps: knownRuns.has(id)
-            ? Array.from({ length: 3 }, (_, index) => ({
-              step: `fixture-step-${index}`,
+            ? Array.from({ length: stepCounts.get(id) ?? 3 }, (_, index) => ({
+              step: index === 0 ? "prepare-snapshot" : `fixture-step-${index}`,
               name: `setup step ${index + 1}`,
+              explanation: index === 0 ? "Prepared once a day, or after Farhelm updates." : null,
               status: index < done ? "completed" : index === done ? "running" : "pending",
             }))
             : [],
@@ -224,6 +231,15 @@ async function prepare(page: Page, request: APIRequestContext) {
     },
     setCompleted(id: number, done: number) {
       completed.set(id, done);
+    },
+    /** A one-step run has no disposable list height to mask rounding errors. */
+    setStepCount(id: number, count: number) {
+      stepCounts.set(id, count);
+    },
+    /** Keep a live connecting phase while varying only its peer diagnosis. */
+    setConnectionError(id: number, error: string) {
+      ages.set(id, "connecting");
+      connectionErrors.set(id, error);
     },
     /** An attended filter read still observes new build stamps after skew stops the feed. */
     async observeBuildThroughFilter(hostId?: number) {
@@ -495,6 +511,219 @@ test("attention groups problems, work and updates and opens the exact host", asy
   await attentionRow(page, IDS.two).getByText("build-two", { exact: true }).click();
   await expect(page.locator(`[data-host-id="${IDS.two}"] .host-row-menu`)).toBeFocused();
   expect(fixture.updates).toEqual([]);
+});
+
+/**
+ * The two surfaces must expose the same live run rather than stale copied
+ * diagnostics. Separate hidden sources keep row selectors unambiguous while
+ * pointer and keyboard entry both reach the shared tooltip owner.
+ */
+test("host progress cards agree across surfaces and follow connection detail", async ({ page, request }) => {
+  const fixture = await prepare(page, request);
+  const attention = attentionRow(page, IDS.busy);
+  const open = attention.locator(".host-attention-open");
+  await expect(attention).toHaveAttribute("data-attention-kind", "working");
+  await expect(attention.locator(".host-attention-state")).toHaveText("Setting up · setup step 1");
+  await expect(attention.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "0");
+  await expect(open).not.toHaveAttribute("data-tooltip", /\S/);
+  await expect(attention.locator(".host-kind-icon")).not.toHaveAttribute("data-tooltip", /\S/);
+  await expect(attention.getByRole("progressbar")).not.toHaveAttribute("data-tooltip", /\S/);
+  await expect(attention.locator(".host-progress-card")).toHaveCount(0);
+  const attentionSource = await open.getAttribute("data-tooltip-card");
+  expect(attentionSource, "a running attention identity needs its own card source").toBeTruthy();
+  await expect(page.locator(`[id="${attentionSource}"]`)).toBeHidden();
+  const tip = page.locator(".farhelm-tooltip");
+  const card = tip.locator(".host-progress-card");
+  await open.hover();
+  await expect(card).toBeVisible();
+  await expect(card.locator(".host-progress-title")).toHaveText("busy");
+  await expect(card).toContainText("Setting up: 0 of 3 steps done");
+  await expect(card).toContainText("Prepared once a day, or after Farhelm updates.");
+  await expect(card.locator(".host-progress-connection")).toHaveCount(0);
+  const steps = await card.locator(".provisioning-step").evaluateAll((nodes) => nodes.map((node) => ({
+    id: node.getAttribute("data-step"), status: node.getAttribute("data-status"), text: node.textContent,
+  })));
+  expect(steps).toHaveLength(3);
+  await expect(tip).toHaveAttribute("data-side", "right");
+
+  // The run is unchanged: only the freshly read host phase supplies this line.
+  fixture.setAge(IDS.busy, "connecting");
+  await fixture.publish();
+  const connection = card.locator(".host-progress-connection");
+  await expect(connection).toContainText("Attempt 2: waiting for the next connection attempt");
+  await expect(connection).toContainText("the last one failed: fixture SSH connection refused");
+  const diagnostic = await connection.textContent();
+  await showHostsPanel(page);
+  const row = page.locator(`[data-host-id="${IDS.busy}"]`);
+  const label = row.locator(".host-update-running");
+  await expect(label).toBeVisible();
+  const hostsSource = await label.getAttribute("data-tooltip-card");
+  expect(hostsSource).toBeTruthy();
+  expect(hostsSource, "the always-mounted Hosts source must not alias the attention source").not.toBe(attentionSource);
+  await expect(row.locator(".host-progress-card")).toHaveCount(0);
+  await expect(page.locator(`[id="${hostsSource}"]`)).toBeHidden();
+  await label.hover();
+  await expect(card).toBeVisible();
+  await expect(connection).toHaveText(diagnostic!);
+  expect(await card.locator(".provisioning-step").evaluateAll((nodes) => nodes.map((node) => ({
+    id: node.getAttribute("data-step"), status: node.getAttribute("data-status"), text: node.textContent,
+  })))).toEqual(steps);
+  fixture.setAge(IDS.busy, "current");
+  await fixture.publish();
+  await expect(connection).toHaveCount(0);
+
+  await showSessionsPanel(page);
+  await expect(open).toBeVisible();
+  const viewport = page.viewportSize()!;
+  await page.mouse.move(viewport.width - 8, viewport.height - 8);
+  await page.keyboard.press("Tab");
+  await open.focus();
+  await expect(open).toBeFocused();
+  expect(await open.evaluate((node) => node.matches(":focus-visible")), "keyboard provenance must own this opening").toBe(true);
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("Prepared once a day, or after Farhelm updates.");
+  await expect(connection).toHaveCount(0);
+  expect(fixture.updates).toEqual([]);
+});
+
+/**
+ * A connection failure can exceed an entire short window. Preview only that
+ * overflow, keep the actual current step readable, and make the promised full
+ * diagnosis reachable through the ordinary identity button. Re-cloning must
+ * restore whole text when either the window grows or the diagnosis gets shorter.
+ * A run without its first steps still needs the same diagnostic preview; only
+ * the populated variant has a current step whose glyphs must remain readable.
+ */
+for (const stepCount of [3, 0]) {
+test(stepCount === 0 ? "host progress previews long diagnostics before any steps arrive"
+  : "host progress previews only diagnostics that cannot fit beside its current step", async ({ page, request }) => {
+  const fixture = await prepare(page, request);
+  const diagnosis = "SSH failed while reconnecting. ".repeat(18) + "Final diagnosis: permission denied.";
+  fixture.setStepCount(IDS.busy, stepCount);
+  fixture.setConnectionError(IDS.busy, diagnosis);
+  await fixture.publish();
+  const open = attentionRow(page, IDS.busy).locator(".host-attention-open");
+  await expect(open).toBeVisible();
+  await expect(attentionRow(page, IDS.busy)).toHaveAttribute("data-attention-kind", "working");
+  const card = page.locator(".farhelm-tooltip .host-progress-card");
+  const detail = card.locator(".host-progress-connection-detail");
+  const notice = card.locator(".host-progress-preview-notice");
+
+  /** Reveal scrolling dismisses help, even when its event arrives after hover.
+   * Keep reveal separate from pointer entry and cross the browser's scroll-event
+   * phase before entering. This is a viewport-opening boundary only: live
+   * diagnosis changes below must update the already-open card without re-entry.
+   */
+  const hoverAtHeight = async (height: number) => {
+    await page.mouse.move(0, 0);
+    await page.setViewportSize({ width: 1024, height });
+    await page.evaluate(() => document.fonts.ready);
+    await open.scrollIntoViewIfNeeded();
+    await expect(open, "the working identity must fit its actual scroller and viewport before entry")
+      .toBeInViewport({ ratio: 1 });
+    // Scroll steps precede animation-frame callbacks. Flush the reveal's queued
+    // scroll before hover, rather than cancelling the tooltip's pending timer.
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+    await expect.poll(() => open.evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      return node.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+    }), { message: "the revealed identity owns the hover hit point" }).toBe(true);
+    await open.hover();
+    await expect(card).toBeVisible();
+  };
+
+  await hoverAtHeight(300);
+  await expect(card.locator(".provisioning-step")).toHaveCount(stepCount);
+  await expect(card.locator(".provisioning-step[data-current]")).toHaveCount(stepCount === 0 ? 0 : 1);
+  await expect(detail).toContainText(diagnosis);
+  await expect(notice).toBeVisible();
+  // DOM visibility accepts partially clipped text. Both the current name and
+  // the notice must keep every glyph inside their clipping boxes and viewport.
+  const readablePreview = () => card.evaluate((node, stepCount) => {
+    if (!node.isConnected) return { current: false, notice: false };
+    const readable = (text: Element, clip: Element = node) => {
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const rects = Array.from(range.getClientRects());
+      const clips = [node.getBoundingClientRect(), clip.getBoundingClientRect(), new DOMRect(0, 0, innerWidth, innerHeight)];
+      return rects.length > 0 && rects.every((rect) => clips.every((bounds) =>
+        rect.top >= bounds.top - 0.5 && rect.bottom <= bounds.bottom + 0.5
+        && rect.left >= bounds.left - 0.5 && rect.right <= bounds.right + 0.5));
+    };
+    return {
+      current: stepCount === 0 ? null
+        : readable(node.querySelector(".host-progress-step-current")!, node.querySelector(".host-progress-steps")!),
+      notice: readable(node.querySelector(".host-progress-preview-notice")!),
+    };
+  }, stepCount);
+  const expectedPreview = { current: stepCount === 0 ? null : true, notice: true };
+  await expect.poll(readablePreview, { message: "a long diagnosis must leave its current step and full-details notice readable" })
+    .toEqual(expectedPreview);
+  await expect.poll(() => detail.evaluate((node) => node.isConnected && node.scrollHeight > node.clientHeight)).toBe(true);
+  // The elapsed clock replaces clones. Sample visibility and style on the same
+  // connected copy instead of accepting a detached element's empty style.
+  await expect.poll(() => card.evaluate(node =>
+    node.isConnected && node.getClientRects().length > 0 ? getComputedStyle(node).pointerEvents : null
+  )).toBe("none");
+
+  await hoverAtHeight(1200);
+  await expect(notice).toBeHidden();
+  await expect.poll(() => detail.evaluate((node) => node.isConnected && node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+  await expect(detail).toContainText(diagnosis);
+  await hoverAtHeight(300);
+  await expect(notice).toBeVisible();
+  fixture.setConnectionError(IDS.busy, "Short connection failure.");
+  await fixture.publish();
+  await expect(detail).toContainText("Short connection failure.");
+  await expect(notice).toBeHidden();
+  await expect.poll(() => detail.evaluate((node) => node.isConnected && node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+
+  fixture.setConnectionError(IDS.busy, diagnosis);
+  await fixture.publish();
+  await expect(notice).toBeVisible();
+  await expect.poll(readablePreview).toEqual(expectedPreview);
+  await open.click();
+  await expect(page.locator(".hosts-panel-toggle")).toHaveAttribute("aria-pressed", "true");
+  await page.locator(".host-details-toggle").check();
+  const fullDetail = page.locator(`[data-host-id="${IDS.busy}"] .host-detail`);
+  await expect(fullDetail).toContainText(diagnosis);
+  // The full row can scroll normally; its text itself must have no preview cap.
+  expect(await fullDetail.evaluate((node) => getComputedStyle(node).maxHeight)).toBe("none");
+  expect(fixture.updates).toEqual([]);
+});
+}
+
+/**
+ * A fitting one-step card has no spare list height to absorb measurement
+ * rounding. Its multiline diagnosis must remain whole rather than losing a
+ * notice-height of text because clientHeight rounded down a fractional line box.
+ */
+test("a one-step host card keeps a fitting multiline diagnosis whole", async ({ page, request }) => {
+  const fixture = await prepare(page, request);
+  const diagnosis = "Connection refused by the remote supervisor. ".repeat(2).trim();
+  fixture.setStepCount(IDS.busy, 1);
+  fixture.setConnectionError(IDS.busy, diagnosis);
+  await fixture.publish();
+  const open = attentionRow(page, IDS.busy).locator(".host-attention-open");
+  await expect(open).toBeVisible();
+  await open.hover();
+  const card = page.locator(".farhelm-tooltip .host-progress-card");
+  await expect(card).toBeVisible();
+  await expect(card.locator(".provisioning-step")).toHaveCount(1);
+  await expect(card.locator(".provisioning-step[data-current]")).toHaveCount(1);
+  const detail = card.locator(".host-progress-connection-detail");
+  await expect(detail).toContainText(diagnosis);
+  await expect.poll(() => card.evaluate((node) => {
+    if (!node.isConnected) return null;
+    const detail = node.querySelector(".host-progress-connection-detail") as HTMLElement;
+    const style = getComputedStyle(detail);
+    return {
+      belowCap: node.getBoundingClientRect().height < innerHeight - 20,
+      multiline: detail.getBoundingClientRect().height > parseFloat(style.lineHeight) * 2,
+      whole: detail.scrollHeight <= detail.clientHeight + 1,
+      noticeHidden: (node.querySelector(".host-progress-preview-notice") as HTMLElement).hidden,
+    };
+  })).toEqual({ belowCap: true, multiline: true, whole: true, noticeHidden: true });
 });
 
 /**
@@ -813,17 +1042,19 @@ test("optional dismissal leaves other attention visible and revives only for new
   expect(fixture.updates).toEqual([]);
 });
 
-/** Polling work must not invalidate a session menu measured against the same layout. */
+/** Step text and counters repaint inside the row without invalidating a measured session menu. */
 test("progress-only publications preserve an open session menu", async ({ page, request }) => {
   const { fixture, open, geometry, panel, toggle } = await prepareSessionMenu(page, request);
   const progress = attentionRow(page, IDS.busy).getByRole("progressbar");
   await expect(progress).toHaveAttribute("aria-valuenow", "0");
   await expect(progress).toHaveAttribute("aria-valuemax", "3");
+  await expect(attentionRow(page, IDS.busy).locator(".host-attention-state")).toHaveText("Setting up · setup step 1");
   await open();
   const before = await geometry();
   fixture.setCompleted(IDS.busy, 1);
   await fixture.publish();
   await expect(progress).toHaveAttribute("aria-valuenow", "1");
+  await expect(attentionRow(page, IDS.busy).locator(".host-attention-state")).toHaveText("Setting up · setup step 2");
   await waitForFeedReadersSettled(page);
   expect(await geometry(), "a progress-only update must leave the anchor unchanged").toEqual(before);
   await expect(panel).toBeVisible();

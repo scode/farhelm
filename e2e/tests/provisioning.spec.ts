@@ -261,15 +261,15 @@ async function startAdd(request: APIRequestContext, destination: string): Promis
 }
 
 /**
- * Whether the update popup's current step name, count line, and clock line
+ * Whether the progress card's current step name, count line, and clock line
  * are actually readable: every rectangle of each one's text lies inside the
- * popup's box, inside the step list's box for the step, and inside the
+ * card's box, inside the step list's box for the step, and inside the
  * viewport. Measured on the text itself through a DOM `Range`, because the
  * elements' own `scrollWidth`/`clientWidth` read zero for inline spans and
  * so cannot tell clipped text from visible text.
  */
-async function popupTextVisible(popup: Locator): Promise<{ current: boolean; count: boolean; elapsed: boolean }> {
-  return await popup.evaluate((node) => {
+async function progressCardTextVisible(card: Locator): Promise<{ current: boolean; count: boolean; elapsed: boolean }> {
+  return await card.evaluate((node) => {
     const within = (inner: DOMRect, outer: DOMRect) =>
       inner.left >= outer.left - 0.5 && inner.right <= outer.right + 0.5
       && inner.top >= outer.top - 0.5 && inner.bottom <= outer.bottom + 0.5;
@@ -285,9 +285,9 @@ async function popupTextVisible(popup: Locator): Promise<{ current: boolean; cou
         && rects.every((rect) => within(rect, box) && within(rect, clipBox) && within(rect, viewport));
     };
     return {
-      current: readable(node.querySelector(".host-update-popup-step"), node.querySelector(".host-update-popup-steps")),
-      count: readable(node.firstElementChild),
-      elapsed: readable(node.querySelector(".host-update-popup-elapsed")),
+      current: readable(node.querySelector(".host-progress-step-current"), node.querySelector(".host-progress-steps")),
+      count: readable(node.querySelector(".host-progress-count")),
+      elapsed: readable(node.querySelector(".host-progress-elapsed")),
     };
   });
 }
@@ -1062,11 +1062,11 @@ test("confirmed uninstall refusal survives a vanished host row", async ({ page, 
   }
 });
 
-/** An open, unscrollable popup must follow progress and retain warning detail.
+/** An open, unscrollable card must follow progress and retain warning detail.
  * A controlled long step list makes the next step start outside its clip;
  * the geometry oracle distinguishes scrolling from text repaint. A degraded
  * prior step must keep the helm's reason when the row is folded. */
-test("an open Update popup follows the new current step in a short viewport", async ({ page, request }, testInfo) => {
+test("an open Update card follows the new current step in a short viewport", async ({ page, request }, testInfo) => {
   const remote = destination(testInfo, "popup-follow");
   const accepted = await startAdd(request, remote);
   await waitForProgress(request, accepted.host_id, "completed");
@@ -1097,16 +1097,22 @@ test("an open Update popup follows the new current step in a short viewport", as
   await expect(row.locator(".host-update-step")).toHaveText(" fixture-step-0");
   await page.setViewportSize({ width: 1280, height: 300 });
   await row.locator(".host-update-count").hover();
-  const popup = row.locator(".host-update-popup");
-  await expect(popup).toBeVisible();
-  await expect.poll(() => popupTextVisible(popup)).toEqual({ current: true, count: true, elapsed: true });
-  expect(await popup.locator(".host-update-popup-steps").evaluate((node) => node.scrollHeight > node.clientHeight), "the step list must actually be clipped").toBe(true);
+  const card = page.locator(".farhelm-tooltip .host-progress-card");
+  await expect(card).toBeVisible();
+  await expect.poll(() => progressCardTextVisible(card)).toEqual({ current: true, count: true, elapsed: true });
+  const steps = card.locator(".host-progress-steps");
+  // Card spacing must outrank the expanded panel's later list defaults;
+  // otherwise the running marker's ring is clipped against the left edge.
+  expect(await steps.evaluate((node) => Number.parseFloat(getComputedStyle(node).paddingLeft))).toBeGreaterThan(0);
+  expect(await steps.evaluate((node) => node.scrollHeight > node.clientHeight), "the step list must actually be clipped").toBe(true);
+  const initialScroll = await steps.evaluate((node) => node.scrollTop);
   current = 15;
   feed.notify(2);
-  await expect(popup.locator(".host-update-popup-step")).toHaveText("fixture-step-15");
-  await expect(popup.locator('.provisioning-step[data-status="degraded"] .provisioning-step-message'))
+  await expect(card.locator(".host-progress-step-current")).toHaveText("fixture-step-15");
+  await expect(card.locator('.provisioning-step[data-status="degraded"] .provisioning-step-message'))
     .toHaveText("Lingering denied; supervisor starts at login instead of boot.");
-  await expect.poll(() => popupTextVisible(popup), { message: "the already-open popup must scroll to step 15" }).toEqual({ current: true, count: true, elapsed: true });
+  await expect.poll(() => steps.evaluate((node) => node.scrollTop), { message: "the already-open card must actually scroll to its new current step" }).toBeGreaterThan(initialScroll);
+  await expect.poll(() => progressCardTextVisible(card), { message: "the already-open card must keep step 15 readable" }).toEqual({ current: true, count: true, elapsed: true });
 });
 
 test.afterEach(async ({ request }) => {
@@ -2754,7 +2760,7 @@ function countUpdateRequests(page: Page, host: number): { plans: number; confirm
  * for it to stay compact. This pins the whole folded path: one plan and one
  * submission with no confirmation, `N/M step m:ss` inline with a pulse that
  * stands down under reduced motion, no trace line, the menu toggle still
- * inside the sidebar with the longest real step name, a hover popup that
+ * inside the sidebar with the longest real step name, a shared hover card that
  * spells out what the narrow label truncates, and success returning the
  * ordinary status without ever touching the details checkbox.
  */
@@ -2831,22 +2837,29 @@ test(`single Update shows inline progress without opening its row in ${appearanc
   expect(geometry.nameWidth).toBeGreaterThan(150);
   expect(geometry.statusTop).toBeGreaterThanOrEqual(geometry.nameBottom);
 
-  // Hovering anywhere on the label spells out the whole status. The popup is
-  // fixed-position so the sidebar's clipping cannot cut off the step name the
-  // inline label had to truncate, and it goes away when the pointer leaves.
-  const popup = row.locator(".host-update-popup");
-  await expect(popup).toHaveCount(0);
+  // The source is outside the managed row, so its hidden step list cannot
+  // contaminate row-scoped selectors. Only the body-level tooltip paints it.
+  const label = row.locator(".host-update-running");
+  const sourceId = await label.getAttribute("data-tooltip-card");
+  expect(sourceId, "the inline status must opt into the shared card").toBeTruthy();
+  const source = page.locator(`[id="${sourceId}"]`);
+  await expect(source).toBeHidden();
+  await expect(row.locator(".host-progress-card")).toHaveCount(0);
+  await expect(label).not.toHaveAttribute("tabindex", /./);
+  const tip = page.locator(".farhelm-tooltip");
+  const popup = tip.locator(".host-progress-card");
+  await expect(popup).not.toBeVisible();
   await row.locator(".host-update-count").hover();
   await expect(popup).toBeVisible();
   await expect(popup).toContainText(/Updating: \d+ of \d+ steps done/);
-  await expect(popup.locator(".host-update-popup-step")).toHaveText("Create directories");
+  await expect(popup.locator(".host-progress-step-current")).toHaveText("Create directories");
   await expect(popup).toContainText(/\d+:\d{2} elapsed/);
   // Both live clocks keep their technical face; the popup's explanatory
   // suffix stays in Inter. Resolve the actual weight-matched bundled face.
   for (const [clock, family] of [
     [row.locator(".host-update-elapsed"), "JetBrains Mono"],
-    [popup.locator(".host-update-popup-elapsed .font-mono"), "JetBrains Mono"],
-    [popup.locator(".host-update-popup-elapsed"), "Inter"],
+    [popup.locator(".host-progress-elapsed .font-mono"), "JetBrains Mono"],
+    [popup.locator(".host-progress-elapsed"), "Inter"],
   ] as const) {
     await expect.poll(() => clock.evaluate(async (element, family) => {
       const style = getComputedStyle(element);
@@ -2871,7 +2884,10 @@ test(`single Update shows inline progress without opening its row in ${appearanc
   const marker = popup.locator('.provisioning-step[data-current="true"] .provisioning-step-marker');
   // Fading a whole numbered marker makes its text unreadable. Only the ring
   // may pulse; its pseudo-element must retain the original outer diameter.
-  const markerPaint = await marker.evaluate((element) => {
+  // The elapsed clock replaces the tooltip clone, so a locator resolved just
+  // before that replacement can briefly name a detached, unstyled element.
+  const markerPaint = () => marker.evaluate((element) => {
+    if (!element.isConnected) return null;
     const style = getComputedStyle(element);
     const number = getComputedStyle(element, "::before");
     const ring = getComputedStyle(element, "::after");
@@ -2880,28 +2896,28 @@ test(`single Update shows inline progress without opening its row in ${appearanc
       color: style.color, ringColor: ring.borderTopColor, width: style.width, height: style.height,
       ringWidth: ring.width, ringHeight: ring.height, ringLeft: ring.left, ringTop: ring.top };
   });
-  expect(markerPaint).toEqual({ textAnimation: "none", textOpacity: "1", numeralOpacity: "1",
+  await expect.poll(markerPaint, { message: "the current tooltip clone keeps the running marker's paint" }).toEqual({ textAnimation: "none", textOpacity: "1", numeralOpacity: "1",
     ringAnimation: "farhelm-status-pulse", ringTiming: "steps(4)", ringDuration: "2s",
     color: appearance === "dark" ? "rgb(229, 187, 110)" : "rgb(121, 83, 27)",
     ringColor: appearance === "dark" ? "rgb(229, 187, 110)" : "rgb(121, 83, 27)",
     width: "17px", height: "17px", ringWidth: "15px", ringHeight: "15px", ringLeft: "-1px", ringTop: "-1px" });
   await page.emulateMedia({ reducedMotion: "reduce" });
-  expect(await marker.evaluate((element) => getComputedStyle(element, "::after").animationName)).toBe("none");
+  await expect.poll(() => marker.evaluate((element) => element.isConnected ? getComputedStyle(element, "::after").animationName : null)).toBe("none");
   await page.emulateMedia({ reducedMotion: "no-preference" });
-  expect(await popup.evaluate((node) => getComputedStyle(node).position)).toBe("fixed");
-  expect(await popupTextVisible(popup), "the current step, count, and clock are readable").toEqual({
+  expect(await tip.evaluate((node) => getComputedStyle(node).position)).toBe("fixed");
+  await expect(tip).toHaveAttribute("data-side", "right");
+  // Clock ticks replace this clone while media changes settle. Re-resolve it
+  // until the same complete geometry oracle sees a readable rendered copy.
+  await expect.poll(() => progressCardTextVisible(popup), { message: "the current step, count, and clock are readable" }).toEqual({
     current: true,
     count: true,
     elapsed: true,
   });
   await page.mouse.move(0, 0);
-  await expect(popup).toHaveCount(0);
+  await expect(popup).not.toBeVisible();
 
-  // With the label near the viewport's bottom edge there is no room below it,
-  // so the popup opens above it, or, when the run's step list is too tall for
-  // that too, is pinned inside the viewport over the label: fixed positioning
-  // escapes the sidebar's clipping but not the viewport's, and a popup past
-  // either edge would hide the steps it exists to show.
+  // A card beside a low label must stay within the viewport. The shared
+  // placement clamps its top while its own list gives up the missing height.
   const originalViewport = page.viewportSize()!;
   const labelBottom = await row
     .locator(".host-update-running")
@@ -2914,23 +2930,20 @@ test(`single Update shows inline progress without opening its row in ${appearanc
   await expect(popup).toBeVisible();
   const placement = await popup.evaluate((node) => {
     const box = node.getBoundingClientRect();
-    const label = node.parentElement!.getBoundingClientRect();
     return {
       inside: box.top >= 0 && box.bottom <= window.innerHeight,
-      notBelow: box.top < label.bottom,
     };
   });
-  expect(placement).toEqual({ inside: true, notBelow: true });
-  // However short the window, the list gives up height, not the lines that
-  // matter: the current step (scrolled into the list's view), the count,
-  // and the clock stay readable.
-  expect(await popupTextVisible(popup), "a short window keeps the current step, count, and clock").toEqual({
+  expect(placement).toEqual({ inside: true });
+  // The list gives up height first; an oversized connection diagnosis becomes
+  // a marked preview before it can consume the current step's remaining room.
+  await expect.poll(() => progressCardTextVisible(popup), { message: "a short window keeps the current step, count, and clock" }).toEqual({
     current: true,
     count: true,
     elapsed: true,
   });
   await page.mouse.move(0, 0);
-  await expect(popup).toHaveCount(0);
+  await expect(popup).not.toBeVisible();
   await page.setViewportSize(originalViewport);
 
   const progressDot = row.locator(".host-update-dot");

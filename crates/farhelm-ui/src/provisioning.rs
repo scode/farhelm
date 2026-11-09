@@ -585,7 +585,7 @@ impl UpdatePendingPhase {
 }
 
 impl UpdateProgressSummary {
-    /// The word the row's inline status and its hover popup use for this
+    /// The word the row's inline status and its shared hover card use for this
     /// run: "Setting up", "Updating" or "Uninstalling".
     pub(crate) fn verb(&self) -> &'static str {
         match self.operation {
@@ -607,8 +607,11 @@ pub(crate) struct UpdateProgressSummary {
     /// First executor-ordered `running` step, absent when the view names none.
     pub(crate) current_step: Option<String>,
     /// Every executor step in the snapshot, in executor order, for the hover
-    /// popup's full list. `current` marks the entry `current_step` names.
+    /// card's full list. `current` marks the entry `current_step` names.
     pub(crate) steps: Vec<UpdateStepLine>,
+    /// The run's own diagnostic, usually absent until the run ends. Keep the
+    /// original peer bytes for the card's render-time escaping, not display text.
+    pub(crate) message: Option<String>,
     /// Steps in a terminal state: completed, skipped, degraded, or failed.
     pub(crate) done: usize,
     /// All executor steps in the snapshot, including pending work.
@@ -617,10 +620,10 @@ pub(crate) struct UpdateProgressSummary {
     pub(crate) started_at: Instant,
 }
 
-/// One run step in the hover popup, with its policy and warning or failure reason.
+/// One run step in the shared hover card, with its policy and warning or failure reason.
 ///
 /// The id is a stable handle and the name is for people. A folded row can
-/// hide the expanded rail for this run, so the popup must retain a reason
+/// hide the expanded rail for this run, so the card must retain a reason
 /// that changes what the host will do, such as lingering falling back to login,
 /// and explanations that qualify the work while the user waits.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -883,7 +886,7 @@ fn summarize_running_view(
             id: step.step.clone(),
             name: progress_step_name(step).to_string(),
             status: step.status.clone(),
-            // The popup's local snapshot still owns raw strings and escapes
+            // The card's local snapshot still owns raw strings and escapes
             // them through PeerLine. Do not cache a display spelling here.
             explanation: progress_step_explanation(step)
                 .map(|explanation| explanation.raw().to_owned()),
@@ -901,6 +904,10 @@ fn summarize_running_view(
         steps,
         done,
         total: view.steps.len(),
+        message: view
+            .message
+            .as_ref()
+            .map(|message| message.raw().to_owned()),
         started_at,
     }
 }
@@ -5138,7 +5145,7 @@ mod tests {
             summary.steps[0].message.as_deref(),
             Some("command\u{200b}\r\nfailed")
         );
-        assert_eq!(view.message.as_ref().unwrap().raw(), "aggregate\u{2066}");
+        assert_eq!(summary.message.as_deref(), Some("aggregate\u{2066}"));
         let mut step = view.steps[0].clone();
         assert_eq!(progress_step_name(&step), " \t ");
         assert_eq!(progress_step_status(&step.status), "future-status");

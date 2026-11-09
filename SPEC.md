@@ -133,24 +133,31 @@ only Farhelm-owned files are removed and the shared directory stays. Then remove
 again. Its data directory can stay, without a promise that the new release can use every feature's old data, or the user
 can delete it too if they accept losing it. While an update is running, its host row stays folded and shows `Updating…`
 until a progress snapshot is available, then shows the current step, completed-step count, and client-measured elapsed
-time inline in the status spot; hovering that status shows the count, the elapsed time, and every step of the run with
-its status and the current one highlighted (in a window too short for the whole list, the list keeps the current step in
-view), since the sidebar is too narrow to show a long step name, let alone the rest of the run. Reduced-motion settings
-replace the animated indicator with a static one. Remote binary upload appears as a separate step before installation,
-so the user can tell when network transfer is still underway. The row and its hover use the helm's readable names for
-the same steps in the plan, with completed work checked green, the running step pulsing amber (static under reduced
-motion), pending work grey, unchanged work grey, degraded work as an amber warning, and failure red with the helm's
-reason. Success returns the status spot to its normal label and leaves the row folded unless global details are on.
-Failure or an uncertain outcome still expands the row so its step list and diagnostic remain visible in Hosts. When
-setup or Update fails or has an uncertain outcome while Hosts is closed, the host's rail avatar shows a warning mark
-until Hosts is opened or a later run of that same action succeeds. Starting a retry does not acknowledge the warning,
-and an unrelated successful action does not clear it. Setup recovery by discovery can resolve the same failed setup run.
-Hosts never opens by itself. The Hosts header's `Update all` action makes the same authorized Update request for each
-remote host whose individual Update action is available at the click. A host already busy with setup or another run is
-skipped rather than queued for a later update; the local host is excluded. Each remote host keeps its own validation,
-progress, and result, so one failure does not hide or delay the others. Having an available Update action does not
-itself mean the host needs an update: the rail's update badge and the attention list's Update rows require a compatible
-older build or a lower protocol, as well as an available remote Update action.
+time inline in the status spot. Hovering that status opens the same card as a working host in the attention list: the
+host's mark and name, operation and completed-step count with elapsed time, every step with its status and explanation,
+the current step highlighted, and any degraded or failed step's reason. Connection detail follows the steps while the
+host is not connected, including the attempt and last connection error, and the run's own message follows when present.
+In a short window the step list shrinks, keeping the current step in view as it changes. If connection detail or a run
+message cannot fit beside a readable current step, only the oversized text becomes a bounded preview and the card says
+`Full details in Hosts`. Messages that fit stay whole. The card remains non-interactive; opening Hosts through the host
+identity gives access to the whole diagnosis. This is the narrow exception to full detail on hover. The card uses the
+shared hover delay and beside-the-sidebar placement, is absent on touch, and adds no keyboard stop to the status label.
+The sidebar is too narrow to show a long step name, let alone the rest of the run. Reduced-motion settings replace the
+animated indicator with a static one. Remote binary upload appears as a separate step before installation, so the user
+can tell when network transfer is still underway. The row and its hover use the helm's readable names for the same steps
+in the plan, with completed work checked green, the running step pulsing amber (static under reduced motion), pending
+work grey, unchanged work grey, degraded work as an amber warning, and failure red with the helm's reason. Success
+returns the status spot to its normal label and leaves the row folded unless global details are on. Failure or an
+uncertain outcome still expands the row so its step list and diagnostic remain visible in Hosts. When setup or Update
+fails or has an uncertain outcome while Hosts is closed, the host's rail avatar shows a warning mark until Hosts is
+opened or a later run of that same action succeeds. Starting a retry does not acknowledge the warning, and an unrelated
+successful action does not clear it. Setup recovery by discovery can resolve the same failed setup run. Hosts never
+opens by itself. The Hosts header's `Update all` action makes the same authorized Update request for each remote host
+whose individual Update action is available at the click. A host already busy with setup or another run is skipped
+rather than queued for a later update; the local host is excluded. Each remote host keeps its own validation, progress,
+and result, so one failure does not hide or delay the others. Having an available Update action does not itself mean the
+host needs an update: the rail's update badge and the attention list's Update rows require a compatible older build or a
+lower protocol, as well as an available remote Update action.
 
 **Update remote hosts automatically** in Settings is off by default for new and existing installations. While on, the
 helm starts that same authorized Update for each host with an update by the badge's test, including required protocol
@@ -2353,7 +2360,7 @@ than here.
 
 In the web and desktop clients, hover text appears about 300 ms after the pointer rests on a control or icon that has
 it, or keyboard focus reaches one, and at once when moving on to another while one is showing; it sits above the control
-so the pointer does not cover it, except in session rows, whose hovers sit beside the list (Session list). Every
+so the pointer does not cover it, except in session rows and host progress, whose hovers sit beside the sidebar. Every
 clickable control and every icon that carries meaning has hover text saying what it is or does, plain-word buttons
 included, saying more than the label where it can. The one exception is an item in a row's actions menu that already
 shows a description line under its label.
@@ -2397,10 +2404,13 @@ red when any update is required, amber otherwise; its accessible name and hover 
 
 The attention list above sessions has one row per host, with its rail mark and short name, its state, and the action
 that state offers. Live setup, update or uninstall progress takes precedence over a problem, which takes precedence over
-an available update. Working rows say **Setting up**, **Updating** or **Uninstalling** and show a progress bar, filled
-as steps complete when a step count is available and otherwise left empty and static, which keeps the row's height; they
-have no action button. A connection interruption during that work does not replace its progress with a problem. Problems
-appear first, then working hosts, then updates, in rail order within each group.
+an available update. Working rows say **Setting up**, **Updating** or **Uninstalling**, followed by the current step's
+name when known, ellipsized to fit. Their identity button opens the shared progress card on hover or keyboard focus,
+with the same detail as the Hosts progress line, and their marks and bars have no separate plain tooltip. Step-name
+changes do not invalidate session menus below the list. Working rows show a progress bar, filled as steps complete when
+a step count is available and otherwise left empty and static, which keeps the row's height; they have no action button.
+A connection interruption during that work does not replace its progress with a problem. Problems appear first, then
+working hosts, then updates, in rail order within each group.
 
 Problem rows offer **Details**: Unreachable (worded **Unreachable, retrying**), Identity mismatch, Identity unverified,
 Duplicate, Retired, Unrecognized, a protocol skew without an available Update or with the host's higher protocol, a

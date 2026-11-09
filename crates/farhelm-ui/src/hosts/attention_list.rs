@@ -12,10 +12,10 @@ use dioxus::prelude::*;
 
 use super::attention::HostAttention;
 use super::updates::{HostUpdates, UpdateDismissal};
-use super::{host_update_title, phase_display_label, rail_identity};
+use super::{HostProgressCardSource, host_update_title, phase_display_label, rail_identity};
 use crate::api::ProvisioningOperation;
 use crate::icons::HostMark;
-use crate::provisioning::HostUpdateProgress;
+use crate::provisioning::{HostUpdateProgress, UpdateProgressSummary};
 use crate::{Host, HostId, HostPhase};
 
 /// A host has one reason to appear, even when several observations need attention.
@@ -40,13 +40,17 @@ impl AttentionKind {
 }
 
 /// One rendered host snapshot, not a lookup key to resolve again at activation.
-/// Counts repaint the progress bar but never change its layout footprint.
+/// Counts and the current step repaint inside a fixed footprint. The summary
+/// supplies the card without adding progress ticks to the geometry signature.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct AttentionRow {
     pub(crate) host: Host,
     pub(crate) kind: AttentionKind,
     pub(crate) words: String,
     pub(crate) progress: Option<(usize, usize)>,
+    /// Full run detail is separate from stable row copy: the current step and
+    /// clock repaint without moving the session-menu anchors below this list.
+    pub(crate) summary: Option<UpdateProgressSummary>,
 }
 
 /// Select one row per host, then group Problems, Working and Updates in rail order.
@@ -115,6 +119,10 @@ pub(crate) fn classify(
             kind,
             words,
             progress: counts,
+            summary: match progress.get(&host.id) {
+                Some(HostUpdateProgress::Running(summary)) => Some(summary.clone()),
+                _ => None,
+            },
         });
     }
     // Stable grouping retains registry order, including optional and required
@@ -283,7 +291,18 @@ fn AttentionHostRow(
             .map(|destination| destination.raw()),
         row.host.kind.is_this_machine(),
     );
-    let tooltip = format!("{identity}: {}; open Hosts for details", row.words);
+    let current_step = row
+        .summary
+        .as_ref()
+        .and_then(|summary| summary.current_step.clone());
+    let step_words = current_step
+        .as_ref()
+        .map(|step| format!(" · {}", crate::peer::display_peer(step)))
+        .unwrap_or_default();
+    let tooltip = format!(
+        "{identity}: {}{step_words}; open Hosts for details",
+        row.words
+    );
     let update_tooltip = host_update_title(&row.host.state)
         .unwrap_or_else(|| "Update: install this helm's version on this host".into());
     let update_kind = match row.kind {
@@ -291,22 +310,41 @@ fn AttentionHostRow(
         AttentionKind::Update { required: false } => Some("optional"),
         AttentionKind::Problem | AttentionKind::Working => None,
     };
+    let working = row.kind == AttentionKind::Working;
+    let card = row
+        .summary
+        .clone()
+        .map(|summary| (row.host.clone(), summary));
+    let card_id = format!("host-progress-attention-{id}");
+    let has_card = card.is_some();
+    let card_attribute = has_card.then(|| card_id.clone());
     rsx! {
         div { class: "host-attention-row", "data-attention-host-id": "{id}",
             "data-attention-kind": row.kind.attribute(), "data-update-kind": update_kind,
             onclick: move |_| on_show_host.call(id),
             button { r#type: "button", class: "btn host-attention-open",
-                aria_label: tooltip.clone(), "data-tooltip": tooltip.clone(),
+                aria_label: tooltip.clone(),
+                // Admission/planning has no run snapshot to put in a card yet.
+                "data-tooltip": if !has_card { Some(tooltip.clone()) },
+                "data-tooltip-card": card_attribute,
+                "data-tooltip-anchor": if has_card { "session-row" },
                 onclick: move |event| { event.stop_propagation(); on_show_host.call(id); },
                 HostMark {
                     icon: row.host.icon, color: row.host.color,
-                    local: row.host.kind.is_this_machine(), tooltip: tooltip.clone(),
+                    local: row.host.kind.is_this_machine(),
+                    tooltip: if working { String::new() } else { tooltip.clone() },
                 }
                 span { class: "host-attention-copy",
                     span { class: "host-attention-name peer-value", dir: "ltr",
                         "{row.host.short_name().escaped()}"
                     }
-                    span { class: "host-attention-state", "{row.words}" }
+                    span { class: "host-attention-state",
+                        "{row.words}"
+                        if let Some(step) = current_step {
+                            " · "
+                            span { class: "peer-value", dir: "ltr", "{crate::peer::display_peer(&step)}" }
+                        }
+                    }
                     if row.kind == (AttentionKind::Update { required: true }) {
                         span { class: "host-attention-required",
                             "Sessions stay unreachable until this host is updated."
@@ -334,13 +372,17 @@ fn AttentionHostRow(
                     if let Some((done, total)) = row.progress.filter(|(_, total)| *total > 0) {
                         progress { class: "host-attention-progress", max: "{total}", value: "{done.min(total)}",
                             aria_valuemin: "0", aria_valuenow: "{done.min(total)}", aria_valuemax: "{total}",
-                            aria_label: "Host operation progress", "data-tooltip": "{done} of {total} steps finished"
+                            aria_label: "Host operation progress",
                         }
                     } else {
                         progress { class: "host-attention-progress", aria_label: "Host operation in progress" }
                     }
                 },
             }
+        }
+        if let Some((host, summary)) = card {
+            // Keep cloned step lists out of row-scoped detail selectors.
+            HostProgressCardSource { key: "{summary.run_id}", id: card_id, host, summary }
         }
     }
 }
@@ -711,6 +753,7 @@ mod tests {
         let hosts = vec![host(1, connected())];
         let mut summary = UpdateProgressSummary {
             run_id: "first".into(),
+            message: None,
             operation: ProvisioningOperation::Update,
             current_step: Some("upload".into()),
             steps: Vec::new(),
@@ -735,6 +778,7 @@ mod tests {
         summary.total = 5;
         summary.started_at = Instant::now();
         let after = working(summary.clone());
+        assert_ne!(before[0].summary, after[0].summary);
         assert_ne!(before[0].progress, after[0].progress);
         assert_eq!(layout_key(&before), layout_key(&after));
         summary.operation = ProvisioningOperation::Uninstall;
