@@ -10,7 +10,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `session-switch-jiggle.md` — Find and fix what makes rightmost-column text and full-width rules jiggle in new terminals when switching sessions, with a browser test
 - [in-flight 5fd194] `grid-binary-stream.md` — A committed browser memory and attach benchmark, then a binary encoding for new terminals' screen and history messages and compact on-demand-decoded scrollback in the page
 - [pending] `nonblocking-session-actions.md` — Pending Stop, Restart, Replace, Delete and launches no longer block switching sessions or acting on other ones; the acted-on session shows "Stopping…" and keeps its result after a switch
-- [in-flight dfa374] `per-host-checkout-folder.md` — A Checkout folder field in each host's settings, with Settings → Checkouts becoming the default for hosts without one
+- [complete] `per-host-checkout-folder.md` — A Checkout folder field in each host's settings, with Settings → Checkouts becoming the default for hosts without one
 - [pending] `mux-chunk-size.md` — Upload, download and tunnel data between helm and supervisor goes in 32 KiB chunks instead of 256 KiB, with the connection's multiplexing explained in SPEC_impl.md
 - [pending] `header-actions-compact.md` — The session header's actions compact only when the header is actually short of room, not whenever a tunnel pill is shown, with a browser test
 - [pending] `podman-environments.md` — A rootless Podman container on one of your hosts as a session's own machine, built from a shared recipe with Farhelm inside and the checkout cloned inside; sandbox and container sessions share one provider abstraction in code; today's containerized sessions become delete-only (after `sandbox-sessions.md`)
