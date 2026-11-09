@@ -66,3 +66,68 @@ The required single fresh-context gpt-6.1-sol/high reviewer found no outstanding
 overstated when download credit advances; it now distinguishes upload disk writes, relay socket writes and the helm
 taking download bytes from its receive queue. The same reviewer verified that correction against the source. No finding
 was rejected or required behavior omitted. The documentation pass and commit/PR wording cold read are complete.
+
+### Landing
+
+Landed together with rail-notification-bell (a bell in the navigation rail for failed Trash cleanup), stacked above it.
+Main had just gained cheaper cleanup for sessions in systemd scopes, and checkout folders set per host. A fresh-context
+review found no conflict in the code. Only this plan changes the protocol version, from 70 to 71. The test that pins the
+version, the protocol's own documentation and SPEC_impl.md all agree, and no test data still names 70. Every transfer
+path uses the one shared chunk size, and the transfer queues are sized from it as SPEC_impl.md now states. The landing
+made no fixes to this plan.
+
+The version bump did affect rail-notification-bell: its docs and changelog entry claimed older hosts keep their previous
+behavior, which is no longer true, and that landing removed the claim.
+
+#### Things you should know
+
+- After this release, every remote host's supervisor must be updated before it connects to a helm with this change;
+  until then the host shows as needing an update. The executor's report says so too ("Remote supervisors need
+  updating").
+
+#### Checks
+
+The two plans were checked together, stacked in queue order on main (rail-notification-bell's top commit, then
+mux-chunk-size's), on this development machine and, at the maintainer's request, on Tensorlake sandboxes. The landing
+resolved the UI API conflict before any check ran, so every run below includes it. The merged tree is the one checked
+last: rail-notification-bell's top at `94a5b4f7` and mux-chunk-size at `1ffbd128`. Main after the merges differs from it
+only by two changes that landed meanwhile and touch neither plan: a queue-picking rule for plan executors, and
+review-queue bookkeeping.
+
+On the stack before the fixture and docs fixes (rail-notification-bell's top at `68da3700`, mux-chunk-size at
+`e5fd6349`):
+
+- Here: `cargo fmt --all -- --check`, `dprint check`, `python3 releasing/check-changelog.py format`, the test-sleep
+  checker, `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`, the docs website build and the UI's JavaScript unit tests passed.
+- Tensorlake, browser: `rail-notices`, `trash-dialog`, `header`, `sidebar`, `tensorlake-tunnels`, `terminal-files`,
+  `terminal-links` and `agent-relay` on Chromium and WebKit over eight sandboxes: 372 passed, none failed, skipped or
+  retried. Runs `dee09cd5`, `6806c67b`, `0a0124fb`, `986657df`, `04198f20`, `8ef40cc8`, `b20d7f3e` and `d6fba799`, in
+  the recorder's plain command mode (its Playwright mode cannot pick one engine per file) under the sandbox's slightly
+  older Node 24. Every sandbox reported its per-user systemd manager and its SSH to itself working.
+- Tensorlake, Rust: every Rust test in the workspace except the desktop app's (the sandboxes cannot build or run the
+  desktop app, and neither plan changes desktop-only code beyond what the desktop compile check above covers), from one
+  archive over nine sandboxes. Runs `3dd29160`, `eaaa34eb`, `b32f6ffc`, `48183d95`, `4f412bce`, `96e65397`, `614967f5`,
+  `3e110a64` and `3ca3aec9`. There were five failures:
+  - two in the helm's checkout-configuration tests, fixed by rail-notification-bell's schema-fixture landing fix;
+  - `attribute_compile_contract_matrix`, which compiles small crates with a nested `cargo` that the sandboxes do not
+    have. Neither plan touches its crate; it passed here in an earlier round on a tree that differs from this one only
+    outside that crate (run `05991d87`);
+  - `create_idempotency::a_crash_before_the_outcome_commit_still_replays_the_same_session` (run `614967f5`, retained).
+    Delete refused because the sandbox's per-user systemd manager stopped answering its probes. This is the same failure
+    as in the previous round, in a test neither plan touches, and it is being recorded as a latent flake on its own;
+  - `service::core::tests::a_failed_create_replays_its_error_and_a_changed_override_conflicts` (run `eaaa34eb`,
+    retained), whose create reply did not arrive within 10 seconds on a loaded sandbox: one observation, in code neither
+    plan touches.
+
+After the fixture and docs fixes: formatting, `dprint check`, the changelog format check,
+`cargo clippy -p farhelm-helm --all-targets -- -D warnings`, the website build, and recorded
+`cargo nextest run -p farhelm-helm` here. 1659 passed; the two skipped are the real-Mac tests that only run by hand (run
+`ad5b842d`). That covers the fixed checkout-configuration tests and every helm test of the new notices. Nothing else was
+rerun: those fixes changed one helm test fixture and two sentences of documentation.
+
+Reused: nothing from the executors; the round's own runs above cover both plans on the combined tree.
+
+Skipped: the rest of the browser suite (the specs above cover the bell, Trash, the rail and the relay paths), the
+desktop smoke (no desktop-only code changed beyond what the desktop compile check covers) and hosted CI (manual-only,
+not dispatched).
