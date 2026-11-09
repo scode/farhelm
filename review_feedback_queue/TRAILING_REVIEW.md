@@ -1,6 +1,6 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `9e3ab60b86025ca74948ededd09b99cd81a2477c`
+Last reviewed commit: `25d8a9435662e6c832bc2e7fbf4b03a3ebbe1652`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in `review_feedback_queue/.agents/trailing-review.md`, together with any resulting queue updates. A proposed
@@ -9,74 +9,67 @@ checkpoint reaches `main` only when its review-result PR is merged.
 This file holds only the checkpoint and the latest run's completion record. Earlier runs' records are in
 `review_feedback_queue/TRAILING_REVIEW_HISTORY.md`.
 
-## Review through 9e3ab60b
+## Review through 25d8a943
 
-Raw reviewer-open findings number 47 before semantic deduplication and exclusions. Final dispositions below distinguish
-retained roots from source-refuted and covered records; every original identity remains in the private register.
-
-Reviewed range: `49ce8cb76e9f4c841e15122a89264c7c908171dc..9e3ab60b86025ca74948ededd09b99cd81a2477c`, 277 commits. The
-fetched exclusive checkpoint and inclusive main tip were pinned and ancestry verified. Every commit/path change was
-inventoried; 320 original per-commit patch packets were selected, including intermediate and deleted text. Initial
-reconstruction matched every selected patch; a supplemental audit restored two initially excluded behavior-bearing JSON
-inputs (tool checksum pins and the host-list wire fixture). Final mandatory delivery is 41,422 physical lines and
-2,110,752 bytes across 48 functional groups, 23–1474 lines and at most 62,756 bytes per group. No in-scope mandatory
-range remains unread.
+Reviewed range: `9e3ab60b86025ca74948ededd09b99cd81a2477c..25d8a9435662e6c832bc2e7fbf4b03a3ebbe1652`, 55 commits. The
+fetched checkpoint and inclusive main tip were pinned and ancestry verified. All 155 commit/path changes were
+inventoried; 32 original per-commit patch snapshots were selected, preserving intermediate text. Reconstruction matched
+every selected patch. Mandatory delivery was 6,204 physical lines and 344,449 bytes across nine functional groups,
+131–1230 lines and at most 57,973 bytes per group. Manifests also include the final empty line in each snapshot. No
+in-scope mandatory range remains unread.
 
 Scope was landed product code, tests/helpers/fixtures, executable maintainer tooling, behavior-bearing build/runtime
-configuration and SPEC.md/SPEC_impl.md contracts. Workflow metadata, plans/reports/queue/triage/TODO/flake/agent
+configuration and current SPEC.md/SPEC_impl.md contracts. Workflow metadata, plans/reports/queue/triage/TODO/flake/agent
 instructions, historical records, ordinary documentation and release prose were deliberately excluded as review targets.
-Excluded paths and reasons remain in inventory.json; necessary contracts and recording coverage were inspected
-selectively.
+Inventory entries preserve each exclusion's reason; relevant contracts and recording coverage were read selectively.
 
-The primary persistent review is **complete**. All 48 original external Codex `gpt-6.1-sol` identities, **low
-reasoning**, completed initial review, later-turn synthesis after verified delivery, and a credible final empty
-discovery pass after pertinent interface input. There were 172 successful scheduled turns, against the 144-turn minimum,
-with concurrency capped at 19. Delivery repairs include g030's separate final-line repair/synthesis before discovery;
-uncredited clipped or oversized packets earned no coverage. Every final supported audit is complete, with no unfinished
-call or unrecognized record. No refusal, blocked scope, replacement identity or direct transcript-payload fallback
-occurred. Each group's three-part final record was rendered once after its last turn from its append-only history, final
-delivery audit and progress.
+The primary persistent review is **complete**. Nine original external Codex `gpt-6.1-sol` identities, **high
+reasoning**, completed initial review, later-turn synthesis after verified delivery, and final empty discovery after
+their relevant interface inputs. Forty-one scheduled turns include 23 discovery/search passes, against a 27-turn
+minimum, with concurrency capped at nine. Mac planning, contract, implementation-contract, release and install groups
+each took five turns; native Mac tests took four, toolchain six, GUI three and monitor three. Each group's progress and
+final record preserve its checks, novel finding IDs, confidence revisions and final stopping evidence.
 
-The final result records **15 new items: 2 highest, 1 high and 12 other**, and extends three existing other-priority
-worker-harness items (sibling cleanup, aggregate exit status and checkpoint polling) with their Rust-runner
-counterparts. Reconciled dispositions contain **14 verified and 4 unverified-after-investigation groups**, including
-extensions. No undecided, stale, conflicting, duplicate-only or under-investigation group remains, and no open lead or
-pending cross-group input remains. Four investigated uncertainties concern native resolver lifetime impact, the delayed
-joined-path hover, the shallow-pause observer's actual schedule, and the service producer needed for permanent
-checkpoint polling. Their actual checks, missing premises and settling evidence remain explicit. The source-confirmed
-capture guard defects do not establish a vendor-displayed secret or actual publication.
+All final supported audits have complete mandatory coverage, zero unfinished calls and no unrecognized records. Mac
+release has one historical clipped packet that earned no credit; required patches were already delivered and relevant
+context was subsequently read in smaller packets. No refusal, blocked review scope, replacement identity or direct
+transcript-payload fallback occurred. Each group's three-part final record was rendered once after its last turn from
+its append-only events, final audit and progress.
 
-Discovery continued after productive searches and independent consultations. Seventy-three discovery/search turns
-include later interface reconciliation; two further turns only corrected durable uncertainty labels (g013 turn6 after
-its turn5 empty search, and g045 turn7 after its turn6 empty search). Initial review and synthesis account for the
-remaining turns. completion.json and group progress preserve per-pass additions, original IDs and final stopping
-evidence. The combined Stop and expired-origin grant remainders remain HIGHEST with their policy tensions; narrower
-tabs-only, logical-entry and source-refutation agreements were not expanded to discard those remainders. Delivery,
-synthesis and empty searches do not certify attention, understanding, correctness or exhaustive discovery.
+The result records **10 new items: 0 highest, 1 high and 9 other**. Final reconciled dispositions contain **8 verified
+and 2 unverified-after-investigation groups**, plus 63 excluded candidate groups. Thirty-four reviewer-open findings
+before semantic deduplication are not 34 distinct defects. No undecided, stale, conflicting, duplicate-only or
+under-investigation group, open lead or pending cross-group input remains. The run was quiescent. The investigated
+uncertainties are Rosetta's exact SSH shell/child architecture chain and the pinned Darwin compiler artifact's actual
+LLVM loader layout; their checks, missing premises and settling evidence remain explicit in their queue files. The
+verified app-confirmation and missing-plist mechanisms retain their separate contract-applicability uncertainties. The
+host-start item is a confirmed invariant inconsistency, without a demonstrated incompatible startup pair.
 
-The full register reconciles 223 reviewer-local records, all original severity labels, withdrawals, proposed drops,
-lowered consequences and parent exclusions. Fourteen fresh native Codex consultations outside persistent-review judged
-named entries with exact source/policy excerpts; three received a second clarification turn. Ambiguous or partial
-verdicts retained the delayed-publication, combined-Stop, independent Rust privacy-guard and same-install live-card
-remainders. Independent agreement applies HIGH to the residual settings-save race under the exact prior triage rating,
-without accepting or dropping that race; OTHER agreements preserve hypothetical security/publication consequences if
-their missing routes are later established. Remaining ordinary source-refuted, explicit-policy and fully matching
-rare-diagnostic/safe-retry exclusions retain their exact bases.
+The complete register reconciles all 100 reviewer-local identities, including every withdrawal, proposed drop,
+consequence narrowing and parent exclusion regardless of bucket. Three fresh native Codex consultations outside
+persistent-review judged ten named entries. They agreed narrowly to five explicit highest-capable source refutations,
+the initially conditional loaded-registration claim, the established app-bypass consequence's other rating, and three
+producer withdrawals. No agreement was expanded to discard the missing-plist guard, app-bypass finding or other retained
+remainder. Partial authorized writes and Linux-only developer payload staging remain source observations, without an
+established separately violated promise. Original wording, all revisions, exact bases and checked-source verdicts remain
+in the register. Delivery, synthesis and empty searches do not certify attention, understanding, correctness or
+exhaustive discovery.
 
 This was a source-only review. No product runtime, browser, cloud, process or network-endpoint experiment ran, and no
-live installation changed. Read-only dependency/primary-source retrieval supports named investigations; private helper
-checks validate bookkeeping only. Primary cumulative usage was 262,241,849 input tokens, including 254,993,536 cached,
-and 597,610 output. Each resumed thread contributes only its latest cumulative usage. Orchestrator/consultation totals
-and monetary cost were unavailable.
+live installation changed. Read-only primary-source retrieval supported named investigations; private helper checks
+validated bookkeeping only. Primary cumulative usage was 116,075,633 input tokens, including 114,121,472 cached, and
+379,402 output. Each resumed identity contributes only its latest cumulative usage. Orchestrator/consultation totals and
+monetary cost were unavailable.
 
-Private evidence remains under run `f57167f6-e8b1-4ac6-ac31-413e21137114`: completion.json, groups.json, the original
-sessions and actual turn counts, final audits, each final-record.md, findings.jsonl/progress.md, inventory-proof.json,
-supplement-proof.json, dispositions.jsonl, consolidated.json, drop-register-final.json, outcomes.json and
-independent-verdicts.json preserve coverage, exclusions, confidence and provenance.
+Private evidence remains under run `fc41a3a3-d917-41d0-bf2f-3aad9a7d6f3a`: completion.json, groups.json, original
+session identities/turn counts, inventory.json, inventory-proof.json, final audits, each final-record.md,
+findings.jsonl/progress.md, dispositions.jsonl, consolidated.json, drop-register-final.json, independent-verdicts.json
+and usage.json preserve scope, delivery, exclusions, confidence and provenance.
 
-Recording-time main is `3942b85bdad615556dd9e1fed1795e907af6d8a7`, with the original checkpoint unchanged. Its later
-changes are planning state/reports and a TODO note; no reviewed product cause, governing specification, queue, filter or
-triage decision changed. Planned remains empty. Unlanded plans do not explicitly remove a retained cause; the rail bell
-adds a different notification system, and the scoped-stop plan changes process cleanup rather than combined-prompt
-authority. Later commits were not added to the pinned review. Queue updates, the previous-record history move and this
-checkpoint are proposed in one draft PR for separate manual merging. Preparing it does not advance main.
+Recording-time main was `b089325887a1ffdfae78fa053e37ce700e2b9cad`, with the saved checkpoint unchanged. Later changes
+add an upgrade floor, stop-during-start handling and terminal-fit fixes, plus workflow state; none removes a retained
+cause. The new floor still permits cross-build updates above it. Queue, filters, known bugs and ledger were unchanged;
+Planned remains empty, and no unlanded plan explicitly removes a retained cause. An older GNU-stat ledger decision
+concerns a Linux test script executed on a Mac, not production Mac provisioning. Later commits were not added to the
+pinned review. Queue updates, the previous-record history move and this checkpoint proposal belong to one draft PR for
+separate manual merging. Preparing it does not advance main.
