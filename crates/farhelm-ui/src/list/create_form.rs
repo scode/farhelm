@@ -382,6 +382,22 @@ pub(crate) struct CreatedSession {
     pub(crate) new_was_never_shown: bool,
 }
 
+/// A source host absent from the registry might be a just-created sandbox.
+/// Wait for its ordinary metadata instead of borrowing local placement. An
+/// explicit different host or recipe is the user's replacement placement.
+fn unresolved_creation_origin(
+    origin: Option<HostId>,
+    hosts: &[HostOption],
+    chosen: Option<HostId>,
+    recipe: Option<&str>,
+) -> bool {
+    recipe.is_none()
+        && origin.is_some_and(|origin| {
+            !hosts.iter().any(|host| host.id == origin)
+                && chosen.is_none_or(|chosen| chosen == origin)
+        })
+}
+
 /// Preserve the opening's actual visibility history at accepted-create time.
 /// A refusal, YOLO question or incomplete template reveals New permanently;
 /// the initial quick-launch intent alone cannot justify a second naming prompt.
@@ -622,6 +638,7 @@ fn launcher_snapshot(
         LaunchTab::Command => LauncherKind::Command,
     };
     LauncherState {
+        recipe: draft.recipe(),
         prompt: active_prompt(kind_now, draft.harness(), &draft.prompt()),
         kind: Some(kind_now),
         harness: draft.harness(),
@@ -656,12 +673,17 @@ fn launcher_snapshot(
                 draft.command_resume_raw_seed().as_deref(),
             )
         }),
-        host: selected.and_then(|chosen| {
-            hosts
-                .iter()
-                .find(|host| host.id == chosen && !host.identity_mismatch)
-                .and_then(|host| host.identity.clone())
-        }),
+        host: draft
+            .recipe()
+            .is_none()
+            .then_some(selected)
+            .flatten()
+            .and_then(|chosen| {
+                hosts
+                    .iter()
+                    .find(|host| host.id == chosen && !host.identity_mismatch)
+                    .and_then(|host| host.identity.clone())
+            }),
         // An unselected query is an editor draft, not a reusable destination.
         // Saving it would make the whole template fail when applied later.
         destination: match &draft.destination() {
@@ -758,6 +780,7 @@ type ValidatedTemplateBatch = (
 /// against the opening snapshot; remaining held-field checks run in order, so
 /// a later held change cannot hide an earlier ordinary refusal. No edits land
 /// unless the whole batch succeeds.
+#[cfg(test)]
 fn validated_template_batch(
     templates: &[farhelm_proto::launcher::LaunchTemplate],
     hosts: &[HostOption],
@@ -766,6 +789,28 @@ fn validated_template_batch(
     draft: &LaunchDraft,
     chosen_host: Option<HostId>,
 ) -> Result<ValidatedTemplateBatch, String> {
+    validated_template_batch_known(
+        templates,
+        hosts,
+        catalog,
+        host_fixed,
+        draft,
+        chosen_host,
+        &[],
+    )
+}
+
+/// Recipe applicability uses the current catalog while retaining the shared
+/// ordered, atomic template fold used for ordinary installed-host targets.
+fn validated_template_batch_known(
+    templates: &[farhelm_proto::launcher::LaunchTemplate],
+    hosts: &[HostOption],
+    catalog: &[crate::api::LaunchCatalogModel],
+    host_fixed: bool,
+    draft: &LaunchDraft,
+    chosen_host: Option<HostId>,
+    recipes: &[String],
+) -> Result<ValidatedTemplateBatch, String> {
     use farhelm_proto::launcher::TemplateDestination;
     let mut state = launcher_snapshot(draft, hosts, chosen_host);
     // A partial template may fill an agent later in this same batch. Preserve
@@ -773,13 +818,13 @@ fn validated_template_batch(
     state.prompt = draft.prompt();
     let known_hosts: Vec<String> = hosts
         .iter()
-        .filter(|host| !host.identity_mismatch)
+        .filter(|host| !host.identity_mismatch && !host.session_owned)
         .filter_map(|host| host.identity.clone())
         .collect();
     let context = farhelm_proto::launcher::TemplateContext {
         catalog,
         known_hosts: &known_hosts,
-        known_recipes: &[],
+        known_recipes: recipes,
         host_fixed,
     };
     let normalized = templates
@@ -2863,6 +2908,26 @@ pub(super) fn CreateSessionForm(
     on_template_saved: EventHandler<farhelm_proto::launcher::LaunchTemplate>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    let sandbox_base = base.clone();
+    let sandbox_catalog = use_resource(move || {
+        let base = sandbox_base.clone();
+        async move {
+            let recipes = api::fetch_recipes(&base).await?;
+            let settings = api::fetch_tensorlake_settings(&base).await?;
+            Ok::<_, String>((recipes, settings))
+        }
+    });
+    let sandbox_answer = sandbox_catalog.read().as_ref().cloned();
+    let recipe_names = sandbox_answer
+        .as_ref()
+        .and_then(|answer| answer.as_ref().ok())
+        .map(|(recipes, _)| {
+            recipes
+                .iter()
+                .map(|recipe| recipe.name.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     // The helm-wide preference row (`PreferencesGate`'s seed): read here
     // only to seed a fresh no-prefill dialog's permissions segment and to
     // answer "reset choices" — see `initial_structured_permissions`. This
@@ -2956,6 +3021,7 @@ pub(super) fn CreateSessionForm(
     // Handler-time authority reads the live owner rather than memo.peek(),
     // whose cached value can lag an earlier edit in the same event turn.
     let DraftFields {
+        recipe,
         cwd,
         cwd_edited,
         title,
@@ -3047,6 +3113,36 @@ pub(super) fn CreateSessionForm(
     // Only this launch API call owns the snapshot. Launcher preparation and
     // another page operation may be busy too, but neither is this request's wait.
     let mut pending_launch = use_signal(|| None::<PendingLaunch>);
+    let mut sandbox_question = use_signal(|| None::<LaunchDraft>);
+    let mut sandbox_consent = use_signal(|| None::<LaunchDraft>);
+    let mut sandbox_run = use_signal(|| None::<(HostId, String)>);
+    let progress_base = base.clone();
+    use_future(move || {
+        let base = progress_base.clone();
+        async move {
+            loop {
+                crate::reader::sleep_ms(1_000).await;
+                let run = sandbox_run.peek().clone();
+                if let Some((host, run)) = run
+                    && let Ok(progress) = api::fetch_provisioning(&base, host).await
+                    && progress.run_id.as_deref() == Some(run.as_str())
+                    && sandbox_run.peek().as_ref() == Some(&(host, run))
+                    && let Some(step) = progress.steps.iter().find(|step| step.status == "running")
+                    && let Some(pending) = pending_launch.write().as_mut()
+                {
+                    let name = step
+                        .name
+                        .as_ref()
+                        .map(|name| name.raw().to_string())
+                        .unwrap_or_else(|| step.step.clone());
+                    pending.observe_stage(
+                        name,
+                        step.explanation.as_ref().map(|text| text.raw().to_string()),
+                    );
+                }
+            }
+        }
+    });
     // Set only around this form's explicit Resume and reconnect wait. Other
     // viewers' shared Resuming phase must not make a target launchable here.
     // Form unmount cancels the future and retires this signal with its owner.
@@ -3195,7 +3291,19 @@ pub(super) fn CreateSessionForm(
         })
         .map(crate::launch_composer::harness_label)
         .unwrap_or("Unknown agent");
-    let selected = if restart_mode {
+    let creation_origin = (!host_fixed)
+        .then(|| {
+            prefill
+                .as_ref()
+                .and_then(|source| source.host)
+                .or_else(|| open_host.as_ref().map(|host| host.id))
+        })
+        .flatten();
+    let origin_unresolved =
+        unresolved_creation_origin(creation_origin, &hosts, chosen_host(), recipe().as_deref());
+    let selected = if origin_unresolved || recipe().is_some() && !host_fixed {
+        None
+    } else if restart_mode {
         prefill.as_ref().and_then(|prefill| prefill.host)
     } else {
         effective_create_host(&hosts, chosen_host(), open_host.as_ref())
@@ -3532,6 +3640,48 @@ pub(super) fn CreateSessionForm(
     // Initial search acceptance follows this effect, so mount-time host and
     // clone reconciliation cannot overwrite the action it applies.
     let mount_seeded = use_signal(|| false);
+    let source_generation = prefill
+        .as_ref()
+        .map(|prefill| prefill.generation)
+        .unwrap_or(0);
+    let inherited_sandbox = (!host_fixed)
+        .then(|| {
+            let id = prefill
+                .as_ref()
+                .and_then(|prefill| prefill.host)
+                .or_else(|| open_host.as_ref().map(|host| host.id))?;
+            hosts
+                .iter()
+                .find(|host| host.id == id && host.session_owned)
+                .map(|host| host.recipe.clone().unwrap_or_default())
+        })
+        .flatten();
+    let mut sandbox_seeded = use_signal(|| None::<u64>);
+    let seed_new_sandbox = prefill.is_none();
+    use_effect(use_reactive(
+        (
+            &hosts_loaded,
+            &source_generation,
+            &inherited_sandbox,
+            &origin_unresolved,
+        ),
+        move |(hosts_loaded, source_generation, inherited_sandbox, origin_unresolved)| {
+            if seed_new_sandbox
+                && hosts_loaded
+                && mount_seeded()
+                && !origin_unresolved
+                && *sandbox_seeded.peek() != Some(source_generation)
+            {
+                if draft.snapshot().recipe().is_none()
+                    && chosen_host.peek().is_none()
+                    && let Some(recipe) = &inherited_sandbox
+                {
+                    draft.choose_recipe(recipe.clone());
+                }
+                sandbox_seeded.set(Some(source_generation));
+            }
+        },
+    ));
     // The folder default as it stood when the current permission warning
     // appeared, keyed by its generation, and the copy a permission Undo hands
     // back; see `FolderDefaultInputs::restored`.
@@ -3874,10 +4024,14 @@ pub(super) fn CreateSessionForm(
     .into_iter()
     .cloned()
     .collect::<Vec<_>>();
-    let selected_host_label = selected
-        .and_then(|id| hosts.iter().find(|host| host.id == id))
-        .map(HostOption::label)
-        .unwrap_or_else(|| "Unavailable host".to_string());
+    let selected_host_label = recipe()
+        .map(|name| format!("New sandbox · {name}"))
+        .unwrap_or_else(|| {
+            selected
+                .and_then(|id| hosts.iter().find(|host| host.id == id))
+                .map(HostOption::label)
+                .unwrap_or_else(|| "Unavailable host".to_string())
+        });
     // Confirmation owns raw peer text and escapes it at its own rendering
     // boundary. Keep that snapshot separate from this form's display label.
     let host_label_for_restart = if restart_mode {
@@ -3909,13 +4063,14 @@ pub(super) fn CreateSessionForm(
         .read()
         .as_ref()
         .is_some_and(|receipt| Some(receipt) == displayed_resume.as_ref());
-    let selected_host_available = restart_host_confirmed
-        && selected.is_some_and(|id| {
-            hosts
-                .iter()
-                .find(|host| host.id == id)
-                .is_some_and(|host| host.available_for_launch(own_resume_host))
-        });
+    let selected_host_available = recipe().is_some()
+        || restart_host_confirmed
+            && selected.is_some_and(|id| {
+                hosts
+                    .iter()
+                    .find(|host| host.id == id)
+                    .is_some_and(|host| host.available_for_launch(own_resume_host))
+            });
     // A stored structured snapshot is provenance, rather than a promise that
     // a later release still supports every combination it named. Keep its
     // model and effort visible for clone, but refuse to turn an incompatible
@@ -4065,7 +4220,8 @@ pub(super) fn CreateSessionForm(
         },
         _ => None,
     };
-    let fresh_destination_ready = matches!(destination_draft(), DestinationDraft::Existing { .. })
+    let fresh_destination_ready = recipe().is_some()
+        || matches!(destination_draft(), DestinationDraft::Existing { .. })
         || retry_binding.is_some()
         || current_preview.is_some()
         || (selected_host_suspended
@@ -4079,8 +4235,10 @@ pub(super) fn CreateSessionForm(
         github_search: matches!(destination_draft(), DestinationDraft::GithubInput { .. })
             || crate::launch_composer::scoped_query(&composer_search()).0
                 == crate::launch_composer::SearchScope::Github,
-        remembered_destination_valid,
-        folder_default_waiting: retry_binding.is_none() && folder_default_waiting,
+        remembered_destination_valid: recipe().is_some() || remembered_destination_valid,
+        folder_default_waiting: recipe().is_none()
+            && retry_binding.is_none()
+            && folder_default_waiting,
         needs_harness: retry_binding.is_none()
             && launch_tab() == LaunchTab::Agent
             && structured_harness().is_none(),
@@ -4091,24 +4249,37 @@ pub(super) fn CreateSessionForm(
         invalid_wrapper: launch_tab() == LaunchTab::Agent
             && wrapper_words(&structured_wrapper()).is_err(),
     };
-    let container_available = container_destination_available(
-        &draft.snapshot(),
-        prefill_for_submit.as_ref(),
-        &hosts,
-        selected,
-    ) || container_recent_destination_available(
-        &draft.snapshot(),
-        offered_history.peek().as_ref(),
-        live_destination.peek().as_ref(),
-    );
+    let container_available = (recipe().is_some() && draft.snapshot().destination().is_managed())
+        || container_destination_available(
+            &draft.snapshot(),
+            prefill_for_submit.as_ref(),
+            &hosts,
+            selected,
+        )
+        || container_recent_destination_available(
+            &draft.snapshot(),
+            offered_history.peek().as_ref(),
+            live_destination.peek().as_ref(),
+        );
     let container_refusal = draft.snapshot().container_refusal(container_available);
-    let launch_refusal = if restart_mode && !restart_host_confirmed {
+    let sandbox_reason = recipe().and_then(|name| match &sandbox_answer {
+        None => Some("Loading Tensorlake recipes…".into()),
+        Some(Err(error)) => Some(error.clone()),
+        Some(Ok((recipes, settings))) => recipes
+            .iter()
+            .find(|recipe| recipe.name == name)
+            .map(|recipe| crate::sandbox_sessions::recipe_refusal(recipe, settings))
+            .unwrap_or_else(|| Some(format!("Recipe {name:?} is unavailable"))),
+    });
+    let launch_refusal = if origin_unresolved {
+        Some("The source host's placement is unavailable; wait for Hosts to refresh or choose a target explicitly")
+    } else if restart_mode && !restart_host_confirmed {
         Some("The source host installation cannot be confirmed; close and reopen restart with")
     } else if restart_mode && !selected_host_available {
         Some("The source host is unavailable; wait for it to reconnect before restarting")
     } else {
         launch_prerequisites.refusal()
-    }.or(container_refusal.as_deref()).or_else(|| {
+    }.or(sandbox_reason.as_deref()).or(container_refusal.as_deref()).or_else(|| {
         if !restart_mode { return None; }
         let current = draft.snapshot();
         if model_open() && !model_draft().is_empty() || model_draft_error().is_some() {
@@ -4123,8 +4294,8 @@ pub(super) fn CreateSessionForm(
     });
     // A suspended destination promises allocation after Resume, not a path
     // offered by the previous connection. Hide it in every summary/field too.
-    let allocate_after_resume =
-        selected_host_suspended && matches!(destination_draft(), DestinationDraft::Github { .. });
+    let allocate_after_resume = (recipe().is_some() || selected_host_suspended)
+        && matches!(destination_draft(), DestinationDraft::Github { .. });
     let allocation_notice = if draft.snapshot().effective_title().is_empty() {
         "The folder is picked automatically when the host is ready"
     } else {
@@ -4503,6 +4674,7 @@ pub(super) fn CreateSessionForm(
     // snapshot; the helper owns no separate host cache or name resolution.
     let composer_hosts = hosts
         .iter()
+        .filter(|host| !host.session_owned)
         .map(|host| crate::launch_composer::ComposerHost {
             id: host.id,
             name: host.name.clone(),
@@ -4523,6 +4695,16 @@ pub(super) fn CreateSessionForm(
         &composer_search(),
         &composer_hosts,
     ));
+    if recipe().is_some() {
+        search_rows.retain(|row| {
+            !matches!(
+                row,
+                crate::launch_composer::ComposerSearchResult::Recent(_)
+                    | crate::launch_composer::ComposerSearchResult::Folder(_)
+                    | crate::launch_composer::ComposerSearchResult::BrowsePath(_)
+            )
+        });
+    }
     let templates_answer = launch_templates.read().clone();
     let templates_read_error = templates_answer
         .as_ref()
@@ -4628,6 +4810,8 @@ pub(super) fn CreateSessionForm(
     let host_label_for_template_save = selected_host_label.clone();
     let action_hosts = hosts.clone();
     let action_catalog = catalog_answer.clone();
+    let action_recipes = recipe_names.clone();
+    let shortcut_recipes = recipe_names.clone();
     let shortcut_hosts = hosts.clone();
     let shortcut_catalog = catalog_answer.clone();
     let action_history_target = current_history_target.clone();
@@ -4646,6 +4830,7 @@ pub(super) fn CreateSessionForm(
                 captured.as_ref(),
                 from_shortcut,
                 SearchInputs {
+                    recipes: &action_recipes,
                     templates: &templates_now,
                     hosts: &action_hosts,
                     catalog: action_catalog.as_deref(),
@@ -4744,7 +4929,14 @@ pub(super) fn CreateSessionForm(
             crate::launch_composer::ComposerSearchResult::Template(_)
         ) && (!hosts_loaded
             || (captured.is_none() && launch_templates.read().is_none())
-            || launch_catalog.read().is_none())
+            || launch_catalog.read().is_none()
+            || (captured.as_ref().is_some_and(|template| template.fields.recipe.is_some())
+                || draft.snapshot().recipe().is_some()
+                || launch_templates.peek().as_ref().and_then(|answer| answer.as_ref().ok())
+                    .is_some_and(|templates| templates.iter().any(|template| {
+                        matches!(&action, crate::launch_composer::ComposerSearchResult::Template(name) if name == &template.name)
+                            && template.fields.recipe.is_some()
+                    }))) && sandbox_catalog.read().is_none())
         {
             return;
         }
@@ -4803,7 +4995,13 @@ pub(super) fn CreateSessionForm(
         if request.refusal.is_none()
             && (!hosts_loaded
                 || launch_catalog.read().is_none()
-                || launch_templates.read().is_none())
+                || launch_templates.read().is_none()
+                || (draft.snapshot().recipe().is_some()
+                    || request
+                        .templates
+                        .iter()
+                        .any(|template| template.fields.recipe.is_some()))
+                    && sandbox_catalog.read().is_none())
         {
             return;
         }
@@ -4813,6 +5011,7 @@ pub(super) fn CreateSessionForm(
         shortcut_replay_checking.set(true);
         let shortcut_hosts = shortcut_hosts.clone();
         let shortcut_catalog = shortcut_catalog.clone();
+        let shortcut_recipes = shortcut_recipes.clone();
         spawn(async move {
             let current = crate::launch_sequence::shortcut_context_snapshot().await;
             if request.opening != *opening_generation.peek()
@@ -4833,13 +5032,14 @@ pub(super) fn CreateSessionForm(
                 shortcut_requests.write().pop_front();
             } else if !request.templates.is_empty() {
                 let templates = request.templates.into_iter().collect::<Vec<_>>();
-                match validated_template_batch(
+                match validated_template_batch_known(
                     &templates,
                     &shortcut_hosts,
                     shortcut_catalog.as_deref().unwrap_or_default(),
                     host_fixed,
                     &draft.snapshot(),
                     *chosen_host.peek(),
+                    &shortcut_recipes,
                 ) {
                     Err(refusal) => template_error.set(Some(refusal)),
                     Ok(_) => {
@@ -4893,8 +5093,8 @@ pub(super) fn CreateSessionForm(
     // No timer guesses when a template or managed-checkout preview is ready.
     // Each boundary is the same one the ordinary Launch button consumes. Once
     // submitted, this flag is spent even after an ambiguous reply or path race.
-    let quick_target_ready =
-        target_matches_selection(selected, &hosts, create_target.read().as_ref());
+    let quick_target_ready = recipe().is_some()
+        || target_matches_selection(selected, &hosts, create_target.read().as_ref());
     // Replay effects and auto-submit can run in the same effect batch. The
     // final replay must first earn a render with its resulting readiness and
     // refusal, rather than consume those values from before the last edit.
@@ -4965,7 +5165,7 @@ pub(super) fn CreateSessionForm(
                 !snapshot.folder_is_explicit()
                     && matches!(snapshot.destination(), DestinationDraft::Existing { .. })
             };
-            if (default.pending || default.unread) && untouched_folder {
+            if recipe().is_none() && (default.pending || default.unread) && untouched_folder {
                 if default.unread {
                     auto_launch_pending.set(false);
                     quick_launch_hidden.set(false);
@@ -4976,12 +5176,13 @@ pub(super) fn CreateSessionForm(
                 return;
             }
             let _ = destination_draft();
-            let preview_pending = match draft.snapshot().destination() {
-                DestinationDraft::Github { .. } => {
-                    matches!(preview_state(), PreviewState::Pending)
-                }
-                _ => false,
-            };
+            let preview_pending = recipe().is_none()
+                && match draft.snapshot().destination() {
+                    DestinationDraft::Github { .. } => {
+                        matches!(preview_state(), PreviewState::Pending)
+                    }
+                    _ => false,
+                };
             if preview_pending {
                 return;
             }
@@ -5214,18 +5415,39 @@ pub(super) fn CreateSessionForm(
             // re-reading across it would let the request's MODE differ
             // from the one the button was pressed on.
             let current = draft.snapshot();
+            // Read the live choice, including a queued submit predating the
+            // first registry observation of a newly created sandbox host.
+            if unresolved_creation_origin(
+                (!host_fixed)
+                    .then(|| {
+                        prefill_for_submit
+                            .as_ref()
+                            .and_then(|source| source.host)
+                            .or_else(|| open_host.as_ref().map(|host| host.id))
+                    })
+                    .flatten(),
+                &hosts,
+                *chosen_host.peek(),
+                current.recipe().as_deref(),
+            ) {
+                error.set(Some("The source host's placement is unavailable; wait for Hosts to refresh or choose a target explicitly".into()));
+                drop(op_guard);
+                return;
+            }
             let launch = if current.tab() == LaunchTab::Agent {
                 if let Some(reason) = current.container_refusal(
-                    container_destination_available(
-                        &current,
-                        prefill_for_submit.as_ref(),
-                        &hosts,
-                        effective_create_host(&hosts, *chosen_host.peek(), open_host.as_ref()),
-                    ) || container_recent_destination_available(
-                        &current,
-                        offered_history.peek().as_ref(),
-                        live_destination.peek().as_ref(),
-                    ),
+                    (current.recipe().is_some() && current.destination().is_managed())
+                        || container_destination_available(
+                            &current,
+                            prefill_for_submit.as_ref(),
+                            &hosts,
+                            effective_create_host(&hosts, *chosen_host.peek(), open_host.as_ref()),
+                        )
+                        || container_recent_destination_available(
+                            &current,
+                            offered_history.peek().as_ref(),
+                            live_destination.peek().as_ref(),
+                        ),
                 ) {
                     error.set(Some(reason));
                     drop(op_guard);
@@ -5278,6 +5500,145 @@ pub(super) fn CreateSessionForm(
                 };
                 launch
             };
+            if let Some(recipe_name) = current.recipe() {
+                if host_fixed {
+                    error.set(Some("Restart and Replace keep the existing sandbox".into()));
+                    return;
+                }
+                let catalog = sandbox_catalog.peek();
+                let ready = catalog
+                    .as_ref()
+                    .and_then(|answer| answer.as_ref().ok())
+                    .and_then(|(recipes, settings)| {
+                        recipes
+                            .iter()
+                            .find(|recipe| recipe.name == recipe_name)
+                            .map(|recipe| crate::sandbox_sessions::recipe_refusal(recipe, settings))
+                    });
+                match ready {
+                    Some(None) => {}
+                    Some(Some(reason)) => {
+                        error.set(Some(reason));
+                        return;
+                    }
+                    None => {
+                        error.set(Some(
+                            "The selected recipe is unavailable; check Settings → Tensorlake"
+                                .into(),
+                        ));
+                        return;
+                    }
+                }
+                let confirmed = sandbox_consent.peek().as_ref() == Some(&current);
+                sandbox_consent.set(None);
+                let base = base.clone();
+                let snapshot = current.clone();
+                let naming = current.checkout_naming();
+                let name_kind = naming.template_name().map(|(_, kind)| kind).or_else(|| {
+                    matches!(naming.source, Some(CheckoutNameSource::Clone(_)))
+                        .then_some(farhelm_proto::launcher::TemplateNameKind::Base)
+                });
+                let title = naming
+                    .template_name()
+                    .map(|(name, _)| name.to_string())
+                    .or_else(|| {
+                        naming.default_title(
+                            current.title_edited(),
+                            current.title_raw_seed().as_deref(),
+                            current.destination().repo(),
+                        )
+                    })
+                    .unwrap_or_else(|| current.effective_title());
+                let repo = match current.destination() {
+                    DestinationDraft::Existing { .. } => None,
+                    DestinationDraft::Github { repo } => Some(repo.identifier()),
+                    DestinationDraft::GithubInput { .. } => {
+                        error.set(Some("Select a GitHub repository before launching".into()));
+                        return;
+                    }
+                };
+                spawn(async move {
+                    let skip_billing = api::fetch_tensorlake_settings(&base)
+                        .await
+                        .is_ok_and(|settings| settings.create_without_asking);
+                    if !confirmed && !skip_billing {
+                        sandbox_question.set(Some(snapshot));
+                        quick_launch_hidden.set(false);
+                        drop(op_guard);
+                        return;
+                    }
+                    let key = match mint_intent_key().await {
+                        Ok(key) => key,
+                        Err(reason) => {
+                            error.set(Some(reason));
+                            return;
+                        }
+                    };
+                    let conversation = current.conversation();
+                    let prompt = current.prompt();
+                    let agent = match &launch {
+                        LaunchIntent::Structured(selection) => api::CreateAgent::Structured {
+                            selection,
+                            conversation: (!conversation.is_empty())
+                                .then_some(conversation.as_str()),
+                            prompt: prompt.as_deref(),
+                        },
+                        LaunchIntent::Command(command) => api::CreateAgent::Command(command),
+                    };
+                    let mut request = api::sandbox_launch_body("~", agent, &title, &key);
+                    if let Some(repo) = repo {
+                        request["github_checkout"] = serde_json::json!({
+                            "repo": repo, "title": api::optional_create_title(&title), "preview": null,
+                        });
+                        request["cwd"] = serde_json::json!("");
+                    }
+                    launch_attempted.set(LaunchAttempt::None);
+                    pending_launch.set(Some(PendingLaunch::new(
+                        LaunchAction::Launch,
+                        format!("{recipe_name} sandbox"),
+                        Some(title),
+                    )));
+                    let result = api::create_sandbox_session(
+                        &base,
+                        &recipe_name,
+                        confirmed,
+                        name_kind,
+                        request,
+                        move |host, run| sandbox_run.set(Some((host, run))),
+                    )
+                    .await;
+                    sandbox_run.set(None);
+                    pending_launch.set(None);
+                    match result {
+                        Ok(session) => {
+                            let submitted_launch = match launch {
+                                LaunchIntent::Structured(selection) => Some(selection),
+                                _ => None,
+                            };
+                            drop(op_guard);
+                            COMPOSER_DIALOG.release();
+                            on_created.call(CreatedSession {
+                                session,
+                                submitted_launch,
+                                new_was_never_shown: new_was_never_shown(
+                                    quick_origin,
+                                    *quick_launch_hidden.peek(),
+                                ),
+                            });
+                        }
+                        Err(reason) => {
+                            quick_launch_hidden.set(false);
+                            launch_attempted.set(if reason.is_unknown() {
+                                LaunchAttempt::Unknown
+                            } else {
+                                LaunchAttempt::Refused
+                            });
+                            error.set(Some(reason.to_string()));
+                        }
+                    }
+                });
+                return;
+            }
             // The HOST is derived here too, from the live signal — never
             // from what the last render computed. The same one-turn window
             // the agent has: changing the selector and pressing create in
@@ -6370,6 +6731,17 @@ pub(super) fn CreateSessionForm(
     let host_select = rsx! {
         super::host_picker::HostPicker {
             hosts: hosts.clone(), selected, busy,
+            recipe: recipe(),
+            recipes: sandbox_answer.as_ref().filter(|_| !host_fixed).and_then(|answer| answer.as_ref().ok())
+                .map(|(recipes, settings)| recipes.iter().map(|recipe| crate::sandbox_sessions::RecipeChoice {
+                    name: recipe.name.clone(),
+                    size: format!("{} CPU · {} GB", recipe.size.cpus, recipe.size.memory_gb),
+                    refusal: crate::sandbox_sessions::recipe_refusal(recipe, settings),
+                }).collect::<Vec<_>>()).unwrap_or_default(),
+            catalog_error: sandbox_answer.as_ref().and_then(|answer| answer.as_ref().err()).cloned(),
+            on_recipe: move |name| {
+                if draft.choose_recipe(name) { folder_open.set(false); folder_active.set(None); template_panel.set(None); }
+            },
             on_pick: choose_host, on_enter: launch_from_choice,
         }
     };
@@ -7042,7 +7414,7 @@ pub(super) fn CreateSessionForm(
                 // already there.
                 // A direct recent owns destination and agent fields. Restart
                 // holds those controls; search still explains a rejected recent.
-                if !restart_mode && !recent_launches.is_empty() {
+                if recipe().is_none() && !restart_mode && !recent_launches.is_empty() {
                     div { class: "launch-composer-recents",
                             span { class: "launch-composer-section-label", "Recent setups" }
                             div { class: "launch-composer-recent-slots",
@@ -7236,7 +7608,7 @@ pub(super) fn CreateSessionForm(
                                 span { class: "launch-composer-row-label", "Host" }
                             div { class: "launch-composer-destination-row",
                                 {host_select.clone()}
-                                if !checkout_mode {
+                                if !checkout_mode && recipe().is_none() {
                                     button {
                                         r#type: "button",
                                         disabled: busy || selected.is_none(),
@@ -7258,6 +7630,20 @@ pub(super) fn CreateSessionForm(
                             }
                             }
                             {host_notes.clone()}
+                            if let Some(recipe) = recipe() {
+                                p { class: "launch-composer-checkout-explanation",
+                                    "A new Tensorlake sandbox from {display_peer(&recipe)}, for this session. It bills while running. Suspend stops CPU and memory billing; snapshot storage still bills. Delete removes the whole sandbox and its files. After Farhelm disconnects, Tensorlake suspends it after 30 minutes without activity."
+                                }
+                                if let Some(Ok((_, settings))) = &sandbox_answer
+                                    && let farhelm_proto::tensorlake::SshKeyStatus::Ready { register_command, .. } = &settings.ssh_key {
+                                    p { "Register Farhelm's SSH key with Tensorlake before launching. Farhelm cannot check account registration." }
+                                    code { "{display_peer(register_command)}" }
+                                    button { r#type: "button", class: "btn btn-neutral",
+                                        "data-tooltip": "Copy the command that registers Farhelm's SSH key with your Tensorlake account",
+                                        onclick: { let command = register_command.clone(); move |_| crate::session_view::copy_to_clipboard(&command) },
+                                        "Copy registration command" }
+                                }
+                            }
                             if show_checkout_root_setup {
                                 crate::checkout_root::CheckoutRootField {
                                     note: "Sets the default checkout folder for every host without its own. ~ means each host's home folder. Change the default later in Settings → Checkouts, or set a host's own folder in its settings.",
@@ -7302,6 +7688,13 @@ pub(super) fn CreateSessionForm(
                                                 Key::Enter => {
                                                     evt.prevent_default(); evt.stop_propagation();
                                                     if evt.is_auto_repeating() || evt.is_composing() || repository_read_only { return; }
+                                                    if recipe().is_some() {
+                                                        match GithubRepo::parse(&draft.snapshot().destination().repository_text()) {
+                                                            Ok(repo) => { select_repository.call(repo); repository_open.set(false); }
+                                                            Err(reason) => error.set(Some(reason)),
+                                                        }
+                                                        return;
+                                                    }
                                                     if !draft_transition_allowed(ops) {
                                                         template_error.set(Some("Wait for the current operation to finish before choosing a repository".into()));
                                                         return;
@@ -7401,7 +7794,8 @@ pub(super) fn CreateSessionForm(
                                     }
                                 }
                                 p { class: "launch-composer-checkout-explanation",
-                                    "Farhelm clones the repository into a new folder named after the session, under this host's checkout folder. When the last session using it is deleted, the folder moves to the trash."
+                                    if recipe().is_some() { "Farhelm clones the repository in the new sandbox. Delete permanently removes the whole sandbox, including the checkout and unpushed changes." }
+                                    else { "Farhelm clones the repository into a new folder named after the session, under this host's checkout folder. When the last session using it is deleted, the folder moves to the trash." }
                                 }
                             }
                             div { class: "launch-composer-row",
@@ -7411,7 +7805,7 @@ pub(super) fn CreateSessionForm(
                                 class: "font-mono",
                                 r#type: "text",
                                 required: !checkout_mode,
-                                readonly: checkout_mode,
+                                readonly: checkout_mode || recipe().is_some(),
                                 role: (!checkout_mode).then_some("combobox"),
                                 aria_autocomplete: (!checkout_mode).then_some("list"),
                                 aria_expanded: (!checkout_mode).then_some(folder_open()),
@@ -7429,7 +7823,7 @@ pub(super) fn CreateSessionForm(
                                 aria_invalid: folder_notice().is_some().then_some("true"),
                                 aria_describedby: folder_notice().is_some().then_some("launcher-folder-problem"),
                                 onfocus: move |_| {
-                                    if !draft.snapshot().destination().is_managed() {
+                                    if recipe().is_none() && !draft.snapshot().destination().is_managed() {
                                         folder_active.set(None);
                                         folder_open.set(true);
                                     }
@@ -7439,7 +7833,7 @@ pub(super) fn CreateSessionForm(
                                     folder_active.set(None);
                                 },
                                 onkeydown: move |evt: KeyboardEvent| {
-                                    if draft.snapshot().destination().is_managed() || evt.is_composing() { return; }
+                                    if recipe().is_some() || draft.snapshot().destination().is_managed() || evt.is_composing() { return; }
                                     match evt.key() {
                                         Key::Escape if folder_open() => {
                                             evt.prevent_default(); evt.stop_propagation();
@@ -7477,7 +7871,7 @@ pub(super) fn CreateSessionForm(
                             // Float like model/search suggestions. In-flow history
                             // would resize and recenter this dialog when pointer blur
                             // closes it, moving the pressed action before mouseup.
-                            if !checkout_mode && folder_open() {
+                            if recipe().is_none() && !checkout_mode && folder_open() {
                                 div { class: "launch-composer-folder-options", id: "launcher-folder-options", role: "listbox", aria_label: "Folders",
                                     // A press anywhere in the list (a heading, the empty
                                     // row, a gap, its scrollbar) must not take focus
@@ -8051,6 +8445,33 @@ pub(super) fn CreateSessionForm(
                                 LaunchProgress { pending }
                             }
                         }
+                        if let Some(snapshot) = sandbox_question() {
+                            div { class: "header-confirm", role: "alertdialog", aria_label: "Create a sandbox for this session?",
+                                onmounted: move |_| crate::focus_confirmation(".create-session-form [role='alertdialog'] .btn-primary", ".create-session-form [role='alertdialog'] .btn-neutral"),
+                                h3 { crate::icons::SandboxMark {} "Create a sandbox for this session?" }
+                                if let Some(name) = snapshot.recipe() {
+                                    p { "Recipe {display_peer(&name)}" }
+                                    if let Some(Ok((recipes, _))) = &sandbox_answer
+                                        && let Some(recipe) = recipes.iter().find(|recipe| recipe.name == name) {
+                                        p { "{recipe.size.cpus} CPU · {recipe.size.memory_gb} GB memory · {recipe.size.disk_gb} GB disk" }
+                                    }
+                                }
+                                p { "The sandbox bills while running. Suspend preserves its processes and files and stops CPU and memory billing; snapshot storage still bills. Tensorlake suspends it after 30 minutes without a connection from Farhelm. Delete irreversibly removes the whole sandbox, every process, its files and snapshots." }
+                                a { href: "https://www.tensorlake.ai/pricing", target: "_blank", rel: "noopener noreferrer",
+                                    "data-tooltip": "Open Tensorlake's pricing page in your browser", "Tensorlake pricing" }
+                                button { r#type: "button", class: "btn btn-neutral",
+                                    "data-tooltip": "Cancel: create no sandbox and keep the launcher open",
+                                    onclick: move |_| { sandbox_question.set(None); sandbox_consent.set(None); }, "Cancel" }
+                                button { r#type: "button", class: "btn btn-primary",
+                                    "data-tooltip": "Create a billed Tensorlake sandbox from this recipe and launch the session in it",
+                                    onkeydown: crate::guard_confirmation_enter,
+                                    onclick: move |_| {
+                                        sandbox_consent.set(Some(snapshot.clone()));
+                                        sandbox_question.set(None);
+                                        submit_composer.call(submit_consent);
+                                    }, "Create and launch" }
+                            }
+                        }
                         DialogActions { class: "launch-composer-actions",
                 button {
                     r#type: "button",
@@ -8086,7 +8507,7 @@ pub(super) fn CreateSessionForm(
                         "Reset choices"
                     }
                 }
-                if !is_replace_with {
+                if !is_replace_with && recipe().is_none() && !selected.is_some_and(|id| hosts.iter().any(|host| host.id == id && host.session_owned)) {
                     button { r#type: "button", class: "btn launch-composer-save-template",
                         aria_label: "Save as template",
                         "data-tooltip": "Save as template: keep choices from this setup for another launch",
@@ -8334,6 +8755,33 @@ pub(super) fn CreateSessionForm(
 
 #[cfg(test)]
 mod tests {
+    /// A newly created sandbox can precede its host metadata in the browser.
+    /// Neither New nor a queued shortcut may use local placement in that gap;
+    /// an explicit replacement target is independent of the unresolved source.
+    #[farhelm_testtrace::test]
+    fn missing_creation_origin_requires_metadata_or_an_explicit_target() {
+        assert!(super::unresolved_creation_origin(Some(7), &[], None, None));
+        assert!(super::unresolved_creation_origin(
+            Some(7),
+            &[],
+            Some(7),
+            None
+        ));
+        assert!(!super::unresolved_creation_origin(
+            Some(7),
+            &[],
+            Some(1),
+            None
+        ));
+        assert!(!super::unresolved_creation_origin(
+            Some(7),
+            &[],
+            None,
+            Some("dev")
+        ));
+        assert!(!super::unresolved_creation_origin(None, &[], None, None));
+    }
+
     /// The real owner and question hooks let completion be tested before any
     /// renderer memo settles. This fixture retains the actual template targets,
     /// not a parallel draft, retry comparison or confirmation implementation.
@@ -8423,6 +8871,7 @@ mod tests {
                     Some(&template),
                     false,
                     SearchInputs {
+                        recipes: &[],
                         templates: &[],
                         hosts,
                         catalog: Some(&[]),

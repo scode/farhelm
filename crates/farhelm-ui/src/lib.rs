@@ -184,6 +184,7 @@ mod reconnect;
 mod rename;
 mod replace;
 mod rows;
+mod sandbox_sessions;
 mod session_view;
 mod settings;
 mod skew;

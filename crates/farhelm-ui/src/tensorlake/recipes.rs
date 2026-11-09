@@ -22,7 +22,7 @@
 //! through that build before hosts can use it. The word is always "snapshot",
 //! never "template", which means launch templates.
 //!
-//! Preparation is separate from building: the first new host installs Farhelm
+//! Preparation is separate from building: the first new host or session installs Farhelm
 //! into a reusable snapshot. The helm decides whether it is still fresh. An
 //! idle list receives no expiry event, so readiness is explicitly last-checked;
 //! the shared activity clock updates ages without deciding snapshot reuse.
@@ -263,7 +263,7 @@ fn prepared_status(view: &RecipeView, now: Option<i64>) -> PreparedStatus {
                 .unwrap_or_default();
             (
                 StatusLine::Plain(format!(
-                    "Preparing for new hosts: {} ({}){elapsed}",
+                    "Preparing for new hosts and sessions: {} ({}){elapsed}",
                     step.label(),
                     step_of(*step)
                 )),
@@ -272,7 +272,7 @@ fn prepared_status(view: &RecipeView, now: Option<i64>) -> PreparedStatus {
         }
         PrepareView::Failed { step, message, .. } => (
             StatusLine::Error(format!(
-                "Preparing failed while {} ({}): {message}. The next new host tries again.",
+                "Preparing failed while {} ({}): {message}. The next new host or session tries again.",
                 step.label(),
                 step_of(*step)
             )),
@@ -280,14 +280,14 @@ fn prepared_status(view: &RecipeView, now: Option<i64>) -> PreparedStatus {
         ),
         PrepareView::Interrupted { .. } => (
             StatusLine::Warning(
-                "Preparation stopped when the helm stopped. The next new host tries again.".into(),
+                "Preparation stopped when the helm stopped. The next new host or session tries again.".into(),
             ),
             false,
         ),
         PrepareView::Idle => {
             let line = match &view.prepared {
                 None => StatusLine::Muted(
-                    "Not prepared yet; the first new host prepares it (about a minute).".into(),
+                    "Not prepared yet; the first new host or session prepares it (about a minute).".into(),
                 ),
                 Some(prepared) => match prepared.stale_reason {
                     Some(reason) => {
@@ -297,7 +297,7 @@ fn prepared_status(view: &RecipeView, now: Option<i64>) -> PreparedStatus {
                             PreparedStaleReason::SnapshotRebuilt => "the snapshot was rebuilt",
                         };
                         StatusLine::Warning(format!(
-                            "Not prepared since {reason}; the next new host prepares it (about a minute)."
+                            "Not prepared since {reason}; the next new host or session prepares it (about a minute)."
                         ))
                     }
                     None => {
@@ -307,7 +307,7 @@ fn prepared_status(view: &RecipeView, now: Option<i64>) -> PreparedStatus {
                             })
                             .unwrap_or_else(|| utc_minute(prepared.prepared_at));
                         StatusLine::Positive(format!(
-                            "Ready for new hosts when last checked · prepared {when} for Farhelm {} · expires after 24 h; checked before use",
+                            "Ready for new hosts and sessions when last checked · prepared {when} for Farhelm {} · expires after 24 h; checked before use",
                             prepared.farhelm_version
                         ))
                     }
@@ -757,7 +757,8 @@ mod tests {
             prepared_status(&missing, Some(100)),
             PreparedStatus {
                 line: StatusLine::Muted(
-                    "Not prepared yet; the first new host prepares it (about a minute).".into()
+                    "Not prepared yet; the first new host or session prepares it (about a minute)."
+                        .into()
                 ),
                 preparing: false,
             }
@@ -776,7 +777,7 @@ mod tests {
                 prepared_status(&recipe, now),
                 PreparedStatus {
                     line: StatusLine::Positive(format!(
-                        "Ready for new hosts when last checked · prepared {when} for Farhelm 0.38.0 · expires after 24 h; checked before use"
+                        "Ready for new hosts and sessions when last checked · prepared {when} for Farhelm 0.38.0 · expires after 24 h; checked before use"
                     )),
                     preparing: false,
                 }
@@ -808,7 +809,7 @@ mod tests {
                     prepared_status(&recipe, now),
                     PreparedStatus {
                         line: StatusLine::Warning(format!(
-                            "Not prepared since {phrase}; the next new host prepares it (about a minute)."
+                            "Not prepared since {phrase}; the next new host or session prepares it (about a minute)."
                         )),
                         preparing: false,
                     }
@@ -848,7 +849,7 @@ mod tests {
                     prepared_status(&recipe, now),
                     PreparedStatus {
                         line: plain(&format!(
-                            "Preparing for new hosts: {} (step {} of 5){elapsed}",
+                            "Preparing for new hosts and sessions: {} (step {} of 5){elapsed}",
                             label,
                             index + 1
                         )),
@@ -865,7 +866,7 @@ mod tests {
                 prepared_status(&recipe, Some(201)),
                 PreparedStatus {
                     line: StatusLine::Error(format!(
-                        "Preparing failed while {} (step {} of 5): gateway refused. The next new host tries again.",
+                        "Preparing failed while {} (step {} of 5): gateway refused. The next new host or session tries again.",
                         label,
                         index + 1
                     )),
@@ -879,7 +880,7 @@ mod tests {
             prepared_status(&recipe, Some(201)),
             PreparedStatus {
                 line: StatusLine::Warning(
-                    "Preparation stopped when the helm stopped. The next new host tries again."
+                    "Preparation stopped when the helm stopped. The next new host or session tries again."
                         .into()
                 ),
                 preparing: false,

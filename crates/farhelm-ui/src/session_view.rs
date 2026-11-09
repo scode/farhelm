@@ -1457,7 +1457,10 @@ pub(crate) fn SessionView(
     // or while tabs are closing must not restore that intermediate tab strip.
     // Both consent flags are passed by the answered render; current is read
     // only for this keyed view's routing identity, never for stronger consent.
-    let stop = move |claim: OpGuard, refuse_if_tabs_open: bool, refuse_if_agent_running: bool| {
+    let stop = move |claim: OpGuard,
+                     refuse_if_tabs_open: bool,
+                     refuse_if_agent_running: bool,
+                     suspend: bool| {
         stopping.set(true);
         stop_error.set(None);
         detail_reads.write().fence();
@@ -1466,8 +1469,14 @@ pub(crate) fn SessionView(
         let refresh = refresh_after_stop.clone();
         spawn(async move {
             let _claim = claim;
-            match api::stop_session(&base, &id, refuse_if_tabs_open, refuse_if_agent_running).await
-            {
+            let result = if suspend {
+                api::stop_and_suspend(&base, &id, refuse_if_tabs_open, refuse_if_agent_running)
+                    .await
+                    .map(|()| farhelm_proto::SessionStopOutcome::default())
+            } else {
+                api::stop_session(&base, &id, refuse_if_tabs_open, refuse_if_agent_running).await
+            };
+            match result {
                 Ok(outcome) => {
                     stop_error.set(outcome.notice.map(|notice| format!("Stop: {notice}")))
                 }
@@ -1480,6 +1489,7 @@ pub(crate) fn SessionView(
         });
     };
     let mut direct_stop = stop.clone();
+    let mut confirm_stop_suspend = stop.clone();
     let mut confirm_stop = stop;
 
     let replace_base = base.clone();
@@ -1907,6 +1917,19 @@ pub(crate) fn SessionView(
     crate::ops::use_clear_when_hidden(confirming_replace, interrupted_card_shown);
 
     let shown = current.read().clone();
+    let sandbox_host = crate::sandbox_sessions::owned_host(
+        &shown,
+        sidebar_hosts.read().hosts().unwrap_or_default(),
+    )
+    .cloned();
+    let sandbox = sandbox_host.as_ref().map(|host| host.id);
+    let sandbox_frozen = sandbox_host
+        .as_ref()
+        .is_some_and(crate::sandbox_sessions::frozen);
+    let sandbox_suspended = sandbox_host
+        .as_ref()
+        .is_some_and(|host| matches!(host.state, crate::HostPhase::Suspended { .. }));
+    let sandbox_claim = use_callback(move |()| lifecycle.claim_guard());
     let confirms_restart = restart_needs_confirmation(&shown.status) && !skip_session_confirmations;
     let direct_restart_stops =
         direct_restart_stops_agent(&shown.status, skip_session_confirmations);
@@ -1964,7 +1987,10 @@ pub(crate) fn SessionView(
     // and so it still names it if the host has since been removed from the
     // registry entirely.
     let host_read_now = host_read.read();
-    let stale_notice = shown.stale.then(|| {
+    let stale_notice = (shown.stale || sandbox_frozen).then(|| {
+        if let Some(host) = &sandbox_host {
+            return crate::sandbox_sessions::unavailable_notice(host);
+        }
         stale_session_notice(
             shown
                 .host_name
@@ -2290,12 +2316,18 @@ pub(crate) fn SessionView(
                         }
                     }
                     div { class: "restart-offer header-stop-anchor",
+                        if let Some(host) = &sandbox_host {
+                            crate::sandbox_sessions::Controls {
+                                host: host.clone(), session: shown.clone(), disabled: lifecycle.busy(),
+                                claim: sandbox_claim, on_done: move |_| header_refresh.set(true),
+                            }
+                        }
                         button {
                             r#type: "button", class: "btn btn-neutral header-stop",
-                            "data-tooltip": "Stop the agent and close its terminal tabs",
+                            "data-tooltip": if sandbox.is_some() { "Stop the agent and close its terminal tabs; the sandbox keeps running and billing" } else { "Stop the agent and close its terminal tabs" },
                             "aria-expanded": "{confirming_stop.is_open()}",
                             "aria-controls": "stop-confirm-panel",
-                            disabled: lifecycle.busy() || shown.stale,
+                            disabled: lifecycle.busy() || shown.stale || sandbox_frozen,
                             onclick: {
                                 let tabs = tabs.len();
                                 let refuse_if_agent_running = shown.status.has_ended();
@@ -2306,7 +2338,7 @@ pub(crate) fn SessionView(
                                         if tabs > 0 && !skip_session_confirmations {
                                             confirming_stop.open((), claim);
                                         } else {
-                                            direct_stop(claim, tabs == 0, refuse_if_agent_running);
+                                            direct_stop(claim, tabs == 0, refuse_if_agent_running, false);
                                         }
                                     }
                                 }
@@ -2320,6 +2352,7 @@ pub(crate) fn SessionView(
                                 onmounted: move |_| { document::eval(&crate::dialog_focus::install_js(".header-stop-confirm", crate::dialog_focus::ContainerEnter::None)); },
                                 span { class: "confirm-consequence",
                                     "{crate::status::stop_consequence(&shown.status, tabs.len())}"
+                                    if sandbox.is_some() { " {crate::sandbox_sessions::STOP_BILLING} Stop and suspend freezes the remaining processes; they continue on Resume. The stopped agent and closed tabs do not continue." }
                                 }
                                 button {
                                     r#type: "button", class: "btn btn-danger header-stop-confirm-submit",
@@ -2335,10 +2368,25 @@ pub(crate) fn SessionView(
                                         move |_| {
                                             if stale || stopping() { return; }
                                             if let Some(claim) = confirming_stop.take(&shown_stop) {
-                                                confirm_stop(claim, refuse_if_tabs_open, refuse_if_agent_running);
+                                                confirm_stop(claim, refuse_if_tabs_open, refuse_if_agent_running, false);
                                             }
                                         }
                                     }, "Stop"
+                                }
+                                if sandbox.is_some() {
+                                    button { r#type: "button", class: "btn btn-danger", disabled: stopping() || sandbox_frozen,
+                                        "data-tooltip": "Stop this session's agent and close its terminal tabs, then suspend the whole sandbox",
+                                        onkeydown: crate::guard_confirmation_enter,
+                                        onclick: {
+                                            let token = shown_stop.clone();
+                                            let no_tabs = tabs.is_empty();
+                                            let ended = shown.status.has_ended();
+                                            move |_| {
+                                                if let Some(claim) = confirming_stop.take(&token) {
+                                                    confirm_stop_suspend(claim, no_tabs, ended, true);
+                                                }
+                                            }
+                                        }, "Stop and suspend" }
                                 }
                                 button {
                                     r#type: "button", class: "btn btn-neutral", autofocus: stopping() || shown.stale,
@@ -2378,13 +2426,13 @@ pub(crate) fn SessionView(
                             // the tooltip hoverable and the reason reachable,
                             // and the handler is what refuses activation.
                             "aria-disabled": !restart_available,
-                            disabled: lifecycle.busy(),
+                            disabled: lifecycle.busy() || sandbox_frozen,
                             onclick: move |_| on_restart.call(()),
                             ActionIcon { glyph: ActionGlyph::Restart }
                             "Restart"
                         }
                         ActionMenu {
-                            kind: ActionKind::Restart, open_menu: action_menu, busy: lifecycle.busy(),
+                            kind: ActionKind::Restart, open_menu: action_menu, busy: lifecycle.busy() || sandbox_frozen,
                             plain_unavailable: !restart_available, with_unavailable,
                             plain_description: offer_explanation.clone(),
                             with_description: restart_with_description.clone(),
@@ -2479,14 +2527,14 @@ pub(crate) fn SessionView(
                             r#type: "button",
                             class: "btn btn-neutral header-replace",
                             "data-tooltip": "Replace: swap this session for a fresh conversation with the same settings",
-                            disabled: lifecycle.busy(),
+                            disabled: lifecycle.busy() || sandbox_frozen,
                             "aria-expanded": "{confirming_header_replace.is_open()}",
                             onclick: move |_| on_replace.call(()),
                             ActionIcon { glyph: ActionGlyph::Replace }
                             "Replace"
                         }
                         ActionMenu {
-                            kind: ActionKind::Replace, open_menu: action_menu, busy: lifecycle.busy(),
+                            kind: ActionKind::Replace, open_menu: action_menu, busy: lifecycle.busy() || sandbox_frozen,
                             plain_unavailable: false, with_unavailable: false,
                             plain_description: "Swap this session for a fresh conversation with the same settings",
                             with_description: "Edit the settings, then swap this session for a new one",
@@ -2576,9 +2624,10 @@ pub(crate) fn SessionView(
                                 let id = shown.id.raw().to_owned();
                                 move |_| {
                                     if let Some(claim) = lifecycle.claim_guard() {
-                                        if skip_session_confirmations {
+                                        if skip_session_confirmations && sandbox.is_none() {
                                             drop(claim);
                                             header_delete.set(Some(crate::list::HeaderDeleteRequest {
+                                                sandbox,
                                                 id: id.clone(),
                                                 guard: header_delete_guard,
                                             }));
@@ -2599,9 +2648,13 @@ pub(crate) fn SessionView(
                                 // the two entry points warn about exactly the
                                 // same things (a live agent, open tabs).
                                 span { class: "confirm-consequence",
-                                    "{crate::status::confirm_consequence(&shown.status, shown.tabs.len())}"
+                                    if sandbox.is_some() { "{crate::sandbox_sessions::DELETE_CONSEQUENCE}" }
+                                    else { "{crate::status::confirm_consequence(&shown.status, shown.tabs.len())}" }
+                                    if let Some(host) = &sandbox_host && let Some(binding) = &host.tensorlake {
+                                        " Sandbox: {binding.sandbox.escaped()}"
+                                    }
                                 }
-                                if shown.working_copy.is_some() {
+                                if sandbox.is_none() && shown.working_copy.is_some() {
                                     span { class: "confirm-consequence confirm-checkout-consequence",
                                         "The managed checkout stays while another session uses it. When its last session is deleted, its folder moves to the trash; no files are deleted."
                                     }
@@ -2623,12 +2676,13 @@ pub(crate) fn SessionView(
                                             };
                                             drop(claim);
                                             header_delete.set(Some(crate::list::HeaderDeleteRequest {
+                                                sandbox,
                                                 id: id.clone(),
                                                 guard: header_delete_guard,
                                             }));
                                         }
                                     },
-                                    "Delete"
+                                    if sandbox.is_some() { "Delete session and sandbox" } else { "Delete" }
                                 }
                                 button {
                                     r#type: "button",
@@ -3022,7 +3076,7 @@ pub(crate) fn SessionView(
                     // disconnected terminal gives, from its one definition.
                     "data-drop-refusal": crate::attachments::DETACHED_TEXT,
                     if let Some(notice) = &stale_notice {
-                        SessionUnavailableCard { notice: notice.clone() }
+                        SessionUnavailableCard { notice: notice.clone(), sandbox: sandbox.is_some() }
                     }
                     // The delete in flight, over the terminal where the eye
                     // is: the row and header say it too, but a user looking
@@ -3161,7 +3215,7 @@ pub(crate) fn SessionView(
             } else if let Some(notice) = &stale_notice {
                 div { class: "terminal-panes",
                     onmounted: move |_| { document::eval(include_str!("../assets/outage-layout.js")); },
-                    SessionUnavailableCard { notice: notice.clone() }
+                    SessionUnavailableCard { notice: notice.clone(), sandbox: sandbox.is_some() }
                 }
             }
             // Last in DOM order: keyboard traversal reaches copy controls after
@@ -3184,14 +3238,25 @@ pub(crate) fn SessionView(
                 }
                 if let Some(name) = &shown.host_name {
                     span { class: "session-details-host",
-                        crate::list::SessionHostIcon { locality, icon: host_icon, color: host_color }
-                        crate::list::SessionHostName { name: name.clone(), locality }
+                        if let Some(host) = &sandbox_host {
+                            crate::icons::SandboxMark {}
+                            span { class: "visually-hidden", "Sandbox" }
+                            span { "{crate::peer::display_peer(&crate::sandbox_sessions::label(host))}" }
+                        } else {
+                            crate::list::SessionHostIcon { locality, icon: host_icon, color: host_color }
+                            crate::list::SessionHostName { name: name.clone(), locality }
+                        }
                     }
                 }
                 // Its own `if`, not nested under the badge's: see
                 // `activity_destination` for why an absent badge must not
                 // take the age with it.
-                if let Some(activity) = &details_activity {
+                if sandbox_suspended {
+                    span { "data-tooltip": "Suspended: this session's sandbox is frozen; Resume continues its processes",
+                        crate::icons::SandboxPause {} "Suspended"
+                    }
+                }
+                else if let Some(activity) = &details_activity {
                     span {
                         class: "status-time",
                         "data-tooltip": "{activity.absolute}",
@@ -3199,7 +3264,7 @@ pub(crate) fn SessionView(
                     }
                 }
                 if let Some(checkout) = &shown.working_copy {
-                    crate::icons::ManagedCheckoutMark { checkout: checkout.clone(), cwd: shown.cwd.clone() }
+                    crate::icons::ManagedCheckoutMark { checkout: checkout.clone(), cwd: shown.cwd.clone(), sandbox: sandbox.is_some() }
                 }
                 // Which kind each terminal is, once kinds can differ
                 // (`migration::terminal_kinds`); the label is short, the
@@ -3277,7 +3342,10 @@ pub(crate) fn SessionView(
 /// The text-only overlay is a keyboard stop so a short terminal area never
 /// makes reading a long remedy depend on a pointer.
 #[component]
-fn SessionUnavailableCard(notice: SessionUnavailableNotice) -> Element {
+fn SessionUnavailableCard(
+    notice: SessionUnavailableNotice,
+    #[props(default)] sandbox: bool,
+) -> Element {
     let base = use_context::<ApiBase>().0;
     let mut pending = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
@@ -3289,12 +3357,16 @@ fn SessionUnavailableCard(notice: SessionUnavailableNotice) -> Element {
             tabindex: "0", aria_label: "Session unavailable",
             div { class: "session-unavailable-card", role: "status",
                 div { class: "session-unavailable-heading",
-                    span { class: "delete-spinner", "aria-hidden": "true" }
-                    "Session unavailable — {cause_clause}"
+                    if sandbox && notice.cause == "Suspended" {
+                        crate::icons::SandboxPause {} "Session suspended"
+                    } else {
+                        span { class: "delete-spinner", "aria-hidden": "true" }
+                        "Session unavailable — {cause_clause}"
+                    }
                 }
                 PeerLine { class: "session-unavailable-explanation", parts: notice.explanation }
                 if let Some(host) = notice.resume_host {
-                    button { class: "btn", disabled: pending(), onclick: move |_| {
+                    button { class: if sandbox { "btn btn-primary" } else { "btn" }, disabled: pending(), onclick: move |_| {
                         if *pending.peek() { return; }
                         pending.set(true);
                         let base = base.clone();
@@ -3302,7 +3374,7 @@ fn SessionUnavailableCard(notice: SessionUnavailableNotice) -> Element {
                             error.set(crate::api::resume_host(&base, host).await.err());
                             pending.set(false);
                         });
-                    }, "Resume host" }
+                    }, if sandbox { "Resume" } else { "Resume host" } }
                 }
                 if let Some(reason) = error() {
                     PeerLine { class: "session-unavailable-detail", parts: vec![DetailPart::peer(reason)] }

@@ -74,8 +74,12 @@ use serde::Deserialize;
 mod credentials;
 mod save_order;
 pub(crate) use credentials::{delete_credential, fetch_credentials, write_credential};
+mod sandbox_sessions;
 /// The Tensorlake recipe calls (see the module's own docs).
 mod tensorlake_recipes;
+pub(crate) use sandbox_sessions::{
+    create_sandbox_session, delete_sandbox_session, sandbox_launch_body, stop_and_suspend,
+};
 pub(crate) use tensorlake_recipes::{
     build_recipe, create_recipe, delete_orphan_sandbox, delete_recipe, fetch_orphan_sandboxes,
     fetch_recipes, update_recipe,

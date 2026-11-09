@@ -1242,12 +1242,12 @@ test("recipe preparation reports lazy progress, failure and readiness", async ({
     const row = list.getByRole("listitem").filter({ hasText: name });
     const builtStatus = row.getByRole("status", { name: `Snapshot of ${name}`, exact: true });
     const preparedStatus = row.getByRole("status", { name: `Preparation of ${name}`, exact: true });
-    await expect(preparedStatus).toContainText("Not prepared yet; the first new host prepares it");
+    await expect(preparedStatus).toContainText("Not prepared yet; the first new host or session prepares it");
     await expect(row.getByRole("button", { name: /Prepare now|Retry preparation/ })).toHaveCount(0);
 
     const first = await startPreparedHost(request, `${name}-first`, name);
     ownedHosts.push(first);
-    await expect(preparedStatus).toContainText("Preparing for new hosts: installing Farhelm (step 3 of 5)");
+    await expect(preparedStatus).toContainText("Preparing for new hosts and sessions: installing Farhelm (step 3 of 5)");
     await expect(preparedStatus.locator(".delete-progress-dot")).toHaveCount(1);
     await expect(builtStatus).toContainText("Snapshot built");
     expect((await recipe(request, name)).prepared).toBeNull();
@@ -1255,7 +1255,7 @@ test("recipe preparation reports lazy progress, failure and readiness", async ({
     await preparationBackend({ default: { fail_action: "finish-snapshot-install", message: "retained supervisor state" } });
     await waitForHostSetup(request, first, "failed");
     await expect(preparedStatus).toContainText("Preparing failed while installing Farhelm (step 3 of 5)");
-    await expect(preparedStatus).toContainText("The next new host tries again.");
+    await expect(preparedStatus).toContainText("The next new host or session tries again.");
     await expect(preparedStatus.locator(".delete-progress-dot")).toHaveCount(0);
     expect((await recipe(request, name)).preparation.state).toBe("failed");
     expect((await fakeModel()).sandboxes.every((sandbox) => sandbox.status === "terminated")).toBe(true);
@@ -1265,7 +1265,7 @@ test("recipe preparation reports lazy progress, failure and readiness", async ({
     await preparationBackend({ default: { hold_actions: true } });
     const second = await startPreparedHost(request, `${name}-second`, name);
     ownedHosts.push(second);
-    await expect(preparedStatus).toContainText("Preparing for new hosts: installing Farhelm (step 3 of 5)");
+    await expect(preparedStatus).toContainText("Preparing for new hosts and sessions: installing Farhelm (step 3 of 5)");
     await expect(preparedStatus.locator(".delete-progress-dot")).toHaveCount(1);
     await preparationBackend({});
     await waitForHostSetup(request, second, "completed");
@@ -1276,7 +1276,7 @@ test("recipe preparation reports lazy progress, failure and readiness", async ({
     const ready = await recipe(request, name);
     // An idle feed reports the last freshness check. It neither renews the
     // snapshot nor promises that it remains eligible before its next use.
-    await expect(preparedStatus).toContainText("Ready for new hosts when last checked");
+    await expect(preparedStatus).toContainText("Ready for new hosts and sessions when last checked");
     await expect(preparedStatus).toContainText(`for Farhelm ${ready.prepared.farhelm_version}`);
     await expect(preparedStatus).toContainText("expires after 24 h; checked before use");
     await expect(preparedStatus.locator(".recipe-row-status-positive")).toHaveCount(1);
@@ -1351,7 +1351,7 @@ for (const [state, wording] of [
       await expect(row.getByRole("status", { name: `Snapshot of ${name}`, exact: true })).toContainText("No snapshot yet");
       const status = row.getByRole("status", { name: `Preparation of ${name}`, exact: true });
       await expect(status).toContainText(wording);
-      await expect(status).toContainText(state === "interrupted" ? "The next new host tries again." : "the next new host prepares it");
+      await expect(status).toContainText(state === "interrupted" ? "The next new host or session tries again." : "the next new host or session prepares it");
       await expect(status.locator(".recipe-row-status-warning")).toHaveCount(1);
       await expect(row.getByRole("button", { name: /Prepare now|Retry preparation/ })).toHaveCount(0);
     } finally {
@@ -1425,7 +1425,7 @@ test("a recipe's snapshot builds, rebuilds, recovers from a failed step and goes
     await expect(row.getByRole("status", { name: `Snapshot of ${name}`, exact: true }))
       .toContainText("No snapshot yet");
     await expect(row.getByRole("status", { name: `Preparation of ${name}`, exact: true }))
-      .toContainText("Not prepared yet; the first new host prepares it");
+      .toContainText("Not prepared yet; the first new host or session prepares it");
     await row.getByRole("button", {
       name: `Build snapshot for ${name}`,
       exact: true,

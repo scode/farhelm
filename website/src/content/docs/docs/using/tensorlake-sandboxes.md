@@ -16,6 +16,9 @@ A Tensorlake sandbox is a Linux machine in your Tensorlake project that Farhelm 
 its size and software in a saved recipe, then start [sessions](/docs/using/start-a-session/) on it like any other host.
 You can suspend it with its processes and sessions intact, then resume where you left off.
 
+You can also [give each session its own sandbox](#give-each-session-its-own-sandbox), created when you launch and
+discarded when you delete the session.
+
 Sandboxes bill while running, including while their agents are idle. Snapshot storage also costs money, including while
 a sandbox is suspended; see [Tensorlake pricing](https://www.tensorlake.ai/pricing) for current terms. Building a
 recipe's snapshot uses a temporary sandbox that bills too. Closing Farhelm does not delete your sandboxes.
@@ -161,6 +164,29 @@ snapshot's size, rebuild before adding a host.
 The recipe's row warns if Farhelm could not delete an old build sandbox or snapshot; the next build or deleting the
 recipe retries that cleanup. Deleting a recipe also deletes its managed snapshot, and is refused while a host uses the
 recipe.
+
+## Give each session its own sandbox
+
+In the session launcher's **Host** picker, choose a recipe under **New sandbox for this session**. The recipe needs a
+built snapshot first. You can also choose a recipe in a [launch template](/docs/using/launch-templates/). Farhelm asks
+before creating the billed sandbox unless **Create Tensorlake sandboxes without asking** is on.
+
+Choose a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) or start in the sandbox's home
+directory. **Clone** creates another sandbox from the same recipe; it does not copy the original's files. **Restart**
+and **Replace** keep the existing sandbox and its files.
+
+**Suspend** freezes the entire sandbox with its processes intact; **Resume** continues them. **Stop** ends the agent and
+its terminal tabs while the sandbox keeps running and billing. **Stop and suspend** does both. A session sandbox uses a
+30-minute idle timeout after its connection from Farhelm ends. (On Tensorlake's Usage Credits plan, an ordinary host
+sandbox instead suspends after 24 hours without a connection from Farhelm.)
+
+**Delete session and sandbox** permanently removes the whole sandbox, every session and process in it, its files and
+snapshots. It always asks, including while suspended. If Replace failed and left another session there, Delete removes
+that session too. A failed Replace itself preserves the sandbox; its error identifies the machine to recover work from.
+
+These sandboxes appear in **Hosts** and the sidebar's update and problem notices, without permanent navigation rail
+icons. A sandbox left by interrupted setup or failed cleanup stays listed there. Agents in sandbox sessions cannot ask
+Farhelm to act.
 
 ## Add a sandbox host
 

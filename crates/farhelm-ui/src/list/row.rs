@@ -172,6 +172,8 @@ enum MenuAction {
     /// Relative ordering within the displayed movable pin run only.
     MoveUp,
     MoveDown,
+    Sandbox,
+    StopSuspend,
     Clone,
     /// "Replace with": clone's editable form, seeded from this row, with
     /// replace's create-then-delete-the-source action on launch — the third
@@ -203,12 +205,14 @@ enum MenuAction {
 /// first" (ReplaceWith) to "swap this one out, unedited" (Replace) —
 /// putting them beside each other is what lets a user compare the three
 /// without hunting across the menu.
-const MENU_ACTIONS: [MenuAction; 10] = [
+const MENU_ACTIONS: [MenuAction; 12] = [
     MenuAction::Rename,
     MenuAction::MarkSeen,
     MenuAction::TogglePin,
     MenuAction::MoveUp,
     MenuAction::MoveDown,
+    MenuAction::Sandbox,
+    MenuAction::StopSuspend,
     MenuAction::Clone,
     MenuAction::ReplaceWith,
     MenuAction::Replace,
@@ -234,13 +238,27 @@ type MenuOrder = menu_panel::MenuOrder<MenuAction, { MENU_ACTIONS.len() }>;
 /// session from metadata and do not require the source's process to be alive.
 /// Move availability instead comes from displayed neighbors: a held or
 /// filtered list cannot use an off-screen pin as its destination.
+#[cfg(test)]
 fn session_menu_order(controls: RowControlVisibility, move_up: bool, move_down: bool) -> MenuOrder {
+    session_menu_order_with_sandbox(controls, move_up, move_down, None)
+}
+
+/// Resource controls share the row's existing menu order. Suspension withdraws
+/// only Stop and suspend; Resume keeps the same stable action identity.
+fn session_menu_order_with_sandbox(
+    controls: RowControlVisibility,
+    move_up: bool,
+    move_down: bool,
+    sandbox_suspended: Option<bool>,
+) -> MenuOrder {
     MenuOrder::pack(MENU_ACTIONS, |action| match action {
         MenuAction::Rename => controls.rename,
         MenuAction::MarkSeen => controls.mark_seen,
         MenuAction::TogglePin => true,
         MenuAction::MoveUp => move_up,
         MenuAction::MoveDown => move_down,
+        MenuAction::Sandbox => sandbox_suspended.is_some(),
+        MenuAction::StopSuspend => sandbox_suspended == Some(false),
         MenuAction::Clone => true,
         MenuAction::ReplaceWith => true,
         MenuAction::Replace => true,
@@ -378,6 +396,7 @@ fn MenuActionIcon(action: MenuAction) -> Element {
         MenuAction::TogglePin => ActionGlyph::Pin,
         MenuAction::MoveUp => ActionGlyph::MoveUp,
         MenuAction::MoveDown => ActionGlyph::MoveDown,
+        MenuAction::Sandbox | MenuAction::StopSuspend => ActionGlyph::Stop,
         MenuAction::Clone => ActionGlyph::Clone,
         MenuAction::ReplaceWith => ActionGlyph::Adjust,
         MenuAction::Replace => ActionGlyph::Replace,
@@ -784,7 +803,7 @@ std::thread_local! {
 /// A Stop answer carries the row id, drawn opening, no-tabs guard and ended-agent guard.
 /// Only the payload is aliased: Dioxus must still recognize `EventHandler` in
 /// the component prop to retain its callback ownership and memoization rules.
-type StopConfirmation = (String, ConfirmToken<RowQuestion>, bool, bool);
+pub(super) type StopConfirmation = (String, ConfirmToken<RowQuestion>, bool, bool);
 
 /// One row, in two layers. The row itself is a plain `<div>` wrapper
 /// around two real `<button>`s — the open button (the session's stacked
@@ -1062,13 +1081,20 @@ pub(super) fn SessionRow(
     /// Omission is `None`: a default no-op handler allocates a fresh callback on
     /// every parent render and invalidates an otherwise unchanged row's props.
     on_confirm_stop: Option<EventHandler<StopConfirmation>>,
+    /// The same drawn Stop question also authorizes whole-sandbox freezing.
+    on_confirm_stop_suspend: Option<EventHandler<StopConfirmation>>,
     /// Cancel hands back this row's id and the opening its button was drawn for.
     /// Like confirm, an omitted handler must retain a stable absent value.
     on_cancel_stop: Option<EventHandler<(String, ConfirmToken<RowQuestion>)>>,
     on_delete: EventHandler<DeleteTarget>,
     /// The delete prompt's confirm: this row's id, the drawn opening, and
     /// the guard derived from the same render as the consequence text.
-    on_confirm_delete: EventHandler<(String, ConfirmToken<RowQuestion>, crate::DeleteGuard)>,
+    on_confirm_delete: EventHandler<(
+        String,
+        ConfirmToken<RowQuestion>,
+        crate::DeleteGuard,
+        Option<crate::HostId>,
+    )>,
     /// The delete prompt's cancel: this row's id and the drawn opening.
     on_cancel_delete: EventHandler<(String, ConfirmToken<RowQuestion>)>,
     /// The read/unread toggle's click, from either the menu item or the
@@ -1108,6 +1134,21 @@ pub(super) fn SessionRow(
     /// number the list showed.
     on_bell_clear: EventHandler<(String, u64)>,
 ) -> Element {
+    let sidebar_hosts = try_use_context::<Signal<crate::hosts::HostsRead>>();
+    let sandbox_host = sidebar_hosts.and_then(|hosts| {
+        crate::sandbox_sessions::owned_host(&session, hosts.read().hosts().unwrap_or_default())
+            .cloned()
+    });
+    let sandbox = sandbox_host.as_ref().map(|host| host.id);
+    let sandbox_frozen = sandbox_host
+        .as_ref()
+        .is_some_and(crate::sandbox_sessions::frozen);
+    let sandbox_suspended = sandbox_host
+        .as_ref()
+        .is_some_and(|host| matches!(host.state, crate::HostPhase::Suspended { .. }));
+    let sandbox_gate = try_use_context::<crate::ops::PaneGate>();
+    let sandbox_claim =
+        use_callback(move |()| sandbox_gate.and_then(|mut gate| gate.claim_guard()));
     let RowState {
         error,
         busy,
@@ -1180,7 +1221,13 @@ pub(super) fn SessionRow(
     let card_id = format!("session-summary-{}", session.id.raw());
     let card_session = session.clone();
     let menu_state = badge.as_ref().map(crate::status::StatusBadge::label);
-    let menu_summary_parts = menu_header_summary_parts(&session, menu_state);
+    let mut menu_summary_parts = menu_header_summary_parts(&session, menu_state);
+    if let Some(host) = &sandbox_host {
+        menu_summary_parts.extend([
+            DetailPart::text(" · "),
+            DetailPart::peer(crate::sandbox_sessions::label(host)),
+        ]);
+    }
     // Live statuses occupy the fixed leading slot as dots. In compact mode an
     // ended status uses that same slot for an icon; noncompact rows put its
     // complete wording on the full-width detail line below the identity.
@@ -1238,10 +1285,13 @@ pub(super) fn SessionRow(
     let confirm_stop_id = session.id.raw().to_owned();
     let cancel_stop_id = session.id.raw().to_owned();
     let confirm_stop_question = question.clone();
+    let suspend_stop_question = question.clone();
+    let suspend_stop_id = session.id.raw().to_string();
     let cancel_stop_question = question.clone();
     let stop_refuse_if_tabs_open = session.tabs.is_empty();
     let stop_refuse_if_agent_running = session.status.has_ended();
-    let delete_target = DeleteTarget::for_session(&session);
+    let mut delete_target = DeleteTarget::for_session(&session);
+    delete_target.sandbox = sandbox;
     let clone_target = session.clone();
     let replace_with_target = session.clone();
     let replace_target = session.clone();
@@ -1304,7 +1354,9 @@ pub(super) fn SessionRow(
     let pin_neighbors = pin_neighbors.unwrap_or_default();
     let move_up = pin_neighbors.up.is_some();
     let move_down = pin_neighbors.down.is_some();
-    let menu_order = session_menu_order(controls, move_up, move_down);
+    let sandbox_menu_state = sandbox_host.as_ref().map(|_| sandbox_suspended);
+    let menu_order =
+        session_menu_order_with_sandbox(controls, move_up, move_down, sandbox_menu_state);
     // Whether the panel is currently showing its item list rather than a
     // confirmation prompt. Rename immediately closes this panel and mounts
     // ListView's stable dialog, so it is not a panel sub-state.
@@ -1586,10 +1638,14 @@ pub(super) fn SessionRow(
     // a Move item shifts surviving actions while focus may remain in bounds.
     let withdrawal_close_id = session.id.raw().to_owned();
     use_effect(use_reactive(
-        (&offers_mark_seen, &move_up, &move_down),
-        move |(offers_mark_seen, move_up, move_down)| {
-            let order =
-                session_menu_order(row_control_visibility(offers_mark_seen), move_up, move_down);
+        (&offers_mark_seen, &move_up, &move_down, &sandbox_menu_state),
+        move |(offers_mark_seen, move_up, move_down, sandbox_menu_state)| {
+            let order = session_menu_order_with_sandbox(
+                row_control_visibility(offers_mark_seen),
+                move_up,
+                move_down,
+                sandbox_menu_state,
+            );
             let mut focused_position = *menu_focus.peek();
             if order != *previous_menu_order.peek() {
                 // Preserve the latest keyboard target across a withdrawal and
@@ -1717,7 +1773,10 @@ pub(super) fn SessionRow(
     // `deleting` is layered on rather than folded into `row_class`'s table:
     // it is transient and independent of the other three, and doubling that
     // exhaustive match for it would say nothing the suffix does not.
-    let row_class = match (row_class(session.stale, selected, menu_open), deleting) {
+    let row_class = match (
+        row_class(session.stale || sandbox_frozen, selected, menu_open),
+        deleting,
+    ) {
         (class, true) => format!("{class} deleting"),
         (class, false) => class.to_string(),
     };
@@ -1878,7 +1937,11 @@ pub(super) fn SessionRow(
                         // uses for a status word next to a color-only dot),
                         // since the icon itself is `aria-hidden`.
                         span { class: "session-locality-slot",
-                            SessionHostIcon { locality, icon: host_icon, color: host_color, session_row: true }
+                            if sandbox.is_some() {
+                                crate::icons::SandboxMark { session_row: true }
+                                span { class: "visually-hidden", "Sandbox" }
+                            }
+                            else { SessionHostIcon { locality, icon: host_icon, color: host_color, session_row: true } }
                         }
                         // One grid child owns the title and compact-only
                         // qualifiers. Noncompact qualifier words move into
@@ -1914,7 +1977,7 @@ pub(super) fn SessionRow(
                                 // Compact rows omit the directory line. Keep
                                 // checkout lifetime visible beside the name.
                                 if let Some(checkout) = &session.working_copy {
-                                    ManagedCheckoutMark { checkout: checkout.clone(), cwd: session.cwd.clone(), session_row: true }
+                                    ManagedCheckoutMark { checkout: checkout.clone(), cwd: session.cwd.clone(), sandbox: sandbox.is_some(), session_row: true }
                                 }
                                 if session.stale {
                                     span { class: "compact-qualifier", "data-tooltip": "{stale_tooltip}",
@@ -1990,7 +2053,13 @@ pub(super) fn SessionRow(
                             if let Some(badge) = ended_badge {
                                 StatusBadgeView { badge, dot_onclick: move |_| {}, dot_title: None, session_row: true }
                             }
-                            if let Some(cause) = stale_cause {
+                            if sandbox_suspended {
+                                span { class: "status-badge",
+                                    "data-tooltip": "Suspended: this session's sandbox is frozen; Resume continues its processes",
+                                    "data-tooltip-anchor": "session-row",
+                                    crate::icons::SandboxPause {} "Suspended"
+                                }
+                            } else if let Some(cause) = stale_cause {
                                 span { class: "stale-badge", "data-tooltip": "{stale_tooltip}", "data-tooltip-anchor": "session-row", "{cause}" }
                             }
                         }
@@ -2003,7 +2072,8 @@ pub(super) fn SessionRow(
                     // name, including the legacy case where it sends none.
                     span { class: "session-row-line session-row-meta",
                         if let Some(host_name) = host_short_name.as_ref().or(session.host_name.as_ref()) {
-                            SessionHostName { name: host_name.clone(), locality, tooltip: false, short_form: host_short_name.is_some() }
+                            if let Some(host) = &sandbox_host { span { "{display_peer(&crate::sandbox_sessions::label(host))}" } }
+                            else { SessionHostName { name: host_name.clone(), locality, tooltip: false, short_form: host_short_name.is_some() } }
                             span {
                                 class: "session-host-separator",
                                 "data-separator": if session.working_copy.is_some() { "dot" } else { "colon" },
@@ -2014,7 +2084,7 @@ pub(super) fn SessionRow(
                         // the shared mark keeps its lifetime and actual cwd
                         // reachable through one hover target.
                         if let Some(checkout) = &session.working_copy {
-                            ManagedCheckoutMark { checkout: checkout.clone(), cwd: session.cwd.clone(), show_repository: true, session_row: true }
+                            ManagedCheckoutMark { checkout: checkout.clone(), cwd: session.cwd.clone(), sandbox: sandbox.is_some(), show_repository: true, session_row: true }
                         } else {
                             // Two spans, not one: `.session-cwd` is the rtl
                             // clipping container that puts the ellipsis on the
@@ -2268,6 +2338,7 @@ pub(super) fn SessionRow(
                                 class: "confirm-consequence",
                                 onmounted: move |_| { document::eval(&crate::dialog_focus::install_js(".session-row-menu-panel.menu-prompt", crate::dialog_focus::ContainerEnter::None)); },
                                 "{crate::status::stop_consequence(&session.status, session.tabs.len())}"
+                                if sandbox.is_some() { " {crate::sandbox_sessions::STOP_BILLING} Stop and suspend freezes the remaining processes; they continue on Resume. The stopped agent and closed tabs do not continue." }
                             }
                             PeerTitle { class: "confirm-title", title: session.title.clone(), quoted: true }
                             crate::modal_dialog::DialogActions {
@@ -2293,6 +2364,16 @@ pub(super) fn SessionRow(
                                         }
                                     }, "Confirm stop"
                                 }
+                                if sandbox.is_some() {
+                                    button { r#type: "button", class: "btn btn-danger", disabled: busy,
+                                        "data-tooltip": "Stop this session's agent and close its terminal tabs, then suspend the whole sandbox",
+                                        onkeydown: crate::guard_confirmation_enter,
+                                        onclick: move |_| {
+                                            if let (Some(answer), Some(token)) = (on_confirm_stop_suspend, suspend_stop_question.clone()) {
+                                                answer.call((suspend_stop_id.clone(), token, stop_refuse_if_tabs_open, stop_refuse_if_agent_running));
+                                            }
+                                        }, "Stop and suspend" }
+                                }
                             }
                         } else if confirming {
                             // Two elements, consequence first: an
@@ -2305,7 +2386,11 @@ pub(super) fn SessionRow(
                                 // The panel also hosts an ordinary menu; arm
                                 // its gap rule when confirmation first mounts.
                                 onmounted: move |_| { document::eval(&crate::dialog_focus::install_js(".session-row-menu-panel.menu-prompt", crate::dialog_focus::ContainerEnter::None)); },
-                                "{confirm_consequence(&session.status, session.tabs.len())}"
+                                if sandbox.is_some() { "{crate::sandbox_sessions::DELETE_CONSEQUENCE}" }
+                                else { "{confirm_consequence(&session.status, session.tabs.len())}" }
+                                if let Some(host) = &sandbox_host && let Some(binding) = &host.tensorlake {
+                                    " Sandbox: {binding.sandbox.escaped()}"
+                                }
                             }
                             // The last check before an irreversible action:
                             // an override or invisible character in a title
@@ -2315,7 +2400,7 @@ pub(super) fn SessionRow(
                                 title: session.title.clone(),
                                 quoted: true,
                             }
-                            if session.working_copy.is_some() {
+                            if sandbox.is_none() && session.working_copy.is_some() {
                                 // Membership includes ordinary borrowers. Do not
                                 // promise a move from a stale client-side count;
                                 // Delete decides from durable references.
@@ -2362,10 +2447,11 @@ pub(super) fn SessionRow(
                                                 confirm_id.clone(),
                                                 token,
                                                 crate::status::delete_guard(&session.status, session.tabs.len()),
+                                                sandbox,
                                             ));
                                         }
                                     },
-                                    "Confirm delete"
+                                    if sandbox.is_some() { "Delete session and sandbox" } else { "Confirm delete" }
                                 }
                             }
                         } else if confirming_replace {
@@ -2681,6 +2767,61 @@ pub(super) fn SessionRow(
                                     }
                                 }
                                 menu_panel::MenuSeparator { class: "session-row-menu-separator" }
+                                if let Some(host) = &sandbox_host {
+                                    crate::sandbox_sessions::Controls {
+                                        host: host.clone(), session: session.clone(), disabled: busy,
+                                        claim: sandbox_claim, stop_choice: true, on_done: move |_| {},
+                                        buttons: {
+                                            let row_id = session.id.raw().to_owned();
+                                            Callback::new(move |controls: crate::sandbox_sessions::ControlButtons| {
+                                                let suspend_key = row_id.clone();
+                                                let stop_key = row_id.clone();
+                                                rsx! {
+                                                    button {
+                                                        r#type: "button", class: "btn menu-item session-row-menu-item", role: "menuitem",
+                                                        aria_label: if controls.resume { "Resume" } else { "Suspend" },
+                                                        aria_describedby: "session-menu-sandbox-description",
+                                                        aria_disabled: controls.disabled,
+                                                        tabindex: if menu_tab_stop == Some(MenuAction::Sandbox) { "0" } else { "-1" },
+                                                        "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::Sandbox),
+                                                        onmounted: move |element| remember_menu_item(menu_wiring, MenuAction::Sandbox, element.data()),
+                                                        onfocusin: move |_| record_menu_item_focus(menu_wiring, MenuAction::Sandbox),
+                                                        onfocusout: move |_| menu_focus.set(None),
+                                                        onkeydown: move |event| handle_menu_key(&event, menu_order.position(MenuAction::Sandbox), menu_wiring, &suspend_key),
+                                                        onclick: move |_| { if !controls.disabled { controls.start.call(false); } },
+                                                        crate::icons::SandboxPause { resume: controls.resume }
+                                                        menu_panel::MenuItemCopy {
+                                                            label: rsx! { if controls.resume { "Resume" } else { "Suspend" } },
+                                                            description_id: "session-menu-sandbox-description",
+                                                            description: rsx! { if controls.resume { "Continue the sandbox's preserved processes" } else { "Freeze every process; everything continues on Resume" } },
+                                                        }
+                                                    }
+                                                    if !controls.resume {
+                                                        button {
+                                                            r#type: "button", class: "btn menu-item session-row-menu-item danger", role: "menuitem",
+                                                            aria_label: "Stop and suspend",
+                                                            aria_describedby: "session-menu-stop-suspend-description",
+                                                            aria_disabled: controls.disabled,
+                                                            tabindex: if menu_tab_stop == Some(MenuAction::StopSuspend) { "0" } else { "-1" },
+                                                            "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::StopSuspend),
+                                                            onmounted: move |element| remember_menu_item(menu_wiring, MenuAction::StopSuspend, element.data()),
+                                                            onfocusin: move |_| record_menu_item_focus(menu_wiring, MenuAction::StopSuspend),
+                                                            onfocusout: move |_| menu_focus.set(None),
+                                                            onkeydown: move |event| handle_menu_key(&event, menu_order.position(MenuAction::StopSuspend), menu_wiring, &stop_key),
+                                                            onclick: move |_| { if !controls.disabled { controls.start.call(true); } },
+                                                            MenuActionIcon { action: MenuAction::StopSuspend }
+                                                            menu_panel::MenuItemCopy {
+                                                                label: rsx! { "Stop and suspend" },
+                                                                description_id: "session-menu-stop-suspend-description",
+                                                                description: rsx! { "End this session's agent and tabs, then suspend the whole sandbox" },
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            })
+                                        },
+                                    }
+                                }
                                 // Offered on every row, unconditionally —
                                 // see `RowControlVisibility`'s own doc for
                                 // why clone has no visibility field to gate
@@ -2726,7 +2867,7 @@ pub(super) fn SessionRow(
                                     menu_panel::MenuItemCopy {
                                         label: rsx! { "Clone" },
                                         description_id: "session-menu-clone-description",
-                                        description: rsx! { "New session, keep this one" },
+                                        description: rsx! { if sandbox.is_some() { "New session in a new sandbox, keep this one" } else { "New session, keep this one" } },
                                     }
                                 }
                                 // Between clone and replace: clone's exact
@@ -2748,7 +2889,7 @@ pub(super) fn SessionRow(
                                     role: "menuitem",
                                     aria_label: "Replace with",
                                     aria_describedby: "session-menu-replace-with-description",
-                                    aria_disabled: if busy { "true" },
+                                    aria_disabled: if busy || sandbox_frozen { "true" },
                                     tabindex: if menu_tab_stop == Some(MenuAction::ReplaceWith) { "0" } else { "-1" },
                                     "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::ReplaceWith),
                                     onmounted: move |element| {
@@ -2767,7 +2908,7 @@ pub(super) fn SessionRow(
                                         );
                                     },
                                     onclick: move |_| {
-                                        if busy {
+                                        if busy || sandbox_frozen {
                                             return;
                                         }
                                         on_replace_with.call(replace_with_target.clone());
@@ -2800,7 +2941,7 @@ pub(super) fn SessionRow(
                                     role: "menuitem",
                                     aria_label: "Replace",
                                     aria_describedby: "session-menu-replace-description",
-                                    aria_disabled: if busy { "true" },
+                                    aria_disabled: if busy || sandbox_frozen { "true" },
                                     tabindex: if menu_tab_stop == Some(MenuAction::Replace) { "0" } else { "-1" },
                                     "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::Replace),
                                     onmounted: move |element| {
@@ -2819,7 +2960,7 @@ pub(super) fn SessionRow(
                                         );
                                     },
                                     onclick: move |_| {
-                                        if busy {
+                                        if busy || sandbox_frozen {
                                             return;
                                         }
                                         on_replace.call(replace_target.clone());
@@ -2839,7 +2980,7 @@ pub(super) fn SessionRow(
                                         role: "menuitem",
                                         aria_label: "Stop",
                                         aria_describedby: "session-menu-stop-description",
-                                        aria_disabled: if busy { "true" },
+                                        aria_disabled: if busy || sandbox_frozen { "true" },
                                         tabindex: if menu_tab_stop == Some(MenuAction::Stop) { "0" } else { "-1" },
                                         "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::Stop),
                                         onmounted: move |element| {
@@ -2862,7 +3003,7 @@ pub(super) fn SessionRow(
                                             );
                                         },
                                         onclick: move |_| {
-                                            if busy {
+                                            if busy || sandbox_frozen {
                                                 return;
                                             }
                                             on_stop.call(stop_target.clone());
@@ -2871,7 +3012,7 @@ pub(super) fn SessionRow(
                                         menu_panel::MenuItemCopy {
                                             label: rsx! { "Stop" },
                                             description_id: "session-menu-stop-description",
-                                            description: rsx! { "Ends the agent and its processes, and closes terminal tabs" },
+                                            description: rsx! { if sandbox.is_some() { "Ends the agent and its processes; the sandbox keeps running and billing" } else { "Ends the agent and its processes, and closes terminal tabs" } },
                                         }
                                     }
                                 }
@@ -2921,7 +3062,7 @@ pub(super) fn SessionRow(
                                         menu_panel::MenuItemCopy {
                                             label: rsx! { "Delete" },
                                             description_id: "session-menu-delete-description",
-                                            description: rsx! { "Removes the session and its state" },
+                                            description: rsx! { if sandbox.is_some() { "Destroys the whole sandbox, all processes, files and snapshots" } else { "Removes the session and its state" } },
                                         }
                                     }
                                 }
@@ -3234,6 +3375,28 @@ mod tests {
         let menu = session_menu_order(row_control_visibility(false), false, false);
         assert_eq!(menu.get(1), Some(MenuAction::TogglePin));
     }
+
+    /// Keyboard navigation must reach both sandbox actions even when ordinary
+    /// confirmations are skipped. Suspension keeps Resume in the same slot and
+    /// withdraws Stop and suspend without withdrawing Clone or Delete.
+    #[farhelm_testtrace::test]
+    fn sandbox_actions_participate_in_the_ordinary_roving_menu() {
+        let controls = row_control_visibility(false);
+        let running = session_menu_order_with_sandbox(controls, false, false, Some(false));
+        let suspended = session_menu_order_with_sandbox(controls, false, false, Some(true));
+        assert!(
+            running.position(MenuAction::Sandbox).unwrap()
+                < running.position(MenuAction::Clone).unwrap()
+        );
+        assert!(running.position(MenuAction::StopSuspend).is_some());
+        assert_eq!(
+            running.position(MenuAction::Sandbox),
+            suspended.position(MenuAction::Sandbox)
+        );
+        assert!(suspended.position(MenuAction::StopSuspend).is_none());
+        assert!(suspended.position(MenuAction::Clone).is_some());
+        assert!(suspended.position(MenuAction::Delete).is_some());
+    }
     use crate::peer::detail_text;
 
     /// Reordering belongs immediately after Unpin in both rendered and
@@ -3370,8 +3533,14 @@ mod tests {
             let on_cancel_replace = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
             let on_stop = use_callback(|_: DeleteTarget| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
-            let on_confirm_delete =
-                use_callback(|_: (String, ConfirmToken<RowQuestion>, crate::DeleteGuard)| {});
+            let on_confirm_delete = use_callback(
+                |_: (
+                    String,
+                    ConfirmToken<RowQuestion>,
+                    crate::DeleteGuard,
+                    Option<crate::HostId>,
+                )| {},
+            );
             let on_cancel_delete = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
             let on_rename_start = use_callback(|_: (String, String)| {});
             let on_menu_toggle = use_callback(|_: String| {});
@@ -3679,7 +3848,12 @@ mod tests {
                 });
             let on_delete = use_callback(|_: DeleteTarget| {});
             let on_confirm_delete = use_callback(
-                |(row, token, _): (String, ConfirmToken<RowQuestion>, crate::DeleteGuard)| {
+                |(row, token, _, _): (
+                    String,
+                    ConfirmToken<RowQuestion>,
+                    crate::DeleteGuard,
+                    Option<crate::HostId>,
+                )| {
                     record("confirm delete", row, token);
                 },
             );
@@ -3900,8 +4074,14 @@ mod tests {
             let on_cancel_replace = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
             let on_stop = use_callback(|_: DeleteTarget| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
-            let on_confirm_delete =
-                use_callback(|_: (String, ConfirmToken<RowQuestion>, crate::DeleteGuard)| {});
+            let on_confirm_delete = use_callback(
+                |_: (
+                    String,
+                    ConfirmToken<RowQuestion>,
+                    crate::DeleteGuard,
+                    Option<crate::HostId>,
+                )| {},
+            );
             let on_cancel_delete = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
             let on_rename_start = use_callback(|_: (String, String)| {});
             let on_menu_toggle = use_callback(|_: String| {});
@@ -4005,8 +4185,14 @@ mod tests {
             let on_cancel_replace = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
             let on_stop = use_callback(|_: DeleteTarget| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
-            let on_confirm_delete =
-                use_callback(|_: (String, ConfirmToken<RowQuestion>, crate::DeleteGuard)| {});
+            let on_confirm_delete = use_callback(
+                |_: (
+                    String,
+                    ConfirmToken<RowQuestion>,
+                    crate::DeleteGuard,
+                    Option<crate::HostId>,
+                )| {},
+            );
             let on_cancel_delete = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
             let on_rename_start = use_callback(|_: (String, String)| {});
             let on_menu_toggle = use_callback(|_: String| {});
@@ -4201,7 +4387,7 @@ mod tests {
                     on_cancel_replace: |_: (String, ConfirmToken<RowQuestion>)| {},
                     on_stop: |_: DeleteTarget| {},
                     on_delete: |_: DeleteTarget| {},
-                    on_confirm_delete: |_: (String, ConfirmToken<RowQuestion>, crate::DeleteGuard)| {},
+                    on_confirm_delete: |_: (String, ConfirmToken<RowQuestion>, crate::DeleteGuard, Option<crate::HostId>)| {},
                     on_cancel_delete: |_: (String, ConfirmToken<RowQuestion>)| {},
                     on_rename_start: |_: (String, String)| {},
                     on_menu_toggle: |_: String| {},

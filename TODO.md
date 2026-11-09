@@ -345,38 +345,34 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   with, so a sandbox meant to flex has to boot small. Let the user resize a Tensorlake host (or apply its recipe's
   current size) without recreating it. Phase 1 left this out deliberately.
 
-- **Phase 2: a sandbox per session.** A session launch names a recipe instead of a host; Farhelm creates a sandbox for
-  that session from the recipe's prepared snapshot, runs the session there, and deletes the sandbox with the session
-  (one sandbox per session, mapped 1:1). Phase 1 (Tensorlake hosts from named recipes, prepared snapshots and Rebuild
-  snapshot, suspend/resume, delete with snapshots, recipe tunnels, the list of sandboxes not on this helm) is the base;
-  Rebuild snapshot was put into phase 1 because phase 2 needs exactly that path. Design records:
+- **Per-repository warm snapshots for sandbox sessions.** Build on a recipe's prepared snapshot, then refresh each
+  checkout with an incremental `git fetch` when a session starts. Decide how these snapshots are refreshed. Keep using
+  the recipe's GitHub token delivery to each sandbox for private repositories. Design records:
   `lore/2026-11-03-tensorlake-sandbox-hosts-design.md` ("Phase 2, as far as it was thought through", plus the measured
-  platform facts) and `lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md`. What phase 2 needs that phase
-  1 does not, as far as it was thought through:
-  - Fast spawn. Streamed CAS snapshots start in about two seconds regardless of size (a clone runs about 2 s after
-    create, a lingering user unit about 5 s later), so phase 2 depends on Tensorlake's CAS ssh gateway staying fixed (it
-    broke and was fixed on 2026-11-03).
-  - Per-repository snapshots on top of a recipe's prepared snapshot, refreshed with an incremental `git fetch` at spawn,
-    and a refresh story for those snapshots. Fresh sandboxes have no Git credentials, so private repositories need
-    credentials injected per sandbox; the GitHub token delivery recipes now give Tensorlake hosts is where that starts.
-  - Session-owned host rows that the hosts panel hides, with the session's lifecycle driving the sandbox's (create,
-    suspend, delete), and cleanup that cannot leave billed sandboxes or snapshots behind when a helm dies mid-spawn.
-  - Either the supervisor baked into the prepared snapshot with its identity reset per clone (clones also share
-    `/etc/machine-id` unless it is emptied before the checkpoint), or a per-spawn install fast enough not to matter.
-  - Answers to the trust questions in the 2026-09-29 entry: an unsupervised agent in a sandbox must not gain more reach
-    into the user's other hosts than it would have anywhere else.
-  - Possibly: live resize (boot small, grow on demand), shared scratch volumes, and forking a warm sandbox from a memory
-    checkpoint or live copy (restores running processes with the same boot ID, which is also a trap: a forked supervisor
-    keeps its identity).
+  platform facts) and `lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md`.
 
-  Plans: `plans/queue/recipe-bases.md`, `plans/queue/prepared-snapshots.md`, `plans/queue/sandbox-sessions.md`.
+- **Live resize for sandbox sessions.** Let a session's sandbox boot small and grow on demand, preserving its running
+  processes. Build on "Live resize of Tensorlake hosts" above; expose it from the session's controls. The first version
+  launches at the recipe's size and offers no resize control.
+
+- **Possibly: shared scratch volumes for sandbox sessions.** Explore Tensorlake cloud volumes as scratch space shared by
+  sandbox sessions.
+
+- **Possibly: fork a warm sandbox session.** Explore a memory checkpoint or live copy that preserves running processes.
+  A copied supervisor retains its identity and the sandbox's boot ID, so an independent fork needs an explicit answer to
+  that ownership problem. Ordinary Clone starts a fresh sandbox from the recipe instead.
+
+- **Sandbox-session conveniences left out of the first version.** Recipe recent setups, Save as template from a sandbox
+  launch, and bulk Suspend, Resume and Stop and suspend. The maintainer deferred these when simplifying the first
+  version on 2026-11-09. Sandbox launches record no recent setups, and Save as template is unavailable for a recipe or
+  session-owned host target; recipe templates and individual lifecycle controls are supported.
 
 - **Let agents in sandbox sessions ask Farhelm to act.** The first version of sandbox sessions (a session in a
   Tensorlake sandbox of its own, `plans/queue/sandbox-sessions.md`) refuses every agent request from such a session:
-  `farhelm spawn` and every `farhelm agent …` verb, with a quiet notification on the session. The maintainer chose that
-  on 2026-11-08 to keep the trust question out of the first version. Decide what an agent in a disposable sandbox may
-  ask for. It should not reach the user's other hosts any further than it could from anywhere else (the trust questions
-  in `lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md` and SPEC.md's "Local authority and trust between
+  `farhelm spawn` and every `farhelm agent …` verb. The maintainer kept that refusal, without a notification, when
+  simplifying the first version on 2026-11-09. Decide what an agent in a disposable sandbox may ask for. It should not
+  reach the user's other hosts any further than it could from anywhere else (the trust questions in
+  `lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md` and SPEC.md's "Local authority and trust between
   hosts"). Then allow that much. Spawning another sandbox session from the same recipe is the obvious first candidate.
   Plan: `plans/queue/environment-agent-operations.md`.
 

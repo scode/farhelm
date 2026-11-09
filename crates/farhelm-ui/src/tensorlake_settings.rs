@@ -410,14 +410,14 @@ pub(crate) fn TensorlakeSettings() -> Element {
                     }
                 }
                 p { id: "tensorlake-ask-help", class: "host-settings-help",
-                    "Adding a Tensorlake host creates a sandbox, which bills while it runs, so Farhelm asks first. This skips that question. \"Set up new hosts without asking\" under Hosts never does."
+                    "Adding a Tensorlake host or launching a recipe session creates a sandbox, which bills while running, so Farhelm asks first. This skips that question. \"Set up new hosts without asking\" under Hosts never does."
                 }
                 if let Some(error) = toggle_error() {
                     p { class: "app-settings-error", role: "alert", "{error}" }
                 }
             }
             p { class: "host-settings-help",
-                "On Tensorlake's Usage Credits plan, Tensorlake suspends a sandbox after 24 hours without a connection from Farhelm, for example while this helm's machine is asleep. Its sessions continue where they were when you resume it."
+                "On Tensorlake's Usage Credits plan, Tensorlake suspends a sandbox after 24 hours without a connection from Farhelm, for example while this helm's machine is asleep. Sandbox sessions instead have a fixed 30-minute idle timeout. Their processes and files remain until you explicitly delete the sandbox; Resume continues them."
             }
         }
     }

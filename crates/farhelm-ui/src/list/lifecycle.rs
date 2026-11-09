@@ -47,11 +47,12 @@ impl LifecycleAction {
 
     /// Match the batch question to the consequences this operation introduces.
     pub(super) fn needs_confirmation(self, targets: &[DeleteSnapshot], skip: bool) -> bool {
-        !skip
-            && match self {
-                Self::Stop => targets.iter().any(|target| target.tabs > 0),
-                Self::Delete => needs_confirmation(targets, false),
-            }
+        (self == Self::Delete && targets.iter().any(|target| target.sandbox))
+            || !skip
+                && match self {
+                    Self::Stop => targets.iter().any(|target| target.tabs > 0),
+                    Self::Delete => needs_confirmation(targets, false),
+                }
     }
 }
 
@@ -121,6 +122,7 @@ pub(super) async fn run_paced(work: Vec<(Option<HostId>, RowWork)>) {
 /// Equality means the same question; a changed snapshot needs a new opening token.
 #[derive(Clone, PartialEq)]
 pub(super) struct DeleteSnapshot {
+    pub(super) sandbox: bool,
     pub(super) id: PeerText,
     pub(super) host: Option<HostId>,
     title: PeerText,
@@ -136,6 +138,7 @@ impl DeleteSnapshot {
     /// Freeze the identity and consequences the user can actually inspect.
     pub(super) fn for_session(session: &Session, local_host: Option<HostId>) -> Self {
         Self {
+            sandbox: false,
             id: session.id.clone(),
             host: session.host,
             title: session.title.clone(),
@@ -150,12 +153,26 @@ impl DeleteSnapshot {
 
     /// Every request carries this snapshot's guard, even after waiting in a queue.
     pub(super) fn guard(&self) -> crate::DeleteGuard {
-        crate::status::delete_guard(&self.status, self.tabs)
+        if self.sandbox {
+            crate::DeleteGuard::Unconditional
+        } else {
+            crate::status::delete_guard(&self.status, self.tabs)
+        }
+    }
+
+    /// Ownership changes the whole-resource consequence, not member inventory.
+    pub(super) fn with_sandbox(mut self, host: Option<&crate::Host>) -> Self {
+        if let Some(host) = host {
+            self.sandbox = true;
+            self.host_name = Some(crate::sandbox_sessions::label(host).into());
+        }
+        self
     }
 
     /// Preserve the single-row confirmation predicate for mixed batches.
     fn needs_confirmation(&self) -> bool {
         DeleteTarget {
+            sandbox: self.sandbox.then_some(self.host).flatten(),
             id: self.id.raw().to_owned(),
             status: self.status.clone(),
             tabs: self.tabs,
@@ -166,7 +183,23 @@ impl DeleteSnapshot {
 
 /// One row needing consent is sufficient to show the whole accepted selection.
 pub(super) fn needs_confirmation(targets: &[DeleteSnapshot], skip: bool) -> bool {
-    !skip && targets.iter().any(DeleteSnapshot::needs_confirmation)
+    targets.iter().any(|target| target.sandbox)
+        || !skip && targets.iter().any(DeleteSnapshot::needs_confirmation)
+}
+
+/// Draw a resource consequence once, without changing the identities that consent covers.
+/// A retained session is only an example of what the sandbox contains; this projection
+/// neither discovers peers nor changes ordinary Stop's per-session consequences.
+fn question_targets(action: LifecycleAction, targets: &[DeleteSnapshot]) -> Vec<&DeleteSnapshot> {
+    let mut sandboxes = std::collections::HashSet::new();
+    targets
+        .iter()
+        .filter(|target| {
+            action != LifecycleAction::Delete
+                || !target.sandbox
+                || target.host.is_none_or(|host| sandboxes.insert(host))
+        })
+        .collect()
 }
 
 /// Reword known targets and drop only proven departures; never grow an opening.
@@ -184,7 +217,14 @@ pub(super) fn reconcile(
         .iter()
         .filter_map(
             |target| match listed.iter().find(|session| session.id == target.id) {
-                Some(session) => Some(DeleteSnapshot::for_session(session, local_host)),
+                Some(session) => {
+                    let mut refreshed = DeleteSnapshot::for_session(session, local_host);
+                    refreshed.sandbox = target.sandbox;
+                    if target.sandbox {
+                        refreshed.host_name = target.host_name.clone();
+                    }
+                    Some(refreshed)
+                }
                 None if absence_is_evidence => None,
                 None => Some(target.clone()),
             },
@@ -234,9 +274,24 @@ pub(super) fn DeleteDialog(
         LifecycleAction::Stop => "Stop",
         LifecycleAction::Delete => "Delete",
     };
-    let label = format!("{verb} {count} {noun}?");
+    let includes_sandbox =
+        action == LifecycleAction::Delete && targets.iter().any(|target| target.sandbox);
+    let label = if includes_sandbox {
+        "Delete marked sessions and their sandboxes?".to_owned()
+    } else {
+        format!("{verb} {count} {noun}?")
+    };
+    let confirm_label = if includes_sandbox {
+        "Delete sessions and sandboxes".to_owned()
+    } else {
+        format!("{verb} {noun}")
+    };
     let cancel_label = format!("Cancel bulk {}", verb.to_lowercase());
-    let confirm_tooltip = format!("{verb} the sessions listed in this question");
+    let confirm_tooltip = if includes_sandbox {
+        "Delete every process, file and snapshot in each named sandbox".to_owned()
+    } else {
+        format!("{verb} the sessions listed in this question")
+    };
     let cancel = shown.clone();
     let escape = shown.clone();
     let close = shown.clone();
@@ -270,7 +325,7 @@ pub(super) fn DeleteDialog(
                     class: "host-settings-body bulk-delete-body", handle: DialogHandle::new(DIALOG),
                     selector: ".bulk-delete-body", name: "Sessions affected",
                     recovery: RecoveryFocus::new(".bulk-delete-cancel", None, true, RecoveryDelay::OneFrame),
-                    for target in &targets {
+                    for target in question_targets(action, &targets) {
                         div { class: "bulk-delete-row", "data-delete-target": target.id.raw(),
                             div { class: "bulk-delete-identity",
                                 if let Some(badge) = status_badge(&target.status, target.annotation.as_ref().map(PeerText::raw), None) {
@@ -288,10 +343,12 @@ pub(super) fn DeleteDialog(
                                 } else { "Host identity unavailable" }
                             }
                             p { class: "bulk-delete-consequence", {match action {
-                                LifecycleAction::Stop => crate::status::stop_consequence(&target.status, target.tabs),
+                                LifecycleAction::Stop => format!("{} {}", crate::status::stop_consequence(&target.status, target.tabs),
+                                    if target.sandbox { crate::sandbox_sessions::STOP_BILLING } else { "" }),
+                                LifecycleAction::Delete if target.sandbox => crate::sandbox_sessions::DELETE_CONSEQUENCE.into(),
                                 LifecycleAction::Delete => confirm_consequence(&target.status, target.tabs),
                             }} }
-                            if target.managed && action == LifecycleAction::Delete {
+                            if target.managed && !target.sandbox && action == LifecycleAction::Delete {
                                 p { class: "bulk-delete-consequence",
                                     "The managed checkout stays while another session uses it. When its last session is deleted, its folder moves to the trash; no files are deleted."
                                 }
@@ -307,7 +364,7 @@ pub(super) fn DeleteDialog(
                         button { r#type: "button", class: "btn btn-danger bulk-delete-confirm", disabled,
                             "data-tooltip": confirm_tooltip,
                             onkeydown: crate::guard_confirmation_enter,
-                            onclick: move |_| on_confirm.call(shown.clone()), "{verb} {noun}" }
+                            onclick: move |_| on_confirm.call(shown.clone()), "{confirm_label}" }
                     }
                 }
             }
@@ -325,6 +382,44 @@ mod tests {
     use futures_channel::oneshot;
 
     use super::*;
+
+    /// Whole-resource consent remains mandatory even for an ended session
+    /// with no tabs and the ordinary skip-confirmations preference enabled.
+    #[farhelm_testtrace::test]
+    fn sandbox_bulk_delete_always_asks_and_uses_unconditional_resource_consent() {
+        let session = super::super::row::row_specimen("sandbox");
+        let mut target = DeleteSnapshot::for_session(&session, Some(1));
+        target.sandbox = true;
+        assert!(LifecycleAction::Delete.needs_confirmation(&[target.clone()], true));
+        assert_eq!(target.guard(), crate::DeleteGuard::Unconditional);
+        let mut ordinary = target;
+        ordinary.sandbox = false;
+        assert!(!LifecycleAction::Delete.needs_confirmation(&[ordinary], true));
+    }
+
+    /// A failed Replace can leave multiple marked peers. Delete asks once for
+    /// their shared resource, whereas Stop must retain each peer's consequence.
+    #[farhelm_testtrace::test]
+    fn sandbox_delete_question_coalesces_resources_without_shrinking_stop_consent() {
+        let rows = [
+            session("first", 7),
+            session("leftover", 7),
+            session("ordinary", 8),
+        ];
+        let mut targets = snapshots(&rows);
+        targets[0].sandbox = true;
+        targets[1].sandbox = true;
+        let drawn = question_targets(LifecycleAction::Delete, &targets);
+        assert_eq!(drawn.len(), 2);
+        assert_eq!(drawn[0].id.raw(), rows[0].id.raw());
+        assert_eq!(drawn[1].id.raw(), rows[2].id.raw());
+        assert_eq!(question_targets(LifecycleAction::Stop, &targets).len(), 3);
+        assert_eq!(
+            targets.len(),
+            3,
+            "the answer must still carry every marked identity"
+        );
+    }
     use crate::list::row::row_specimen;
     use crate::list::view::{begin_row_operation, end_row_operation};
     use crate::ops::{ConfirmSlot, OpLock, PaneGate, use_confirm_slot, use_op_lock};
