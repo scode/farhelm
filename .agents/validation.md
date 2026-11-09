@@ -654,6 +654,14 @@ that its required systemd or SSH substrate ran.
   assets are served through request routing. Needs `npm install` and the browsers from the browser suite's setup below;
   a few minutes. Not in CI. Run it when the grid assets, `terminal.js`'s grid handling or the fixtures under
   `crates/farhelm-ui/js-tests/fixtures/grid/` change.
+- `node --experimental-strip-types --test e2e/grid-client/benchmark.test.mts` — the opt-in grid benchmark's frame and
+  Linux process-accounting helpers. Run it when the benchmark changes; it starts no browser. The measurement itself
+  (`e2e/grid-client/BENCHMARK.md`) uses the production Rust grid encoder and shipped grid component, one fresh Chromium
+  or WebKit content process per workload, to report GC-requested resident growth, lifetime highwater, attach bytes and
+  time at 12,000 history lines by 200 columns. It is outside ordinary component-test discovery and has no performance
+  thresholds. Run it for grid encoding or history-storage performance changes, through the generic recorder with
+  `--tmux none`; preserve matching generated frames and assets for each compared revision and report raw samples beside
+  medians. These static-page measurements establish no helm, SSH or live terminal-host coverage.
 - `cd e2e && FARHELM_E2E_SUITE_TERMINALS=tmux python3 ../scripts/record-test-run.py --runner playwright --kind development --tmux required --keep-farhelm-env FARHELM_E2E_SUITE_TERMINALS --selection 'old-terminal set, both engines' --concurrency '3 browser workers, one stack each; retries 0' -- npx playwright test`
   — the browser suite's old-terminal set: the tests whose subject exists only for old terminals (tmux, drawn by
   xterm.js), against stacks whose two supervisors start with `--new-terminals tmux`, with the pinned tmux first on

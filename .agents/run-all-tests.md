@@ -99,6 +99,10 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - `cd website && bun install --frozen-lockfile && bun run build`, and `cd website/feedback-tests && node --test`
 - `cd e2e && npx playwright test --config grid-client/playwright.config.ts` (the grid terminal's static-page specs,
   which boot no stack and which neither the sweep nor CI runs)
+- `node --experimental-strip-types --test e2e/grid-client/benchmark.test.mts` (the opt-in grid benchmark's framing and
+  process-accounting helpers). The separate measurement in `e2e/grid-client/BENCHMARK.md` is run on demand for encoding
+  or history-storage performance changes, with matching frames/assets, both engines and interleaved comparison samples;
+  it reports memory, bytes and time without performance thresholds and is not an ordinary sweep gate.
 - `node --test e2e/tests/helpers/program-input.test.ts` (the decoding the shortcut specs use to say what a program read
   from a terminal's input frames; seconds)
 - `dist generate --check`
