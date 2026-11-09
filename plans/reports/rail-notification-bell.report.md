@@ -111,3 +111,90 @@ it explicitly; the same reviewer verified the correction and found no remaining 
 ordinary pointer clicks on its actions passed in both engines. Fresh scope assessments approved the minimal
 existing-reader reuse and the earlier cleanup ordering correction; no required behavior was dropped. Separate
 documentation passes and commit/PR wording cold reads are complete.
+
+### Landing
+
+Landed together with mux-chunk-size (smaller chunks for bulk transfers through the helm, with a protocol version bump),
+stacked below it. Main had just gained cheaper cleanup for sessions in systemd scopes, and checkout folders set per host
+(the per-host-checkout-folder plan). A fresh-context review read them against each other:
+
+- This plan's new notice fields are optional, so a new helm talking to an older supervisor never resolves a notice or
+  offers Retry wrongly.
+- Its helm database upgrade and fresh-database paths match.
+- Trash cleanup removes folders and the scoped cleanup ends processes, so they do not overlap.
+- The per-host checkout folder change touches the same files in different functions.
+- The rail's footer grows from 168px to 208px. Nothing else depends on the old height, and neither Settings nor host
+  settings is affected.
+
+#### Fixes made at landing
+
+- per-host-checkout-folder had edited a doc comment in the UI's API code right where this plan adds its notice code. The
+  textual conflict was resolved by keeping both (#3251).
+- A test already on main turns a current helm database back into an old release's layout and compares the result with
+  that release's recorded layout. Its list of what to remove did not include this plan's new notices table, so two
+  checkout-configuration tests failed once both changes were combined; the table is now on the list (#3244).
+- The Session list docs page and the changelog entry said "Older hosts keep their previous behavior until updated".
+  mux-chunk-size raises the protocol version in the same round, so an older host no longer connects to this helm at all:
+  it shows as needing an update. The sentence is gone from both (#3251). The executor's report says the same thing ("An
+  older host keeps its prior behavior until updated") and is now wrong on that point.
+
+#### Things you should know
+
+- One judgment call, mine as the landing monitor, landed as is and is recorded in TODO.md's "Plan decisions to revisit".
+  Whenever any session's status changes, and on the client's periodic catch-up refresh, each open window now re-reads
+  every connected host's Trash. Each read uses one of the host's two slots for folder browsing, which the launcher's
+  folder picker also uses, so folder browsing can feel slower while the fleet is busy. Each read also takes a per-host
+  lock on the helm and a database transaction, even when nothing is stuck. The executor's report says no polling loop
+  was added, which is true of timers but not of this traffic. It is bounded, about one read in flight per host per
+  window, and does not feed on itself. A cheap mitigation is to skip the lock and the transaction when nothing is stuck
+  and the host has no unresolved notice.
+- If mux-chunk-size were ever reverted before a release, a helm on the previous protocol version could show a folder
+  whose deletion is already in progress as an ordinary archive you can restore, and restoring it would hand back a
+  partly deleted checkout. Re-check this plan in that case.
+
+#### Checks
+
+The two plans were checked together, stacked in queue order on main (rail-notification-bell's top commit, then
+mux-chunk-size's), on this development machine and, at the maintainer's request, on Tensorlake sandboxes. The landing
+resolved the UI API conflict before any check ran, so every run below includes it. The merged tree is the one checked
+last: rail-notification-bell's top at `94a5b4f7` and mux-chunk-size at `1ffbd128`. Main after the merges differs from it
+only by two changes that landed meanwhile and touch neither plan: a queue-picking rule for plan executors, and
+review-queue bookkeeping.
+
+On the stack before the fixture and docs fixes (rail-notification-bell's top at `68da3700`, mux-chunk-size at
+`e5fd6349`):
+
+- Here: `cargo fmt --all -- --check`, `dprint check`, `python3 releasing/check-changelog.py format`, the test-sleep
+  checker, `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`, the docs website build and the UI's JavaScript unit tests passed.
+- Tensorlake, browser: `rail-notices`, `trash-dialog`, `header`, `sidebar`, `tensorlake-tunnels`, `terminal-files`,
+  `terminal-links` and `agent-relay` on Chromium and WebKit over eight sandboxes: 372 passed, none failed, skipped or
+  retried. Runs `dee09cd5`, `6806c67b`, `0a0124fb`, `986657df`, `04198f20`, `8ef40cc8`, `b20d7f3e` and `d6fba799`, in
+  the recorder's plain command mode (its Playwright mode cannot pick one engine per file) under the sandbox's slightly
+  older Node 24. Every sandbox reported its per-user systemd manager and its SSH to itself working.
+- Tensorlake, Rust: every Rust test in the workspace except the desktop app's (the sandboxes cannot build or run the
+  desktop app, and neither plan changes desktop-only code beyond what the desktop compile check above covers), from one
+  archive over nine sandboxes. Runs `3dd29160`, `eaaa34eb`, `b32f6ffc`, `48183d95`, `4f412bce`, `96e65397`, `614967f5`,
+  `3e110a64` and `3ca3aec9`. There were five failures:
+  - two in the helm's checkout-configuration tests, fixed by rail-notification-bell's schema-fixture landing fix;
+  - `attribute_compile_contract_matrix`, which compiles small crates with a nested `cargo` that the sandboxes do not
+    have. Neither plan touches its crate; it passed here in an earlier round on a tree that differs from this one only
+    outside that crate (run `05991d87`);
+  - `create_idempotency::a_crash_before_the_outcome_commit_still_replays_the_same_session` (run `614967f5`, retained).
+    Delete refused because the sandbox's per-user systemd manager stopped answering its probes. This is the same failure
+    as in the previous round, in a test neither plan touches, and it is being recorded as a latent flake on its own;
+  - `service::core::tests::a_failed_create_replays_its_error_and_a_changed_override_conflicts` (run `eaaa34eb`,
+    retained), whose create reply did not arrive within 10 seconds on a loaded sandbox: one observation, in code neither
+    plan touches.
+
+After the fixture and docs fixes: formatting, `dprint check`, the changelog format check,
+`cargo clippy -p farhelm-helm --all-targets -- -D warnings`, the website build, and recorded
+`cargo nextest run -p farhelm-helm` here. 1659 passed; the two skipped are the real-Mac tests that only run by hand (run
+`ad5b842d`). That covers the fixed checkout-configuration tests and every helm test of the new notices. Nothing else was
+rerun: those fixes changed one helm test fixture and two sentences of documentation.
+
+Reused: nothing from the executors; the round's own runs above cover both plans on the combined tree.
+
+Skipped: the rest of the browser suite (the specs above cover the bell, Trash, the rail and the relay paths), the
+desktop smoke (no desktop-only code changed beyond what the desktop compile check covers) and hosted CI (manual-only,
+not dispatched).
