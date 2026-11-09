@@ -4520,3 +4520,28 @@ delete the retried session: killing process tree: the process-tree sweep confirm
 Class: substrate
 
 Cause: hypothesis — the reopened supervisor's user-manager probe ran out its 15-second bound under load.
+
+## 2026-11-09 — a failed-create replay test's create reply did not arrive in time (crates/farhelm-supervisor/src/service/core.rs)
+
+`service::core::tests::a_failed_create_replays_its_error_and_a_changed_override_conflicts` failed in two consecutive
+landing rounds' full Rust runs on Tensorlake sandboxes (4 CPUs, 8 GiB, Ubuntu 24.04 clones with systemd as PID 1), each
+a workspace nextest archive split by hash partition over nine sandboxes, four slots per sandbox, zero retries, through
+the recorder's generic mode: run `eaaa34eb-7392-427b-80cc-328b1c6c9406` on clean stacked commits `68da3700`/`e5fd6349`
+and run `d230a97e-df2f-4da1-aa99-192fe6910671` on clean stacked commit `980ac423`. The tmux was the repository's pinned
+3.7c build shipped to the sandbox; its executable SHA256 and the locale were not recorded (unavailable). Ambient
+`FARHELM_*` names were scrubbed by the recorder. Both times it failed alone in its shard, after about 10.05 s, on the
+test's own 10-second wait for the reply to its in-process create, against about 0.2 s per iteration locally. Neither
+landing changed the create path. Five consecutive local passes on this development machine on the later tree (run
+`9f342a7d-f413-47fd-9723-71351aae8b1d`, `--stress-count 5`); not reproduced on a sandbox. Load on the sandboxes was not
+measured; the same shards also run the e2e suite's real supervisors. Whether the create waits on something slow under
+load (a systemd user-manager probe, as in the crash-retry entry above, is a candidate) is not established. The retained
+failing runs live on this machine and expire with temporary-file cleanup; the failure is quoted below. Disposition:
+open, excluded from deflake sweeps.
+
+```text
+owned create reply must arrive: Elapsed(())
+```
+
+Class: unknown
+
+Cause: unknown
