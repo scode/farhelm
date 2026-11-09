@@ -964,6 +964,12 @@ pub(crate) fn ListView(
     // The helm's shared preference, already read by `PreferencesGate` —
     // this component never mounts before it has (see `SharedPreferences`).
     let mut preferences = use_context::<SharedPreferences>();
+    // The attention prompt unmounts while Hosts is open. Its failed preference
+    // save belongs to this surviving owner, unlike Settings' dialog-local alert.
+    let auto_update_error = use_signal(|| None::<api::PreferenceWrite>);
+    let auto_update_mounted = use_hook(|| Rc::new(Cell::new(true)));
+    let auto_update_unmount = auto_update_mounted.clone();
+    use_drop(move || auto_update_unmount.set(false));
     // Capture the preference with this render's action handlers, alongside
     // the row snapshots they act on. A skipped question still carries consent.
     let skip_session_confirmations = preferences.0.read().skip_session_confirmations == Some(true);
@@ -1041,6 +1047,23 @@ pub(crate) fn ListView(
             &provisioning_busy_hosts.peek(),
         );
         provisioning_action_requests.write().extend(requests);
+    });
+    let auto_update_base = base.clone();
+    let save_auto_update = use_callback(move |_| {
+        crate::settings::save_shared_preference(
+            &auto_update_base,
+            preferences,
+            api::PreferenceValue::AutoUpdateRemoteHosts(true),
+            auto_update_error,
+            auto_update_mounted.clone(),
+        );
+    });
+    let always_update_shown = use_callback(move |shown: Vec<crate::Host>| {
+        // Queue the same revalidated targets as Update all before opting in.
+        // The helm may start its automatic attempt first; ordinary host busy
+        // admission settles that existing race without a second update owner.
+        request_shown_updates.call(shown);
+        save_auto_update.call(());
     });
     // Per-session, not one shared slot: a stop failing on session A must
     // not blank out session B's still-fresh success (or vice versa), and
@@ -4144,11 +4167,29 @@ pub(crate) fn ListView(
     // Attention rows reserve height above the session scroller. Capture real
     // layout changes before DOM publication, but exclude progress counters and
     // elapsed time: those poll without moving the rows' fixed-size bars.
-    let attention_layout = if hosts_panel_open() {
-        Vec::new()
-    } else {
-        attention_list::layout_key(&attention_rows.read())
-    };
+    let auto_update_enabled = preferences.0.read().auto_update_remote_hosts == Some(true);
+    // The alert says later updates will still wait, which is false once the
+    // setting reads on: a save whose reply was lost can still have committed,
+    // and the corrective read then shows it on.
+    let auto_update_failed =
+        !auto_update_enabled && auto_update_error().is_some_and(|write| write.is_current());
+    let attention_visible = !hosts_panel_open() && !attention_rows.read().is_empty();
+    // A preference completion can add or remove header copy without changing
+    // any host row. Include those geometry changes in the existing lease fence.
+    let attention_layout = (
+        if attention_visible {
+            attention_list::layout_key(&attention_rows.read())
+        } else {
+            Vec::new()
+        },
+        attention_visible
+            && !auto_update_enabled
+            && attention_rows
+                .read()
+                .iter()
+                .any(|row| matches!(row.kind, attention_list::AttentionKind::Update { .. })),
+        attention_visible && auto_update_failed,
+    );
     use_rendered_movement_between(&attention_layout, |_, _| {
         // Capture before DOM edits and deliver only to those existing opening
         // leases. A menu opened after this render measures the new layout and
@@ -4796,6 +4837,10 @@ pub(crate) fn ListView(
             HostAttentionList {
                 rows: attention_rows(),
                 on_update: request_shown_updates,
+                auto_update_enabled,
+                auto_update_failed,
+                on_always_update: always_update_shown,
+                on_retry_auto_update: save_auto_update,
                 on_show_host: show_attention_host,
                 on_dismiss: {
                     let shown = host_updates();

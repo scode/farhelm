@@ -140,7 +140,7 @@ pub(crate) fn sync_preference_checks() {
     ));
 }
 
-/// Change only the surviving shared field whose save this Settings control owns.
+/// Change only the surviving shared field whose save this control owns.
 ///
 /// Rollback and corrective reads must not replace the whole preferences row:
 /// unrelated controls may have changed while this request was outstanding.
@@ -162,15 +162,18 @@ fn apply_settings_preference(preferences: &mut api::Preferences, value: Preferen
     }
 }
 
-/// Keep optimistic shared settings honest even after their dialog closes.
+/// Keep optimistic shared preferences honest after the initiating surface closes.
 ///
 /// The queue retains the last observed or acknowledged value, rather than the
 /// previous click: that click may itself be an unsaved choice. Restore that
 /// fallback immediately on failure, then refine it with one fresh field read
 /// because a lost reply can follow a committed save. Neither path retries a PUT.
-/// Only the alert belongs to Settings. The shared signal belongs to the longer
-/// lived authenticated tree; a destroyed tree is left alone through try_write.
-fn save_settings_preference(
+/// The caller owns the alert's lifetime: Settings drops it with the dialog,
+/// while the host-attention action keeps it in ListView across panel switches.
+/// The shared signal belongs to the longer lived authenticated tree; a destroyed
+/// tree is left alone through try_write. Every caller uses the same write token,
+/// so a later choice from another surface supersedes both rollback and alert.
+pub(crate) fn save_shared_preference(
     base: &str,
     mut preferences: SharedPreferences,
     value: PreferenceValue,
@@ -263,7 +266,7 @@ pub(crate) fn SettingsDialog(
     // The radio components share a field and one adjacent alert. Registering in
     // their parent also gives every radio the same surviving rollback lifetime.
     let link_change = use_callback(move |value: TerminalLinkClick| {
-        save_settings_preference(
+        save_shared_preference(
             &link_base,
             preferences,
             PreferenceValue::TerminalLinkClick(value),
@@ -456,7 +459,7 @@ pub(crate) fn SettingsDialog(
                                         "data-preference-checked": name_quick_launches.to_string(),
                                         aria_describedby: "quick-launch-naming-help",
                                         onchange: move |event| {
-                                            save_settings_preference(
+                                            save_shared_preference(
                                                 &naming_base,
                                                 preferences,
                                                 PreferenceValue::NameSessionOnQuickLaunch(event.checked()),
@@ -490,7 +493,7 @@ pub(crate) fn SettingsDialog(
                                         aria_describedby: "terminal-frame-color-help",
                                         onchange: move |event| {
                                             let color = event.checked();
-                                            save_settings_preference(&frame_base, preferences,
+                                            save_shared_preference(&frame_base, preferences,
                                                 PreferenceValue::ColorTerminalFrames(color), frame_error,
                                                 frame_mounted.clone());
                                         },
@@ -542,7 +545,7 @@ pub(crate) fn SettingsDialog(
                                         "data-preference-checked": auto_update_hosts.to_string(),
                                         aria_describedby: "remote-host-auto-update-help",
                                         onchange: move |event| {
-                                            save_settings_preference(&auto_update_base, preferences,
+                                            save_shared_preference(&auto_update_base, preferences,
                                                 PreferenceValue::AutoUpdateRemoteHosts(event.checked()), auto_update_error,
                                                 auto_update_mounted.clone());
                                         },

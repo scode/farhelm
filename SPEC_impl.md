@@ -889,42 +889,42 @@ PUT whose observer was superseded; capturing the previous click could preserve a
 bounded fallbacks are never pending overlays or replayed writes. The existing authenticated seed refreshes idle
 fallbacks, leaves pending ones intact, and initializes only missing defaults after a failed read. A failed corrective
 read retains the fallback and save error without claiming that the helm's current value is known. Rollback outlives
-Settings; its alert uses the dialog's mounted check, and a destroyed authenticated tree's signal is left alone. Trust
-reads capture the dismissal field's identity and pending bit before awaiting the GET. At completion a current pending
-dismissal wins and carries its identity; otherwise a read that began pending or crossed a new identity carries its start
-marker for immediate invalidation. Only an unchanged idle read is unmarked, so an old raw response cannot escape
-reconciliation just because its crossing save already settled. Every mounted Settings or band resource independently
-owns a cancellable one-shot invalidation waiter for that stamp, separate from the click's completion and any deletion
-barrier. New records, final settlement and writer loss release these waiters; late enrollment checks pending state and
-identity atomically. An invalidated resource clears and rereads only if it still carries that stamp, including after
-supersession. Local optimistic mutations stamp their new record before yielding, so an old invalidation cannot clear a
-newer choice. This uses one replaceable companion resource, not a trust cache, polling loop, mounted-resource registry
-or global HTTP ordering ticket. A copied overlay therefore cannot survive its failed save in a reopened dialog or
-another band. The click waiter owns only its local alert, which disappears on close; a corrective read failure leaves
-the resource unknown rather than treating trust as off. Restart alone would retain the previous successful provisional
-value while that GET is pending, so the matching value is cleared first. Controlled native checks also synchronize their
-property from the currently rendered choice: a refusal that beats the optimistic render can otherwise leave the
-browser's changed property behind an unchanged virtual-DOM value. A band's Don't show again waiter belongs to its
-mounted session and reports only the current dismissal's failure; navigation drops that alert without canceling the
-write. Normal hint copy and actions still require an explicitly disabled trust setting. An unreadable corrective GET can
-show the local save error alone, under the existing question, managed-checkout, agent-pane and occurrence-dismissal
-gates, without claiming trust is off. The dialog uses the host dialogs' framed header and footer, with a gear tile and a
-separately named × close control. Settings alone has a 780px height capped by the shared viewport margin. Its body grows
-to fill spare height and is the only scroller, containing a section-button sidebar and the selected panel. The order is
-Sessions, Appearance, Hosts, Tensorlake, Terminal, Checkouts, Agent trust, Notifications and, when the updater is
-active, App. Each section button pairs an existing decorative icon with its full sentence-case label; icons inherit the
-selected button's inverse color. The solid selection fill marks the open section. Terminal holds web-link choices and
-desktop tunnel consent and file types; checkouts holds the explicit-save folder and command; agent trust holds all four
-agents' blocks; notifications groups device sounds and helm-wide ntfy alerts. Inactive panels stay mounted with hidden,
-preserving field drafts, outcomes and pending saves. The sound asset's document-wide input query initializes even hidden
-inputs. No section choice is persisted. At 620px and below, a presentation-only signal reveals either the selected panel
-or the section list; the back button reads '‹ Settings'. Section selection focuses its heading, while back focuses the
-selected section button after the rendering frame. Neither adds a normal Tab stop or overrides platform button
-navigation. Both close controls stay visible. It uses the shared focus/isolation helper with its own selector; gear
-opening selects sessions and focuses its first switch. Existing trust props instead select agent trust before mount,
-focus the agent's switch and scroll its block into view. Escape or either close control releases isolation and returns
-focus to the gear. The host setup and removal permanent answers each name that gear as the way to turn confirmation back
-on.
+Settings; its alert uses the mounted check of the surface that started the save (the dialog, or the session list for the
+host prompt's Always update), and a destroyed authenticated tree's signal is left alone. Trust reads capture the
+dismissal field's identity and pending bit before awaiting the GET. At completion a current pending dismissal wins and
+carries its identity; otherwise a read that began pending or crossed a new identity carries its start marker for
+immediate invalidation. Only an unchanged idle read is unmarked, so an old raw response cannot escape reconciliation
+just because its crossing save already settled. Every mounted Settings or band resource independently owns a cancellable
+one-shot invalidation waiter for that stamp, separate from the click's completion and any deletion barrier. New records,
+final settlement and writer loss release these waiters; late enrollment checks pending state and identity atomically. An
+invalidated resource clears and rereads only if it still carries that stamp, including after supersession. Local
+optimistic mutations stamp their new record before yielding, so an old invalidation cannot clear a newer choice. This
+uses one replaceable companion resource, not a trust cache, polling loop, mounted-resource registry or global HTTP
+ordering ticket. A copied overlay therefore cannot survive its failed save in a reopened dialog or another band. The
+click waiter owns only its local alert, which disappears on close; a corrective read failure leaves the resource unknown
+rather than treating trust as off. Restart alone would retain the previous successful provisional value while that GET
+is pending, so the matching value is cleared first. Controlled native checks also synchronize their property from the
+currently rendered choice: a refusal that beats the optimistic render can otherwise leave the browser's changed property
+behind an unchanged virtual-DOM value. A band's Don't show again waiter belongs to its mounted session and reports only
+the current dismissal's failure; navigation drops that alert without canceling the write. Normal hint copy and actions
+still require an explicitly disabled trust setting. An unreadable corrective GET can show the local save error alone,
+under the existing question, managed-checkout, agent-pane and occurrence-dismissal gates, without claiming trust is off.
+The dialog uses the host dialogs' framed header and footer, with a gear tile and a separately named × close control.
+Settings alone has a 780px height capped by the shared viewport margin. Its body grows to fill spare height and is the
+only scroller, containing a section-button sidebar and the selected panel. The order is Sessions, Appearance, Hosts,
+Tensorlake, Terminal, Checkouts, Agent trust, Notifications and, when the updater is active, App. Each section button
+pairs an existing decorative icon with its full sentence-case label; icons inherit the selected button's inverse color.
+The solid selection fill marks the open section. Terminal holds web-link choices and desktop tunnel consent and file
+types; checkouts holds the explicit-save folder and command; agent trust holds all four agents' blocks; notifications
+groups device sounds and helm-wide ntfy alerts. Inactive panels stay mounted with hidden, preserving field drafts,
+outcomes and pending saves. The sound asset's document-wide input query initializes even hidden inputs. No section
+choice is persisted. At 620px and below, a presentation-only signal reveals either the selected panel or the section
+list; the back button reads '‹ Settings'. Section selection focuses its heading, while back focuses the selected section
+button after the rendering frame. Neither adds a normal Tab stop or overrides platform button navigation. Both close
+controls stay visible. It uses the shared focus/isolation helper with its own selector; gear opening selects sessions
+and focuses its first switch. Existing trust props instead select agent trust before mount, focus the agent's switch and
+scroll its block into view. Escape or either close control releases isolation and returns focus to the gear. The host
+setup and removal permanent answers each name that gear as the way to turn confirmation back on.
 
 The default and per-host checkout folders use a shared scoped explicit-save field rather than the preference queue:
 invalid path text must have a visible refusal, and a draft is not configuration. `GET`/`PUT /api/checkout-root` is an
@@ -7888,7 +7888,11 @@ The attention list's Update rows use the rail's narrower available-update classi
 all list: an offered remote Update, no live provisioning work, and either a compatible older build or a lower peer
 protocol. The Hosts toggle still summarizes that update count and highest urgency. Each Update action sends the existing
 binding-captured request for its displayed host; the attention header's Update all uses exactly its displayed Update
-rows and appears only for more than one. No fleet endpoint or second provisioning owner is added.
+rows and appears only for more than one. No fleet endpoint or second provisioning owner is added. The header's Always
+update requests those same displayed rows, then saves automatic remote-host updating through the same shared preference
+queue and field identity as the Settings switch, so a later choice on either surface supersedes it. Its alert belongs to
+the session list rather than to the attention list, which unmounts while Hosts is open, and shows only while the
+preference still reads off.
 
 The pure `hosts::attention_list` classifier reads the retained host snapshot, that update classification, per-host
 `HostUpdateProgress`, `HostAttention::unseen()`, Tensorlake tunnel health, and the existing optional-update dismissal.

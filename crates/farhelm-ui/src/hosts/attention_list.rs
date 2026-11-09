@@ -191,13 +191,19 @@ pub(crate) fn layout_key(rows: &[AttentionRow]) -> Vec<(HostId, AttentionKind, S
 
 /// Render only the snapshots the classifier admitted, with separate open/action controls.
 /// The independently scrolling body leaves Update all and optional dismissal
-/// reachable. Event propagation cannot turn an Update click into a Details click.
+/// reachable. Its caller retains preference-save failures while this component
+/// is hidden, and Retry saves only that preference rather than repeating updates.
+/// Event propagation cannot turn an Update click into a Details click.
 #[component]
 pub(crate) fn HostAttentionList(
     rows: Vec<AttentionRow>,
     on_update: EventHandler<Vec<Host>>,
     on_show_host: EventHandler<HostId>,
     on_dismiss: EventHandler<()>,
+    auto_update_enabled: bool,
+    auto_update_failed: bool,
+    on_always_update: EventHandler<Vec<Host>>,
+    on_retry_auto_update: EventHandler<()>,
 ) -> Element {
     if rows.is_empty() {
         return rsx! {};
@@ -210,6 +216,7 @@ pub(crate) fn HostAttentionList(
     let optional = rows
         .iter()
         .any(|row| row.kind == (AttentionKind::Update { required: false }));
+    let always_updates = updates.clone();
     let count = rows.len();
     let heading = if count == 1 {
         "1 host needs attention".into()
@@ -226,11 +233,26 @@ pub(crate) fn HostAttentionList(
                         onclick: move |_| on_update.call(updates.clone()), "Update all"
                     }
                 }
+                if !auto_update_enabled && !always_updates.is_empty() {
+                    button { r#type: "button", class: "btn btn-neutral host-attention-always-update",
+                        "data-tooltip": "Update the listed hosts now and turn on Update remote hosts automatically: later updates install without asking. Change this in Settings → Hosts.",
+                        onclick: move |_| on_always_update.call(always_updates.clone()), "Always update"
+                    }
+                }
                 if optional {
                     button { r#type: "button", class: "btn btn-neutral host-attention-dismiss",
                         aria_label: "Dismiss optional host updates",
                         "data-tooltip": "Dismiss optional updates until another host has an update or the helm build changes",
                         onclick: move |_| on_dismiss.call(()), "✕"
+                    }
+                }
+            }
+            if auto_update_failed {
+                p { class: "host-attention-save-error error", role: "alert",
+                    "Could not turn on automatic updates. Later updates will still wait for you. "
+                    button { r#type: "button", class: "btn btn-neutral",
+                        "data-tooltip": "Try saving automatic updates again without requesting these host updates again",
+                        onclick: move |_| on_retry_auto_update.call(()), "Try again"
                     }
                 }
             }

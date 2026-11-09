@@ -55,14 +55,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (the command, the first prompt, a session ID, a long path), never the controls or the dialog as a whole. Seen on a
   session-start request on 2026-11-08. Plan: `plans/queue/approval-cards-fit.md`.
 
-- **One-click "update and always auto-update" in the sidebar's host update prompt.** The prompt at the top of the
-  sidebar offers Update, and Update all when several hosts qualify, while making future updates automatic lives only in
-  Settings, as the "Update remote hosts automatically" checkbox. Add an action beside them that updates the listed
-  update hosts now and turns that preference on, so the user does not have to find the setting afterwards. The label
-  must be short, with the full meaning in its tooltip; the preference save needs the checkbox's failure handling so a
-  write that fails is visible rather than leaving the user believing the hosts will keep themselves updated. Plan:
-  `plans/queue/update-and-auto-update.md`.
-
 - **Bootstrap a Podman image on a remote host.** Automatically bootstrap a Podman image on a remote host, with some
   reasonable defaults, as a supported flow. Plan: `plans/queue/podman-environments.md`.
 
