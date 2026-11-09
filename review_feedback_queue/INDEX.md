@@ -121,6 +121,18 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`mac-update-gnu-stat-path.md`](mac-update-gnu-stat-path.md) — A remote Mac with GNU stat first on its SSH PATH can
   pass inspection but repeatedly fail Update or recovery on existing files until command selection is repaired.
 
+- [`scoped-cleanup-misses-late-tmux.md`](scoped-cleanup-misses-late-tmux.md) — Stop, Restart, Delete or closing a
+  terminal tab can report completed cleanup while a job the session started inside tmux keeps running. The job can
+  survive if its tmux server starts after cleanup's inspection but before termination.
+
+- [`scoped-cleanup-forgets-ended-tmux.md`](scoped-cleanup-forgets-ended-tmux.md) — After a session-started tmux server
+  ends, its background jobs can survive a later successful Stop, Restart or Delete. Cleanup looks for a currently
+  running server and forgets the jobs it previously moved outside the session's group.
+
+- [`delete-lost-tab-markers-skip-sweep.md`](delete-lost-tab-markers-skip-sweep.md) — If an old terminal server
+  disappears during Delete's tab discovery, Delete can succeed and remove the session while background jobs from an old
+  unscoped tab keep running.
+
 ## Other: correctness, diagnostics, cleanup, or convenience
 
 - [`removed-host-strands-tunnel-listeners.md`](removed-host-strands-tunnel-listeners.md) — Removing a host leaves its
@@ -1463,7 +1475,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   screen and history use the conversion.
 
 - [`initial-oversized-grid-cannot-attach.md`](initial-oversized-grid-cannot-attach.md) — A terminal fitted to over1000
-  cells can fail to open repeatedly because its initial dimensions exceed the grid stream's bound.
+  cells can fail to open repeatedly because its initial dimensions exceed the grid stream's bound. The inherited-size
+  handoff no longer sends a corrective clamp at unchanged geometry; a distinct incremental failure remains unproved.
 
 - [`program-selected-cursor-color-never-reaches-viewer.md`](program-selected-cursor-color-never-reaches-viewer.md) — A
   program that changes its text cursor color continues to show the theme's fixed cursor color, even though Farhelm's
@@ -2259,3 +2272,23 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`devbuild-rustup-active-name.md`](devbuild-rustup-active-name.md) — Mac devbuild misparses Rustup 1.28.0's multiline
   active-toolchain output and aborts preflight even with the compiler installed; current one-line output is unaffected.
+
+- [`switch-geometry-discards-visible-frames.md`](switch-geometry-discards-visible-frames.md) — The session-switch
+  regression discards visible frames when their expected edge text or rule is absent. Its final comparison can therefore
+  miss that category of temporary visible failure. No current product rendering failure was demonstrated.
+
+- [`switch-geometry-capped-readiness.md`](switch-geometry-capped-readiness.md) — The session-switch test can keep
+  waiting on frozen historical geometry after a trace fills, even if the terminal later paints correctly. This is a
+  conditional source-level test defect; no actual failing run was observed.
+
+- [`tmux-image-role-recognition-unresolved.md`](tmux-image-role-recognition-unresolved.md) — Cleanup might miss a
+  session-started tmux server under a nonstandard executable name. A supported installation producing the required name
+  and truncated role has not been established, so this is an investigated uncertainty.
+
+- [`stopped-host-update-floor-unresolved.md`](stopped-host-update-floor-unresolved.md) — A stopped host running Farhelm
+  below the minimum update version can still be updated without checking its installed version. Whether the
+  minimum-version rule is intended to cover stopped supervisors remains unresolved.
+
+- [`switch-geometry-row-readiness-unresolved.md`](switch-geometry-row-readiness-unresolved.md) — The session-switch test
+  might accept an old-height screen as ready and later compare a correct screen with that stale baseline. The fixture's
+  required row change and timing have not been established; this is an investigated uncertainty.
