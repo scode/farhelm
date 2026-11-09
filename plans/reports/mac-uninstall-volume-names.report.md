@@ -51,3 +51,51 @@ The required fresh gpt-6.1-sol/high reviewer found no correctness, design, idiom
 The same reviewer also checked the final fragment-only correction and found no issues. The commit/PR wording passed its
 separate cold read. Every touched file received a documentation pass; no scope expansion or omitted required behavior
 remains.
+
+### Landing
+
+Landed alone in its round. Between the executor basing its PR and the checks below, nothing but planning bookkeeping
+reached main, so nothing could interact with it. One change landed while this PR was merging: a fix to the macOS
+acceptance test of the desktop app's own uninstall (#3268, which now expects an update from a very old app layout to be
+refused). That test drives a local installation, not a remote Mac host, and does not use the mount check this plan
+changes.
+
+A fresh-context review read the change against main and found nothing that had to change before merging. Uninstall
+planning and the final removal still use the new Mac mount check only on a Mac. The Linux check, which Tensorlake
+sandbox cleanup also uses, is unchanged and still refuses when it cannot read the mount table. The reviewer also ran the
+new check under dash and under bash in POSIX mode, the shell a Mac runs scripts with, against a Mac-style mount table.
+It found the clearly named nested mounts and skipped the ambiguous lines.
+
+#### Fixes made at landing
+
+- Two code comments on uninstall's inspection still said an unreadable mount table always fails it. That is now true
+  only on Linux; the comments now say the Mac check is best effort and link to it.
+- The hosts documentation page (Using, "Manage hosts") said uninstall refuses whenever something is mounted on or inside
+  the installation directory. It now adds that on a Mac this check is best effort, and that a mount whose name contains
+  " (" or " on " can go unnoticed. That is the same caveat the changelog entry gives. The page does not mention the
+  rarer case of a Mac whose mount list cannot be read at all, which uninstall now also treats as having no mounts.
+
+#### Checks
+
+Run here on the plan rebased onto main as it stood before #3268 merged, with the landing fixes. That is the tree that
+merged apart from #3268's test-script change.
+
+- `cargo fmt --all -- --check`, `dprint check`, `python3 releasing/check-changelog.py format`, the test-sleep checker
+  and `cargo clippy -p farhelm-helm --all-targets -- -D warnings` passed.
+- Recorded `cargo nextest run -p farhelm-helm --lib -E 'test(/provisioning::/)'`, every helm provisioning test (the
+  mount checks, uninstall inspection, planning, refusals and final removal among them): all 344 passed, run
+  `fe034ef7-ec6b-473d-953a-82078ad2a8b3`. Three of those passes skipped their real work because no `farhelm` binary had
+  been built in this checkout yet. After `cargo build -p farhelm`, those three ran again in full and passed: uninstall
+  stopping a live terminal host (run `87c66105-4799-4e5b-9619-9148ba2c32a3`), and installing then updating Farhelm both
+  without SSH and over SSH to this machine (run `b06f8524-8728-449c-b926-ee2d86545005`).
+- An extra check outside the project's inventory and CI: `cargo doc -p farhelm-helm --no-deps --document-private-items`,
+  with warnings denied, to see that the comment fix's two new links resolve. They do. The command still fails, on about
+  170 broken or private documentation links that are already on main, none of them in a file this plan or the landing
+  touched.
+
+Reused: nothing from the executor's runs.
+
+Skipped: browser and desktop tests (no page or desktop code changed), a run on a real Mac (the plan settled on
+shell-fixture tests instead), the rest of the workspace's Rust tests (the change is one shell function inside the helm,
+covered by the tests above), the docs website build (one sentence of prose with no links or components), and hosted CI
+(manual-only, not dispatched).
