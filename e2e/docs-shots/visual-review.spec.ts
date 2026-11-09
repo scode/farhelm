@@ -3422,11 +3422,14 @@ ordinaryApprovalTest("sentence-case ordinary approval in both themes and widths"
         await expect(card).toBeVisible();
         await expect(card.locator(".approval-card-badge")).toHaveText("Agent request");
         await expect(card.locator(".approval-card-heading")).toHaveText("Start a new session running the asking session's own launch");
-        await expect(card.locator(".approval-card-requester")).toContainText(source.title);
-        await expect(card.locator(".approval-card-requester")).toContainText(id);
-        await expect(card.locator(".approval-card-requester")).toContainText(cards[0].host_name);
+        await expect(card.locator('.approval-card-from [aria-label="From session"]')).toHaveText(source.title);
+        // The compact requester omits the repeated entry prefix visually;
+        // its hover and accessible spelling still identify the real source.
+        await expect(card.locator('.approval-card-from [aria-label^="From session ID:"]')).toHaveAttribute("data-tooltip", id);
+        await expect(card.locator('.approval-card-from [aria-label^="From session ID:"]')).toHaveAttribute("aria-label", `From session ID: ${id}`);
+        await expect(card.locator('.approval-card-from [aria-label="From host"]')).toHaveText(cards[0].host_name);
         await expect(card.locator(".approval-card-command")).toContainText("claude {farhelm_args}");
-        await expect(card.locator(".approval-card-rows")).toContainText("/tmp");
+        await expect(card.locator(".approval-card-facts")).toContainText("/tmp");
         await expect(card.locator(".approval-allow")).toHaveText("Allow");
         await expect(card.locator(".approval-always-allow")).toContainText("Always allow from");
         await expect(card.locator(".approval-deny")).toHaveText("Deny");

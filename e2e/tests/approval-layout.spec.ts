@@ -22,7 +22,7 @@ installTerminalSuiteHooks();
 /** Permit action-specific fields while keeping listing identity explicit in the fixture. */
 type Approval = { id: string; host_name: string; [field: string]: unknown };
 
-/** A complete launch card whose requester title can exercise real word wrapping. */
+/** A complete launch card with a requester title that can exercise truncation. */
 function launchRequest(id: string, host = "devbox", title = "fix-flaky-ci"): Approval {
   return {
     id,
@@ -396,6 +396,436 @@ test("only the winning host add window probes its captured edited fields", async
   } finally { gate.release(); await other.close(); }
 });
 
+/** Exercise the product's decision shapes with text large enough to expose accidental wrapping.
+ * The wire fixtures deliberately include optional facts that a compact example
+ * would omit. Rust row tests audit content; these cases audit the browser's
+ * containment and scrolling contract for each shape of decision.
+ */
+function layoutRequests(): Approval[] {
+  const host = `remote-${"build".repeat(8)}`;
+  const title = `Investigate ${"long session title ".repeat(8)}`;
+  const targetBare = `target-${"x".repeat(32)}`;
+  expect(new TextEncoder().encode(targetBare).length, "premise: target ID fits the helm's 40-byte admission bound").toBe(39);
+  const target = { id: `12345678-1234-1234-1234-123456789abc:${targetBare}`, title, host_name: host };
+  const command = `agent ${"--review-long-command-argument ".repeat(60)}`;
+  const prompt = `${"A complete line of the requested message.\n".repeat(40)}PROMPT-END`;
+  const folder = `/workspace/${"long-directory/".repeat(22)}`;
+  const repo = `example-org/${"long-repository-name-".repeat(14)}`;
+  const launch = {
+    kind: "agent",
+    selection: {
+      harness: "claude", model: "opus", effort: "high", permissions: "custom",
+      permission_flags: ["--allowedTools", "Read", `--security-tail=${"flag".repeat(65)}`],
+      workspace_trust: true,
+    },
+    start: ["claude", "{farhelm_args}", command],
+    resume: ["claude", "{farhelm_args}", "--resume", "{conversation}", command],
+  };
+  const fields = {
+    kind: "command", agent: "claude", model: "opus", effort: "high", permissions: "custom",
+    permission_flags: ["--allowedTools", `--security-tail=${"flag".repeat(65)}`],
+    command, resume_command: command, yolo: true, prompt,
+    wrapper_prefix: ["env", `WRAPPER=${"wrapper".repeat(90)}`],
+    container: { engine: "podman", image: "example.invalid/agent:latest", api_proxy_port: 43210, github_token_file: folder },
+    host: "12345678-1234-1234-1234-123456789abc", destination: { github: repo }, name: title, name_kind: "fixed",
+  };
+  const actions: Array<Record<string, unknown>> = [];
+  for (const kind of ["launch", "launch_with_prompt", "launch_with_agent_wrapper"]) {
+    for (const verb of ["spawn", "spawn_inherited", "create", "clone"]) {
+      actions.push({
+        kind, verb, host_name: host, cwd: folder, repo, title,
+        source: verb === "clone" ? target : null,
+        launch: kind === "launch_with_agent_wrapper"
+          ? { ...launch, selection: { ...launch.selection, wrapper_prefix: fields.wrapper_prefix },
+            start: [...fields.wrapper_prefix, ...launch.start], resume: [...fields.wrapper_prefix, ...launch.resume] }
+          : launch,
+        ...(kind !== "launch" ? { prompt } : {}),
+      });
+    }
+  }
+  actions.push(
+    { kind: "rename", target, title },
+    { kind: "stop", target },
+    { kind: "delete", target, guard: "unconditional" },
+    { kind: "restart", target, stop_if_running: true, launch },
+    { kind: "prompt", target, launch, screen_yolo: true, attached: true, prompt },
+    { kind: "launch", verb: "create", host_name: host, cwd: folder, repo: null, title, source: null,
+      launch: { kind: "command", command, resume: command, agent: "claude", yolo: false } },
+    { kind: "template_write", name: title, replaces_existing: false, fields, host_name: host },
+    { kind: "template_write_with_shortcuts", name: title, replaces_existing: true, fields, host_name: host,
+      shortcuts: { quick_launch: { change: "set", moved_from: title }, key: { change: "set", key: "2", replaced_key: "1", moved_from: title } } },
+    { kind: "template_delete", name: title, fields: { ...fields, destination: { folder } }, host_name: host },
+    { kind: "host_add", destination: `operator@${"destination".repeat(30)}.invalid`, alias: title },
+    { kind: "host_edit", host_name: host, destination: `operator@${"destination".repeat(30)}.invalid`,
+      alias: { old: title, new: `${title} revised` }, icon: { old: "cloud", new: "rocket" }, color: { old: "default", new: "teal" } },
+    { kind: "host_remove", host_name: host, destination: `operator@${"destination".repeat(30)}.invalid` },
+  );
+  for (const preapproved of [false, true]) {
+    for (const local_network of [false, true]) {
+      actions.push({ kind: "open_url", preapproved, local_network, tunnel_available: false,
+        url: `https://example.test/${"long-path/".repeat(35)}?security-tail=END` });
+    }
+  }
+  // A web renderer must retain the link even when the helm offers a native
+  // tunnel. The desktop-only action itself has no browser rendering path.
+  actions.push({ kind: "open_url", preapproved: false, local_network: true, tunnel_available: true,
+    url: `http://127.0.0.1:8765/${"long-path/".repeat(35)}?security-tail=END` });
+  return actions.map((action, index) => ({
+    ...launchRequest(`audit-${index}`, host, title),
+    own_host_session_action: ["launch", "launch_with_prompt", "rename", "stop", "delete", "restart", "prompt"].includes(String(action.kind)),
+    action,
+  }));
+}
+
+/** Set the real pane's width without assuming the sidebar's current size.
+ * At its 320px minimum the shell may scroll; reveal the pane's own left edge
+ * before taking viewport-dependent measurements. The pane can settle before
+ * the approval ResizeObserver runs, so the card's centered width and position
+ * are a separate readiness oracle before callers record an anchor.
+ */
+async function setPaneWidth(page: Page, width: number) {
+  await page.setViewportSize({ width: 1600, height: 1200 });
+  const main = (await placement(page)).main;
+  await page.setViewportSize({ width: Math.round(main.x + width), height: 1200 });
+  await page.locator(".app-shell").evaluate((node) => {
+    node.scrollLeft = (node.querySelector(".app-main") as HTMLElement).offsetLeft;
+  });
+  await expect.poll(async () => (await placement(page)).main.width, { message: "premise: measured main-pane width" })
+    .toBeCloseTo(width, 0);
+  await expect.poll(async () => {
+    const { main, card } = await placement(page);
+    const wantedWidth = Math.min(660, main.width - 24);
+    return Math.abs(card.width - wantedWidth) < 0.5
+      && Math.abs(card.x - (main.x + (main.width - wantedWidth) / 2)) < 0.5;
+  }, { message: "premise: the approval observer applied this pane's current width and center" }).toBe(true);
+}
+
+/** Sample containment, not just CSS declarations that could describe a broken layout.
+ * Horizontal overflow is permitted only in the declared single-line fact
+ * values and text boxes. Clipped requester text is checked separately.
+ */
+async function cardGeometry(page: Page) {
+  return page.locator(".approval-cards").evaluate((region) => {
+    const bounds = region.getBoundingClientRect();
+    const card = region.querySelector(".approval-card")!;
+    const header = card.querySelector(".approval-card-header")!.getBoundingClientRect();
+    const from = card.querySelector(".approval-card-from")!.getBoundingClientRect();
+    const actions = card.querySelector(".approval-card-actions")!.getBoundingClientRect();
+    const inside = (rect: DOMRect) => rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1
+      && rect.top >= bounds.top - 1 && rect.bottom <= bounds.bottom + 1;
+    const horizontalLeaks = Array.from(card.querySelectorAll<HTMLElement>(".approval-card-body, .approval-card-facts, .approval-card-row, .approval-card-command, .approval-card-block-row, .approval-card-actions"))
+      .filter(node => node.scrollWidth > node.clientWidth + 1).map(node => node.className);
+    return {
+      regionOverflowX: region.scrollWidth - region.clientWidth,
+      regionScrollTop: region.scrollTop,
+      headerInside: inside(header), fromInside: inside(from), actionsInside: inside(actions),
+      buttonsInside: Array.from(card.querySelectorAll(".approval-card-actions button"), button => inside(button.getBoundingClientRect())),
+      horizontalLeaks,
+      bodyOverflowX: (card.querySelector(".approval-card-body") as HTMLElement).scrollWidth
+        - (card.querySelector(".approval-card-body") as HTMLElement).clientWidth,
+    };
+  });
+}
+
+for (const paneWidth of [960, 650, 320]) {
+  /** All action shapes share one shell. Stepping the listing also catches
+   * geometry left behind by the previously selected kind, unlike isolated
+   * snapshots that mount each kind into a fresh region.
+   */
+  test(`every approval kind keeps its header and answers visible in a ${paneWidth}px pane`, async ({ page }) => {
+    const fixtures = layoutRequests();
+    expect([...new Set(fixtures.map(card => (card.action as { kind: string }).kind))].sort(), "premise: the audit includes every wire kind")
+      .toEqual(["delete", "host_add", "host_edit", "host_remove", "launch", "launch_with_agent_wrapper", "launch_with_prompt", "open_url", "prompt", "rename", "restart", "stop", "template_delete", "template_write", "template_write_with_shortcuts"]);
+    const staged = await stageApprovals(page, [launchRequest("audit-start")]);
+    await openSelected(page);
+    await setPaneWidth(page, paneWidth);
+    await page.evaluate(() => document.fonts.ready);
+    const anchor = (await placement(page)).card;
+    await setWindowFocused(page, false);
+    try {
+      for (const fixture of fixtures) {
+        await test.step(`${fixture.id}: ${(fixture.action as { kind: string }).kind}`, async () => {
+          await staged.replace([fixture]);
+          const card = page.locator(".approval-card");
+          await expect(card).toHaveAttribute("data-approval-id", fixture.id);
+          await expect(card).toHaveAttribute("data-approval-kind", (fixture.action as { kind: string }).kind);
+          await expect(card.locator(".approval-card-actions .approval-allow")).toHaveCount(1);
+          await expect(card.locator(".approval-card-actions .approval-deny")).toHaveCount(1);
+          await expect.poll(() => cardGeometry(page), { message: `${fixture.id}: header, From and every answer stay inside the unscrolled region` }).toMatchObject({
+            regionOverflowX: 0, regionScrollTop: 0, headerInside: true, fromInside: true,
+            actionsInside: true, horizontalLeaks: [], bodyOverflowX: 0,
+          });
+          const geometry = await cardGeometry(page);
+          const current = (await placement(page)).card;
+          expect(current.x, "kind changes preserve the horizontal anchor").toBeCloseTo(anchor.x, 0);
+          expect(current.y, "kind changes preserve the terminal anchor").toBeCloseTo(anchor.y, 0);
+          expect(current.width, "all kinds use the same card width").toBeCloseTo(anchor.width, 0);
+          expect(geometry.buttonsInside.length).toBeGreaterThanOrEqual(2);
+          expect(geometry.buttonsInside.every(Boolean), "every answer is fully visible before any scrolling").toBe(true);
+          for (const block of await card.locator(".approval-card-block").all()) {
+            await expect(block).toHaveAttribute("tabindex", "0");
+            await expect(block).toHaveAttribute("aria-label", /.+/);
+            expect(await block.evaluate(node => getComputedStyle(node).overflowY), "long text owns its scroll").toBe("auto");
+          }
+          const singleLines = await card.locator(".approval-fact-scroll").evaluateAll(nodes => nodes.map(node => ({
+            label: node.closest(".approval-card-row")!.querySelector("dt")!.textContent,
+            overflowing: node.scrollWidth > node.clientWidth,
+            wrap: getComputedStyle(node).whiteSpace,
+            overflow: getComputedStyle(node).overflowX,
+            tabStop: node.hasAttribute("tabindex"),
+            mono: getComputedStyle(node.querySelector(".peer-value")!).fontFamily.toLowerCase().includes("mono"),
+          })));
+          for (const value of singleLines) {
+            expect(value).toMatchObject({ wrap: "nowrap", overflow: "auto", tabStop: false, mono: true });
+            expect(["Folder", "Managed checkout of", "SSH destination", "Destination", "Container GitHub token file",
+              "Session ID", "Copied session ID", "Site", "Host install"], "sideways scrolling is reserved for technical identities and destinations")
+              .toContain(value.label);
+          }
+          if ((fixture.action as { kind: string }).kind !== "open_url") {
+            expect(singleLines.some(value => value.overflowing), "premise: a long path, repository, destination or target ID needs its own sideways scroll").toBe(true);
+          }
+          const flags = approvalValue(page, "permission flags");
+          if (await flags.count()) {
+            await expect(flags).toContainText(`--security-tail=${"flag".repeat(65)}`);
+            expect(await flags.evaluate(node => node.scrollWidth - node.clientWidth), "permission flag tails wrap in full").toBe(0);
+          }
+          if ((fixture.action as { kind: string }).kind === "open_url") {
+            const url = approvalValue(page, "URL");
+            await expect(url).toContainText("security-tail=END");
+            expect(await url.evaluate(node => node.scrollWidth - node.clientWidth), "URL tails wrap inside the fact").toBe(0);
+          }
+        });
+      }
+      expect(staged.answers, "layout inspection cannot approve a request").toEqual([]);
+    } finally { await setWindowFocused(page, true); }
+  });
+}
+
+/** Read the CSS's actual text budgets so this test follows deliberate tuning.
+ * Rectangle heights include borders and padding, while the min-height budget
+ * must use the box's own box-sizing convention to mean the same thing.
+ */
+async function textBudgets(page: Page) {
+  return page.locator(".approval-card-block").evaluateAll(nodes => nodes.map(node => {
+    const style = getComputedStyle(node);
+    const extra = style.boxSizing === "border-box" ? 0
+      : parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+    return {
+      height: node.getBoundingClientRect().height,
+      minimum: parseFloat(style.minHeight) + extra,
+      maximum: parseFloat(style.maxHeight) + extra,
+      overflowing: node.scrollHeight > node.clientHeight,
+    };
+  }));
+}
+
+/** Text consumes its shrink allowance before the shared facts start scrolling.
+ * The first resize removes only half that allowance, so an implementation
+ * that immediately scrolls an unshrunk body cannot satisfy the oracle. The
+ * second resize exhausts it and must keep the answers pinned nevertheless.
+ */
+test("long boxes shrink to their computed minima before the body scrolls", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 2400 });
+  const fixture = layoutRequests().find(card => (card.action as { kind: string; verb?: string }).kind === "launch_with_agent_wrapper"
+    && (card.action as { verb?: string }).verb === "create")!;
+  await stageApprovals(page, [fixture]);
+  await openSelected(page);
+  await page.evaluate(() => document.fonts.ready);
+  const body = page.locator(".approval-card-body");
+  const initial = await textBudgets(page);
+  expect(initial.length, "premise: wrapper, command, resume and first prompt all compete for space").toBe(4);
+  for (const box of initial) {
+    expect(Number.isFinite(box.minimum) && box.minimum > 0, "premise: computed two-line minimum exists").toBe(true);
+    expect(box.maximum).toBeGreaterThan(box.minimum);
+    expect(box.overflowing, "premise: long text overflows even at its cap").toBe(true);
+    expect(box.height).toBeCloseTo(box.maximum, 0);
+  }
+  expect(await body.evaluate(node => node.scrollHeight - node.clientHeight), "premise: the tall pane fits facts plus capped boxes").toBeLessThanOrEqual(1);
+  const before = await placement(page);
+  const cap = await page.locator(".approval-cards").evaluate(node => parseFloat(getComputedStyle(node).maxHeight));
+  const allowance = initial.reduce((sum, box) => sum + box.height - box.minimum, 0);
+  const desiredCap = before.card.height - allowance / 2;
+  const paneRatio = cap / before.main.height;
+  await page.setViewportSize({ width: 1280, height: Math.round(desiredCap / paneRatio + before.main.y) });
+  await expect.poll(async () => (await textBudgets(page)).reduce((sum, box) => sum + box.height, 0),
+    { message: "text boxes yield actual height when the cap becomes smaller" })
+    .toBeLessThan(initial.reduce((sum, box) => sum + box.height, 0) - allowance / 4);
+  expect(await body.evaluate(node => node.scrollHeight - node.clientHeight), "shrinking boxes preserve a non-scrolling fact list").toBeLessThanOrEqual(1);
+  expect((await textBudgets(page)).every(box => box.height >= box.minimum - 1), "no text box crosses its computed minimum").toBe(true);
+  await expect.poll(() => cardGeometry(page)).toMatchObject({ headerInside: true, actionsInside: true, regionScrollTop: 0 });
+
+  await page.setViewportSize({ width: 1280, height: 500 });
+  await expect.poll(() => body.evaluate(node => node.scrollHeight - node.clientHeight), {
+    message: "only after text reaches its minimum does the body need to scroll",
+  }).toBeGreaterThan(1);
+  for (const box of await textBudgets(page)) expect(box.height).toBeCloseTo(box.minimum, 0);
+  const pinned = await placement(page);
+  await body.evaluate(node => { node.scrollTop = node.scrollHeight; });
+  await expect.poll(() => body.evaluate(node => node.scrollTop), { message: "the overflowing body really scrolls" }).toBeGreaterThan(0);
+  const scrolled = await placement(page);
+  expect(scrolled.actions.y).toBeCloseTo(pinned.actions.y, 0);
+  expect(scrolled.actions.bottom).toBeLessThanOrEqual(scrolled.region.bottom + 1);
+  await expect.poll(() => cardGeometry(page)).toMatchObject({ headerInside: true, actionsInside: true, regionScrollTop: 0 });
+});
+
+/** A late receipt and a large queue each consume a bounded part of the region.
+ * Moving the queue must not move the notice, card header or answers; the last
+ * waiting request must still be selectable rather than merely present in DOM.
+ */
+test("waiting requests scroll independently below a tall card and fixed late notice", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  const staged = await stageApprovals(page, [launchRequest("late-receipt")]);
+  await page.route("**/api/approvals/late-receipt", route => fulfillAsHelm(route, { status: 410 }));
+  await openSelected(page);
+  await page.locator(".approval-deny").click();
+  const notice = page.locator(".approval-late");
+  await expect(notice).toContainText("did not take effect");
+  const tall = layoutRequests().find(card => (card.action as { kind: string }).kind === "launch_with_prompt")!;
+  const queue = Array.from({ length: 12 }, (_, index) => launchRequest(`waiting-${index}`));
+  await staged.replace([tall, ...queue]);
+  await expect(page.locator(".approval-card")).toHaveAttribute("data-approval-id", tall.id);
+  const waiting = page.locator(".approval-waiting-list");
+  await expect(waiting.locator(".approval-waiting")).toHaveCount(queue.length);
+  await expect.poll(() => waiting.evaluate(node => node.scrollHeight - node.clientHeight), {
+    message: "premise: the queue exceeds its own visible allocation",
+  }).toBeGreaterThan(1);
+  const initial = await placement(page);
+  const noticeBefore = (await notice.boundingBox())!;
+  expect(noticeBefore.y).toBeGreaterThanOrEqual(initial.region.y);
+  expect(noticeBefore.y + noticeBefore.height).toBeLessThanOrEqual(initial.region.bottom);
+  await waiting.evaluate(node => { node.scrollTop = node.scrollHeight; });
+  await expect.poll(() => waiting.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+  await expect(page.locator('.approval-waiting[data-approval-id="waiting-11"]')).toBeInViewport();
+  expect((await notice.boundingBox())!.y).toBeCloseTo(noticeBefore.y, 0);
+  expect((await placement(page)).card.y).toBeCloseTo(initial.card.y, 0);
+  expect((await placement(page)).actions.y).toBeCloseTo(initial.actions.y, 0);
+  await expect.poll(() => cardGeometry(page)).toMatchObject({ headerInside: true, actionsInside: true, regionScrollTop: 0 });
+  await page.locator('.approval-waiting[data-approval-id="waiting-11"]').click();
+  await expect(page.locator(".approval-card")).toHaveAttribute("data-approval-id", "waiting-11");
+  await expect(notice).toContainText("did not take effect");
+});
+
+/** Fixed queue and notice space counts against the card's pinned minimum.
+ * At this boundary the viewport exceeds the narrow card's fallback constant,
+ * but its siblings leave too little room for the card. Either ordinary
+ * containment or the declared whole-region exception must retain every answer
+ * and the last waiting request; hidden overflow is not a reachable fallback.
+ */
+test("a narrow short queue and late notice keep every answer reachable", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  const staged = await stageApprovals(page, [launchRequest("late-boundary")]);
+  await page.route("**/api/approvals/late-boundary", route => fulfillAsHelm(route, { status: 410 }));
+  await openSelected(page);
+  await page.locator(".approval-deny").click();
+  await expect(page.locator(".approval-late")).toContainText("did not take effect");
+  const tall = layoutRequests().find(card => (card.action as { kind: string }).kind === "launch_with_prompt")!;
+  const queue = Array.from({ length: 12 }, (_, index) => launchRequest(`boundary-waiting-${index}`));
+  await staged.replace([tall, ...queue]);
+  await expect(page.locator(".approval-card")).toHaveAttribute("data-approval-id", tall.id);
+  await expect(page.locator(".approval-waiting")).toHaveCount(queue.length);
+  await expect(page.locator(".approval-card-actions button")).toHaveCount(4);
+  await setPaneWidth(page, 320);
+  await page.setViewportSize({ width: page.viewportSize()!.width, height: 430 });
+  const region = page.locator(".approval-cards");
+  await expect.poll(async () => ({
+    width: Math.round((await placement(page)).main.width),
+    viewportHeight: page.viewportSize()!.height,
+  }), { message: "premise: the 320px pane has only the 430px viewport available" })
+    .toEqual({ width: 320, viewportHeight: 430 });
+  await expect.poll(() => region.evaluate(node => node.getBoundingClientRect().bottom), {
+    message: "the resized approval region has settled within the short viewport",
+  }).toBeLessThanOrEqual(430);
+  await expect.poll(async () => {
+    const geometry = await cardGeometry(page);
+    return geometry.buttonsInside.every(Boolean) || await region.getAttribute("data-tiny-pane") === "true";
+  }, { message: "all answers fit, or insufficient sibling-adjusted card space declares the scrollable tiny-pane exception" }).toBe(true);
+
+  if (await region.getAttribute("data-tiny-pane") === "true") {
+    await expect.poll(() => region.evaluate(node => node.scrollHeight - node.clientHeight), {
+      message: "the declared tiny-pane exception supplies real whole-region scrolling",
+    }).toBeGreaterThan(1);
+    for (const answer of await page.locator(".approval-card-actions button").all()) {
+      await answer.evaluate(button => {
+        const region = button.closest(".approval-cards")!;
+        const buttonBounds = button.getBoundingClientRect();
+        const regionBounds = region.getBoundingClientRect();
+        // WebKit rounds scrollTop to device pixels. Move just inside the
+        // edge rather than leaving a fractional button border clipped.
+        region.scrollTop += Math.ceil(buttonBounds.bottom - regionBounds.bottom) + 2;
+      });
+      await expect(answer, "each answer can be fully revealed by the region's own scroll").toBeInViewport({ ratio: 1 });
+    }
+  } else {
+    for (const answer of await page.locator(".approval-card-actions button").all()) {
+      await expect(answer, "the ordinary pinned layout fully exposes each answer").toBeInViewport({ ratio: 1 });
+    }
+  }
+  // The queue keeps its own scrollport even when the surrounding region must
+  // also scroll. Reveal that list, then prove its final request remains usable.
+  const waiting = page.locator(".approval-waiting-list");
+  await region.evaluate(node => { node.scrollTop = node.scrollHeight; });
+  await waiting.evaluate(node => { node.scrollTop = node.scrollHeight; });
+  const last = page.locator('.approval-waiting[data-approval-id="boundary-waiting-11"]');
+  await expect.poll(() => last.evaluate(button => {
+    const bounds = button.getBoundingClientRect();
+    const waiting = button.closest(".approval-waiting-list")!.getBoundingClientRect();
+    const region = button.closest(".approval-cards")!.getBoundingClientRect();
+    // At its scroll limit WebKit can round away a fraction of a border pixel.
+    // Check every clipping boundary with the same 1px geometry tolerance as
+    // the ordinary pinned tests, then actually select this request below.
+    const inside = (box: { left: number; right: number; top: number; bottom: number }) =>
+      bounds.left >= box.left - 1 && bounds.right <= box.right + 1
+      && bounds.top >= box.top - 1 && bounds.bottom <= box.bottom + 1;
+    return {
+      queue: inside(waiting), region: inside(region),
+      viewport: inside({ left: 0, right: innerWidth, top: 0, bottom: innerHeight }),
+    };
+  }), { message: "the last request fits its queue, region and viewport at the real scroll limits" })
+    .toEqual({ queue: true, region: true, viewport: true });
+  await expect(page.locator(".approval-waiting")).toHaveCount(queue.length);
+  await last.click();
+  await expect(page.locator(".approval-card")).toHaveAttribute("data-approval-id", "boundary-waiting-11");
+  await expect(page.locator(".approval-late")).toContainText("did not take effect");
+});
+
+/** The shortened requester is a presentation only, never a clipboard target.
+ * Spaces, bidi controls and literal escape-looking text must retain distinct
+ * full spellings in the accessible identity while Copy sends the raw bytes.
+ */
+test("the compact From line keeps isolated full identity and raw Copy ID", async ({ page }) => {
+  const bare = "begin \u202eopaque\\n-middle-identity-end";
+  expect(new TextEncoder().encode(bare).length, "premise: raw requester ID fits the helm's admission bound").toBeLessThanOrEqual(40);
+  const raw = `12345678-1234-1234-1234-123456789abc:${bare}`;
+  const full = "12345678-1234-1234-1234-123456789abc:begin<U+0020><U+202E>opaque\\n-middle-identity-end";
+  const fixture = launchRequest("requester-copy", "build\u202ebox", "a \"quoted\" session\u202e");
+  fixture.session = { id: raw, title: "a \"quoted\" session\u202e", host_name: "build\u202ebox" };
+  await stageApprovals(page, [fixture]);
+  await openSelected(page);
+  const from = page.locator(".approval-card-from");
+  const id = from.locator('[aria-label^="From session ID:"]');
+  await expect(from.locator('[aria-label="From host"]')).toHaveText("build<U+202E>box");
+  await expect(from.locator('[aria-label="From session"]')).toHaveText('a "quoted" session<U+202E>');
+  await expect(from.locator(".approval-from-title")).toHaveText('“a "quoted" session<U+202E>”');
+  await expect(id).toHaveAttribute("data-tooltip", full);
+  await expect(id).toHaveAttribute("aria-label", `From session ID: ${full}`);
+  const short = (await id.textContent())!;
+  expect(short).not.toContain("12345678-1234-1234-1234-123456789abc:");
+  expect(short).toMatch(/^begin.*….*end$/);
+  expect(short, "abbreviation cannot leave a partial visible escape").not.toMatch(/<[^>]*…|…[^<]*>/);
+  expect(await from.locator(".peer-value").evaluateAll(values =>
+    values.length === 3 && values.every(node => node.getAttribute("dir") === "ltr")
+  ), "host, title and identity each remain isolated").toBe(true);
+  await page.evaluate(() => {
+    const copies: string[] = [];
+    Object.assign(window, { __approvalCopies: copies });
+    navigator.clipboard.writeText = async text => { copies.push(text); };
+  });
+  const copy = from.getByRole("button", { name: "Copy from session ID", exact: true });
+  await expect(copy).toHaveText("Copy ID");
+  await copy.click();
+  await expect.poll(() => page.evaluate(() => Reflect.get(window, "__approvalCopies"))).toEqual([raw]);
+});
+
 /** The common launch fits above the prompt; sidebar changes and narrow widths still follow the pane. */
 test("a compact card follows the main pane and keeps the answer buttons visible", async ({ page }, info) => {
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -408,12 +838,7 @@ test("a compact card follows the main pane and keeps the answer buttons visible"
   }, { message: "card centered inside the terminal area and clear of the sidebar" }).toBe(true);
   const wide = await placement(page);
   expect(wide.card.width).toBeCloseTo(660, 0);
-  // The bound grew from 380 when guarded launches began naming the agent's
-  // own mode ("Guarded · Claude auto mode") in the permissions cell, which
-  // wraps over a few lines in its third-of-a-card column. Naming that mode on
-  // the card that approves the launch is deliberate; the bound still catches
-  // a card that spills its full help text or grows by whole rows.
-  expect(wide.card.height, "mockup-sized request stays compact").toBeLessThan(440);
+  expect(wide.card.height, "a request grows only as far as the available cap").toBeLessThanOrEqual(wide.region.height);
   expect(wide.actions.bottom, "answers visible without scrolling").toBeLessThanOrEqual(wide.region.bottom);
   expect(wide.region.bottom, "the terminal's bottom remains clear").toBeLessThan(wide.main.bottom - 100);
   await page.screenshot({ path: info.outputPath("approval-common.png") });
@@ -456,9 +881,7 @@ test("a compact card follows the main pane and keeps the answer buttons visible"
     const { main, card } = await placement(page);
     return card.x >= Math.max(11, main.x + 11) && card.right <= main.right - 11 && card.width <= 296;
   }, { message: "320px pane contains the whole card" }).toBe(true);
-  await expect.poll(() => page.locator(".approval-card-rows").evaluate((node) =>
-    getComputedStyle(node).gridTemplateColumns.split(" ").length
-  )).toBe(1);
+  await expect(page.locator(".approval-card-facts")).toHaveCount(1);
   expect(await page.locator(".approval-cards").evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
   await page.screenshot({ path: info.outputPath("approval-narrow.png") });
 
@@ -486,7 +909,7 @@ test("a compact card follows the main pane and keeps the answer buttons visible"
   const shownHost = `remote-${"x".repeat(80)}<U+202E>`;
   await staged.replace([{ ...launchRequest("long-host", longHost), own_host_session_action: true }]);
   await expect(page.locator(".approval-card")).toHaveAttribute("data-approval-id", "long-host");
-  await expect(page.locator(".approval-card-actions > button")).toHaveCount(4);
+  await expect(page.locator(".approval-card-actions button")).toHaveCount(4);
   for (const selector of [".approval-always-allow-own-host", ".approval-always-allow"]) {
     const button = page.locator(selector);
     await expect(button).toContainText(shownHost);
@@ -504,19 +927,18 @@ test("a compact card follows the main pane and keeps the answer buttons visible"
 });
 
 /**
- * A requester title uses the card's room before wrapping, but still fits a narrow pane.
- * Equal requester columns can wrap an ordinary name while the adjacent host
- * leaves unused space. Actual text line boxes catch that without blessing
- * a nowrap rule that merely pushes long values beyond the card.
+ * The compact requester line truncates presentation without losing identity.
+ * A narrow card must ellipsize the title rather than spending its answer
+ * space on wrapped requester prose; the complete spelling remains in hover.
  */
-test("a requester session title uses available card width before wrapping", async ({ page }, info) => {
+test("a requester session title stays on one line with its full hover text", async ({ page }, info) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   const title = "migrate authentication tokens";
   await stageApprovals(page, [launchRequest("requester-width", "devbox", title)]);
   await openSelected(page);
-  const value = page.locator(".approval-card-requester .approval-card-row")
-    .filter({ has: page.locator("dt", { hasText: /^From session$/ }) }).locator("dd .peer-value");
+  const value = page.locator('.approval-card-from [aria-label="From session"]');
   await expect(value).toHaveText(title);
+  await expect(value).toHaveAttribute("data-tooltip", title);
   // The vendored UI font is a layout input; a fallback's smaller glyphs can
   // otherwise hide the cramped column before the real face finishes loading.
   await page.evaluate(() => document.fonts.ready);
@@ -537,7 +959,11 @@ test("a requester session title uses available card width before wrapping", asyn
     node.scrollLeft = (node.querySelector(".app-main") as HTMLElement).offsetLeft;
   });
   await expect.poll(async () => (await placement(page)).card.width).toBeLessThanOrEqual(296);
-  await expect.poll(lines, { message: "a genuinely narrow card wraps the complete requester title" }).toBeGreaterThan(1);
+  await expect.poll(lines, { message: "a narrow requester title cannot grow the pinned header" }).toBe(1);
+  await expect.poll(() => value.evaluate((node) => ({
+    overflow: node.scrollWidth > node.clientWidth,
+    ellipsis: getComputedStyle(node).textOverflow,
+  })), { message: "the full title is retained behind a visible ellipsis" }).toEqual({ overflow: true, ellipsis: "ellipsis" });
   await expect.poll(() => page.locator(".approval-cards").evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
   await page.screenshot({ path: info.outputPath("approval-requester-narrow.png") });
 });
@@ -730,7 +1156,7 @@ test("a link approval opens synchronously with user activation and displays the 
   await openSelected(page);
   const card = page.locator(".approval-card");
   await expect(card).toContainText(url);
-  await expect(card.locator(".approval-card-rows b"), "URL markup must remain text").toHaveCount(0);
+  await expect(card.locator(".approval-card-facts b"), "URL markup must remain text").toHaveCount(0);
   await card.getByRole("button", { name: "Allow", exact: true }).click();
   await expect(card).toHaveCount(0);
   expect(staged.answers).toEqual([{ id: "link-allow", answer: "allow" }]);
@@ -838,10 +1264,16 @@ test("a running prompt card keeps its full message and target facts readable", a
   expect(staged.answers).toEqual([{ id: "running-prompt", answer: "allow" }]);
 });
 
-/** Read a labelled fact without confusing the requesting host with the host being changed. */
+/** Read semantic requester roles or a labelled fact without confusing their hosts.
+ * The From line uses accessible roles rather than fact rows; callers retain
+ * the same vocabulary when comparing a requester with a changed host.
+ */
 function approvalValue(page: Page, label: string) {
   // Callers name semantic facts; the rendered label also preserves ID's acronym.
   const displayLabel = label.replace(/\bid\b/g, "ID").replace(/^[a-z]/, letter => letter.toUpperCase());
+  if (displayLabel.startsWith("From ")) {
+    return page.locator(`.approval-card-from [aria-label${displayLabel === "From session ID" ? "^" : ""}="${displayLabel}${displayLabel === "From session ID" ? ":" : ""}"]`);
+  }
   return page.locator(".approval-card .approval-card-row")
     .filter({ has: page.locator("dt").filter({ hasText: new RegExp(`^${displayLabel}$`) }) }).locator("dd");
 }
@@ -880,9 +1312,9 @@ test("a host edit card shows changed fields as escaped data and answers only thi
   ]) {
     await expect(approvalValue(page, label)).toHaveText(text);
   }
-  // The session ID has a separate copy button; only its peer span is the identity.
-  await expect(approvalValue(page, "from session id").locator(".peer-value"))
-    .toHaveText("7c1e9a52-4b0d-4f7e-9a3c-2d81f6b0e413");
+  // The compact ID keeps its full identity in the accessible spelling.
+  await expect(approvalValue(page, "from session id"))
+    .toHaveAttribute("data-tooltip", "7c1e9a52-4b0d-4f7e-9a3c-2d81f6b0e413");
   await expect(card.locator("b, em"), "peer markup cannot create elements").toHaveCount(0);
   expect(await card.locator(".peer-value").evaluateAll((values) =>
     values.length >= 7 && values.every((value) => value.getAttribute("dir") === "ltr")

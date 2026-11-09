@@ -3676,26 +3676,46 @@ card still open the raw URL; they do not automatically create tunnels.
 While requests wait, the GUI shows one expanded card centered at the top of the main area, below the session's tabs when
 a session is open and clear of the sidebar and the terminal's prompt. The oldest request opens first. Other requests
 appear as labelled headers below it; selecting a header expands that request instead, and it stays selected until
-answered or expired, after which the oldest remaining request opens. The card shows the total waiting count. Its compact
-fact grid reflows in a narrow main area, and the whole request region scrolls once it reaches its height cap, well short
-of the full main area; command text stays full and wrapped. If session chrome leaves too little height to reach an
-answer, the request region uses the window's full height and can cover session chrome. At ordinary sizes the rest of the
-app stays usable, and cards remain answerable over open dialogs. Answer buttons pause for 700ms whenever the waiting
-list or the expanded request changes, so a click already aimed at the previous request cannot answer the next one. It
-names the requesting session and its host, the action, and its target. For a launch it shows the target host, the folder
-(the exact previewed directory and source-qualified repository for a managed checkout), the agent type and its choices
-or the full command and resume command text, and whether the launch is YOLO. For a template write it shows the whole
-resulting template, including the command and resume command text that the templates listing withholds from agents. When
-the write changes ⚡ or a number key, the card shows each assignment or removal and names the template a moved mark or
-key leaves. For a template delete it shows the template being deleted. Text an agent controls (session titles, folders,
-command lines) is shown as labelled data, never in a way that could pass for Farhelm's own wording. Link cards likewise
-show the entire URL as data. The card offers Allow, Always allow from the requesting host, and Deny (Open and Dismiss
-for a preapproved web link). Always allow turns that host's setting on and then approves the request; if turning the
-setting on fails, nothing is approved and the card stays up with the reason. It approves only the request it was
-answered on: other cards already waiting from that host stay until they are answered. Asking, target and clone-source
-session IDs occupy full-width identity rows: the complete entry-prefixed ID is shown with spaces, formatting characters
-and literal escape notation spelled distinctly. Each row offers Copy for the complete raw ID, including characters shown
-as escapes. Answering the card still uses its approval ID.
+answered or expired, after which the oldest remaining request opens. The card shows the total waiting count. Every kind
+uses the same width and top anchor, with one aligned list of labelled facts instead of narrow columns. Labels may stack
+above values in a narrow pane. Paths, repository names, SSH destinations and session IDs stay on one line and scroll
+sideways within their own values; URLs and permission flags wrap in full. Commands, prompts, resume commands and wrapper
+text each have a bounded, keyboard-scrollable box, preserving all their text.
+
+The request region takes at most about three quarters of the main pane and the space below its top anchor. The card's
+header and answer bar stay visible within that cap. Text boxes shrink to about two lines before the fact list needs its
+own vertical scroll. Other waiting requests have a separate scrolling list below the card, showing about three headers
+at once; a late-answer notice stays above it. Deny sits apart at the right of the answer bar, and buttons wrap in narrow
+panes without scrolling out of reach. If session chrome leaves less than the pinned header and answer bar need, the
+region uses the whole viewport and may cover that chrome. A viewport shorter than those pinned controls is the one
+exception: the region then scrolls as a whole so every control remains reachable. At ordinary sizes the rest of the app
+stays usable, and cards remain answerable over open dialogs. Answer buttons pause for 700ms whenever the waiting list or
+the expanded request changes, so a click already aimed at the previous request cannot answer the next one. It names the
+requesting session and its host, the action, and its target. For a launch it shows the target host, the folder (the
+exact previewed directory and source-qualified repository for a managed checkout), the agent type and its choices or the
+full command and resume command text, and whether the launch is YOLO. For a template write it shows the whole resulting
+template, including the command and resume command text that the templates listing withholds from agents. When the write
+changes ⚡ or a number key, the card shows each assignment or removal and names the template a moved mark or key leaves.
+For a template delete it shows the template being deleted. Text an agent controls (session titles, folders, command
+lines) is shown as labelled data, never in a way that could pass for Farhelm's own wording. Link cards likewise show the
+entire URL as data. The card offers Allow, Always allow from the requesting host, and Deny (Open and Dismiss for a
+preapproved web link). Always allow turns that host's setting on and then approves the request; if turning the setting
+on fails, nothing is approved and the card stays up with the reason. It approves only the request it was answered on:
+other cards already waiting from that host stay until they are answered. Asking, target and clone-source session IDs
+remain distinct from titles and host names. The compact From line shows an isolated host, a quoted, ellipsized session
+title with its full text on hover, and the start and end of the requester's bare ID, without splitting an escape
+spelling. Its hover and accessible name carry the complete entry-prefixed ID with spaces, formatting characters and
+literal escape notation spelled distinctly. Copy ID copies that full raw reference. Target and clone-source IDs stay in
+full in single-line identity facts with Copy. Every copy uses the raw reference, including characters shown as escapes.
+Answering the card still uses its approval ID.
+
+Launch and restart cards show one Permissions row using the session list's classification: a warning YOLO chip for YOLO
+or Custom, the vendor's guarded mode name, Approve, Smart approve, Chat, or Unknown for a launch predating
+classification. Own setting explains that Farhelm treats it as YOLO. A command launch's Asserted YOLO or Asserted not
+YOLO is explicitly the agent's unchecked claim, never Farhelm's verdict. Stored workspace trust has its own Trusted
+workspace or Not trusted chip; trusted managed-checkout wording names Settings as the source. Permission flags remain a
+separate, fully wrapped fact. Prompt cards use the same chip presentation; template cards keep their stored permission
+labels and YOLO assertions without interpreting an omitted permission as own setting.
 
 A qualifying session card offers Allow, **Always allow on <host> only**, **Always allow from <host>**, and Deny. The new
 button grants only **Manage sessions on this host without asking** to the requesting install and approves that request.
