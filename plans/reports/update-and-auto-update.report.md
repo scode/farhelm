@@ -66,3 +66,65 @@ there is no backend, installer or native-platform change for those broader check
 The required single fresh-context gpt-6.1-sol/high reviewer found no correctness, design, idiomatic-code or
 test-authoring issue. The commit and PR wording passed its separate cold read. Every touched file received a
 documentation pass. No scope departure, omitted requirement or rejected code-review finding remains.
+
+### Landing
+
+Landed alone in its round, as #3269. After the executor based it, main gained the best-effort mount check for
+uninstalling a remote Mac, a fix to the macOS acceptance test of the desktop app's own uninstall, and TODO.md edits.
+None of them touches the sidebar, Settings or automatic updates. The only conflict was textual, in TODO.md, where this
+plan's entry and the Mac uninstall entry sat next to each other and both were removed. A fresh-context review checked
+the change against main. It found nothing that had to change before merging, and confirmed the contracts the change
+relies on. A newer choice for the setting, from either the prompt or Settings, clears the prompt's error. The error is
+kept by the sidebar itself, which stays in place while Hosts is open, so a failure while Hosts is open still shows when
+the prompt comes back. A session menu open below the prompt closes when the button or the error appears or goes away, as
+it already did when the prompt's rows change. **Try again** saves only the preference and requests no host updates
+again.
+
+#### Fixes made at landing
+
+- If the save's reply is lost after the helm has already stored the setting, Farhelm reads the setting again and finds
+  it on. The prompt still said "Could not turn on automatic updates. Later updates will still wait for you." The error
+  now shows only while the setting reads off, and SPEC.md says so. No test covers a lost reply; the change is one
+  condition, checked by the build and the UI tests below.
+- SPEC_impl.md still described the error of a failed preference save as belonging to the Settings dialog alone, and did
+  not mention the new button. It now covers both.
+
+#### Things you should know
+
+From the review, left as they are:
+
+- After a failed save, the error stays attached to the prompt. If the prompt goes away (every listed host updated) and
+  later comes back because another host has an update, the old error comes back with it, as long as nothing newer was
+  chosen for the setting. SPEC.md says the error survives opening and closing Hosts "while attention remains", which
+  does not settle this case.
+- The button's tooltip says it updates "the listed hosts" and that later updates install without asking. Turning the
+  setting on also lets the helm update hosts the prompt is not listing, such as ones whose optional update was
+  dismissed. The report's "things you should know" mentions this; the tooltip does not.
+- Two checks in the new browser tests are weaker than they look. The check that the button disappears after a successful
+  save would pass anyway, because the host rows turn into updating rows on the click. The **Try again** check passes as
+  soon as the click lands, before the save is answered.
+
+#### Checks
+
+Run on the plan rebased onto main with the landing fixes, the tree that merged, on this development machine and, as the
+maintainer asked for today's landings, on Tensorlake sandboxes:
+
+- Here: `cargo fmt --all -- --check`, `dprint check`, `python3 releasing/check-changelog.py format`, the test-sleep
+  checker, `scripts/check-desktop-assets.sh`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings` and `cargo check -p farhelm-ui --features desktop` passed.
+- Here, recorded `cargo nextest run -p farhelm-ui --lib`: 924 passed, none skipped (run `4c2bc4c7`).
+- Tensorlake, browser, using the release web build: the `host-updates`, `settings`, `host-rail-warning` and
+  `bulk-session-actions` specs on Chromium and WebKit, one project per sandbox. 150 passed, none failed, skipped or
+  retried. Runs `2454d459`, `463afb6b`, `890d42c8`, `0f668ecd`, `a4aeb22b`, `d911b783`, `8ea71195` and `481c5cd4`,
+  recorded the generic way rather than in the recorder's Playwright mode, which cannot run one engine per sandbox, and
+  under the sandbox image's Node 24, a slightly older release than this machine's. Every sandbox reported that the
+  services the tests rely on (a per-user systemd and SSH to itself) worked. The `host-updates` spec holds the plan's new
+  tests (the button, a failed save and its retry, and a session menu the error line moves); the others cover Settings'
+  automatic-update switch, the rail's host warnings and the bulk session actions shown with the prompt.
+
+Reused: nothing from the executor's runs.
+
+Skipped: the rest of the browser suite, including the separate set of tests for old tmux terminals (the change is
+confined to the host update prompt, its Settings preference and the menus beside it, which the specs above cover), the
+workspace's other Rust tests (no helm, supervisor or protocol code changed), the desktop smoke (no desktop-only code
+changed) and hosted CI (manual-only, not dispatched).
