@@ -66,3 +66,85 @@ fixed browser cleanup that could race a backend save and an outdated save-order 
 independently confirmed by the same reviewer, fixed keyboard access to the host settings dialog's scrolling content
 while another setting is saving. The field's own save keeps its existing focus-preserving behavior. The focused modal
 tests pass on both engines. No finding was rejected and no requirement was weakened.
+
+### Landing
+
+Landed together with scoped-stop-without-sweep (cheaper cleanup for sessions in systemd scopes), stacked above it. Main
+had just gained stop-start-message (a Stop during an agent's startup is now reported as such), the update floor
+(installations and hosts older than v0.23.0 cannot update in place), and steadier terminal sizing on session switch. A
+fresh-context review found no interaction with any of them; this plan's only supervisor change is three error messages.
+
+It did interact with the fixed-height Settings dialog, which landed two rounds earlier. That plan's WebKit test holds
+the Checkouts section to fit inside the 780px dialog, with only about six pixels to spare, and this plan's longer help
+text under the default checkout folder wrapped onto another line in WebKit and broke it.
+
+#### Fixes made at landing
+
+- The help text under **Default checkout folder** in Settings → Checkouts is shorter: "Used by hosts without their own
+  folder, which you set in a host's settings. ~ means each host's home folder. A missing folder is created on first use.
+  Changes affect new checkouts only. Save an empty field to clear the default." It keeps what the executor's text said,
+  except that "existing checkouts stay where they are" is now implied by "new checkouts only" (#3250). Checkouts fits
+  again on both engines.
+
+#### Things you should know
+
+- Checkouts now fits in 780px by a few pixels, so the next addition to that section will need the dialog's height or the
+  section's layout revisited.
+- Three small docs wording points from the review, left as possible follow-ups rather than fixed at landing:
+  - `docs/github-checkouts.md` should say that only the post-clone command (the command run after each clone) is still
+    set from the command line alone per host.
+  - The two uninstall pages say "**Checkout folder**" without saying whether they mean a host's own folder or the
+    default.
+  - The managed-checkout guide's "There is no default root" now reads oddly beside the new **Default checkout folder**
+    label.
+- The docs screenshots of host settings and Settings → Checkouts are stale, as the executor's report says.
+
+#### Checks
+
+The two plans were checked together, stacked in queue order on main, on this development machine and, at the
+maintainer's request, on Tensorlake sandboxes. The tree that merged is the one checked last (`80366b10`, `ef23035c`);
+main after the merges equals it outside `plans/`.
+
+On the stack before the landing fixes (`2cc53615`, `160f30e2`):
+
+- Here: `cargo fmt --all -- --check`, `dprint check`, `python3 releasing/check-changelog.py format`, the test-sleep
+  checker, `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop` and the docs website build passed.
+- Tensorlake, browser: `host-checkout-folder`, `github-checkout-composer`, `settings` and `spawn` on Chromium and WebKit
+  over six sandboxes (recorder runs `15407382`, `88777727`, `07584a58`, `8a2508fb`, `bb673a4a`, `8c459a18`). One test
+  failed: the WebKit Settings navigation test's check that the Checkouts section fits without scrolling (run `8c459a18`,
+  retained). per-host-checkout-folder's landing fix to its help text addresses it; every other test passed.
+- Tensorlake, Rust: every Rust test in the workspace except the desktop app's, from one archive over nine sandboxes
+  (runs `67cc46ef`, `271aa0c5`, `cf6e2b79`, `5c0fcb65`, `8dfee46b`, `14d0ff68`, `b9891b30`, `79ba2bd9`, `385cde9f`),
+  with two failures.
+  - `attribute_compile_contract_matrix` compiles small crates with a nested `cargo`, which the sandboxes do not have.
+    Neither plan touches its crate (`farhelm-testtrace-macros`); it passed here last round on a tree that differs from
+    this one only outside that crate (run `05991d87`), so that pass is reused.
+  - `create_idempotency::a_crash_before_the_outcome_commit_still_replays_the_same_session` (run `cf6e2b79`, retained)
+    had Delete refuse because the sandbox's per-user systemd manager stopped answering its probes, which is the
+    situation that refusal exists for. It passed five times in a row here (run `84880653`, in the recorder's plain
+    command mode, since its nextest mode refuses repetition). It also passed on a rerun from the same archive on three
+    sandboxes, three times each, together with the whole create-idempotency and session-lifecycle modules (runs
+    `41f38188`, `1ad1e77f`, `3aa87de6`). In that rerun, a different test on one sandbox reported the same manager
+    unusable and skipped. This is one observation of the sandbox's manager, not a flake of the test.
+  - The sandboxes have no stock tmux, so the new stock-tmux test skipped there; it ran here (next item).
+- Here, on the same stack: recorded `cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e` filtered to
+  the scoped Stop test, the scoped login-shell Stop test, the stock-tmux test and stop-start-message's early-Stop tests
+  (`pending_stop_*`): 9 passed, none skipped, run `e5d5c56f`. This machine has a stock systemd-linked tmux and a working
+  user manager, so the stock-tmux test really ran.
+
+After the landing fixes: `cargo fmt --all -- --check`, `dprint check`,
+`cargo clippy -p farhelm-supervisor -p farhelm-ui -p farhelm --all-targets -- -D warnings`, a fresh build and release
+web build, and on Tensorlake `settings` and `host-checkout-folder` on both engines: 74 passed, runs `e107e43d`,
+`90807ce6`, `94c646d1` and `6d9da565`. The Rust tests were not rerun after the fixes: in the supervisor they changed
+only comments and the text of one informational log line, which no test reads. The browser runs used the recorder's
+plain command mode (its Playwright mode cannot pick one engine per file) under the sandbox's slightly older Node 24;
+every sandbox reported its per-user manager and SSH to itself working.
+
+Reused: only the compile-contract pass above. Everything else that matters was run on this round's stacked tree, which
+includes stop-start-message, so the executors' own runs on their older bases are not relied on.
+
+Skipped: the rest of the browser suite (the specs above cover the Settings, checkout and launch paths
+per-host-checkout-folder changes; the cleanup change has no browser surface beyond what the Rust end-to-end suite
+drives), the desktop smoke (no desktop-only code changed beyond what the desktop compile check covers) and hosted CI
+(manual-only, not dispatched).
