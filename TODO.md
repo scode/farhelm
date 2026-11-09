@@ -30,7 +30,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   count and a truncated step name, and the host dialog shows the numbered steps and the run's own message (the failed
   connection attempt's error, say). Hovering the line lists the steps but leaves out the run message, and the bar the
   sidebar shows at the top while the hosts panel is closed has no hover detail at all. Both should give the same
-  information as the dialog: every step with its status, the step in progress, and the run's message.
+  information as the dialog: every step with its status, the step in progress, and the run's message. Plan:
+  `plans/queue/host-progress-hover.md`.
 
 - **Revisit the rail bell re-reading every host's Trash on each status change.** Decided on the maintainer's behalf on
   2026-11-09 when landing rail-notification-bell: it landed with each open window re-reading every connected host's
@@ -39,13 +40,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   database transaction, even when nothing is stuck. It is bounded and does not feed on itself. The alternative was to
   change it before landing; the cheap mitigation is to skip the lock and the transaction when nothing is stuck and the
   host has no unresolved notice, or to read Trash only when a host reports a change.
-
-- **Revisit letting prepared snapshots keep a custom base's own logins.** Decided on the maintainer's behalf on
-  2026-11-08 when prepared-snapshots blocked: preparing a snapshot keeps whatever authentication a recipe's custom image
-  or snapshot already contains (agent logins, tokens, Git credentials), and hosts made from it inherit that, with the
-  base's author responsible; Farhelm guarantees only that it adds none of its own and delivers no credentials or tunnels
-  to the preparation sandbox. Recipe snapshots already keep a base's content the same way. The alternative was to refuse
-  a base that holds credentials in known locations, naming what its author must remove, which can still be added later.
 
 ## Near term
 
@@ -59,14 +53,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   every request kind, not just the launch card: launch, prompt, rename, stop, delete, restart, open URL, host
   add/edit/remove, and template write/delete. Where content genuinely does not fit, only the relevant long text scrolls
   (the command, the first prompt, a session ID, a long path), never the controls or the dialog as a whole. Seen on a
-  session-start request on 2026-11-08.
+  session-start request on 2026-11-08. Plan: `plans/queue/approval-cards-fit.md`.
 
 - **One-click "update and always auto-update" in the sidebar's host update prompt.** The prompt at the top of the
   sidebar offers Update, and Update all when several hosts qualify, while making future updates automatic lives only in
   Settings, as the "Update remote hosts automatically" checkbox. Add an action beside them that updates the listed
   update hosts now and turns that preference on, so the user does not have to find the setting afterwards. The label
   must be short, with the full meaning in its tooltip; the preference save needs the checkbox's failure handling so a
-  write that fails is visible rather than leaving the user believing the hosts will keep themselves updated.
+  write that fails is visible rather than leaving the user believing the hosts will keep themselves updated. Plan:
+  `plans/queue/update-and-auto-update.md`.
 
 - **Let a remote Mac's uninstall work when a volume name contains " (" or " on ".** Before removing Farhelm's
   directories from a remote Mac, uninstall reads the Mac's mount table to make sure nothing is mounted inside them, both
@@ -74,7 +69,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the whole table when any line is ambiguous, so one unrelated volume whose name contains " (" or " on " (say
   `/Volumes/Backup (old)`) makes uninstall refuse: before anything changes, or partway through. It fails safe, but the
   user cannot uninstall while that volume is mounted. Only an ambiguous line that could name a path at or below the
-  directory being removed should refuse. Found by the landing review of the macos-remote-hosts plan on 2026-11-08.
+  directory being removed should refuse. Found by the landing review of the macos-remote-hosts plan on 2026-11-08. Plan:
+  `plans/queue/mac-uninstall-volume-names.md`.
 
 - **Overhaul the grid stream's encoding and the grid client's history storage.** Grid terminals (terminals in a terminal
   host) get their screen and history from the supervisor as JSON messages, and the page keeps every history line
