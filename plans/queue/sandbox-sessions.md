@@ -956,3 +956,75 @@ the executors run as. The key itself is not in this decision and must never be w
   every sandbox, snapshot and SSH key you create and clean them up promptly, as the plan says.
 - If the file is missing (the temporary directory is cleared on a reboot), or the API refuses the key, block again and
   say which, so the maintainer can supply it another way.
+
+## Blocked
+
+Blocked while landing on 2026-11-09 (claim 682a31).
+
+### Landing blocked: launching a sandbox session can be refused because the new sandbox is still connecting
+
+The landing monitor blocked this plan (sandbox sessions: launching a session into its own disposable Tensorlake sandbox
+created from a recipe) while landing it on 2026-11-09. None of its PRs (#3263, #3264, #3265) merged, so main holds
+nothing of the plan.
+
+#### What fails
+
+Launching a session from a recipe creates a fresh Tensorlake sandbox, sets Farhelm up in it, and then creates the
+session there. Right after setup, the helm drops its own setup connection and starts its ordinary connection to the new
+sandbox. The launch asks that connection to create the session at once, without waiting for it to finish connecting. If
+the connection has not finished yet, the helm refuses the create with "Not launched. host 2 is connecting, so this
+operation is refused and nothing was queued: the first connection attempt has not finished yet". The launch then tears
+down the sandbox it just paid for, and the user sees a failed launch.
+
+The helm test that drives this whole launch against a scripted sandbox shows it. It passed once, in a full run on a busy
+machine, where the connection happened to win the race (recorder run 60afa9d9). It failed in the next full run (run
+210c9ac6), and then on every attempt when run alone on a quiet machine (run e9b3c1be). The product code under that test
+was the same in all of these runs. The executor's own runs against real Tensorlake sandboxes passed. Against real
+sandboxes something seems to slow the launch enough for the connection to win most of the time, but nothing guarantees
+it.
+
+#### The question
+
+How should the launch wait for the new sandbox's connection before creating the session?
+
+The realistic options:
+
+- Wait until the helm reports the sandbox connected, and treat any other settled outcome (unreachable, wrong identity,
+  version mismatch) as a failed launch with that state's message. The catch: until the helm starts its new connection,
+  it still shows the "Farhelm is setting up this Tensorlake sandbox" state that setup put there. The wait must not take
+  that leftover state for a real failure. One way is to wait for the first state change after setup lets go. No extra
+  time limit is needed: a connection that keeps failing becomes "unreachable" after a few attempts, which ends the wait
+  as a failed launch.
+- Retry the create a few times while the refusal says "connecting". This is simpler, but it puts a guessed retry count
+  and delay in a path the helm otherwise handles by watching connection state.
+- Change the helm so that any create waits out a host's first connection attempt instead of refusing it. Not
+  recommended: the refusal with "nothing was queued" is deliberate behavior for every host, and changing it would reach
+  well beyond this plan.
+
+Recommendation: the first option. It follows how the helm already observes host connections. The plan's executor knows
+this code best and should choose the exact wait. Either way, the scripted test must pass when run alone, repeatedly.
+
+#### What the landing changed on the plan's branches
+
+The landing monitor pushed its landing fixes to all three PR branches, rebased onto current main, so the executor
+continues from them:
+
+- hover text on the new sandbox controls, marks and badges, as SPEC.md's hover rule requires;
+- a Hosts setup retry on a leftover sandbox row that belongs to a session now keeps the 30-minute idle timeout, with a
+  test;
+- the changelog fragment claims #3265;
+- the Tensorlake sandboxes docs page says the 24-hour ordinary-host timeout applies only on the Usage Credits plan;
+- a database-upgrade test that the plan's new column broke now passes;
+- the recipe-preparation browser tests expect the plan's new "new host or session" wording.
+
+#### Other checks from this landing
+
+Passed: formatting and lint checks, the desktop and website builds, the JavaScript unit tests, the UI's Rust tests, and
+the agent request paths. Also passed: the browser suite's tmux-terminal set, on six Tensorlake test machines.
+
+The whole browser suite, on ten Tensorlake test machines, had three kinds of failure:
+
+- recipe-preparation tests, from this plan's wording change, fixed above;
+- host-settings and feed tests, already broken on main by two earlier landings, which the landing monitor will fix in
+  its own PR;
+- single-engine failures already seen as flaky in earlier rounds.
