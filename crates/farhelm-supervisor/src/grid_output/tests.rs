@@ -746,7 +746,7 @@ fn history_has_its_width_and_ignores_the_alternate_screen() {
 /// Why: message size, not count, is what bounds the bytes one attachment
 /// has queued on the connection, and a client refuses a gap between
 /// appends. Spec: 2,000 lines of 100 characters pack into several messages,
-/// none over twice the target, each starting where the previous ended, and
+/// none over the target, each starting where the previous ended, and
 /// a client applying them holds every line.
 #[test]
 fn history_packs_into_bounded_contiguous_messages() {
@@ -778,7 +778,7 @@ fn history_packs_into_bounded_contiguous_messages() {
         .unwrap();
     for message in &messages {
         let bytes = message.encode().expect("encodes");
-        assert!(bytes.len() <= 2 * MESSAGE_TARGET, "{} bytes", bytes.len());
+        assert!(bytes.len() <= MESSAGE_TARGET, "{} bytes", bytes.len());
         check.accept(message).expect("contiguous");
     }
     let mut client = started_client(100, 5);
@@ -786,6 +786,72 @@ fn history_packs_into_bounded_contiguous_messages() {
     deliver(&mut client, &messages);
     assert_eq!(client.history.len(), 2000);
     assert_eq!(client.history.front().map(|line| line.0), Some(7));
+}
+
+/// Binary packing uses the full target without charging JSON escaping or
+/// repeatedly charging a shared link table. Screen and history prefixes
+/// differ, so both paths must stop at the actual next-row byte boundary.
+#[test]
+fn binary_packing_counts_exact_envelopes_rows_and_shared_links() {
+    let row = CellRow {
+        wraps: true,
+        runs: vec![CellRun {
+            col: 0,
+            width: 1000,
+            text: "\"".repeat(1000),
+            style: plain(Color::Palette(3)),
+            link: Some(Link {
+                id: "shared".into(),
+                uri: "https://example.invalid/\"\\".into(),
+            }),
+        }],
+    };
+    let lines = vec![row; 100];
+    let screen: Vec<_> = lines
+        .iter()
+        .enumerate()
+        .map(|(y, row)| (y as u16, row))
+        .collect();
+    for messages in [rows_messages(&screen), history_messages(17, 1000, &lines)] {
+        assert!(messages.len() > 1, "premise: several full packs");
+        for (at, message) in messages.iter().enumerate() {
+            let bytes = message.encode().unwrap();
+            assert!(bytes.len() <= MESSAGE_TARGET);
+            let (envelope, prefix, row_bytes, links) = match message {
+                GridOutput::Rows { rows, links } => (
+                    8,
+                    6,
+                    rows.iter().map(|row| row.row.binary_len()).sum::<usize>(),
+                    links,
+                ),
+                GridOutput::History { rows, links, .. } => (
+                    18,
+                    4,
+                    rows.iter().map(Row::binary_len).sum::<usize>(),
+                    links,
+                ),
+                _ => panic!("row-bearing message"),
+            };
+            assert_eq!(links.len(), 1, "shared links are charged once");
+            let count = match message {
+                GridOutput::Rows { rows, .. } => rows.len(),
+                GridOutput::History { rows, .. } => rows.len(),
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                bytes.len(),
+                envelope + prefix * count + row_bytes + links[0].binary_len()
+            );
+            if at + 1 < messages.len() {
+                let next_row = cell_row_binary_len(&lines[0]) + prefix;
+                assert!(
+                    bytes.len() + next_row > MESSAGE_TARGET,
+                    "pack stopped before its exact binary boundary"
+                );
+            }
+            assert_eq!(GridOutput::decode(&bytes).unwrap(), *message);
+        }
+    }
 }
 
 // ---- Clipboard ----------------------------------------------------------------

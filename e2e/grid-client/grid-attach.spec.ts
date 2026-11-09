@@ -22,6 +22,7 @@ import { join } from "node:path";
 
 const ASSETS = join(__dirname, "../../crates/farhelm-ui/assets");
 const FIXTURES = join(__dirname, "../../crates/farhelm-ui/js-tests/fixtures/grid");
+const TEST_ENCODER = readFileSync(join(__dirname, "../../crates/farhelm-ui/js-tests/grid-test-encoder.js"), "utf8");
 const ORIGIN = "https://grid.test";
 
 // Records the document's live listeners, installed before any other
@@ -136,7 +137,7 @@ class FakeSocket {
     this.onmessage({ data: JSON.stringify(message) });
   }
   binary(text) {
-    this.onmessage({ data: new TextEncoder().encode(text).buffer });
+    this.onmessage({ data: window.farhelmGridTestEncoder.encode(text).buffer });
   }
 }
 FakeSocket.CONNECTING = 0;
@@ -152,6 +153,7 @@ const PAGE = `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
+<script>${TEST_ENCODER}</script>
 <link rel="stylesheet" href="/assets/vendor/xterm.css">
 <link rel="stylesheet" href="/assets/app.css">
 <script>${LISTENER_LEDGER}</script>

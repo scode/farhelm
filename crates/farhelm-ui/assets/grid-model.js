@@ -74,8 +74,9 @@
   const CLIPBOARD_CHUNK_BYTES = 64 * 1024;
   const DIRECT_COLOR_BASE = 0x1000000;
   const DIRECT_COLOR_MAX = 0x1ffffff;
-  // The flag bits the format defines (1 bold through 2048 blink). Unknown
-  // higher bits are dropped rather than refused, like unknown fields.
+  // The twelve style bits occupy the low part of binary run metadata;
+  // the remaining bits describe optional fields, so callers cannot add
+  // flags without changing the protocol version.
   const KNOWN_FLAGS = 0xfff;
   const MOUSE_MODES = new Set(["off", "click", "drag", "motion"]);
   const CURSOR_SHAPES = new Set(["block", "underline", "bar"]);
@@ -132,14 +133,185 @@
   // ## Decoding one data frame
 
   const utf8Decoder = typeof TextDecoder === "function" ? new TextDecoder("utf-8", { fatal: true }) : null;
+  // Each binary field is text, not a document with an optional BOM. A
+  // field-leading U+FEFF must survive just as it does inside a JSON string.
+  const binaryTextDecoder = typeof TextDecoder === "function"
+    ? new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+    : null;
+
+  /** A bounded little-endian reader for this protocol version's binary rows.
+   * Every primitive read checks its own range, including reads inside a
+   * length-delimited row. Counts are checked before allocating arrays, so a
+   * small hostile payload cannot turn a declared count into a large model.
+   */
+  class BinaryReader {
+    constructor(bytes) {
+      this.bytes = bytes;
+      this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      this.at = 0;
+    }
+
+    need(length) {
+      if (length > this.bytes.length - this.at) fail("truncated binary grid message");
+    }
+
+    u8() {
+      this.need(1);
+      return this.view.getUint8(this.at++);
+    }
+
+    u16() {
+      this.need(2);
+      const value = this.view.getUint16(this.at, true);
+      this.at += 2;
+      return value;
+    }
+
+    u32() {
+      this.need(4);
+      const value = this.view.getUint32(this.at, true);
+      this.at += 4;
+      return value;
+    }
+
+    i32() {
+      this.need(4);
+      const value = this.view.getInt32(this.at, true);
+      this.at += 4;
+      return value;
+    }
+
+    /** Counter arithmetic must stay exact when the model checks continuity. */
+    counter() {
+      const low = this.u32();
+      const high = this.u32();
+      if (high > 0x1fffff) fail("binary counter past the largest safe integer");
+      return high * 0x100000000 + low;
+    }
+
+    /** Decode only a bounded byte range; invalid UTF-8 never becomes replacement text. */
+    text(length, maximum) {
+      if (length > maximum) fail("binary text past its byte bound");
+      this.need(length);
+      const bytes = this.bytes.subarray(this.at, this.at + length);
+      this.at += length;
+      try {
+        return binaryTextDecoder.decode(bytes);
+      } catch (_error) {
+        return fail("binary text is not UTF-8");
+      }
+    }
+
+    /** A count is plausible only when even its smallest entries fit. */
+    count(minimum, maximum = Number.MAX_SAFE_INTEGER) {
+      const count = this.u32();
+      if (count > maximum || count > Math.floor((this.bytes.length - this.at) / minimum)) fail("bad binary entry count");
+      return count;
+    }
+
+    /** Row boundaries cannot borrow bytes from the following row. */
+    row() {
+      const length = this.u32();
+      this.need(length);
+      const reader = new BinaryReader(this.bytes.subarray(this.at, this.at + length));
+      this.at += length;
+      return reader;
+    }
+
+    end() {
+      if (this.at !== this.bytes.length) fail("trailing bytes in binary grid message");
+    }
+  }
+
+  /** Keep the existing message-local link identities; no dictionary survives a message. */
+  function binaryLinks(reader) {
+    const count = reader.u16();
+    if (count > MAX_LINKS) fail("bad binary links count");
+    const links = [];
+    for (let i = 0; i < count; i++) {
+      links.push([reader.text(reader.u16(), MAX_LINK_ID_BYTES), reader.text(reader.u16(), MAX_LINK_URI_BYTES)]);
+    }
+    return links;
+  }
+
+  /** Read a row's structural envelope; decodeRow applies the shared semantic rules.
+   * Optional colors save ordinary default-colored runs their repeated fields.
+   * Foreground/background defaults have one canonical spelling: absence.
+   * An explicit default underline remains distinct, as in the Rust type.
+   */
+  function binaryRow(reader, maxCols) {
+    const wrap = reader.u8();
+    if (wrap > 1) fail("bad binary row wrap flag");
+    const count = reader.u16();
+    if (count > maxCols || count > Math.floor((reader.bytes.length - reader.at) / 8)) fail("bad binary run count");
+    const runs = [];
+    for (let i = 0; i < count; i++) {
+      const col = reader.u16();
+      const width = reader.u16();
+      const meta = reader.u16();
+      const length = reader.u16();
+      const fg = meta & 0x1000 ? reader.i32() : -1;
+      const bg = meta & 0x2000 ? reader.i32() : -1;
+      if ((meta & 0x1000 && fg === -1) || (meta & 0x2000 && bg === -1)) fail("noncanonical binary default color");
+      const style = [meta & KNOWN_FLAGS, fg, bg];
+      if (meta & 0x4000) style.push(reader.i32());
+      const link = meta & 0x8000 ? reader.u16() : null;
+      const run = [col, width, reader.text(length, MAX_TEXT_BYTES_PER_CELL * width), style];
+      if (link !== null) run.push(link);
+      runs.push(run);
+    }
+    reader.end();
+    return { w: wrap === 1, r: runs };
+  }
+
+  /** Binary replaces only row-bearing output and its commit, never control or input JSON. */
+  function decodeBinary(bytes) {
+    const reader = new BinaryReader(bytes);
+    reader.u8();
+    const kind = reader.u8();
+    let message;
+    if (kind === 2) {
+      const rev = reader.counter();
+      const cols = reader.u16();
+      const rows = reader.u16();
+      const shift = reader.u16();
+      const x = reader.u16();
+      const y = reader.u16();
+      const flags = reader.u8();
+      const shape = (flags >> 2) & 3;
+      if (flags & 0xf0 || shape === 3) fail("bad binary cursor flags");
+      message = {
+        t: "frame", rev, cols, rows,
+        cursor: { x, y, visible: !!(flags & 1), blink: !!(flags & 2), shape: ["block", "underline", "bar"][shape] },
+      };
+      if (shift) message.shift = shift;
+    } else if (kind === 1 || kind === 3) {
+      const first = kind === 3 ? reader.counter() : null;
+      const cols = kind === 3 ? reader.u16() : null;
+      const links = binaryLinks(reader);
+      const count = reader.count(kind === 1 ? 9 : 7);
+      const rows = [];
+      for (let i = 0; i < count; i++) {
+        const y = kind === 1 ? reader.u16() : null;
+        const row = binaryRow(reader.row(), kind === 1 ? MAX_DIMENSION : cols);
+        rows.push(kind === 1 ? [y, row] : row);
+      }
+      message = kind === 1 ? { t: "rows", rows } : { t: "history", first, cols, rows };
+      if (links.length) message.links = links;
+    } else return fail("unknown binary grid message type");
+    reader.end();
+    return message;
+  }
 
   /**
    * Turn one supervisor-to-client data frame into a message object, or
    * throw `GridProtocolError`.
    *
-   * Only the framing is checked here (size, UTF-8, JSON, an object with a
-   * string `t`); each message's fields are validated when it is applied,
-   * because some bounds (a row's width) depend on the model's state.
+   * Binary reads enforce field boundaries, UTF-8 and the representation's
+   * own bounds. JSON controls require an object with a string `t`.
+   * Shared semantic rules are checked when the message is applied (or a
+   * queued history row drains), because a screen row's final width belongs
+   * to its committing frame. Row-bearing JSON is never a wire fallback.
    *
    * @param {ArrayBuffer|Uint8Array|string} data
    */
@@ -151,6 +323,7 @@
     } else {
       const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
       if (bytes.byteLength > GRID_MAX_MESSAGE) fail("message larger than 1 MiB");
+      if (bytes[0] === 0) return decodeBinary(bytes);
       try {
         text = utf8Decoder.decode(bytes);
       } catch (_error) {
@@ -164,6 +337,7 @@
       fail("message is not JSON");
     }
     if (!isPlainObject(message) || typeof message.t !== "string") fail("message has no type");
+    if (message.t === "rows" || message.t === "frame" || message.t === "history") fail("grid row message is not binary");
     return message;
   }
 
@@ -183,8 +357,8 @@
    */
   function decodeStyle(raw) {
     if (!Array.isArray(raw) || (raw.length !== 3 && raw.length !== 4)) fail("bad style");
-    if (!isInt(raw[0], 0, INT32_MAX)) fail("bad style flags");
-    const flags = raw[0] & KNOWN_FLAGS;
+    if (!isInt(raw[0], 0, KNOWN_FLAGS)) fail("bad style flags");
+    const flags = raw[0];
     const fg = decodeColor(raw[1], "foreground");
     const bg = decodeColor(raw[2], "background");
     const ul = raw.length === 4 ? decodeColor(raw[3], "underline") : -1;

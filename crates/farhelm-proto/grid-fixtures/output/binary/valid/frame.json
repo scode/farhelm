@@ -1,0 +1,13 @@
+{
+  "cols": 80,
+  "cursor": {
+    "blink": true,
+    "shape": "block",
+    "visible": true,
+    "x": 0,
+    "y": 0
+  },
+  "rev": 1,
+  "rows": 24,
+  "t": "frame"
+}

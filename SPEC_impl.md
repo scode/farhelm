@@ -2650,29 +2650,28 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   sent), when it is sent `history_reset` and the history held; a change of shape is acted on once it has held for a
   quarter second, or two seconds after the first of a run of changes that does not settle, so a window dragged to a new
   size resends the history once, not at every step; after a reset forced by the two seconds, the next run waits until it
-  settles, so changes that never stop resend the history once, not every two seconds. A resend costs what an attach does
-  (for 12,000 lines at 200 columns, about 2.5 MB of typical output, 60 MB colored from the 256-color palette, 86 MB in
-  true color), and a redefined palette entry costs one whether or not any history row uses it, since telling would mean
-  scanning the history. A live cycle sends at most about 256 KiB of history ahead of its screen frame (an estimate that
-  errs high, counting escaped text and each run's link target, plus at most one row more), so a resend goes out over
-  many cycles with the screen current in each. The attach's catch-up ends early when history changes shape under it,
-  leaving the reset to the live path's settle rule, and is followed at once by a live cycle, since its later reads take
-  history only. The program's exit is `state`'s, over the final screen; a host that is gone ends the attachment as a
-  dead pane's, and an unavailable one as a failed stream. An attach to a host that cannot be read is refused as
-  `Unavailable` before anything is taken over, with a message that says what can help: a handle whose reason may pass
-  becomes attachable once re-adoption replaces it with a runtime (the viewer attaches again then), while a reason that
-  will not pass stays refused until the supervisor restarts. Clipboard writes reach the viewer from the attachment's
-  notice subscription; while the viewer is behind only the latest is kept. Viewer input is decoded and encoded where the
-  connection reads it, with the modes and size the status carries, never waiting there, and handed to the attachment's
-  own input pump, which writes it through one input sequence per attachment. A paste is collected in the attachment and
-  handed on only with its last part, as one paste the runtime writes whole; one whose last part never arrives is dropped
-  whole. What an attachment holds (a paste being collected, input waiting for the pump, a paste not yet written) is
-  bounded at 8 MiB. A malformed message, an interrupted paste, input past the bound, or input whose fate is unknown or
-  not sent ends the attachment as an input failure, which the sender notices wherever it waits, a pause included. Since
-  another producer's input lost with a connection moves the terminal's input epoch too, an attachment's next input after
-  any such loss fails it, and the viewer attaches again. An attachment that ends drops the input its pump had not handed
-  to the runtime and stops the pump at once; what the pump handed over is written before anything a replacement
-  attachment sends.
+  settles, so changes that never stop resend the history once, not every two seconds. A resend transfers the whole
+  retained history, as an attach does (the opt-in grid benchmark measures its bytes and attach cost), and a redefined
+  palette entry costs one whether or not any history row uses it, since telling would mean scanning the history. A live
+  cycle sends at most about 256 KiB of history ahead of its screen frame (an estimate that errs high, counting escaped
+  text and each run's link target, plus at most one row more), so a resend goes out over many cycles with the screen
+  current in each. The attach's catch-up ends early when history changes shape under it, leaving the reset to the live
+  path's settle rule, and is followed at once by a live cycle, since its later reads take history only. The program's
+  exit is `state`'s, over the final screen; a host that is gone ends the attachment as a dead pane's, and an unavailable
+  one as a failed stream. An attach to a host that cannot be read is refused as `Unavailable` before anything is taken
+  over, with a message that says what can help: a handle whose reason may pass becomes attachable once re-adoption
+  replaces it with a runtime (the viewer attaches again then), while a reason that will not pass stays refused until the
+  supervisor restarts. Clipboard writes reach the viewer from the attachment's notice subscription; while the viewer is
+  behind only the latest is kept. Viewer input is decoded and encoded where the connection reads it, with the modes and
+  size the status carries, never waiting there, and handed to the attachment's own input pump, which writes it through
+  one input sequence per attachment. A paste is collected in the attachment and handed on only with its last part, as
+  one paste the runtime writes whole; one whose last part never arrives is dropped whole. What an attachment holds (a
+  paste being collected, input waiting for the pump, a paste not yet written) is bounded at 8 MiB. A malformed message,
+  an interrupted paste, input past the bound, or input whose fate is unknown or not sent ends the attachment as an input
+  failure, which the sender notices wherever it waits, a pause included. Since another producer's input lost with a
+  connection moves the terminal's input epoch too, an attachment's next input after any such loss fails it, and the
+  viewer attaches again. An attachment that ends drops the input its pump had not handed to the runtime and stops the
+  pump at once; what the pump handed over is written before anything a replacement attachment sends.
 - **Terminal kinds on replies** (the migration band and the session details' kinds, SPEC.md "Terminal experience").
   `SessionInfo` carries `agent_terminal` (`tmux` or `host`), taken in `status::entry_info` from the `Terminal` variant
   the entry holds, not from the row's stored `terminal_kind`, so a session with no terminal reports none and its agent
@@ -3291,8 +3290,8 @@ JSON control frames keep the protocol debuggable by eye; raw binary data channel
 Protocol 68 adds grid streams, the form in which terminals that run in terminal hosts reach their viewers: the
 supervisor interprets their output and sends the screen as rows of styled runs. `Attach` carries the client's `grid`
 capability and `Attached` the channel's stream kind (`bytes` or `grid`), which the helm passes to the browser as a
-`{"type":"stream","kind":...}` text frame before any data. A grid channel carries one JSON message per data frame in
-each direction, and the helm relays them without reading them. The helm passes the browser's `grid=1` on as `grid`, and
+`{"type":"stream","kind":...}` text frame before any data. A grid channel carries one message per data frame in each
+direction, and the helm relays them without reading them. The helm passes the browser's `grid=1` on as `grid`, and
 refuses a grid stream it did not ask for. Its relay differs from a byte stream's in three ways
 (`crates/farhelm-helm/src/terminal.rs`, "Grid streams"): it admits frames up to the grid bound of 1 MiB (a long row with
 its links does not fit in 64 KiB), up to 4,096 of them, while holding no more bytes per attachment than a byte stream's
@@ -3324,12 +3323,32 @@ browser shows it as any stall until the user reconnects. The budget stays the ha
 would avoid it are not built.
 
 The format is not permanent: it changes with ordinary protocol bumps, unlike the terminal host's protocol and snapshots.
+Protocol 72 replaces the JSON `rows`, `frame` and `history` messages with fixed-field little-endian binary records. The
+JSON encoding repeated keys and style arrays through the full scrollback; the committed grid benchmark supplies matching
+workloads for measuring the replacement. A zero byte followed by the kind (1 rows, 2 frame, 3 history) distinguishes
+these records from JSON. Controls (`hello`, `state`, `history_reset`, `clipboard`) and all viewer input remain JSON. A
+peer never accepts the former row-bearing JSON as a fallback: it is an incompatible wire change, so the hello's protocol
+check must refuse mismatched helms and supervisors before an attachment starts. The page is already gated on the helm's
+build stamp.
+
+Binary rows carry a byte length, a wrap bit and runs with fixed-width columns, widths and metadata. Metadata holds
+twelve style flags and presence bits for nondefault foreground/background, an explicit underline color and a link index;
+present default foreground/background colors are refused, while an explicit default underline stays distinct from
+absence. Text and message-local hyperlink strings are length-prefixed UTF-8. No style or hyperlink dictionary survives a
+message. Counts and lengths are bounded before allocation or slicing, every read checks remaining bytes, counters stay
+within JavaScript's exact integers, and unknown kinds, malformed UTF-8, truncation and trailing bytes are errors. Shared
+row, color, link and ordering validation still applies. Packing counts the actual binary envelope, rows and links
+against the same 32 KiB target and 1 MiB hard bound; a whole row that exceeds the target still goes alone.
+
 Its contract, bounds and golden fixtures are in `farhelm-proto` (`crates/farhelm-proto/src/grid.rs` and
-`crates/farhelm-proto/grid-fixtures/`). `farhelm-proto`'s Rust tests validate every fixture. The grid client's node
-tests apply every output fixture to the browser's decoder and compare its input builders with the valid input fixtures,
-some of which are allowed wire forms the client never sends (an empty last paste part, for one); they also hold the
-client's hand-copied input bounds to the invalid input fixtures. Every terminal in a terminal host streams this way; old
-tmux terminals keep their byte streams.
+`crates/farhelm-proto/grid-fixtures/`). Binary output fixtures pair bytes with JSON descriptions, including a fixed-seed
+varied-row corpus and malformed records; there is no tolerated binary category within the locked protocol version.
+`farhelm-proto`'s Rust tests validate every fixture and fail when checked-in bytes drift from the encoder. The grid
+client's node tests decode the same binary records, compare their content and model effects with the descriptions, and
+hold the test-only JavaScript feed encoder byte-equal to Rust. They also apply every JSON control fixture and compare
+the input builders with the valid input fixtures, some of which are allowed wire forms the client never sends (an empty
+last paste part, for one); they also hold the client's hand-copied input bounds to the invalid input fixtures. Every
+terminal in a terminal host streams this way; old tmux terminals keep their byte streams.
 
 `SessionInfo` carries a `last_activity_at` (unix seconds) beside `created_at`: the last time the supervisor observed
 that session's agent pane change. It was added WITHIN protocol version 11 rather than bumping it, per the running rule

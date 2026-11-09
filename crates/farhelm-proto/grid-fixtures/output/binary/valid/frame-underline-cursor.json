@@ -1,0 +1,14 @@
+{
+  "cols": 1,
+  "cursor": {
+    "blink": false,
+    "shape": "underline",
+    "visible": true,
+    "x": 0,
+    "y": 999
+  },
+  "rev": 9007199254740991,
+  "rows": 1000,
+  "shift": 1,
+  "t": "frame"
+}
