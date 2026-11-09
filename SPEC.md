@@ -2417,6 +2417,17 @@ only when more than one displayed row offers Update; it sends the ordinary autho
 displayed Update hosts, independently. The broader **Update all** inside Hosts still considers every remote host whose
 individual Update action is available. These actions retain their existing confirmations and refusals.
 
+While **Update remote hosts automatically** is off and at least one displayed row offers Update, the attention header
+also offers **Always update**. It requests the same displayed hosts as Update all, then turns on that preference using
+Settings' optimistic save, newest-choice rollback and corrective read. Its tooltip explains that later updates install
+without asking and that Settings → Hosts changes the choice. A failed save leaves the requested updates running and,
+while the preference still reads off, shows an error below the heading explaining that later updates will still wait,
+with **Try again** saving only the preference. The error survives opening and closing Hosts while attention remains, and
+stops applying after a newer choice for that setting. It does not keep an otherwise empty attention list visible. A
+successful save hides Always update and makes Settings show the enabled switch. Button and error visibility changes
+retire session menus anchored below the attention list, just as changes in its rows do; ordinary progress ticks still do
+not.
+
 A close control dismisses only the optional Update rows; required updates, problems and working hosts cannot be
 dismissed. The dismissal leaves the rail badges and hides those reminders until a host outside the dismissed update set
 gains an update or the helm build changes. It lives only in interface memory, so reloading shows optional reminders

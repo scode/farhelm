@@ -22,6 +22,7 @@ import {
 import { requireHelmBuild } from "./helpers/helm-build";
 import { expectKeyboardScroll } from "./helpers/keyboard-scroll";
 import { routeGate } from "./helpers/route-gate";
+import { openSettings } from "./helpers/settings";
 
 type Age = "optional" | "required" | "current" | "newer" | "unreachable";
 type FixtureHost = { id: number; name: string; kind: string; state: Record<string, unknown> } & Record<string, unknown>;
@@ -244,6 +245,56 @@ async function prepare(page: Page, request: APIRequestContext) {
         .toBeGreaterThan(0);
       feed.notify(++revision);
       await expect(page.locator(`[data-host-id="${IDS.current}"] .host-name`)).toHaveText(`current-${generation}`);
+    },
+  };
+}
+
+/**
+ * Keep automatic-update opt-in entirely in the page fixture. The routed hosts
+ * do not exist in the test helm, so no PUT of this field may reach that helm
+ * and authorize updates of its real hosts. Corrective GETs see the same fake
+ * persisted value, while unrelated preference fields retain their real values.
+ */
+async function automaticUpdatePreference(page: Page, initiallyEnabled = false) {
+  let enabled = initiallyEnabled;
+  let refuse = false;
+  let nextGate: ReturnType<typeof routeGate> | undefined;
+  const writes: boolean[] = [];
+  let reads = 0;
+  cleanup.push(["automatic-update preference replies", await drainedRoute(page, "**/api/preferences", async (route) => {
+    const outgoing = route.request();
+    if (outgoing.method() === "GET") {
+      reads++;
+      const response = await route.fetch();
+      const preferences = await response.json();
+      await route.fulfill({ response, json: { ...preferences, auto_update_remote_hosts: enabled } });
+    } else if (outgoing.method() === "PUT" && "auto_update_remote_hosts" in outgoing.postDataJSON()) {
+      const patch = outgoing.postDataJSON();
+      expect(Object.keys(patch)).toEqual(["auto_update_remote_hosts"]);
+      expect(typeof patch.auto_update_remote_hosts).toBe("boolean");
+      writes.push(patch.auto_update_remote_hosts);
+      const fail = refuse;
+      const gate = nextGate;
+      nextGate = undefined;
+      await gate?.wait();
+      if (fail) {
+        await route.fulfill({ status: 503, body: "fixture preference save refused" });
+      } else {
+        enabled = patch.auto_update_remote_hosts;
+        await route.fulfill({ status: 204 });
+      }
+    } else await route.fallback();
+  })]);
+  return {
+    writes,
+    reads: () => reads,
+    setRefused(value: boolean) { refuse = value; },
+    /** Hold only the next save, retaining its refusal choice at admission. */
+    holdNext() {
+      const gate = routeGate();
+      nextGate = gate;
+      releases.push(gate.release);
+      return gate;
     },
   };
 }
@@ -611,6 +662,106 @@ test("one listed update uses its own Update action", async ({ page, request }) =
   await expect(list.getByRole("button", { name: "Update all", exact: true })).toHaveCount(0);
   await attentionRow(page, IDS.one).getByRole("button", { name: "Update", exact: true }).click();
   await expect.poll(() => fixture.updates).toEqual([{ id: IDS.one, method: "POST", body: null }]);
+});
+
+for (const count of [1, 2]) {
+  /** Opt-in must use the displayed Update targets, excluding busy/current/newer hosts. */
+  test(`Always update requests exactly ${count} displayed hosts and enables the shared setting`, async ({ page, request }) => {
+    const preference = await automaticUpdatePreference(page);
+    const fixture = await prepare(page, request);
+    fixture.setAge(IDS.one, "required");
+    if (count === 1) fixture.setAge(IDS.two, "current");
+    await fixture.publish();
+    const list = page.locator(".host-attention-list");
+    await expect(list.locator('[data-attention-kind="update"]')).toHaveCount(count);
+    await expect(list.getByRole("button", { name: "Update all", exact: true })).toHaveCount(count === 1 ? 0 : 1);
+    const action = list.getByRole("button", { name: "Always update", exact: true });
+    await expect(action).toBeVisible();
+    await expect(action).toHaveAttribute("data-tooltip", /listed hosts now.*later updates.*Settings/);
+    await action.click();
+    const wanted = count === 1 ? [IDS.one] : [IDS.one, IDS.two];
+    await expect.poll(() => fixture.updates.map((sent) => sent.id).sort()).toEqual(wanted);
+    await expect.poll(() => preference.writes).toEqual([true]);
+    expect(fixture.updates.every((sent) => sent.method === "POST" && sent.body === null)).toBe(true);
+    await expect(action).toHaveCount(0);
+    const dialog = await openSettings(page, "hosts");
+    await expect(dialog.getByRole("checkbox", { name: "Update remote hosts automatically", exact: true })).toBeChecked();
+    expect(fixture.updates).toHaveLength(count);
+  });
+}
+
+/** An existing opt-in needs no second action; ordinary manual updates stay available. */
+test("Always update is absent when automatic updates are already enabled", async ({ page, request }) => {
+  const preference = await automaticUpdatePreference(page, true);
+  await prepare(page, request);
+  const list = page.locator(".host-attention-list");
+  await expect(list.locator('[data-attention-kind="update"]')).toHaveCount(2);
+  await expect(list.getByRole("button", { name: "Update all", exact: true })).toBeVisible();
+  await expect(list.getByRole("button", { name: "Always update", exact: true })).toHaveCount(0);
+  expect(preference.writes).toEqual([]);
+});
+
+for (const recovery of ["Try again", "Settings"] as const) {
+  /** Hiding attention cannot lose a failed save; either deliberate save supersedes it without repeating host updates. */
+  test(`Always update retains a hidden save failure and recovers through ${recovery}`, async ({ page, request }) => {
+    const preference = await automaticUpdatePreference(page);
+    preference.setRefused(true);
+    const save = preference.holdNext();
+    const fixture = await prepare(page, request);
+    const list = page.locator(".host-attention-list");
+    await expect(list.locator('[data-attention-kind="update"]')).toHaveCount(2);
+    await list.getByRole("button", { name: "Always update", exact: true }).click();
+    await expect.poll(() => preference.writes).toEqual([true]);
+    await expect.poll(() => fixture.updates.map((sent) => sent.id).sort()).toEqual([IDS.one, IDS.two]);
+    await showHostsPanel(page);
+    await expect(list).toHaveCount(0);
+    const reads = preference.reads();
+    save.release();
+    await expect.poll(preference.reads, { message: "failed save must trigger its corrective preference read" })
+      .toBeGreaterThan(reads);
+    await showSessionsPanel(page);
+    const alert = list.getByRole("alert");
+    await expect(alert).toContainText("Could not turn on automatic updates. Later updates will still wait for you.");
+    await expect(alert.getByRole("button", { name: "Try again", exact: true })).toBeVisible();
+    preference.setRefused(false);
+    if (recovery === "Try again") {
+      await alert.getByRole("button", { name: "Try again", exact: true }).click();
+      await expect(alert).toHaveCount(0);
+      const dialog = await openSettings(page, "hosts");
+      await expect(dialog.getByRole("checkbox", { name: "Update remote hosts automatically", exact: true })).toBeChecked();
+    } else {
+      const dialog = await openSettings(page, "hosts");
+      const checkbox = dialog.getByRole("checkbox", { name: "Update remote hosts automatically", exact: true });
+      await expect(checkbox).not.toBeChecked();
+      await checkbox.click();
+      await expect(checkbox).toBeChecked();
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
+      await expect(alert).toHaveCount(0);
+    }
+    await expect.poll(() => preference.writes).toEqual([true, true]);
+    expect(fixture.updates).toHaveLength(2);
+  });
+}
+
+/** A late save warning moves session anchors even when every host row is unchanged. */
+test("Always update save failure retires a session menu measured while the save was pending", async ({ page, request }) => {
+  const preference = await automaticUpdatePreference(page);
+  preference.setRefused(true);
+  const save = preference.holdNext();
+  const { fixture, open, panel, toggle } = await prepareSessionMenu(page, request);
+  await page.locator(".host-attention-list").getByRole("button", { name: "Always update", exact: true }).click();
+  await expect.poll(() => preference.writes).toEqual([true]);
+  await expect.poll(() => fixture.updates.map((sent) => sent.id).sort()).toEqual([IDS.one, IDS.two]);
+  for (const id of [IDS.one, IDS.two]) {
+    await expect(attentionRow(page, id)).toHaveAttribute("data-attention-kind", "working");
+  }
+  await open();
+  await expect(panel).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  save.release();
+  await expect(page.locator(".host-attention-list").getByRole("alert")).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(panel).not.toBeVisible();
 });
 
 /** Dismissal remembers update identities, while required, working and problem rows persist. */
