@@ -32,6 +32,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   sidebar shows at the top while the hosts panel is closed has no hover detail at all. Both should give the same
   information as the dialog: every step with its status, the step in progress, and the run's message.
 
+- **Revisit the rail bell re-reading every host's Trash on each status change.** Decided on the maintainer's behalf on
+  2026-11-09 when landing rail-notification-bell: it landed with each open window re-reading every connected host's
+  Trash whenever any session's status changes and on the client's periodic catch-up refresh. Each read uses one of the
+  host's two folder-browsing slots (shared with the launcher's folder picker), a per-host lock on the helm and a
+  database transaction, even when nothing is stuck. It is bounded and does not feed on itself. The alternative was to
+  change it before landing; the cheap mitigation is to skip the lock and the transaction when nothing is stuck and the
+  host has no unresolved notice, or to read Trash only when a host reports a change.
+
 - **Revisit letting prepared snapshots keep a custom base's own logins.** Decided on the maintainer's behalf on
   2026-11-08 when prepared-snapshots blocked: preparing a snapshot keeps whatever authentication a recipe's custom image
   or snapshot already contains (agent logins, tokens, Git credentials), and hosts made from it inherit that, with the
@@ -556,6 +564,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   doc cites.
 
 ## Deflake
+
+- **Crash-retry create test's Delete refused when the user manager stays silent.**
+  `create_idempotency::a_crash_before_the_outcome_commit_still_replays_the_same_session` in
+  `crates/farhelm/tests/e2e/create_idempotency.rs` failed in two consecutive landing rounds' full Rust runs on
+  Tensorlake sandboxes (runs `cf6e2b79` and `614967f5`): the reopened supervisor's systemd probe appears to run out its
+  15-second bound under load, and Delete then refuses the recorded scope by design. It passes locally and on a lighter
+  rerun. The 2026-09-30 FLAKES.md entry fixed the same exposure in another test by giving it a disabled scope manager;
+  this test likely needs the same, or a scope manager that answers quickly. See FLAKES.md, 2026-11-09.
 
 - **A full browser report exceeded the recorder's inspection bound.** Browser sweep run
   `b0269440-1711-4470-8e18-f6f7ef88bec3` on clean main `2146e607ea9227579740704f2e120ee6192c2525` retained a

@@ -4490,3 +4490,33 @@ host 2 never reached the expected state; last seen Some(Connected { identity: No
 Class: ambiguous-observable
 
 Cause: established
+
+## 2026-11-09 — a crash-retry create's Delete refused while the user manager stayed silent (crates/farhelm/tests/e2e/create_idempotency.rs)
+
+`create_idempotency::a_crash_before_the_outcome_commit_still_replays_the_same_session` failed in two consecutive landing
+rounds' full Rust runs on Tensorlake sandboxes (4 CPUs, 8 GiB, Ubuntu 24.04 clones with systemd as PID 1 and a lingering
+per-user manager), each a workspace nextest archive split by hash partition over nine sandboxes, four slots per sandbox,
+zero retries, through the recorder's generic mode: run `cf6e2b79-c129-4882-9c05-218f4aed65bd` on clean stacked commits
+`2cc53615`/`160f30e2` and run `614967f5-8f43-4dd9-9fcd-c6ba7d693206` on clean stacked commits `68da3700`/`e5fd6349`. The
+tmux was the repository's pinned 3.7c build shipped to the sandbox; its executable SHA256 and the locale were not
+recorded (unavailable). Ambient `FARHELM_*` names were scrubbed by the recorder. Both times the test failed alone in its
+shard, after about 15.3 s against about 1 s for a local pass, on the same assertion: Delete of the retried session
+refused because the recorded `-0.scope` could not be checked while the systemd user manager was "not usable now". The
+test reopens a supervisor on the same state directory; the reopened supervisor's fresh probe of the user manager has a
+15-second bound, which matches the failure's duration, so the probe most likely timed out under the shard's load and
+Delete refused the recorded scope by design, the same exposure as the 2026-09-30 entry for
+`an_ambiguous_planned_checkout_never_adopts_a_foreign_directory`. Reproduction: five consecutive local passes on this
+development machine (run `84880653-65d2-4dd4-8940-b3d7fc663468`, `--stress-count 5`), and three passes each on three
+sandboxes rerunning the create-idempotency and session-lifecycle modules from the same archive (runs `41f38188`,
+`1ad1e77f`, `3aa87de6`), where a different test on one sandbox reported the user manager unusable and skipped. The run
+just before these, on the same sandbox template without the scoped-cleanup change (#3237), passed it; whether that
+change made the probe's timeout likelier is not established. The retained failing runs live on this machine and expire
+with temporary-file cleanup; the failure is quoted below. Disposition: open, excluded from deflake sweeps.
+
+```text
+delete the retried session: killing process tree: the process-tree sweep confirmed nothing is running, but the named cgroup scope(s) could not be torn down (scope farhelm-<session>-0.scope could not be checked because this host's systemd user manager is not usable now, so its cgroup may still hold processes); the session is kept so the operation can be retried
+```
+
+Class: substrate
+
+Cause: hypothesis — the reopened supervisor's user-manager probe ran out its 15-second bound under load.
