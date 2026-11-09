@@ -899,3 +899,36 @@ superseded. The first SSH-registration preflight answer remains valid. Remove th
 monitor's unknown-finality answer when revising the feature's code/spec drafts. Earlier acceptance criteria requiring
 notifications, hidden Hosts rows, membership proof or the deferred additive conveniences cannot revive them during
 review. Every implementation reviewer must receive these Decisions and the amended specifications.
+
+## Blocked
+
+Blocked on 2026-11-09 (claim 27571b).
+
+### Usable Tensorlake API access is needed for the required real-sandbox check
+
+This plan adds sessions that launch into their own disposable Tensorlake sandboxes. The maintainer approved replacing
+the earlier membership and supervisor-policy design with whole-sandbox Delete, data-preserving Replace failures and
+helm-side agent refusal. Those choices and the instruction to remove the old machinery are already recorded in this
+plan's latest Decisions. The replacement draft stack is #3263, #3264 and #3265; do not resume the superseded design.
+
+The plan also requires checking a real launch with a managed checkout, a command, process-preserving Suspend/Resume,
+Stop and suspend, Clone, Delete and the provider's 30-minute timeout value. The account Test with the configured
+development API key is forbidden: a fresh, isolated test helm received Tensorlake HTTP 403. The precise cause, such as
+the key's project or permissions, is unconfirmed. Recorder run `5cd3c736-de85-4a56-bce8-816bb8765757` retains that
+result. The separately signed-in Tensorlake CLI can list sandboxes, but that uses different account credentials and does
+not establish that Farhelm can use the saved API key. No cloud sandbox, snapshot or SSH registration was created during
+this verification attempt.
+
+Please arrange private access to a Tensorlake project API key that can list and create sandboxes, either by correcting
+the existing development credential's access or providing a replacement privately, then resume this plan. The executor
+will save it in its own throwaway test helm's Tensorlake settings. No private handoff mechanism is prescribed here; the
+maintainer should identify one when resuming. Do not put the key in a plan answer or any public artifact. Restoring
+access is recommended: it preserves the required real verification and the approved budget of at most 100 sandboxes
+across the whole plan.
+
+Alternatively, the maintainer could explicitly waive this real-sandbox verification. That would leave real creation,
+checkout and command execution, process preservation across Suspend/Resume, Clone and destructive cleanup unverified
+against Tensorlake. No waiver is assumed. This is missing access, not a product-design decision the landing monitor can
+resolve by choosing an implementation. Keep the plan blocked until usable access or the maintainer's explicit waiver is
+available. Do not substitute the CLI listing, fake-provider tests or local browser tests for real launch/lifecycle
+evidence.
