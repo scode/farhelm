@@ -26,6 +26,26 @@ const { encode } = require("./grid-test-encoder.js");
 const FIXTURES = path.join(__dirname, "fixtures/grid");
 const PLAIN = [0, -1, -1];
 
+/** History has one production input shape: indexed binary decoder output.
+ * Keep raw screen tests at their semantic boundary, but make readable history
+ * feeds use the real decoder so storage tests cannot exercise a legacy branch.
+ */
+function apply(model, message) {
+  model.apply(message.t === "history" && !message.binaryRows ? grid.decodeFrame(encode(message)) : message);
+}
+
+/** Start with a valid descriptor before changing an unrepresentable envelope.
+ * The premise is outside the refusal assertion: an encoder failure must never
+ * masquerade as evidence that the model rejects the intended field.
+ */
+function historyEnvelope(change, first = 0) {
+  const valid = grid.decodeFrame(encode({ t: "history", first, cols: 10, rows: [] }));
+  assert.equal(valid.binaryRows.offsets.length, 1);
+  assert.equal(valid.first, first);
+  assert.equal(valid.cols, 10);
+  return { ...valid, ...change };
+}
+
 /** Readable fixture messages cross the same binary boundary as Rust output. */
 function frames(name) {
   return fs
@@ -210,11 +230,11 @@ test("a scroll of the whole screen or more redraws everything", () => {
 
 test("history must be contiguous, and a reset lets it start anywhere", () => {
   const model = started();
-  model.apply({ t: "history", cols: 10, first: 7, rows: [row([[0, 1, "a", PLAIN]])] });
-  assert.throws(() => model.apply({ t: "history", cols: 10, first: 9, rows: [] }), grid.GridProtocolError);
+  apply(model, { t: "history", cols: 10, first: 7, rows: [row([[0, 1, "a", PLAIN]])] });
+  assert.throws(() => apply(model, { t: "history", cols: 10, first: 9, rows: [] }), grid.GridProtocolError);
   model.apply({ t: "history_reset" });
   assert.equal(model.historyLength, 0);
-  model.apply({ t: "history", cols: 10, first: 100, rows: [row([[0, 1, "b", PLAIN]])] });
+  apply(model, { t: "history", cols: 10, first: 100, rows: [row([[0, 1, "b", PLAIN]])] });
   assert.equal(model.historyFirst, 100);
   assert.deepEqual(historyText(model), ["b"]);
 });
@@ -226,7 +246,7 @@ test("history stays within its cap across many appends", () => {
   let first = 0;
   for (let batch = 0; batch < 50; batch++) {
     const rows = Array.from({ length: 100 }, (_, i) => row([[0, 6, String(first + i).padStart(6, "0"), PLAIN]]));
-    model.apply({ t: "history", cols: 10, first, rows });
+    apply(model, { t: "history", cols: 10, first, rows });
     first += 100;
   }
   assert.equal(model.historyLength, 1000);
@@ -243,7 +263,7 @@ test("evicted history rows are released at once, not at the next compaction", ()
   let first = 0;
   for (let batch = 0; batch < 60; batch++) {
     const rows = Array.from({ length: 100 }, (_, i) => row([[0, 6, String(first + i).padStart(6, "0"), PLAIN]]));
-    model.apply({ t: "history", cols: 10, first, rows });
+    apply(model, { t: "history", cols: 10, first, rows });
     first += 100;
     assert.equal(model.history.retained, model.historyLength, `after ${first} lines`);
   }
@@ -253,9 +273,9 @@ test("evicted history rows are released at once, not at the next compaction", ()
 
 test("a history cap of zero keeps nothing but still checks contiguity", () => {
   const model = started(10, 3, 0);
-  model.apply({ t: "history", cols: 10, first: 0, rows: [row([])] });
+  apply(model, { t: "history", cols: 10, first: 0, rows: [row([])] });
   assert.equal(model.historyLength, 0);
-  assert.throws(() => model.apply({ t: "history", cols: 10, first: 5, rows: [] }), grid.GridProtocolError);
+  assert.throws(() => apply(model, { t: "history", cols: 10, first: 5, rows: [] }), grid.GridProtocolError);
 });
 
 // ## Layout of runs
@@ -310,7 +330,7 @@ test("markup-looking text is kept verbatim as data", () => {
 /** Assert `message` is refused and leaves the model exactly as it was. */
 function refuses(model, message, why) {
   const before = JSON.stringify({ screen: model.screen, pending: [...model.pending], cursor: model.cursor, rev: model.rev, state: model.state });
-  assert.throws(() => model.apply(message), grid.GridProtocolError, why);
+  assert.throws(() => apply(model, message), grid.GridProtocolError, why);
   const after = JSON.stringify({ screen: model.screen, pending: [...model.pending], cursor: model.cursor, rev: model.rev, state: model.state });
   assert.equal(after, before, `${why}: a refused message must not change the model`);
 }
@@ -413,12 +433,13 @@ test("bogus colors and style shapes are refused", () => {
   }
 });
 
-test("runs with the same style share one style object", () => {
-  // History holds up to its cap whether or not it is drawn; sharing the
-  // handful of styles most lines use keeps that memory down.
+test("screen runs with the same style share one style object", () => {
+  // Screen rows remain decoded; their interner must keep sharing styles even
+  // though compact history deliberately has no retained decoded style tree.
   const model = started(10, 3, 10);
-  model.apply({ t: "history", cols: 10, first: 0, rows: [row([[0, 1, "a", [1, 2, -1]], [2, 1, "b", [1, 2, -1]]]), row([[0, 1, "c", [1, 2, -1]]])] });
-  const styles = [model.historyLine(0).runs[0].style, model.historyLine(0).runs[1].style, model.historyLine(1).runs[0].style];
+  model.apply({ t: "rows", rows: [[0, row([[0, 1, "a", [1, 2, -1]], [2, 1, "b", [1, 2, -1]]])], [1, row([[0, 1, "c", [1, 2, -1]]])]] });
+  model.apply(frame(1));
+  const styles = [model.screen[0].runs[0].style, model.screen[0].runs[1].style, model.screen[1].runs[0].style];
   assert.equal(styles[0], styles[1]);
   assert.equal(styles[0], styles[2]);
 });
@@ -494,8 +515,8 @@ test("bad state messages are refused", () => {
 
 test("bad history messages are refused", () => {
   const model = started();
-  refuses(model, { t: "history", cols: 10, first: -1, rows: [] }, "a negative line number");
-  refuses(model, { t: "history", cols: 10, first: 2 ** 60, rows: [] }, "an unsafe line number");
+  refuses(model, historyEnvelope({ first: -1 }), "a negative line number");
+  refuses(model, historyEnvelope({ first: 2 ** 60 }), "an unsafe line number");
   refuses(model, { t: "history", cols: 10, first: 0, rows: [{ w: false, r: [[0, 1, "a", [0, 999, -1]]] }] }, "a bogus color in history");
 });
 
@@ -515,10 +536,10 @@ test("history lines keep the width their message says they were written at", () 
   // Joining soft-wrapped history lines for selection needs each line's own
   // width, which after a resize is not the screen's.
   const model = started(10, 3, 10);
-  model.apply({ t: "history", cols: 40, first: 0, rows: [row([[30, 5, "right", PLAIN]], true)] });
+  apply(model, { t: "history", cols: 40, first: 0, rows: [row([[30, 5, "right", PLAIN]], true)] });
   assert.equal(model.historyLine(0).cols, 40);
   for (const cols of [undefined, 0, 1001, 2.5, "40"]) {
-    refuses(model, { t: "history", cols, first: 1, rows: [] }, `history width ${cols}`);
+    refuses(model, historyEnvelope({ cols }, 1), `history width ${cols}`);
   }
   refuses(model, { t: "history", cols: 20, first: 1, rows: [row([[18, 3, "abc", PLAIN]])] }, "a run past its line's width");
 });
@@ -527,9 +548,9 @@ test("history line numbers stay within JavaScript's safe integers", () => {
   const max = Number.MAX_SAFE_INTEGER;
   const model = started();
   refuses(model, { t: "history", cols: 10, first: max - 1, rows: [row([]), row([]), row([])] }, "a last line past the bound");
-  model.apply({ t: "history", cols: 10, first: max, rows: [] });
+  apply(model, { t: "history", cols: 10, first: max, rows: [] });
   const other = started();
-  other.apply({ t: "history", cols: 10, first: max - 1, rows: [row([]), row([])] });
+  apply(other, { t: "history", cols: 10, first: max - 1, rows: [row([]), row([])] });
   assert.equal(other.historyLength, 2);
 });
 
@@ -614,13 +635,13 @@ test("deferred history is queued on arrival and applied in slices", () => {
   // queue drains.
   const model = started(10, 3, 100);
   model.deferHistory = true;
-  model.apply({ t: "history", cols: 10, first: 0, rows: numbered(0, 10) });
-  model.apply({ t: "history", cols: 10, first: 10, rows: numbered(10, 10) });
+  apply(model, { t: "history", cols: 10, first: 0, rows: numbered(0, 10) });
+  apply(model, { t: "history", cols: 10, first: 10, rows: numbered(10, 10) });
   assert.equal(model.historyLength, 0);
   assert.equal(model.historyPending, true);
   assert.equal(model.screenBase, 20);
   // Contiguity is checked on arrival, not when applied.
-  assert.throws(() => model.apply({ t: "history", cols: 10, first: 25, rows: [] }), grid.GridProtocolError);
+  assert.throws(() => apply(model, { t: "history", cols: 10, first: 25, rows: [] }), grid.GridProtocolError);
   let rows = 0;
   assert.equal(model.drainHistory(() => ++rows >= 7), true);
   assert.equal(model.historyLength, 7);
@@ -639,10 +660,10 @@ test("a queue longer than the cap drops its oldest rows unread", () => {
   // row is never decoded, so a bad one there is not an error.
   const model = started(10, 3, 5);
   model.deferHistory = true;
-  model.apply({ t: "history", cols: 10, first: 0, rows: numbered(0, 3) });
+  apply(model, { t: "history", cols: 10, first: 0, rows: numbered(0, 3) });
   model.drainHistory();
-  model.apply({ t: "history", cols: 10, first: 3, rows: [{ w: false, r: [[0, 1, "x", [0, 999, -1]]] }, ...numbered(4, 3)] });
-  model.apply({ t: "history", cols: 10, first: 7, rows: numbered(7, 4) });
+  apply(model, { t: "history", cols: 10, first: 3, rows: [{ w: false, r: [[0, 1, "x", [0, 999, -1]]] }, ...numbered(4, 3)] });
+  apply(model, { t: "history", cols: 10, first: 7, rows: numbered(7, 4) });
   assert.equal(model.queuedRows, 5);
   model.drainHistory();
   assert.deepEqual(historyText(model), ["6", "7", "8", "9", "10"]);
@@ -658,20 +679,27 @@ test("a queue longer than the cap drops its oldest rows unread", () => {
 test("a history reset discards what is queued before it", () => {
   const model = started(10, 3, 100);
   model.deferHistory = true;
-  model.apply({ t: "history", cols: 10, first: 0, rows: numbered(0, 5) });
+  apply(model, { t: "history", cols: 10, first: 0, rows: numbered(0, 5) });
   model.apply({ t: "history_reset" });
-  model.apply({ t: "history", cols: 10, first: 40, rows: numbered(40, 2) });
+  apply(model, { t: "history", cols: 10, first: 40, rows: numbered(40, 2) });
   model.drainHistory();
   assert.deepEqual(historyText(model), ["40", "41"]);
   assert.equal(model.historyFirst, 40);
   assert.equal(model.takeDamage().historyReset, true);
 });
 
+/** Arrival must not make an invalid retained row visible, and the error must
+ * not depend on anyone scrolling to it or calling historyLine.
+ */
 test("a bad history row is reported when it is applied", () => {
   const model = started(10, 3, 100);
   model.deferHistory = true;
-  model.apply({ t: "history", cols: 10, first: 0, rows: [...numbered(0, 2), row([[8, 3, "abc", PLAIN]])] });
+  apply(model, { t: "history", cols: 10, first: 0, rows: [...numbered(0, 2), row([[8, 3, "abc", PLAIN]])] });
+  assert.equal(model.queuedRows, 3, "premise: valid binary envelopes reached the queue");
+  assert.equal(model.historyLength, 0);
   assert.throws(() => model.drainHistory(), grid.GridProtocolError);
+  assert.equal(model.historyLength, 2);
+  assert.equal(model.historyIdentity(2), undefined);
 });
 
 test("a real reset still voids anchors when the queue it is in is trimmed", () => {
@@ -680,11 +708,11 @@ test("a real reset still voids anchors when the queue it is in is trimmed", () =
   // must stay a real reset (line numbers start over).
   const model = started(10, 3, 10);
   model.deferHistory = true;
-  model.apply({ t: "history", cols: 10, first: 0, rows: numbered(0, 3) });
+  apply(model, { t: "history", cols: 10, first: 0, rows: numbered(0, 3) });
   model.drainHistory();
   model.takeDamage();
   model.apply({ t: "history_reset" });
-  model.apply({ t: "history", cols: 10, first: 50, rows: numbered(50, 11) });
+  apply(model, { t: "history", cols: 10, first: 50, rows: numbered(50, 11) });
   model.drainHistory();
   assert.equal(model.takeDamage().historyReset, true);
   assert.equal(model.historyFirst, 51);

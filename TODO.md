@@ -72,22 +72,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   directory being removed should refuse. Found by the landing review of the macos-remote-hosts plan on 2026-11-08. Plan:
   `plans/queue/mac-uninstall-volume-names.md`.
 
-- **Overhaul the grid stream's encoding and the grid client's history storage.** Grid terminals (terminals in a terminal
-  host) get their screen and history from the supervisor as JSON messages, and the page keeps every history line
-  decoded, as one JavaScript object per run of styled text plus a style object per distinct color pair. Measured in
-  WebKit (the Mac desktop app's engine) at the 12,000-line scrollback cap, 200 columns, growth in resident memory once
-  settled: typical output 44 MiB (xterm.js 65), a different 256-color color in every cell 364 MiB (xterm.js 408), a
-  different true color in every cell 737 MiB (xterm.js 502). The benchmark behind those numbers was never committed. On
-  2026-11-03 the maintainer asked for the wire encoding and the in-memory representation to be overhauled together so
-  that neither is hideously inefficient, and judged making history compact without changing the encoding a waste of
-  time. The shape discussed: one compact binary encoding for the grid stream, which the page stores history in nearly as
-  it arrives, decoding only the rows on screen and the rows that selection, copying, word and link lookups touch.
-  Drawing (one element per visible row) stays as it is, and compressing older history is something to measure afterwards
-  rather than assume. The grid stream is not a permanent format, so a new encoding is an ordinary protocol bump
-  (`crates/farhelm-proto/src/grid.rs`, "Why this shape", which chose JSON for readable traces and to avoid a
-  hand-written binary decoder in the browser, the place where bounds would be easy to get wrong). Commit a benchmark
-  that measures memory, attach size and attach time before and after. Plan: `plans/queue/grid-binary-stream.md`.
-
 - **Bootstrap a Podman image on a remote host.** Automatically bootstrap a Podman image on a remote host, with some
   reasonable defaults, as a supported flow. Plan: `plans/queue/podman-environments.md`.
 
@@ -334,8 +318,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   that works. Flow control skips screen frames while a client is behind but still sends every line that scrolled off as
   history, which is how it never loses output (SPEC.md), so a buffer fed only by the frames the client saw would have
   gaps; and a client attaching to a terminal that already has output has no local history to show. Both need an answer
-  before the shape is settled. Related to, but not the same as, the grid stream encoding overhaul in this bucket, which
-  keeps the split and changes how the same lines are encoded.
+  before the shape is settled. Related to, but not the same as, the grid stream's binary encoding (grid-binary-stream,
+  landed 2026-11-09), which kept the split and changed how the same lines are encoded.
 
 - **Stop the session header's actions collapsing into their tunnel-pill compact style.** On 2026-11-08 the cluster at
   the right of a session's header (zoom, Stop, Restart ▾, Replace ▾, Clone, Delete) was seen drawn cramped, suspected to

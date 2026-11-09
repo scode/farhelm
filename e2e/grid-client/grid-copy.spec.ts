@@ -11,14 +11,17 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 
 const ASSETS = join(__dirname, "../../crates/farhelm-ui/assets");
+const TEST_ENCODER = readFileSync(join(__dirname, "../../crates/farhelm-ui/js-tests/grid-test-encoder.js"), "utf8");
 const ORIGIN = "https://grid.test";
 
 const PAGE = `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
+<script>${TEST_ENCODER}</script>
 <script src="/assets/grid-model.js"></script>
 <script src="/assets/grid-buffer.js"></script>
 </head>
@@ -62,7 +65,7 @@ test("a copy across a wide character's wrap leaves out the empty edge cell, on t
     historyModel.apply({ t: "hello", cols: 4, rows: 3, history_cap: 10 });
     historyModel.apply({ t: "rows", rows: [[0, next]] });
     historyModel.apply({ t: "frame", rev: 1, cols: 4, rows: 3, cursor });
-    historyModel.apply({ t: "history", first: 0, cols: 4, rows: [wrapped] });
+    historyModel.apply(w.farhelmGridModel.decodeFrame(w.farhelmGridTestEncoder.encode({ t: "history", first: 0, cols: 4, rows: [wrapped] })));
     const buffer = w.farhelmGridBuffer;
     const screenBase = screenModel.screenBase;
     const historyBase = historyModel.screenBase;

@@ -1259,7 +1259,7 @@
     // question, about rows still in place and the line still under the
     // pointer, counts (`answerLines`).
     //
-    // A hover rests on the row objects it read, initially captured when its
+    // A hover rests on the line identities it read, initially captured when its
     // `hover()` runs: the lines the link covers, plus its `evidence`
     // lines. OSC 8 links include adjacent tagged rows and their boundaries;
     // printed URLs include the search window and its boundary rows, since
@@ -1269,9 +1269,12 @@
     // unrelated output changes, without another asynchronous container check.
     // Covered-row changes always retire the link: text and provider precedence
     // may have changed even when a recognizer returns the same target.
-    // Rows are immutable and replaced only when the
-    // supervisor sends that row, so "the hover is current" is one identity
-    // check per line. Every path checks it before relying on the hover: a
+    // Screen rows keep their object identity until replaced. History is
+    // decoded on demand, so its identity is a separate stable token with
+    // no reference back to the stored bytes. Rereading a history row must
+    // neither retire an unchanged hover nor let a hover pin evicted data.
+    // "The hover is current" is one identity check per line. Every path
+    // checks it before relying on the hover: a
     // pointer move, the paint after rows changed, and a release. A hover
     // that cannot revalidate its changed neighbors is left first (withdrawing a stale target display
     // and a file link's permission) and the link under the pointer asked for
@@ -1283,7 +1286,7 @@
     // release activates only the link its press was on, still current.
 
     let hoverLink = null;
-    // The row objects the hovered link's `hover()` read, by line number.
+    // The screen objects/history tokens the hover read, by line number.
     let hoverRows = null;
     // The pointer's last event over the terminal.
     let lastPointer = null;
@@ -1295,9 +1298,15 @@
     let admittedClick = null;
     const linkProvider = options.links || null;
 
-    function rowAt(abs) {
-      const line = source().line(abs);
-      return line ? line.row : null;
+    /** Check identity without materializing history just to compare it.
+     * Missing, hidden and still-queued lines all remain absent evidence;
+     * a reset that reuses an absolute number gets a different token.
+     */
+    function rowIdentityAt(abs) {
+      const base = model.screenBase;
+      if (abs >= base && abs < base + model.rows) return model.screen[abs - base];
+      if (!historyShown() || abs < model.historyFirst || abs >= model.historyEnd) return null;
+      return model.historyIdentity(abs - model.historyFirst) || null;
     }
 
     /** The lines a link's hover reads: the lines it covers and its evidence lines. */
@@ -1317,14 +1326,14 @@
     function hoverCurrent() {
       if (!hoverRows) return true;
       let changed = false;
-      for (const [abs, row] of hoverRows) {
-        if (rowAt(abs) === row) continue;
+      for (const [abs, identity] of hoverRows) {
+        if (rowIdentityAt(abs) === identity) continue;
         if (!hoverLink.revalidateEvidence || hoverLink.ranges.some(range => abs >= range.start.abs && abs <= range.end.abs)) return false;
         changed = true;
       }
       if (changed) {
         if (!hoverLink.revalidateEvidence()) return false;
-        for (const abs of hoverRows.keys()) hoverRows.set(abs, rowAt(abs));
+        for (const abs of hoverRows.keys()) hoverRows.set(abs, rowIdentityAt(abs));
       }
       return true;
     }
@@ -1377,10 +1386,10 @@
       // none of them was replaced meanwhile. Output elsewhere does not void
       // it, so links keep appearing while a program writes other rows.
       const depends = new Map();
-      for (const abs of gridBuffer.answerLines(source(), pos.abs)) depends.set(abs, rowAt(abs));
+      for (const abs of gridBuffer.answerLines(source(), pos.abs)) depends.set(abs, rowIdentityAt(abs));
       linkProvider.row(pos.abs, (links) => {
         if (token !== lookup || disposed) return;
-        for (const [abs, row] of depends) if (rowAt(abs) !== row) return;
+        for (const [abs, identity] of depends) if (rowIdentityAt(abs) !== identity) return;
         // Nor is it used for a line that is no longer under the pointer (the
         // view scrolled while the answer was pending).
         const now = lastPointer && pointerInside ? linkCell(lastPointer) : null;
@@ -1421,7 +1430,7 @@
       hoverRows = null;
       if (link) {
         hoverRows = new Map();
-        for (const abs of hoverLineNumbers(link)) hoverRows.set(abs, rowAt(abs));
+        for (const abs of hoverLineNumbers(link)) hoverRows.set(abs, rowIdentityAt(abs));
         decorate(link);
       }
       element.classList.toggle("grid-terminal-link-hover", !!link && link.decorations.pointerCursor);

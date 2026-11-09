@@ -1535,6 +1535,83 @@ async function frame(page: Page, rev: number, rows: [number, string][], rowsInVi
   }, { rev, rows, rowsInView });
 }
 
+/**
+ * A freshly decoded history row is not a redraw of that line. Both a
+ * provider's delayed answer and an established hover must survive reads
+ * and output elsewhere, or links would disappear while a terminal runs.
+ */
+test("a history link keeps its answer and hover across lazy reads and unrelated output", async ({ page }) => {
+  await openGrid(page);
+  await gridWithHeldAnswers(page, 3, ["history link", "second line", "third line"]);
+  const premise = await page.evaluate(() => {
+    const grid = (window as any).harness.grid;
+    grid.scrollLines(-3);
+    grid.flush();
+    const first = grid.model.historyLine(0);
+    const second = grid.model.historyLine(0);
+    return { fresh: first !== second, text: first.runs[0].text, first: grid.model.historyFirst };
+  });
+  expect(premise).toEqual({ fresh: true, text: "history link", first: 0 });
+  expect(await viewport(page)).toMatchObject({ following: false, top: 0 });
+  const at = await cellAt(page, 2, 0);
+  await page.mouse.move(at.x, at.y);
+  await expect.poll(() => page.evaluate(() => (window as any).pending.length)).toBe(1);
+  await frame(page, 2, []);
+  await page.evaluate(() => (window as any).answer());
+  await expect.poll(() => page.evaluate(() => (window as any).hovers.slice())).toEqual([0]);
+  await frame(page, 3, [[2, "busy..."]]);
+  await page.mouse.move(at.x + 1, at.y);
+  expect(await page.evaluate(() => ({
+    hovers: (window as any).hovers.slice(), pending: (window as any).pending.length,
+  }))).toEqual({ hovers: [0], pending: 0 });
+});
+
+/**
+ * A reset can reuse the same absolute line number and text. Only the
+ * stored line's identity distinguishes the old permission check from a
+ * fresh question about the replacement, with the pointer restored to it.
+ */
+test("a late history link answer is refused after a same-number same-text reset", async ({ page }) => {
+  await openGrid(page);
+  const history = ["history link", "second line", "third line"];
+  await gridWithHeldAnswers(page, 3, history);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.harness.grid.scrollLines(-3);
+    w.harness.grid.flush();
+    w.oldHistoryIdentity = w.harness.grid.model.historyIdentity(0);
+  });
+  const at = await cellAt(page, 2, 0);
+  await page.mouse.move(at.x, at.y);
+  await expect.poll(() => page.evaluate(() => (window as any).pending.length)).toBe(1);
+  const replacement = await page.evaluate((history) => {
+    const w = window as any;
+    const grid = w.harness.grid;
+    const send = (message: unknown) => grid.receive(w.farhelmGridTestEncoder.encode(message));
+    send({ t: "history_reset" });
+    send({ t: "history", first: 0, cols: 20, rows: history.map((text) => ({ w: false, r: [[0, text.length, text, [0, -1, -1]]] })) });
+    grid.flush();
+    grid.scrollLines(-3);
+    grid.flush();
+    return {
+      changed: w.oldHistoryIdentity !== grid.model.historyIdentity(0),
+      first: grid.model.historyFirst, text: grid.model.historyLine(0).runs[0].text,
+      pending: w.pending.length,
+    };
+  }, history);
+  expect(replacement).toEqual({ changed: true, first: 0, text: "history link", pending: 1 });
+  expect(await viewport(page)).toMatchObject({ following: false, top: 0 });
+  await page.evaluate(() => (window as any).answer());
+  expect(await page.evaluate(() => (window as any).hovers.slice())).toEqual([]);
+  // A new question over the replacement still works; rejecting the old
+  // answer must not merely have broken link lookup or lost the pointer.
+  await page.mouse.move(at.x, at.y + 3 * (await cell(page)).height);
+  await page.mouse.move(at.x, at.y);
+  await expect.poll(() => page.evaluate(() => (window as any).pending.length)).toBe(1);
+  await page.evaluate(() => (window as any).answer());
+  await expect.poll(() => page.evaluate(() => (window as any).hovers.slice())).toEqual([0]);
+});
+
 test("a late link answer still hovers after output that did not touch its line", async ({ page }) => {
   // A container's link answers wait for host checks; a program writing
   // meanwhile (a cursor-only frame, another row) must not void them, or no

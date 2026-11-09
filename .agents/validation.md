@@ -530,8 +530,8 @@ that its required systemd or SSH substrate ran.
   cost and a resize drag's cost at the full scrollback (bytes, history resets, and arrival times over a simulated 10
   Mbit/s link): run them by hand in release with `--run-ignored only --no-capture --test-threads 1` and
   `-E 'test(/measure_the_(attach|resize)_cost_at_the_scrollback_cap/)'`, the attach ones optionally with
-  `FARHELM_GRID_MEASURE_OUT` naming a directory for their messages (passed with `--keep-farhelm-env`); they assert
-  nothing.
+  `FARHELM_GRID_MEASURE_OUT` naming a directory for their messages, each written as a 4-byte little-endian length and
+  the message (passed with `--keep-farhelm-env`); they assert nothing.
 - Terminal host coverage, when the crate changes:
   `cargo +nightly llvm-cov -p terminal-host --branch --summary-only -- --test-threads=1`, with cargo-llvm-cov 0.9.1
   installed in your scratch directory (`cargo install --locked --root <scratch>/tools cargo-llvm-cov --version 0.9.1`,

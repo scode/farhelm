@@ -85,3 +85,9 @@ Run baseline and candidate interleaved, several times each, with a new result fi
 medians per engine and workload, retaining every raw sample and the load observations. Run one case at a time; parallel
 browser samples would compete for resources and distort the comparison. Measure the baseline before editing the
 encoding. Do not change fixture content, settling rules or transport to make the candidate pass.
+
+The [recorded binary-stream and compact-history comparison](COMPARISON.md) includes both engines' medians, individual
+captures and source identities. Typical Chromium settled memory remains essentially unchanged, missing the original
+all-six memory target. The maintainer accepted that exception on 2026-11-09 because cutting the colored-history
+extremes, with smaller transfers and faster attaches, meets the goal; the comparison records that decision and the
+unchanged data.

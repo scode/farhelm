@@ -1522,9 +1522,10 @@ async fn drain_until(
 /// screen and the end of the history arrive over a simulated 10 Mbit/s link
 /// with 25 ms each way ([`Link`]). Prints one JSON line; with
 /// `FARHELM_GRID_MEASURE_OUT` naming a directory, also writes the data
-/// messages there, one per line (`<kind>.jsonl`), and the output that made
-/// them (`<kind>.raw`), for measuring the grid client's memory and today's
-/// tmux replay of the same output.
+/// messages there (`<kind>.messages`, each a 4-byte little-endian length
+/// followed by the message, since binary rows cannot be split on newlines),
+/// and the output that made them (`<kind>.raw`), for measuring the grid
+/// client's memory and today's tmux replay of the same output.
 async fn measure_attach(kind: &str) {
     let out_dir = std::env::var_os("FARHELM_GRID_MEASURE_OUT").map(std::path::PathBuf::from);
     let (host, _test_host, output) = host_at_the_cap(kind).await;
@@ -1556,12 +1557,15 @@ async fn measure_attach(kind: &str) {
         match frame.kind {
             FrameKind::Data => {
                 messages += 1;
-                if screen_at.is_none() && frame.body.starts_with(br#"{"t":"frame""#) {
+                // A binary frame record starts with a zero byte and kind 2
+                // (SPEC_impl.md, the grid stream's binary records).
+                if screen_at.is_none() && frame.body.starts_with(&[0, 2]) {
                     screen_at = Some(arrived);
                 }
                 if out_dir.is_some() {
+                    let length = u32::try_from(frame.body.len()).expect("a grid message fits u32");
+                    lines.extend_from_slice(&length.to_le_bytes());
                     lines.extend_from_slice(&frame.body);
-                    lines.push(b'\n');
                 }
             }
             FrameKind::Control => break arrived,
@@ -1569,7 +1573,7 @@ async fn measure_attach(kind: &str) {
     };
     task.abort();
     if let Some(dir) = &out_dir {
-        std::fs::write(dir.join(format!("{kind}.jsonl")), &lines).expect("write messages");
+        std::fs::write(dir.join(format!("{kind}.messages")), &lines).expect("write messages");
         std::fs::write(dir.join(format!("{kind}.raw")), &output).expect("write output");
     }
     println!(
