@@ -3581,30 +3581,49 @@ Version 13 adds the one shape on this wire that travels UPWARD as a request: `Co
 socket with the per-session credential — exactly as `farhelm spawn` does — and the supervisor forwards the request to
 the helm, because the session has no route, address, or credential back to the machine the helm runs on. Nothing else
 changed direction then: the helm still learns about sessions by drain, so version 10's "no supervisor-edge push channel"
-held for everything but this (version 33's change hint, below, carries no session data either). The supervisor picks the
-helm that holds an attachment to the asking session — well defined by the one-attachment-per-session rule, and by
-construction the helm the user is looking at, which is also the rule that stays correct if several helms per supervisor
-are ever supported. Request ids are per connection on this protocol and stay that way: the asking process numbers its
-own leg, the supervisor numbers the upcall from a counter it keeps per helm connection, and the relay holds the mapping
-for one round trip.
+held for everything but this (version 33's change hint, below, carries no session data either). The supervisor sends the
+request to the owning helm's newest connection; version 73, below, is how it knows which connection that is. Request ids
+are per connection on this protocol and stay that way: the asking process numbers its own leg, the supervisor numbers
+the upcall from a counter it keeps per helm connection, and the relay holds the mapping for one round trip.
+
+Version 73 changes how the supervisor picks that connection. Until then it picked the one holding a terminal attachment
+to the asking session, on the reasoning that this was the helm the user was looking at and would stay correct if several
+helms per supervisor were ever supported. Both halves were wrong. The UI attaches only the session on screen, so an
+agent in any other session was refused with "no helm is attached to this session" while its helm was connected the whole
+time; a monitor session that launches and deletes other sessions in the background could not use agent commands at all,
+and switching the UI away from a session broke its agent's commands within seconds. And several helms per supervisor is
+ruled out by policy rather than left open: one helm owns each supervisor and every session in it, so there is only one
+right helm to ask, and which session it displays says nothing about that. The supervisor now routes by connection. The
+helm's host connection, the only connection built with an agent-request handler, declares itself in its hello
+(`ControlMsg::Hello::owning_helm`), and the supervisor registers an upward link only for a full-authority connection
+that did. Requests go to the newest such link, because the one case with two is a helm reconnecting while its old
+transport is still half-open, and the old one may never answer. With none registered the request is refused at once with
+"no helm is connected to this host". The declaration exists because the supervisor cannot tell a helm from other
+full-authority peers by anything else (`role` is diagnostic text): the provisioning and update probe sends the same
+`role: "helm"`, sends nothing after its hello, and can connect while the host connection is up, so "the newest
+full-authority connection" would hand requests to a probe that never answers them. The field is not additive within a
+version, because a helm that omitted it would silently stop receiving agent requests; hence the bump, and since a
+mismatched peer is refused at the hello there is no older helm to fall back for. Only declaring connections receive
+change hints too (version 33, below), which loses nothing: in production the host connection is the only one that reads
+them.
 
 Version 33 adds a second message in that direction, `ControlMsg::SessionsChanged`: a content-free hint that something a
 user can see about the host's sessions changed. The helm still learns WHAT changed by drain; the hint only moves the
 drain earlier. The supervisor owes a hint whenever a value it would list actually changes (a pane dying, a status
 transition, the activity and work-start stamps advancing, a restart offer changing, and every lifecycle mutation), never
 merely because a listing was served, so hints and the refreshes they cause cannot feed each other. It coalesces owed
-hints into at most one per 200 ms and sends each on every full-authority connection's ordinary writer queue, dropping it
-rather than blocking when that queue is full. Replies never run a capture sweep or commit outcomes; a pane-death wake
-hints before observation and an outcome change hints again. The helm refreshes the hinted host at once, unless a refresh
-that started with a hint pending began less than that same 200 ms ago (`SESSIONS_CHANGED_MIN_GAP` in the protocol crate,
-which both ends use); then it waits out the rest of the gap, and the one refresh that follows answers every hint that
-arrived meanwhile. Supervisor messages are untrusted, so the helm enforces the gap itself rather than relying on the
-supervisor's spacing. Only a hint's own wake waits: the poll, a user's refresh and a nudge do not. A refresh a hint
-caused always raises a feed event, even when the cache compares equal: a tab opened and exited between two refreshes
-leaves the cache unchanged but a client's optimistic tab behind. The three-second poll stays as the backstop and keeps
-its changed-only rule. A hint stays pending until a refresh that STARTED after it completes; a refresh the helm
-discarded because one of its own seeded writes overtook it is retried as soon as the gap allows rather than left to the
-poll.
+hints into at most one per 200 ms and sends each on the ordinary writer queue of every connection that declared itself
+the owning helm's (version 73, above), dropping it rather than blocking when that queue is full. Replies never run a
+capture sweep or commit outcomes; a pane-death wake hints before observation and an outcome change hints again. The helm
+refreshes the hinted host at once, unless a refresh that started with a hint pending began less than that same 200 ms
+ago (`SESSIONS_CHANGED_MIN_GAP` in the protocol crate, which both ends use); then it waits out the rest of the gap, and
+the one refresh that follows answers every hint that arrived meanwhile. Supervisor messages are untrusted, so the helm
+enforces the gap itself rather than relying on the supervisor's spacing. Only a hint's own wake waits: the poll, a
+user's refresh and a nudge do not. A refresh a hint caused always raises a feed event, even when the cache compares
+equal: a tab opened and exited between two refreshes leaves the cache unchanged but a client's optimistic tab behind.
+The three-second poll stays as the backstop and keeps its changed-only rule. A hint stays pending until a refresh that
+STARTED after it completes; a refresh the helm discarded because one of its own seeded writes overtook it is retried as
+soon as the gap allows rather than left to the poll.
 
 The helm's client closes its transport when its final owning handle drops, even with an unanswered upcall. Answer tasks
 hold writer senders of their own, so closing the client's sender alone cannot make a quiet connection reach EOF. The
@@ -3616,13 +3635,13 @@ final-owner cleanup. Neither path cancels a mutation that has started: only read
 (see "Who owns an accepted action").
 
 The failure vocabulary is two kinds, split by whether a retry is free. `ErrorKind::Unavailable` means nothing is holding
-the request: no helm is attached, its connection died before or during the request, the request could not be delivered
-onto that connection at all, or the helm itself is not in a state to answer — still starting up, shutting down, or
-serving a connection with no fleet behind it. `ErrorKind::Timeout` means the opposite and only that: the request was
-QUEUED for delivery on the helm's connection and no answer arrived within the supervisor's budget. It may or may not
-have reached the helm — the supervisor observes its own writer queue accepting the frame, never the writer transmitting
-it — so a retry is neither provably free nor provably duplicative, and the message says exactly that rather than
-claiming a delivery nobody watched. Closing that residual gap needs a per-frame transmission receipt from the
+the request: no helm is connected to the host, its connection died before or during the request, the request could not
+be delivered onto that connection at all, or the helm itself is not in a state to answer — still starting up, shutting
+down, or serving a connection with no fleet behind it. `ErrorKind::Timeout` means the opposite and only that: the
+request was QUEUED for delivery on the helm's connection and no answer arrived within the supervisor's budget. It may or
+may not have reached the helm — the supervisor observes its own writer queue accepting the frame, never the writer
+transmitting it — so a retry is neither provably free nor provably duplicative, and the message says exactly that rather
+than claiming a delivery nobody watched. Closing that residual gap needs a per-frame transmission receipt from the
 connection's writer, with the answer budget starting at the receipt and a write failure before it reported as
 `Unavailable`; that is the known refinement, deferred because the queue is one `mpsc::Sender<Frame>` shared by every
 attachment site in the supervisor and a receipt changes that type at all of them. Both kinds are emitted by the relay
@@ -9022,7 +9041,7 @@ connection manager sends true for SSH rows and false for Local rows only after i
 identity-less peers, and awaits the reply before publishing Connected. Mismatched and duplicate identities never
 configure. A refusal or missing acknowledgement follows the existing connection attempt deadline and retry path. The
 supervisor applies a process-local boolean before acknowledging; disconnect leaves it in place, while each accepted
-reconnect sets it explicitly. Actual link requests still require the ordinary attached helm. No schema or per-session
+reconnect sets it explicitly. Actual link requests still require the owning helm's connection. No schema or per-session
 placement field is needed: every next launch and new tab reads the current policy.
 
 `LaunchSpec::browser_command` is optional with a serde default for private specs already written on disk. It carries the

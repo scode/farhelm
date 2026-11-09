@@ -269,8 +269,9 @@ fn render(agent: &Command) -> String {
          another card or clone; one never approved still asks. A recorded checkout refusal\n\
          requires a new idempotency key; a changed request under an old key is refused.\n\
          \n\
-         Results come from the helm attached to this session and cover its fleet. If no helm is\n\
-         attached, ask the user to open this session in the Farhelm UI, then retry.\n",
+         Results come from the helm that owns this host and cover its fleet, whether or not\n\
+         this session is on screen. If no helm is connected to this host, ask the user to open\n\
+         Farhelm and check that this host is connected, then retry.\n",
     );
     out
 }

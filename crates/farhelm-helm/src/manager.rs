@@ -7040,6 +7040,7 @@ mod tests {
             role: "supervisor".to_string(),
             host_identity: hello.identity.clone(),
             auth: None,
+            owning_helm: false,
         };
         if writer.write_control(&greeting).await.is_err() {
             return;

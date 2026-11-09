@@ -644,7 +644,7 @@ fn full_self_restart_discovery_refusal_does_not_claim_a_mutation() {
             req_id,
             outcome: AgentOutcome::Err {
                 kind: ErrorKind::Unavailable,
-                message: "no helm is attached to this session".to_string(),
+                message: "no helm is connected to this host".to_string(),
             },
         })
     });
@@ -658,7 +658,7 @@ fn full_self_restart_discovery_refusal_does_not_claim_a_mutation() {
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.contains("no helm is attached to this session"),
+        stderr.contains("no helm is connected to this host"),
         "{stderr}"
     );
     assert!(!stderr.contains("outcome is unknown"), "{stderr}");
@@ -925,9 +925,10 @@ fn a_truncated_listing_prints_its_rows_and_warns_on_stderr() {
 /// Spec: a relay refusal reaches the user as the supervisor's own sentence
 /// on stderr, with nothing on stdout and a non-zero exit.
 ///
-/// The verbatim relay is the point. "No helm is attached to this session"
+/// The verbatim relay is the point. "No helm is connected to this host"
 /// is the relay's defining failure and it comes with its own remedy
-/// ("open it in the farhelm UI"); a CLI that paraphrased it — or that
+/// ("open Farhelm and check that this host is connected"); a CLI that
+/// paraphrased it — or that
 /// printed a half-table before failing — would strip the one thing that
 /// makes the error actionable. Exit status and the empty stdout are the
 /// same contract `farhelm spawn` holds, so a script wrapping either can
@@ -944,9 +945,10 @@ fn a_refusal_is_the_supervisors_own_sentence_on_stderr() {
             req_id,
             outcome: AgentOutcome::Err {
                 kind: ErrorKind::Unavailable,
-                message: "no helm is attached to this session — open the session in the \
-                          farhelm UI and try again"
-                    .to_string(),
+                message: format!(
+                    "no helm is connected to this host — {}",
+                    farhelm_proto::AGENT_UNAVAILABLE_REMEDY
+                ),
             },
         })
     });
@@ -958,7 +960,10 @@ fn a_refusal_is_the_supervisors_own_sentence_on_stderr() {
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.contains("no helm is attached to this session — open the session in the farhelm UI"),
+        stderr.contains(&format!(
+            "no helm is connected to this host — {}",
+            farhelm_proto::AGENT_UNAVAILABLE_REMEDY
+        )),
         "the relay's own sentence must reach stderr verbatim, got: {stderr}"
     );
 }

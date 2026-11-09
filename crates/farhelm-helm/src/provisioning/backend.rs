@@ -2396,6 +2396,10 @@ impl ProvisioningBackend for SystemBackend {
             bytes: Arc::clone(&stdout_bytes),
         });
         let mut writer = FrameWriter::new(stdin);
+        // Plain `handshake`, never `handshake_as_owning_helm`: this probe
+        // answers no agent requests and can run while the host connection
+        // is up, and a supervisor routes agent requests to the newest
+        // connection that declared itself the owning helm's.
         let handshake_result = tokio::select! {
             result = tokio::time::timeout(
                 PROBE_TIMEOUT,

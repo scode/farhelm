@@ -1386,6 +1386,7 @@ async fn a_peer_one_protocol_version_behind_is_refused_before_it_can_attach() {
             role: "helm".to_string(),
             host_identity: None,
             auth: None,
+            owning_helm: false,
         })
         .await
         .unwrap();

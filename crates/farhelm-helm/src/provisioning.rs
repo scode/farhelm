@@ -6825,6 +6825,7 @@ mod tests {
             role: "supervisor".to_string(),
             host_identity: None,
             auth: None,
+            owning_helm: false,
         });
         let cases = [
             (
@@ -6902,6 +6903,7 @@ mod tests {
                 role: "supervisor".to_string(),
                 host_identity: Some("identity-the-refusal-never-conveys".to_string()),
                 auth: None,
+                owning_helm: false,
             })
         };
 
@@ -6998,6 +7000,7 @@ mod tests {
             role: "supervisor".to_string(),
             host_identity: Some("fixture-identity".to_string()),
             auth: None,
+            owning_helm: false,
         });
         // `cat` consumes the helm's hello and returns at the end of input;
         // the loop then keeps the remote, and so its stderr, alive until the
@@ -7080,6 +7083,7 @@ mod tests {
             role: "supervisor".to_string(),
             host_identity: None,
             auth: None,
+            owning_helm: false,
         });
         let script_path = root.path().join("fake-farhelm");
         std::fs::write(

@@ -375,10 +375,13 @@ impl VersionSkew {
 /// than being request/response — so neither end can deadlock waiting for
 /// the other to speak first.
 ///
-/// Sends `ControlMsg::hello(role)` — always `host_identity: None` and
-/// `database_schema: None` — which is correct for the helm (neither value
-/// of its own to report) and for a test double that models an older
-/// supervisor without schema reporting. The one caller that
+/// Sends `ControlMsg::hello(role)` — always `host_identity: None`,
+/// `database_schema: None` and `owning_helm: false` — which is correct for
+/// a helm connection that answers no agent requests (neither identity nor
+/// schema of its own to report, and not the connection agent requests
+/// should reach; the host connection uses [`handshake_as_owning_helm`]),
+/// and for a test double that models an older supervisor without schema
+/// reporting. The one caller that
 /// needs a REAL identity on the wire is the production supervisor
 /// connection loop, which calls [`handshake_with_host_identity`] instead;
 /// see that function's docs for why a separate entry point, rather than a
@@ -445,6 +448,45 @@ pub async fn handshake_with_host_identity<R: AsyncRead + Unpin, W: AsyncWrite + 
             host_identity,
             auth: None,
             database_schema: Some(database_schema),
+            owning_helm: false,
+        },
+    )
+    .await
+}
+
+/// [`handshake`], but declaring this connection the owning helm's
+/// ([`ControlMsg::Hello::owning_helm`]): the one the supervisor sends its
+/// sessions' agent requests to.
+///
+/// The caller is the helm's host connection, the only connection built with
+/// an agent-request handler (`farhelm_helm::client::SupervisorClient`'s
+/// `start_for_host` path). Anything else that speaks to a supervisor with
+/// full authority, such as the provisioning and update probe, goes through
+/// plain [`handshake`] and so never declares. That split matters because
+/// the supervisor routes to the NEWEST declaring connection: a probe that
+/// declared while the host connection was up would take every agent request
+/// and answer none of them.
+///
+/// `role` is not a parameter, for the reason
+/// [`handshake_with_host_identity`] gives: one kind of caller, one role.
+/// A separate entry point rather than a parameter on [`handshake`] follows
+/// the same precedent, keeping the ~80 test call sites of `handshake`
+/// untouched by a value only one production caller ever sets.
+pub async fn handshake_as_owning_helm<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+    reader: &mut FrameReader<R>,
+    writer: &mut FrameWriter<W>,
+) -> std::io::Result<ControlMsg> {
+    handshake_with_hello(
+        reader,
+        writer,
+        ControlMsg::Hello {
+            protocol_version: PROTOCOL_VERSION,
+            build_version: crate::BUILD_VERSION.to_string(),
+            role: "helm".to_string(),
+            host_identity: None,
+            auth: None,
+            database_schema: None,
+            owning_helm: true,
         },
     )
     .await
@@ -472,6 +514,7 @@ pub async fn handshake_with_session_auth<R: AsyncRead + Unpin, W: AsyncWrite + U
             role: "spawn".to_string(),
             host_identity: None,
             auth: Some(auth),
+            owning_helm: false,
         },
     )
     .await
@@ -664,6 +707,7 @@ mod tests {
                 role: "supervisor".into(),
                 host_identity: None,
                 auth: None,
+                owning_helm: false,
             })
             .await
             .unwrap();
@@ -787,6 +831,7 @@ mod tests {
                 role: "supervisor".into(),
                 host_identity,
                 auth,
+                owning_helm: false,
             })
             .await
             .unwrap();
@@ -829,6 +874,7 @@ mod tests {
                 session_id: "s".repeat(crate::MAX_SESSION_ID_BYTES),
                 token: "t".repeat(MAX_SESSION_AUTH_TOKEN_BYTES),
             }),
+            owning_helm: false,
         })
         .await
         .unwrap();
@@ -932,5 +978,48 @@ mod tests {
         let sup_saw = sup.await.unwrap().unwrap();
         assert!(matches!(helm_saw, ControlMsg::Hello { ref role, .. } if role == "supervisor"));
         assert!(matches!(sup_saw, ControlMsg::Hello { ref role, .. } if role == "helm"));
+    }
+
+    /// Spec: `handshake_as_owning_helm` is the one entry point whose hello
+    /// declares `owning_helm`, and plain `handshake` with the same `role`
+    /// does not.
+    ///
+    /// Why: the supervisor routes every agent request to the newest
+    /// connection that declared itself the owning helm's. The provisioning
+    /// probe uses plain `handshake` with `role` "helm" while the host
+    /// connection may be up; if the two entry points ever converged, the
+    /// probe would take the requests and answer none. Both sides of the
+    /// split are read off what the supervisor end actually receives.
+    #[farhelm_testtrace::test]
+    async fn only_the_owning_helm_handshake_declares_itself() {
+        for (declare, expected) in [(true, true), (false, false)] {
+            let (a, b) = tokio::io::duplex(64 * 1024);
+            let (ar, aw) = tokio::io::split(a);
+            let (br, bw) = tokio::io::split(b);
+            let helm = tokio::spawn(async move {
+                let mut r = FrameReader::new(ar);
+                let mut w = FrameWriter::new(aw);
+                if declare {
+                    handshake_as_owning_helm(&mut r, &mut w).await
+                } else {
+                    handshake(&mut r, &mut w, "helm").await
+                }
+            });
+            let mut r = FrameReader::new(br);
+            let mut w = FrameWriter::new(bw);
+            let sup_saw = handshake(&mut r, &mut w, "supervisor").await.unwrap();
+            helm.await.unwrap().unwrap();
+            let ControlMsg::Hello {
+                role, owning_helm, ..
+            } = sup_saw
+            else {
+                panic!("the handshake returns the peer's hello");
+            };
+            assert_eq!(role, "helm", "both entry points speak as the helm");
+            assert_eq!(
+                owning_helm, expected,
+                "declare={declare}: only the owning-helm entry point may set the flag"
+            );
+        }
     }
 }

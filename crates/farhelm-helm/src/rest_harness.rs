@@ -454,6 +454,7 @@ impl PeerBehavior {
             role: "supervisor".to_string(),
             host_identity: self.identity.clone(),
             auth: None,
+            owning_helm: false,
         }
     }
 
@@ -683,6 +684,7 @@ fn identified_hello(frame: farhelm_proto::Frame, behavior: &PeerBehavior) -> far
             host_identity: None,
             auth: None,
             database_schema,
+            owning_helm,
         }) => farhelm_proto::Frame::control(&ControlMsg::Hello {
             database_schema,
             protocol_version,
@@ -690,6 +692,7 @@ fn identified_hello(frame: farhelm_proto::Frame, behavior: &PeerBehavior) -> far
             role,
             host_identity: Some(identity.clone()),
             auth: None,
+            owning_helm,
         }),
         _ => frame,
     }

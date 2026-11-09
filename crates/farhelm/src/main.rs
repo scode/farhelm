@@ -24,10 +24,10 @@
 //! relayed by it to the helm.
 //!
 //! `farhelm spawn` and `farhelm agent create` overlap and both stay: a
-//! spawn creates on the host it runs on, answered by that supervisor
-//! alone, and works with no helm attached; `agent create` goes through the
-//! helm and can therefore name any host in the fleet. The first is the
-//! scripting primitive, the second is the fleet-aware one.
+//! spawn creates on the host it runs on, while `agent create` can name any
+//! host in the fleet. Both are relayed to the helm that owns this host,
+//! which asks the user first. The first is the scripting primitive, the
+//! second is the fleet-aware one.
 //!
 //! `farhelm agent instructions` is the exception on both counts, and
 //! deliberately so: its stdout is prose for a language model rather than a
@@ -71,7 +71,7 @@ enum Cmd {
     ///
     /// The child runs this session's own launch (`--inherit-agent`), or the
     /// launch its launch flags and templates describe. Either way the request
-    /// goes to the helm attached to this session, which asks the user first.
+    /// goes to the helm that owns this host, which asks the user first.
     Spawn {
         /// Child working directory. Relative paths resolve against this
         /// process's real current directory before crossing the wire;
@@ -155,8 +155,8 @@ enum Cmd {
 
 /// The verbs `farhelm agent` currently carries.
 ///
-/// `Instructions` and `Help` render locally; the other verbs use the
-/// attached helm's relay. See [`AgentCmd::verb`] for that boundary.
+/// `Instructions` and `Help` render locally; the other verbs are relayed
+/// to the helm that owns this host. See [`AgentCmd::verb`] for that boundary.
 ///
 /// The creating verbs print DIFFERENTLY from every other verb here, and
 /// the difference is a contract rather than a style: their stdout is the

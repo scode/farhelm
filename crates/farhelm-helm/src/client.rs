@@ -14,7 +14,8 @@ pub use tcp_relays::TcpTunnelAccepted;
 
 use anyhow::bail;
 use farhelm_proto::io::{
-    FrameReader, FrameWriter, ProgressWrite, handshake, parse_control, write_frame_before_stall,
+    FrameReader, FrameWriter, ProgressWrite, handshake, handshake_as_owning_helm, parse_control,
+    write_frame_before_stall,
 };
 use farhelm_proto::{
     ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo, TabInfo, TerminalSelector,
@@ -1726,6 +1727,12 @@ impl SupervisorClient {
     /// Perform the hello handshake and start the demux loop. Fails fast
     /// on protocol-version mismatch — the SPEC.md skew rule fires here,
     /// at connection time, not on first use.
+    ///
+    /// The hello does NOT declare this connection the owning helm's, so the
+    /// supervisor never sends it agent requests or change hints. That is
+    /// right for every caller of this constructor, which has no
+    /// agent-request handler to answer with; the host connection uses
+    /// [`Self::start_for_host`] instead.
     pub async fn start<R, W>(r: R, w: W) -> anyhow::Result<Arc<SupervisorClient>>
     where
         R: AsyncRead + Unpin + Send + 'static,
@@ -1775,6 +1782,11 @@ impl SupervisorClient {
     /// Like [`Self::start`], but able to answer the supervisor's agent
     /// upcalls — the shape the connection manager uses for every real host
     /// (PROTOCOL_VERSION 13).
+    ///
+    /// Its hello declares the connection the owning helm's
+    /// (`ControlMsg::Hello::owning_helm`, protocol 73), which is what makes
+    /// the supervisor route its sessions' agent requests here whatever is
+    /// on screen.
     ///
     /// The handler arrives as a SLOT rather than a value, and reading it
     /// per request rather than capturing it here is what closes a startup
@@ -1847,14 +1859,25 @@ impl SupervisorClient {
         let (w, bytes_written) = ProgressWrite::new(w);
         let mut reader = FrameReader::new(r);
         let mut writer = FrameWriter::new(w);
+        // A connection that answers agent requests declares itself the
+        // owning helm's, and the supervisor then sends its sessions' agent
+        // requests here; one that answers none must not, or the supervisor
+        // would route requests to a connection that can only refuse them.
+        // "Has a handler" is exactly the host connection the manager dials,
+        // so no other plumbing is needed (see `ControlMsg::Hello::owning_helm`).
+        let hello = if agent.is_some() {
+            handshake_as_owning_helm(&mut reader, &mut writer).await?
+        } else {
+            handshake(&mut reader, &mut writer, "helm").await?
+        };
         // Retained rather than discarded: the peer's identity and build
         // reach this process exactly once, here. See [`PeerHello`].
-        // `handshake` guarantees the reply is a `Hello` (anything else is
+        // The handshake guarantees the reply is a `Hello` (anything else is
         // already an `Err` above), so the `else` arm below is unreachable
         // in practice — it is written as a hard failure rather than a
         // silent default so a future change to that guarantee cannot
         // quietly hand every host a `None` identity.
-        let peer = match handshake(&mut reader, &mut writer, "helm").await? {
+        let peer = match hello {
             ControlMsg::Hello {
                 build_version,
                 host_identity,

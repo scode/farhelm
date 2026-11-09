@@ -1,6 +1,6 @@
 //! The shipped `farhelm agent` commands, answered by a real helm through
-//! the real assembly — separate processes, a real socket, a real
-//! attachment.
+//! the real assembly — separate processes, a real socket, and no terminal
+//! open on the asking session.
 //!
 //! # What this covers that nothing else can
 //!
@@ -22,22 +22,25 @@
 //! row as the asker's own.
 //!
 //! This module therefore injects NOTHING: it starts the products, creates
-//! a session (or two) through the helm's own API, attaches to it the way a
-//! browser does, and runs the built `farhelm agent` commands as child
-//! processes carrying only the credentials a real session's agent is
+//! a session (or two) through the helm's own API, and runs the built
+//! `farhelm agent` commands as child processes carrying only the credentials a real session's agent is
 //! given — both the two read-only listings (`hosts`/`sessions`) and, in
 //! this file's second test, the three lifecycle verbs
 //! (`rename`/`stop`), each verified against the real,
 //! post-mutation state a browser's own REST call would see.
 //!
-//! # Why the attachment is part of the fixture
+//! # Why no terminal is opened on the asking session
 //!
-//! The supervisor forwards an upcall to the helm holding an attachment to
-//! the ASKING session (`service::agent_relay`). With nothing attached
-//! there is no helm to ask and the command is refused — correctly — so
-//! attaching is not decoration here: it is what makes the question
-//! answerable at all, and it is the same act (a terminal WebSocket) that
-//! makes it answerable in production.
+//! The supervisor forwards an upcall to the newest connection that
+//! declared itself the owning helm (`service::agent_relay`), whatever is on
+//! screen. Until protocol 73 it asked the connection holding a terminal
+//! attachment to the asking session instead, and these tests opened one
+//! (and retried their first command until the attachment had landed). They
+//! now open none, so every command here is also a real-stack check that an
+//! agent in a session nobody is looking at gets answered. No readiness wait
+//! is needed either: each asking session is created through the helm's own
+//! API, which travels on the helm's host connection, so that connection has
+//! declared itself and registered before any agent command runs.
 
 use crate::harness::*;
 use crate::structured_launches::{fake_harness, observed_argv_in_state};
@@ -56,33 +59,16 @@ pub(crate) fn bare_session_id(reference: &str) -> String {
         .to_string()
 }
 
-/// Open the helm's terminal WebSocket for `session`, and hold it.
+/// Hold one authenticated GUI channel without consuming its frames.
 ///
 /// Hand-rolled down to the upgrade request because no WebSocket client is a
-/// dependency of this workspace and this test needs exactly one thing from
-/// one: that the upgrade SUCCEEDS, so the helm attaches. It never reads a
-/// frame and never sends one — the returned stream exists only to keep the
-/// socket, and therefore the attachment, alive for the rest of the test.
-///
-/// The credential rides `Sec-WebSocket-Protocol` rather than a header,
-/// which is not a quirk of the test: browsers cannot set headers on a
-/// WebSocket handshake, so this is the only way the helm's own client
-/// authenticates one (`farhelm-helm`'s `auth`).
-pub(crate) async fn attach_terminal(
-    helm: &HelmProcess,
-    secret: &str,
-    session: &str,
-) -> tokio::net::TcpStream {
-    hold_gui_socket(
-        helm,
-        secret,
-        &format!("/api/sessions/{session}/term?grid=1"),
-    )
-    .await
-}
-
-/// Hold one authenticated GUI channel without consuming its frames. Terminal channels
-/// route agent requests; the events channel establishes the separate approval-window premise.
+/// dependency of this workspace and these tests need exactly one thing from
+/// one: that the upgrade SUCCEEDS. The events channel is what establishes
+/// the approval-window premise (a card needs a connected GUI); routing does
+/// not depend on any GUI channel. The credential rides
+/// `Sec-WebSocket-Protocol` rather than a header because browsers cannot
+/// set headers on a WebSocket handshake, so this is the only way the helm's
+/// own client authenticates one (`farhelm-helm`'s `auth`).
 async fn hold_gui_socket(helm: &HelmProcess, secret: &str, path: &str) -> tokio::net::TcpStream {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -157,7 +143,7 @@ pub(crate) async fn session_token(state_dir: &std::path::Path, session: &str) ->
 ///
 /// Refusal tests need a failed command's stderr rather than
 /// [`agent_command_args`]'s success-or-panic contract. The shared builder
-/// also supplies the deadline-bounded attachment probe, so both paths use
+/// also supplies the deadline-bounded rename probe, so every path uses
 /// the same identity and the three environment variables injected by the
 /// production launch shim. The supplied full reference is stripped for that
 /// child credential; public verb targets in `args` remain full. Only the child
@@ -261,11 +247,9 @@ async fn host_add_cli_reports_accepted_edited_destination_and_declined() {
         serde_json::json!({"cwd":work.path(), "command":{"command":fixture_cmd("fake-agent --script basic"), "yolo":false}, "title":"host add requester"})).await;
     assert!(status.is_success(), "create requester: {body}");
     let session: SessionInfo = serde_json::from_str(&body).unwrap();
-    let _terminal = attach_terminal(&helm, &secret, &session.id).await;
     let _events = hold_gui_socket(&helm, &secret, "/api/events").await;
     let token = session_token(supervisor.state.path(), &session.id).await;
     let socket = supervisor.state.path().join("supervisor.sock");
-    hosts_until_attached(&session.id, &token, &socket).await;
     allow_agents_without_asking(&client, &helm.base).await;
     let before = get_json(&client, &format!("{}/api/hosts", helm.base)).await;
     for answer in ["allow", "deny"] {
@@ -370,10 +354,8 @@ async fn browser_link_cli_waits_without_fencing_and_reports_each_answer() {
     .await;
     assert!(status.is_success(), "session creation failed: {body}");
     let session: SessionInfo = serde_json::from_str(&body).unwrap();
-    let _terminal = attach_terminal(&helm, &secret, &session.id).await;
     let token = session_token(supervisor.state.path(), &session.id).await;
     let socket = supervisor.state.path().join("supervisor.sock");
-    hosts_until_attached(&session.id, &token, &socket).await;
     let url = "https://example.test/path?full=1#part";
     let mut command = tokio::process::Command::from(agent_command_builder(
         &["open-url", "--", url],
@@ -393,8 +375,8 @@ async fn browser_link_cli_waits_without_fencing_and_reports_each_answer() {
         serde_json::json!([])
     );
 
-    // The event route admits its GUI seat before returning 101, unlike the terminal
-    // attachment whose routing readiness was separately proved above.
+    // The event route admits its GUI seat before returning 101, so the
+    // upgrade completing is enough for the approval premise.
     let _gui = hold_gui_socket(&helm, &secret, "/api/events").await;
     let hosts = get_json(&client, &format!("{}/api/hosts", helm.base)).await;
     let host = hosts["hosts"]
@@ -520,92 +502,6 @@ async fn agent_command_args(
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).expect("the command's stdout is UTF-8")
-}
-
-/// The supervisor's own refusal text when no helm holds a session's
-/// attachment (`service::agent_relay::NO_HELM_ATTACHED`, private to that
-/// crate — matched here by the same literal substring `tests/agent_cli.rs`
-/// and `e2e/agent_relay.rs` already pin it by, rather than by a shared
-/// export).
-const NO_HELM_ATTACHED_REFUSAL: &str = "no helm is attached to this session";
-
-/// Run `farhelm agent hosts` for `session`, retrying while the CLI's
-/// failure is EXACTLY the supervisor's "no helm is attached" refusal, and
-/// return the eventual successful stdout.
-///
-/// # Why this exists: the upgrade completing is not the attachment existing
-///
-/// `attach_terminal` above only proves the WebSocket's 101 response
-/// arrived. Axum answers that upgrade and hands the socket to
-/// `serve_term`'s `on_upgrade` callback as two separate steps, and it is
-/// that CALLBACK — running strictly after the 101 already reached this
-/// test's raw socket — which sends the helm's `Attach` onward to the
-/// supervisor and waits for it to land in `Supervisor::attachments`. So a
-/// caller that treats "the upgrade returned" as "the attachment exists"
-/// is racing the supervisor, not waiting on it.
-///
-/// That race is exactly what turned this test flaky on GitHub's loaded,
-/// `--test-threads=4` 4-vCPU runner (see this file's own module docs):
-/// `farhelm agent hosts` reached `relay_agent_request` before the
-/// `attachments` insert did, and got the same
-/// [`NO_HELM_ATTACHED_REFUSAL`] a session nobody has open in the UI gets —
-/// correctly, for a question asked a moment too early. Locally, and on an
-/// unloaded worker, the window is too narrow to ever lose.
-///
-/// A single frame read on the terminal socket was considered instead and
-/// rejected: nothing in `farhelm-helm`'s terminal handler (`serve_term`,
-/// `Forwarder::run`) promises that the FIRST frame a freshly attached,
-/// freshly created, output-free session ever sends is bound to already
-/// having its row in `attachments` — `Forwarder::run` spawns as a
-/// separate task while the handler still holds that map's lock, so an
-/// aggressively scheduled forwarder could in principle send its
-/// `ReplayComplete` marker before the handler's own `attachments.insert`
-/// runs. Retrying the CLI call instead polls the one fact this test
-/// actually needs, with no assumption about internal task-scheduling
-/// order to keep sound.
-///
-/// Retrying is rearmed by PROGRESS rather than by sleeping a flat budget
-/// (this repo's flake-fix convention): each attempt either succeeds, fails
-/// with this one specific transient refusal (attach still in flight — try
-/// again), or fails some other way, in which case retrying cannot help and
-/// the failure is surfaced immediately instead of spending the rest of the
-/// 20-second budget on it. Once `hosts` succeeds the attachment is proven
-/// present and stays that way for the rest of the test (nothing detaches
-/// the held terminal socket), so nothing later needs to repeat this dance.
-pub(crate) async fn hosts_until_attached(
-    session: &str,
-    token: &str,
-    socket: &std::path::Path,
-) -> String {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    let mut last_refusal = None;
-    loop {
-        let output = command_output_before_deadline(
-            agent_command_builder(&["hosts"], session, token, socket),
-            deadline,
-        )
-        .await
-        .unwrap_or_else(|| panic!(
-            "attachment probe for session {session} exhausted its 20s budget; last completed refusal (None means no response): {last_refusal:?}"
-        ));
-        if output.status.success() {
-            return String::from_utf8(output.stdout).expect("the listing is UTF-8");
-        }
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-        assert!(
-            stderr.contains(NO_HELM_ATTACHED_REFUSAL),
-            "`farhelm agent hosts` failed ({}) for a reason retrying cannot fix: {stderr}",
-            output.status
-        );
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the helm's Attach never reached the supervisor's attachments map within 20s \
-             (still refused: {stderr})"
-        );
-        last_refusal = Some(stderr);
-        // sleep-ok: retry only the attachment-not-yet-present refusal between deadline checks.
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
 }
 
 /// The rows of `output` that the CLI marked with its current-row marker.
@@ -738,13 +634,10 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
     let session: serde_json::Value = serde_json::from_str(&body).expect("created session JSON");
     let session_id = session["id"].as_str().expect("session id").to_string();
 
-    // Held for the rest of the test: the attachment is what tells the
-    // supervisor which helm to forward this session's questions to.
-    let _terminal = attach_terminal(&helm, &secret, &session_id).await;
     let token = session_token(supervisor.state.path(), &session_id).await;
     let socket = supervisor.state.path().join("supervisor.sock");
 
-    let hosts = hosts_until_attached(&session_id, &token, &socket).await;
+    let hosts = agent_command_args(&["hosts"], &session_id, &token, &socket).await;
     assert!(
         hosts.contains("NAME") && hosts.contains("KIND") && hosts.contains("STATE"),
         "the hosts listing must be the CLI's table: {hosts:?}"
@@ -897,23 +790,12 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
     let controller_id = create_session("controller").await;
     let target_id = create_session("before-rename").await;
 
-    // Only the CONTROLLER needs an attachment: the supervisor forwards an
-    // upcall to the helm holding the ASKING session's attachment, and
-    // every `farhelm agent` call below authenticates as the controller —
-    // see the module docs for why the target is named by `--session`
-    // instead of also being attached to.
-    let _terminal = attach_terminal(&helm, &secret, &controller_id).await;
+    // Every `farhelm agent` call below authenticates as the controller and
+    // names the target by `--session`; see the module docs for why acting
+    // on a different session than the asker matters here.
     let token = session_token(supervisor.state.path(), &controller_id).await;
     let socket = supervisor.state.path().join("supervisor.sock");
     let target_url = format!("{}/api/sessions/{target_id}", helm.base);
-
-    // Same CI-runner race as the read-only test above (see
-    // `hosts_until_attached`'s own docs): the controller's `Attach` upcall
-    // reaching the supervisor is not guaranteed by the WebSocket's 101
-    // response alone, and every lifecycle verb below authenticates as the
-    // controller, so its attachment has to be confirmed before the first
-    // one is issued.
-    hosts_until_attached(&controller_id, &token, &socket).await;
 
     // Deliberate self-targeting uses the id and old title from discovery;
     // rename itself triggers no sweep, so it is safe to run from the
@@ -1076,12 +958,8 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
     let session: serde_json::Value = serde_json::from_str(&body).expect("created session JSON");
     let asker_id = session["id"].as_str().expect("session id").to_string();
 
-    let _terminal = attach_terminal(&helm, &secret, &asker_id).await;
     let token = session_token(supervisor.state.path(), &asker_id).await;
     let socket = supervisor.state.path().join("supervisor.sock");
-    // The same attach race every verb in this file has to wait out; see
-    // `hosts_until_attached`'s own docs.
-    hosts_until_attached(&asker_id, &token, &socket).await;
 
     // `create`, naming the host by the DISPLAY NAME the hosts listing
     // reports — the value an agent can actually have read.
@@ -1320,12 +1198,13 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
 
 /// An authenticated agent clone preserves a structured parent's frozen bundle.
 ///
-/// This starts the shipped supervisor and helm, attaches the asking session,
-/// then runs the shipped agent CLI. The fake harness directory is present only
-/// through the supervisor child's fixture-owned login home; the test process
-/// neither finds nor runs a vendor executable. Reading the successor's terminal, live HTTP row, and
-/// durable row distinguishes a real inherited launch from a plausible JSON
-/// reply assembled before the supervisor starts its process.
+/// This starts the shipped supervisor and helm, then runs the shipped agent
+/// CLI from the asking session without attaching it. The fake harness
+/// directory is present only through the supervisor child's fixture-owned
+/// login home; the test process neither finds nor runs a vendor executable.
+/// Reading the successor's terminal, live HTTP row, and durable row
+/// distinguishes a real inherited launch from a plausible JSON reply
+/// assembled before the supervisor starts its process.
 #[farhelm_testtrace::test]
 async fn an_authenticated_agent_clone_starts_a_structured_successor() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
@@ -1377,10 +1256,8 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
         "the structured parent must reach the owned fake executable: {parent_argv}"
     );
 
-    let _terminal = attach_terminal(&helm, &secret, &parent.id).await;
     let token = session_token(supervisor.state.path(), &parent.id).await;
     let socket = supervisor.state.path().join("supervisor.sock");
-    hosts_until_attached(&parent.id, &token, &socket).await;
     let output = spawn_agent_command_args(
         &[
             "clone",
@@ -1525,10 +1402,8 @@ async fn keyed_agent_create_and_clone_need_fresh_approval_after_delete() {
     assert!(status.is_success(), "create the asking session: {body}");
     let asker: SessionInfo = serde_json::from_str(&body).expect("asking session JSON");
     wait_for_agent_ready_at(supervisor.state.path(), &bare_session_id(&asker.id)).await;
-    let _terminal = attach_terminal(&helm, &secret, &asker.id).await;
     let token = session_token(supervisor.state.path(), &asker.id).await;
     let socket = supervisor.state.path().join("supervisor.sock");
-    hosts_until_attached(&asker.id, &token, &socket).await;
     let _gui = hold_gui_socket(&helm, &secret, "/api/events").await;
     let store = SessionStore::open(&supervisor.state.path().join("supervisor.db"), false)
         .await

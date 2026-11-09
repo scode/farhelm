@@ -3460,26 +3460,27 @@ farhelm spawn --cwd /home/user/ws/auth-followup \
 The spawn CLI talks to the session's own supervisor, authenticated by a per-session credential present in the session's
 environment — any process inside the session may spawn, and that is the point. `farhelm spawn` targets the session's own
 host, and only that host, however its launch is chosen; `farhelm agent create` and `farhelm agent clone` below reach any
-host in the fleet. Like every acting `farhelm` command, spawn needs the attached helm, which asks the user before it is
-carried out (see the permission prompts below), so it is refused when no helm is attached, `--inherit-agent` included.
-The helm learns of new sessions automatically; they appear in all clients without manual registration or refresh.
+host in the fleet. Like every acting `farhelm` command, spawn needs the helm that owns the host, which asks the user
+before it is carried out (see the permission prompts below), so it is refused when no helm is connected to the host,
+`--inherit-agent` included. The helm learns of new sessions automatically; they appear in all clients without manual
+registration or refresh.
 
 The CLI's contract, since agents will script against it: on success it prints the child session id to stdout and exits
 zero, and success means the session exists — a child whose agent then fails to launch still exists, in error or exited
 status. Precondition failures exit nonzero with a message on stderr. `--cwd` is required, and the launch is either
 `--inherit-agent` or the launch flags shared with `farhelm agent create` below. `--inherit-agent` explicitly reuses the
 asking session's stored launch, which the session's own supervisor supplies, except that workspace trust follows the
-destination's managed-checkout membership and Settings. The launch flags are resolved by the attached helm, which owns
-templates and composes agent launches. Either is refused with a remedy when no helm is attached. The title is generated
-when omitted. An optional idempotency key makes retries safe: re-running spawn with the same key after a timeout or
-ambiguous outcome returns the existing child rather than creating another. Keys are scoped to the asking session on its
-host and live as long as the child session does: the same key from another session is an unrelated request, never a
-replay of someone else's child, and a replay never returns the asking session itself. The same caller scoping and
-created-session lifetime apply to the idempotency keys of `farhelm agent create` and `farhelm agent clone`, including
-when they target another host. Refusals recorded before any session exists are replayed for 24 hours for all three
-verbs. Guaranteed Farhelm-injected environment: the session id (`$FARHELM_SESSION_ID`) and the per-session credential;
-other Farhelm-specific variables are illustrative, not contract. (The user's login-shell environment is separately
-guaranteed; see Durability.)
+destination's managed-checkout membership and Settings. The launch flags are resolved by the helm, which owns templates
+and composes agent launches. Either is refused with a remedy when no helm is connected. The title is generated when
+omitted. An optional idempotency key makes retries safe: re-running spawn with the same key after a timeout or ambiguous
+outcome returns the existing child rather than creating another. Keys are scoped to the asking session on its host and
+live as long as the child session does: the same key from another session is an unrelated request, never a replay of
+someone else's child, and a replay never returns the asking session itself. The same caller scoping and created-session
+lifetime apply to the idempotency keys of `farhelm agent create` and `farhelm agent clone`, including when they target
+another host. Refusals recorded before any session exists are replayed for 24 hours for all three verbs. Guaranteed
+Farhelm-injected environment: the session id (`$FARHELM_SESSION_ID`) and the per-session credential; other
+Farhelm-specific variables are illustrative, not contract. (The user's login-shell environment is separately guaranteed;
+see Durability.)
 
 Session references handed to clients and agents are full IDs: the host entry's helm-assigned UUID in canonical
 36-character lowercase form, a colon, and the supervisor's opaque session ID. The separator is at that fixed position;
@@ -3503,26 +3504,31 @@ values can only come from a foreign or hand-edited database. A host cannot choos
 full-looking suffix: the helm always adds the reporting entry's prefix.
 
 A session can also ASK, not only create. `farhelm agent <verb>`, run inside a session with the same injected credential
-spawn uses, reaches the helm rather than the session's own supervisor: the supervisor forwards the question to the helm
-currently attached to that session and relays the answer back, because a session has no way to reach the helm's machine
-directly. The verbs are answered with the HELM's view — every host and template it knows, and every session it knows,
-whichever machine they are on — with the asking session and its host marked. That is deliberately wider than spawn's
-own-host-only rule above, which stands unchanged: creating is a local act, asking is not. Every verb goes this way,
-including questions about the session's own host, so there is one answer to what an agent sees. The failure this defines
-is "no helm is attached to this session", reported as such, with opening the session in a client as the remedy — never a
-silent fallback to what the supervisor alone could have answered. The verbs may also ACT — rename, stop, restart, delete
-— on any session named by id, including the asking session when the caller deliberately supplies its id (except Delete),
-with the helm applying its ordinary rules to the operation exactly as it would for a client request. Rename also
-requires the title the caller observed; the owning supervisor compares and changes it atomically, so a stale agent
-cannot overwrite a concurrent rename. Restart requires an explicit `--session` target that can resume its conversation
-(as in the GUI, there is no other kind of restart), and an explicit `--stop-if-running` consent when the target is
-working (an idle, waiting, or unknown target is stopped without it, as in the GUI). It runs only that session's stored
-launch on its owning host and accepts no replacement command. The owning supervisor revalidates both the resume offer
-and the target's status at handling time, and refuses rather than launching anything else when the conversation can no
-longer be resumed. An explicit self restart warns before dispatch that it can interrupt the invoking CLI, lose its
-acknowledgement, and leave resumed task continuation unconfirmed; it never prints an unobserved completion as success.
-There is no `farhelm agent replace`: an agent replacing its own session would be killing itself mid-request, which is a
-design question this version leaves open rather than answers by accident.
+spawn uses, reaches the helm rather than the session's own supervisor: the supervisor forwards the question over the
+connection of the helm that owns it (each supervisor and its sessions are owned by exactly one helm) and relays the
+answer back, because a session has no way to reach the helm's machine directly. Whether the asking session is on screen
+anywhere plays no part: an agent in a session nobody is looking at, such as a monitor that launches and deletes sessions
+in the background, is answered exactly as one on screen. (An earlier rule asked only the helm displaying the session,
+which refused every such agent and reported a connected helm as missing.) The verbs are answered with the HELM's view —
+every host and template it knows, and every session it knows, whichever machine they are on — with the asking session
+and its host marked. That is deliberately wider than spawn's own-host-only rule above, which stands unchanged: creating
+is a local act, asking is not. Every verb goes this way, including questions about the session's own host, so there is
+one answer to what an agent sees. The failure this defines is "no helm is connected to this host", reported as such at
+once, with opening Farhelm and checking that this host is connected as the remedy (the supervisor cannot tell Farhelm
+being closed from Farhelm being unable to reach the host) — never a silent fallback to what the supervisor alone could
+have answered. The verbs may also ACT — rename, stop, restart, delete — on any session named by id, including the asking
+session when the caller deliberately supplies its id (except Delete), with the helm applying its ordinary rules to the
+operation exactly as it would for a client request. Rename also requires the title the caller observed; the owning
+supervisor compares and changes it atomically, so a stale agent cannot overwrite a concurrent rename. Restart requires
+an explicit `--session` target that can resume its conversation (as in the GUI, there is no other kind of restart), and
+an explicit `--stop-if-running` consent when the target is working (an idle, waiting, or unknown target is stopped
+without it, as in the GUI). It runs only that session's stored launch on its owning host and accepts no replacement
+command. The owning supervisor revalidates both the resume offer and the target's status at handling time, and refuses
+rather than launching anything else when the conversation can no longer be resumed. An explicit self restart warns
+before dispatch that it can interrupt the invoking CLI, lose its acknowledgement, and leave resumed task continuation
+unconfirmed; it never prints an unobserved completion as success. There is no `farhelm agent replace`: an agent
+replacing its own session would be killing itself mid-request, which is a design question this version leaves open
+rather than answers by accident.
 
 `farhelm agent delete --session <id> [--stop-if-running]` removes a session with the same teardown and checkout notices
 as the UI's Delete. Without the flag it refuses any agent or terminal tabs still alive; with it, the approval card names
@@ -3870,11 +3876,11 @@ leaves alone is kept, and a remove still goes ahead after a rename.
 
 `farhelm agent instructions` (also spelled `farhelm agent help`) prints the agent-facing account of all of the above:
 the verbs, the `*` marker, that a session's own credential is what authorizes the question, what to do about "no helm is
-attached", that acting verbs may wait up to nine minutes for the user (so run them with a long enough timeout, and give
-creates an idempotency key so a retry returns the same session), and what each refusal means. It is the one verb that
-reaches nothing — no supervisor, no helm, no credential — because it is what an agent runs first, and a manual that
-fails on an unattached session is a manual nobody reads at the moment they need it. The verb list it prints is derived
-from the CLI itself, so it cannot describe a set of verbs that does not exist.
+connected to this host", that acting verbs may wait up to nine minutes for the user (so run them with a long enough
+timeout, and give creates an idempotency key so a retry returns the same session), and what each refusal means. It is
+the one verb that reaches nothing — no supervisor, no helm, no credential — because it is what an agent runs first, and
+a manual that fails while no helm is connected is a manual nobody reads at the moment they need it. The verb list it
+prints is derived from the CLI itself, so it cannot describe a set of verbs that does not exist.
 
 `$farhelm help` in a conversation asks the agent for a brief introduction, the available user-level actions, and a few
 natural-language examples, not a raw CLI help dump. The agent derives the actions from that generated inventory and does
@@ -4498,7 +4504,7 @@ the trash is not refused. This never relaxes the remote-host boundary, removes a
 for a specific case (such as the foreign-replacement guard, the installer keeping a user's file, or uninstall refusing
 unknown app-bundle entries), or accepts database corruption, a bricked installation or similar lasting damage.
 
-A supervisor trusts its attached helm to administer it, launch processes, and forward user input. That trust is
+A supervisor trusts its owning helm to administer it, launch processes, and forward user input. That trust is
 directional: the helm and GUI must treat remote supervisor messages and agent-controlled output as untrusted. A remote
 host must not gain unauthorized execution or access to secrets on the helm's machine or another host through Farhelm.
 Existing redaction promises remain requirements even where the sender already has local account authority.

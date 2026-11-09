@@ -10,9 +10,7 @@
 //! While the helm refuses agent prompts, only the turned-off proof runs; the
 //! delivery proofs are ignored until the re-enable (see the note above them).
 
-use crate::agent_listing_real_stack::{
-    attach_terminal, bare_session_id, hosts_until_attached, session_token,
-};
+use crate::agent_listing_real_stack::{bare_session_id, session_token};
 use crate::harness::*;
 use farhelm_proto::{CommandLaunch, LaunchHarness};
 use std::path::{Path, PathBuf};
@@ -229,8 +227,9 @@ async fn create_recorder(
     recorder
 }
 
-/// Observe a recorder from a fresh full-authority connection without changing
-/// the requesting session's helm attachment. Replay is consumed before the
+/// Observe a recorder from a fresh full-authority connection, one that does
+/// not declare itself the owning helm and so never receives the asking
+/// session's agent requests. Replay is consumed before the
 /// first probe, which must produce new bytes from this recorder process.
 async fn viewer(client: &SupervisorClient, recorder: &Recorder) -> Viewer {
     recorder.assert_alive();
@@ -340,10 +339,8 @@ async fn prove_prompt(agent: LaunchHarness, expect: Expect) {
     trust_local_commands(&client, &helm.base).await;
     let asking = create_recorder(&client, &helm.base, work.path(), "asking", Some(agent)).await;
     let target = create_recorder(&client, &helm.base, work.path(), "target", Some(agent)).await;
-    let _asking_terminal = attach_terminal(&helm, &secret, &asking.session.id).await;
     let token = session_token(supervisor.state.path(), &asking.session.id).await;
     let socket = supervisor.state.path().join("supervisor.sock");
-    hosts_until_attached(&asking.session.id, &token, &socket).await;
 
     let transport = farhelm_supervisor::service::connect(supervisor.state.path())
         .await
@@ -435,8 +432,8 @@ async fn prove_prompt(agent: LaunchHarness, expect: Expect) {
                 || reason.contains("own session"),
             "unexpected refusal: {reason}"
         );
-        // This can replace the asking helm's attachment, so it happens only
-        // after the final CLI call. Its first probe must be the asker's only input.
+        // Attached only after the final CLI call, so its first probe is the
+        // asker's only input.
         let _asking_viewer = viewer(&observer, &asking).await;
     }
 }
