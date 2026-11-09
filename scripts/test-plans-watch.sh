@@ -299,6 +299,19 @@ if expect "wake check gets the lander role" "$d" 0 "changed $A $B"; then
 	fi
 fi
 
+# The same for the monitor's watcher during a landing round, which must reach the check as the block-only role:
+# passed as plain `lander`, it would wake mid-round for completions the round may not take on.
+d=$(case_dir wake-lander-blocks "tree $A" "tree $B")
+make_check "$d" wake
+run_case "$d" --baseline-from "$C" --interval 1 --max-wait 60 --wake-check "$d/bin/wake-check" --wake-for lander-blocks
+if expect "wake check gets the lander-blocks role" "$d" 0 "changed $A $B"; then
+	if [ "$(head -n 1 "$d/checks")" = "--repo owner/name wake-check --baseline $C --ref $P --for lander-blocks" ]; then
+		pass "wake check gets the lander-blocks role"
+	else
+		fail "wake check gets the lander-blocks role" "checks: $(tr '\n' ';' <"$d/checks")"
+	fi
+fi
+
 # Polls that see the baseline tree never run the check.
 d=$(case_dir wake-unchanged "tree $A")
 make_check "$d" wake

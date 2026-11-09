@@ -17,9 +17,9 @@
 #
 # Not every change under plans/ is worth a wake-up, though. With several executors, claims are the most frequent
 # commits there and never give an idle executor work, and the monitor that lands finished plans cares only about plans
-# becoming complete. With --wake-check, a changed tree hash is only a hint: the watcher then asks the queue script
-# whether the difference from the baseline commit is something the agent's role acts on (--wake-for, executor by
-# default), and keeps waiting if not. The tree hash stays the cheap first filter, so the check runs when the tree
+# becoming complete or blocked. With --wake-check, a changed tree hash is only a hint: the watcher then asks the queue
+# script whether the difference from the baseline commit is something the agent's role acts on (--wake-for, executor
+# by default), and keeps waiting if not. The tree hash stays the cheap first filter, so the check runs when the tree
 # changes, not on every poll.
 #
 # The script only reads, through the GitHub API; it never touches a local repository, so it works the same from a
@@ -29,7 +29,8 @@
 # Usage:
 #   scripts/plans-watch.sh --repo OWNER/NAME (--baseline <tree-hash|none> | --baseline-from <commit-id>)
 #                          [--branch main] [--interval SECONDS] [--max-wait SECONDS] [--max-failures N]
-#                          [--request-timeout SECONDS] [--wake-check PATH [--wake-for executor|lander]]
+#                          [--request-timeout SECONDS]
+#                          [--wake-check PATH [--wake-for executor|lander|lander-blocks]]
 #
 # The baseline is the tree hash of plans/ in the main commit the agent's last round selected from, or `none` if that
 # commit has no plans/ directory. --baseline-from <commit-id> asks GitHub for it, through the same request the polls
@@ -40,8 +41,10 @@
 # --wake-check PATH needs --baseline-from, since it compares against that commit. The watcher runs
 # `PATH --repo OWNER/NAME wake-check --baseline <commit-id> --ref <poll-commit> --for <role>` (scripts/plans-queue.py has
 # exactly that interface), which must print `wake` or `ignore`. The role comes from --wake-for: `executor` for a
-# draining executor, `lander` for the monitor. It runs under the same timeout and failure accounting as a request:
-# a check that fails or prints anything else is a failed poll, never a change.
+# draining executor, `lander` for the monitor between landing rounds, and `lander-blocks` for the monitor while a
+# round runs, when only a new block is worth waking it for (plans/.agents/landing.md, "A landing round"). It runs
+# under the same timeout and failure accounting as a request: a check that fails or prints anything else is a failed
+# poll, never a change.
 #
 # Exit status and the one line printed to stdout (nothing goes to stderr, so a harness that captures only stdout, or
 # merges both streams, still sees exactly one line):
@@ -143,7 +146,10 @@ case "$branch" in '' | -* | *[![:alnum:]._-]*) usage "--branch must be a branch 
 [ "$interval" -ge 1 ] || usage "--interval must be at least 1"
 [ "$max_failures" -ge 1 ] || usage "--max-failures must be at least 1"
 [ "$request_timeout" -ge 1 ] || usage "--request-timeout must be at least 1"
-case "$wake_for" in executor | lander) ;; *) usage "--wake-for must be executor or lander, got '$wake_for'" ;; esac
+case "$wake_for" in
+executor | lander | lander-blocks) ;;
+*) usage "--wake-for must be executor, lander or lander-blocks, got '$wake_for'" ;;
+esac
 # Without a check there is nothing to pass the role to, and a monitor whose invocation lost --wake-check would wake on
 # every change under plans/ without a word.
 [ "$wake_for" = executor ] || [ -n "$wake_check" ] || usage "--wake-for needs --wake-check"

@@ -86,4 +86,5 @@ The read-only verbs: `status` (the queue with claims, claim times, open PRs, wai
 person or the monitor should look at, then the landed plans awaiting review; it prints main's commit id first), `check`
 (the invariants of a local tree, or of a remote ref with `--ref`; with `--base <branch>`, also what a planning PR may
 not change), `check-slug <slug>`, `history <slug>` (the plan's recent commits under `plans/`, each with the claim id it
-carried), and `wake-check` (used by the watcher, with `--for executor` or `--for lander`).
+carried), and `wake-check` (used by the watcher, with `--for executor`, `--for lander`, or `--for lander-blocks` for the
+monitor's watcher during a round).

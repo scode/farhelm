@@ -1226,7 +1226,8 @@ class GhApiErrorTest(QueueTestCase):
 
 
 class WakeCheckTest(QueueTestCase):
-    """The watcher's filter: an idle executor wakes only for work it could pick, the monitor only for finished plans."""
+    """The watcher's filter: an idle executor wakes only for work it could pick, the monitor only for finished or
+    blocked plans, and the monitor's watcher during a round only for blocked ones."""
 
     def setUp(self):
         super().setUp()
@@ -1405,6 +1406,29 @@ class WakeCheckTest(QueueTestCase):
         self.set_index(line("pending", "a"), line("blocked", "b"), line("pending", "w"))
         self.assertFalse(self.wakes("lander"), "only the block left at the baseline remains")
 
+    def test_the_round_watcher_wakes_only_for_new_blocks(self):
+        """During a landing round the monitor answers blocks but must not take on newly completed plans, which belong
+        to the next round (`plans/.agents/landing.md`, "A landing round"). So `lander-blocks` wakes for a plan blocked
+        now that was not blocked at the baseline, the same block test as `lander`, and never for a delivery, which
+        would hand the monitor work it may not start until the round ends. A block already present at the baseline
+        (one left for the maintainer, or one the round is answering) does not wake it again."""
+        self.fake.land(
+            "main",
+            {
+                pq.INDEX_PATH: index(line("pending", "a"), line("complete", "b"), line("pending", "w")),
+                pq.report_path("b"): "# R\n",
+            },
+        )
+        self.assertTrue(self.wakes("lander"), "the between-rounds role does wake for the delivery")
+        self.assertFalse(self.wakes("lander-blocks"), "a completion is the next round's")
+        self.set_index(line("pending", "a"), line("complete", "b"), line("blocked", "w"))
+        self.assertTrue(self.wakes("lander-blocks"), "a plan that blocked mid-round")
+        self.baseline = self.fake.refs["main"]
+        self.set_index(line("in-flight 111111", "a"), line("landing 3d4e5f", "b"), line("blocked", "w"))
+        self.assertFalse(self.wakes("lander-blocks"), "blocked at the baseline already")
+        self.set_index(line("blocked", "a"), line("landing 3d4e5f", "b"), line("blocked", "w"))
+        self.assertTrue(self.wakes("lander-blocks"), "a second plan blocking is new")
+
     def test_the_lander_wakes_for_a_redelivery_complete_at_the_baseline(self):
         """The monitor's baseline can predate the last delivery: a plan complete at the baseline is landed, comes back
         through a follow-up, and is delivered again. It is complete in both snapshots, but with a new report, and
@@ -1436,8 +1460,9 @@ class WakeCheckTest(QueueTestCase):
     def test_the_role_is_passed_through_the_command_line(self):
         """The watcher selects the filter with `--for`; an unknown role is a usage error, not a silent executor."""
         h = Harness(self.fake, self.scratch)
-        argv = ("wake-check", "--baseline", self.baseline, "--ref", "main", "--for", "lander")
-        self.assertEqual(h.run(*argv)[1], "ignore\n")
+        for role in ("lander", "lander-blocks"):
+            argv = ("wake-check", "--baseline", self.baseline, "--ref", "main", "--for", role)
+            self.assertEqual(h.run(*argv)[1], "ignore\n", role)
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             h.run("wake-check", "--baseline", self.baseline, "--ref", "main", "--for", "nobody")
 

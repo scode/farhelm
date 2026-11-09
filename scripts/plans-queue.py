@@ -1224,7 +1224,7 @@ def _read_root_file(gh: GitHub, root_tree: str, name: str) -> str:
 # --- Read-only verbs ------------------------------------------------------------------------------------------------
 
 
-WAKE_ROLES = ("executor", "lander")
+WAKE_ROLES = ("executor", "lander", "lander-blocks")
 
 
 def _eligible(snap: Snapshot, index: Index) -> list[tuple[str, str | None]]:
@@ -1272,6 +1272,11 @@ def wake_check(gh: GitHub, baseline: str, ref: str, role: str = "executor") -> b
     blocked at the baseline, because the monitor answers blocks on the maintainer's behalf
     (`plans/.agents/landing.md`, "Answering blocks"). A block it leaves for the maintainer is blocked at the next
     baseline too, so it does not wake the monitor again.
+
+    A lander-blocks check is the monitor's watcher while a landing round runs: it wakes for exactly the lander's block
+    test and never for a completion. A round's plans are fixed when it starts (`plans/.agents/landing.md`, "A landing
+    round"), so a plan completing mid-round waits for the next round whatever wakes the monitor, while a block can be
+    answered beside the round and would otherwise sit until the round ends.
     """
     if role not in WAKE_ROLES:
         raise Usage(f"unknown wake role {role!r}")
@@ -1280,18 +1285,23 @@ def wake_check(gh: GitHub, baseline: str, ref: str, role: str = "executor") -> b
     cache: dict[str, str] = {}
     before, _ = remote_snapshot(gh, baseline, cache)
     after, _ = remote_snapshot(gh, ref, cache)
-    if INDEX_PATH not in before.files or INDEX_PATH not in after.files:
-        if role == "lander" and INDEX_PATH not in after.files:
-            return False
-        return (INDEX_PATH in before.files) != (INDEX_PATH in after.files)
-    old, old_problems = parse_index(before.read(INDEX_PATH))
+    if INDEX_PATH not in after.files:
+        # No queue at `ref` gives the monitor nothing to land or answer; an executor wakes when the queue goes away.
+        return role == "executor" and INDEX_PATH in before.files
     new, new_problems = parse_index(after.read(INDEX_PATH))
-    if role == "lander":
-        was_complete = {(e.slug, before.files.get(report_path(e.slug))) for e in old.entries if e.state == "complete"}
+    if INDEX_PATH not in before.files:
+        # A queue appearing is a change for the roles that wake on change in general; the block-only role still needs
+        # a block in it.
+        return role != "lander-blocks" or any(e.state == "blocked" for e in new.entries)
+    old, old_problems = parse_index(before.read(INDEX_PATH))
+    if role in ("lander", "lander-blocks"):
         was_blocked = {e.slug for e in old.entries if e.state == "blocked"}
-        return any(
-            (e.state == "complete" and (e.slug, after.files.get(report_path(e.slug))) not in was_complete)
-            or (e.state == "blocked" and e.slug not in was_blocked)
+        newly_blocked = any(e.state == "blocked" and e.slug not in was_blocked for e in new.entries)
+        if role == "lander-blocks":
+            return newly_blocked
+        was_complete = {(e.slug, before.files.get(report_path(e.slug))) for e in old.entries if e.state == "complete"}
+        return newly_blocked or any(
+            e.state == "complete" and (e.slug, after.files.get(report_path(e.slug))) not in was_complete
             for e in new.entries
         )
     if old_problems != new_problems:
