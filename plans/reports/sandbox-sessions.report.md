@@ -123,3 +123,149 @@ The required single fresh-context Opus 5.5 reviewer at high effort passed the fu
 comment and test-diagnostic findings were corrected. Its initial result covered only the narrow repair; the same
 reviewer then read the full backend diff and relevant specifications and completed the gate. The original spec and UI
 gates remain applicable to the retained stack. No removed membership or supervisor-policy guarantee was restored.
+
+### Landing
+
+Landed alone, as #3263, #3264 and #3265, on the second landing attempt. Nothing else reached main while the plan was
+being landed, apart from planning bookkeeping, so nothing could interact with it.
+
+#### Why it took two attempts
+
+The first attempt (2026-11-09) stopped before merging anything. One of the helm's tests drives a whole recipe launch
+against a scripted sandbox. It passed once in a full run on a busy machine, failed in the next full run, and failed
+every time when run alone on a quiet one. It exposed a real race. After setting Farhelm up in the new sandbox, the
+launch created the session at once, while the helm's own connection to the sandbox was still being made. The helm
+refused the create with "host is connecting", and the launch then deleted the sandbox it had just paid for. Launches
+against real sandboxes had passed only because something slowed them down enough for the connection to win.
+
+The landing monitor sent the plan back with an instruction to fix the race. The launch had to wait for the helm's
+connection state to settle, not retry on a timer, and it must not mistake the "setting up" state that setup leaves
+behind for a failure. The executor did that: the launch now waits until the new sandbox's connection has settled before
+creating the session. If it settles anywhere other than connected, the launch fails with that state's message and cleans
+up the sandbox as before. That scripted test now passes 20 times out of 20 when run alone.
+
+Sending the plan back was a plain instruction to fix a failing test, so it has no entry to revisit. The plan's earlier
+block, when the Tensorlake API key was lost, was answered by the maintainer.
+
+#### Fixes the landing made
+
+Made during the first attempt, pushed to the plan's branches, and kept by the executor:
+
+- Hover text on every new sandbox control and mark, which SPEC.md's hover rule requires and the plan had left out: the
+  session's Suspend and Resume button, the Stop and suspend actions (in the session row, the session header and the
+  suspend question), the suspend question's buttons, the billing question's Cancel, Create and launch and pricing link,
+  the Copy registration command button, the sandbox mark and the Suspended badges. The template editor's Host field also
+  lost its hover text in this plan; it is back.
+- When setup was retried from Hosts on the entry a session's sandbox had left behind, the sandbox that retry created had
+  no 30-minute idle timeout, which session sandboxes otherwise get. The timeout now follows whether the entry belongs to
+  a session, and a helm test covers that retry.
+- The changelog fragment now also claims #3265. It was added in #3264, so the top PR, a feature, had no fragment of its
+  own.
+- The Tensorlake sandboxes docs page said an ordinary host sandbox suspends after 24 hours without a connection. That
+  applies only on Tensorlake's Usage Credits plan, and the page now says so.
+- A database-upgrade test broke because of the plan's new record of which sandbox belongs to a session. It now removes
+  that record first when it rewinds a database to the older schema.
+- The recipe-preparation browser tests still expected the old status wording. The plan changed it to "the first new host
+  or session prepares it", and the tests now expect that.
+
+#### Reviews
+
+The first attempt's fresh-context review found the hover-text gap and the changelog gap, both fixed above. It found no
+problem with the data the plan adds, its handling of deletion, or how an agent's request to launch into a sandbox is
+refused or billed.
+
+The second attempt's fresh-context review read the executor's race fix and found nothing that must change. Its points
+worth knowing are listed below.
+
+#### Things you should know
+
+From the second review, left as they are:
+
+- A failed Farhelm install inside the sandbox still lets the launch carry on to creating the session; this bug predates
+  the plan. It used to fail at once. With the new wait, it now fails after about 3 minutes and says "unreachable"
+  instead of showing the install error. A fresh session launch takes this install path only when its usual way of
+  attaching to a prepared sandbox does not apply, so it should be rare, but it is a worse experience when it happens.
+  Not recorded anywhere yet; worth a follow-up.
+- If the connection drops between setup finishing and the session being created, the launch now waits through one round
+  of reconnection attempts, up to about 3 minutes, before failing. Meanwhile it keeps one of the helm's four setup
+  slots, which are shared by every host setup, update and sandbox launch, so those may queue behind it.
+- The executor's new tests check the outcome but would not reliably fail without the fix. The older scripted test above
+  fails every time without it, so the race stays covered.
+- Part of the wait, the exclusion of the leftover "setting up" state, never comes into play, because the helm already
+  shows "connecting" by then. It is harmless.
+- The wait could in theory hang forever, but only if the helm's connection handler for the new host crashed twice at
+  specific moments.
+
+From the first review, left as they are:
+
+- Removing an ordinary host now also closes the local ports Farhelm had opened to forward to it. That seems right, but
+  SPEC.md does not say so.
+- Picking a host in the launcher now saves the launcher's draft again even when nothing changed. The review found no
+  visible effect.
+- An agent can tell from the refusal it gets whether a recipe template of a given name exists. It is a minor leak to the
+  agent and was not worth holding the landing for.
+- The page-wide hover-text check (the tooltip-coverage browser spec) never reaches the sandbox states, so no test covers
+  the hover text added above.
+
+Two groups of browser failures in the first attempt's full run came from earlier landings on main, not from this plan:
+
+- the host-settings footer text, from the per-host checkout folder change;
+- a feed test's reader count, from the trash bell.
+
+Those landings ran only a narrowed browser selection, which is how the breakage got through. Draft PR #3275 fixes both
+tests, and its two specs passed on both engines. It waits for the maintainer, because landing a fix outside a plan is
+not the landing monitor's to do.
+
+The four single-engine failures counted as flaky below were each seen in earlier landing rounds, recorded in the landing
+monitor's log. This landing did not check whether FLAKES.md tracks them.
+
+#### Checks
+
+As the maintainer asked for the landings of 2026-11-09, the browser specs ran on Tensorlake sandboxes (cloud test
+machines), and everything else ran on this development machine.
+
+Run now, on the tree that merged (main equals it outside `plans/`):
+
+- Here: `cargo fmt --all -- --check`, the test-sleep checker and
+  `cargo clippy -p farhelm-helm --all-targets -- -D warnings` passed.
+- Here, recorded `cargo nextest run -p farhelm-helm -p farhelm-proto`: 1917 passed, 3 skipped by design (run
+  `d9b84462`). This includes the database-upgrade test the landing fixed and the new idle-timeout retry test.
+- Here, the scripted sandbox launch test alone, 20 times: 20 of 20 passed (runs `06e07295` through `828d8de5`). Before
+  the fix it failed every time this way (run `e9b3c1be`), and once in a full run (run `210c9ac6`).
+- Tensorlake, browser, using the release web build, on Chromium and WebKit: the plan's `tensorlake-sandbox-sessions`
+  spec and `tensorlake-recipes`. 40 passed, none failed, skipped or retried (runs `772d796b`, `b4db20c7`, `e2b19319`,
+  `2b71cbcc`).
+
+Reused from the first attempt. Those runs covered the plan's stack at its top commit `a10ff502`, which already held
+every landing fix except the database-upgrade test and the recipe spec. Since then, the only product code that changed
+is the helm's sandbox launch, which the checks above rerun. The two later test fixes are covered above.
+
+- Here: `dprint check`, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`,
+  `scripts/check-desktop-assets.sh`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop` and the website build
+  passed.
+- Here, the UI's JavaScript unit tests (`node --test`) passed. They ran directly rather than through the recorder, so
+  they have no run id.
+- Here, recorded `cargo nextest run -p farhelm-ui --lib`: 937 passed, none skipped (run `fbbe7feb`).
+- Here, recorded, the agent request paths in `cargo nextest run -p farhelm` (the agent and spawn command tests, agent
+  relay, agent listing against a real stack, prompting a running agent): 84 passed (run `7469c2a4`).
+- Tensorlake, the whole browser suite on ten sandboxes: 3126 passed, 14 skipped by design, 24 failed (runs `f026780a`,
+  `6da9a8f8`, `8d6dac39`, `a46d65aa`, `70937abd`, `66ea5b44`, `11a04617`, `d80bac06`, `6f073f09`, `140d760f`). The
+  failures:
+  - 12 were the recipe-preparation wording, fixed by the landing and passing above.
+  - 8 were already broken on main: the host-settings footer and the feed reader count (draft PR #3275).
+  - 4 were single-engine failures already seen as flaky in earlier rounds: WebKit's popover number popup, WebKit's
+    multi-host launcher retarget, Chromium's provisioning incarnation churn, and Chromium's window-chrome version
+    double-click.
+- Tensorlake, the browser suite's tmux-terminal set on six sandboxes: 107 passed, 1 skipped by design (runs `7d056a13`,
+  `78b40b17`, `f9fbad9f`, `ab8f8145`, `89c306ba`, `000aa7b3`).
+- The browser runs went through the recorder's general command mode, because its Playwright mode always runs both
+  engines and these runs split the engines across sandboxes. The sandbox image runs Node 24, a slightly older release
+  than this machine's. Every sandbox reported that the services the tests rely on (a per-user systemd and SSH to itself)
+  worked.
+
+Reused from the executor: nothing.
+
+Skipped: the workspace's other Rust tests (the plan changes the helm, protocol, UI and the agent request paths, all run
+above), the desktop smoke (no desktop-only code beyond what `cargo check --features desktop` compiles), and hosted CI
+(manual-only, not dispatched).
