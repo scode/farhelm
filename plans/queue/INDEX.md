@@ -2,7 +2,7 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` (or, when the maintainer asks, `[held]`) lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [in-flight 6a74de] `sandbox-sessions.md` — Launch a session in a named Tensorlake sandbox of its own from a recipe (launcher, templates, Clone), with explicit Suspend/Resume, Stop and suspend, Delete removing the sandbox, and agent operations refused (after `prepared-snapshots.md`)
+- [blocked] `sandbox-sessions.md` — Launch a session in a named Tensorlake sandbox of its own from a recipe (launcher, templates, Clone), with explicit Suspend/Resume, Stop and suspend, Delete removing the sandbox, and agent operations refused (after `prepared-snapshots.md`)
 - [complete] `grid-binary-stream.md` — A committed browser memory and attach benchmark, then a binary encoding for new terminals' screen and history messages and compact on-demand-decoded scrollback in the page
 - [pending] `nonblocking-session-actions.md` — Pending Stop, Restart, Replace, Delete and launches no longer block switching sessions or acting on other ones; the acted-on session shows "Stopping…" and keeps its result after a switch
 - [pending] `header-actions-compact.md` — The session header's actions compact only when the header is actually short of room, not whenever a tunnel pill is shown, with a browser test

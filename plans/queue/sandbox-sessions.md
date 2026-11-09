@@ -705,3 +705,41 @@ Suspend, Resume and Stop and suspend act on the shared sandbox, so their wording
 left there. Creating ordinary additional sessions in a sandbox stays forbidden. Record these as narrow exceptions to the
 one-session model and to the Delete guarantee, lasting until the user resolves the failed replacement; no automatic
 cleanup, retry or Resume is added.
+
+## Blocked
+
+Blocked on 2026-11-09 (claim 6a74de).
+
+### Delete when Farhelm cannot tell whether a sandbox is still shared
+
+This plan lets a session launch into its own Tensorlake sandbox. The recorded decision keeps Replace in that sandbox: if
+removing the original fails, the replacement stays and the user may remove the original by hand. Delete removes only the
+chosen session while others remain; deleting the last session destroys the sandbox and its snapshots, including while
+suspended. A non-final Delete refuses while suspended or unreachable, asking the user to Resume or reconnect.
+
+Source review found one case that decision does not settle. Replace can create its replacement and successfully remove
+the original, then lose the removal reply. Farhelm correctly reports that the replacement exists and the original's fate
+is unknown. If the sandbox subsequently suspends, Farhelm cannot contact its supervisor to learn whether one or several
+sessions remain. The replacement may actually be the last session, yet destroying the sandbox without that answer could
+instead kill another session and delete its files.
+
+Keeping durable membership records prevents a stale cache from authorizing destruction, but cannot establish whether
+that unanswered remote removal happened. This is source-based failure analysis, not a reproduced cloud failure. No
+product implementation, PR or real sandbox has been created in this plan. The leading specification draft remains
+ungated. The earlier SSH-registration and ordinary partial-Replace decisions remain settled.
+
+Which behavior should apply only while the number of remaining sessions is unknown?
+
+- Require explicit Resume or reconnect before Delete can determine its consequence. A session proved to be the last
+  still deletes its suspended sandbox directly. This adds a narrow exception: an actually last session may require
+  Resume when Farhelm cannot establish that fact, briefly restarting compute billing. It adds no automatic Resume or new
+  destructive action.
+- Offer explicit destruction of the entire sandbox in this uncertain state. Its confirmation says other sessions may
+  remain and that all of them, their files and the snapshots will be destroyed. This avoids Resume but lets the user
+  deliberately sacrifice a possibly surviving peer; it adds a distinct destructive choice beyond the agreed
+  session-only-versus-final-session Delete.
+
+Recommendation: the first option. It preserves other sessions and the consequences the user confirmed, using the
+existing Resume/reconnect path. The independent scope review found the missing-answer limitation; additional local
+bookkeeping does not remove it. No unknown-finality refusal or whole-sandbox choice has been implemented or silently
+added to the specification.
