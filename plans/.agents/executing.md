@@ -24,9 +24,19 @@ The judgment: take the oldest eligible plan unless it is particularly likely to 
 it would change the same functions, the same spec sections, or substantially the same parts of a file. Touching the same
 crate or the same file is not enough on its own, and these shared bookkeeping files never count: `TODO.md`,
 `TRIAGE_OUTCOMES.md`, `review_feedback_queue/` (its index and the feedback files PRs delete), `releasing/changelog.d/`,
-and `plans/`. A skipped plan is not overtaken on the same ground: a newer candidate that would conflict with an older
-eligible plan already skipped for conflicts is skipped too, or the older one could wait forever. If every eligible plan
-is skipped, take nothing.
+and `plans/`. Adding a schema version to the helm's or the supervisor's database never counts either: two plans that
+each append the next migration step (with its fresh-schema statements, version stamp and historical-schema fixtures)
+only collide at the end of the ladder, and whichever lands second renumbers its step at rebase
+(`.agents/careful-rebase.md`). Two plans that change the same table or column still conflict on that ground.
+
+Skipping a plan for a conflict does not, on its own, hold back newer candidates that conflict with it: a burst of small
+plans may go ahead of a big one that touches what they touch. What bounds the big one's wait is its pass count, which
+`queue status` shows on every eligible or blocked plan as `passed over N`: the number of other plans claimed while it
+was eligible or blocked. Once N reaches the script's limit, status marks the plan `(overdue)`. Skip any candidate that
+would conflict with an eligible overdue plan, wherever that candidate sits in the queue, so the conflicting unlanded
+work drains and the overdue plan starts. Between overdue plans that conflict with each other, the one listed first goes
+first. A blocked overdue plan holds nothing back while it waits for its answer, but its count keeps growing, so it does
+not go back to the end of the line when answered. If every eligible plan is skipped, take nothing.
 
 To judge, read `queue status`, the candidates' plan files, and for unlanded work its plan file and the `gh pr diff` of
 its open PRs. Record the pick and its reasoning in the executor log.
@@ -64,7 +74,8 @@ its open PRs. Record the pick and its reasoning in the executor log.
    in flight with nobody working on it.
 4. Re-check. Run `queue status` again. If a plan claimed since your pick is a strong conflict with this one, give the
    claim back (`queue unclaim`) and pick again from step 2, whose boundary brings the checkout up to the `main` the
-   unclaim just moved.
+   unclaim just moved. The exception is a plan that was overdue when you picked it, racing one that was not: keep the
+   overdue one, and the other plan's executor gives way.
 5. Run `jj git fetch`, then read the plan file from the freshly fetched `main@origin`, including any `## Decisions`. The
    fetch in step 2 came before the pick and the claim, so the local `main@origin` can predate a revision or an answer to
    this plan that landed in between; the claim itself goes through GitHub and does not update it.

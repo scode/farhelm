@@ -695,7 +695,9 @@ class GitHub(Protocol):
 
     def merged_pulls(self, prefix: str) -> list[dict]: ...
 
-    def path_history(self, branch: str, path: str, limit: int) -> list[dict]: ...
+    # Newest first, `limit` per page (at most 100 on GitHub); `page` counts from 1. Each item carries the commit's
+    # `sha` and its `commit.message` and `commit.committer.date`.
+    def path_history(self, branch: str, path: str, limit: int, page: int = 1) -> list[dict]: ...
 
 
 class GhApi:
@@ -787,8 +789,8 @@ class GhApi:
         )
         return [json.loads(line) for line in out.splitlines() if line.strip()]
 
-    def path_history(self, branch: str, path: str, limit: int) -> list[dict]:
-        return self._json(f"commits?sha={branch}&path={path}&per_page={limit}")
+    def path_history(self, branch: str, path: str, limit: int, page: int = 1) -> list[dict]:
+        return self._json(f"commits?sha={branch}&path={path}&per_page={limit}&page={page}")
 
     def pull(self, number: int) -> dict:
         data = self._json(f"pulls/{number}")
@@ -1260,8 +1262,8 @@ def wake_check(gh: GitHub, baseline: str, ref: str, role: str = "executor") -> b
     skip a plan), when an in-flight plan blocks, or when any plan goes on hold. The block case is conservative: a
     plan that blocks before opening any PR stops being unlanded work, so a plan skipped for conflicting with it may now
     be picked; the filter cannot see PRs and wakes for every block, which are rare. A hold wakes for the same reason
-    when it comes from a release, and also when it parks a pending plan: picking never lets a newer plan overtake an
-    older one it skipped for conflicts, so holding the older one can free the newer one. Holds are the maintainer's
+    when it comes from a release, and also when it parks a pending plan: picking does not start work that conflicts
+    with an overdue plan, so holding an overdue one can free the plans it held back. Holds are the maintainer's
     own actions and rare, so waking for every one costs little. Plans leaving eligibility by being claimed never wake
     it, and neither do deliveries, landing claims, or anything that only touches REPORTS.md or the reports.
 
@@ -1350,6 +1352,104 @@ def claim_age(gh: GitHub, branch: str, entry: Entry) -> str | None:
     return None
 
 
+# --- Passes: how long a waiting plan has waited, in queue progress ---------------------------------------------------
+#
+# Picking prefers the oldest eligible plan but skips one that conflicts with unlanded work, and a plan that touches a
+# lot conflicts with something nearly all the time. Left alone, a steady trickle of small plans can keep a big one
+# waiting forever. A pass is another plan claimed while this one waited; once a plan has been passed `OVERDUE_PASSES`
+# times it is overdue, and picking stops starting work that conflicts with it (`plans/.agents/executing.md`,
+# "Picking: "pick a plan to execute", "execute the next plan""). Counting claims rather than hours ties the bound to
+# how much work went past the plan, not to how busy or idle the executors happened to be.
+#
+# Every pass counts, not only the conflicting ones: which candidates conflict is an executor's judgment that nothing
+# records, and an overdue plan only holds back candidates that conflict with it, so counting the harmless passes too
+# only makes it overdue a little sooner.
+
+OVERDUE_PASSES = 4
+
+# How many pages of INDEX.md history (100 commits each) a pass count may read before settling for what it saw.
+_PASS_HISTORY_PAGES = 3
+
+_QUEUE_SUBJECT_RE = re.compile(
+    r"^chore\(plans\): (?P<verb>claim|give back|hold|unhold|release|block|deliver the report for|start landing"
+    r"|stop landing|record the landing of|answer|abandon|request a follow-up on|approve) (?P<slug>[a-z0-9][a-z0-9-]*)$"
+)
+
+# The plan's own commits whose state just before the commit was pending or blocked, i.e. waiting. Every other verb of
+# its own (give back, unhold, release, block, deliver, the landing verbs) started from a state that is not waiting:
+# in flight, held, complete or landing.
+_WAITING_BEFORE = ("claim", "hold", "answer")
+
+
+def count_passes(history: Iterable[dict], entry: Entry, created: str | None) -> int:
+    """How many distinct other plans were claimed while `entry` waited, from INDEX.md history newest first.
+
+    Waiting means pending and eligible, or blocked: a blocked plan is no one's work, and counting its blocked time is
+    what keeps a plan that blocks more than once from going back to the end of the line each time. Time held, in
+    flight, complete or landing does not count, and neither does anything before the plan last became eligible.
+
+    The walk runs backward from the plan's current state and reconstructs the state before each of its own commits,
+    so it relies on the queue script's own commit subjects. It stops at the commit that created the plan file
+    (`created`, when known), a follow-up that put the plan back into INDEX.md (its earlier round was already on main),
+    or the landing or abandoning of something it runs after (before that it was not eligible). History that runs out
+    first gives a lower bound. A dependency dropped by `abandon --dependents drop-dep` is no longer in the plan's line,
+    so the walk does not see that the plan was waiting on it and may count a few passes from before it was eligible.
+
+    Only meaningful for a pending plan whose dependencies have all landed, or a blocked one; callers skip the rest.
+    """
+    waiting = True
+    passed: set[str] = set()
+    for item in history:
+        if created is not None and item.get("sha") == created:
+            break
+        match = _QUEUE_SUBJECT_RE.match(item["commit"]["message"].split("\n", 1)[0])
+        if not match:
+            continue
+        verb, slug = match["verb"], match["slug"]
+        if slug == entry.slug:
+            if verb == "request a follow-up on":
+                break
+            waiting = verb in _WAITING_BEFORE
+        elif slug in entry.deps and verb in ("record the landing of", "abandon"):
+            break
+        elif verb == "claim" and waiting:
+            passed.add(slug)
+    return len(passed)
+
+
+def _plan_created(gh: GitHub, branch: str, slug: str) -> str | None:
+    """The commit that added the plan's file, or None if its history is too long to reach it in one page."""
+    items = gh.path_history(branch, plan_path(slug), 100)
+    return items[-1].get("sha") if items and len(items) < 100 else None
+
+
+class _IndexHistory:
+    """INDEX.md's history newest first, fetched a page at a time and only as far as some caller reads.
+
+    Shared across every plan in one `status` so each page is fetched once however many plans walk it.
+    """
+
+    def __init__(self, gh: GitHub, branch: str):
+        self.gh, self.branch = gh, branch
+        self.items: list[dict] = []
+        self.pages = 0
+        self.exhausted = False
+
+    def __iter__(self):
+        position = 0
+        while True:
+            while position < len(self.items):
+                yield self.items[position]
+                position += 1
+            if self.exhausted or self.pages >= _PASS_HISTORY_PAGES:
+                return
+            self.pages += 1
+            page = self.gh.path_history(self.branch, INDEX_PATH, 100, page=self.pages)
+            self.items.extend(page)
+            if len(page) < 100:
+                self.exhausted = True
+
+
 def _hours_since(path: pathlib.Path, now: datetime.datetime) -> float | None:
     return (now.timestamp() - path.stat().st_mtime) / 3600 if path.exists() else None
 
@@ -1365,12 +1465,16 @@ def status(gh: GitHub, branch: str, logs_dir: pathlib.Path, now: datetime.dateti
     means its PRs were closed and the maintainer must decide), and a pending or held plan that still has open PRs
     (unlanded work from an earlier round, which conflict judgments must count). Landed plans awaiting review are
     listed after the queue.
+
+    Each eligible pending plan and each blocked plan also carries its pass count and whether that makes it overdue
+    (`count_passes`), which picking uses to bound how long a conflicting plan can be passed over.
     """
     head = gh.head(branch)
     snap, _ = remote_snapshot(gh, head, {})
     index, problems = parse_index(snap.read(INDEX_PATH)) if INDEX_PATH in snap.files else (Index("", []), [])
     reports, report_problems = read_reports(snap)
     pulls = gh.open_pulls()
+    index_history = _IndexHistory(gh, branch)
     plans = []
     for entry in index.entries:
         prs = sorted(
@@ -1389,6 +1493,12 @@ def status(gh: GitHub, branch: str, logs_dir: pathlib.Path, now: datetime.dateti
             "log_quiet_hours": None if log_age is None else round(log_age, 1),
             "flags": [],
         }
+        # Passes are reported only for plans that are waiting their turn: eligible pending ones and blocked ones.
+        # Overdue is a field, not a flag, because the monitor acts on every flag and this one is for executors.
+        if entry.state == "blocked" or (entry.state == "pending" and not item["deps_waiting"]):
+            passes = count_passes(index_history, entry, _plan_created(gh, branch, entry.slug))
+            item["passes"] = passes
+            item["overdue"] = passes >= OVERDUE_PASSES
         if entry.claim:
             since = claim_age(gh, branch, entry)
             item["claimed_at"] = since
@@ -1442,6 +1552,8 @@ def render_status(data: dict) -> str:
         parts = [f"[{state}] {plan['slug']}"]
         if plan["deps_waiting"]:
             parts.append("waits on " + ", ".join(plan["deps_waiting"]))
+        if "passes" in plan:
+            parts.append(f"passed over {plan['passes']}" + (" (overdue)" if plan["overdue"] else ""))
         if plan["open_prs"]:
             parts.append("PRs " + ", ".join(f"#{p['number']}" for p in plan["open_prs"]))
         if plan.get("claimed_at"):
