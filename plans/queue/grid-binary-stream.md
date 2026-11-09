@@ -363,3 +363,55 @@ passed its review gate, and the last code PR makes the TODO.md changes the accep
 If a `## Decisions` section exists, its latest entry must also be satisfied. Then close the plan per
 `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write
 a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-11-09 (claim 5fd194).
+
+### Typical Chromium memory did not clearly improve
+
+Opening or reconnecting to a new terminal transfers its screen and scrollback to the page. The old JSON stream and fully
+decoded scrollback were expensive, especially when every cell had a different color. This plan was to replace both
+representations together, preserving drawing, selection, copying and links. The agreed success criterion requires
+clearly lower settled resident-memory growth for typical, indexed-color and true-color output in both Chromium and
+WebKit, smaller transfers and attach time no worse.
+
+The three draft PRs implement the benchmark, binary screen/history messages and compact scrollback with decoding on
+demand. Three interleaved main/candidate pairs at 12,000 history lines and 200 columns give these medians, in MiB of
+resident growth after requesting garbage collection:
+
+| Engine   | Output        |  Main | Candidate |
+| -------- | ------------- | ----: | --------: |
+| Chromium | Typical       |  29.2 |      29.0 |
+| Chromium | Indexed color | 185.3 |     101.7 |
+| Chromium | True color    | 313.8 |     100.3 |
+| WebKit   | Typical       |  63.2 |      59.7 |
+| WebKit   | Indexed color | 727.0 |     265.9 |
+| WebKit   | True color    | 896.2 |     296.9 |
+
+Typical Chromium's exact medians are 30,617,600 versus 30,457,856 bytes, only 0.52% lower. The raw ranges overlap:
+30,138,368–30,732,288 versus 29,851,648–31,952,896 bytes. That is not evidence of a clear reduction, so the full target
+is unmet. Transfers are 16% smaller for typical output and 41%/53% smaller for the two colored streams; attach-time
+medians improve in all six cases. The committed comparison includes both full metric tables, every raw sample and the
+limits of Linux process-RSS measurements; these are not Mac desktop measurements.
+
+The work already avoids decoding printable text merely to validate it, after profiling identified that allocation cost.
+A further bounded attempt removed a permanent byte-view wrapper from every stored line while preserving each line's
+independent allocation. Neither attempt established a clear typical Chromium memory reduction. The benchmark workloads,
+accounting and thresholds were not changed to obtain a pass. The original TODO entry remains.
+
+May this plan finish with typical Chromium memory treated as essentially unchanged, or must it continue until that case
+clearly improves too? I recommend accepting this narrow exception: the measured colored-history gains and lower transfer
+size/time are substantial, while the original all-six memory criterion remains unsatisfied without that explicit
+decision. A resumed executor would record the exception in its final report and remove the addressed TODO entry only
+after completing the plan under that decision.
+
+The alternative is to keep the original target and authorize further storage investigation. Sharing immutable message
+storage between lines is one possible experiment, but would change the present per-line release contract: evicting one
+line could retain its bytes until the last line sharing that message is gone. Compression, caches and changes to drawing
+remain outside the agreed scope. No such experiment has been implemented or measured, and success is uncertain.
+
+The reviewed drafts remain open and must not land as a completed plan until this is answered:
+[benchmark #3245](https://github.com/scode/farhelm/pull/3245/changes),
+[binary transfers #3252](https://github.com/scode/farhelm/pull/3252/changes), and
+[compact scrollback and comparison #3255](https://github.com/scode/farhelm/pull/3255/changes).
