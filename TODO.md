@@ -33,13 +33,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   information as the dialog: every step with its status, the step in progress, and the run's message. Plan:
   `plans/queue/host-progress-hover.md`.
 
-- **Revisit requiring Resume before deleting a sandbox session whose sandbox may be shared.** Decided on the
-  maintainer's behalf on 2026-11-09 when sandbox-sessions blocked: when Farhelm cannot tell how many sessions remain in
-  a suspended or unreachable sandbox (a Replace removed its original but the reply was lost), Delete refuses and asks
-  the user to Resume or reconnect first, so an actually last session may briefly restart billing. The alternative was an
-  explicit "destroy the whole sandbox" choice whose confirmation warns that other sessions may remain, which avoids the
-  Resume but can kill a surviving session and delete its files.
-
 - **Revisit the rail bell re-reading every host's Trash on each status change.** Decided on the maintainer's behalf on
   2026-11-09 when landing rail-notification-bell: it landed with each open window re-reading every connected host's
   Trash whenever any session's status changes and on the client's periodic catch-up refresh. Each read uses one of the
