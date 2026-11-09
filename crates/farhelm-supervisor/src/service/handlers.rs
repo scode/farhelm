@@ -1263,8 +1263,8 @@ async fn handle_delete_session(
         // invalidating the very credential mid-flight.
         // A relay already holds the asking session's fence. Waiting here
         // on an agent delete could cycle against the target deleting its
-        // asker, even when the two requests use different helms. Refuse the
-        // contender without releasing either request's authority fence.
+        // asker. Refuse the contender without releasing either request's
+        // authority fence.
         let _agent_fence = if refuse_if_agent_request_in_flight {
             let Some(fence) = mutation_sup.agent_request_locks.try_claim(&mutation_id) else {
                 return (Err(RequestError::new(ErrorKind::Conflict,
@@ -2253,8 +2253,10 @@ struct RestartSessionRequest {
 }
 
 /// Snapshot authoritative target facts for an approval card. Any attachment
-/// counts, including terminal tabs and clients connected through another helm.
-/// The snapshot may age while approval waits; no attachment lock crosses I/O.
+/// this supervisor holds for the session counts, terminal tabs included: the
+/// supervisor's attachment table is the authority on which terminals are held,
+/// which the helm's channel registry cannot answer. The snapshot may age while
+/// approval waits; no attachment lock crosses I/O.
 async fn handle_prompt_target_info(
     sup: &Arc<Supervisor>,
     tx: &mpsc::Sender<Frame>,

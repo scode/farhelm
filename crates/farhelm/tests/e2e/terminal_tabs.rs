@@ -2698,11 +2698,12 @@ async fn input_client_failure_safely_reaps_queued_output_before_reattach() {
 ///
 /// Losing the transport bypasses the explicit `Detach` request. The connection
 /// tail must therefore retain attachment ownership while it shuts down the
-/// per-terminal clients and releases its sink lease; otherwise another helm
-/// can see an empty slot, overlap the old output client, and reproduce tmux
-/// 3.7b's queued-pane abort. The session sink may be handed directly to the
-/// replacement because it never carries output. A successful replacement
-/// reply is the observable boundary for every output-bearing client.
+/// per-terminal clients and releases its sink lease; otherwise an attach from
+/// another connection can see an empty slot, overlap the old output client,
+/// and reproduce tmux 3.7b's queued-pane abort. The session sink may be
+/// handed directly to the replacement because it never carries output. A
+/// successful replacement reply is the observable boundary for every
+/// output-bearing client.
 ///
 /// Old terminals: tmux's control-mode output queue.
 #[farhelm_testtrace::test]
