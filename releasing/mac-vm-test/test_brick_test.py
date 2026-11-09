@@ -11,6 +11,7 @@ import io
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tarfile
@@ -19,7 +20,7 @@ import unittest
 import uuid
 from unittest import mock
 
-from brick_test import Run, artifact, checks, metadata, plan, priority_entry, smoke, version
+from brick_test import REPO, UPGRADE_FLOOR, Run, artifact, checks, metadata, plan, priority_entry, smoke, version
 from control import Control, Refused, atomic_json
 from machine_profile import Profile
 from test_machine_profile import fixture
@@ -54,9 +55,35 @@ class FakeSource:
 class PlanningTests(unittest.TestCase):
     """Pin candidate selection and the full supported-old-version coverage."""
 
+    def test_upgrade_floor_agrees_with_the_installer_and_helm(self):
+        """A floor raise must keep release coverage aligned with the shipped update gates.
+
+The coordinator stays usable without building Rust, so its literal is checked
+against the shared source constant rather than loading a compiled helper.
+"""
+        source = (REPO / 'crates/farhelm-proto/src/version.rs').read_text()
+        floors = re.findall(r'^pub\s+const\s+UPGRADE_FLOOR\s*:\s*&str\s*=\s*"([^"]+)"\s*;',
+                            source, re.MULTILINE)
+        self.assertEqual(len(floors), 1, 'expected one shared Rust upgrade-floor constant')
+        self.assertEqual(UPGRADE_FLOOR, 'v' + floors[0])
+
+    def test_the_supplied_floor_bounds_the_previous_stable_pairs(self):
+        """Raising the floor removes unsupported sources without weakening the remaining pairs.
+
+Use fictional fixed floors: this policy test must survive a future production
+raise, and a floor beyond every previous stable must fail before guest setup.
+"""
+        result = plan('v0.25.0', 'v0.24.0', FakeSource(), floor='v0.24.0')
+        self.assertEqual([v['id'] for v in result['passes']],
+                         ['p0-fresh', 'p0-installer-upgrade', 'p0-updater-upgrade',
+                          'fresh', 'upgrade-v0.24.0'])
+        self.assertTrue(all(v['previous'] == 'v0.24.0' for v in result['passes']))
+        with self.assertRaisesRegex(Refused, 'from v0.25.0 onward'):
+            plan('v0.25.0', 'v0.24.0', FakeSource(), floor='v0.25.0')
+
     def test_previous_stable_leads_and_older_supported_pairs_remain_required(self):
         """Testing only the latest old stable must not silently waive older upgrade contracts."""
-        result = plan('v0.25.0', 'v0.24.0', FakeSource())
+        result = plan('v0.25.0', 'v0.24.0', FakeSource(), floor='v0.23.0')
         self.assertEqual([v['id'] for v in result['passes']],
                          ['p0-fresh', 'p0-installer-upgrade', 'p0-updater-upgrade',
                           'fresh', 'upgrade-v0.24.0', 'upgrade-v0.23.0'])
@@ -81,17 +108,17 @@ fresh fixture keeps its four checkpoints.
     def test_override_uses_old_source_and_never_selects_an_rc(self):
         """A candidate's support cannot make an unsupported old app use its override."""
         source = FakeSource(['v0.24.0'])
-        stable = plan('v0.25.0', 'v0.24.0', source)
+        stable = plan('v0.25.0', 'v0.24.0', source, floor='v0.23.0')
         self.assertEqual(stable['passes'][1]['update_path'], 'manual')
         self.assertEqual(stable['passes'][2]['update_path'], 'override')
         self.assertEqual(stable['passes'][4]['update_path'], 'override')
         self.assertEqual(stable['passes'][5]['update_path'], 'manual')
-        rc = plan('v0.25.0-rc.1', 'v0.24.0', source)
+        rc = plan('v0.25.0-rc.1', 'v0.24.0', source, floor='v0.23.0')
         self.assertTrue(all(v['update_path'] == 'manual' for v in rc['passes'] if v['update_path'] is not None))
 
     def test_promoted_candidate_is_an_ordinary_rehearsal(self):
         """After-publication testing still uses older versions, never candidate-to-itself."""
-        result = plan('v0.24.0', 'v0.24.0', FakeSource())
+        result = plan('v0.24.0', 'v0.24.0', FakeSource(), floor='v0.23.0')
         self.assertTrue(all(v['previous'] == 'v0.23.0' for v in result['passes']))
         self.assertEqual(result['passes'][1]['update_path'], 'manual')
         self.assertEqual(result['passes'][2]['update_path'], 'ordinary')
@@ -99,14 +126,14 @@ fresh fixture keeps its four checkpoints.
     def test_downgrades_missing_old_source_and_unsafe_tags_are_refused(self):
         """Invalid gate inputs must fail before any VM can be created."""
         with self.assertRaises(Refused):
-            plan('v0.23.0', 'v0.24.0', FakeSource())
+            plan('v0.23.0', 'v0.24.0', FakeSource(), floor='v0.23.0')
         class MissingStable(FakeSource):
             """Omit the promoted release even though an older eligible tag exists."""
             def tags(self):
                 """Expose the incomplete source prerequisite independently of planning."""
                 return ['v0.23.0']
         with self.assertRaisesRegex(Refused, 'promoted stable is missing'):
-            plan('v0.25.0', 'v0.24.0', MissingStable())
+            plan('v0.25.0', 'v0.24.0', MissingStable(), floor='v0.23.0')
         for value in ('--help', '../release', 'v01.2.3', 'v1.2.3-rc.01'):
             with self.subTest(tag=value), self.assertRaises(Refused):
                 version(value)
@@ -256,7 +283,7 @@ class WorkflowTests(unittest.TestCase):
         self.free = 20 * 1024 ** 3
         self.run = Run(self.evidence / ('brick-' + str(uuid.uuid4())), self.profile,
                        factory=self.model.factory, disk_usage=lambda path: usage(self.free), connector=self.model.connect)
-        self.plan = plan('v0.25.0', 'v0.24.0', FakeSource())
+        self.plan = plan('v0.25.0', 'v0.24.0', FakeSource(), floor='v0.23.0')
         # These lifecycle/evidence regressions resume a historical manifest.
         # Keep that premise explicit so the new P0 scheduling fence cannot
         # mask the ownership or evidence failure each test exists to observe.
@@ -636,7 +663,7 @@ authentication, GUI outcome or product verdict is borrowed by these tests.
         self.run = Run(self.evidence / ('brick-' + str(uuid.uuid4())), self.profile,
                        factory=self.model.factory, connector=self.model.connect,
                        disk_usage=lambda path: namedtuple('Usage', 'free')(self.free))
-        release = plan(candidate, 'v0.24.0', FakeSource(['v0.24.0'] if supported else []))
+        release = plan(candidate, 'v0.24.0', FakeSource(['v0.24.0'] if supported else []), floor='v0.23.0')
         release['sha256sums_sha256'] = 'fixture-checksum'
         self.run.create(release, p0_only=p0_only, p1_only=p1_only)
 

@@ -70,9 +70,10 @@ class GuestTesterTests(unittest.TestCase):
 
 P0 uses plain identifiers, but each bonus baseline embeds a dotted stable tag.
 This composes the real planner and validator, so a hand-shaped task cannot hide
-that cross-phase naming mismatch.
+that cross-phase naming mismatch. Its fixed floor preserves the fictional
+historical pass names when a later release raises the production boundary.
 """
-        coverage = plan('v0.25.0', 'v0.24.0', FakeSource(['v0.23.0', 'v0.24.0']))
+        coverage = plan('v0.25.0', 'v0.24.0', FakeSource(['v0.23.0', 'v0.24.0']), floor='v0.23.0')
         for entry in coverage['passes']:
             value = dict(task(), pass_id=entry['id'])
             with self.subTest(pass_id=entry['id']):

@@ -49,11 +49,13 @@ procedure. Host Tart window binding is needed only during fixture setup; actual 
 inside the guest.
 
 Run this gate **before** moving `/latest` to the candidate. It is expected that `/latest` still names the preceding
-promoted stable; do not treat that difference as a blocker or ask to promote first. Upgrade baselines run from v0.23.0
-through that public default, excluding unpromoted intervening tags. For an old app that supports it, quit and relaunch
-inside the Mac guest with `open --env FARHELM_DESKTOP_UPDATE_LATEST=vX.Y.Z "$HOME/Applications/Farhelm.app"`, then use
-the in-app updater. Older apps use the manual candidate-installer path. Follow the procedure's verification and override
-removal checks in both cases.
+promoted stable; do not treat that difference as a blocker or ask to promote first. Upgrade baselines run from the
+candidate's upgrade floor through that public default, excluding unpromoted intervening tags. The initial floor is
+v0.23.0; `UPGRADE_FLOOR` in `brick_test.py` stays equal to the shared Rust constant, checked by the portable unit suite.
+For an old app that supports it, quit and relaunch inside the Mac guest with
+`open --env FARHELM_DESKTOP_UPDATE_LATEST=vX.Y.Z "$HOME/Applications/Farhelm.app"`, then use the in-app updater. Older
+apps use the manual candidate-installer path. Follow the procedure's verification and override removal checks in both
+cases.
 
 During fixture setup only, read `releasing/mac-vm-test/OPERATIONS.md`, "Computer use and continuity", before entering
 guest text. Update those notes and `releasing/mac-vm-test/BRICK-TEST.md`, "Release brick tests", when a new Tart input
@@ -187,6 +189,13 @@ fallback.
 Run commands from the Farhelm checkout with Python 3.11 or newer. Replace the release placeholder with the requested
 exact tag. Do not interpret `vX.Y.Z` literally.
 
+Before `plan` or `init`, compare the candidate tag's `UPGRADE_FLOOR` in `crates/farhelm-proto/src/version.rs` with the
+running checkout's literal in `brick_test.py`. A candidate predating the Rust constant has the documented v0.23.0 floor.
+They must agree: testing an earlier-base candidate with a newer checkout's higher floor would silently omit supported
+upgrade sources. If they differ, stop planning and use a coordinator checkout whose floor matches the candidate before
+continuing. The portable agreement test checks the two constants within one checkout; it cannot establish this
+candidate-tag comparison for the operator.
+
 ### Resolve permissions during fixture setup
 
 During environment readiness and basic coverage planning, inventory the permissions needed for the **requested scope**
@@ -242,7 +251,7 @@ window binding is confined to the infrequent fixture setup procedure.
 
 - Confirm release tags are available in the checkout; fetch missing tags from its normal Git remote if authorized.
   `python3 -B releasing/mac-vm-test/brick_test.py plan vX.Y.Z` performs read-only release discovery. It resolves the
-  candidate commit, observes `https://get.farhelm.io/latest`, lists eligible stable upgrades from v0.23.0 onward and
+  candidate commit, observes `https://get.farhelm.io/latest`, lists eligible stable upgrades from the upgrade floor and
   checks candidate installer metadata availability. Availability and an advertised hash are **not** signature
   verification. Needed payloads and the previous releases' inputs must also exist for their actual guest flows.
 - Upgrade baselines run through the stable named by `/latest`, excluding the candidate itself. A newer intervening tag

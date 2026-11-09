@@ -40,6 +40,9 @@ from checkpoint_contract import turn_timeout
 REPO = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 ORIGIN = 'https://get.farhelm.io'
+# Keep this standalone coordinator's baseline equal to farhelm-proto's floor.
+# test_upgrade_floor_agrees_with_the_installer_and_helm catches a one-sided raise.
+UPGRADE_FLOOR = 'v0.23.0'
 PROVIDER_BACKOFF = (60, 120, 240)
 
 
@@ -163,16 +166,21 @@ def update_path(candidate, latest, supports_override):
             'override' if target[3] == 1 and supports_override else 'manual')
 
 
-def plan(candidate, latest, source):
+def plan(candidate, latest, source, floor=UPGRADE_FLOOR):
     """Cover every source-known eligible stable through the promoted stable.
 
 A standard gate cannot silently test a downgrade or choose the candidate as its
 own previous release. Three independent P0 fixtures exercise fresh install,
 installer upgrade and updater upgrade before the broader acceptance passes.
 The filled release addendum must identify any historical availability gap.
+The caller must establish that the supplied floor matches the candidate's
+source before planning; BRICK-TEST.md requires this manual comparison for real
+runs. Tests supply a fixed floor so later policy raises cannot change their
+fictional releases.
 """
     target = version(candidate)
     promoted = version(latest)
+    minimum = version(floor)
     if promoted[3] != 1 or target < promoted:
         raise Refused('latest must be stable and candidate must not precede it')
     eligible = []
@@ -181,11 +189,11 @@ The filled release addendum must identify any historical availability gap.
             parsed = version(tag)
         except Refused:
             continue
-        if parsed[3] == 1 and version('v0.23.0') <= parsed < target and parsed <= promoted:
+        if parsed[3] == 1 and minimum <= parsed < target and parsed <= promoted:
             eligible.append(tag)
     eligible = sorted(set(eligible), key=version, reverse=True)
     if not eligible:
-        raise Refused('no eligible previous stable from v0.23.0 onward is available in source')
+        raise Refused(f'no eligible previous stable from {floor} onward is available in source')
     if latest != candidate and latest not in eligible:
         raise Refused('the promoted stable is missing from the eligible source tags')
     previous = eligible[0]

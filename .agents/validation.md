@@ -870,18 +870,18 @@ that its required systemd or SSH substrate ran.
   with `deno check`, when the harness changes; seconds, no sandbox. Using the harness itself is described in
   `.agents/tensorlake.md`.
 - `python3 scripts/record-test-run.py --kind development --selection 'portable brick-test harness' --concurrency 'one unittest process' --tmux none -- python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v`
-  — validates owned Tart lifecycle, signed-input planning, guest execution, fixed command operations, durable handoffs,
-  compiled checkpoint contracts, fresh-versus-update installer entrypoints, fixed command-only execution and provenance,
-  bounded pre-action provider recovery with retained failures and no uncertain-action replay, structured native actions,
-  durable completed-update evidence without transient progress images, exact native update-channel readouts without
-  mandatory tooltip images, normal Finder readiness with verified menu dismissal, conditional product confirmations,
-  remote menu Remove/re-add and Uninstall sequencing, independent resource-preservation/removal receipts, restart
-  process handoffs, calibrated window measurements, gesture-trace and bonus gesture-readiness gates, failure gates and
-  evidence import with fictional fixtures. Use a substrate that permits process-group inspection; Linux continuity cases
-  skip on macOS. These tests prove harness contracts, not native GUI behavior or a release pass. Actual native fixture
-  probes and release checks retain their own private evidence. The guest-only Swift geometry helper needs separate SDK
-  type-check and read-only runtime validation in an owned disposable guest; the portable suite does not exercise that OS
-  API.
+  — validates owned Tart lifecycle, signed-input planning, Rust/Python upgrade-floor agreement and fixed-floor baseline
+  selection, guest execution, fixed command operations, durable handoffs, compiled checkpoint contracts,
+  fresh-versus-update installer entrypoints, fixed command-only execution and provenance, bounded pre-action provider
+  recovery with retained failures and no uncertain-action replay, structured native actions, durable completed-update
+  evidence without transient progress images, exact native update-channel readouts without mandatory tooltip images,
+  normal Finder readiness with verified menu dismissal, conditional product confirmations, remote menu Remove/re-add and
+  Uninstall sequencing, independent resource-preservation/removal receipts, restart process handoffs, calibrated window
+  measurements, gesture-trace and bonus gesture-readiness gates, failure gates and evidence import with fictional
+  fixtures. Use a substrate that permits process-group inspection; Linux continuity cases skip on macOS. These tests
+  prove harness contracts, not native GUI behavior or a release pass. Actual native fixture probes and release checks
+  retain their own private evidence. The guest-only Swift geometry helper needs separate SDK type-check and read-only
+  runtime validation in an owned disposable guest; the portable suite does not exercise that OS API.
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test` — the changelog
   layout lint the release gate runs on every tag, and the checker's own fixtures (format variants, a synthetic git
   history for the fragment sweep, synthetic dist manifests for the announcement comparison). Run the lint when

@@ -20,17 +20,19 @@ tag's copy keeps the draft for good, which nothing reads. Main holds the draft t
 deployed in that window shows it on the Release notes page, which is where the app's What's new item lands. When asked
 to deploy the website while the notes are still a draft, say so before deploying.
 
-The version and announcements are settled when the stable release is requested, and from then on nothing waits for the
-maintainer until the tag's build is running. A request that names a version settles the version. So does a request that
-follows a release candidate: when the most recent published release, prereleases included and ordered by publication
-time (the same lookup as `releasing/.agents/rc.md`, "Cutting an RC release"), is `X.Y.Z-rc.N` or `X.Y.Z-dev.N` and
-`vX.Y.Z` does not exist yet, the version is `X.Y.Z`. Announce it without asking about the version again. Only when
-neither applies, or the version's tag already exists, ask which version to cut, and ask it in the same reply that
-acknowledges the request, before any other work; never stop later for it. The base is not a question: it is always the
-changelog PR's merge commit (step 5). The maintainer asked for this on 2026-10-16, after the v0.29.0 attempt stopped
-with every pre-tag check passing to confirm a version that rc.3 had already settled. The tag's build gate is the slowest
-part of a release and the one that turns up the failures to fix forward, so it starts the moment the pre-tag checks
-pass.
+The version, announcements and any upgrade-floor raise are settled when the stable release is requested, and from then
+on nothing waits for the maintainer until the tag's build is running. Apply `releasing/AGENTS.md`, "Rules for every
+release", to compare the previous stable's floor with the proposed main base and obtain acceptance of a raise. An
+earlier-base choice pauses this default main-based procedure there, before step 1. A request that names a version
+settles the version. So does a request that follows a release candidate: when the most recent published release,
+prereleases included and ordered by publication time (the same lookup as `releasing/.agents/rc.md`, "Cutting an RC
+release"), is `X.Y.Z-rc.N` or `X.Y.Z-dev.N` and `vX.Y.Z` does not exist yet, the version is `X.Y.Z`. Announce it without
+asking about the version again. Only when neither applies, or the version's tag already exists, ask which version to
+cut, and ask it in the same reply that acknowledges the request, before any other work; never stop later for it. The
+base is not a question: it is always the changelog PR's merge commit (step 5). The maintainer asked for this on
+2026-10-16, after the v0.29.0 attempt stopped with every pre-tag check passing to confirm a version that rc.3 had
+already settled. The tag's build gate is the slowest part of a release and the one that turns up the failures to fix
+forward, so it starts the moment the pre-tag checks pass.
 
 In that same request-settling reply, show main's selected announcements for `X.Y.Z` and its prereleases and ask whether
 to add or change any, per `releasing/AGENTS.md`, "In-app announcements". Ask even when the version is already settled by
@@ -207,13 +209,13 @@ changes in step 4's changelog PR. Stable re-cuts carry over the settled list wit
 8. Stop for the brick test. The release is now staged: anyone can install it by naming its version, and nothing installs
    it by default. Tell the maintainer it is ready to brick test, and give them the line to hand the agent on the Mac
    test host: `brick test release vX.Y.Z` (`releasing/mac-vm-test/BRICK-TEST.md`). That test runs on the maintainer's
-   Mac, in Tart VMs, so this session does not run it; it installs the staged release and upgrades the previous stable
-   releases to it, which is the check that the release does not brick existing installations (SPEC.md, "Upgrade
-   compatibility and client scale"). Give the maintainer the risk report's ranked risks and manual checks as material
-   for the test's per-release addendum. The result names P0's install/upgrade/agent checks, P1's live feedback send and
-   bonus coverage separately; bring those results to the maintainer without deciding whether a P1 failure blocks
-   promotion. If the notes are not finalized yet, say so in the same message, since a pass leads straight to promotion.
-   Then wait for the maintainer's verdict; do not treat silence, or a test that could not run, as a pass.
+   Mac, in Tart VMs, so this session does not run it; it installs the staged release and upgrades previous stable
+   releases at or above its upgrade floor, which is the check that supported updates do not brick existing installations
+   (SPEC.md, "Upgrade compatibility and client scale"). Give the maintainer the risk report's ranked risks and manual
+   checks as material for the test's per-release addendum. The result names P0's install/upgrade/agent checks, P1's live
+   feedback send and bonus coverage separately; bring those results to the maintainer without deciding whether a P1
+   failure blocks promotion. If the notes are not finalized yet, say so in the same message, since a pass leads straight
+   to promotion. Then wait for the maintainer's verdict; do not treat silence, or a test that could not run, as a pass.
    - Pass: the maintainer moves `/latest`, which no agent does. Hand them exactly this line, with the version filled in,
      to run from their release management location (outside this repository; agents never run it):
 

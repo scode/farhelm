@@ -93,14 +93,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   logged warning, and nothing may get stuck or break because of it. Consider improving how visible this is to the user.
   Plan: `plans/queue/rail-notification-bell.md`.
 
-- **Upgrade epochs.** Give every release an upgrade epoch, and only promise clean upgrades across one epoch: an
-  installation on epoch N updates normally while the latest release is on N+1, and one whose latest release is N+2 is
-  told to uninstall and reinstall. A change that needs new logic in the upgrade path itself ships that logic in a
-  release that starts a new epoch; once that release has been out long enough (a week, a month), the next epoch may rely
-  on it. Covers the desktop app, the helm, and supervisors. Until this lands, SPEC.md's "Upgrade compatibility and
-  client scale" forbids upgrade-breaking changes outright; replace that rule with the epoch rule here. The overall plan
-  is `lore/2026-10-05-release-brick-protection-plan.md`. Plan: `plans/queue/upgrade-epochs.md`.
-
 - **Restore automatic recovery from a withdrawn waiting update.** On 2026-10-14 the signed release advisories plan was
   narrowed to warning about a withdrawn running version and refusing to install a withdrawn release; a withdrawn release
   that is already installed and waiting for a restart now needs manual recovery, and an ordinary relaunch may still open
