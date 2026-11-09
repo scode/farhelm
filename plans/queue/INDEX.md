@@ -10,5 +10,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `upgrade-epochs.md` — Upgrade epochs as an upgrade floor: installations and hosts below the floor are told to uninstall and reinstall; the SPEC.md freeze becomes the floor rule
 - [complete] `pin-rust-toolchain.md` — Pin Rust to the newest stable in rust-toolchain.toml so local checks, CI and release builds agree; bumps are manual PRs
 - [complete] `xhigh-effort-label.md` — The extra-high effort level reads "xhigh" instead of "Xhigh" wherever effort labels show
-- [pending] `scoped-stop-without-sweep.md` — Where a launch or tab runs in a systemd scope, Stop, tab close and Delete end the scope and skip the machine-wide process sweep; SPEC.md states what is no longer caught
+- [in-flight 57143d] `scoped-stop-without-sweep.md` — Where a launch or tab runs in a systemd scope, Stop, tab close and Delete end the scope and skip the machine-wide process sweep; SPEC.md states what is no longer caught
 - [pending] `session-switch-jiggle.md` — Find and fix what makes rightmost-column text and full-width rules jiggle in new terminals when switching sessions, with a browser test
