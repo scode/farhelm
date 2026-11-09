@@ -116,33 +116,36 @@
 // - the character is measured with an offscreen canvas's `measureText("W")`
 //   (width, and the font bounding box for height), or a 32-W span where the
 //   canvas lacks those metrics;
-// - the cell is derived through device pixels, rounding the height up per
-//   device pixel and the whole canvas to CSS pixels at the CURRENT size,
-//   so the cell width can differ from the character width by rounding and
-//   the result depends on the size being fitted from (80 x 24 before the
-//   first fit);
+// - proposals derive a cell through device pixels at a fixed 80 x 24
+//   reference, rounding the height up per device pixel and the whole
+//   reference canvas to CSS pixels. This retains a direct mount's first
+//   fit without feeding its answer back into the next calculation;
 // - the room is the container's size less this element's 4px padding and
 //   a 14px column for the scrollbar, which is where this component's
 //   scrollbar sits;
 // - the size is the room over the cell, rounded down, at least 2 x 1 and at
 //   most the format's 1000 x 1000.
 //
-// Why this formula and not a simpler one: it is the old terminal's (the
-// vendored xterm.js 6.0's `CharSizeService`, `DomRenderer._updateDimensions`
-// and fit add-on, ported step for step), and a pane must give the program
-// the same rows and columns whichever component it holds. A new terminal's
-// socket URL carries this component's own fit, but a terminal whose kind
-// the page did not know is attached at the old terminal's size before a
-// grid notice swaps this in, and a grid that fitted differently would
-// resize the program again at once, redrawing it and rebuilding its
-// history.
+// Measurement and rounding came from the old terminal's xterm.js 6.0
+// services, but fitting from the previous answer made an unchanged pane
+// depend on resize history: reopening it could choose another column.
+// The fixed reference makes direct grid mounts and later fits agree.
+// Drawing still rounds at the server-committed rows and columns, not at
+// this reference; the program's actual size remains authoritative.
+//
+// One local exception preserves a compatibility swap. A terminal whose
+// kind the page did not know already attached at the old renderer's size.
+// `options.size` keeps that answer at the grid's first usable observation
+// and while its effective inputs stay unchanged, avoiding a resize just
+// for changing renderers. A later pane, metric or pixel-ratio change uses
+// the deterministic rule. This exception does not survive a fresh mount.
 //
 // A browser spec (`e2e/grid-client/grid-fit.spec.ts`) holds the fit to this
 // formula, worked out from each run's own measurement, across text sizes
-// and pixel ratios, and holds old terminals' xterm.js to the same formula,
-// which is what the swap relies on. The fitted size goes to the program through the
-// existing resize control message; what is drawn is always the size the
-// supervisor last committed in a frame.
+// and pixel ratios; separate checks retain legacy fitting and prove the
+// inherited-size exception directly. The fitted size goes to the program
+// through the existing resize control message; what is drawn is always the
+// size the supervisor last committed in a frame.
 //
 // ## Not built
 //
@@ -157,8 +160,8 @@
   const SCROLLBAR_WIDTH = 14;
   const MAX_DIMENSION = 1000;
   const MEASURE_TEXT = "W".repeat(32);
-  // The size a terminal has before its first fit (an old terminal starts at
-  // the same 80 x 24).
+  // The proposal reference and pre-fit size. Fixing the reference retains
+  // direct first fits while removing their dependence on previous answers.
   const DEFAULT_SIZE = Object.freeze({ cols: 80, rows: 24 });
   // How long one slice of history application may run before it yields
   // (see "Scrollback" in this file's header): half a 60 Hz frame, so input
@@ -234,7 +237,7 @@
   /**
    * The size that fits `available` (the container's computed width and
    * height, minus this element's padding) at the cell metrics of the
-   * current size (see "Size"). Never below 2 x 1, and never past the
+   * supplied reference (see "Size"). Never below 2 x 1, and never past the
    * format's 1000 x 1000.
    *
    * Ported from @xterm/addon-fit 0.11.0's `proposeDimensions`, MIT;
@@ -410,9 +413,13 @@
     // The size the program was last told about: the size the socket URL
     // carried (`options.size`, the old terminal's fit before a swap; the
     // default for a new terminal, whose first fit replaces it) until this
-    // component fits differently. It is also the size the next fit's cell
-    // metrics are computed at (see "Size").
+    // component fits differently. Drawing uses the model's committed size;
+    // later fit proposals use the fixed reference, never this answer.
     let fitted = { ...(options.size || DEFAULT_SIZE) };
+    // The first usable tuple anchors a compatibility swap's inherited
+    // answer. Identical notifications keep it; a real input change releases
+    // that local exception. No sizing state survives this component.
+    let lastFitInputs = null;
 
     /**
      * Measure the character (see "Size"). Returns whether the measurement
@@ -467,8 +474,10 @@
     /**
      * Fit the grid to its container by the formula in this file's header
      * ("Size") and report a size that differs from the last one reported or
-     * carried through `onResize`. A container with no layout box, or no font
-     * metrics yet, proposes nothing.
+     * carried through `onResize`. The fixed reference makes proposals
+     * independent of resize history. A compatibility swap first keeps its
+     * inherited answer until an effective input changes.
+     * A container with no layout box, or no font metrics yet, proposes nothing.
      *
      * Ported from @xterm/addon-fit 0.11.0's `proposeDimensions` (the room
      * read from the container and this element's padding), MIT;
@@ -490,7 +499,13 @@
       const width = Math.max(0, parseInt(outer.getPropertyValue("width"), 10)) -
         (parseInt(inner.getPropertyValue("padding-right"), 10) + parseInt(inner.getPropertyValue("padding-left"), 10));
       if (!Number.isFinite(height) || !Number.isFinite(width)) return;
-      const cell = cellFor(charWidth, charHeight, fitted.cols, fitted.rows, pixelRatio());
+      const ratio = pixelRatio();
+      const inputs = [width, height, charWidth, charHeight, ratio];
+      if (lastFitInputs && inputs.every((value, i) => value === lastFitInputs[i])) return;
+      const firstFit = lastFitInputs === null;
+      lastFitInputs = inputs;
+      if (firstFit && options.size) return;
+      const cell = cellFor(charWidth, charHeight, DEFAULT_SIZE.cols, DEFAULT_SIZE.rows, ratio);
       const size = proposeSize(width, height, cell);
       if (size.cols === fitted.cols && size.rows === fitted.rows) return;
       fitted = size;

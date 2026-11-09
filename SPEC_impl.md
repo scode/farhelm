@@ -1837,27 +1837,29 @@ into a new terminal, the agent's spec says `pending` and its reconnect attempts 
 The catch-up and its reveal, the heartbeat, detaches, banners, reconnect, resize, paste interception, the clipboard
 queue, links with their hover checks, file downloads and tunnels are shared with xterm.js terminals.
 
-The grid's fit and cell metrics are Farhelm's documented formula (`grid-terminal.js`, "Size"): the character measured by
-an offscreen canvas, the cell rounded through device pixels at the size being fitted from, and the room less the
-element's padding and a 14-pixel scrollbar. The formula is the old terminal's (xterm.js 6.0's measurement, cell rounding
-and fit add-on), so a pane gives the program the same rows and columns whichever component holds it: on the
-compatibility swap, a grid that fitted differently from the size the socket URL carried would resize the program at once
-and make the supervisor resend the history. A browser spec holds the grid to the formula, computed from each run's own
-measurement, across text sizes and pixel ratios, without running xterm.js; an old-terminal test beside it holds the
-vendored xterm.js's fit to the same formula, which is the compatibility swap's premise. Rendering is one element per
-visible row with its runs as spans reused in place, painted at most once per animation frame however many messages
-arrive; the choice between boxing every non-ASCII cell and letting characters the font draws at the cell width flow
-inline came from a renderer benchmark against xterm.js, recorded in the file's header. Input goes up as small JSON
-messages (keys, text, pastes, mouse and focus events), never as encoded bytes: the supervisor encodes them from the
-terminal's modes (`crates/farhelm-supervisor/src/grid_input.rs`). Which keydowns reach the program, and the bytes each
-key and click becomes, are Farhelm's own contract, written down as checked-in tables (`grid-keys.jsonl` and
-`grid-mouse.jsonl` under `crates/farhelm-supervisor/tests/fixtures/`, and the page's keydown and Alt-click tables under
-`crates/farhelm-ui/js-tests/fixtures/input/`) that the page's code and the supervisor's encoder are held to, the key
-table by both. They are the xterm family's encodings, which shells and agents expect, and were first computed by the
-vendored xterm.js, so a program reads the same keys and clicks in both kinds of terminal; no test reads xterm.js for
-them any more. The client sends no flow-control pause or resume: it applies every message as it arrives, applying a
-large history in slices between frames so that the screen stays usable, and the helm pauses a grid stream on its own
-queue instead.
+The grid's deterministic fit is Farhelm's documented formula (`grid-terminal.js`, "Size"): the character measured by an
+offscreen canvas, the proposal cell rounded through device pixels at a fixed 80-column, 24-row reference, and the room
+less the element's padding and a 14-pixel scrollbar. The fixed reference preserves direct mounts' initial fits while
+making later answers independent of resize history. Drawing still rounds cells at the supervisor-committed size, never
+at the proposal reference. A compatibility swap keeps the size already sent by the old renderer: its first usable grid
+observation records the effective pane, character metrics and pixel ratio without resizing, and identical observations
+keep that inherited answer. A subsequent effective input change uses the deterministic rule. The inherited answer can
+differ from a direct mount's answer; this local exception does not survive a fresh mount, and no per-terminal sizing
+state is retained across visits. Separate browser checks hold direct fitting to its independently computed formula
+across text sizes and pixel ratios, retain the old renderer's own formula coverage, and prove that a noncanonical
+inherited size survives the handoff. Rendering is one element per visible row with its runs as spans reused in place,
+painted at most once per animation frame however many messages arrive; the choice between boxing every non-ASCII cell
+and letting characters the font draws at the cell width flow inline came from a renderer benchmark against xterm.js,
+recorded in the file's header. Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never
+as encoded bytes: the supervisor encodes them from the terminal's modes (`crates/farhelm-supervisor/src/grid_input.rs`).
+Which keydowns reach the program, and the bytes each key and click becomes, are Farhelm's own contract, written down as
+checked-in tables (`grid-keys.jsonl` and `grid-mouse.jsonl` under `crates/farhelm-supervisor/tests/fixtures/`, and the
+page's keydown and Alt-click tables under `crates/farhelm-ui/js-tests/fixtures/input/`) that the page's code and the
+supervisor's encoder are held to, the key table by both. They are the xterm family's encodings, which shells and agents
+expect, and were first computed by the vendored xterm.js, so a program reads the same keys and clicks in both kinds of
+terminal; no test reads xterm.js for them any more. The client sends no flow-control pause or resume: it applies every
+message as it arrives, applying a large history in slices between frames so that the screen stays usable, and the helm
+pauses a grid stream on its own queue instead.
 
 Not built for grid terminals, a near-term entry in `TODO.md`: showing an input method's composition at the cursor
 (committed text is sent).

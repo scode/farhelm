@@ -302,9 +302,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (cache the encoded bytes of history rows and re-encode only the screen and new rows, producing the same v1 blob as
   today). The repository records no reason for the original choice of whole snapshots.
 
-- **Jittery/jiggling characters when switching between sessions.** Switching between sessions makes characters jitter or
-  jiggle: something is being re-drawn or laid out for no reason. Find what triggers the needless re-draw/re-layout on
-  session switch. Plan: `plans/queue/session-switch-jiggle.md`.
 - **Per-host checkout directory.** Settings → Checkouts has one global **Checkout folder** for every host, but one
   directory rarely suits every machine: an absolute path from one machine may not exist or be writable on another, and
   hosts can differ in where projects belong. Let the user set the checkout directory per host in the UI, with the global

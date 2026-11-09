@@ -643,16 +643,17 @@ that its required systemd or SSH substrate ran.
 - `cd e2e && npx playwright test --config grid-client/playwright.config.ts` — the grid terminal component
   (`crates/farhelm-ui/assets/grid-*.js`) on a static page fed recorded grid streams (display, input, scrollback,
   selection and copy, links, paste, history applied in slices), its fit held to the documented formula over the measured
-  character across text sizes and pixel ratios (and, for old terminals only, xterm.js's fit held to the same formula,
-  the compatibility swap's premise), its copy across a wide character's wrap leaving out the empty edge cell, and
-  `terminal.js`'s plumbing for grid streams against a fake socket (a new terminal's grid mounted with no xterm.js built
-  or waited for, a byte stream on its attachment refused, a pending kind held until named, the swap from xterm.js for an
-  old or unknown kind, attach, paste and drop interception, link opening, the hyperlink mismatch warning, file-path
-  hovers and downloads, tunnels, reconnect and takeover snapshots, a catch-up ended by a takeover or a close before its
-  marker, a stalled detach that does not reconnect, and typing and pasting clearing the selection), in Chromium and
-  WebKit. No stack and no build: the page and the shipped assets are served through request routing. Needs `npm install`
-  and the browsers from the browser suite's setup below; a few minutes. Not in CI. Run it when the grid assets,
-  `terminal.js`'s grid handling or the fixtures under `crates/farhelm-ui/js-tests/fixtures/grid/` change.
+  character across text sizes and pixel ratios (and, for old terminals only, xterm.js's own legacy fit formula),
+  inherited dimensions preserved through a compatibility swap until an effective sizing input changes, its copy across a
+  wide character's wrap leaving out the empty edge cell, and `terminal.js`'s plumbing for grid streams against a fake
+  socket (a new terminal's grid mounted with no xterm.js built or waited for, a byte stream on its attachment refused, a
+  pending kind held until named, the swap from xterm.js for an old or unknown kind, attach, paste and drop interception,
+  link opening, the hyperlink mismatch warning, file-path hovers and downloads, tunnels, reconnect and takeover
+  snapshots, a catch-up ended by a takeover or a close before its marker, a stalled detach that does not reconnect, and
+  typing and pasting clearing the selection), in Chromium and WebKit. No stack and no build: the page and the shipped
+  assets are served through request routing. Needs `npm install` and the browsers from the browser suite's setup below;
+  a few minutes. Not in CI. Run it when the grid assets, `terminal.js`'s grid handling or the fixtures under
+  `crates/farhelm-ui/js-tests/fixtures/grid/` change.
 - `cd e2e && FARHELM_E2E_SUITE_TERMINALS=tmux python3 ../scripts/record-test-run.py --runner playwright --kind development --tmux required --keep-farhelm-env FARHELM_E2E_SUITE_TERMINALS --selection 'old-terminal set, both engines' --concurrency '3 browser workers, one stack each; retries 0' -- npx playwright test`
   — the browser suite's old-terminal set: the tests whose subject exists only for old terminals (tmux, drawn by
   xterm.js), against stacks whose two supervisors start with `--new-terminals tmux`, with the pinned tmux first on

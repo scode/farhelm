@@ -500,6 +500,36 @@ test("a grid notice on an old terminal's spec swaps in the grid with a new termi
   await expect(page.locator(".grid-terminal-row").nth(0)).toHaveText("$ echo");
 });
 
+/** A stale-kind handoff must keep the program's inherited size, even when noncanonical.
+ * Force a different old-renderer size immediately before the stream notice.
+ * The swap must carry it through unchanged fits; an actual later pane resize
+ * then releases that compatibility exception and reports the grid's answer.
+ */
+test("a renderer swap preserves its carried size until the pane changes", async ({ page }) => {
+  await mountTerminal(page, undefined, { spec: { kind: "tmux" } });
+  const carried = { cols: 77, rows: 11 };
+  await page.evaluate((size) => {
+    const w = window as any;
+    // Keep the forced old answer and the handoff in one synchronous turn,
+    // so an old observer cannot replace the fixture premise in between.
+    w.__farhelmIslands.term.term.resize(size.cols, size.rows);
+    const old = w.__farhelmIslands.term.term;
+    if (old.cols !== size.cols || old.rows !== size.rows) throw new Error("old renderer did not adopt the carried fixture size");
+    w.FakeSocket.all[0].open();
+    w.FakeSocket.all[0].text({ type: "stream", kind: "grid" });
+    w.__farhelmGrid.fit();
+    w.__farhelmGrid.fit();
+  }, carried);
+  expect(await page.evaluate(() => (window as any).__farhelmGrid.size())).toEqual(carried);
+  expect(await resizes(page)).toEqual([carried]);
+  await page.locator(".terminal-panes").evaluate((element: HTMLElement) => {
+    element.style.width = `${element.clientWidth + 50}px`;
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).__farhelmGrid.size().cols)).not.toBe(carried.cols);
+  const canonical = await page.evaluate(() => (window as any).__farhelmGrid.size());
+  await expect.poll(() => resizes(page)).toEqual([carried, canonical]);
+});
+
 /** The resize control messages the page has sent. */
 async function resizes(page: Page): Promise<{ cols: number; rows: number }[]> {
   return (await sentFrames(page))
