@@ -6,7 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 7ed931] `stop-start-message.md` — A Stop while the agent is still starting shows "Exited — stopped before the agent finished starting" instead of a launch failure blaming systemd; Restart and Replace get the same fix
 - [in-flight 0b9109] `rail-notification-bell.md` — A notification bell in the rail for notices that are not about one session, red with a count when unread; its first notice is a trashed checkout whose files could not be freed, with Retry now, and the Trash dialog keeps such folders listed
 - [complete] `settings-dialog-fixed-size.md` — The Settings dialog keeps one fixed height across sections (about 640px, capped by the window), its body scrolling for taller sections
-- [in-flight 5dfb96] `upgrade-epochs.md` — Upgrade epochs as an upgrade floor: installations and hosts below the floor are told to uninstall and reinstall; the SPEC.md freeze becomes the floor rule
+- [complete] `upgrade-epochs.md` — Upgrade epochs as an upgrade floor: installations and hosts below the floor are told to uninstall and reinstall; the SPEC.md freeze becomes the floor rule
 - [pending] `scoped-stop-without-sweep.md` — Where a launch or tab runs in a systemd scope, Stop, tab close and Delete end the scope and skip the machine-wide process sweep; SPEC.md states what is no longer caught
 - [complete] `session-switch-jiggle.md` — Find and fix what makes rightmost-column text and full-width rules jiggle in new terminals when switching sessions, with a browser test
 - [pending] `grid-binary-stream.md` — A committed browser memory and attach benchmark, then a binary encoding for new terminals' screen and history messages and compact on-demand-decoded scrollback in the page
