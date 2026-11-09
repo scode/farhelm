@@ -4,7 +4,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [pending] `sandbox-sessions.md` — Launch a session in a named Tensorlake sandbox of its own from a recipe (launcher, templates, Clone), with explicit Suspend/Resume, Stop and suspend, Delete removing the sandbox, and agent operations refused (after `prepared-snapshots.md`)
 - [in-flight 0b9109] `rail-notification-bell.md` — A notification bell in the rail for notices that are not about one session, red with a count when unread; its first notice is a trashed checkout whose files could not be freed, with Retry now, and the Trash dialog keeps such folders listed
-- [landing e10d28] `upgrade-epochs.md` — Upgrade epochs as an upgrade floor: installations and hosts below the floor are told to uninstall and reinstall; the SPEC.md freeze becomes the floor rule
 - [complete] `scoped-stop-without-sweep.md` — Where a launch or tab runs in a systemd scope, Stop, tab close and Delete end the scope and skip the machine-wide process sweep; SPEC.md states what is no longer caught
 - [landing c8b7f4] `session-switch-jiggle.md` — Find and fix what makes rightmost-column text and full-width rules jiggle in new terminals when switching sessions, with a browser test
 - [in-flight 5fd194] `grid-binary-stream.md` — A committed browser memory and attach benchmark, then a binary encoding for new terminals' screen and history messages and compact on-demand-decoded scrollback in the page
