@@ -8911,22 +8911,32 @@ still there and bumps the feed, so no card outlives the request it describes. Ca
 The GUI keeps one expanded request id locally, preserves it across listing refreshes, and falls back to the oldest
 remaining request when it leaves. The other requests are header buttons below it, including requests from other hosts.
 The listing's id sequence and the expanded id together trigger the 700ms arm delay; a generation check prevents an older
-delay from arming buttons after a more recent switch. Existing decision rows are regrouped into requester, short facts,
-and full-width text, preserving the peer-text distinction and showing real commands in full. Session-reference rows
-reuse `peer::display_identity` and the existing full-width identity layout, with a Copy button calling the existing
-clipboard writer on the unmodified full reference. Escaped display text is never copied or used as an action target; the
-card's answer handlers retain its random approval ID.
+delay from arming buttons after a more recent switch. The common shell separates its pinned header and answer bar from
+an aligned fact list and individually scrollable long-text boxes. Requester host, quoted title and shortened ID remain
+separate peer isolates with accessible labels. ID shortening uses complete `peer::display_identity` escape spellings
+from the bare ID, while hover and accessible text retain the complete reference. Target and copied-source IDs stay in
+full. Copy buttons call the existing clipboard writer on the unmodified raw reference. Escaped or shortened display text
+is never copied or used as an action target; the card's answer handlers retain its random approval ID. Launch and
+restart permission chips reuse `list::session_permission` and its description rather than classifying command strings
+again; stored workspace trust and permission flags keep their separate meaning.
 
 The approval region stays beside the shell so modal isolation leaves it live. While mounted, its small geometry observer
 follows the actual main-pane rectangle and the terminal area's top, falling back to the top row's bottom when no
 terminal surface is shown. Anchoring below the top row and conditional bands keeps approval cards from covering those
 in-flow notices. Floating tunnel surfaces independently declare terminal-link coverage. This accounts for sidebar width,
 narrow-window shell scrolling, native top chrome, and conditional notices without fixed offsets. Width is capped at
-660px with 12px margins; the whole region's height is capped at 55% of the pane and at the space remaining below its
-top. Below 44px of available height it instead uses the whole viewport, keeping answer controls scrollable even when
-session chrome exhausts the pane. Pane, sidebar and chrome sizes and direct chrome structure are observed, not terminal
-output mutations; listeners and observers are released when the region leaves the DOM. Sidebar size is an input even at
-the pane's minimum width, where a resize moves the pane without changing its size.
+660px with 12px margins; the region's height is capped at 75% of the pane and at the space remaining below its top. CSS
+flex sizing keeps the card header and answer bar fixed while shrinking long-text boxes toward their two-line floor
+before the intervening body scrolls. Waiting headers have their own bounded scrolling list, and a late-answer notice is
+a fixed item. The fallback minimum measures the header, requester and answer bar at the actual card width, including
+their spacing, plus the notice and waiting list. Those fixed siblings consume the same cap; comparing only the card's
+minimum with the whole region could clip its answers. When that combined minimum cannot fit below the anchor, the
+geometry helper uses the whole viewport. Below the minimum even there, CSS lets the whole region scroll instead of
+clipping answers. The existing size observer follows only those fixed inputs, alongside the pane, sidebar and chrome;
+direct-child observation rebinds them when the request, notice or waiting list changes. Body and text-box heights are
+outputs of CSS shrinking, never inputs to this measurement. Terminal output mutations remain unobserved. Listeners and
+observers are released when the region leaves the DOM. Sidebar size is an input even at the pane's minimum width, where
+a resize moves the pane without changing its size.
 
 "A GUI is connected" means at least one subscriber to the fleet invalidation feed, which every GUI holds open for its
 whole life and which the cards rely on to appear without a reload. The desktop app's process ends when its window closes

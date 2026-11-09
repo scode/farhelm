@@ -50,18 +50,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Make the approval cards fit their answer controls, and audit every one of them.** A session-start request grew
-  taller than the space the cards get: the requester's session ID filled a full-width row, the managed checkout's
-  repository name wrapped one character per line in a narrow column, and the YOLO permission description ran five lines,
-  so the Allow/Deny buttons sat below the fold and reaching them meant scrolling the whole card region. The region is
-  capped at 55% of the main pane and scrolls as a unit (`crates/farhelm-ui/assets/approval-layout.js`), so any card
-  taller than that scrolls its own controls out of reach. Give the request cards a consistent size and position, keep
-  the answer controls always visible, and make them look better than the current plain column of labelled rows. Audit
-  every request kind, not just the launch card: launch, prompt, rename, stop, delete, restart, open URL, host
-  add/edit/remove, and template write/delete. Where content genuinely does not fit, only the relevant long text scrolls
-  (the command, the first prompt, a session ID, a long path), never the controls or the dialog as a whole. Seen on a
-  session-start request on 2026-11-08. Plan: `plans/queue/approval-cards-fit.md`.
-
 - **Bootstrap a Podman image on a remote host.** Automatically bootstrap a Podman image on a remote host, with some
   reasonable defaults, as a supported flow. Plan: `plans/queue/podman-environments.md`.
 

@@ -23,7 +23,7 @@
 //! Almost everything on a card was written by the agent asking: the session's
 //! title, the folder, the command text, the template's name. A card that read
 //! those values into a sentence would let an agent write its own approval
-//! prompt, so every value sits in a labelled row as escaped,
+//! prompt, so every value keeps its own label and escaped,
 //! direction-isolated peer text (`peer::display_peer`), and the only prose is
 //! this module's own labels and buttons. Host names are rendered the same way:
 //! they are user data the helm relays, not this UI's words.
@@ -361,6 +361,8 @@ pub(crate) fn ApprovalCards() -> Element {
                     },
                 }
             }
+            if cards.len() > 1 {
+            div { class: "approval-waiting-list", aria_label: "Other waiting requests",
             for card in cards.iter().filter(|card| Some(&card.id) != selected_id.as_ref()) {
                 button {
                     key: "{card.id}",
@@ -381,6 +383,8 @@ pub(crate) fn ApprovalCards() -> Element {
                         span { class: "peer-value", dir: "ltr", "{display_peer(&card.host_name)}" }
                     }
                 }
+            }
+            }
             }
         }
     }
@@ -497,8 +501,8 @@ fn ApprovalCard(
             ..
         }
     );
-    // Long rows follow the short facts, so a full-width folder or command
-    // cannot split the compact grid into several mostly empty rows.
+    // Facts keep their intrinsic height. Text boxes are separate flex items
+    // so they surrender spare lines before the body needs its own scrollport.
     let (full, facts): (Vec<_>, Vec<_>) = action_rows(&card.action)
         .into_iter()
         .partition(full_width_row);
@@ -508,14 +512,6 @@ fn ApprovalCard(
         let id = id.clone();
         move |_| on_answer.call((id.clone(), answer))
     };
-    let mut asking = Vec::new();
-    session_rows(
-        "asked by session",
-        "asking session id",
-        None,
-        &card.session,
-        &mut asking,
-    );
     rsx! {
         section {
             class: "approval-card",
@@ -528,15 +524,16 @@ fn ApprovalCard(
                 h2 { id: "{heading}", class: "approval-card-heading", "{authored_words(action_summary(&card.action))}" }
                 span { class: "approval-card-count", "1 of {waiting} waiting" }
             }
-            dl { class: "approval-card-requester",
-                Row { label: "From host", value: card.host_name.clone() }
-                for (index, row) in asking.into_iter().enumerate() {
+            Requester { host: card.host_name.clone(), session: card.session.clone() }
+            div { class: "approval-card-body",
+            dl { class: "approval-card-rows approval-card-facts",
+                for (index, row) in facts.into_iter().enumerate() {
                     CardDetail { key: "{index}", row }
                 }
             }
-            dl { class: "approval-card-rows",
-                for (index, row) in facts.into_iter().chain(full).enumerate() {
-                    CardDetail { key: "{index}", row }
+            for (index, row) in full.into_iter().enumerate() {
+                dl { key: "block-{index}", class: "approval-card-command",
+                    CardDetail { row }
                 }
             }
             if tunnel_available {
@@ -567,6 +564,7 @@ fn ApprovalCard(
                 p { class: "approval-card-note",
                     "Each host change needs your approval, even when the requesting host can run Farhelm commands without asking."
                 }
+            }
             }
             div { class: "approval-card-actions",
                 if tunnel_available {
@@ -618,57 +616,105 @@ fn ApprovalCard(
     }
 }
 
-/// Keep a requester value separate from the UI's own label.
+/// Keep requester roles distinct even though they share one compact line.
 ///
-/// The requesting host is peer text just like session details. Escape its
-/// controls and isolate its direction so it cannot rewrite the surrounding
-/// label; CSS lets the complete value wrap within the requester grid.
+/// Quotes belong to Farhelm, outside the isolated title. Only the visible ID
+/// is shortened: its hover and accessible name retain the injective spelling,
+/// and Copy retains the full raw reference, including the entry prefix.
 #[component]
-fn Row(label: &'static str, value: String) -> Element {
+fn Requester(host: String, session: ApprovalSession) -> Element {
+    let title = session.title.as_deref().map(display_peer);
+    let identity = display_identity(&session.id);
+    let short = shortened_requester_id(&session.id);
     rsx! {
-        div { class: "approval-card-row",
-            dt { "{compact_label(label)}" }
-            dd {
-                span { class: "peer-value", dir: "ltr", "{display_peer(&value)}" }
+        div { class: "approval-card-from",
+            span { "From" }
+            strong { class: "approval-from-host", span { class: "peer-value", dir: "ltr", aria_label: "From host", "data-tooltip": "{display_peer(&host)}", "{display_peer(&host)}" } }
+            span { aria_hidden: "true", "·" }
+            span { class: "approval-from-title",
+                if let Some(title) = title {
+                    "“"
+                    span { class: "peer-value", dir: "ltr", aria_label: "From session", "data-tooltip": "{title}", "{title}" }
+                    "”"
+                } else {
+                    span { aria_label: "From session", "title unknown" }
+                }
+            }
+            span { class: "peer-value font-mono approval-from-id", dir: "ltr", "data-tooltip": "{identity}", aria_label: "From session ID: {identity}", "{short}" }
+            button { r#type: "button", class: "btn btn-neutral approval-copy-id",
+                aria_label: "Copy from session ID",
+                "data-tooltip": "Copy: the complete session ID, including characters shown as escapes",
+                onclick: move |_| crate::session_view::copy_to_clipboard(&session.id),
+                "Copy ID"
             }
         }
     }
 }
 
-/// Regroup an existing decision row without changing which values are shown.
+/// Abbreviate only the bare requester ID, never part of an escape token.
 ///
-/// Commands and identities need the whole card width; short facts share the
-/// grid. The row model still owns content and trust distinctions, so visual
-/// compactness cannot turn peer text into Farhelm's own verdict.
-/// A copyable identity shares that strict display path but retains its raw
-/// reference for the clipboard; presentation escapes never become target bytes.
-/// Technical value labels opt into mono individually. Other peer values here
-/// include host names and titles, so isolation alone cannot choose the font.
+/// SessionRef parsing removes exactly one valid entry prefix; a prefix-looking
+/// bare suffix remains data. Each raw character has one identity token, so
+/// choosing tokens before joining preserves literal-escape distinctions at
+/// both ends. The full reference stays available on the rendered requester.
+fn shortened_requester_id(raw: &str) -> String {
+    let reference = raw.parse::<farhelm_proto::SessionRef>().ok();
+    let bare = reference
+        .as_ref()
+        .map_or(raw, |reference| reference.bare_id());
+    let tokens: Vec<_> = bare
+        .chars()
+        .map(|ch| display_identity(&ch.to_string()))
+        .collect();
+    if tokens.iter().map(String::len).sum::<usize>() <= 16 {
+        return display_identity(bare);
+    }
+    // Budgets count displayed characters, rather than raw characters: eight
+    // invisible Unicode characters can otherwise become eighty visible ones.
+    // A token wider than its budget is kept whole at the corresponding end.
+    let mut start = 0;
+    let mut width = 0;
+    while start < tokens.len() && width < 8 {
+        width += tokens[start].len();
+        start += 1;
+    }
+    let mut end = tokens.len();
+    width = 0;
+    while end > start && width < 4 {
+        end -= 1;
+        width += tokens[end].len();
+    }
+    if start == end {
+        return tokens.concat();
+    }
+    format!("{}…{}", tokens[..start].concat(), tokens[end..].concat())
+}
+
+/// Render fact values without allowing long technical names to widen the card.
+///
+/// URL and flag tails remain wrapped and visible. Only paths and identities
+/// scroll sideways; selectable text does not introduce another tab stop.
 #[component]
 fn CardDetail(row: CardRow) -> Element {
-    let full = full_width_row(&row);
     let copyable = matches!(&row, CardRow::CopyIdentity(..));
-    let class = if full {
-        "approval-card-row approval-card-full"
-    } else {
-        "approval-card-row"
-    };
+    let class = "approval-card-row";
     match row {
         CardRow::Value(label, value) => rsx! {
             div { class,
                 dt { "{compact_label(label)}" }
-                dd { span {
-                    class: if matches!(label, "folder" | "URL" | "ssh destination" | "destination" | "permission flags") { "peer-value font-mono" } else { "peer-value" },
+                dd { class: if single_line_fact(label) { "approval-fact-scroll" } else { "" },
+                    span {
+                    class: if single_line_fact(label) || matches!(label, "URL" | "permission flags") { "peer-value font-mono" } else if label == "permissions" { "peer-value approval-permission-chip" } else { "peer-value" },
                     dir: "ltr", "{display_peer(&value)}"
                 } }
             }
         },
         CardRow::Block(label, text) => rsx! {
-            div { class: "approval-card-row approval-card-full approval-card-command",
+            div { class: "approval-card-block-row",
                 dt { "{authored_words(label)}" }
                 dd { PeerBlock {
                     class: if matches!(label, "initial prompt" | "prompt") { "approval-card-block approval-card-prompt" } else { "approval-card-block" },
-                    scroll_label: matches!(label, "initial prompt" | "prompt").then(|| authored_words(label)),
+                    scroll_label: Some(authored_words(label)),
                     text: text.into()
                 } }
             }
@@ -676,14 +722,14 @@ fn CardDetail(row: CardRow) -> Element {
         CardRow::Note(label, words) => rsx! {
             div { class,
                 dt { "{compact_label(label)}" }
-                dd { class: "approval-card-note", "{authored_words(words)}" }
+                dd { class: if label == "asserted YOLO" { "approval-card-note approval-permission-chip" } else { "approval-card-note" }, "{authored_words(words)}" }
             }
         },
         CardRow::Identity(label, identity) | CardRow::CopyIdentity(label, identity) => rsx! {
             div { class,
                 dt { "{compact_label(label)}" }
-                dd {
-                    span { class: "peer-value", dir: "ltr", "{display_identity(&identity)}" }
+                dd { class: "approval-identity-value",
+                    span { class: "approval-fact-scroll", span { class: "peer-value font-mono", dir: "ltr", "{display_identity(&identity)}" } }
                     if copyable {
                         " "
                         button {
@@ -702,24 +748,90 @@ fn CardDetail(row: CardRow) -> Element {
             div { class,
                 dt { "Permissions" }
                 dd {
-                    PermissionIcon { glyph }
-                    "{permission_description(glyph)}"
+                    PermissionChips { glyph, guarded: None, trust: None }
                 }
+            }
+        },
+        CardRow::LaunchPermission {
+            glyph,
+            guarded,
+            trust,
+        } => rsx! {
+            div { class,
+                dt { "Permissions" }
+                dd { PermissionChips { glyph, guarded, trust } }
             }
         },
     }
 }
 
-/// Reserve a whole line for text whose shape or identity needs room to read.
-/// Missing-command notes remain ordinary facts; real command text never does.
+/// Text boxes must be outside the fact list to shrink independently of facts.
+/// Missing-command notes remain facts; identities stay aligned with their label.
 fn full_width_row(row: &CardRow) -> bool {
+    matches!(row, CardRow::Block(..))
+}
+
+/// Technical destinations need their complete spelling without character wrap.
+/// URL and permission flags deliberately remain outside this set: their tails
+/// are part of the security decision and must wrap in full.
+fn single_line_fact(label: &str) -> bool {
     matches!(
-        row,
-        CardRow::Block(..)
-            | CardRow::Identity(..)
-            | CardRow::CopyIdentity(..)
-            | CardRow::Value("folder" | "URL", _)
+        label,
+        "folder"
+            | "managed checkout of"
+            | "ssh destination"
+            | "destination"
+            | "container GitHub token file"
     )
+}
+
+/// One vocabulary for classified permission chips, including unchecked claims.
+/// Custom shares YOLO's classifier result; an absent YOLO chip is enough to
+/// distinguish a non-YOLO mode without inventing another independent verdict.
+fn permission_chip_label(glyph: PermissionGlyph) -> &'static str {
+    match glyph {
+        PermissionGlyph::Yolo => "YOLO",
+        PermissionGlyph::Guarded => "Guarded",
+        PermissionGlyph::OwnSetting => "Own setting",
+        PermissionGlyph::Unknown => "Unknown",
+        PermissionGlyph::Approve => "Approve",
+        PermissionGlyph::SmartApprove => "Smart approve",
+        PermissionGlyph::Chat => "Chat",
+        PermissionGlyph::AssertedYolo => "Asserted YOLO",
+        PermissionGlyph::AssertedNotYolo => "Asserted not YOLO",
+    }
+}
+
+/// Share session-list classification and wording while retaining stored trust.
+/// Only guarded mode adds the vendor's mode heading. Trust is a separate line
+/// because it controls repository startup behavior independently of the mode.
+#[component]
+fn PermissionChips(
+    glyph: PermissionGlyph,
+    guarded: Option<String>,
+    trust: Option<bool>,
+) -> Element {
+    let warning = matches!(
+        glyph,
+        PermissionGlyph::Yolo | PermissionGlyph::OwnSetting | PermissionGlyph::AssertedYolo
+    );
+    rsx! {
+        div { class: "approval-permission-line",
+            span { class: if warning { "approval-permission-chip approval-permission-warning" } else { "approval-permission-chip" },
+                PermissionIcon { glyph }
+                "{permission_chip_label(glyph)}"
+            }
+            span { class: "approval-permission-description", "{guarded.as_deref().unwrap_or(permission_description(glyph))}" }
+        }
+        if let Some(trusted) = trust {
+            div { class: "approval-permission-line",
+                span { class: "approval-permission-chip", if trusted { "Trusted workspace" } else { "Not trusted" } }
+                if trusted {
+                    span { class: "approval-permission-description", "By Settings in a managed checkout; repository hooks, settings and commands can run without asking" }
+                }
+            }
+        }
+    }
 }
 
 /// Present row keys as sentence-case labels, shortening only redundant context.
@@ -768,14 +880,15 @@ fn authored_words(words: &str) -> String {
     shown
 }
 
-/// Decision content before presentation separates facts from full-width text.
+/// Decision content before presentation separates facts from shrinkable text.
 ///
 /// These variants preserve the distinction between peer text, fixed UI words,
-/// and identities regardless of which grid position they occupy. Copyable
+/// and identities regardless of their visual placement. Copyable
 /// identities retain raw bytes separately from their render-time spelling.
 #[derive(Debug, Clone, PartialEq)]
 enum CardRow {
-    /// A labelled peer fact, allowed to wrap to fit the available width.
+    /// A labelled peer fact. Technical destinations scroll on one line;
+    /// URL and permission flags wrap so the user can inspect their tails.
     Value(&'static str, String),
     /// A peer value that may span lines (commands or prompts), kept in its shape.
     Block(&'static str, String),
@@ -789,6 +902,14 @@ enum CardRow {
     CopyIdentity(&'static str, String),
     /// The same classified shield as the session list, with audible wording.
     Permission(PermissionGlyph),
+    /// Launch and restart classification with an optional vendor mode heading
+    /// and stored workspace trust. Template omission has different semantics
+    /// and must never enter this existing-launch classifier.
+    LaunchPermission {
+        glyph: PermissionGlyph,
+        guarded: Option<String>,
+        trust: Option<bool>,
+    },
 }
 
 /// The action's kind, for the card's data attribute (tests and styling).
@@ -964,26 +1085,6 @@ fn action_rows(action: &ApprovalAction) -> Vec<CardRow> {
             } = action
             {
                 rows.push(CardRow::Block("initial prompt", prompt.clone()));
-            }
-            // Farhelm's own verdict only where it has one: a command launch's
-            // YOLO is the agent's unchecked claim, already shown as "asserted
-            // YOLO", and restating it here in Farhelm's words would present
-            // the claim as a finding.
-            if !matches!(launch, SessionLaunch::Command(_)) {
-                let own_setting = launch.agent_selection().is_some_and(|selection| {
-                    selection
-                        .harness
-                        .stored_permission(selection.permissions)
-                        .is_none()
-                });
-                rows.push(CardRow::Note(
-                    "YOLO",
-                    if own_setting {
-                        "agent's own setting: not classified; treated as YOLO by the host guard"
-                    } else {
-                        yolo_words(launch.yolo())
-                    },
-                ));
             }
         }
         ApprovalAction::Rename { target, title } => {
@@ -1204,6 +1305,25 @@ enum Runs {
 /// Settings must not reinterpret these rows: a plain Restart retains its
 /// stored choices even when the settings for newly composed launches changed.
 fn launch_rows(launch: &SessionLaunch, runs: Runs, rows: &mut Vec<CardRow>) {
+    let glyph = session_permission(Some(launch), false);
+    let selection = launch.agent_selection();
+    let guarded = selection
+        .filter(|_| glyph == PermissionGlyph::Guarded)
+        .map(|selection| {
+            crate::launch_composer::permission_help(
+                selection.harness,
+                selection.harness.stored_permission(selection.permissions),
+            )
+            .lines()
+            .next()
+            .expect("permission help has a heading")
+            .to_string()
+        });
+    rows.push(CardRow::LaunchPermission {
+        glyph,
+        guarded,
+        trust: selection.and_then(|selection| selection.workspace_trust),
+    });
     let start_label = "command";
     let resume_text = |argv: &[String], prefix_words: usize| {
         // Wrapper words already include their quotes. Only Farhelm's composed
@@ -1229,36 +1349,8 @@ fn launch_rows(launch: &SessionLaunch, runs: Runs, rows: &mut Vec<CardRow>) {
                 "effort",
                 selection.effort.as_ref().map(word),
             ));
-            // Only the help's heading line ("Guarded · Claude auto mode",
-            // "Not classified · agent's own setting"). Value rows render
-            // through the peer-text escaper, which shows each newline of the
-            // full multi-paragraph help as a literal escape, in a half-width
-            // cell styled as text another host supplied. The heading comes
-            // from the stored permission, not the request default, so an
-            // older own-setting launch still reads as not classified here.
-            rows.push(CardRow::Value(
-                "permissions",
-                crate::launch_composer::permission_help(
-                    selection.harness,
-                    selection.harness.stored_permission(selection.permissions),
-                )
-                .lines()
-                .next()
-                .expect("permission help has a heading")
-                .to_string(),
-            ));
             if let Some(words) = &selection.permission_flags {
                 rows.push(CardRow::Value("permission flags", shell_words::join(words)));
-            }
-            if let Some(trusted) = selection.workspace_trust {
-                rows.push(CardRow::Note(
-                    "workspace trust",
-                    if trusted {
-                        "trusted by Settings in a managed checkout; repository hooks, settings and commands can run without asking"
-                    } else {
-                        "not trusted"
-                    },
-                ));
             }
             if runs == Runs::Start {
                 rows.push(CardRow::Block(start_label, launch.display_command()));
@@ -1285,10 +1377,6 @@ fn launch_rows(launch: &SessionLaunch, runs: Runs, rows: &mut Vec<CardRow>) {
             if let Some(agent) = command.agent {
                 rows.push(CardRow::Value("declared agent", word(&agent)));
             }
-            rows.push(CardRow::Note(
-                "asserted YOLO",
-                if command.yolo { "yes" } else { "no" },
-            ));
         }
         SessionLaunch::Legacy {
             invocation,
@@ -1414,17 +1502,6 @@ fn optional_value(label: &'static str, value: Option<String>) -> CardRow {
     }
 }
 
-/// The launch's YOLO verdict in this UI's words. Unknown (a launch from
-/// before launch kinds) says so rather than reading as "no": on a permission
-/// prompt, guessing the safe answer is the wrong way to be wrong.
-fn yolo_words(yolo: Option<bool>) -> &'static str {
-    match yolo {
-        Some(true) => "yes: the agent runs with no approval prompts",
-        Some(false) => "no",
-        None => "unknown: this launch predates YOLO classification",
-    }
-}
-
 /// A session as separate labelled rows: its title (when the helm knows it),
 /// its id, and its host. Kept apart, not joined into one value, because a
 /// title is agent text and could otherwise imitate the id or the host and make
@@ -1478,6 +1555,122 @@ mod tests {
         farhelm_proto::SessionRef::new(ENTRY, bare)
             .unwrap()
             .to_string()
+    }
+
+    /// Requester abbreviation removes one entry prefix and preserves both ends
+    /// of the bare identity. Tokens crossing a cut stay whole, so an escaped
+    /// character cannot be mistaken for the literal spelling of another ID.
+    #[test]
+    fn requester_abbreviation_preserves_identity_tokens_and_bare_suffix() {
+        assert_eq!(shortened_requester_id(&session_reference("short")), "short");
+        assert_eq!(
+            shortened_requester_id(&session_reference("1234567890abcdefghijkl")),
+            "12345678…ijkl"
+        );
+        assert_eq!(
+            shortened_requester_id(&session_reference("1234567\u{200b}middle\u{202e}")),
+            "1234567<U+200B>…<U+202E>"
+        );
+        assert_eq!(
+            shortened_requester_id(&session_reference("<U+200B>middle-long-enough")),
+            "<U+003C>…ough"
+        );
+        // A full-looking suffix still obeys the 40-byte ingress bound:
+        // the nested entry prefix leaves room for only a tiny bare suffix.
+        let nested = session_reference("x");
+        assert_eq!(
+            shortened_requester_id(&session_reference(&nested)),
+            "7f8c2b1e…6d:x"
+        );
+    }
+
+    /// The compact line can discard visual middle text only because assistive
+    /// users and pointer users can still inspect the full strict reference.
+    #[test]
+    fn requester_rendering_retains_full_identity_in_accessible_name_and_hover() {
+        fn render(session: ApprovalSession) -> Element {
+            rsx! { Requester { host: "host".to_string(), session } }
+        }
+        let id = session_reference("1234567\u{200b}middle\u{202e}");
+        let full = display_identity(&id);
+        let mut dom = VirtualDom::new_with_props(
+            render,
+            ApprovalSession {
+                id,
+                title: Some("peer title".into()),
+                host_name: None,
+            },
+        );
+        let edits = dom.rebuild_to_vec().edits;
+        let attributes: Vec<_> = edits
+            .iter()
+            .filter_map(|edit| match edit {
+                dioxus::core::Mutation::SetAttribute {
+                    name,
+                    value: dioxus::core::AttributeValue::Text(value),
+                    ..
+                } => Some((*name, value.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert!(attributes.contains(&("data-tooltip", full.as_str())));
+        let accessible = format!("From session ID: {full}");
+        assert!(attributes.contains(&("aria-label", accessible.as_str())));
+        assert!(edits.iter().any(|edit| matches!(edit,
+            dioxus::core::Mutation::CreateTextNode { value, .. } if value == "1234567<U+200B>…<U+202E>"
+        )));
+    }
+
+    /// Security-relevant URL and flag tails wrap in full. Only technical
+    /// destinations scroll sideways, and text boxes alone leave the fact list
+    /// so the layout can shrink them before it scrolls that list.
+    #[test]
+    fn approval_facts_keep_their_scrolling_contracts() {
+        for label in [
+            "folder",
+            "managed checkout of",
+            "ssh destination",
+            "destination",
+            "container GitHub token file",
+        ] {
+            assert!(single_line_fact(label), "{label}");
+        }
+        for label in ["URL", "permission flags", "title", "host"] {
+            assert!(!single_line_fact(label), "{label}");
+        }
+        assert!(full_width_row(&CardRow::Block("command", "long".into())));
+        assert!(!full_width_row(&CardRow::CopyIdentity(
+            "session id",
+            "full".into()
+        )));
+    }
+
+    /// Every permission glyph has an explicit chip name, particularly command
+    /// claims and unknown legacy launches. New modes cannot inherit a safer
+    /// looking fallback through a wildcard match.
+    #[test]
+    fn permission_chips_cover_every_classified_meaning() {
+        for (glyph, label) in [
+            (PermissionGlyph::Yolo, "YOLO"),
+            (PermissionGlyph::Guarded, "Guarded"),
+            (PermissionGlyph::OwnSetting, "Own setting"),
+            (PermissionGlyph::Unknown, "Unknown"),
+            (PermissionGlyph::Approve, "Approve"),
+            (PermissionGlyph::SmartApprove, "Smart approve"),
+            (PermissionGlyph::Chat, "Chat"),
+            (PermissionGlyph::AssertedYolo, "Asserted YOLO"),
+            (PermissionGlyph::AssertedNotYolo, "Asserted not YOLO"),
+        ] {
+            assert_eq!(permission_chip_label(glyph), label);
+        }
+        for asserted in [
+            PermissionGlyph::AssertedYolo,
+            PermissionGlyph::AssertedNotYolo,
+        ] {
+            assert!(permission_description(asserted).contains("not checked by Farhelm"));
+        }
+        assert!(permission_description(PermissionGlyph::OwnSetting).contains("treated as YOLO"));
+        assert!(permission_description(PermissionGlyph::Unknown).contains("before launch kinds"));
     }
 
     /// The real card must offer the narrow grant only when the helm advertises
@@ -1801,7 +1994,7 @@ mod tests {
                 assert_eq!(left_raw, &left, "copy retains the complete raw reference");
                 assert_eq!(right_raw, &right);
                 assert_ne!(display_identity(left_raw), display_identity(right_raw));
-                assert!(full_width_row(left_row) && full_width_row(right_row));
+                assert!(!full_width_row(left_row) && !full_width_row(right_row));
             }
         }
         assert_eq!(compact_label("asking session id"), "From session ID");
@@ -1854,13 +2047,9 @@ mod tests {
                 })
                 .collect();
             assert_eq!(copy_names, ["Copy from session ID", "Copy session ID"]);
-            assert!(
-                edits.iter().any(|edit| matches!(edit,
-                dioxus::core::Mutation::SetAttribute {
-                    name: "class", value: dioxus::core::AttributeValue::Text(value), ..
-                } if value == "approval-card-row approval-card-full")),
-                "identity rows must occupy a full line"
-            );
+            // Browser geometry tests cover the actual scrolling container.
+            // A literal class lives in Dioxus's static template, so dynamic
+            // attribute mutations cannot establish that layout contract.
         }
     }
 
@@ -2102,7 +2291,11 @@ mod tests {
             "resume command",
             "agent --resume {conversation}".to_string()
         )));
-        assert!(rows.contains(&CardRow::Note("asserted YOLO", "no")));
+        assert!(rows.contains(&CardRow::LaunchPermission {
+            glyph: PermissionGlyph::AssertedNotYolo,
+            guarded: None,
+            trust: None,
+        }));
         assert!(
             !rows
                 .iter()
@@ -2255,14 +2448,9 @@ mod tests {
         assert!(!card(fields).contains(&CardRow::Note("container", "none")));
     }
 
-    /// Spec: an agent launch's card names its permission mode in one line,
-    /// from the stored permission.
-    ///
-    /// Why: this is the card on which a user approves an agent's launch.
-    /// The full permission help is several paragraphs; in a value row each of
-    /// its newlines renders as a literal escape, so the mode the user is
-    /// approving became hard to read. An older launch stored without a
-    /// permission must still read as not classified, never as guarded.
+    /// Launch permissions use the session classifier and keep the guarded
+    /// vendor heading. Omission must remain own-setting, never today's default;
+    /// otherwise an old launch could look safer than the host guard treats it.
     #[test]
     fn an_agent_launch_card_names_its_permission_in_one_line() {
         let permissions_of = |permissions: Option<farhelm_proto::LaunchPermission>| {
@@ -2284,16 +2472,85 @@ mod tests {
             launch_rows(&launch, Runs::Start, &mut rows);
             rows.into_iter()
                 .find_map(|row| match row {
-                    CardRow::Value("permissions", value) => Some(value),
+                    CardRow::LaunchPermission {
+                        glyph,
+                        guarded,
+                        trust,
+                    } => Some((glyph, guarded, trust)),
                     _ => None,
                 })
                 .expect("the card has a permissions row")
         };
         assert_eq!(
             permissions_of(Some(farhelm_proto::LaunchPermission::Guarded)),
-            "Guarded · Claude auto mode"
+            (
+                PermissionGlyph::Guarded,
+                Some("Guarded · Claude auto mode".into()),
+                None
+            )
         );
-        assert_eq!(permissions_of(None), "Not classified · Agent's own setting");
+        assert_eq!(
+            permissions_of(None),
+            (PermissionGlyph::OwnSetting, None, None)
+        );
+    }
+
+    /// Start and Resume share one classification row for every supported mode.
+    /// Custom remains YOLO, flags remain inspectable data, and a merged row
+    /// must not silently lose a vendor-specific mode or create a second verdict.
+    #[test]
+    fn launch_permission_rows_cover_every_supported_mode_without_losing_flags() {
+        use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection};
+        for &harness in LaunchHarness::ALL {
+            for permission in LaunchPermission::ALL {
+                if !harness.offers_permission(permission) {
+                    continue;
+                }
+                let expected = match permission {
+                    LaunchPermission::Guarded => PermissionGlyph::Guarded,
+                    LaunchPermission::Yolo | LaunchPermission::Custom => PermissionGlyph::Yolo,
+                    LaunchPermission::Approve => PermissionGlyph::Approve,
+                    LaunchPermission::SmartApprove => PermissionGlyph::SmartApprove,
+                    LaunchPermission::Chat => PermissionGlyph::Chat,
+                };
+                let launch = SessionLaunch::Agent {
+                    selection: LaunchSelection {
+                        harness,
+                        permissions: Some(permission),
+                        model: None,
+                        effort: None,
+                        permission_flags: Some(vec!["--example-mode".into()]),
+                        wrapper_prefix: None,
+                        container: None,
+                        workspace_trust: None,
+                    },
+                    start: vec!["agent".into()],
+                    resume: None,
+                };
+                for runs in [Runs::Start, Runs::Resume] {
+                    let mut rows = Vec::new();
+                    launch_rows(&launch, runs, &mut rows);
+                    let modes: Vec<_> = rows
+                        .iter()
+                        .filter_map(|row| match row {
+                            CardRow::LaunchPermission { glyph, guarded, .. } => {
+                                Some((*glyph, guarded))
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    assert_eq!(modes.len(), 1, "{harness:?} {permission:?}: {rows:?}");
+                    assert_eq!(modes[0].0, expected);
+                    assert_eq!(
+                        modes[0].1.is_some(),
+                        permission == LaunchPermission::Guarded
+                    );
+                    assert!(
+                        rows.contains(&CardRow::Value("permission flags", "--example-mode".into()))
+                    );
+                }
+            }
+        }
     }
 
     /// Launch and Restart must explain stored trust without asking the user
@@ -2348,15 +2605,15 @@ mod tests {
                     let notes: Vec<_> = rows
                         .iter()
                         .filter_map(|row| match row {
-                            CardRow::Note("workspace trust", text) => Some(*text),
+                            CardRow::LaunchPermission {
+                                trust: Some(trust), ..
+                            } => Some(*trust),
                             _ => None,
                         })
                         .collect();
-                    let expected: &[&str] = match workspace_trust {
-                        Some(true) => &[
-                            "trusted by Settings in a managed checkout; repository hooks, settings and commands can run without asking",
-                        ],
-                        Some(false) => &["not trusted"],
+                    let expected: &[bool] = match workspace_trust {
+                        Some(true) => &[true],
+                        Some(false) => &[false],
                         None => &[],
                     };
                     assert_eq!(notes, expected, "{harness:?}: {rows:?}");

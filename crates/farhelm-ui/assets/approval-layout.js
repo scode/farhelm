@@ -10,6 +10,40 @@
   let layout = null;
   let released = false;
 
+  // Measure only space that cannot surrender height to the card body. The
+  // body's current flex allocation is an output, so including it here would
+  // make the fallback depend on the very cap it is choosing.
+  const pinnedMinimum = () => {
+    const px = (value) => parseFloat(value) || 0;
+    const frame = (style) =>
+      px(style.paddingTop) + px(style.paddingBottom) + px(style.borderTopWidth) + px(style.borderBottomWidth);
+    const outerHeight = (element) => {
+      const style = getComputedStyle(element);
+      return element.getBoundingClientRect().height + px(style.marginTop) + px(style.marginBottom);
+    };
+    const occupants = Array.from(region.children).filter((child) => getComputedStyle(child).display !== "none");
+    const regionStyle = getComputedStyle(region);
+    let minimum = frame(regionStyle) + Math.max(0, occupants.length - 1) * px(regionStyle.rowGap);
+    for (const occupant of occupants) {
+      if (!occupant.matches(".approval-card")) {
+        // This includes the capped waiting list and a late notice even when
+        // no request remains selected. Neither can give its height to a card.
+        minimum += outerHeight(occupant);
+        continue;
+      }
+      const style = getComputedStyle(occupant);
+      const rows = Array.from(occupant.children).filter((child) => getComputedStyle(child).display !== "none");
+      minimum += frame(style) + px(style.marginTop) + px(style.marginBottom)
+        + Math.max(0, rows.length - 1) * px(style.rowGap);
+      for (const row of rows) {
+        if (!row.matches(".approval-card-body")) minimum += outerHeight(row);
+      }
+    }
+    // Fractional font metrics must not leave the last answer fractionally
+    // clipped. All card gaps remain necessary even when the body reaches zero.
+    return Math.ceil(minimum);
+  };
+
   const update = () => {
     if (!region.isConnected) {
       release();
@@ -25,19 +59,27 @@
       ? terminal.getBoundingClientRect().top
       : chrome ? chrome.getBoundingClientRect().bottom : bounds.top) + 12;
     const width = Math.min(660, Math.max(0, bounds.width - 24));
+    // Fixed rows must wrap at the intended pane width before measuring them,
+    // including the first hidden mount and a sidebar/window resize.
+    Object.assign(region.style, {
+      left: `${bounds.left + (bounds.width - width) / 2}px`,
+      width: `${width}px`,
+    });
     // The cap preserves the prompt below the overlay; a tall header must not
     // let a nominal fraction of the pane extend past its remaining space.
-    let height = Math.max(0, Math.min(bounds.height * 0.55, bounds.bottom - top - 12));
-    // Reserve one answer control plus spacing (44px). If session chrome uses
-    // that room, the request temporarily takes the viewport so it can be answered.
-    if (height < 44) {
+    let height = Math.max(0, Math.min(bounds.height * 0.75, bounds.bottom - top - 12));
+    // Include every fixed region occupant, not just the card: a notice and
+    // waiting headers can exhaust the space left for its pinned answer bar.
+    const minimum = pinnedMinimum();
+    if (height < minimum) {
       top = 0;
       height = window.innerHeight;
     }
+    // Even pinned chrome cannot fit an extremely short viewport. That one
+    // fallback keeps the old whole-region scroll so every answer is reachable.
+    region.dataset.tinyPane = String(height < minimum);
     Object.assign(region.style, {
-      left: `${bounds.left + (bounds.width - width) / 2}px`,
       top: `${top}px`,
-      width: `${width}px`,
       maxHeight: `${height}px`,
       visibility: "visible",
     });
@@ -68,6 +110,21 @@
       // so never observe their output mutations.
       structure.observe(layout, { childList: true });
       for (const child of layout.children) sizes.observe(child);
+    }
+    // Rebind when a request, notice or waiting list appears or is replaced.
+    // Their fixed rows can resize with peer text or loaded fonts. Observing
+    // only those rows avoids feeding body/region height changes back into the
+    // cap; direct-child mutations likewise exclude terminal and text output.
+    structure.observe(region, { childList: true });
+    for (const occupant of region.children) {
+      if (occupant.matches(".approval-card")) {
+        structure.observe(occupant, { childList: true });
+        for (const row of occupant.children) {
+          if (!row.matches(".approval-card-body")) sizes.observe(row);
+        }
+      } else {
+        sizes.observe(occupant);
+      }
     }
     update();
   };

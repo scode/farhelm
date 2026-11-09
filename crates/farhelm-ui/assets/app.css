@@ -8911,7 +8911,9 @@ a:any-link,
 /* One agent request expanded over the main pane, with other waiting requests
    below it as headers. Geometry comes from approval-layout.js: the sibling
    mount stays modal-exempt while the actual pane and tab strip set its bounds.
-   The region scrolls, rather than shrinking a card or clipping command text. */
+   Fixed chrome stays outside the body's scrollport. Text wells surrender
+   spare lines before the facts need to scroll; only tiny viewports scroll
+   the whole region, because even the pinned chrome cannot fit there. */
 .approval-cards {
   position: fixed;
   z-index: 45;
@@ -8919,20 +8921,25 @@ a:any-link,
   display: flex;
   flex-direction: column;
   gap: 8px;
-  overflow-y: auto;
+  overflow: hidden;
+  min-height: 0;
+  container-type: inline-size;
 }
 .approval-card {
   display: flex;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   flex-direction: column;
   gap: 8px;
-  padding: 12px;
+  padding: 12px 12px 0;
+  min-height: 0;
+  overflow: hidden;
   background: var(--bg-2);
   border: 2px solid var(--warn);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-menu);
 }
 .approval-card-header {
+  flex: none;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -8959,41 +8966,91 @@ a:any-link,
   color: var(--fg-dim);
   font-size: 12px;
 }
-.approval-card-requester,
-.approval-card-rows {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
-  gap: 4px 12px;
-  margin: 0;
-}
-.approval-card-requester {
-  /* Size requester rows from their text instead of equal columns: a short host
-     must not take room an ordinary session title needs. Whole rows wrap when
-     they cannot fit together; values still wrap inside a narrow row. */
+.approval-card-from {
   display: flex;
-  flex-wrap: wrap;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border-row);
+  font-size: 12px;
 }
-.approval-card-requester > .approval-card-row {
+.approval-from-host {
+  max-width: 22%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.approval-from-title {
+  display: flex;
   flex: 1 1 auto;
+  min-width: 0;
 }
-.approval-card-requester > :last-child {
-  flex-basis: 100%;
+.approval-from-title .peer-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.approval-from-id {
+  max-width: 28%;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.approval-copy-id {
+  flex: none;
+  padding: 2px 6px;
+}
+.approval-card-body {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  gap: 8px;
+  overflow: auto;
+}
+.approval-card-facts {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
 }
 .approval-card-row {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
+  flex: none;
+  grid-template-columns: 112px minmax(0, 1fr);
   align-content: start;
   gap: 4px 8px;
   min-width: 0;
 }
-.approval-card-requester > :last-child,
-.approval-card-full {
-  grid-column: 1 / -1;
-}
 .approval-card-command {
-  grid-template-columns: minmax(0, 1fr);
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  /* Two/six 1.6em text lines, one 1.4em label, padding, border and gap.
+     Keep these bounds consistent with the well so its minimum never clips. */
+  min-height: calc(4.6em + 18px);
+  max-height: calc(11em + 18px);
+  margin: 0;
+}
+.approval-card-block-row {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  gap: 4px;
+}
+.approval-card-block-row dt {
+  flex: none;
+  line-height: 1.4;
+  color: var(--fg-dim);
+}
+.approval-card-block-row dd {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
 }
 .approval-card-row dt {
   color: var(--fg-dim);
@@ -9004,9 +9061,35 @@ a:any-link,
   min-width: 0;
   overflow-wrap: anywhere;
 }
-/* The user approves exactly this text. It wraps in full, and only the whole
-   region scrolls when an unusually large request exceeds the height cap. */
+.approval-fact-scroll {
+  display: block;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+.approval-fact-scroll > .peer-value {
+  white-space: nowrap;
+}
+.approval-identity-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.approval-identity-value .approval-fact-scroll { flex: 1 1 auto; }
+.approval-identity-value .btn { flex: none; }
+/* Every byte remains available in a keyboard-reachable well. Two lines are
+   retained before the surrounding body, including the facts, starts scrolling. */
 .approval-card-block {
+  flex: 1 1 auto;
+  /* These bounds already include the well's padding and border, as do the
+     enclosing label/well wrapper's bounds. Count that frame exactly once. */
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: calc(3.2em + 14px);
+  max-height: calc(9.6em + 14px);
+  line-height: 1.6;
+  font-size: inherit;
   margin: 0;
   padding: 6px 8px;
   background: var(--well);
@@ -9014,14 +9097,40 @@ a:any-link,
   border-radius: var(--radius-sm);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-/* First messages can use the entire launch budget. Keep every line available
-   for approval while leaving the card's other facts and answer controls in reach. */
-.approval-card-prompt {
-  max-height: 20rem;
   overflow: auto;
 }
-.approval-card-prompt:focus-visible { outline-offset: -2px; }
+.approval-card-block:focus-visible { outline-offset: -2px; }
+.approval-permission-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+.approval-permission-line + .approval-permission-line { margin-top: 5px; }
+.approval-permission-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-style: normal;
+  font-size: 12px;
+}
+.approval-permission-warning {
+  color: var(--warn);
+  border-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+.approval-permission-description { font-size: 12px; }
+.approval-waiting-list {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 108px;
+  overflow: auto;
+}
 .approval-waiting {
   display: flex;
   flex: 0 0 auto;
@@ -9068,17 +9177,26 @@ a:any-link,
   margin: 0;
 }
 .approval-card-note {
+  flex: none;
+  margin: 0;
   font-style: italic;
 }
 .approval-card-error {
+  flex: none;
   margin: 0;
   color: var(--danger);
 }
 .approval-card-actions {
   display: flex;
+  flex: none;
   flex-wrap: wrap;
   gap: 8px;
+  margin: 0 -12px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-row);
+  background: var(--bg-1);
 }
+.approval-deny { margin-left: auto; }
 /* The permanent-allow label includes a peer's host name. Moving the button
    onto its own line cannot contain an unbroken name; the button itself must
    shrink and wrap so the narrow pane never needs sideways scrolling. */
@@ -9087,6 +9205,23 @@ a:any-link,
   max-width: 100%;
   overflow-wrap: anywhere;
 }
+/* The host span belongs inside a sentence. The shared button's inline-flex
+   would give each surrounding text run its own narrow column beside it. */
+.approval-always-allow,
+.approval-always-allow-own-host { display: block; }
+/* Stack labels according to the actual pane width, which can be narrow on a
+   wide window with a large sidebar. The region itself never scrolls sideways. */
+@container (max-width: 420px) {
+  .approval-card-row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .approval-card-from { flex-wrap: wrap; }
+  .approval-from-host { max-width: 36%; }
+  .approval-from-title { flex-basis: 42%; }
+  .approval-from-id { max-width: calc(100% - 75px); }
+}
+.approval-cards[data-tiny-pane="true"] { overflow-y: auto; }
+.approval-cards[data-tiny-pane="true"] .approval-card { flex: none; overflow: visible; }
+.approval-cards[data-tiny-pane="true"] .approval-card-body { flex: none; overflow: visible; }
+.approval-cards[data-tiny-pane="true"] .approval-waiting-list { flex: none; }
 
 /* The confirmation required before starting a YOLO launch
    (`yolo_confirm`). Deliberately loud: accidental YOLO launches on the wrong
