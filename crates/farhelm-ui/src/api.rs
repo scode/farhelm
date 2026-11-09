@@ -584,6 +584,90 @@ pub(crate) async fn mark_announcements_shown(base: &str, ids: Vec<String>) -> Re
     Ok(())
 }
 
+/// One shared, non-session notice. Its stable ID identifies the condition's
+/// retained history; reconnects and repeated failures do not create new marks.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub(crate) struct HelmNotice {
+    pub(crate) id: i64,
+    pub(crate) host: HostId,
+    /// The helm's first-observation clock orders history; the payload's `at`
+    /// remains the supervisor's failure clock and is what the panel displays.
+    pub(crate) raised_at: i64,
+    pub(crate) read: bool,
+    pub(crate) resolved: bool,
+    pub(crate) content: NoticeContent,
+}
+
+impl HelmNotice {
+    /// Resolution is quiet even when no client ever opened the notice.
+    pub(crate) fn unread(&self) -> bool {
+        !self.read && !self.resolved
+    }
+}
+
+/// Kind-specific content stays explicit so adding another kind also requires
+/// deciding its words and actions. Supervisor facts have no helm read marks.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum NoticeContent {
+    StuckTrash {
+        checkout_id: String,
+        name: String,
+        repository: String,
+        /// The helm preserves the last known measurement across unsized reads.
+        bytes: Option<u64>,
+        reason: String,
+        /// UTC seconds reported by the host, never a client arrival timestamp.
+        at: i64,
+    },
+}
+
+/// Exact-ID mutations cannot acknowledge an item that arrived after closing.
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum NoticeMark {
+    Read,
+    ClearResolved,
+}
+
+/// The helm orders the retained history newest first; an empty successful
+/// response, unlike a failed request, establishes that nothing is listed.
+pub(crate) async fn fetch_notices(base: &str) -> Result<Vec<HelmNotice>, String> {
+    #[derive(Deserialize)]
+    struct Reply {
+        notices: Vec<HelmNotice>,
+    }
+    let url = format!("{base}/api/notices");
+    let response = send(client().get(&url)).await?;
+    if !response.status().is_success() {
+        return Err(read_failure("GET", &url, response).await);
+    }
+    response
+        .json::<Reply>()
+        .await
+        .map(|reply| reply.notices)
+        .map_err(|error| error.to_string())
+}
+
+/// Mark only the rendered IDs; clear can remove only those already resolved.
+/// Explicit clear callers surface failure, while close-time read marks follow
+/// the session bells' best-effort policy and retain their shared server owner.
+pub(crate) async fn mark_notices(
+    base: &str,
+    action: NoticeMark,
+    ids: &[i64],
+) -> Result<(), String> {
+    let url = format!("{base}/api/notices/marks");
+    let response = send(client().post(&url).json(&serde_json::json!({
+        "action": action, "ids": ids,
+    })))
+    .await?;
+    if !response.status().is_success() {
+        return Err(refusal_text("POST", &url, response).await);
+    }
+    Ok(())
+}
+
 /// The write body is root-only for both folder routes; null clears its scope.
 /// Keeping it separate from the read snapshot prevents the inherited default
 /// or any separately saved command from becoming a writable field.
@@ -4088,14 +4172,26 @@ fn delete_reply(body: Result<String, String>) -> farhelm_proto::SessionDeleteOut
     }
 }
 
+/// Preserve the real trash listing when the helm cannot save notice state.
+/// This warning belongs to the HTTP layer, not the supervisor's archive facts
+/// or selectable per-checkout diagnostics. Old helms omit it.
+#[derive(Deserialize)]
+pub(crate) struct CheckoutTrashReply {
+    #[serde(flatten)]
+    pub(crate) listing: farhelm_proto::CheckoutTrashListing,
+    #[serde(default)]
+    pub(crate) notice_error: Option<String>,
+}
+
 /// Read archives from one observed host. Sizes are requested only for the
-/// open dialog; the sidebar's count never walks checkout trees.
+/// open dialog; the sidebar's count never walks checkout trees. A failed
+/// notice save remains separate from successfully read archive entries.
 pub(crate) async fn fetch_checkout_trash(
     base: &str,
     host: HostId,
     incarnation: u64,
     measure_sizes: bool,
-) -> Result<farhelm_proto::CheckoutTrashListing, String> {
+) -> Result<CheckoutTrashReply, String> {
     let url = format!("{base}/api/checkout-trash/list");
     let resp = send(client().post(&url).json(&serde_json::json!({
         "host": host, "expected_incarnation": incarnation, "measure_sizes": measure_sizes,

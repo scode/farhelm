@@ -1629,6 +1629,10 @@ Farhelm never changes permissions or removes files as another user. There is no 
 listing reports queued or running removal separately from a retained failure. Older supervisors omit these facts and
 keep their existing trash behavior.
 
+A cleanup failure also appears in the navigation rail's notification bell, with its host, checkout, last known size,
+reason and failure time. Its **Retry now** and **Open Trash** actions use the same cleanup checks and Trash dialog.
+Retry acceptance alone never marks the notice resolved; a later successful listing must confirm the checkout is gone.
+
 New sessions, including fresh checkouts whose configured root is inside the trash, cannot enter a directory accepted for
 removal or its unresolved original location. Canonical aliases follow the same refusal. Startup also preserves an
 accepted directory containing any retained session's working path instead of queuing its removal.
@@ -2595,8 +2599,28 @@ away, pressing Escape, or clicking the bell again, marks everything it showed as
 button removes them all, and the bell disappears until a new one arrives. Notifications persist across supervisor and
 helm restarts and reloads; each session keeps its 10 most recent, with no time-based expiry, and deleting a session
 deletes them. Read and cleared state is kept by the helm and shared by every client, the same way seen state is. Other
-than ntfy waiting alerts, desktop or operating-system notifications, and notifications about a host or the whole app,
-are not part of v1.
+than ntfy waiting alerts, desktop or operating-system notifications are not part of v1.
+
+Notifications about a host or the whole app have a separate bell at the top of the navigation rail's footer, above
+Hosts. It uses the same 16px size and quiet colors as its neighboring controls. Unread items make it filled red with an
+unread count; its accessible name reports that count too. Clicking opens newest-first history beside the bell. Escape,
+clicking outside, clicking the bell again or leaving the panel with keyboard focus closes it and marks only the items it
+showed as read. The bell then goes quiet; a failed best-effort mark may leave it loud until another close. Resolved
+items are quiet even if never opened, stay greyed in the panel, and can be removed with **Clear resolved**. Read and
+cleared state is shared by the helm across clients and reloads. Removing a host removes its notices; an unreachable host
+keeps its last known notices.
+
+The initial kind reports trashed checkouts whose background cleanup failed. It names the host and checkout, shows how
+much space was last measured when known and a short reason, and explains that Farhelm tries again when that host's
+supervisor restarts. **Retry now** asks for one attempt through the existing cleanup checks; it is unavailable without a
+current connected host listing showing that same checkout stuck, or while another guarded operation prevents it. **Open
+Trash** opens the existing dialog, including while host management is visible or sessions are marked, and closing that
+dialog returns focus to the visible rail bell. A notice keeps its identity and read state while the failure recurs; an
+unresolved problem never re-alerts merely because Retry or a supervisor restart reports it again. A folder being removed
+stays unresolved. Only a successful listing from a host capable of reporting accepted cleanup can resolve a checkout it
+no longer contains; failed reads, older hosts and cleanup receipts cannot. Host setup/update attention, release
+announcements and session bells keep their existing separate presentation. No toast or new notification kind ships with
+this behavior.
 
 An older helm or UI shows resolved entries as ordinary unresolved notifications. A newer helm connected to an older
 supervisor receives no resolutions; the rest of the notification behavior stays available without a protocol change.
@@ -4143,8 +4167,7 @@ Further requirements:
 
 ## Non-goals for v1
 
-- Notifications outside a session (about a host or the whole app), and desktop or operating-system notifications other
-  than configured ntfy waiting alerts.
+- Desktop or operating-system notifications other than configured ntfy waiting alerts.
 - Terminal history persistence beyond what the live terminal retains. A durable history store is a possible future
   add-on; v1 leans on agent conversation resume instead.
 - A prompt composer or message-level abstraction over the terminal.

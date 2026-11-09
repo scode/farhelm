@@ -151,6 +151,7 @@ mod container_controls;
 mod credentials_settings;
 #[cfg(native_desktop)]
 pub mod desktop;
+mod notices;
 
 // The native menu's description is renderer-free. Compile its shortcut guard
 // in ordinary UI tests too, so Linux does not need AppKit or a display server.

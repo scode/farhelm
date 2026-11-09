@@ -38,7 +38,7 @@ export function supervisorSessionId(fullId: string): string {
 type ReaderRegistry = { version: number; getters: Set<() => string>; error?: string };
 type ReaderState = { running: boolean; demand: string; task: boolean };
 type ReaderSnapshot = {
-  role: "list" | "session" | "sounds" | "tensorlake-orphans";
+  role: "list" | "session" | "sounds" | "tensorlake-orphans" | "trash";
   readers: ReaderState[];
   acted_on: string;
   notices?: string;
@@ -54,6 +54,9 @@ type ReaderSnapshot = {
   baseline?: boolean;
   generation?: string;
   failed?: boolean;
+  host?: number;
+  incarnation?: number;
+  caught_up?: boolean;
 };
 
 /** Install before navigation; ordinary pages never register reader callbacks. */
@@ -125,9 +128,10 @@ async function waitForFeedReaderBoundary(
     const lists = last.filter((snapshot) => snapshot.role === "list");
     const sessions = last.filter((snapshot) => snapshot.role === "session");
     const sounds = last.filter((snapshot) => snapshot.role === "sounds");
+    const trash = last.filter((snapshot) => snapshot.role === "trash");
     const list = lists[0];
     if (lists.length !== 1 || sounds.length !== 1 ||
-      last.length !== lists.length + sessions.length + sounds.length ||
+      last.length !== lists.length + sessions.length + sounds.length + trash.length ||
       list.healthy !== feedHealthy || list.skew !== withdrawn || list.listing_answered !== true ||
       list.resolving_selection !== false || typeof list.notices !== "string" ||
       typeof list.has_rows !== "boolean" ||
@@ -138,7 +142,9 @@ async function waitForFeedReaderBoundary(
     if (list.selected ? sessions.length !== 1 || sessions[0].id !== list.selected : sessions.length !== 0) {
       return false;
     }
-    return last.every((snapshot) => snapshot.acted_on === list.notices &&
+    // This boundary counts the session/list/sound reads measured by the feed
+    // specs. Trash has independent host lifetimes and its own boundedness test.
+    return last.filter((snapshot) => snapshot.role !== "trash").every((snapshot) => snapshot.acted_on === list.notices &&
       snapshot.readers.length === (snapshot.role === "sounds" ? 1 : 2) && snapshot.readers.every((reader) =>
         reader.running === false && reader.task === false &&
         (withdrawn ? ["None", "Scheduled", "Retry", "Notice"].includes(reader.demand) : reader.demand === "None")

@@ -73,17 +73,32 @@ host can be read. Sizes can be partial when some directories cannot be measured.
 moved since Farhelm archived it, it stays untouched and the dialog explains what was left behind. Changing the files
 inside it does not protect it: copy anything you want to keep out of the archive first.
 
-An accepted deletion removes the checkout from the trash promptly; its host frees the disk space in the background,
-so the space comes back shortly after the trash empties. If the host cannot finish removing a directory, it keeps what
-remains and tries again the next time its supervisor starts (the program that keeps that host's sessions
-running; see [The pieces](/docs/how-it-works/the-pieces/)).
+The host frees disk space in the background. The checkout stays listed as **Removing…** until its files are gone. If
+cleanup fails, it stays in Trash with the reason and a **Retry** button. Its directory may already be partly removed;
+Farhelm never changes its permissions to force deletion. The host also tries again when its supervisor, the program
+that keeps its sessions running, next starts ([The pieces](/docs/how-it-works/the-pieces/)).
 
 Confirming **Delete all** closes the dialog immediately. The trash can turns upside down and bobs while cleanup is
 running; hover it to see which hosts are freeing space. An individual **Delete** keeps the dialog open. Errors remain
 available in the trash, and the trash button tells you to open it for details.
 
-Nothing empties the trash automatically. A deletion in another window updates the count when its managed session
-disappears; emptying the trash in another window can leave this count high until you open the dialog.
+Nothing empties ordinary archived checkouts automatically. Cleanup started in another window updates this window's
+count and progress too. A failed cleanup also appears in the
+[navigation rail's bell](/docs/using/session-list/#notices-about-a-host).
+
+### Notices about a host
+
+The bell above **Hosts** in the navigation rail, the column of icons down the left edge of the sidebar, turns red and
+shows a count when there is something you have not read. Open it to see which host and checkout could not be cleaned
+up, its last measured size when known, and why. **Retry now** makes one more cleanup attempt; **Open Trash** takes you
+to the full list of archived checkouts.
+
+Closing the panel marks the items you saw as read and quiets the bell. A problem stays listed until its files are gone,
+then turns grey and says **Resolved**; **Clear resolved** removes that history. Repeated cleanup failures update the
+same notice without making it unread again. The desktop app and browser windows connected to the same
+[helm](/docs/how-it-works/the-pieces/), the program that shows all your hosts' sessions, share that history and which
+items you have read. An unreachable host keeps its last known notices. Session warnings still use
+[the bell on their row](/docs/using/session-list/#when-a-row-shows-a-bell).
 
 ## What the statuses mean
 
