@@ -1948,3 +1948,174 @@
   this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file
   and its index entry.
 - Execution: `pending`.
+
+## sandbox-stop-refresh-weakens-click-guards.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading the code on main 2e42099a (not run). A sandbox session's row-menu Stop and suspend
+  fixes whether to ask, and the operation, at the click (`crates/farhelm-ui/src/sandbox_sessions.rs`, `start`), but its
+  `execute` callback recomputes the no-tabs and agent-ended guards from the session of the latest render
+  (`session.tabs.is_empty()`, `session.status.has_ended()`); Dioxus `use_callback` replaces its closure on every render.
+  A listing refresh landing during the activity check that runs between the click and `execute` can therefore send a
+  weakened guard: a tab another window opened meanwhile is closed without a question, and an agent restarted meanwhile
+  (by the command line or an agent) is stopped. The finding argued only the tab guard; the ended-agent guard has the
+  same cause. The window is one helm HTTP read, so it is narrow. Bucket: not `highest` (realistically `other`); moot
+  once decided. The finding's Suspend-versus-Resume sub-claim is not carried: the direction is captured at the click
+  (`Operation::requested`, covered by `captured_suspend_and_resume_keep_their_endpoint_after_a_phase_change`), and the
+  remaining button-under-cursor race is the sub-second one SPEC.md accepts (line ~4856) and FILTER.md "Races a person
+  would have to win inside a sub-second window" matches. Required behavior, SPEC.md "Lifecycle operations": "When the
+  session setting skips a prompt, the click authorizes only the state the screen showed, under the same guards ... a
+  Stop whose click showed no tabs is refused if any tab is open, and a Stop whose click showed an ended agent is refused
+  if the agent is alive again or cannot be confirmed ended". SPEC_impl.md "Answers bind to what was drawn": a control
+  "acts on what the render that drew the control showed, never on state it reads when it runs ... nothing is recomputed
+  at send time."
+- Decision: recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
+  "Preparing each item"), 2026-11-09 highest-bucket triage. The maintainer can revise it.
+- Completion criteria: Stop and suspend captures the no-tabs and agent-ended guards at the click, alongside the existing
+  ask decision, and sends those captured values on both the skipped-question and the answered-question paths (click-time
+  values can only refuse more, never authorize more). A test shows a refresh between the click and the request does not
+  weaken either guard. The undecided queue item `sandbox-lifecycle-questions-lack-opening-guards.md` is in the same
+  component but is not part of this outcome. Size gate: about 100 lines of diff (code, tests and docs, not counting this
+  ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its
+  index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
+- Execution: `pending`.
+
+## codex-endpoint-change-retains-environment-key.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by reading the code on main 2e42099a (not run). When a recipe selects API endpoint for Codex,
+  Farhelm selects `model_provider = "farhelm"` and writes its own keys into `[model_providers.farhelm]` while keeping
+  every other key in that table (`crates/farhelm-helm/src/provisioning/agent_endpoints.rs`, `codex()`), so an `env_key`
+  (and any `http_headers`/`env_http_headers`) already in that table survives. With the variable exported by the login
+  shell, Codex sends that key to the recipe's endpoint instead of the recipe token (upstream precedence established by
+  the reviewer from Codex source, not re-checked); with it unset, Codex errors. Needs a custom image, or a hand-edited
+  host, with `env_key` inside the table named exactly `farhelm`; Farhelm never writes one. Unchanged by the work landed
+  since the 2026-11-07 deferral (#3077, #3081, #3086, #3126, #3173 compare-before-replace delivery, prepared snapshots,
+  sandbox sessions); custom image and snapshot bases are still offered. Codex None and Subscription stop selecting
+  Farhelm's provider, so a leftover `env_key` is harmless there. Not clearly settled: SPEC.md "Topology" ("Other
+  settings remain intact", and "A custom base's existing authentication is preserved and may be inherited by hosts
+  created from it; its author is responsible for that content") describes the current behavior.
+- Decision: the maintainer, on the 2026-11-09 highest-bucket triage page (Q1, shared with
+  `claude-endpoint-change-retains-custom-headers.md`), in their words: "either farhelm is responsible for provisionoing
+  credentials, or the image is. I forget if we support both today. But it's either or. If the user asks farhelm to
+  provision credentials and they have credentials in the image, the result is undefined. fix SPEC on that point. That
+  said, to the extent that we can address this so that the behavior is better, let's fix code with a hard complexity
+  gate and SPEC_impl must state this is a best-effort behavior to do better than what SPEC (user visible contract)
+  says." Both are supported today, per agent: a recipe's None leaves credentials to the image, while API endpoint and
+  Subscription have Farhelm provision them. Answered on the page that this fully resolves both items without new
+  settings.
+- Completion criteria: SPEC.md (recipe agent choices, "Topology") says that for each agent either Farhelm provisions its
+  credentials (API endpoint or Subscription) or the base image and host do (None), and that credentials for that agent
+  already present in the image or host configuration when Farhelm provisions it give undefined results. SPEC_impl.md
+  says Farhelm does better than that contract on a best-effort basis, and what it does: when it provisions Codex through
+  API endpoint, it replaces the `farhelm` provider table wholesale with its own coherent definition (dropping `env_key`,
+  header settings and any other leftover keys there) while preserving unrelated providers and root settings. Focused
+  merge tests cover a preexisting `env_key` and header settings in that table, without changing the test process's
+  environment. Hard complexity gate: about 100 lines of diff for this item (code, tests and docs, not counting this
+  ledger, the queue removal or a changelog fragment); over it, or if the fix needs new settings, block and bring it back
+  rather than expanding. Remove the feedback file and its index entry, and move this entry to
+  `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
+- Execution: `pending`.
+
+## claude-endpoint-change-retains-custom-headers.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by reading the code on main 2e42099a (not run). When a recipe selects API endpoint for Claude,
+  Farhelm replaces only `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` in the host's
+  `~/.claude/settings.json` environment (`agent_endpoints.rs`), so an `ANTHROPIC_CUSTOM_HEADERS` carrying a previous
+  gateway's secret (for example an `X-Gateway-Key` header) goes to the recipe's endpoint on every request. Since #3126,
+  Subscription keeps the headers too, sending them to Anthropic's own API. A team image built for a gateway is a
+  plausible trigger. Custom headers as gateway credentials are documented by Anthropic (reviewer's fetch of the env-vars
+  and LLM-gateway pages, 2026-11-05, not re-fetched). Not clearly settled, for the same reason as the Codex item.
+- Decision: the same Q1 answer as `codex-endpoint-change-retains-environment-key.md`, recorded there in the maintainer's
+  words: Farhelm or the image is responsible for an agent's credentials, never both; credentials in the image when
+  Farhelm provisions are undefined (SPEC.md), and Farhelm does better than that on a best-effort basis under a hard
+  complexity gate, stated as such in SPEC_impl.md.
+- Completion criteria: the SPEC.md rule is the one in the Codex entry (one change for both agents). SPEC_impl.md's
+  best-effort statement says that when Farhelm provisions Claude (API endpoint or Subscription), it removes
+  `ANTHROPIC_CUSTOM_HEADERS` from the settings environment along with the keys it already manages, and that a gateway
+  needing extra headers belongs under None, with the image providing everything. Other settings stay intact. Whether to
+  also remove other Claude credential sources (`ANTHROPIC_API_KEY`, `apiKeyHelper`) is the executor's call within the
+  gate; a nonempty `ANTHROPIC_AUTH_TOKEN` already outranks them per Anthropic's documented precedence. Focused merge
+  tests cover a preexisting custom-headers value in both modes, without changing the test process's environment. Hard
+  complexity gate: about 100 lines of diff for this item; over it, or if the fix needs new settings, block and bring it
+  back. Remove the feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same
+  change.
+- Execution: `pending`.
+
+## combined-stop-closes-undisplayed-tabs.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by reading the code on main 2e42099a (not run). Row, header and bulk Stop send only the
+  `refuse_if_tabs_open` and agent-ended booleans, not the tab count the question showed, and the supervisor closes the
+  tabs open when it acts. So when Stop's combined question ("stop the agent and close N tabs") is answered in the
+  fraction of a second before a tab another Farhelm window just opened reaches the question (normally 0.2-0.5 s, after
+  which the question rewords itself), that tab is closed too. SPEC.md "Lifecycle operations" accepts this only for a
+  tabs-only prompt: "Accepted: a terminal tab opened between a tabs-only prompt and the click is closed with the others;
+  the prompt need not name the exact tabs it showed." The combined case is accepted by the 2026-10-01 Delete decision
+  ("a tab opened between the prompt and the click is still closed") and by the landed stop-closes-tabs plan's acceptance
+  ("closes every tab, including one opened in between"), which a browser test asserts; most likely a drafting gap in
+  SPEC.md. Bucket: `other` (needs a second GUI, which "One GUI at a time" makes best-effort; the tab lost is seconds
+  old); moot once decided.
+- Decision: the maintainer picked "both fix spec" (2026-11-09 highest-bucket triage page, Q2, shared with
+  `approval-grant-outlives-origin-card.md`).
+- Completion criteria: SPEC.md's "Accepted" sentence in "Lifecycle operations" covers any destructive prompt that named
+  open terminal tabs, alone or together with stopping the agent, not only a tabs-only prompt: a tab opened between that
+  prompt and the click is closed with the others, and the prompt need not name the exact tabs it showed. No code change.
+  Remove the feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
+- Execution: `pending`.
+
+## approval-grant-outlives-origin-card.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed as a mechanism by reading the code on main 2e42099a (not run), but not a security issue. An
+  "Always allow" (or "Always allow on <host> only") answer checks that the requesting connection is live when the answer
+  arrives, then waits for the host lock (normally milliseconds) and saves the permission without checking again. If the
+  connection drops during that wait, the card disappears and the request is refused, but the permission stays saved.
+  What is saved is exactly the permission the user picked on a card that was live when the answer arrived, for exactly
+  the install that asked (the write checks the install identity under the lock); the original command never runs, and
+  the GUI already says the permission "may still have been turned on". SPEC_impl.md (the `hosts.commands_without_asking`
+  paragraph) says Always allow "stores it only if the card's connection is still live" without saying when liveness is
+  checked, and already accepts the same outcome when the request expires after the setting is stored. The 2026-10-10
+  decision on `always-allow-grant-permission-host-connection-has.md` (now in `TRIAGE_OUTCOMES_ARCHIVE.md`) accepted the
+  same check-then-lock order for a repointed or replaced host. The landed own-host-sessions-without-asking plan
+  prescribes the current order. Bucket: `other`; moot once decided.
+- Decision: the maintainer picked "both fix spec" (2026-11-09 highest-bucket triage page, Q2, shared with
+  `combined-stop-closes-undisplayed-tabs.md`).
+- Completion criteria: SPEC_impl.md says the liveness check for an "Always allow" answer happens when the answer
+  arrives: a connection that ends while the answer waits for the host lock can still leave the chosen permission saved
+  for that install, with the request refused and the GUI's existing notice saying the permission may have been turned
+  on. This applies to every permission a card's "Always allow" saves (session commands, own-host session management, and
+  the fleet and browser grants that share the path). No code change. Remove the feedback file and its index entry, and
+  move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
+- Execution: `pending`.
+
+## empty-history-queue-bypasses-bounds.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading the code on main 2e42099a (not run; no browser reproduction). In the browser grid
+  terminal (`crates/farhelm-ui/assets/grid-model.js`), trimming the deferred-history queue lets an empty queued append
+  absorb rows that should be trimmed (`entry.offset += excess`) while the real rows behind it stay, so `queuedRows`
+  undercounts (possibly negative, which also removes the cap), and the drain then takes the start of history numbering
+  from that shifted offset. History rows end up numbered over the live screen's rows. The painter draws history by
+  index, while pointer mapping, link lookup and the click check resolve by absolute row number screen-first, so a click
+  on a plain URL painted in that scrollback opens the screen row's URL, with no destination display (plain URLs waive it
+  because what is shown is what opens). Copying over that range likely takes the screen rows' text too (not traced in
+  detail). Empty appends also escape the row cap and the drain's yield. An honest supervisor never sends empty history
+  (`grid_output.rs`), but the protocol allows it, so a malicious, compromised or broken host controls the whole trigger.
+  SPEC.md's hostile-host acceptance ("Remote input, session defaults, and availability") covers availability only;
+  "Local authority and trust between hosts" says Farhelm defends against what an attached host can do. Not clearly
+  settled: the link rule states a reason rather than a requirement, and the existing code deliberately keeps empty
+  appends because they settle where history starts. Bucket: `highest` by the letter (established route from a named
+  threat actor); the harm is a spoofed link, without code execution or exposed secrets.
+- Decision: the maintainer picked "fix code, drop empty scrollback messages on arrival" (2026-11-09 highest-bucket
+  triage page, Q3).
+- Completion criteria: a zero-row history append no longer occupies the deferred queue: once validated, the numbering it
+  carries is applied (it still settles where history starts, which is why the code kept it), and it never absorbs
+  trimmed rows, counts toward the row cap, or skips the drain's yield. The two existing comments that justify keeping
+  empty appends are rewritten to explain the new handling. History numbering stays exact and never overlaps the screen
+  after a trim that meets an empty append (and does not leave a gap either). A JS unit test drives a backlog, an empty
+  append and more rows than the cap, and checks the queued-row count, the numbering, and that the link under a history
+  row is that row's. Size gate: about 100 lines of diff; over it, block and bring it back. Remove the feedback file and
+  its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
+- Execution: `pending`.
