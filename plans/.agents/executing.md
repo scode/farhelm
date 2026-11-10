@@ -54,9 +54,8 @@ its open PRs. Record the pick and its reasoning in the executor log.
      reset for a released claim (`plans/.agents/close-reset.md`, "Clean-main boundary"), recorded in the executor log
      only.
    - `blocking` or `delivering`: if `history` shows that commit with your claim id, it landed, whatever the line says
-     now (the monitor or a review may already have moved on); finish closing (step 12). For `blocking`, also notify: the
-     crash may have come between the block and its notification, and a second notification costs less than none. If not
-     and your id is still on the line, run the verb again. Otherwise the claim was released.
+     now (the monitor or a review may already have moved on); finish closing (step 12). If not and your id is still on
+     the line, run the verb again. Otherwise the claim was released.
 
    A released claim means: drop it from the executor log, push nothing more for that plan and write nothing more to its
    working log, run the reset for a released claim (`plans/.agents/close-reset.md`, "Clean-main boundary"), and continue
@@ -93,10 +92,11 @@ its open PRs. Record the pick and its reasoning in the executor log.
    pushes differ from GitHub's, inspect that checkout without changing it (`jj --ignore-working-copy -R <path> log`);
    unpushed work found there is a block, with that as the question, rather than something to rebuild blind. A sub-agent
    then checks the entry against the same sources. Reconcile any disagreement before working. If the plan cannot be
-   reconciled, give the claim back (the paragraph after step 12) and notify. Always start your own resource watchdog;
-   treat the previous executor's scratch directory as read-only input. After a release, entries the released executor
-   wrote to the working log before it noticed are expected: record that you saw them and continue, rather than stopping
-   as the resume protocol would for entries of unknown origin.
+   reconciled, block with that as the question (step 10), so that it reaches the landing monitor rather than stopping
+   the next executor the same way. Always start your own resource watchdog; treat the previous executor's scratch
+   directory as read-only input. After a release, entries the released executor wrote to the working log before it
+   noticed are expected: record that you saw them and continue, rather than stopping as the resume protocol would for
+   entries of unknown origin.
 8. Run the plan file as the goal. For a single plan, set the harness's goal to it if the harness lets the model set its
    own goal; otherwise, and always within a drain, behave exactly as if it were the harness-provided goal under the
    outer request. A drain does not register each plan as a harness goal, because a plan that blocks could not be cleared
@@ -108,8 +108,9 @@ its open PRs. Record the pick and its reasoning in the executor log.
     fallback), push everything that is consistent, then write the question for the Blocked section
     (`plans/.agents/maintainer-writing.md`, "Writing for the maintainer"). Have a sub-agent cold-read it, asking whether
     the maintainer could decide from this text alone and whether it breaks public-repo hygiene, and revise until it
-    passes. Write `blocking` to the executor log, run `queue block <slug> --claim <id> --question <file>`, notify
-    (`plans/AGENTS.md`, "Notifications"), and close (step 12).
+    passes. Write `blocking` to the executor log, run `queue block <slug> --claim <id> --question <file>`, and close
+    (step 12). Do not notify: the landing monitor answers the block or notifies the maintainer about it
+    (`plans/AGENTS.md`, "Notifications").
 11. Finishing: when the done criterion holds, rebase the stack onto `main@origin` as a careful rebase if main has moved
     in a way that touches it, so the report describes what would actually land. Then write the report
     (`plans/.agents/maintainer-writing.md`, "Writing for the maintainer") and have a sub-agent cold-read it, asking
@@ -128,12 +129,14 @@ logs, run the reset for a released claim (`plans/.agents/close-reset.md`, "Clean
 leftovers. To give a claim back for any other reason (the maintainer stops the flow mid-plan, a `gh` login that expired,
 a disk alert that cannot be cleared), push what is consistent, write the working log, write `unclaiming` to the executor
 log, run `queue unclaim`, and close (step 12). Notify unless the maintainer asked for the stop: an expired login or a
-full disk stops every plan on the machine until someone fixes it, and a plan that could not be reconciled (step 7) will
-stop the next executor the same way. If pushing the consistent work failed (the expired login, say), close with the
-reset for a released claim instead of the full one, so that work stays in the checkout for the next claimer to find
-(step 7), and say so in the working log and the notification.
+full disk stops every plan on the machine until someone fixes it, and the plan goes back to `pending`, where the landing
+monitor does not pick it up. If pushing the consistent work failed (the expired login, say), close with the reset for a
+released claim instead of the full one, so that work stays in the checkout for the next claimer to find (step 7), and
+say so in the working log and the notification.
 
-To notify, follow `plans/AGENTS.md`, "Notifications". Delivering does not notify: the monitor lands the plan, and its
-report reaches the maintainer through `REPORTS.md`. An executor that dies cannot notify at all; its claim shows up in
+To notify, follow `plans/AGENTS.md`, "Notifications". An executor notifies only when it stops in a way the landing
+monitor will not pick up, whatever a plan's goal file says. A block and a delivery both reach the monitor through the
+queue, so neither notifies: the monitor answers a block or notifies the maintainer about it, and lands a delivery (its
+report reaches the maintainer through `REPORTS.md`). An executor that dies cannot notify at all; its claim shows up in
 `queue status` as possibly abandoned, and the monitor notifies about that (`plans/.agents/landing.md`, "A landing
 round").
