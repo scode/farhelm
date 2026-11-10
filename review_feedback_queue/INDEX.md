@@ -23,10 +23,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   close a terminal tab opened during its activity check even though the initiating click showed no tabs and no
   tab-closing question was shown.
 
-- [`empty-history-queue-bypasses-bounds.md`](empty-history-queue-bypasses-bounds.md) — Empty deferred history can
-  corrupt coordinates so a painted URL opens a different, undisclosed screen URL. The source-confirmed action route
-  requires a protocol-valid malicious or broken peer and backlog; original availability uncertainty remains.
-
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
