@@ -38,11 +38,14 @@ test.afterEach(async ({ request }) => {
   await patchPreferences(request, { skip_session_confirmations: null });
 });
 
-/** Establish an explicit Codex YOLO draft so the helm's refusal has a known reason. */
+/** Bind the draft to the local host whose policy and requests these fixtures
+ * control. A remembered remote destination would exercise a different guard
+ * even though the local policy write succeeded. */
 async function openYoloLaunch(page: Page, cwd: string): Promise<Locator> {
   const form = page.locator(".create-session-form");
   await page.locator(".new-session-button").click();
   await expect(form).toBeVisible();
+  await chooseLauncherHost(form.locator(".create-session-host"), String(await localHostId(page.request)));
   await fillLauncherFolder(form, cwd);
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
   await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
@@ -75,6 +78,10 @@ test(`a YOLO launch asks first and starts only when confirmed${height === 844 ? 
 
     await page.locator(".new-session-button").click();
     await expect(form).toBeVisible();
+    // Every policy write below targets local; remembered destination is not
+    // evidence that this new draft will use that same host.
+    const local = await localHostId(request);
+    await chooseLauncherHost(form.locator(".create-session-host"), String(local));
     await fillLauncherFolder(form, cwd);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
@@ -162,6 +169,7 @@ test(`a YOLO launch asks first and starts only when confirmed${height === 844 ? 
     await setLocalYoloWithoutAsking(request, true);
     await page.locator(".new-session-button").click();
     await expect(form).toBeVisible();
+    await chooseLauncherHost(form.locator(".create-session-host"), String(local));
     await fillLauncherFolder(form, cwd);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
@@ -186,8 +194,8 @@ test(`a YOLO launch asks first and starts only when confirmed${height === 844 ? 
 
 /**
  * Guarded is a new launch choice, not approval of the refused YOLO request.
- * A held create makes its permission change observable before success
- * closes the form. The real helm then proves one guarded session results,
+ * A held create keeps its hidden draft observable before success closes it.
+ * The page is released while that draft remains busy. The real helm proves one guarded session results,
  * the host still asks, and the ordinary successful-launch memory is guarded.
  */
 test("the YOLO question can launch guarded and remember that permission", async ({ page, request }) => {
@@ -257,7 +265,11 @@ test("the YOLO question can launch guarded and remember that permission", async 
     const launched = page.waitForResponse(isCreate);
     await guarded.click();
     await expect.poll(() => createBodies.length).toBe(2);
-    await expect(permissions.getByRole("button", { name: "Guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(form).toBeHidden();
+    await expect(form).not.toHaveAttribute("aria-modal", "true");
+    const heldGuarded = permissions.getByRole("button", { name: "Guarded", exact: true, includeHidden: true });
+    await expect(heldGuarded).toHaveAttribute("aria-pressed", "true");
+    await expect(heldGuarded).toBeDisabled();
     // The launcher has no stored-launch baseline marker. Its selected
     // permission and the held request expose the actual template edit.
     expect(createBodies[1].launch).toMatchObject({ harness: "codex", permissions: "guarded" });
@@ -286,6 +298,7 @@ test("the YOLO question can launch guarded and remember that permission", async 
   } finally {
     gate.release();
     await guardedDone?.catch(() => undefined);
+    await page.unrouteAll({ behavior: "wait" });
     await setLocalYoloWithoutAsking(request, false);
     await patchPreferences(request, { remembered_permissions: null });
     try {

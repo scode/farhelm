@@ -26,6 +26,16 @@ pub(crate) struct PendingReplace {
     pub(crate) ask: YoloAsk,
     pub(crate) source: Session,
     pub(crate) guard: DeleteGuard,
+    /// The page's press count when the user's Replace answer started this
+    /// request (`LaunchActivity::snapshot`), or `None` when it is unknown.
+    ///
+    /// The question's Cancel takes focus outright only while the count is
+    /// unchanged. Focus alone cannot tell: WebKit does not focus a clicked
+    /// button, so after a header Replace click focus often stays in the
+    /// session's terminal although the user never left the Replace. A question
+    /// reopened after a failed host save keeps the first answer's count, so the
+    /// later answer's own press sends it back to the ordinary guard.
+    pub(crate) press_baseline: Option<u64>,
 }
 
 /// One local opening of a Replace question: the shared prompt mechanism's
@@ -55,6 +65,16 @@ pub(crate) struct ReplaceAttempt {
     guard: DeleteGuard,
     retained: Option<String>,
     answer: Option<ReplaceAnswer>,
+    press_baseline: Option<u64>,
+}
+
+impl ReplaceAttempt {
+    /// Record the press count read synchronously in the answering handler.
+    /// A refusal's YOLO question carries it (`PendingReplace::press_baseline`).
+    pub(crate) fn with_press_baseline(mut self, baseline: Option<u64>) -> Self {
+        self.press_baseline = baseline;
+        self
+    }
 }
 
 /// The requests all Replace surfaces are waiting on, keyed by their source.
@@ -258,6 +278,7 @@ impl ReplaceController {
             guard,
             retained,
             answer,
+            press_baseline: None,
         }
     }
 
@@ -414,6 +435,7 @@ impl ReplaceController {
         guard: DeleteGuard,
         key: String,
         error: api::ActionRefusal,
+        press_baseline: Option<u64>,
     ) -> ReplaceResult {
         self.settle(source.id.raw(), &key, error.outcome);
         let deadline_text = error.deadline_expired.then(|| {
@@ -442,6 +464,7 @@ impl ReplaceController {
                     ask,
                     source,
                     guard,
+                    press_baseline,
                 },
                 None,
             ) {
@@ -460,6 +483,7 @@ impl ReplaceController {
             guard,
             retained,
             answer,
+            press_baseline,
         } = attempt;
         let allow_yolo = answer.is_some();
         if let Some(ReplaceAnswer {
@@ -494,7 +518,7 @@ impl ReplaceController {
                 self.end_key(id, &key);
                 ReplaceResult::Replaced(Box::new(session), notice)
             }
-            Err(error) => self.refused(source, guard, key, error),
+            Err(error) => self.refused(source, guard, key, error, press_baseline),
         }
     }
 }
@@ -599,6 +623,7 @@ mod tests {
             },
             source: source(id),
             guard: DeleteGuard::NothingAlive,
+            press_baseline: None,
         }
     }
 
@@ -943,7 +968,8 @@ mod tests {
                     source("A"),
                     DeleteGuard::NothingAlive,
                     "a2".to_owned(),
-                    refusal()
+                    refusal(),
+                    None,
                 ),
                 ReplaceResult::Refused(text) if text == "refused"
             ));
@@ -952,7 +978,8 @@ mod tests {
                     source("A"),
                     DeleteGuard::NothingAlive,
                     "a2".to_owned(),
-                    refusal()
+                    refusal(),
+                    None,
                 ),
                 ReplaceResult::Refused(text) if text == "refused"
             ));
@@ -994,6 +1021,7 @@ mod tests {
                     text: "request timed out".into(),
                     deadline_expired: true,
                 },
+                None,
             );
             assert!(
                 matches!(result, ReplaceResult::Refused(text) if text.contains("Still waiting on build box"))
@@ -1013,6 +1041,7 @@ mod tests {
                     text: "host refused the replacement".into(),
                     deadline_expired: false,
                 },
+                None,
             );
             assert!(
                 matches!(result, ReplaceResult::Refused(text) if text == "host refused the replacement")
@@ -1039,6 +1068,7 @@ mod tests {
                     text: "deadline".into(),
                     deadline_expired: true,
                 },
+                None,
             );
             let ReplaceResult::Refused(text) = result else {
                 panic!("a timeout needs an ordinary unknown-outcome explanation");

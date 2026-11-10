@@ -7,13 +7,16 @@ import type { APIRequestContext, Page } from "@playwright/test";
 import { cleanupSession, createSession, localHostId, openHostsPanel, openRowMenu, patchPreferences, pinAutoSelect, readPreferences, stubFeed } from "./helpers/fleet";
 import { drainedRoute } from "./helpers/drained-route";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
-import { answerYolo, waitForTermText } from "./helpers/term";
+import { answerYolo, fillCreateForm, waitForTermText } from "./helpers/term";
 import { routeGate } from "./helpers/route-gate";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
+import { hostChoice } from "./helpers/host-rail";
 
 /** Every controlled response retains the serving build stamp. Owned remote
- * identity and session transport stay real; only its presentation is replaced. */
-async function ownedHost(page: Page, request: APIRequestContext) {
+ * identity and session transport stay real; only its presentation is replaced.
+ * Ordinary-host mode exercises Resume-before-create without New choosing the
+ * fresh recipe that a session-owned sandbox deliberately defaults to. */
+async function ownedHost(page: Page, request: APIRequestContext, sessionOwned = true) {
   const response = await request.get("/api/hosts");
   expect(response.ok()).toBe(true);
   const build = response.headers()["x-farhelm-build"];
@@ -33,7 +36,7 @@ async function ownedHost(page: Page, request: APIRequestContext) {
       ...host,
       name: "Owned sandbox",
       kind: "tensorlake",
-      is_session_owned: true,
+      is_session_owned: sessionOwned,
       state: suspended
         ? { phase: "suspended", observed_at: Date.now(), suspended_by_farhelm_at: null, resume_failed: null }
         : host.state,
@@ -97,19 +100,23 @@ async function recipeChoices(page: Page, build: string) {
   return stops;
 }
 
-/** Billing consent must precede a recipe request, and a recipe refusal must
- * never fall back to ordinary session creation on Local. */
+/** Billing consent must precede a recipe request and retain modal ownership.
+ * Only the admitted request frees navigation; its refusal restores the same
+ * draft and must never fall back to ordinary session creation on Local. */
 test("recipe placement explains prerequisites and requires billing consent", async ({ page, request }, testInfo) => {
   const response = await request.get("/api/hosts");
   const build = response.headers()["x-farhelm-build"];
   expect(build).toBeTruthy();
   const stops = await recipeChoices(page, build);
   const bodies: any[] = [];
+  const held = routeGate();
+  const owned: string[] = [];
   let uncertainReply = false;
   let ordinaryCreates = 0;
   stops.push(await drainedRoute(page, "**/api/sandbox-sessions", async (route) => {
     expect(route.request().method()).toBe("POST");
     bodies.push(route.request().postDataJSON());
+    await held.wait();
     if (uncertainReply) return route.fulfill({ status: 200, headers: {
       "x-farhelm-build": build, "x-farhelm-sandbox-host": "3",
       "x-farhelm-sandbox-run": "1ddba07b-2a1a-46c6-945a-b09d87e741a8",
@@ -121,6 +128,11 @@ test("recipe placement explains prerequisites and requires billing consent", asy
     await route.continue();
   }));
   try {
+    const source = await createSession(request, { title: `recipe-source-${Date.now()}` });
+    owned.push(source.id);
+    const other = await createSession(request, { title: `recipe-other-${Date.now()}` });
+    owned.push(other.id);
+    await pinAutoSelect(page, source.id);
     await page.goto("/");
     await page.locator(".new-session-button").click();
     const form = page.locator(".create-session-form");
@@ -140,12 +152,29 @@ test("recipe placement explains prerequisites and requires billing consent", asy
     const question = form.getByRole("alertdialog", { name: "Create a sandbox for this session?", exact: true });
     await expect(question).toContainText("bills while running");
     await expect(question).toContainText("30 minutes");
+    await expect(form).toHaveAttribute("aria-modal", "true");
+    await page.locator(`[data-session-id="${other.id}"] .session-row-open`).focus();
+    expect(await form.evaluate(node => node.contains(document.activeElement)), "billing consent still owns the keyboard").toBe(true);
     expect(bodies).toEqual([]);
     await question.getByRole("button", { name: "Cancel", exact: true }).click();
     expect(bodies).toEqual([]);
     await form.locator(".create-session-submit").click();
     await question.getByRole("button", { name: "Create and launch", exact: true }).click();
+    await expect.poll(() => bodies.length, { message: "the confirmed recipe POST is held" }).toBe(1);
+    await expect(form).toHaveCount(1);
+    await expect(form).toBeHidden();
+    await expect(form).not.toHaveAttribute("aria-modal", "true");
+    const otherRow = page.locator(`[data-session-id="${other.id}"]`);
+    await otherRow.locator(".session-row-open").click();
+    await expect(otherRow).toHaveAttribute("data-session-selected", "true");
+    held.release();
     await expect(form.getByRole("alert")).toContainText("recipe fixture refused launch");
+    await expect(form).toBeVisible();
+    await expect(form).toHaveAttribute("aria-modal", "true");
+    await expect(form.getByLabel("Agent command", { exact: true })).toHaveValue("sleep 300");
+    await expect(form.getByRole("combobox", { name: "Host", exact: true })).toContainText("New sandbox · session-ready");
+    await expect.poll(() => form.evaluate(node => node.contains(document.activeElement)),
+      { message: "the recipe refusal restores its modal draft's keyboard ownership" }).toBe(true);
     expect(bodies).toHaveLength(1);
     expect(bodies[0]).toMatchObject({ recipe: "session-ready", confirmed: true, request: { cwd: "~" } });
     expect(bodies[0].request).not.toHaveProperty("host");
@@ -161,7 +190,74 @@ test("recipe placement explains prerequisites and requires billing consent", asy
     expect(bodies).toHaveLength(2);
     expect(ordinaryCreates).toBe(0);
   } finally {
-    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, stops.map((stop, index) => [`recipe route ${index}`, stop]));
+    held.release();
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ...stops.map((stop, index): [string, () => Promise<void>] => [`recipe route ${index}`, stop]),
+      ...owned.reverse().map((id): [string, () => Promise<void>] => [id, () => cleanupSession(request, id)]),
+    ]);
+  }
+});
+
+/** A submitted launch on a suspended existing host first waits for Resume.
+ * That preparation is already owned work, so it must free navigation too and
+ * survive the source view unmounting before the create's refusal returns. */
+test("an existing-host launch stays nonmodal while its Resume is held", async ({ page, request }, testInfo) => {
+  const fixture = await ownedHost(page, request, false);
+  const held = routeGate();
+  const owned: string[] = [];
+  const bodies: any[] = [];
+  let resumes = 0;
+  try {
+    const source = await createSession(request, { title: `launch-resume-source-${Date.now()}`, host: fixture.remote.id });
+    owned.push(source.id);
+    const other = await createSession(request, { title: `launch-resume-other-${Date.now()}`, host: await localHostId(request) });
+    owned.push(other.id);
+    fixture.stops.push(await drainedRoute(page, `**/api/hosts/${fixture.remote.id}/resume`, async route => {
+      expect(route.request().method()).toBe("POST");
+      resumes++;
+      await held.wait();
+      await route.fallback();
+    }));
+    fixture.stops.push(await drainedRoute(page, "**/api/sessions", async route => {
+      if (route.request().method() !== "POST") return route.fallback();
+      bodies.push(route.request().postDataJSON());
+      await route.fulfill({ status: 409, headers: { "x-farhelm-build": fixture.build }, body: "resumed-host create refused" });
+    }));
+    await pinAutoSelect(page, source.id);
+    await page.goto("/");
+    // This ordinary-host fixture keeps real session details live. Its host
+    // snapshot, rather than a stale-session overlay, authorizes launch Resume.
+    await expect(page.locator(`[data-session-id="${source.id}"]`)).toHaveAttribute("data-session-selected", "true");
+    await expect(hostChoice(page, fixture.remote.id)).toHaveAccessibleName(/: Suspended$/);
+    const form = await fillCreateForm(page, { cwd: "/tmp", invocation: "true", title: "resume-owned draft" });
+    await expect(form.getByRole("combobox", { name: "Host", exact: true })).toContainText("Owned sandbox");
+    await form.locator(".create-session-submit").click();
+    await expect.poll(() => resumes, { message: "launch preparation is held at its existing-host Resume" }).toBe(1);
+    expect(bodies).toHaveLength(0);
+    await expect(form).toHaveCount(1);
+    await expect(form).toBeHidden();
+    await expect(form).not.toHaveAttribute("aria-modal", "true");
+    const otherRow = page.locator(`[data-session-id="${other.id}"]`);
+    await otherRow.locator(".session-row-open").click();
+    await expect(otherRow).toHaveAttribute("data-session-selected", "true");
+    held.release();
+    await expect(form.getByRole("alert")).toContainText("resumed-host create refused");
+    await expect(form).toBeVisible();
+    await expect(form).toHaveAttribute("aria-modal", "true");
+    await expect(form.getByLabel("Name (optional)")).toHaveValue("resume-owned draft");
+    await expect.poll(() => form.evaluate(node => node.contains(document.activeElement)),
+      { message: "a resumed-host refusal returns keyboard ownership to the same draft" }).toBe(true);
+    expect(resumes).toBe(1);
+    expect(fixture.calls).toEqual(["resume"]);
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].host).toBe(fixture.remote.id);
+    await expect(otherRow).toHaveAttribute("data-session-selected", "true");
+  } finally {
+    held.release();
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ...fixture.stops.map((stop, index): [string, () => Promise<void>] => [`launch Resume route ${index}`, stop]),
+      ...owned.reverse().map((id): [string, () => Promise<void>] => [id, () => cleanupSession(request, id)]),
+    ]);
   }
 });
 

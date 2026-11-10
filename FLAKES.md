@@ -4589,3 +4589,66 @@ Timeout: 5000ms
 Class: pointer-focus
 
 Cause: established — reveal scrolling could dismiss the tooltip after pointer entry.
+
+## 2026-11-10 — native tunnel preview exhausts WebKit's case budget again (e2e/tests/header.spec.ts)
+
+`native tunnel preview keeps ports and actions inside a 650px pane` exceeded its unchanged 60-second deadline in WebKit
+during full-browser run `896bd5a1-3017-4c84-b942-687f9676e056`; Chromium passed. The trace reached the final theme/width
+geometry loop before the deadline, then context teardown caused its pending geometry evaluation and cleanup POST to
+fail. No geometry assertion failed, but the remaining assertions did not finish. One exact unchanged WebKit retry passed
+in 32.7 seconds (`1a116c2c-a008-4774-b590-e9d3bd5fcc6f`). The October 29 and November 8 records already establish this
+case's narrow timing margin; this observation does not establish the cause or a fix. Its TODO entry and exclusion remain
+open.
+
+```text
+Test timeout of 60000ms exceeded.
+Error: apiRequestContext.post: Target page, context or browser has been closed
+```
+
+Evidence: clean commit `05bd5c12837afcb7db9a384e97288b5ffe8546d7`, source fingerprint
+`b0798a77fb4aea9c68d5203f477edd87efd554807f128b9e3fbb53fd828d0807`, shared x86_64 Linux kernel 6.8.0-149-generic, Node
+26.13.0, Playwright 1.64.0 and Python 3.15.2. The full command was `npx playwright test` through the controlled
+recorder, both engines, three workers with one stack each and zero retries. It also failed the provisioning reconnect
+response-barrier test recorded below. Console and an independent raw-report parse agree on 3,258 passes, 14 deliberate
+skips and two failures; the 34,867,020-byte JSON exceeds the recorder's 16 MiB inspection cap, so those are not
+recorder-validated counts. Output reached EOF without truncation and all three stacks reported cleanup. The exact retry
+used generic recording around `npx playwright test --project=webkit-header --grep '<exact title>' --retries=0`, with
+complete source/output and cleanup; its pass count comes from the console. Both attempts recorded tmux 3.7c executable
+SHA256 `6180a1c69b39ebb28c6d26c58d91a3bef1abdcac809cd847a4c4ef441f472129` and C.UTF-8. Ambient `FARHELM_*` was scrubbed;
+the full run supplied recorder-owned `FARHELM_TEST_TRACE_DIR` and `FARHELM_PLAYWRIGHT_POLICY_FILE`, the generic retry
+only `FARHELM_TEST_TRACE_DIR`. Per-case load and other agents' work were not measured; the resource sampler reported no
+memory or disk pressure. Browser build identifiers were not recorded here. Failed UUID evidence is retained privately
+and expires with temporary storage.
+
+Class: budget
+
+Cause: hypothesis
+
+## 2026-11-10 — reconnect test accepts a host response from before its simulated reconnect (e2e/tests/provisioning.spec.ts)
+
+`incarnation churn keeps a followed run while a target change detaches it` failed on WebKit in full-browser run
+`896bd5a1-3017-4c84-b942-687f9676e056`: the response selected by its wait lacked the reconnect marker. The trace shows
+that request started and its route captured the old phase before the test installed its broad host-response wait and
+sent the feed notification. Its response arrived afterwards and satisfied the wait. The next traced response had the
+requested marker and new incarnation. This is an established fixture synchronization race before the reconnect behavior
+is checked, distinct from this test's older progress-label flake. Three exact unchanged WebKit repetitions passed in
+`d600f92e-e638-4260-83d0-99d8e35f80e6` (17.4 seconds total). The existing TODO entry now names both failures; its
+exclusion remains, and no product or test fix was made in this session-action plan.
+
+```text
+Error: expect(received).toContain(expected)
+Expected substring: "reconnected-marker"
+```
+
+Evidence: the full run's clean source, substrate, collection limit, complete output and companion failure are recorded
+in the preceding entry. The failed case took 9.179 seconds. The narrow command used generic recording around
+`npx playwright test --project=webkit-provisioning --grep '<exact title>' --repeat-each=3 --retries=0`, three workers
+with one independent stack each, on the same source fingerprint and recorded tmux executable. Its output reached EOF
+without truncation, all three cases passed and all stacks cleaned up; these are console counts, not a controlled browser
+report. One earlier anchored-grep attempt (`4423842e-09d3-4b19-b052-5d5f15ca325f`) found no tests and is not a passing
+attempt. No other test was selected in either narrow attempt. The complete failed UUID and trace remain private
+temporary evidence; no additional full-suite run was used to classify it.
+
+Class: fixture-premise
+
+Cause: established

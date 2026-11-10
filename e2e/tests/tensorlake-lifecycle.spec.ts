@@ -3,10 +3,12 @@
  * lifecycle tests cover vendor calls and connection teardown against the helm's
  * controlled sandbox service; these cases never dial Tensorlake's gateway. */
 import { expect, test } from "./helpers/evidence";
-import type { APIRequestContext, Page } from "@playwright/test";
+import type { APIRequestContext, Locator, Page } from "@playwright/test";
 import {
   cleanupSession,
   createSession,
+  FAKE_AGENT,
+  localHostId,
   openHostsPanel,
   listSessions,
   patchPreferences,
@@ -19,6 +21,10 @@ import { chooseLauncherHost } from "./helpers/host-picker";
 import { fillLauncherFolder } from "./helpers/launcher";
 import { routeGate } from "./helpers/route-gate";
 import { drainedRoute } from "./helpers/drained-route";
+import { attachSession, terminalInput, waitForTermText } from "./helpers/term";
+import { waitForSessionReady } from "./helpers/terminal-readiness";
+import { type InputFrame, programInput, recordInput } from "./helpers/program-input";
+import { selectSessionActionWith } from "./helpers/session-actions";
 
 /** Fleet rewrites can still be reading when the page cancels a refresh.
  * Retain every installed stop, even if later fixture setup fails, so teardown
@@ -141,6 +147,561 @@ test.afterEach(async ({ page }, testInfo) => {
     ...stops.map((stop, index): [string, () => Promise<void>] => [`fleet route ${index}`, stop]),
     ["remaining routes", () => page.unrouteAll({ behavior: "wait" })],
   ]);
+});
+
+/** Record transient launcher admission, not only its final hidden appearance.
+ * Attribute old values expose a reveal/re-hide in one task. The terminal
+ * branch also records isolation writes on B's ancestor path; a switcher may
+ * legitimately isolate that path, so that case observes only the launcher.
+ * Observation never wraps focus, changes a product hook, or prevents input. */
+async function observeWakeTransition(form: Locator, protectTerminal: boolean) {
+  return form.evaluateHandle((node, protectTerminal) => {
+    const root = node as HTMLElement;
+    const input = document.querySelector('#terminal :is(.grid-terminal-input, .xterm-helper-textarea)');
+    if (!input || document.activeElement !== input || input.closest('[inert]') ||
+      !root.hidden || root.getAttribute('aria-modal') === 'true') {
+      throw new Error('wake observation requires a released hidden launcher and focused B terminal');
+    }
+    const events: string[] = [];
+    let dropped = 0;
+    const note = (event: string) => { if (events.length < 64) events.push(event); else dropped++; };
+    const presentation = new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.attributeName === 'aria-modal' &&
+          (record.oldValue === 'true' || root.getAttribute('aria-modal') === 'true')) note('launcher admitted');
+        if (record.attributeName === 'hidden' && (record.oldValue === null || !root.hidden)) note('launcher revealed');
+      }
+    });
+    presentation.observe(root, { attributes: true, attributeOldValue: true, attributeFilter: ['hidden', 'aria-modal'] });
+    const isolation = new MutationObserver((records) => {
+      for (const record of records) {
+        if (protectTerminal && record.target instanceof Element && record.target.contains(input)) {
+          note('B ancestor inert write');
+        }
+      }
+    });
+    isolation.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['inert'] });
+    const onFocus = (event: FocusEvent) => {
+      if (event.target instanceof Node && root.contains(event.target)) note('launcher took focus');
+    };
+    document.addEventListener('focusin', onFocus, true);
+    return {
+      events,
+      get dropped() { return dropped; },
+      dispose() {
+        presentation.disconnect();
+        isolation.disconnect();
+        document.removeEventListener('focusin', onFocus, true);
+      },
+    };
+  }, protectTerminal);
+}
+
+/** Resume is preparation for the accepted create, not a modal Return.
+ * Keep the next create held so a final refusal cannot hide an intervening
+ * flash. A switcher stays open past the helper's fresh Connected read: a
+ * blocked create then means dialog admission, not host readiness, delayed it. */
+for (const mode of ["form", "quick"] as const) {
+  for (const elsewhere of ["terminal", "switcher"] as const) {
+    test(`wake-to-create leaves ${elsewhere} alone (${mode})`, async ({ page, request }, testInfo) => {
+      const fixture = await fleet(page, request);
+      const previous = await readPreferences(request);
+      const resumeGate = routeGate();
+      const createGate = routeGate();
+      let stopResume: (() => Promise<void>) | undefined;
+      let stopCreate: (() => Promise<void>) | undefined;
+      const template = `wake-completion-${mode}-${elsewhere}-${Date.now()}`;
+      let other: Awaited<ReturnType<typeof createSession>> | undefined;
+      let trace: Awaited<ReturnType<typeof observeWakeTransition>> | undefined;
+      let lag: ReturnType<typeof fixture.holdNextRead> | undefined;
+      let retiring = false;
+      let resumes = 0;
+      const creates: Array<{ host: number; expected_incarnation: number }> = [];
+      let bodyFailed = true;
+      try {
+        expect(fixture.remote.identity, "the suspended target retains its real installation identity").toBeTruthy();
+        const local = await localHostId(request);
+        expect(local, "B must remain on the real Local installation").not.toBe(fixture.remote.id);
+        other = await createSession(request, { title: `wake-bystander-${mode}-${elsewhere}`, host: local });
+        const frames: InputFrame[] = [];
+        const otherId = other.id;
+        page.on("websocket", (socket) => {
+          if (new URL(socket.url()).pathname === `/api/sessions/${encodeURIComponent(otherId)}/term`) {
+            recordInput(socket, frames);
+          }
+        });
+        if (mode === "quick") {
+          const saved = await request.put(`/api/templates/${encodeURIComponent(template)}`, { data: {
+            kind: "command", command: "sleep 300", yolo: false,
+            host: fixture.remote.identity, destination: { folder: "/tmp" },
+          } });
+          expect(saved.ok(), await saved.text()).toBe(true);
+        }
+        await patchPreferences(request, { welcome_seen: true,
+          ...(mode === "quick" ? { quick_launch_template: template } : {}) });
+        stopResume = await drainedRoute(page, `**/api/hosts/${fixture.remote.id}/resume`, async (route) => {
+          expect(route.request().method()).toBe("POST");
+          resumes++;
+          await fixture.publishState({ phase: "tensorlake-changing", direction: "resuming", requested_at: Date.now() });
+          await resumeGate.wait();
+          if (!retiring) {
+            // Hold the ordinary reader's Connecting snapshot. The helper's
+            // independent read is then the only Connected reply we observe.
+            lag = fixture.holdNextRead();
+            await fixture.publishState({ phase: "connecting", attempt: 0, stage: null, last_error: null });
+            await lag.entered;
+          }
+          await fixture.publishState();
+          await route.fulfill({ status: 200, headers: { "x-farhelm-build": fixture.buildStamp }, json: {} });
+        });
+        stopCreate = await drainedRoute(page, "**/api/sessions", async (route) => {
+          if (route.request().method() !== "POST") return route.fallback();
+          const body = route.request().postDataJSON();
+          expect(body).toMatchObject({ host: fixture.remote.id, expected_incarnation: fixture.remote.incarnation });
+          creates.push(body);
+          await createGate.wait();
+          await route.fulfill({ status: 409,
+            headers: { "x-farhelm-build": fixture.buildStamp, "x-farhelm-create-outcome": "definitely-unaccepted" },
+            body: "wake handoff fixture refused" });
+        });
+        await pinAutoSelect(page, other.id);
+        await page.goto("/");
+        await attachSession(page, other.id);
+        await waitForTermText(page, "FAKE-AGENT READY");
+        await waitForTermText(page, "> ");
+        const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
+        const form = page.locator('.create-session-form[role="dialog"]');
+        if (mode === "quick") {
+          await expect(page.locator(".quick-launch-trigger")).toBeEnabled();
+          await page.keyboard.press(mac ? "Meta+p" : "Control+Shift+p");
+        } else {
+          await page.locator(".new-session-button").click();
+          await form.getByRole("tab", { name: "Command", exact: true }).click();
+          await form.getByLabel("Agent command", { exact: true }).fill("sleep 300");
+          await form.getByRole("group", { name: "Runs in YOLO mode" }).getByLabel("No", { exact: true }).check();
+          await chooseLauncherHost(form.getByRole("combobox", { name: "Host", exact: true }), String(fixture.remote.id));
+          await expect(form.getByRole("combobox", { name: "Host", exact: true })).toContainText("Suspended");
+          await fillLauncherFolder(form, "/tmp");
+          await form.locator(".create-session-submit").click();
+        }
+        await expect.poll(() => resumes, { message: "one Resume is held before exercising the released page" }).toBe(1);
+        await expect(form).toBeHidden();
+        await expect(form).not.toHaveAttribute("aria-modal", "true");
+        await expect(page.locator(".launch-progress-pill .host-resume-progress")).toBeVisible();
+        expect(creates).toHaveLength(0);
+        await terminalInput(page).focus();
+        await waitForSessionReady(page, other.id);
+        const prefix = `wake-input-${mode}-${elsewhere}`;
+        frames.length = 0;
+        await page.keyboard.type(prefix);
+        await expect.poll(() => programInput(frames)).toBe(prefix);
+        trace = await observeWakeTransition(form, elsewhere === "terminal");
+        const switcher = page.getByRole("dialog", { name: "Quick switcher", exact: true });
+        if (elsewhere === "switcher") {
+          await page.keyboard.press(mac ? "Meta+k" : "Control+Shift+k");
+          await expect(switcher).toBeVisible();
+          await expect(switcher.getByRole("combobox")).toBeFocused();
+        }
+        const connected = page.waitForResponse(async (response) => {
+          if (new URL(response.url()).pathname !== "/api/hosts" || !response.ok()) return false;
+          const json = await response.json();
+          return json.hosts.some((host: any) => host.id === fixture.remote.id &&
+            host.incarnation === fixture.remote.incarnation && host.state.phase === "connected");
+        });
+        resumeGate.release();
+        await connected;
+        await expect.poll(() => creates.length, {
+          timeout: 10_000,
+          message: `a fresh Connected reply must dispatch create while ${elsewhere} still owns the page`,
+        }).toBe(1);
+        const observed = await trace.evaluate(({ events, dropped }) => ({ events, dropped }));
+        expect(observed, "waking the host must not briefly admit, reveal or isolate the launcher").toEqual({ events: [], dropped: 0 });
+        await expect(form).toBeHidden();
+        await expect(form).not.toHaveAttribute("aria-modal", "true");
+        if (elsewhere === "switcher") {
+          await expect(switcher.getByRole("combobox")).toBeFocused();
+          await page.keyboard.press("Escape");
+          await expect(switcher).toHaveCount(0);
+        }
+        await expect(terminalInput(page)).toBeFocused();
+        expect(await terminalInput(page).evaluate((input) => !!input.closest("[inert]"))).toBe(false);
+        frames.length = 0;
+        await page.keyboard.press("Enter");
+        await expect.poll(() => programInput(frames)).toBe("\r");
+        await waitForTermText(page, `echo:${prefix}`);
+        await expect(page.locator(`[data-session-id="${other.id}"]`)).toHaveAttribute("data-session-selected", "true");
+        bodyFailed = false;
+      } finally {
+        retiring = true;
+        resumeGate.release();
+        lag?.release();
+        await cleanupOwnedSteps(bodyFailed, [
+          ["wake observation", async () => {
+            if (!trace) return;
+            const observed = await trace.evaluate(({ events, dropped }) => ({ events, dropped }));
+            await testInfo.attach("wake-transition.json", { body: JSON.stringify(observed), contentType: "application/json" });
+            await trace.evaluate((state) => state.dispose());
+            await trace.dispose();
+          }],
+          ["switcher", async () => {
+            const switcher = page.getByRole("dialog", { name: "Quick switcher", exact: true });
+            if (await switcher.count()) {
+              await switcher.getByRole("button", { name: "Close", exact: true }).click();
+              await expect(switcher).toHaveCount(0);
+            }
+          }],
+          // The create refusal is a legitimate modal Return. Retire the
+          // transition observation before allowing that different phase.
+          ["create gate", () => createGate.release()],
+          ["Resume route", async () => { await stopResume?.(); }],
+          // Closing the switcher can admit the old source's late create.
+          // Keep its trap until navigation cancels the mounted launcher;
+          // drain Resume first while its fixture can still use the feed.
+          ["submitted owner", async () => { await page.goto("about:blank"); }],
+          ["create route", async () => { await stopCreate?.(); }],
+          ["owned bystander", async () => { if (other) await cleanupSession(request, other.id); }],
+          ["quick template", async () => {
+            if (mode !== "quick") return;
+            const removed = await request.delete(`/api/templates/${encodeURIComponent(template)}`);
+            expect(removed.ok() || removed.status() === 404).toBe(true);
+          }],
+          ["preferences", () => patchPreferences(request, {
+            welcome_seen: previous.welcome_seen ?? null,
+            quick_launch_template: previous.quick_launch_template ?? null,
+          })],
+        ]);
+      }
+    });
+  }
+}
+
+/** Wake and create are steps of one accepted quick launch, not new answers.
+ * No physical input follows the shortcut until the real created row is selected
+ * and its normal naming editor opens. This catches an internal reentry losing
+ * the original press baseline, which refusal-only wake cases cannot detect. */
+test("an uninterrupted quick launch opens its session and naming after wake", async ({ page, request }) => {
+  const fixture = await fleet(page, request);
+  const previous = await readPreferences(request);
+  const name = `attended-wake-${Date.now()}`;
+  const owned: string[] = [];
+  const resumeGate = routeGate();
+  const createGate = routeGate();
+  let stopResume: (() => Promise<void>) | undefined;
+  let stopCreate: (() => Promise<void>) | undefined;
+  let resumes = 0;
+  let creates = 0;
+  let created: string | undefined;
+  let retiring = false;
+  let bodyFailed = true;
+  try {
+    expect(fixture.remote.identity, "the shortcut targets the real remote installation").toBeTruthy();
+    const other = await createSession(request, { title: `${name}-origin`, host: await localHostId(request) });
+    owned.push(other.id);
+    const saved = await request.put(`/api/templates/${encodeURIComponent(name)}`, { data: {
+      kind: "command", command: FAKE_AGENT, yolo: false, name,
+      host: fixture.remote.identity, destination: { folder: "/tmp" },
+    } });
+    expect(saved.ok(), await saved.text()).toBe(true);
+    await patchPreferences(request, {
+      welcome_seen: true, quick_launch_template: name, name_session_on_quick_launch: true,
+    });
+    stopResume = await drainedRoute(page, `**/api/hosts/${fixture.remote.id}/resume`, async (route) => {
+      expect(route.request().method()).toBe("POST");
+      resumes++;
+      await fixture.publishState({ phase: "tensorlake-changing", direction: "resuming", requested_at: Date.now() });
+      await resumeGate.wait();
+      await fixture.publishState();
+      await route.fulfill({ status: 200, headers: { "x-farhelm-build": fixture.buildStamp }, json: {} });
+    });
+    stopCreate = await drainedRoute(page, "**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      expect(route.request().postDataJSON()).toMatchObject({
+        host: fixture.remote.id, expected_incarnation: fixture.remote.incarnation,
+      });
+      creates++;
+      await createGate.wait();
+      if (retiring) {
+        await route.fulfill({ status: 409, headers: {
+          "x-farhelm-build": fixture.buildStamp, "x-farhelm-create-outcome": "definitely-unaccepted",
+        }, body: "retired owned quick launch" });
+        return;
+      }
+      const response = await route.fetch();
+      expect(response.ok(), await response.text()).toBe(true);
+      created = (await response.json()).id;
+      expect(created).toEqual(expect.any(String));
+      owned.push(created!);
+      await route.fulfill({ response });
+    });
+    await pinAutoSelect(page, other.id);
+    await page.goto("/");
+    await attachSession(page, other.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await waitForTermText(page, "> ");
+    const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
+    await expect(page.locator(".quick-launch-trigger")).toBeEnabled();
+    await page.keyboard.press(mac ? "Meta+p" : "Control+Shift+p");
+
+    // Only route gates and observations run until naming has opened. Even a
+    // harmless click here would turn this into the moved-on branch instead.
+    await expect.poll(() => resumes, { message: "the accepted shortcut is waiting for its own Resume" }).toBe(1);
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeHidden();
+    await expect(form).not.toHaveAttribute("aria-modal", "true");
+    await expect(page.locator(".launch-progress-pill .host-resume-progress")).toBeVisible();
+    expect(creates).toBe(0);
+    resumeGate.release();
+    await expect.poll(() => creates, { message: "the same shortcut dispatches one create after wake" }).toBe(1);
+    await expect(form).toBeHidden();
+    await expect(page.locator(`[data-session-id="${other.id}"]`)).toHaveAttribute("data-session-selected", "true");
+    createGate.release();
+    await expect.poll(() => created, { message: "the real supervisor accepted the owned quick create" }).toEqual(expect.any(String));
+    const createdRow = page.locator(`.session-row[data-session-id="${created!}"]`);
+    await expect(createdRow).toHaveAttribute("data-session-selected", "true");
+    const naming = page.locator(".rename-dialog");
+    await expect(naming).toBeVisible();
+    await expect(naming.getByLabel("New session title", { exact: true })).toHaveValue(name);
+    await expect(naming.getByLabel("New session title", { exact: true })).toBeFocused();
+    await expect(form).toHaveCount(0);
+    expect(creates).toBe(1);
+    expect(resumes).toBe(1);
+
+    // Naming has already proved the uninterrupted completion took its normal
+    // branch. Its ordinary Cancel now hands the actual created terminal focus.
+    await naming.locator(".rename-cancel").click();
+    await expect(naming).toHaveCount(0);
+    await waitForSessionReady(page, created!);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await waitForTermText(page, "> ");
+    await expect.poll(async () => (await readPreferences(request)).last_selected).toBe(created);
+    bodyFailed = false;
+  } finally {
+    retiring = true;
+    resumeGate.release();
+    createGate.release();
+    await cleanupOwnedSteps(bodyFailed, [
+      ["Resume route", async () => { await stopResume?.(); }],
+      ["submitted owner", async () => { await page.goto("about:blank"); }],
+      ["create route", async () => { await stopCreate?.(); }],
+      // A real create may finish during the route drain above. Read ownership
+      // only now, so an id captured by that callback is included in cleanup.
+      ["owned quick sessions", async () => {
+        await cleanupOwnedSteps(bodyFailed, owned.reverse().map((id): [string, () => Promise<void>] =>
+          ["owned quick session", () => cleanupSession(request, id)]));
+      }],
+      ["quick template", async () => {
+        const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
+        expect(removed.ok() || removed.status() === 404).toBe(true);
+      }],
+      ["preferences", () => patchPreferences(request, {
+        welcome_seen: previous.welcome_seen ?? null,
+        quick_launch_template: previous.quick_launch_template ?? null,
+        name_session_on_quick_launch: previous.name_session_on_quick_launch ?? null,
+      })],
+    ]);
+  }
+});
+
+/** Managed Replace with must claim its source at acceptance, including work
+ * before any replace POST exists. Wake and the fresh preview retain that same
+ * claim; a preparation refusal settles it before the returning draft can pass
+ * another modal. B's actual Stop handler distinguishes per-session exclusion
+ * from accidentally retaining the old page-wide lock. */
+test("managed Replace with owns its source through wake and settles before Switcher return", async ({ page, request }) => {
+  const fixture = await fleet(page, request, false);
+  const previous = await readPreferences(request);
+  const name = `managed-replace-wake-${Date.now()}`;
+  const owned: string[] = [];
+  const stops: Array<() => Promise<void>> = [];
+  const resumeGate = routeGate();
+  const previewGate = routeGate();
+  let stopResume: (() => Promise<void>) | undefined;
+  let lag: ReturnType<typeof fixture.holdNextRead> | undefined;
+  let resumes = 0;
+  let freshPreviews = 0;
+  let sourceStops = 0;
+  let otherStops = 0;
+  let replaces = 0;
+  let retiring = false;
+  let bodyFailed = true;
+  try {
+    const local = await localHostId(request);
+    expect(local, "B is independent of the displayed sandbox lifecycle").not.toBe(fixture.remote.id);
+    const source = await createSession(request, { title: name, host: fixture.remote.id });
+    owned.push(source.id);
+    const other = await createSession(request, { title: `${name}-other`, host: local });
+    owned.push(other.id);
+    const history = await request.get(`/api/launch-history?host=${fixture.remote.id}`);
+    expect(history.ok()).toBe(true);
+    const configRevision = (await history.json()).checkout_config_revision;
+    await patchPreferences(request, { welcome_seen: true, skip_session_confirmations: true });
+    stops.push(await drainedRoute(page, "**/api/github-repositories", async (route) => {
+      const input = route.request().postDataJSON();
+      await route.fulfill({ status: 200, headers: { "x-farhelm-build": fixture.buildStamp }, json: {
+        host: String(input.host), incarnation: input.expected_incarnation,
+        installation_identity: fixture.remote.identity, repos: [], truncated: true, scan_error: "fixture scan unavailable",
+      } });
+    }));
+    stops.push(await drainedRoute(page, "**/api/github-checkout-preview", async (route) => {
+      const input = route.request().postDataJSON();
+      expect(String(input.host)).toBe(String(fixture.remote.id));
+      if (resumes > 0 && input.expected_incarnation === fixture.remote.incarnation) {
+        freshPreviews++;
+        await previewGate.wait();
+        await route.fulfill({ status: 409, headers: { "x-farhelm-build": fixture.buildStamp },
+          json: { error: "held managed preparation refused" } });
+        return;
+      }
+      await route.fulfill({ status: 200, headers: { "x-farhelm-build": fixture.buildStamp }, json: {
+        canonical_root: "/tmp", basename: "managed-source-preview", cwd: "/tmp/managed-source-preview",
+        config_revision: configRevision, host: String(input.host), incarnation: input.expected_incarnation,
+        installation_identity: fixture.remote.identity,
+      } });
+    }));
+    stopResume = await drainedRoute(page, `**/api/hosts/${fixture.remote.id}/resume`, async (route) => {
+      expect(route.request().method()).toBe("POST");
+      resumes++;
+      await fixture.publishState({ phase: "tensorlake-changing", direction: "resuming", requested_at: Date.now() });
+      await resumeGate.wait();
+      if (!retiring) {
+        lag = fixture.holdNextRead();
+        await fixture.publishState({ phase: "connecting", attempt: 0, stage: null, last_error: null });
+        await lag.entered;
+      }
+      await fixture.publishState();
+      await route.fulfill({ status: 200, headers: { "x-farhelm-build": fixture.buildStamp }, json: {} });
+    });
+    for (const [id, isSource] of [[source.id, true], [other.id, false]] as const) {
+      stops.push(await drainedRoute(page, `**/api/sessions/${encodeURIComponent(id)}/stop`, async (route) => {
+        expect(route.request().method()).toBe("POST");
+        if (isSource) sourceStops++;
+        else otherStops++;
+        await route.fulfill({ status: 409, headers: { "x-farhelm-build": fixture.buildStamp },
+          body: isSource ? "source Stop handler admitted" : "independent B Stop admitted" });
+      }));
+    }
+    stops.push(await drainedRoute(page, `**/api/sessions/${encodeURIComponent(source.id)}/replace`, async (route) => {
+      replaces++;
+      await route.fulfill({ status: 409, headers: {
+        "x-farhelm-build": fixture.buildStamp, "x-farhelm-create-outcome": "definitely-unaccepted",
+      }, body: "unexpected replace dispatch after failed preparation" });
+    }));
+    await pinAutoSelect(page, source.id);
+    await page.goto("/");
+    await attachSession(page, source.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await selectSessionActionWith(page, "Replace");
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible();
+    await form.getByRole("tab", { name: "Agent", exact: true }).click();
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+    const search = form.locator('.launch-composer-search input[role="combobox"]');
+    await search.fill("gh:acme/bar");
+    await expect(form.getByRole("option", { name: "Managed checkout: acme/bar", exact: true })).toBeVisible();
+    await search.press("Enter");
+    // A typed checkout name makes the held refusal final; automatic naming
+    // would legitimately try another suffix after an occupied-name reply.
+    await form.getByLabel("Name (optional)").fill("held-replacement");
+    await expect(form.locator(".launch-composer-checkout-preview")).toHaveAttribute("data-preview-state", "ready");
+    await expect(form.locator(".create-session-submit")).toBeEnabled();
+    await expect(page.locator(".header-stop")).toBeEnabled();
+
+    // Open an editable connected-host form first. Opening Replace with after
+    // suspension would test the separate source-placement refusal instead.
+    await fixture.publishState({ phase: "suspended", observed_at: Date.now(), suspended_by_farhelm_at: null, resume_failed: null });
+    await expect(form.getByRole("combobox", { name: "Host", exact: true })).toContainText("Suspended");
+    await expect(form.locator(".launch-composer-checkout-preview")).toHaveAttribute("data-preview-state", "ready");
+    await expect(form.locator(".create-session-submit")).toBeEnabled();
+    const opening = await form.getAttribute("data-opening-generation");
+    // Dispatch a competing real handler in the submit's own browser turn.
+    // Synthetic click deliberately bypasses a later disabled render, so only
+    // the synchronous source claim can refuse this stale queued action.
+    await form.locator(".create-session-submit").evaluate((submit) => {
+      const stop = document.querySelector<HTMLButtonElement>(".header-stop");
+      if (!stop) throw new Error("the connected source Stop handler is missing");
+      (submit as HTMLButtonElement).click();
+      stop.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await expect.poll(() => resumes, { message: "Replace with is held in its hidden wake preparation" }).toBe(1);
+    await expect(form).toBeHidden();
+    await expect(form).not.toHaveAttribute("aria-modal", "true");
+    await expect(page.locator(".launch-progress-pill .host-resume-progress")).toBeVisible();
+    expect(sourceStops, "the queued source handler must not acquire a competing claim").toBe(0);
+    expect(replaces).toBe(0);
+    await attachSession(page, other.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await expect(page.locator(".header-stop")).toBeEnabled();
+    await page.locator(".header-stop").click();
+    const otherRow = page.locator(`.session-row[data-session-id="${other.id}"]`);
+    await expect(otherRow.locator(".session-row-error")).toContainText("independent B Stop admitted");
+    expect(otherStops).toBe(1);
+    expect(sourceStops).toBe(0);
+
+    resumeGate.release();
+    await expect.poll(() => freshPreviews, { message: "Resume continues into a preview on the real fresh SSH incarnation" }).toBe(1);
+    expect(lag, "ordinary display refresh is held separately from Resume's fresh host read").toBeDefined();
+    lag!.release();
+    // Connected has no warning suffix. Rule out the sandbox's frozen-state
+    // rendering before attributing the source's disabled action to its claim.
+    await expect(form.locator(".create-session-host bdi")).toHaveText("Sandbox test");
+    await attachSession(page, source.id);
+    await expect(page.locator(".header-stop")).toBeDisabled();
+    await page.locator(".header-stop").dispatchEvent("click");
+    await expect(form).toBeHidden();
+    await expect(page.locator(".launch-progress-pill .host-resume-progress")).toBeVisible();
+    expect(sourceStops, "the original source owner survives internal preview reentry").toBe(0);
+    const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
+    await page.keyboard.press(mac ? "Meta+k" : "Control+Shift+k");
+    const switcher = page.getByRole("dialog", { name: "Quick switcher", exact: true });
+    await expect(switcher.getByRole("combobox")).toBeFocused();
+    previewGate.release();
+    const sourceRow = page.locator(`.session-row[data-session-id="${source.id}"]`);
+    await expect(sourceRow.locator(".session-row-error")).toContainText("held managed preparation refused");
+    await expect(sourceRow.locator(".launch-progress")).toHaveCount(0);
+    await expect(page.locator(".header-stop")).toBeEnabled();
+    await expect(page.locator(".header-replace")).toBeEnabled();
+    await expect(form).toBeHidden();
+    await expect(form).not.toHaveAttribute("aria-modal", "true");
+    await expect(form).toHaveAttribute("data-opening-generation", opening!);
+    await expect(page.locator(".new-session-button")).toBeDisabled();
+    await expect(switcher.getByRole("combobox")).toBeFocused();
+    expect(sourceStops).toBe(0);
+    expect(replaces, "a failed checkout preparation never dispatches Replace").toBe(0);
+    // Probe the same handler while Return is still blocked. An enabled render
+    // alone would miss a leaked claim in the underlying operation owner.
+    await page.locator(".header-stop").dispatchEvent("click");
+    await expect(sourceRow.locator(".session-row-error")).toContainText("source Stop handler admitted");
+    expect(sourceStops).toBe(1);
+    await expect(form).toBeHidden();
+    await expect(switcher.getByRole("combobox")).toBeFocused();
+    await switcher.getByRole("combobox").press("Escape");
+    await expect(switcher).toHaveCount(0);
+    await expect(form).toBeVisible();
+    await expect(form.getByRole("alert")).toContainText("held managed preparation refused");
+    await expect(page.locator(".host-resume-progress")).toHaveCount(0);
+    await expect(form).toHaveAttribute("data-opening-generation", opening!);
+    await form.locator(".launch-composer-cancel").click();
+    await expect(form).toHaveCount(0);
+    expect(sourceStops).toBe(1);
+    bodyFailed = false;
+  } finally {
+    retiring = true;
+    resumeGate.release();
+    previewGate.release();
+    lag?.release();
+    await cleanupOwnedSteps(bodyFailed, [
+      // Drain the lifecycle callback while its feed is still mounted, then
+      // cancel the owner before removing traps for any late continuation.
+      ["Resume route", async () => { await stopResume?.(); }],
+      ["submitted owner", async () => { await page.goto("about:blank"); }],
+      ...stops.map((stop, index): [string, () => Promise<void>] => [`managed preparation route ${index}`, stop]),
+      ...owned.reverse().map((id): [string, () => Promise<void>] => ["owned managed-source session", () => cleanupSession(request, id)]),
+      ["preferences", () => patchPreferences(request, {
+        welcome_seen: previous.welcome_seen ?? null,
+        skip_session_confirmations: previous.skip_session_confirmations ?? null,
+      })],
+    ]);
+  }
 });
 
 /** A lifecycle request being accepted is not confirmation of its target.
@@ -444,7 +1005,7 @@ for (const duringRead of [false, true]) {
   });
 }
 
-/** Existing-folder preparation spans the vendor call and the new connection.
+/** Submitted existing-folder preparation releases the page across the vendor call and new connection.
  * Neither boundary may flash an unavailable warning or send create early;
  * the real eventual create proves the fresh connection token is accepted. */
 test("launching in an existing folder resumes before creating", async ({ page, request }) => {
@@ -479,7 +1040,10 @@ test("launching in an existing folder resumes before creating", async ({ page, r
     const resumed = page.waitForResponse((r) => new URL(r.url()).pathname === `/api/hosts/${fixture.remote.id}/resume`);
     await form.locator(".create-session-submit").click();
     await expect.poll(() => resumes).toBe(1);
-    const preparation = form.locator(".host-resume-progress");
+    await expect(form).toBeHidden();
+    await expect(form).not.toHaveAttribute("aria-modal", "true");
+    const preparation = page.locator(".launch-progress-pill .host-resume-progress");
+    await expect(preparation).toBeVisible();
     await expect(preparation).toHaveAttribute("role", "status");
     await expect(preparation).toContainText("Resuming Sandbox test");
     await expect(preparation).toContainText("the session starts when it’s ready");
@@ -506,7 +1070,7 @@ test("launching in an existing folder resumes before creating", async ({ page, r
   }
 });
 
-/** The helper's private GET can see Connected before the displayed host reader.
+/** Submitted Resume stays non-modal when its private GET sees Connected before the displayed reader.
  * Hold that reader across helper success and the ensuing create, so absence of
  * the unavailable warning cannot depend on feed/read scheduling luck. */
 test("a successful resume stays honest while the displayed host read catches up", async ({ page, request }) => {
@@ -554,8 +1118,12 @@ test("a successful resume stays honest while the displayed host read catches up"
     await fillLauncherFolder(form, "/tmp");
     await form.locator(".create-session-submit").click();
     await expect.poll(() => resumes).toBe(1);
-    await expect(form.locator(".host-resume-progress")).toBeVisible();
-    await expect(form.getByRole("combobox", { name: "Host", exact: true })).toContainText("Resuming");
+    await expect(form).toBeHidden();
+    await expect(form).not.toHaveAttribute("aria-modal", "true");
+    await expect(page.locator(".launch-progress-pill .host-resume-progress")).toBeVisible();
+    const host = form.getByRole("combobox", { name: "Host", exact: true, includeHidden: true });
+    await expect(host).toContainText("Resuming");
+    await expect(host).toBeDisabled();
     resumeGate.release();
     await expect.poll(() => creates, { message: "private Connected read has authorized the held create" }).toBe(1);
     await expect(form).not.toContainText("The selected host is unavailable");
@@ -563,6 +1131,8 @@ test("a successful resume stays honest while the displayed host read catches up"
     await expect(page.locator(`.host-row[data-host-id="${fixture.remote.id}"]`)).toContainText("Connected");
     await expect(form).not.toContainText("The selected host is unavailable");
     createGate.release();
+    await expect(form).toBeVisible();
+    await expect(form).toHaveAttribute("aria-modal", "true");
     await expect(form.getByRole("alert")).toContainText("handoff create boundary");
   } finally {
     retiring = true;
@@ -717,7 +1287,7 @@ test("a failed resume refuses an existing-folder launch without creating", async
   expect(creates, "the finished preparation refusal sent no session mutation").toBe(0);
 });
 
-/** Resume replaces the suspended connection before create starts. Hold that
+/** Resume replaces the suspended connection before create starts in the non-modal pill. Hold that
  * create at dispatch and advance the shipped progress timer: the request's
  * captured host name must not retain the selector's obsolete phase suffix. */
 test("a delayed create after resume shows the host name without Suspended", async ({ page, request }) => {
@@ -754,7 +1324,9 @@ test("a delayed create after resume shows the host name without Suspended", asyn
     await page.clock.pauseAt(new Date(Date.now() + 5_000));
     await form.locator(".create-session-submit").click();
     await expect.poll(() => creates, { message: "Resume finished and the create reply is held" }).toBe(1);
-    const status = form.locator(".launch-progress");
+    await expect(form).toBeHidden();
+    await expect(form).not.toHaveAttribute("aria-modal", "true");
+    const status = page.locator(".launch-progress-pill .launch-progress");
     await page.clock.runFor(1_900);
     await expect(status).toHaveCount(0);
     await page.clock.runFor(300);
@@ -774,6 +1346,8 @@ test("a delayed create after resume shows the host name without Suspended", asyn
 /** A fresh checkout spends one press only after the form observes Resume's
  * connection and its own preview. Held host/preview replies prove both fences;
  * named templates also exercise the existing occupied-name suffix search.
+ * The submitted owner retains its pill and token through that preview wait,
+ * so successful Resume alone neither reveals the draft nor admits another New.
  * Creates stop at a controlled refusal: this specifies launcher dispatch, while
  * github-checkouts.spec.ts exercises actual cloning and lost directory races. */
 for (const mode of ["form", "recent-enter", "typed-taken", "quick", "number", "lost-race"] as const) {
@@ -939,16 +1513,29 @@ for (const mode of ["form", "recent-enter", "typed-taken", "quick", "number", "l
         await expect.poll(() => delayedHistoryReads, { message: "the shortcut pressed before this host's history completed" }).toBeGreaterThan(0);
         historyGate.release();
       }
-      const preparation = form.locator(".host-resume-progress");
-      await expect(preparation).toContainText("Resuming Sandbox test");
-      const progress = templated ? page.locator(".launch-progress-pill .host-resume-progress") : preparation;
+      // Resume follows the accepted launch press for every entry path. The
+      // pill owns its visible preparation while the retained draft stays busy.
+      await expect(form).toBeHidden();
+      await expect(form).not.toHaveAttribute("aria-modal", "true");
+      const progress = page.locator(".launch-progress-pill .host-resume-progress");
+      await expect(progress).toBeVisible();
+      await expect(progress).toContainText("Resuming Sandbox test");
       await expect(progress).toContainText("the session starts when it’s ready");
       await expect(form).not.toContainText("The selected host is unavailable");
       expect(creates, "preparation cannot authorize a checkout from the new connection").toHaveLength(0);
       gate.release();
-      await expect(progress).toHaveCount(0);
-      await expect.poll(() => previewConnections).toContain(fixture.remote.incarnation);
+      await expect.poll(() => previewConnections, {
+        message: "Resume's fresh connection reaches the held checkout preview",
+      }).toContain(fixture.remote.incarnation);
       expect(creates, "a held current preview cannot be replaced by an old Ready offer").toHaveLength(0);
+      // The fresh preview request proves Resume's helper finished. Its
+      // retained presentation and token still belong to this accepted submit;
+      // neither the stale displayed host nor the held preview owes a modal.
+      await expect(progress).toBeVisible();
+      await expect(form).toBeHidden();
+      await expect(form).not.toHaveAttribute("aria-modal", "true");
+      await expect(page.locator(".new-session-button")).toBeDisabled();
+      expect(lag, "the displayed host reader remains held independently of Resume's helper").toBeDefined();
       lag!.release();
       previewGate.release();
       if (mode === "typed-taken") {
@@ -967,6 +1554,7 @@ for (const mode of ["form", "recent-enter", "typed-taken", "quick", "number", "l
           expect(creates[0].title).toBe("review-2");
         }
       }
+      await expect(progress).toHaveCount(0);
       expect(resumes).toBe(1);
       bodyFailed = false;
     } finally {
