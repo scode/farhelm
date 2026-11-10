@@ -10,4 +10,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `repo-cache-stale-git-locks.md` — A Git lock left in a host's repository cache by a killed background job no longer breaks every later checkout of that repository; Farhelm clears leftover locks while holding its own cache lock
 - [in-flight fd43df] `mac-system-stat.md` — Update, setup and uninstall on a remote Mac keep working when GNU coreutils come first on the SSH PATH, because Farhelm always calls the system `/usr/bin/stat` there
 - [pending] `tensorlake-skip-ssh-agent.md` — Tensorlake builds and host connections offer Farhelm's own key first and no longer consult your ssh-agent, so a personal key loaded there cannot get the login refused
-- [pending] `hosts-suspend-confirm-slot.md` — The Hosts panel's Suspend question acts only on the answer to the question you saw, like host Remove
+- [in-flight 343a11] `hosts-suspend-confirm-slot.md` — The Hosts panel's Suspend question acts only on the answer to the question you saw, like host Remove
