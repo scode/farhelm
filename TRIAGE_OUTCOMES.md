@@ -1980,43 +1980,6 @@
   index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
 - Execution: `` planned in `plans/queue/sandbox-stop-click-guards.md` ``.
 
-## codex-endpoint-change-retains-environment-key.md
-
-- Outcome: `fix spec+code`.
-- Assessment: confirmed by reading the code on main 2e42099a (not run). When a recipe selects API endpoint for Codex,
-  Farhelm selects `model_provider = "farhelm"` and writes its own keys into `[model_providers.farhelm]` while keeping
-  every other key in that table (`crates/farhelm-helm/src/provisioning/agent_endpoints.rs`, `codex()`), so an `env_key`
-  (and any `http_headers`/`env_http_headers`) already in that table survives. With the variable exported by the login
-  shell, Codex sends that key to the recipe's endpoint instead of the recipe token (upstream precedence established by
-  the reviewer from Codex source, not re-checked); with it unset, Codex errors. Needs a custom image, or a hand-edited
-  host, with `env_key` inside the table named exactly `farhelm`; Farhelm never writes one. Unchanged by the work landed
-  since the 2026-11-07 deferral (#3077, #3081, #3086, #3126, #3173 compare-before-replace delivery, prepared snapshots,
-  sandbox sessions); custom image and snapshot bases are still offered. Codex None and Subscription stop selecting
-  Farhelm's provider, so a leftover `env_key` is harmless there. Not clearly settled: SPEC.md "Topology" ("Other
-  settings remain intact", and "A custom base's existing authentication is preserved and may be inherited by hosts
-  created from it; its author is responsible for that content") describes the current behavior.
-- Decision: the maintainer, on the 2026-11-09 highest-bucket triage page (Q1, shared with
-  `claude-endpoint-change-retains-custom-headers.md`), in their words: "either farhelm is responsible for provisionoing
-  credentials, or the image is. I forget if we support both today. But it's either or. If the user asks farhelm to
-  provision credentials and they have credentials in the image, the result is undefined. fix SPEC on that point. That
-  said, to the extent that we can address this so that the behavior is better, let's fix code with a hard complexity
-  gate and SPEC_impl must state this is a best-effort behavior to do better than what SPEC (user visible contract)
-  says." Both are supported today, per agent: a recipe's None leaves credentials to the image, while API endpoint and
-  Subscription have Farhelm provision them. Answered on the page that this fully resolves both items without new
-  settings.
-- Completion criteria: SPEC.md (recipe agent choices, "Topology") says that for each agent either Farhelm provisions its
-  credentials (API endpoint or Subscription) or the base image and host do (None), and that credentials for that agent
-  already present in the image or host configuration when Farhelm provisions it give undefined results. SPEC_impl.md
-  says Farhelm does better than that contract on a best-effort basis, and what it does: when it provisions Codex through
-  API endpoint, it replaces the `farhelm` provider table wholesale with its own coherent definition (dropping `env_key`,
-  header settings and any other leftover keys there) while preserving unrelated providers and root settings. Focused
-  merge tests cover a preexisting `env_key` and header settings in that table, without changing the test process's
-  environment. Hard complexity gate: about 100 lines of diff for this item (code, tests and docs, not counting this
-  ledger, the queue removal or a changelog fragment); over it, or if the fix needs new settings, block and bring it back
-  rather than expanding. Remove the feedback file and its index entry, and move this entry to
-  `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
-- Execution: `` planned in `plans/queue/endpoint-credential-ownership.md` ``.
-
 ## claude-endpoint-change-retains-custom-headers.md
 
 - Outcome: `fix spec+code`.

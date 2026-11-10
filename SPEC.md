@@ -470,10 +470,14 @@ Each agent's recipe choice is **None | API endpoint | Subscription**. API endpoi
 endpoint tokens; Subscription requires a named login for that agent from Credentials. Switching modes retains each draft
 but saves only the selected choice. Claude Subscription writes `CLAUDE_CODE_OAUTH_TOKEN` in the host's usual
 `~/.claude/settings.json` environment and removes `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`. Claude API endpoint
-removes that subscription token; None removes all three keys. Other settings remain intact, and Farhelm writes no
-first-run or onboarding metadata. Claude may show its first-run setup once on a new host, which the user completes.
-Codex None and Subscription remove `model_provider` only when it selects `farhelm`, and remove
+removes that subscription token; None removes all three keys. Other non-credential settings remain intact, and Farhelm
+writes no first-run or onboarding metadata. Claude may show its first-run setup once on a new host, which the user
+completes. Codex None and Subscription remove `model_provider` only when it selects `farhelm`, and remove
 `experimental_bearer_token` from that provider table, preserving the table and unrelated configuration.
+
+For each agent, credentials belong either to Farhelm (API endpoint or Subscription) or to the base image and host
+(None). When Farhelm supplies credentials, credentials for that agent already in the image or host configuration give
+undefined results.
 
 Codex Subscription atomically writes the selected login to the host's usual `~/.codex/auth.json` with mode 0600 only
 when its name or revision differs from the last successful login delivery. Codex owns and refreshes that file
@@ -557,8 +561,9 @@ cleans both its build and preparation. A failed preparation retains the previous
 stale one.
 
 Farhelm delivers none of its own agent logins, endpoint credentials, GitHub tokens, gh Git configuration or tunnels to
-the preparer. A custom base's existing authentication is preserved and may be inherited by hosts created from it; its
-author is responsible for that content. Credentials and tunnels selected in Farhelm are applied separately to each host.
+the preparer. A custom base's existing authentication is preserved and may be inherited by hosts created from it for
+agents whose recipe choice is None; its author is responsible for that content. Credentials and tunnels selected in
+Farhelm are applied separately to each host.
 
 The recipe row shows preparation below its built-snapshot status: **Ready for new hosts and sessions** with age, Farhelm
 version and the 24-hour policy in the positive tone; a pulsing current phase and step count while preparing; the reason
