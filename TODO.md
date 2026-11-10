@@ -317,6 +317,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Tensorlake
 
+- **Deliver recipe credentials through the agent's launch environment instead of its settings files.** Today Farhelm
+  merges a recipe's credentials into Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/config.toml` on the
+  host, at setup, on each connection whose delivery is out of date, and when a named token is replaced, so it can race
+  the agent or the user saving the same file (SPEC_impl.md, "Adding Tensorlake hosts", accepts the last few milliseconds
+  of that race). Most of it could move into the environment Farhelm launches agents and tabs with instead: Claude's
+  `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` are plain environment variables, and
+  Codex's provider can be selected with `-c` overrides at launch and read its token from an environment variable
+  (`env_key`), never from the command line. Codex Subscription stays in `~/.codex/auth.json`, which Codex owns and
+  refreshes. Costs to weigh: a `claude` or `codex` started in a shell Farhelm did not start no longer gets the
+  credentials; a token rotation reaches agents only when they next launch; keys earlier releases wrote into the settings
+  files need a one-time cleanup; and the recipe, delivery and Settings help text in the specs is rewritten. Container
+  hosts share recipes once `plans/queue/podman-environments.md` lands, so the same design should cover them. From the
+  2026-11-10 triage of `settings-save-races-final-replacement.md`.
+
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
   approval.
 

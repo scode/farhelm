@@ -20114,3 +20114,35 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   ("an existing one can be deleted ... and nothing else"), so no paste into one remains. Planned, not implemented.
 - Completion criteria: remove the feedback file and its index entry immediately; the fix lands with that plan.
 - Execution: `complete` for the queue cleanup; removed during the 2026-11-10 triage of the high bucket.
+
+## settings-save-races-final-replacement.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by reading the code on main 1fd93044 (not run). When a Tensorlake recipe carries credentials,
+  Farhelm merges them into Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/config.toml` on the sandbox at
+  setup, on each connection whose recorded delivery is out of date, and when a named token is replaced (SPEC.md
+  "Topology"), so some deliveries happen while agents run. Since #3173 the final install compares the destination with
+  the bytes read, but the check and `chmod` + `mv -f` are separate steps in one remote command
+  (`crates/farhelm-helm/src/provisioning/backend.rs`), so a save by the agent or the user that lands in that gap of a
+  few milliseconds (estimated, not measured) is overwritten silently and the delivery recorded as done. Contradicts the
+  archived principle "Farhelm's delivery into an agent settings file never undoes a change saved to that file after
+  Farhelm read it" (`TRIAGE_OUTCOMES_ARCHIVE.md`, `agent-settings-save-overwrites-concurrent-editor.md`). Fully closing
+  it needs a lock the agents also honor; none is known. No coverage.
+- Decision: the maintainer asked why delivery edits these files after agents start, then whether credentials could move
+  out of the agents' settings files; the page answered that Claude's API endpoint and Subscription and Codex's API
+  endpoint could go into the launch environment (Codex's provider through `-c` overrides and an `env_key` token), Codex
+  Subscription cannot (Codex owns `auth.json`), and that this is a redesign. They picked "Accept the gap in the spec,
+  and add a TODO for launch-environment credentials" (2026-11-10 high-bucket triage page, Q4), and said in conversation:
+  "the todo item for credentials hsould be in near term bucket".
+- Completion criteria: SPEC_impl.md "Adding Tensorlake hosts" states that a save landing between the final comparison
+  and the replacement can still be overwritten, because closing it needs a lock the agents would also honor; the
+  archived principle is narrowed to match where SPEC_impl.md states it (it is not edited in the archive). TODO.md's
+  `Near term` bucket gains an entry: deliver recipe credentials through the agent's launch environment instead of its
+  settings files (Claude `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`; Codex provider via
+  `-c` overrides with an `env_key` token; Codex Subscription stays in `auth.json`), noting the costs raised in triage
+  (only Farhelm-started shells get the credentials, rotation reaches agents at next launch, a one-time cleanup of keys
+  earlier releases wrote, spec rewrite) and that it would remove this race. No code change. Remove the feedback file and
+  its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
+- Execution: `complete`; executed inline at the maintainer's request (spec-only outcomes are not planned). jj change
+  `kssuvkxopmmyqspynukkvvrznvlkmvrr`, bookmark `docs/spec-settings-save-gap`, draft PR
+  [#3293](https://github.com/scode/farhelm/pull/3293/changes).

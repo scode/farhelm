@@ -100,10 +100,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   can hide the last lease's zero transition, allowing obsolete credential transport work to delay reconnect. No
   disclosure, wrong-machine delivery or user-work loss is established.
 
-- [`settings-save-races-final-replacement.md`](settings-save-races-final-replacement.md) — Credential delivery can
-  silently overwrite an agent settings save made after its final digest check and before replacement. The new comparison
-  protects earlier edits but leaves this narrower window.
-
 - [`mac-update-gnu-stat-path.md`](mac-update-gnu-stat-path.md) — A remote Mac with GNU stat first on its SSH PATH can
   pass inspection but repeatedly fail Update or recovery on existing files until command selection is repaired.
 

@@ -6452,7 +6452,9 @@ warnings and do not abort supervisor installation or connection. The shared SSH 
 creating its temporary, so even an existing mode-0755 agent directory cannot expose tokens during upload or after
 interruption. Its finishing command applies the requested final mode. Before replacing agent settings it compares the
 destination with the bytes read (or expected absence); a mismatch re-reads and merges once, then warns without recording
-delivery if it conflicts again, leaving the latest file for the next connection's retry.
+delivery if it conflicts again, leaving the latest file for the next connection's retry. A save that lands between that
+final comparison and the replacement can still be overwritten, because the two are separate steps on the host; closing
+that gap would need a lock the agents themselves honor, so it is accepted.
 
 This credential cleanup is best effort beyond SPEC.md's undefined result for credentials already present when Farhelm
 supplies an agent's credentials. It does not establish support for mixing credential owners. In Codex API endpoint mode,
