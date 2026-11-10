@@ -43,8 +43,9 @@
 //   have been accepted but not yet applied. An attach sends up to the whole
 //   history (12,000 lines by default, in many messages) right after the
 //   screen, and decoding all of it at once held the page for seconds on a
-//   loaded machine. With `deferHistory` set, `apply` only checks a history
-//   message's framing and queues it, and `drainHistory` applies queued rows
+//   loaded machine. With `deferHistory` set, `apply` checks a history
+//   message's framing and queues its rows (empty appends settle numbering
+//   without queuing), and `drainHistory` applies queued rows
 //   until its caller says to yield, so the renderer can spread the work
 //   across tasks. Without it (the unit tests, small callers), `apply`
 //   drains at once and nothing is ever left queued.
@@ -736,7 +737,8 @@
       // See "The HISTORY QUEUE" in this file's header. Entries are
       // `{reset: true}` (`trim: true` when `trimQueue` made it) or an indexed
       // binary row region with validated links, a row count and moving offset.
-      // Empty appends carry numbering only. No queued row has a run/style tree.
+      // Empty appends settle numbering on arrival and never enter this queue.
+      // No queued row has a run/style tree.
       this.deferHistory = false;
       this.historyQueue = [];
       this.queuedRows = 0;
@@ -865,7 +867,8 @@
 
     /**
      * Accept a `history` message: check what can be checked without
-     * decoding its rows (line numbers, contiguity and width) and queue it.
+     * decoding its rows (line numbers, contiguity and width) and queue its rows.
+     * Empty appends settle numbering immediately without retaining an entry.
      * decodeFrame has already bounded its row region and validated its links;
      * this accepts only that indexed input shape. Rows are fully validated
      * as they are applied (`drainHistory`), so a bad row is reported then.
@@ -887,9 +890,16 @@
       // for selection needs it to keep their trailing blanks.
       if (!isInt(message.cols, 1, MAX_DIMENSION)) fail("bad history width");
       this.historyExpected = message.first + count;
-      this.historyQueue.push(count
-        ? { first: message.first, cols: message.cols, bytes: rows.bytes, offsets: rows.offsets, links: message.links, count, offset: 0 }
-        : { first: message.first, count: 0, offset: 0 });
+      if (count === 0) {
+        // Queued real rows (or a reset) own the drain's starting coordinate.
+        // With none, retain an initial empty append's numbering without
+        // giving a future trim an empty entry to absorb real rows' offsets.
+        if (this.historyQueue.length === 0 && this.historyNext === null) {
+          this.historyFirst = this.historyNext = message.first;
+        }
+        return;
+      }
+      this.historyQueue.push({ first: message.first, cols: message.cols, bytes: rows.bytes, offsets: rows.offsets, links: message.links, count, offset: 0 });
       this.queuedRows += count;
       this.trimQueue();
       if (!this.deferHistory) this.drainHistory();
@@ -929,9 +939,8 @@
       for (const entry of this.historyQueue) {
         if (entry.reset) continue;
         const left = entry.count - entry.offset;
-        // An empty append drops nothing, but still settles where history
-        // starts, so it stays.
-        if (left > 0 && excess >= left) {
+        // Every append has real rows: only those rows can absorb a trim.
+        if (excess >= left) {
           excess -= left;
           this.queuedRows -= left;
           continue;
@@ -995,8 +1004,6 @@
             return this.historyQueue.length > 0;
           }
         }
-        // An empty append still settles where history starts.
-        if (this.historyNext === null) this.historyNext = entry.first;
         this.historyQueue.shift();
       }
       return false;

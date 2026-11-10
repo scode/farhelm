@@ -19999,3 +19999,35 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   setting a card's "Always allow" stores. Executed inline at the maintainer's request (spec-only outcomes are not
   planned). jj change `qllywwspstlyoxuttxwnwwvyuznktorz`, bookmark `docs/spec-always-allow-liveness`, draft PR
   [#3286](https://github.com/scode/farhelm/pull/3286/changes).
+
+## empty-history-queue-bypasses-bounds.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading the code on main 2e42099a (not run; no browser reproduction). In the browser grid
+  terminal (`crates/farhelm-ui/assets/grid-model.js`), trimming the deferred-history queue lets an empty queued append
+  absorb rows that should be trimmed (`entry.offset += excess`) while the real rows behind it stay, so `queuedRows`
+  undercounts (possibly negative, which also removes the cap), and the drain then takes the start of history numbering
+  from that shifted offset. History rows end up numbered over the live screen's rows. The painter draws history by
+  index, while pointer mapping, link lookup and the click check resolve by absolute row number screen-first, so a click
+  on a plain URL painted in that scrollback opens the screen row's URL, with no destination display (plain URLs waive it
+  because what is shown is what opens). Copying over that range likely takes the screen rows' text too (not traced in
+  detail). Empty appends also escape the row cap and the drain's yield. An honest supervisor never sends empty history
+  (`grid_output.rs`), but the protocol allows it, so a malicious, compromised or broken host controls the whole trigger.
+  SPEC.md's hostile-host acceptance ("Remote input, session defaults, and availability") covers availability only;
+  "Local authority and trust between hosts" says Farhelm defends against what an attached host can do. Not clearly
+  settled: the link rule states a reason rather than a requirement, and the existing code deliberately keeps empty
+  appends because they settle where history starts. Bucket: `highest` by the letter (established route from a named
+  threat actor); the harm is a spoofed link, without code execution or exposed secrets.
+- Decision: the maintainer picked "fix code, drop empty scrollback messages on arrival" (2026-11-09 highest-bucket
+  triage page, Q3).
+- Completion criteria: a zero-row history append no longer occupies the deferred queue: once validated, the numbering it
+  carries is applied (it still settles where history starts, which is why the code kept it), and it never absorbs
+  trimmed rows, counts toward the row cap, or skips the drain's yield. The two existing comments that justify keeping
+  empty appends are rewritten to explain the new handling. History numbering stays exact and never overlaps the screen
+  after a trim that meets an empty append (and does not leave a gap either). A JS unit test drives a backlog, an empty
+  append and more rows than the cap, and checks the queued-row count, the numbering, and that the link under a history
+  row is that row's. Size gate: about 100 lines of diff; over it, block and bring it back. Remove the feedback file and
+  its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
+- Execution: `complete`; jj change `rxxmsqssywtyqmozspwkwoztspnsrpkt`, bookmark
+  `plan/empty-scrollback-messages/01-skip-empty-history`, draft PR
+  [#3289](https://github.com/scode/farhelm/pull/3289/changes).

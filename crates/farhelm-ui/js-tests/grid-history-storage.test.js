@@ -262,10 +262,50 @@ test("stored links project used wire indices and discard unrelated targets", () 
   assert.equal(model.history.get(2).body.byteLength, 3, "blank rows still have exact bytes and identity");
   assert.notEqual(model.historyIdentity(1), model.historyIdentity(2));
   append(model, 3, [], links);
-  assert.deepEqual(model.historyQueue, [{ first: 3, count: 0, offset: 0 }]);
+  assert.deepEqual(model.historyQueue, []);
   model.drainHistory();
   assert.equal(model.historyLength, 3);
   assert.equal(model.screenBase, 3);
+});
+
+/** Empty peer messages must not absorb a trim and assign painted history
+ * screen coordinates: link lookup resolves those coordinates screen-first.
+ * Exercise both an initial empty append and one inside an undrained backlog.
+ */
+test("empty appends cannot shift capped history onto a screen link", () => {
+  for (const emptyFirst of [true, false]) {
+    const model = started(2, 40);
+    if (emptyFirst) {
+      append(model, 40, []);
+      assert.equal(model.historyPending, false);
+      assert.equal(model.historyFirst, 40);
+      assert.equal(model.historyEnd, 40);
+    }
+    append(model, 40, [row("https://example.com/40")]);
+    assert.equal(model.historyLength, 0, "premise: the first row has not drained");
+    assert.equal(model.queuedRows, 1);
+    append(model, 41, []);
+    assert.equal(model.historyQueue.length, 1, "an empty append occupies no queue entry");
+    append(model, 41, [41, 42, 43].map((n) => row(`https://example.com/${n}`)));
+    model.apply({ t: "rows", rows: [[0, row("https://example.com/screen")]] });
+    model.apply({ t: "frame", rev: 1, cols: 40, rows: 1,
+      cursor: { x: 0, y: 0, visible: false, shape: "block", blink: false } });
+    assert.equal(model.queuedRows, 2);
+    assert.equal(model.historyQueue.reduce((n, e) => n + (e.reset ? 0 : e.count - e.offset), 0), 2);
+    assert.equal(model.screenBase, 44);
+    assert.equal(model.drainHistory(() => true), true, "draining still yields after one real row");
+    assert.equal(model.queuedRows, 1);
+    model.drainHistory();
+    assert.equal(model.queuedRows, 0);
+    assert.equal(model.historyFirst, 42);
+    assert.equal(model.historyEnd, 44);
+    const source = buffer.modelSource(model);
+    for (const abs of [42, 43]) {
+      assert.equal(source.line(abs).row.runs[0].text, `https://example.com/${abs}`);
+      assert.equal(buffer.rowLinks(source, abs)[0].uri, `https://example.com/${abs}`);
+    }
+    assert.equal(buffer.rowLinks(source, 44)[0].uri, "https://example.com/screen");
+  }
 });
 
 /** Eviction clears slots immediately; a kept row never owns sibling bytes.

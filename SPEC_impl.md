@@ -1888,8 +1888,9 @@ neither the body nor its links, so a pending answer cannot retain evicted output
 tokens even if their numbers and text repeat. Eviction clears each dropped record immediately. Queued partial drains and
 trims advance offsets rather than copy the remaining suffix on every append: at most one partly consumed message keeps
 its bounded row region (under 1 MiB), typed index (under 0.6 MiB) and declared links until its final queued row goes.
-Fully discarded entries release those allocations; empty appends retain numbering only. A real reset drops the old queue
-on arrival and clears the applied history at its existing drain boundary.
+Fully discarded entries release those allocations. Empty appends settle numbering on arrival without entering the queue,
+so only real rows absorb trims. A real reset drops the old queue on arrival and clears the applied history at its
+existing drain boundary.
 
 Not built for grid terminals, a near-term entry in `TODO.md`: showing an input method's composition at the cursor
 (committed text is sent).
