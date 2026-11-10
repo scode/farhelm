@@ -23,11 +23,11 @@ a pending plan that has PRs from an earlier round). When judging a candidate, it
 The judgment: take the oldest eligible plan unless it is particularly likely to conflict with unlanded work. That means
 it would change the same functions, the same spec sections, or substantially the same parts of a file. Touching the same
 crate or the same file is not enough on its own, and these shared bookkeeping files never count: `TODO.md`,
-`TRIAGE_OUTCOMES.md`, `review_feedback_queue/` (its index and the feedback files PRs delete), `releasing/changelog.d/`,
-and `plans/`. Adding a schema version to the helm's or the supervisor's database never counts either: two plans that
-each append the next migration step (with its fresh-schema statements, version stamp and historical-schema fixtures)
-only collide at the end of the ladder, and whichever lands second renumbers its step at rebase
-(`.agents/careful-rebase.md`). Two plans that change the same table or column still conflict on that ground.
+`TRIAGE_OUTCOMES.md`, `TRIAGE_OUTCOMES_ARCHIVE.md`, `review_feedback_queue/` (its index and the feedback files PRs
+delete), `releasing/changelog.d/`, and `plans/`. Adding a schema version to the helm's or the supervisor's database
+never counts either: two plans that each append the next migration step (with its fresh-schema statements, version stamp
+and historical-schema fixtures) only collide at the end of the ladder, and whichever lands second renumbers its step at
+rebase (`.agents/careful-rebase.md`). Two plans that change the same table or column still conflict on that ground.
 
 Skipping a plan for a conflict does not, on its own, hold back newer candidates that conflict with it: a burst of small
 plans may go ahead of a big one that touches what they touch. What bounds the big one's wait is its pass count, which

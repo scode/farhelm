@@ -31,9 +31,9 @@ several shapes, so a mechanical closure check would mostly check the parser; the
 when the split was made.
 
 `lore/` is not read at all (`lore/AGENTS.md` says no tooling processes its contents). Broken citations in other
-historical records (`TRIAGE_OUTCOMES.md`, plan reports) and in every queued plan are warnings, never failures: those
-files must not be rewritten to follow a rename, and a queue command can move a landed plan back to pending without
-anyone editing it.
+historical records (`TRIAGE_OUTCOMES.md`, `TRIAGE_OUTCOMES_ARCHIVE.md`, plan reports) and in every queued plan are
+warnings, never failures: those files must not be rewritten to follow a rename, and a queue command can move a landed
+plan back to pending without anyone editing it.
 
 Run from anywhere; `--self-test` runs the fixtures and touches nothing outside a temporary directory.
 """
@@ -61,7 +61,7 @@ RELATIVE = re.compile(r'"([^"\n]{3,80})"\s+(above|below)\b')
 # `plans/AGENTS.md`) makes it some other file, which the lookbehind excludes.
 OLD_ROOT_CITATION = re.compile(r'(?<![/\w])`?AGENTS\.md`?(?:\'s)?\s+(?:section\s+)?"([^"\n]{3,80})"')
 HISTORICAL_PREFIXES = ("lore/", "plans/reports/")
-HISTORICAL_FILES = {"TRIAGE_OUTCOMES.md", "plans/REPORTS.md", "plans/queue/INDEX.md"}
+HISTORICAL_FILES = {"TRIAGE_OUTCOMES.md", "TRIAGE_OUTCOMES_ARCHIVE.md", "plans/REPORTS.md", "plans/queue/INDEX.md"}
 
 
 def old_section_names(text: str) -> set[str]:

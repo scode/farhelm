@@ -22,9 +22,11 @@ base per jjstack. Do not combine items into one PR or split `fix spec+code` acro
 
 Each item's PR contains its agreed changes, the corresponding `TRIAGE_OUTCOMES.md` execution update, and removal of its
 feedback file and index entry (or the agreed narrowing for a partial/custom outcome). A discard PR contains only that
-queue removal and outcome bookkeeping, with no spec or code change. Retain completed ledger entries so another execution
-request can distinguish completed work from pending work. Record the change ID and bookmark before creating the PR, then
-add its URL to the same change and update that PR; do not make a separate bookkeeping PR.
+queue removal and outcome bookkeeping, with no spec or code change. The same change moves the entry, with its final
+Execution field, from `TRIAGE_OUTCOMES.md` to the end of `TRIAGE_OUTCOMES_ARCHIVE.md`
+(`review_feedback_queue/AGENTS.md`, "Lifecycle"), so an entry still in `TRIAGE_OUTCOMES.md` on main is one whose
+execution has not landed. Record the change ID and bookmark before creating the PR, then add its URL to the same change
+and update that PR; do not make a separate bookkeeping PR.
 
 Validate each change using the rules in `AGENTS.md`, "Tests and validation", and `.agents/validation.md`. Completion
 means the agreed work is verified and its draft PR exists, not that it has merged. Report the item-to-PR mapping and any

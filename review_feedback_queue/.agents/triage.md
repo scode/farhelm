@@ -155,9 +155,12 @@ as it appears in `review_feedback_queue/`, with these fields:
   change ID, bookmark, and PR URL as they become available. `` planned in `plans/queue/<slug>.md` `` means the outcome
   was scheduled through `plans/` (see `plans/AGENTS.md`) and is executed only by running that plan.
 
-Keep previous decisions and execution records; do not overwrite the file on a new triage session. If the user revises a
-decision, retain the prior decision and note what supersedes it. Do not create entries for undecided items. Triaged
-items are no longer awaiting a triage decision, but their feedback files and index entries stay until execution,
-including for `discard`. This preserves the input for the separate execution step and its per-item PR. The automatic
-spec-covered or already-planned cleanup in `review_feedback_queue/.agents/triage.md`, "Preparing each item", is the
-exception: those queue items are removed during triage itself.
+Keep previous decisions and execution records; do not overwrite the file on a new triage session. An entry leaves
+`TRIAGE_OUTCOMES.md` only by graduating to `TRIAGE_OUTCOMES_ARCHIVE.md` when its feedback file leaves the queue
+(`review_feedback_queue/AGENTS.md`, "Lifecycle"). An item triage removes immediately (already fixed, covered, or
+filtered) has nothing left open, so write its entry straight to the end of the archive. If the user revises a decision,
+retain the prior decision and note what supersedes it. Do not create entries for undecided items. Triaged items are no
+longer awaiting a triage decision, but their feedback files and index entries stay until execution, including for
+`discard`. This preserves the input for the separate execution step and its per-item PR. The automatic spec-covered or
+already-planned cleanup in `review_feedback_queue/.agents/triage.md`, "Preparing each item", is the exception: those
+queue items are removed during triage itself.
