@@ -1978,7 +1978,7 @@
   component but is not part of this outcome. Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its
   index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
-- Execution: `pending`.
+- Execution: `` planned in `plans/queue/sandbox-stop-click-guards.md` ``.
 
 ## codex-endpoint-change-retains-environment-key.md
 
@@ -2015,7 +2015,7 @@
   ledger, the queue removal or a changelog fragment); over it, or if the fix needs new settings, block and bring it back
   rather than expanding. Remove the feedback file and its index entry, and move this entry to
   `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
-- Execution: `pending`.
+- Execution: `` planned in `plans/queue/endpoint-credential-ownership.md` ``.
 
 ## claude-endpoint-change-retains-custom-headers.md
 
@@ -2041,7 +2041,7 @@
   complexity gate: about 100 lines of diff for this item; over it, or if the fix needs new settings, block and bring it
   back. Remove the feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same
   change.
-- Execution: `pending`.
+- Execution: `` planned in `plans/queue/endpoint-credential-ownership.md` ``.
 
 ## empty-history-queue-bypasses-bounds.md
 
@@ -2071,4 +2071,4 @@
   append and more rows than the cap, and checks the queued-row count, the numbering, and that the link under a history
   row is that row's. Size gate: about 100 lines of diff; over it, block and bring it back. Remove the feedback file and
   its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
-- Execution: `pending`.
+- Execution: `` planned in `plans/queue/empty-scrollback-messages.md` ``.
