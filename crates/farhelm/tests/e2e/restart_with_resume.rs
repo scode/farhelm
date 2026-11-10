@@ -780,8 +780,8 @@ async fn wait_for_new_run_below_history(sock: &std::path::Path, tmux_name: &str)
 ///
 /// The `spawner` fixture is used rather than `basic` because a
 /// single-process agent cannot distinguish a tree kill from a plain one,
-/// and "reaps the prior run before relaunching, never alongside" is the
-/// clause under test.
+/// and Restart reaping leftover descendants before relaunching (SPEC.md,
+/// "Lifecycle operations") is the clause under test.
 #[farhelm_testtrace::test]
 async fn restarting_a_live_session_stops_its_tree_and_reuses_the_terminal() {
     let h = harness_tmux().await;

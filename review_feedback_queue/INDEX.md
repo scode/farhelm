@@ -103,14 +103,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`mac-update-gnu-stat-path.md`](mac-update-gnu-stat-path.md) — A remote Mac with GNU stat first on its SSH PATH can
   pass inspection but repeatedly fail Update or recovery on existing files until command selection is repaired.
 
-- [`scoped-cleanup-misses-late-tmux.md`](scoped-cleanup-misses-late-tmux.md) — Stop, Restart, Delete or closing a
-  terminal tab can report completed cleanup while a job the session started inside tmux keeps running. The job can
-  survive if its tmux server starts after cleanup's inspection but before termination.
-
-- [`scoped-cleanup-forgets-ended-tmux.md`](scoped-cleanup-forgets-ended-tmux.md) — After a session-started tmux server
-  ends, its background jobs can survive a later successful Stop, Restart or Delete. Cleanup looks for a currently
-  running server and forgets the jobs it previously moved outside the session's group.
-
 - [`delete-lost-tab-markers-skip-sweep.md`](delete-lost-tab-markers-skip-sweep.md) — If an old terminal server
   disappears during Delete's tab discovery, Delete can succeed and remove the session while background jobs from an old
   unscoped tab keep running.

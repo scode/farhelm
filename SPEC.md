@@ -1995,11 +1995,11 @@ reachable in ordinary use because the command line and agents act on sessions wh
 time). Accepted: a terminal tab opened between a prompt that named open tabs (alone, or together with stopping the
 agent) and the click is closed with the others; the prompt need not name the exact tabs it showed.
 
-Process-tree ownership is session-wide. Restart reaps any leftover descendants of the prior run before relaunching —
-never alongside them. Stop and delete reap the agent's processes within the containment limits below. An agent exiting
-on its own does not trigger a hunt for daemonized survivors; the session's next restart or its teardown does. Operations
-that need the working directory — restart, opening a terminal tab — fail with a clear error naming the directory if it
-has vanished since creation; the session itself remains, and delete still works.
+Process-tree ownership is session-wide. Restart reaps leftover descendants within the containment limits below before
+relaunching. Stop and delete reap the agent's processes within those same limits. An agent exiting on its own does not
+trigger a hunt for daemonized survivors; the session's next restart or its teardown does. Operations that need the
+working directory — restart, opening a terminal tab — fail with a clear error naming the directory if it has vanished
+since creation; the session itself remains, and delete still works.
 
 This cleanup covers ordinary agent descendants, including accidentally daemonized processes, rather than hostile
 same-account processes deliberately escaping cleanup. Confirmed 2026-11-08: for a launch or terminal tab Farhelm put in
@@ -2008,13 +2008,13 @@ that deliberately moves itself into a separate group (for example with `systemd-
 carries the session's environment marker without ever having been in the scope, such as a manually started program or a
 daemon left from before markers existed. This trades that backstop for cheaper cleanup. Farhelm omits the machine-wide
 sweep only when containment is established for every target, at least one named scope can be checked through a usable
-manager, every named scope is confirmed gone, and no explicitly identified process remains alive afterwards. Confirmed
-2026-11-09: before killing any scope it would trust, cleanup checks those scopes for a running tmux server. Finding one
-keeps the full sweep, because ordinary tmux can place its panes' programs outside the server's group; those programs
-still end with the agent or tab that started the server. An incomplete check keeps the sweep too. Delete also keeps it
-when tab discovery is incomplete, including a session with no terminal or an old tmux session whose listing can no
-longer show its tabs. Unscoped or uncertain containment, a scope failure or a surviving explicit process likewise keeps
-the full sweep.
+manager, every named scope is observed live then confirmed gone, and no explicitly identified process remains alive
+afterwards. Confirmed 2026-11-10: jobs a user-run tmux moves outside those groups may survive Stop, Restart, Replace,
+Delete or tab close; this is accepted as the intent of running them under tmux. Its server inside the scope still ends.
+Cleanup does not inspect scopes for tmux or retain the sweep because of it. Delete also keeps the sweep when tab
+discovery is incomplete, including a session with no terminal or an old tmux session whose listing can no longer show
+its tabs. Unscoped or uncertain containment, a scope failure or a surviving explicit process likewise keeps the full
+sweep, as does a scope already gone before cleanup.
 
 For a launch or tab without a scope (including macOS and a Linux launch made while no usable systemd user manager
 answered), there is no cgroup to contain a detached descendant, and the guarantee narrows to the processes Farhelm can
@@ -2047,12 +2047,13 @@ number, and the like). Under those conditions it is accepted that a process on a
 included, is left untracked, is later killed without the usual warning, or keeps running beside a relaunch or a new
 launch (Replace, New or Clone) in the same folder; that a session's recorded conversation is wrong until the agent next
 reports one, so Restart may resume a different conversation of that agent; or that the helm reconnects a host to its
-previous destination until the next reload. These are exceptions to "never alongside them", to failing visibly when
-cleanup is unconfirmed, to Restart resuming the conversation the agent last reported, and to a corrected destination
-taking effect, for those conditions only. In the maintainer's words, they are accepted when they are of the "the process
-on the remote host got killed" kind. Conversation tracking also has the accepted limits under Durability and resume,
-which need no crash or coinciding faults. Corrupting the supervisor's or the helm's database, bricking an installation,
-or similar lasting damage is never accepted, however unlikely the trigger.
+previous destination until the next reload. These are exceptions to Restart reaping leftover descendants before it
+relaunches, to failing visibly when cleanup is unconfirmed, to Restart resuming the conversation the agent last
+reported, and to a corrected destination taking effect, for those conditions only. In the maintainer's words, they are
+accepted when they are of the "the process on the remote host got killed" kind. Conversation tracking also has the
+accepted limits under Durability and resume, which need no crash or coinciding faults. Corrupting the supervisor's or
+the helm's database, bricking an installation, or similar lasting damage is never accepted, however unlikely the
+trigger.
 
 ### Session view
 
@@ -4937,21 +4938,21 @@ must still handle the resulting remote failures safely.
 
 Session teardown covers ordinary agent descendants, including background servers. Detached services started by shell
 initialization before the agent launches are outside that guarantee. Scope-only cleanup does not chase programs that
-deliberately moved to a separate group or merely carry a session marker. A tmux server inside a scope instead keeps the
-portable sweep, covering ordinary tmux pane migration; unscoped cleanup cannot find detached descendants whose
+deliberately moved to a separate group or merely carry a session marker. Jobs a user-run tmux moves outside those groups
+may survive too, while its server inside the scope ends; unscoped cleanup cannot find detached descendants whose
 environment cannot be read or has been overwritten. See [Lifecycle operations](#lifecycle-operations).
 
 Confirmed 2026-10-22: a per-user shared program, such as the user's own tmux server or an ssh ControlMaster, belongs to
 whichever started it first. Agents and tabs run without `TMUX` (above), so a plain `tmux` there reaches the user's own
 server, or starts it when none runs. One the agent started first ends with the agent's processes (Stop, Restart,
 Replace, Delete); one a terminal tab started first ends with that tab (closing it, Stop, or Delete), as
-[Session view](#session-view) describes. Either way it ends along with everything later run in it or through it,
-including windows and work the user started in it from outside Farhelm, for example over an SSH login, within the
-cleanup guarantee's limits on hosts without a usable systemd user manager. Ordinary tmux pane migration on a scoped
-launch does not weaken this promise: the pre-kill tmux check above retains the portable sweep for it. Farhelm cannot
-tell its own sessions' work in such a server from the user's, and does not try; this is intended, not a defect.
-Confirmed 2026-10-23: the buttons named here are examples; whatever tears down the agent or the tab as the user sees it,
-whichever button or flow does it, ends the programs that agent or tab started first.
+[Session view](#session-view) describes. Within the cleanup limits above, it ends along with everything later run in it
+or through it, including windows and work the user started in it from outside Farhelm, for example over an SSH login,
+within the cleanup guarantee's limits on hosts without a usable systemd user manager. On scoped hosts, tmux pane jobs
+moved outside the session's groups may survive (2026-11-10 decision). Farhelm cannot tell its own sessions' work in such
+a server from the user's, and does not try; this is intended, not a defect. Confirmed 2026-10-23: the buttons named here
+are examples; whatever tears down the agent or the tab as the user sees it, whichever button or flow does it, ends the
+programs that agent or tab started first within these same cleanup limits.
 
 After a failed Delete disconnects a viewer, either automatically reconnecting to a surviving terminal or remaining
 detached until the user reconnects is explicitly acceptable. Choose the simpler implementation. Reviewers must not treat

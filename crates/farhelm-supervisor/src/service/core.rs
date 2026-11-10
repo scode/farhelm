@@ -12913,8 +12913,8 @@ impl Supervisor {
     ///    otherwise reaps the prior run directly. Confirmed containment or
     ///    the portable fallback ends its descendants within the cleanup
     ///    guarantee BEFORE the new launch, never alongside it (SPEC.md:
-    ///    "Restart reaps any leftover descendants of the prior run before
-    ///    relaunching").
+    ///    "Restart reaps leftover descendants within the containment limits
+    ///    below before relaunching").
     /// 2. Hands off to [`Supervisor::relaunch`] for everything destructive,
     ///    on a supervisor-owned task: from the generation claim through
     ///    republication, the span must not be cancellable by the connection

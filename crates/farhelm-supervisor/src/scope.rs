@@ -33,11 +33,9 @@
 //! Confirmed scopes can replace the machine-wide sweep. The shared reaper
 //! (`service::sweep::reap_process_tree`) decides from complete containment,
 //! collection of every named scope and the absence of surviving explicit
-//! roots. Unscoped or uncertain work keeps the portable sweep. This is the
-//! maintainer's 2026-11-08 decision to trade the always-run backstop for cost.
-//! The 2026-11-09 exception retains that sweep for a tmux server in a trusted
-//! scope: stock tmux can put pane jobs in sibling scopes. Membership must be
-//! inspected before the first kill, and uncertainty keeps the sweep too.
+//! roots. Already-gone scopes, unscoped or uncertain work keep the portable
+//! sweep. The maintainer's 2026-11-10 decision accepts user-run tmux pane
+//! jobs outside these scopes surviving; their server inside a scope still ends.
 //!
 //! # Why the wrapper goes where it goes
 //!
@@ -141,50 +139,6 @@ fn parse_process_snapshot(text: &str, byte_cap_reached: bool) -> Option<(Vec<u32
     let truncated = pids.len() > 32 || byte_cap_reached;
     pids.truncate(32);
     Some((pids, truncated))
-}
-
-/// Read only a selected scope member, never the process table. Linux tmux
-/// sets its kernel task name to its role; its original argv can still look
-/// like the client that started it. An unreadable live member cannot prove
-/// that the server is absent, while a member already gone needs no fallback.
-#[cfg(target_os = "linux")]
-fn member_needs_tmux_sweep(pid: u32) -> bool {
-    let gone = || {
-        matches!(
-            crate::procs::read_process(pid),
-            Ok(None | Some((_, _, crate::procs::ProcessState::Zombie)))
-        )
-    };
-    if gone() {
-        return false;
-    }
-    let observation = || -> Option<bool> {
-        let name = std::fs::read(format!("/proc/{pid}/comm")).ok()?;
-        let image = crate::procs::process_image(pid).ok()?;
-        Some(tmux_role_needs_sweep(&name, image.path.file_name()?))
-    };
-    observation().unwrap_or_else(|| !gone())
-}
-
-/// No production systemd member inspection is possible on another platform.
-/// Keep the portable mechanism if a caller nevertheless reaches this seam.
-#[cfg(not(target_os = "linux"))]
-fn member_needs_tmux_sweep(_pid: u32) -> bool {
-    true
-}
-
-/// Kernel role evidence catches a server even under a short renamed tmux
-/// executable. A tmux-prefixed image (including versioned/static installs)
-/// whose role is missing or truncated is uncertainty; only the ordinary
-/// image's explicit client role rules out a server. This
-/// does not attempt to recognize arbitrary modified/renamed program images.
-#[cfg(any(target_os = "linux", test))]
-fn tmux_role_needs_sweep(name: &[u8], image_name: &std::ffi::OsStr) -> bool {
-    use std::os::unix::ffi::OsStrExt as _;
-    let name = name.strip_suffix(b"\n").unwrap_or(name);
-    name.ends_with(b": server")
-        || (image_name.as_bytes().starts_with(b"tmux")
-            && !(image_name == "tmux" && name == b"tmux: client"))
 }
 
 /// The transient scope unit name for one launch of one session, or `None`
@@ -320,8 +274,6 @@ pub enum ScopeOp {
     Exists(String),
     /// Units matching a pattern were enumerated.
     List(String),
-    /// Scope membership was inspected before any selected scope was killed.
-    Inspect(String),
     /// A signal was sent to a unit's whole cgroup.
     Kill { unit: String, signal: String },
 }
@@ -372,8 +324,6 @@ enum Mode {
         signalled: std::sync::Mutex<std::collections::HashSet<(String, String)>>,
         exists_calls: std::sync::Mutex<std::collections::HashMap<String, usize>>,
         matching_units: Vec<String>,
-        /// Units whose pre-kill membership cannot rule out a tmux server.
-        tmux_sweep_units: std::collections::HashSet<String>,
         sink: ScopeOpSink,
         /// When set, each probe waits for a permit before answering, so a
         /// test can hold a probe in flight and cancel its caller there.
@@ -762,7 +712,6 @@ impl ScopeManager {
                 signalled: std::sync::Mutex::new(std::collections::HashSet::new()),
                 exists_calls: std::sync::Mutex::new(std::collections::HashMap::new()),
                 matching_units,
-                tmux_sweep_units: std::collections::HashSet::new(),
                 sink,
                 probe_gate: None,
             },
@@ -1137,56 +1086,6 @@ impl ScopeManager {
     /// sample; callers must label it as a snapshot, not a signal receipt.
     /// None means unavailable; the boolean says the 32-PID list was capped.
     pub(crate) async fn process_snapshot(&self, unit: &str) -> Option<(Vec<u32>, bool)> {
-        self.process_snapshot_inner(unit, false).await
-    }
-
-    /// Whether omitting the portable sweep could strand a tmux pane's jobs.
-    ///
-    /// Stock systemd-linked tmux keeps its server in the caller's scope but
-    /// moves panes into sibling scopes. Inspect before *any* selected scope
-    /// is killed: afterwards the server that explained those jobs is gone.
-    /// Unavailable, capped or nested membership retains the sweep; this is
-    /// an optimization proof, never new signal authority or a cleanup error.
-    pub(crate) async fn needs_tmux_sweep(&self, unit: &str) -> bool {
-        #[cfg(test)]
-        if let Mode::Fake {
-            tmux_sweep_units,
-            sink,
-            ..
-        } = &self.mode
-        {
-            sink(&ScopeOp::Inspect(unit.to_owned()));
-            return tmux_sweep_units.contains(unit);
-        }
-        let Some((pids, false)) = self.process_snapshot_inner(unit, true).await else {
-            return true;
-        };
-        tokio::task::spawn_blocking(move || pids.into_iter().any(member_needs_tmux_sweep))
-            .await
-            .unwrap_or(true)
-    }
-
-    /// Script uncertainty without changing the fake's kill/confirmation
-    /// policy, so ordering tests distinguish preflight from scope teardown.
-    #[cfg(test)]
-    pub(crate) fn with_tmux_sweep_units(mut self, units: Vec<String>) -> Self {
-        if let Mode::Fake {
-            tmux_sweep_units, ..
-        } = &mut self.mode
-        {
-            *tmux_sweep_units = units.into_iter().collect();
-        }
-        self
-    }
-
-    /// Share the bounded direct-member read without calling a diagnostic a
-    /// recursive absence proof. Policy callers reject child cgroups rather
-    /// than building another process-tree traversal inside this fast path.
-    async fn process_snapshot_inner(
-        &self,
-        unit: &str,
-        reject_nested: bool,
-    ) -> Option<(Vec<u32>, bool)> {
         #[cfg(test)]
         if matches!(self.mode, Mode::Fake { .. }) {
             return Some((Vec::new(), false));
@@ -1219,13 +1118,6 @@ impl ScopeManager {
         let group = std::path::Path::new("/sys/fs/cgroup").join(relative);
         tokio::task::spawn_blocking(move || {
             use std::io::Read;
-            if reject_nested {
-                for (index, entry) in std::fs::read_dir(&group).ok()?.enumerate() {
-                    if index == 128 || entry.ok()?.file_type().ok()?.is_dir() {
-                        return None;
-                    }
-                }
-            }
             let mut text = String::new();
             std::fs::File::open(group.join("cgroup.procs"))
                 .ok()?
@@ -1756,27 +1648,6 @@ async fn run_with_timeout(
 mod tests {
     use super::*;
     use std::sync::Arc;
-
-    /// Linux tmux can leave its client's argv on the server, so only role
-    /// evidence distinguishes them. A recognized image with an unknown
-    /// role retains cleanup, including truncated or missing role names.
-    #[test]
-    fn tmux_role_requires_a_server_or_uncertain_tmux_image() {
-        use std::ffi::OsStr;
-        for (name, image, expected) in [
-            (&b"tmux: server\n"[..], "tmux", true),
-            (&b"tmux: client\n"[..], "tmux", false),
-            (&b"tmux\n"[..], "tmux", true),
-            (&b"unknown\n"[..], "tmux", true),
-            (&b"tmux-3.4:\n"[..], "tmux-3.4", true),
-            (&b"tmux3.4:\n"[..], "tmux3.4", true),
-            (&b"tmux-long-build\n"[..], "tmux-long-build-version", true),
-            (&b"short: server\n"[..], "short", true),
-            (&b"sleep\n"[..], "sleep", false),
-        ] {
-            assert_eq!(tmux_role_needs_sweep(name, OsStr::new(image)), expected);
-        }
-    }
 
     /// A byte-capped diagnostic must never invent membership from a PID
     /// prefix. Complete records survive, and truncation remains explicit even
