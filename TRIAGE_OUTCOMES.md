@@ -2006,7 +2006,7 @@
   gate: about 100 lines of diff (code, tests and docs, not counting `TRIAGE_OUTCOMES.md`, the queue removal or a
   changelog fragment); over it, block and bring it back. Remove the feedback file and its index entry, and move this
   entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
-- Execution: `pending`.
+- Execution: `` planned in `plans/queue/hosts-suspend-confirm-slot.md` ``.
 
 ## cache-cleanup-leaves-packed-ref-lock.md
 
@@ -2033,7 +2033,7 @@
   the next checkout succeeds. Size gate: about 100 lines of diff (code, tests and docs, not counting
   `TRIAGE_OUTCOMES.md`, the queue removal or the changelog fragment); over it, block and bring it back. Remove the
   feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
-- Execution: `pending`.
+- Execution: `` planned in `plans/queue/repo-cache-stale-git-locks.md` ``.
 
 ## mac-update-gnu-stat-path.md
 
@@ -2057,7 +2057,7 @@
   `stat` first on PATH no longer breaks the Darwin path. Size gate: about 100 lines of diff (code, tests and docs, not
   counting `TRIAGE_OUTCOMES.md`, the queue removal or the changelog fragment); over it, block and bring it back. Remove
   the feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
-- Execution: `pending`.
+- Execution: `` planned in `plans/queue/mac-system-stat.md` ``.
 
 ## sandbox-ssh-agent-key-ordering-unresolved.md
 
@@ -2081,7 +2081,7 @@
   uses the user's agent, and says so in the comment. Size gate: about 100 lines of diff (code, tests and docs, not
   counting `TRIAGE_OUTCOMES.md`, the queue removal or the changelog fragment); over it, block and bring it back. Remove
   the feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
-- Execution: `pending`.
+- Execution: `` planned in `plans/queue/tensorlake-skip-ssh-agent.md` ``.
 
 ## scoped-cleanup-misses-late-tmux.md
 
@@ -2110,7 +2110,7 @@
   executes both items. Size gate: about 100 lines of added code, tests and docs (removed lines do not count); over it,
   block and bring it back. Remove both feedback files and their index entries, and move both entries to
   `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
-- Execution: `pending`.
+- Execution: `` planned in `plans/queue/user-tmux-jobs-outlive-cleanup.md` ``.
 
 ## scoped-cleanup-forgets-ended-tmux.md
 
@@ -2125,7 +2125,7 @@
   out of the session may survive cleanup, called out in the spec, and the pre-kill tmux check is removed.
 - Completion criteria: executed together with `scoped-cleanup-misses-late-tmux.md`, under its criteria and size gate.
   Remove this feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
-- Execution: `pending`.
+- Execution: `` planned in `plans/queue/user-tmux-jobs-outlive-cleanup.md` ``.
 
 ## settings-save-races-final-replacement.md
 
