@@ -317,6 +317,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   directory). Asked for on 2026-11-08, when agent commands from sessions that were not on screen turned out to fail
   because the supervisor's routing was built on the assumption that several helms might share one supervisor.
 
+- **Open the host update hover card from the progress bar too.** Hovering a host's update flow in the sidebar shows its
+  step list only when the pointer is over the message above the progress bar; make the progress bar itself show the same
+  hover.
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
