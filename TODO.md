@@ -26,6 +26,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
+- **Revisit keeping a sandbox session's Suspend and Resume exclusive with launches.** Decided on the maintainer's behalf
+  on 2026-11-10 when landing nonblocking-session-actions stopped: that plan lets you act on other sessions while a
+  launch or a session action is pending, and as delivered it also let Suspend and Resume from a sandbox session's row or
+  top bar run while a launch or a change to the host list was pending, while the Hosts panel's own Suspend and Resume
+  still waited. The plan was sent back to keep the session-facing Suspend and Resume waiting as before, since its goal
+  file listed relaxing that exclusion as needing reassessment. The alternative was to keep the overlap, after showing
+  that a suspend or resume running beside a launch on the same host cannot leave either in a wrong state.
+
 - **Revisit the rail bell re-reading every host's Trash on each status change.** Decided on the maintainer's behalf on
   2026-11-09 when landing rail-notification-bell: it landed with each open window re-reading every connected host's
   Trash whenever any session's status changes and on the client's periodic catch-up refresh. Each read uses one of the
