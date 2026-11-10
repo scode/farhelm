@@ -6438,26 +6438,29 @@ adopt copied state later. The Tensorlake executor instead uses an explicit admis
 that write records both coordinates together and imports no discovered identity.
 
 Agent settings are read with a 1 MiB bound, merged on the helm, and streamed through backend stdin into mode-0600 atomic
-installs. Claude's JSON and any existing `env` must be objects; only `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and
-`CLAUDE_CODE_OAUTH_TOKEN` change. Endpoint mode removes the OAuth token, Subscription removes the endpoint keys and
-writes the selected setup-token, and None removes all three. Missing or already clean settings need no write. No
-onboarding or first-run metadata is initialized, so Claude's own setup can appear once on a fresh host. `toml_edit`
-preserves Codex's root settings and other providers while replacing its entire `model_providers.farhelm`. Codex None and
-Subscription remove only a `farhelm` model_provider selection and that table's experimental_bearer_token, retaining its
-table, unrelated keys and comments. Setup always includes credential configuration because cleanup can do work even
-without selected credentials; the copied-state check and install-coordinate admission still precede it. Parse/read
-failures omit contents and parser details so tokens cannot enter progress. The shared delivery component writes at Add,
-connection and credential replacement; Update does not independently reapply settings. Failures become warnings and do
-not abort supervisor installation or connection. The shared SSH uploader sets `umask 077` before creating its temporary,
-so even an existing mode-0755 agent directory cannot expose tokens during upload or after interruption. Its finishing
-command applies the requested final mode. Before replacing agent settings it compares the destination with the bytes
-read (or expected absence); a mismatch re-reads and merges once, then warns without recording delivery if it conflicts
-again, leaving the latest file for the next connection's retry.
+installs. Claude's JSON and any existing `env` must be objects. Farhelm manages `ANTHROPIC_BASE_URL`,
+`ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN`. Endpoint mode removes the OAuth token, Subscription removes the
+endpoint keys and writes the selected setup-token, and None removes all three. Missing or already clean settings need no
+write. No onboarding or first-run metadata is initialized, so Claude's own setup can appear once on a fresh host.
+`toml_edit` preserves Codex's root settings and other providers while replacing its entire `model_providers.farhelm`.
+Codex None and Subscription remove only a `farhelm` model_provider selection and that table's experimental_bearer_token,
+retaining its table, unrelated keys and comments. Setup always includes credential configuration because cleanup can do
+work even without selected credentials; the copied-state check and install-coordinate admission still precede it.
+Parse/read failures omit contents and parser details so tokens cannot enter progress. The shared delivery component
+writes at Add, connection and credential replacement; Update does not independently reapply settings. Failures become
+warnings and do not abort supervisor installation or connection. The shared SSH uploader sets `umask 077` before
+creating its temporary, so even an existing mode-0755 agent directory cannot expose tokens during upload or after
+interruption. Its finishing command applies the requested final mode. Before replacing agent settings it compares the
+destination with the bytes read (or expected absence); a mismatch re-reads and merges once, then warns without recording
+delivery if it conflicts again, leaving the latest file for the next connection's retry.
 
 This credential cleanup is best effort beyond SPEC.md's undefined result for credentials already present when Farhelm
 supplies an agent's credentials. It does not establish support for mixing credential owners. In Codex API endpoint mode,
 the entire Farhelm provider table is emptied before its keys are written, dropping `env_key`, header settings and other
-leftovers. Comments outside that table remain intact.
+leftovers. Comments outside that table remain intact. For Claude API endpoint and Subscription modes, it also removes
+`ANTHROPIC_CUSTOM_HEADERS` and `ANTHROPIC_API_KEY` from the settings environment and the root `apiKeyHelper`. Other
+settings remain intact. A gateway needing extra headers belongs under None, with the image providing its complete
+credentials; None's existing three-key cleanup is unchanged.
 
 The add dialog embeds the full recipe editor with deletion disabled and a `DialogCloseGuard` for Escape and Close. It
 selects the editor outside its own body wrapper: the editor supplies a body and `DialogFooter` as direct siblings of the
