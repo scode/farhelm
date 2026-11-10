@@ -7,4 +7,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `environment-agent-operations.md` — Agents in sandbox and container sessions can ask Farhelm to act within their own environment, environments live until their last session is deleted, and agents elsewhere can launch sessions in new environments behind an always-asking approval card (after `podman-environments.md`)
 - [pending] `sandbox-stop-click-guards.md` — A sandbox session's Stop and suspend keeps the no-tabs and agent-ended guards the click saw, so a refresh during its activity check cannot close a new tab or stop a restarted agent unasked
 - [complete] `tensorlake-skip-ssh-agent.md` — Tensorlake builds and host connections offer Farhelm's own key first and no longer consult your ssh-agent, so a personal key loaded there cannot get the login refused
-- [complete] `hosts-suspend-confirm-slot.md` — The Hosts panel's Suspend question acts only on the answer to the question you saw, like host Remove
+- [landing 83cd1b] `hosts-suspend-confirm-slot.md` — The Hosts panel's Suspend question acts only on the answer to the question you saw, like host Remove
