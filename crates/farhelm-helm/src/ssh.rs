@@ -90,8 +90,8 @@ use anyhow::Context;
 /// - `PermitLocalCommand=no`: a `LocalCommand` writes to ssh's own stdout,
 ///   so its output would land in front of the framed protocol stream.
 ///
-/// The user's keys and agent are still used to AUTHENTICATE; only
-/// forwarding the agent to the far side is off. Agent and X11 forwarding are
+/// Ordinary SSH hosts still use the user's keys and agent to AUTHENTICATE;
+/// Tensorlake access adds its own identity policy. Agent and X11 forwarding are
 /// requested per session by the client, so they stay off even on a shared
 /// connection (`ControlMaster`) opened before these overrides existed.
 ///
@@ -1346,9 +1346,9 @@ mod tests {
             .collect()
     }
 
-    /// Why: a Tensorlake host is reached only with Farhelm's own key and
-    /// known-hosts file (D3, P6); a missing option would offer the user's
-    /// keys first (which the gateway refuses outright) or trust the gateway
+    /// Why: a Tensorlake host uses Farhelm's key and known-hosts file (D3, P6);
+    /// a missing option would let the agent promote the user's configured
+    /// keys ahead of Farhelm's or trust the gateway
     /// through the user's `~/.ssh`. Every ordinary ssh host must keep its
     /// argv byte for byte.
     ///
@@ -1378,6 +1378,7 @@ mod tests {
         let expected = [
             r#"IdentityFile="/state dir/normal/tensorlake/ssh-key/id_ed25519""#,
             "IdentitiesOnly=yes",
+            "IdentityAgent=none",
             r#"UserKnownHostsFile="/state dir/normal/tensorlake/known_hosts""#,
             "GlobalKnownHostsFile=/dev/null",
             "HostKeyAlias=sandbox.tensorlake.ai",

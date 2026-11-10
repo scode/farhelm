@@ -1058,12 +1058,12 @@ mod tests {
     }
 
     /// Why: the transport is where a row's kind becomes an argv; a
-    /// Tensorlake host dialed with the user's own ssh setup would offer the
-    /// wrong key and never connect (D3).
+    /// Tensorlake host dialed with the user's own ssh setup would consult
+    /// the user's agent instead of using the sandbox identity policy (D3).
     ///
     /// Spec: dialing a Tensorlake row runs ssh with Farhelm's key file under
-    /// the helm's state directory and `IdentitiesOnly=yes`; an ordinary ssh
-    /// row's argv names neither. The stand-in ssh prints its argv on stdout,
+    /// the helm's state directory, `IdentitiesOnly=yes` and `IdentityAgent=none`;
+    /// an ordinary ssh row's argv names none of them. The stand-in ssh prints its argv on stdout,
     /// which the connection's reader returns.
     #[farhelm_testtrace::test]
     async fn a_tensorlake_row_is_dialed_with_farhelms_key() {
@@ -1093,9 +1093,14 @@ mod tests {
             sandbox.lines().any(|line| line == "IdentitiesOnly=yes"),
             "{sandbox}"
         );
+        assert!(
+            sandbox.lines().any(|line| line == "IdentityAgent=none"),
+            "{sandbox}"
+        );
         let plain = argv(ssh_row()).await;
         assert!(!plain.contains("IdentityFile"), "{plain}");
         assert!(!plain.contains("IdentitiesOnly"), "{plain}");
+        assert!(!plain.contains("IdentityAgent"), "{plain}");
     }
 
     /// Why: a suspended or deleted sandbox's shared masters must go, or the
@@ -1138,6 +1143,7 @@ mod tests {
                 "{run:?}"
             );
             assert!(run.contains(&"IdentitiesOnly=yes"), "{run:?}");
+            assert!(run.contains(&"IdentityAgent=none"), "{run:?}");
         }
     }
 }

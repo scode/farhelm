@@ -5,11 +5,13 @@
 //! an API key. Farhelm therefore keeps a key pair of its own in the helm's
 //! state directory and shows the one-time `tl sbx ssh keys add` command that
 //! registers it. Connections pass the private key to ssh with
-//! `IdentitiesOnly=yes` for Tensorlake hosts, which keeps the user's own keys
-//! out of it (the gateway refuses outright when the first key offered is not
-//! registered). This is the one place Farhelm stores an ssh credential of its
-//! own; SPEC.md's "Farhelm stores no SSH credentials of its own" carries the
-//! exception.
+//! `IdentitiesOnly=yes` and `IdentityAgent=none` for builds and hosts, so the
+//! user's agent cannot promote another configured key ahead of Farhelm's.
+//! Configured file keys can still follow it; a certificate with its matching
+//! private key or a configured PKCS11 key can precede it. A gateway that rejects
+//! the first unknown key can still refuse that setup (see `super::ssh`). This
+//! is the one place Farhelm stores an ssh credential of its own; SPEC.md's
+//! "Farhelm stores no SSH credentials of its own" carries the exception.
 //!
 //! The pair is generated only on an explicit action (Settings → Tensorlake,
 //! Create SSH key, or an add-host probe), by running `ssh-keygen` with explicit

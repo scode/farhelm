@@ -6575,6 +6575,12 @@ sweep of that builder then deletes it; finding its ID takes listing the account'
 running or interrupted build and pending cleanup for every recipe. Build, Rebuild and Retry are available for every
 base.
 
+Tensorlake builds and hosts add `IdentityAgent=none`, so the gateway connection never consults the user's SSH agent. The
+user's SSH configuration still applies: a configured certificate (even one whose private key is only in the agent) or a
+configured hardware-token key can precede Farhelm's key, and a gateway that rejects the first unknown key can still
+refuse that setup. That gateway behavior was not verified live for this change. OpenSSH 7.6, the supported minimum,
+treats `PKCS11Provider=none` as a library name, so Farhelm leaves that option out.
+
 The build's scripts (`build_script.rs`) run as the sandbox user under `sh -c`, through the narrow `SandboxShell` trait.
 Its production implementation runs `ssh` with `ssh_oneshot_args` (the connection overrides, `BatchMode=yes`,
 `ControlMaster=no`, `ControlPath=none`): a builder's name is reused, so a `ControlPersist` master to an earlier builder
