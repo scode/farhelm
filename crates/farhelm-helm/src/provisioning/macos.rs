@@ -149,8 +149,8 @@ pub(super) fn stop_script(
     [ "$active" = inactive ] || { printf '%s\n' "launchd job $job_target is still loaded" >&2; exit 1; }
     changed=yes
 fi
-if inspection=$(stat -f '%HT' "$hosts" 2>&1); then
-    if program=$(stat -L -f '%HT' "$farhelm" 2>&1); then :; else
+if inspection=$(/usr/bin/stat -f '%HT' "$hosts" 2>&1); then
+    if program=$(/usr/bin/stat -L -f '%HT' "$farhelm" 2>&1); then :; else
         case "$program" in
             "stat: $farhelm: stat: No such file or directory")
                 printf '%s\n' "terminal hosts may still be running: $hosts exists, but $farhelm, which would stop them, is gone; end every process whose command line names a socket in $hosts, remove $hosts, and run uninstall again" >&2 ;;
@@ -395,8 +395,14 @@ mod tests {
 
         /// Only the spawned shell receives the fixture environment.
         fn run(&self, script: &str) -> Output {
+            // Linux cannot execute BSD stat. Rewrite only its absolute path;
+            // a bare stat must still reach PATH, where the test can reject it.
+            let script = script.replace(
+                "/usr/bin/stat",
+                &shell_quote(self.directory.path().join("native-stat").to_str().unwrap()),
+            );
             std::process::Command::new("/bin/sh")
-                .args(["-c", script])
+                .args(["-c", &script])
                 .env_clear()
                 .env(
                     "PATH",
@@ -590,7 +596,8 @@ esac"#,
             113,
             "Bad request.\nCould not find service \"io.farhelm.test\" in domain for uid: 501",
         );
-        fixture.tool("stat", "printf '%s\\n' Directory");
+        fixture.tool("native-stat", "printf '%s\\n' Directory");
+        fixture.tool("stat", "exit 91");
         fixture.tool("farhelm", "printf '%s\\n' 'unknown subcommand' >&2; exit 2");
         fixture.tool("find", "exit 99");
         let result = fixture.run(
@@ -621,7 +628,7 @@ esac"#,
                 "Bad request.\nCould not find service \"io.farhelm.test\" in domain for uid: 501",
             );
             fixture.tool(
-                "stat",
+                "native-stat",
                 &format!(
                     "printf '%s\\n' {} >&2; exit 1",
                     shell_quote(&format!("stat: /owned/state/hosts: stat: {message}"))

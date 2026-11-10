@@ -20188,3 +20188,28 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Remove this feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
 - Execution: change `xvpvnvts`, bookmark `plan/user-tmux-jobs-outlive-cleanup/01-drop-tmux-sweep-check`,
   https://github.com/scode/farhelm/pull/3297/changes.
+
+## mac-update-gnu-stat-path.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by reading the code on main 1fd93044 (not run). Mac inspection only checks that a `stat` exists
+  (`provisioning/backend.rs`, unlike its working-`readlink -f` test); artifact inspection then runs the BSD form
+  `stat -L -f '%Lp'` through the SSH command's PATH, chosen from `uname -s` alone, and fails on GNU `stat`. Update
+  (manual, Update all, automatic), re-running setup on an existing Mac, and uninstall's stop step
+  (`provisioning/macos.rs`, `stat -f '%HT'`) fail every time with a cryptic error; Update is also the documented restart
+  path after a reboot. Fresh setup works, but the upload's size reports become unusable, so its 60-second stall timeout
+  never arms. The trigger needs `gnubin` deliberately ahead of the system tools for non-interactive SSH commands (for
+  example in `~/.zshenv`); a stock Homebrew setup in `~/.zprofile` does not trigger it. Contradicts SPEC.md "Supported
+  user environments" (an unsupported configuration is refused with a clear message) and the Mac inspection rules either
+  way. Remote Macs not yet in a stable release. Not clearly settled: two fix shapes. No coverage.
+- Decision: the maintainer picked "(a) Support it: always call `/usr/bin/stat` on Macs" (2026-11-10 high-bucket triage
+  page, Q3).
+- Completion criteria: every `stat` Farhelm runs on a remote Mac (artifact inspection, the shared uploader's size
+  reports, uninstall's stop step, and any other Darwin `stat` call the executor finds) calls `/usr/bin/stat`, so a
+  GNU-first PATH no longer matters; the Linux tests that fake a Darwin `stat` through PATH get a seam to substitute it.
+  SPEC_impl.md "Provisioning" says Darwin uses the system `/usr/bin/stat` regardless of PATH. A test shows a GNU-style
+  `stat` first on PATH no longer breaks the Darwin path. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting `TRIAGE_OUTCOMES.md`, the queue removal or the changelog fragment); over it, block and bring it back. Remove
+  the feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
+- Execution: change `rrnwuzpm`, bookmark `plan/mac-system-stat/01-darwin-system-stat`,
+  https://github.com/scode/farhelm/pull/3298/changes.

@@ -315,10 +315,23 @@ mod tests {
             command: &mut tokio::process::Command,
         ) -> std::io::Result<tokio::process::Child> {
             assert_eq!(command.as_std().get_program().to_string_lossy(), "ssh");
+            // Substitute the system BSD stat in Linux Darwin fixtures only.
+            // Leave bare stat untouched so PATH precedence remains observable.
+            let remote = command
+                .as_std()
+                .get_args()
+                .last()
+                .unwrap()
+                .to_string_lossy();
+            let words = shell_words::split(&remote).unwrap();
+            let remote = words[2].replace(
+                "/usr/bin/stat",
+                &shell_path(&self.bin.join("native-stat")).unwrap(),
+            );
             let mut child = tokio::process::Command::new("sh");
             child
                 .arg("-c")
-                .arg(command.as_std().get_args().last().unwrap())
+                .arg(remote)
                 .env("HOME", &self.home)
                 .env("PATH", format!("{}:/usr/bin:/bin", self.bin.display()))
                 .env_remove("XDG_CONFIG_HOME")
@@ -11477,10 +11490,51 @@ mod tests {
         assert!(error.rendered().contains("sha256sum missing"));
     }
 
+    /// A GNU-first Darwin PATH must still publish received upload sizes.
+    /// Linux substitutes only the absolute BSD executable; a bare stat would
+    /// reach real GNU stat and fail to produce the final byte count.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn darwin_upload_ignores_path_stat() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path();
+        write_fake_tool(bin, "uname", "printf '%s\\n' Darwin").await;
+        write_fake_tool(bin, "stat", "exec /usr/bin/stat \"$@\"").await;
+        write_fake_tool(
+            bin,
+            "native-stat",
+            "[ \"$1 $2 $3\" = '-f %z --' ] || exit 91\nexec /usr/bin/stat -c %s -- \"$4\"",
+        )
+        .await;
+        let input = root.path().join("input");
+        tokio::fs::write(&input, b"upload bytes").await.unwrap();
+        let remote = root.path().join("uploaded bytes");
+        let script = upload_script(&remote).unwrap().replace(
+            "/usr/bin/stat",
+            &shell_path(&bin.join("native-stat")).unwrap(),
+        );
+        let output = tokio::process::Command::new("sh")
+            .args(["-c", &script])
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .stdin(std::fs::File::open(&input).unwrap())
+            .output()
+            .await
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(tokio::fs::read(remote).await.unwrap(), b"upload bytes");
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .lines()
+                .any(|line| line == "12")
+        );
+    }
+
     /// Update and credential delivery read the target file's mode, including
     /// through a symlink. Darwin's stat uses different flags from GNU stat;
     /// executing both branches prevents a Mac-only repair failure from hiding
-    /// behind a fake metadata response.
+    /// behind a fake metadata response. A GNU stat first on PATH must not win
+    /// over the system BSD stat on Darwin; the fixture substitutes that path.
     #[cfg(target_os = "linux")]
     #[farhelm_testtrace::test]
     async fn remote_metadata_uses_the_hosts_native_stat() {
@@ -11508,7 +11562,7 @@ mod tests {
             let flags = if os == "Darwin" { "-f %Lp" } else { "-c %a" };
             write_fake_tool(
                 &bin,
-                "stat",
+                if os == "Darwin" { "native-stat" } else { "stat" },
                 &format!(
                     "[ \"$1 $2 $3 $4\" = {} ] && [ \"$5\" = {} ] || exit 91\nexec /usr/bin/stat -L -c '%a' -- \"$5\"",
                     crate::ssh::shell_quote(&format!("-L {flags} --")),
@@ -11516,6 +11570,9 @@ mod tests {
                 ),
             )
             .await;
+            if os == "Darwin" {
+                write_fake_tool(&bin, "stat", "exec /usr/bin/stat \"$@\"").await;
+            }
             let metadata = backend
                 .metadata_on_target(&ProvisioningTarget::ssh("fixture.example"), &link)
                 .await

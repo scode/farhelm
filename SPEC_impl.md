@@ -7820,6 +7820,8 @@ uses `launchctl disable`, whose persistent override would prevent a later setup 
 setup-owned marker because `farhelm helm setup` does not install a Mac job. Launchd actions are explicit members of the
 same frozen action list as Linux actions, without a separate service-manager abstraction.
 
+Every remote Darwin `stat` call uses the system `/usr/bin/stat` regardless of PATH, including uninstall.
+
 Shared file transfers report their temporary file size with BSD `stat` on Darwin and GNU `stat` on Linux. Artifact mode
 inspection makes the same platform choice. Mac uninstall uses the native mount table as best-effort protection: it
 rejects only a mount read unambiguously on or inside the lib directory. Ambiguous, malformed or non-absolute lines are
