@@ -90,8 +90,9 @@ fn claude_env(
         .ok_or_else(|| "the env in ~/.claude/settings.json must be an object".into())
 }
 
-/// Select a dedicated Codex provider, retaining the rest of the TOML document,
-/// including comments. Existing provider tables may contain unrelated keys.
+/// Replace Farhelm's Codex provider so old credentials cannot follow a new URL.
+/// This is best-effort cleanup of mixed credential ownership; root settings,
+/// other providers and comments outside the replaced table remain intact.
 pub(super) fn codex(bytes: Option<&[u8]>, endpoint: &ResolvedEndpoint) -> Result<Vec<u8>, String> {
     let mut doc = codex_document(bytes)?;
     doc["model_provider"] = toml_edit::value("farhelm");
@@ -108,6 +109,7 @@ pub(super) fn codex(bytes: Option<&[u8]>, endpoint: &ResolvedEndpoint) -> Result
         .get_mut("farhelm")
         .and_then(toml_edit::Item::as_table_like_mut)
         .ok_or("the farhelm provider in ~/.codex/config.toml must be a table")?;
+    provider.clear();
     for (key, value) in [
         ("name", toml_edit::value("Farhelm")),
         ("base_url", toml_edit::value(&endpoint.base_url)),
@@ -317,14 +319,57 @@ mod tests {
             doc["model_providers"]["other"]["name"].as_str(),
             Some("other")
         );
-        assert_eq!(
-            doc["model_providers"]["farhelm"]["custom"].as_bool(),
-            Some(true)
-        );
+        assert!(doc["model_providers"]["farhelm"].get("custom").is_none());
         assert_eq!(
             doc["model_providers"]["farhelm"]["requires_openai_auth"].as_bool(),
             Some(false)
         );
+    }
+
+    /// A reused image can carry credentials that outrank the recipe token or
+    /// add secret headers. Replace the entire selected provider in each TOML
+    /// table form, including nested header tables, without touching its peers.
+    #[test]
+    fn codex_endpoint_replaces_preexisting_provider_credentials() {
+        let endpoint = ResolvedEndpoint {
+            base_url: "https://new.test/v1".into(),
+            token: Some("fictional-new".into()),
+            revision: None,
+            incarnation: None,
+        };
+        for provider in [
+            "[model_providers.farhelm]\nenv_key = 'OLD_KEY'\nhttp_headers = { api-key = 'fictional-old' }\nenv_http_headers = { X-Key = 'OLD_HEADER' }\n",
+            "[model_providers.farhelm]\nenv_key = 'OLD_KEY'\n[model_providers.farhelm.http_headers]\napi-key = 'fictional-old'\n[model_providers.farhelm.env_http_headers]\nX-Key = 'OLD_HEADER'\n",
+            "[model_providers]\nfarhelm = { env_key = 'OLD_KEY', http_headers = { api-key = 'fictional-old' }, env_http_headers = { X-Key = 'OLD_HEADER' } }\n",
+        ] {
+            let original = format!(
+                "# root comment\nmodel = 'personal'\n{provider}\n# peer comment\n[model_providers.other]\nname = 'personal provider'\n"
+            );
+            let output =
+                String::from_utf8(codex(Some(original.as_bytes()), &endpoint).unwrap()).unwrap();
+            let doc: toml_edit::DocumentMut = output.parse().unwrap();
+            let provider = doc["model_providers"]["farhelm"].as_table_like().unwrap();
+            assert_eq!(provider.len(), 5);
+            assert_eq!(
+                provider.get("base_url").and_then(toml_edit::Item::as_str),
+                Some("https://new.test/v1")
+            );
+            assert_eq!(
+                provider
+                    .get("experimental_bearer_token")
+                    .and_then(toml_edit::Item::as_str),
+                Some("fictional-new")
+            );
+            for key in ["env_key", "http_headers", "env_http_headers"] {
+                assert!(!provider.contains_key(key), "retained {key}");
+            }
+            assert_eq!(doc["model"].as_str(), Some("personal"));
+            assert_eq!(
+                doc["model_providers"]["other"]["name"].as_str(),
+                Some("personal provider")
+            );
+            assert!(output.contains("# root comment") && output.contains("# peer comment"));
+        }
     }
 
     /// Malformed or incompatible user files stay untouched, and refusal text

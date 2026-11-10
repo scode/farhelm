@@ -6442,7 +6442,7 @@ installs. Claude's JSON and any existing `env` must be objects; only `ANTHROPIC_
 `CLAUDE_CODE_OAUTH_TOKEN` change. Endpoint mode removes the OAuth token, Subscription removes the endpoint keys and
 writes the selected setup-token, and None removes all three. Missing or already clean settings need no write. No
 onboarding or first-run metadata is initialized, so Claude's own setup can appear once on a fresh host. `toml_edit`
-preserves Codex's comments and unrelated tables while selecting and updating `model_providers.farhelm`. Codex None and
+preserves Codex's root settings and other providers while replacing its entire `model_providers.farhelm`. Codex None and
 Subscription remove only a `farhelm` model_provider selection and that table's experimental_bearer_token, retaining its
 table, unrelated keys and comments. Setup always includes credential configuration because cleanup can do work even
 without selected credentials; the copied-state check and install-coordinate admission still precede it. Parse/read
@@ -6453,6 +6453,11 @@ so even an existing mode-0755 agent directory cannot expose tokens during upload
 command applies the requested final mode. Before replacing agent settings it compares the destination with the bytes
 read (or expected absence); a mismatch re-reads and merges once, then warns without recording delivery if it conflicts
 again, leaving the latest file for the next connection's retry.
+
+This credential cleanup is best effort beyond SPEC.md's undefined result for credentials already present when Farhelm
+supplies an agent's credentials. It does not establish support for mixing credential owners. In Codex API endpoint mode,
+the entire Farhelm provider table is emptied before its keys are written, dropping `env_key`, header settings and other
+leftovers. Comments outside that table remain intact.
 
 The add dialog embeds the full recipe editor with deletion disabled and a `DialogCloseGuard` for Escape and Close. It
 selects the editor outside its own body wrapper: the editor supplies a body and `DialogFooter` as direct siblings of the
