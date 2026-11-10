@@ -2159,9 +2159,11 @@ pub(crate) fn clone_from_repo_cache(
         let lock =
             crate::repo_cache::acquire(cache).map_err(|e| format!("could not lock cache: {e}"))?;
         verify_target_after_lock()?;
+        crate::repo_cache::clear_git_locks(cache, &lock)
+            .map_err(|e| format!("could not clear cache Git locks: {e}"))?;
 
         // argv, never shell text. init is deliberately idempotent, including
-        // after an interrupted first fetch; no staging or cache repair policy.
+        // after an interrupted first fetch; stale Git locks were cleared above.
         let mut init = make_git();
         init.args(["init", "--bare", "-q"]).arg(cache);
         run_preparation_child_process(&mut init, "cache init")?;
@@ -2216,6 +2218,8 @@ pub(crate) fn consolidate_repo_cache(
         validate_repo_cache_path(cache)?;
         let _lock =
             crate::repo_cache::acquire(cache).map_err(|e| format!("could not lock cache: {e}"))?;
+        crate::repo_cache::clear_git_locks(cache, &_lock)
+            .map_err(|e| format!("could not clear cache Git locks: {e}"))?;
         let mut gc = make_git();
         gc.args(CACHE_CLEANUP_CONFIG)
             .arg("--git-dir")
@@ -6595,7 +6599,8 @@ printf 'AGENT-RAN\n'
     /// must produce a checkout holding the tracked file's content, with
     /// the GitHub origin preserved and no dependency on cached objects. A second
     /// checkout observes a new upstream commit, while pull refs never enter the
-    /// cache; removing the cache leaves both ordinary clones intact.
+    /// cache; stale packed-ref locks cannot prevent pruning a deleted branch, and
+    /// removing the cache leaves both ordinary clones intact.
     #[farhelm_testtrace::test]
     fn d2_real_git_offline_clones_the_instead_of_fixture() {
         let setup = tempfile::tempdir().unwrap();
@@ -6662,7 +6667,7 @@ printf 'AGENT-RAN\n'
         );
 
         let original_head = String::from_utf8(out.stdout).unwrap().trim().to_string();
-        for reference in ["refs/tags/v1", "refs/pull/1/head"] {
+        for reference in ["refs/tags/v1", "refs/pull/1/head", "refs/heads/pruned"] {
             assert!(
                 isolated_git(&[
                     "-C",
@@ -6809,6 +6814,33 @@ printf 'AGENT-RAN\n'
             updated, original_head,
             "premise: upstream advanced before checkout"
         );
+        // An interrupted pack-refs leaves this lock. A real deletion must need
+        // the packed-ref rewrite, otherwise a successful fetch proves no repair.
+        let cache_dir = cache.to_str().unwrap();
+        let bare_dir = bare.to_str().unwrap();
+        assert!(
+            isolated_git(&["-C", cache_dir, "pack-refs", "--all"])
+                .status
+                .success()
+        );
+        let packed = std::fs::read_to_string(cache.join("packed-refs")).unwrap();
+        assert!(packed.contains("refs/heads/pruned"));
+        let deletion = isolated_git(&["-C", bare_dir, "update-ref", "-d", "refs/heads/pruned"]);
+        assert!(deletion.status.success());
+        std::fs::write(cache.join("packed-refs.lock"), "interrupted").unwrap();
+        let prune = isolated_git(&[
+            "--git-dir",
+            cache_dir,
+            "fetch",
+            "--prune",
+            bare_dir,
+            "+refs/heads/*:refs/heads/*",
+        ]);
+        assert!(
+            !prune.status.success(),
+            "premise: stale lock must block pruning"
+        );
+        assert!(String::from_utf8_lossy(&prune.stderr).contains("packed-refs.lock"));
         let mut second = PrepFixture::new("https://github.com/example/repo.git", None, "/bin/sh");
         second.preparation.repo_cache_path = cache.clone();
         second.install_script("fake-agent", "#!/bin/sh\nprintf 'AGENT-RAN\\n'\n");
@@ -6824,6 +6856,10 @@ printf 'AGENT-RAN\n'
         );
         assert!(report.is_empty(), "{report}: {terminal}");
         assert_eq!(second.state().unwrap(), PreparationState::Ready);
+        assert!(!cache.join("packed-refs.lock").exists());
+        let retained =
+            isolated_git(&["-C", cache_dir, "show-ref", "--verify", "refs/heads/pruned"]);
+        assert!(!retained.status.success());
         assert_eq!(
             std::fs::read_to_string(Path::new(&second.preparation.cwd).join("tracked-file.txt"))
                 .unwrap(),
@@ -6865,7 +6901,7 @@ printf 'AGENT-RAN\n'
             &["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"],
         );
         assert!(
-            report.contains("cache init exited")
+            report.contains("could not clear cache Git locks")
                 && report.contains(broken.preparation.repo_cache_path.to_str().unwrap()),
             "{report}: {terminal}"
         );

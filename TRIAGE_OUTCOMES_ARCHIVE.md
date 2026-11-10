@@ -20114,3 +20114,31 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   ("an existing one can be deleted ... and nothing else"), so no paste into one remains. Planned, not implemented.
 - Completion criteria: remove the feedback file and its index entry immediately; the fix lands with that plan.
 - Execution: `complete` for the queue cleanup; removed during the 2026-11-10 triage of the high bucket.
+
+## cache-cleanup-leaves-packed-ref-lock.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed on Farhelm's side by reading the code on main 1fd93044 (not run); Git's side rests on the
+  reviewer's citations of Git's source and was not re-checked. After each new checkout the supervisor runs a background
+  job on the host's repository cache (the ready-checkout spare build, or Git housekeeping with `gc --auto`, both under
+  Farhelm's exclusive cache lock; `spare_build.rs`, `launch.rs`). Every cancellation (supervisor stop or update, a
+  crash, a spare-setting or checkout-root change, the ten-minute deadline) is an immediate hard kill
+  (`service/spare_builder.rs`, `bounded_command.rs`). A kill while Git rewrites the packed branch and tag list leaves
+  `packed-refs.lock`; nothing in Farhelm removes Git lock files (`launch.rs` says "no staging or cache repair policy"),
+  so once an upstream ref is deleted every later `fetch --prune` in that cache fails and every new checkout of that
+  repository on that host fails at the clone stage until manual repair or 30-day eviction (`repo_cache.rs`). A spare
+  build's own pruning refresh is a second route. Contradicts SPEC.md ("a failed build leaves no spare, so a later launch
+  can clone normally") and SPEC_impl.md ("leave ordinary visible clone available"). Not clearly settled: several fix
+  shapes. No coverage.
+- Decision: the maintainer picked "(a) Clear leftover Git locks under Farhelm's cache lock" (2026-11-10 high-bucket
+  triage page, Q2).
+- Completion criteria: before each Git command Farhelm runs in a repository cache, while holding Farhelm's exclusive
+  cache lock, Git lock files left in that cache are removed (at least `packed-refs.lock`; the executor decides whether
+  to cover Git's other ref and index locks, and says which in a comment that explains why removal is safe: every Farhelm
+  Git process in the cache runs under that lock, so any Git lock found then is a leftover). SPEC_impl.md gains a
+  sentence on this repair. A test plants a stale `packed-refs.lock` in a cache whose upstream deleted a branch and shows
+  the next checkout succeeds. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  `TRIAGE_OUTCOMES.md`, the queue removal or the changelog fragment); over it, block and bring it back. Remove the
+  feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
+- Execution: change `wvmwlutktpoo`, bookmark `plan/repo-cache-stale-git-locks/01-clear-stale-git-locks`,
+  https://github.com/scode/farhelm/pull/3296/changes.

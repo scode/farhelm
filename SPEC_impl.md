@@ -4148,6 +4148,10 @@ through dissociation, then its modification time records successful use. There i
 name the path and use the existing `Failed{stage: clone}` state; `CloneStarted` covers the whole sequence, including
 restart refusal after interruption.
 
+Before cache Git work, under that same exclusive flock, Farhelm removes leftover `packed-refs.lock`, `HEAD.lock`,
+`config.lock`, `shallow.lock` and lock files beneath real `refs/` directories. Git children do not inherit the flock and
+end with their preparation job, so these locks have no live owner when repair runs; genuine Git failures still fail.
+
 Supervisor startup sweeps `repo-cache/` on a blocking worker. It enumerates the permanent locks and tries each without
 waiting, skipping a cache still in use by a shim that survived supervisor restart. Under the lock it removes leftover
 `<name>.git.trash`, then renames a cache unused for more than 30 days to that trash path before removing it recursively.
