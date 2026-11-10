@@ -70,3 +70,63 @@ python3 scripts/record-test-run.py --runner nextest --kind development --tmux no
 Each PR passed its required single fresh GPT-6.1 Sol high review with the full goal and test-authoring checklist. Codex
 had no substantive findings. Claude had one stale helper comment, which was corrected and accepted on recheck; no
 findings remain and none were rejected. Separate fresh readers understood each PR's title and body.
+
+### Landing
+
+Landed alone (the only plan in this landing round), as #3290 then #3291. Since the stack was based, main gained only the
+browser terminal's scrollback fix (#3289), which changes none of the code these PRs change. Rebasing onto it conflicted
+only in `TRIAGE_OUTCOMES.md` and `TRIAGE_OUTCOMES_ARCHIVE.md`, where both sides had moved finished entries; the landing
+kept both sides. The landing made no other change.
+
+#### Review
+
+The landing's fresh-context review found nothing that must change. It ran the Codex settings merge on its own against
+ordinary, inline and dotted provider tables, nested header tables, a provider chosen elsewhere, comments and an empty
+file, and a Codex profile that selects another provider. Every result was valid, Farhelm's own provider ended up with
+exactly its own settings, other providers were left alone, and running the merge again changed nothing. For Claude it
+found no way to leave settings half-updated, and repeated deliveries give the same result. SPEC.md and SPEC_impl.md
+match the code and each other.
+
+#### Things you should know
+
+From the review. All of these follow from the decision that an agent's credentials come from Farhelm or from the image,
+never both, but the report and changelog entries do not spell them out:
+
+- When a recipe gives Codex an API endpoint, Farhelm now replaces its own provider entry (the one named `farhelm`)
+  whole, so other settings in that entry go too, not only credentials: extra query parameters (Azure's API version, for
+  example), timeouts and retry settings. They could only be there because an image or someone editing the host put them
+  in Farhelm's entry; other providers' entries are untouched.
+- A Claude API endpoint used without a token, which relied on an API key or credential helper saved in the image's
+  Claude settings, loses that credential at the next delivery. This is the one case that can break a setup that works
+  today. Such a setup now belongs under None, with the image supplying the endpoint as well. The landing's view is that
+  this is the decision working as intended, but the changelog entry does not mention it, and a caveat there would warn
+  anyone relying on it.
+- An API key kept in Claude's settings for another purpose, such as hooks or tool servers, is removed too.
+- The cleanup does not undo itself: switching a host back to None does not bring the image's removed settings back.
+- Other places an image can carry credentials are still left alone, as the best-effort rule allows: a Codex profile that
+  selects another provider, Claude's cloud-provider switches (Bedrock, Vertex, Foundry), project or managed settings,
+  and variables the login shell exports.
+- Existing hosts get the cleanup only at their next credential delivery that changes something (an endpoint, token or
+  login change), as the report says. A reconnect does go through credential delivery, but when nothing changed since the
+  last delivery it skips rewriting the settings, so an upgrade followed by a reconnect does not clean a host on its own.
+
+A possible follow-up: the user documentation page on Tensorlake sandboxes does not yet say that each agent's credentials
+come from either Farhelm or the image, nor what Farhelm now removes.
+
+#### Checks
+
+Run now on this development machine, on the rebased stack, whose tree is what merged:
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format` and `cargo clippy -p farhelm-helm --all-targets -- -D warnings` passed.
+- Recorded `cargo nextest run -p farhelm-helm`, the whole helm crate rather than the two provisioning modules the
+  executor ran: 1675 passed, 2 skipped by design (the two tests that need a real remote Mac; run
+  `1ad0ebed-f8bf-4a99-8781-cfcd50195136`). Its output has no runtime `SKIPPED` lines, so no test returned early and
+  counted as a pass. The changed merges are reached through credential delivery, which host setup, credential
+  replacement, reconnects and sandbox sessions all use, and those callers' tests live in the same crate.
+
+Reused: nothing; the run above supersedes the executor's two narrower runs.
+
+Skipped: browser specs (the recipe, Tensorlake host and credential settings specs use a test backend that discards what
+credential delivery writes, so they cannot see this change), the rest of the workspace's Rust tests (only the helm
+crate's code changed), and hosted CI (manual-only, not dispatched).
