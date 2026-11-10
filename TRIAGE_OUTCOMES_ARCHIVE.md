@@ -20069,3 +20069,30 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
 - Execution: change `ntnzwosmntut`, bookmark `plan/endpoint-credential-ownership/01-codex-provider-table`,
   https://github.com/scode/farhelm/pull/3290/changes.
+
+## claude-endpoint-change-retains-custom-headers.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by reading the code on main 2e42099a (not run). When a recipe selects API endpoint for Claude,
+  Farhelm replaces only `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` in the host's
+  `~/.claude/settings.json` environment (`agent_endpoints.rs`), so an `ANTHROPIC_CUSTOM_HEADERS` carrying a previous
+  gateway's secret (for example an `X-Gateway-Key` header) goes to the recipe's endpoint on every request. Since #3126,
+  Subscription keeps the headers too, sending them to Anthropic's own API. A team image built for a gateway is a
+  plausible trigger. Custom headers as gateway credentials are documented by Anthropic (reviewer's fetch of the env-vars
+  and LLM-gateway pages, 2026-11-05, not re-fetched). Not clearly settled, for the same reason as the Codex item.
+- Decision: the same Q1 answer as `codex-endpoint-change-retains-environment-key.md`, recorded there in the maintainer's
+  words: Farhelm or the image is responsible for an agent's credentials, never both; credentials in the image when
+  Farhelm provisions are undefined (SPEC.md), and Farhelm does better than that on a best-effort basis under a hard
+  complexity gate, stated as such in SPEC_impl.md.
+- Completion criteria: the SPEC.md rule is the one in the Codex entry (one change for both agents). SPEC_impl.md's
+  best-effort statement says that when Farhelm provisions Claude (API endpoint or Subscription), it removes
+  `ANTHROPIC_CUSTOM_HEADERS` from the settings environment along with the keys it already manages, and that a gateway
+  needing extra headers belongs under None, with the image providing everything. Other settings stay intact. Whether to
+  also remove other Claude credential sources (`ANTHROPIC_API_KEY`, `apiKeyHelper`) is the executor's call within the
+  gate; a nonempty `ANTHROPIC_AUTH_TOKEN` already outranks them per Anthropic's documented precedence. Focused merge
+  tests cover a preexisting custom-headers value in both modes, without changing the test process's environment. Hard
+  complexity gate: about 100 lines of diff for this item; over it, or if the fix needs new settings, block and bring it
+  back. Remove the feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same
+  change.
+- Execution: change `tktklzkolpsv`, bookmark `plan/endpoint-credential-ownership/02-claude-custom-headers`,
+  https://github.com/scode/farhelm/pull/3291/changes.

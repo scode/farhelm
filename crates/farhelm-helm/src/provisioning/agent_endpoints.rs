@@ -6,13 +6,19 @@
 
 use crate::tensorlake::recipes::ResolvedEndpoint;
 
-/// Select an endpoint and remove a previously delivered subscription token.
-/// Only the three authentication keys belong to Farhelm; unrelated settings
+/// Select an endpoint without carrying image credentials to the selected URL.
+/// Best-effort cleanup removes known conflicting settings; unrelated settings
 /// and environment entries survive, including Claude's first-run choices.
 pub(super) fn claude(bytes: Option<&[u8]>, endpoint: &ResolvedEndpoint) -> Result<Vec<u8>, String> {
     let mut value = claude_document(bytes)?;
+    value
+        .as_object_mut()
+        .expect("validated Claude settings")
+        .remove("apiKeyHelper");
     let env = claude_env(&mut value)?;
     env.remove("CLAUDE_CODE_OAUTH_TOKEN");
+    env.remove("ANTHROPIC_CUSTOM_HEADERS");
+    env.remove("ANTHROPIC_API_KEY");
     env.insert(
         "ANTHROPIC_BASE_URL".into(),
         endpoint.base_url.clone().into(),
@@ -25,13 +31,19 @@ pub(super) fn claude(bytes: Option<&[u8]>, endpoint: &ResolvedEndpoint) -> Resul
 }
 
 /// Install a setup-token in Claude's ordinary settings, without completing
-/// onboarding. Endpoint keys must go away because their token takes precedence
-/// over a subscription; personal settings outside these three keys remain.
+/// onboarding. Endpoint credentials and helpers can override a subscription;
+/// remove those known conflicts without promising an exhaustive credential scrub.
 pub(super) fn claude_subscription(bytes: Option<&[u8]>, token: &str) -> Result<Vec<u8>, String> {
     let mut value = claude_document(bytes)?;
+    value
+        .as_object_mut()
+        .expect("validated Claude settings")
+        .remove("apiKeyHelper");
     let env = claude_env(&mut value)?;
     env.remove("ANTHROPIC_BASE_URL");
     env.remove("ANTHROPIC_AUTH_TOKEN");
+    env.remove("ANTHROPIC_CUSTOM_HEADERS");
+    env.remove("ANTHROPIC_API_KEY");
     env.insert("CLAUDE_CODE_OAUTH_TOKEN".into(), token.into());
     serde_json::to_vec_pretty(&value).map_err(|_| "could not encode Claude Code's settings".into())
 }
@@ -76,8 +88,9 @@ fn claude_document(bytes: Option<&[u8]>) -> Result<serde_json::Value, String> {
     Ok(value)
 }
 
-/// Authentication is confined to env. Its shape is checked before any change
-/// so an incompatible user document never becomes a partial replacement.
+/// Validate Claude's environment before changing its managed entries.
+/// Root credential helpers are handled separately; incompatible shapes are
+/// refused without returning partially updated settings.
 fn claude_env(
     value: &mut serde_json::Value,
 ) -> Result<&mut serde_json::Map<String, serde_json::Value>, String> {
@@ -203,7 +216,7 @@ mod tests {
     /// erasing unrelated configuration or inventing onboarding metadata.
     /// None is idempotent and does not create an otherwise absent file.
     #[test]
-    fn claude_modes_replace_only_the_three_managed_authentication_keys() {
+    fn claude_modes_replace_managed_authentication_without_onboarding() {
         let original = br#"{"permissions":{"allow":["Read"]},"env":{"KEEP":"yes","ANTHROPIC_BASE_URL":"https://old.test","ANTHROPIC_AUTH_TOKEN":"fictional-old"},"theme":"dark"}"#;
         let subscription = claude_subscription(Some(original), "fictional-subscription").unwrap();
         let value: serde_json::Value = serde_json::from_slice(&subscription).unwrap();
@@ -258,6 +271,41 @@ mod tests {
                     .contains("fictional-private")
             );
         }
+    }
+
+    /// Mixed ownership can send gateway headers to another endpoint or let an
+    /// image's key/helper override a subscription. Both endpoint token states
+    /// and Subscription scrub these settings; None leaves image credentials alone.
+    #[test]
+    fn claude_delivery_removes_image_credentials_but_none_preserves_them() {
+        let original = br#"{"apiKeyHelper":"image-helper","theme":"dark","env":{"KEEP":"yes","ANTHROPIC_BASE_URL":"https://old.test","ANTHROPIC_AUTH_TOKEN":"fictional-old","ANTHROPIC_CUSTOM_HEADERS":"X-Gateway-Key: fictional-old","ANTHROPIC_API_KEY":"fictional-image-key"}}"#;
+        let mut outputs = vec![claude_subscription(Some(original), "fictional-login").unwrap()];
+        for token in [Some("fictional-new".into()), None] {
+            let endpoint = ResolvedEndpoint {
+                base_url: "https://new.test".into(),
+                token,
+                revision: None,
+                incarnation: None,
+            };
+            outputs.push(claude(Some(original), &endpoint).unwrap());
+        }
+        for output in outputs {
+            let value: serde_json::Value = serde_json::from_slice(&output).unwrap();
+            assert!(value.get("apiKeyHelper").is_none());
+            for key in ["ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_API_KEY"] {
+                assert!(value["env"].get(key).is_none(), "retained {key}");
+            }
+            assert_eq!(value["env"]["KEEP"], "yes");
+            assert_eq!(value["theme"], "dark");
+        }
+        let cleared: serde_json::Value =
+            serde_json::from_slice(&clear_claude(Some(original)).unwrap().unwrap()).unwrap();
+        assert_eq!(cleared["apiKeyHelper"], "image-helper");
+        assert_eq!(
+            cleared["env"]["ANTHROPIC_CUSTOM_HEADERS"],
+            "X-Gateway-Key: fictional-old"
+        );
+        assert_eq!(cleared["env"]["ANTHROPIC_API_KEY"], "fictional-image-key");
     }
 
     /// Cleanup removes only the owned selection and bearer token. It must not
