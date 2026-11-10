@@ -30,6 +30,46 @@ pub(crate) fn acquire(cache: &Path) -> std::io::Result<PreparationLock> {
     Ok(lock)
 }
 
+/// Remove interrupted Git writes only while the caller holds the cache flock.
+/// Every cache Git child runs under that guard, without inheriting it, and dies
+/// with its preparation job. Thus root/ref locks found here have no live owner.
+/// Bare caches have no index; object/maintenance files and our sibling lock stay.
+pub(crate) fn clear_git_locks(cache: &Path, _held: &PreparationLock) -> std::io::Result<()> {
+    for name in [
+        "packed-refs.lock",
+        "HEAD.lock",
+        "config.lock",
+        "shallow.lock",
+    ] {
+        match std::fs::remove_file(cache.join(name)) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            result => result?,
+        }
+    }
+    clear_ref_locks(&cache.join("refs"))
+}
+
+/// Walk only real ref directories: a symlink must not extend cache repair's reach.
+fn clear_ref_locks(refs: &Path) -> std::io::Result<()> {
+    if refs.is_symlink() {
+        return Ok(());
+    }
+    let entries = match std::fs::read_dir(refs) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    for entry in entries {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            clear_ref_locks(&entry.path())?;
+        } else if entry.path().extension().is_some_and(|ext| ext == "lock") {
+            std::fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
+}
+
 /// Open the same permanent cache lock without waiting for another owner. The
 /// runtime builder uses try_acquire so a credential prompt in a visible clone
 /// cannot strand an unbounded blocking worker across cancellation or shutdown.

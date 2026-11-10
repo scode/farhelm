@@ -92,10 +92,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   keys can precede Farhelm's selected key and may prevent sandbox access. The current gateway's authentication behavior
   remains unverified after investigation.
 
-- [`cache-cleanup-leaves-packed-ref-lock.md`](cache-cleanup-leaves-packed-ref-lock.md) — Interrupted background cache
-  cleanup can leave a Git lock that repeatedly blocks later checkout launches when upstream references need pruning. The
-  route is source-confirmed for stated Git/backend conditions; existing completed checkouts are unaffected.
-
 - [`credential-push-misses-retired-lifetime.md`](credential-push-misses-retired-lifetime.md) — A replacement connection
   can hide the last lease's zero transition, allowing obsolete credential transport work to delay reconnect. No
   disclosure, wrong-machine delivery or user-work loss is established.
