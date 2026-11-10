@@ -404,3 +404,92 @@ passed its review gate, and the last code PR makes the TODO.md changes the accep
 If a `## Decisions` section exists, its latest entry must also be satisfied. Then close the plan per
 `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write
 a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked while landing on 2026-11-10 (claim 73d7db).
+
+### Landing stopped: a launch's result can be lost, and browser tests the plan did not run now fail
+
+This plan makes pending session actions stop blocking the rest of the page. Before it, while a Stop, Restart, Replace or
+Delete was waiting for its reply, or while a new session was launching, you could not switch to another session or act
+on one: the whole page was locked until the reply came. Now only the session being acted on refuses competing actions,
+and a submitted launch hides its launcher window and shows a small progress indicator at the bottom of the window (the
+"pill") while you carry on elsewhere. If the launch fails or needs a question answered, the launcher comes back with
+your choices.
+
+The landing monitor stopped the landing before merging anything: neither of the plan's PRs (#3276 and #3278) is on main,
+and main holds nothing of the plan. Two things stopped it: one product bug and a set of browser tests that still expect
+the old, locked page.
+
+#### The product bug: renaming a session during a launch loses the launch's result
+
+Rename is one of the actions the plan now allows on other sessions while a launch is pending, as its SPEC.md amendment
+says. But the launcher keeps a count of how often it has been opened, so that a reply belonging to an earlier, abandoned
+opening is ignored rather than shown in the wrong place. Opening Rename still advances that count, so the pending
+launch's reply looks as if it belongs to an abandoned launcher and is thrown away. When that reply is a failure, an
+unknown outcome or the question about launching in YOLO mode, the user sees:
+
+- no error and no question, and the pill counting up for as long as the page stays open;
+- for Replace with, the original session showing "Replacing…" until the page is reloaded;
+- for Restart with, the session showing "Restarting…", with its Stop, Restart, Replace, Delete, New terminal and Clone
+  disabled, until the page is reloaded.
+
+The quick switcher, which the plan also opened up during launches, does not advance the count; Rename should not either.
+As it stands this breaks SPEC.md's rule that a launch's outcome is never lost silently.
+
+#### The failing browser tests
+
+The landing ran the whole browser suite on Chromium and WebKit, on ten Tensorlake sandboxes (cloud test machines) at the
+maintainer's request: 3,117 passed, 14 skipped by design, 49 failed (runs `830543a7`, `bec04404`, `b7c14276`,
+`bd2730d7`, `cf210c48`, `7cd61551`, `eff5805d`, `10f321ec`, `506cb9ab`, `e229c9a9`). The executor's own run covered 11
+of the suite's spec files; most of these failures are in others.
+
+- 8 come from main, not from this plan: the host-settings footer and pinned-controls tests in the multi-host spec, and
+  the feed spec's reader count. A separate draft fix (#3275) covers them. Until it lands, a rerun shows them failing
+  again, and that is not this plan's doing.
+- 33 fail because the tests still expect the locked page: the launcher staying visible and focused while a request is
+  pending, the launch's progress showing inside the launcher rather than in the pill, or an open Stop or Delete question
+  disabling that session's open button. They are in the Restart with spec (12), the YOLO question spec (10), the
+  Tensorlake lifecycle spec (6), the window chrome spec's "selected session identity stays legible while confirmation
+  disables navigation" (2), the template shortcut spec's "preserves editor focus when clearing a quick-launch YOLO
+  question" (2), and the sidebar spec's "composer menu-closed Tab order" (WebKit only).
+- 8 need a closer look, because they may be real regressions rather than stale tests:
+  - On both engines, the session confirmations spec's "skip session confirmations walks row header interrupted card and
+    tab actions": after a Delete, the session Farhelm picks next is not selected. The plan changed when that automatic
+    pick happens.
+  - On one engine only, and in code the plan changed: the bulk actions spec's "bulk Stop reports an engaged row without
+    skipping its eligible sibling", and the multi-host spec's "a moved host is a new intent" (both WebKit).
+  - On one engine only, and probably unrelated: the trash dialog's "header and global confirmation remain reachable" at
+    two widths (Chromium), the terminal spec's colour for a session with unseen output, and the recipe snapshot test
+    (both WebKit).
+
+#### Smaller points from the landing's review
+
+- Suspend and Resume of a sandbox, when started from a session's row or its top bar, no longer wait while a launch or a
+  change to the host list is pending, so they can now overlap. The Hosts panel's own Suspend and Resume still wait.
+  Whether the overlap does harm is unknown; the goal file lists relaxing this as a departure that needs reassessment,
+  and the report does not mention it.
+- The row's new "Stopping…" status has no styling, unlike the existing "Deleting…" status beside it.
+- The sidebar's question about replacing a session in YOLO mode still shows its buttons disabled during any launch,
+  although they work.
+- One older browser spec's opening comment still describes the page lock the plan removed.
+- The changelog entry leaves out the "Stopping…" status, results staying on a session's row after you switch away, and
+  Replace no longer pulling you away from a session you switched to.
+
+#### Question
+
+How should the plan go on?
+
+- Send it back to fix (recommended). The executor fixes the Rename bug the way the quick switcher avoids it, keeping
+  Rename available during a launch as the amended spec says, and adds a test for it. It updates the 33 stale tests,
+  reruns the 8 uncertain failures narrowly on both engines and fixes those the plan caused (for the Delete case, the
+  amended spec still selects another session once a Delete settles, so the product is fixed unless the test's own
+  premise is what changed), and fixes the smaller points. It also settles the Suspend and Resume point by keeping them
+  waiting as before, the smaller change; the alternative is to keep the overlap and say in the report why it is safe.
+  Cost: another executor round and another landing run.
+- Send it back, but make Rename refuse during a launch, as before the plan. A smaller fix, but it keeps one piece of the
+  locked page the plan set out to remove, and the spec amendment would need narrowing.
+- Land it as it is and fix forward. Main would get the Rename bug, 33 failing browser tests that every other landing
+  would then have to tell apart from its own, and up to 8 possible regressions, among them a Delete that no longer
+  selects the next session.
