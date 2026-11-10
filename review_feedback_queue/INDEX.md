@@ -81,9 +81,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`missing-agent-terminal-blocks-surviving-tmux-tabs.md`](missing-agent-terminal-blocks-surviving-tmux-tabs.md) — After
   the agent terminal disappears, surviving older shell tabs can remain listed while opening or closing them is refused.
 
-- [`cancelled-suspend-can-accept-queued-answer.md`](cancelled-suspend-can-accept-queued-answer.md) — A queued Suspend
-  answer can still pause a host and its working agents after Cancel was accepted in the same rendered question.
-
 - [`orphan-cleanup-overlay-forgets-failed-discovery.md`](orphan-cleanup-overlay-forgets-failed-discovery.md) — When
   discovery fails while cleanup remains unfinished, earlier orphan rows disappear and unrelated fleet updates keep
   retrying the failed read.

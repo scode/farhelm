@@ -2241,7 +2241,7 @@ pub(crate) fn HostsPanel(
         );
     };
 
-    let mut suspend_question = use_signal(|| None::<Host>);
+    let mut suspend_question = use_confirm_slot::<Host, ()>();
     let lifecycle_base = base.clone();
     let lifecycle = use_callback(move |(snapshot, resume): (Host, bool)| {
         let host = snapshot.id;
@@ -2312,7 +2312,9 @@ pub(crate) fn HostsPanel(
                 {
                     lifecycle.call((snapshot, false))
                 }
-                _ => suspend_question.set(Some(snapshot)),
+                _ => {
+                    suspend_question.open(snapshot, ());
+                }
             }
         });
     });
@@ -2867,6 +2869,10 @@ pub(crate) fn HostsPanel(
         session_menu_open.set(None);
         on_host_choice.call(choice);
     });
+    let suspend_prompt = suspend_question.current().map(|shown| {
+        let host = shown.key().clone();
+        (shown, host)
+    });
     rsx! {
         nav { class: "host-rail", aria_label: "Hosts",
             onscroll: move |_| on_resize.call(()),
@@ -3405,10 +3411,10 @@ pub(crate) fn HostsPanel(
                     },
                 }
             }
-            // All ways out release isolation before clearing the question. Dismissal
+            // Only a current token may release this shared dialog's isolation. Dismissal
             // returns to the visible host control; acceptance leaves the surviving
             // panel in charge of the request and any later refusal.
-            if let Some(host) = suspend_question() {
+            if let Some((shown, host)) = suspend_prompt {
                 crate::modal_isolation::HostModal {
                     div { class: "host-settings-backdrop", role: "presentation",
                         ModalDialog {
@@ -3419,12 +3425,13 @@ pub(crate) fn HostsPanel(
                             tabindex: "-1",
                             on_escape: {
                                 let id = host.id;
+                                let shown = shown.clone();
                                 move |evt: KeyboardEvent| {
                                     if !evt.is_composing() {
+                                        if !cancel_suspend(&mut suspend_question, &shown) { return; }
                                         DialogHandle::new(".host-suspend-dialog").close(
                                             &return_focus.call((id, rail_dialog_hosts.peek().contains(&id))).script(),
                                         );
-                                        suspend_question.set(None);
                                     }
                                 }
                             },
@@ -3437,11 +3444,12 @@ pub(crate) fn HostsPanel(
                                     "data-tooltip": "Cancel host suspension",
                                     onclick: {
                                         let id = host.id;
+                                        let shown = shown.clone();
                                         move |_| {
+                                            if !cancel_suspend(&mut suspend_question, &shown) { return; }
                                             DialogHandle::new(".host-suspend-dialog").close(
                                                 &return_focus.call((id, rail_dialog_hosts.peek().contains(&id))).script(),
                                             );
-                                            suspend_question.set(None);
                                         }
                                     },
                                     "×"
@@ -3465,11 +3473,12 @@ pub(crate) fn HostsPanel(
                                         "data-tooltip": "Cancel: keep the sandbox running",
                                         onclick: {
                                             let id = host.id;
+                                            let shown = shown.clone();
                                             move |_| {
+                                                if !cancel_suspend(&mut suspend_question, &shown) { return; }
                                                 DialogHandle::new(".host-suspend-dialog").close(
                                                     &return_focus.call((id, rail_dialog_hosts.peek().contains(&id))).script(),
                                                 );
-                                                suspend_question.set(None);
                                             }
                                         },
                                         "Cancel"
@@ -3479,9 +3488,9 @@ pub(crate) fn HostsPanel(
                                         class: "btn btn-primary",
                                         "data-tooltip": "Suspend: pause this sandbox until it is resumed",
                                         onclick: move |_| {
+                                            let Some(host) = answer_suspend(&mut suspend_question, &shown) else { return; };
                                             DialogHandle::new(".host-suspend-dialog").release();
-                                            suspend_question.set(None);
-                                            lifecycle.call((host.clone(), false));
+                                            lifecycle.call((host, false));
                                         },
                                         "Suspend"
                                     }
@@ -5582,6 +5591,18 @@ fn cancel_remove(
     request_running: bool,
 ) -> bool {
     !request_running && slot.take(shown).is_some()
+}
+
+/// Consume the drawn Suspend opening before releasing its dialog or dispatching.
+/// Unlike Remove, Suspend leaves no question up through its request.
+fn answer_suspend(slot: &mut ConfirmSlot<Host>, shown: &ConfirmToken<Host>) -> Option<Host> {
+    slot.take(shown).map(|()| shown.key().clone())
+}
+
+/// Authorize dialog dismissal only for this opening; stale controls must not
+/// close or move focus out of a newer question sharing the same selector.
+fn cancel_suspend(slot: &mut ConfirmSlot<Host>, shown: &ConfirmToken<Host>) -> bool {
+    slot.take(shown).is_some()
 }
 
 /// Confirm `planned`, the opening of the offer the add dialog's answer was
@@ -9286,10 +9307,10 @@ mod tests {
         });
     }
 
-    /// Mount a removal-question slot the way `HostsPanel` does and run `body`
+    /// Mount a host-question slot the way `HostsPanel` does and run `body`
     /// against it inside the runtime, so the tests below exercise the real
     /// signal-backed slot rather than a stand-in.
-    fn with_remove_slot(body: impl FnOnce(ConfirmSlot<Host>)) {
+    fn with_host_question_slot(body: impl FnOnce(ConfirmSlot<Host>)) {
         use std::cell::Cell;
         std::thread_local! {
             static SLOT: Cell<Option<ConfirmSlot<Host>>> = const { Cell::new(None) };
@@ -9307,6 +9328,37 @@ mod tests {
         dom.in_runtime(|| body(slot));
     }
 
+    /// Suspend consumes its opening before dispatch or dialog dismissal. A
+    /// cancelled, replaced or already-answered control must authorize neither,
+    /// otherwise it could suspend after Cancel or close the next question.
+    #[farhelm_testtrace::test]
+    fn suspend_answers_act_only_for_the_drawn_opening() {
+        with_host_question_slot(|mut slot| {
+            let host = flow_host(3, "1.0");
+            let cancelled = slot.open(host.clone(), ());
+            assert!(cancel_suspend(&mut slot, &cancelled));
+            assert_eq!(answer_suspend(&mut slot, &cancelled), None);
+            let reopened = slot.open(host.clone(), ());
+            assert!(!cancel_suspend(&mut slot, &cancelled));
+            assert_eq!(answer_suspend(&mut slot, &cancelled), None);
+            assert!(
+                slot.is_current(&reopened),
+                "stale controls leave the dialog up"
+            );
+            let other = slot.open(flow_host(4, "1.0"), ());
+            assert!(!cancel_suspend(&mut slot, &reopened));
+            assert_eq!(answer_suspend(&mut slot, &reopened), None);
+            assert!(slot.is_current(&other));
+            assert_eq!(answer_suspend(&mut slot, &other), Some(flow_host(4, "1.0")));
+            assert!(
+                !slot.is_open(),
+                "Suspend retires its question before the request"
+            );
+            assert!(!cancel_suspend(&mut slot, &other));
+            assert_eq!(answer_suspend(&mut slot, &other), None);
+        });
+    }
+
     /// Spec (`answer_remove`): a Remove answer acts only for the opening its
     /// dialog was drawn for. Once that opening is cancelled, or replaced by
     /// another host's question or by a new question for the same host, the
@@ -9318,7 +9370,7 @@ mod tests {
     /// host's dialog had replaced the one the user clicked in.
     #[farhelm_testtrace::test]
     fn a_stale_remove_answer_removes_nothing() {
-        with_remove_slot(|mut slot| {
+        with_host_question_slot(|mut slot| {
             let first = slot.open(flow_host(1, "1.0"), ());
             // Another host's question replaces the one the click was drawn for.
             let other = slot.open(flow_host(2, "1.0"), ());
@@ -9348,7 +9400,7 @@ mod tests {
     /// dialog that owns that request's refusal.
     #[farhelm_testtrace::test]
     fn a_remove_cancel_acts_only_for_the_open_idle_showing() {
-        with_remove_slot(|mut slot| {
+        with_host_question_slot(|mut slot| {
             // Replaced by a new question for the same host.
             let first = slot.open(flow_host(3, "1.0"), ());
             let reopened = slot.open(flow_host(3, "1.0"), ());
@@ -9385,7 +9437,7 @@ mod tests {
     /// installation-identity check.
     #[farhelm_testtrace::test]
     fn a_remove_answer_acts_on_the_entry_it_showed() {
-        with_remove_slot(|mut slot| {
+        with_host_question_slot(|mut slot| {
             let drawn = flow_host(7, "1.0");
             let shown = slot.open(drawn.clone(), ());
             // `answer_remove` has no access to the host list or to anything

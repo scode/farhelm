@@ -20213,3 +20213,32 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   the feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
 - Execution: change `rrnwuzpm`, bookmark `plan/mac-system-stat/01-darwin-system-stat`,
   https://github.com/scode/farhelm/pull/3298/changes.
+
+## cancelled-suspend-can-accept-queued-answer.md
+
+- Outcome: `fix code`.
+- Assessment: partly correct, by reading the code on main 1fd93044 (not run). In the Hosts panel, the "Suspend
+  <host>?" question for a Tensorlake host is a plain signal (`crates/farhelm-ui/src/hosts.rs`, `suspend_question`): its
+  Escape, close and Cancel handlers clear it, and its Suspend button calls the lifecycle request without checking that
+  the question it was drawn with is still open. A Cancel and a Suspend handled before the next redraw therefore still
+  suspend the host (processes freeze until the user clicks Resume; no data loss is established). That consequence is
+  accepted by SPEC.md "Maintainer-confirmed decisions" ("A Cancel and a submit of the same dialog that arrive together
+  before a redraw may still submit"), so the finding's `high` bucket overstates it; `other` fits what remains. What
+  remains contradicts SPEC_impl.md "GUI: Dioxus", "Answers bind to what was drawn": "Every question, confirmation and
+  destructive prompt goes through `ConfirmSlot` ... an answer whose token is not the open one does nothing". Host Remove
+  in the same file already uses `ConfirmSlot`; host Suspend is not among the four prompts that stay up through their
+  request. Double-clicking Suspend is not a route (the page's operation lock refuses the second request). The session
+  toolbar's Suspend question has the same gap and is a separate undecided item
+  (`sandbox-lifecycle-questions-lack-opening-guards.md`), not in this scope.
+- Decision: recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
+  "Preparing each item"): SPEC_impl.md states the required mechanism in so many words, the code contradicts it, and the
+  fix copies host Remove's pattern. The maintainer can revise it.
+- Completion criteria: the Hosts-panel Suspend question opens through a `ConfirmSlot`, the render that draws it reads
+  the token, Escape, close and Cancel answer with `cancel_for` on that token, and Suspend acts only when `take` with the
+  drawn token succeeds; the question does not stay up through the request (it is not one of the four that do). A UI unit
+  test in the style of host Remove's shows a Suspend answer carrying a cancelled opening's token does nothing. Size
+  gate: about 100 lines of diff (code, tests and docs, not counting `TRIAGE_OUTCOMES.md`, the queue removal or a
+  changelog fragment); over it, block and bring it back. Remove the feedback file and its index entry, and move this
+  entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
+- Execution: change `oyszuqoo`, bookmark `plan/hosts-suspend-confirm-slot/01-suspend-confirm-slot`,
+  https://github.com/scode/farhelm/pull/3299/changes.
