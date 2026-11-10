@@ -270,41 +270,81 @@ not merged. If a `## Decisions` section exists, its latest entry must also be sa
 `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write
 a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-11-10 (claim e1f254).
+### 2026-11-10: answer to a blocked question
 
-### What this was about
+The question, as the executor put it:
 
-Tensorlake snapshot builds and sandbox-host connections could offer a personal key loaded in your SSH agent before
-Farhelm's registered key. If Tensorlake rejects the connection at the first unknown key, those operations fail even
-after the right key is registered. That gateway behavior remains unverified; the recorded decision was to stop using the
-agent without checking it live.
+> Blocked on 2026-11-10 (claim e1f254).
+>
+> ### What this was about
+>
+> Tensorlake snapshot builds and sandbox-host connections could offer a personal key loaded in your SSH agent before
+> Farhelm's registered key. If Tensorlake rejects the connection at the first unknown key, those operations fail even
+> after the right key is registered. That gateway behavior remains unverified; the recorded decision was to stop using
+> the agent without checking it live.
+>
+> The reviewed partial fix disables the agent for the gateway connection and keeps ordinary SSH hosts and proxy/jump
+> configuration working as before. Its tests cover builds, host connections and ordinary-host exclusion. It does not
+> complete the plan's stronger promise that Farhelm's key is always offered first.
+>
+> The consistent partial fix is preserved in [draft PR #3300](https://github.com/scode/farhelm/pull/3300/changes).
+>
+> ### What execution found
+>
+> OpenSSH tries configured certificates before plain key files, even with the agent disabled. A certificate and its
+> matching private key in the user's SSH configuration can therefore still precede Farhelm's key. Configured
+> hardware-token keys can also precede it. The plan already permits omitting the hardware-token override if unsupported:
+> OpenSSH 7.6, Farhelm's minimum, treats `PKCS11Provider=none` as a library name rather than a disable switch.
+> Certificate precedence has no agreed fallback.
+>
+> These are conclusions from OpenSSH's source, not a new gateway experiment. The feedback remains queued and the outcome
+> has not been archived. The Security specification's replacement wording is also pending this decision.
+>
+> ### Decision needed
+>
+> Accept the narrow agent-only fix, with explicit exceptions for configured certificates and hardware-token keys, or
+> authorize broader identity isolation to guarantee that Farhelm's key is first. The broader option needs a design that
+> keeps supported proxy/jump configuration and the OpenSSH 7.6 floor; it may exceed this plan's approximately 100-line
+> limit. Neither a generated SSH configuration nor a higher client minimum has been implemented.
+>
+> I recommend accepting the agent-only fix and making the specification precise about those exceptions. It implements
+> the recorded decision without adding a new configuration mechanism. If first-key ordering in every supported SSH
+> configuration is required, the broader work needs explicit authorization and a revised size limit.
 
-The reviewed partial fix disables the agent for the gateway connection and keeps ordinary SSH hosts and proxy/jump
-configuration working as before. Its tests cover builds, host connections and ordinary-host exclusion. It does not
-complete the plan's stronger promise that Farhelm's key is always offered first.
+The maintainer's answer:
 
-The consistent partial fix is preserved in [draft PR #3300](https://github.com/scode/farhelm/pull/3300/changes).
+The landing monitor answered this on the maintainer's behalf, under `plans/.agents/landing.md`, "Answering blocks". It
+is not a question that waits for the maintainer: it delivers what they picked (Farhelm stops using the SSH agent for the
+Tensorlake gateway), weakens no security, and only narrows how strong a guarantee the text makes. A later change of mind
+is a follow-up, not a reason to stop the plan.
 
-### What execution found
+Accept the agent-only fix, as recommended. When Farhelm connects to a Tensorlake sandbox host or builds a snapshot, it
+stops offering keys from the user's SSH agent. It does not also take over which other keys the user's own SSH
+configuration offers. This decision replaces the stronger wording in the triage outcome's completion criteria ("so only
+Farhelm's key file is offered") and in the plan's proposed SPEC.md text ("Farhelm's own key alone", "first, not only"):
+the plan is done when the agent is no longer consulted for the gateway and the two exceptions below are documented.
+Finish it on that basis, all in #3300, the plan's one PR:
 
-OpenSSH tries configured certificates before plain key files, even with the agent disabled. A certificate and its
-matching private key in the user's SSH configuration can therefore still precede Farhelm's key. Configured
-hardware-token keys can also precede it. The plan already permits omitting the hardware-token override if unsupported:
-OpenSSH 7.6, Farhelm's minimum, treats `PKCS11Provider=none` as a library name rather than a disable switch. Certificate
-precedence has no agreed fallback.
+- Keep #3300's code change as it is: the agent is disabled only for the Tensorlake gateway connection, and ordinary SSH
+  hosts and proxy or jump configuration keep working as before. Do the remaining work below in that same PR.
+- Everywhere the plan asks for wording about which key is offered (the module comments in the Tensorlake SSH code,
+  SPEC_impl.md, SPEC.md "Security" and the changelog fragment), say that Farhelm does not consult the user's SSH agent
+  for the gateway, and never that Farhelm's key is always offered first or alone. Say that a certificate configured in
+  the user's SSH configuration (with its matching private key) can still be offered before Farhelm's key, and so can a
+  configured hardware-token key, so a gateway that rejects the first unknown key could still refuse such a setup. The
+  changelog fragment carries the advice as a caveat: leave those settings out of the SSH configuration that applies to
+  the Tensorlake host. Put the remark that the gateway's behavior with an unknown first key was not verified live in
+  SPEC_impl.md or the code comment, not in SPEC.md.
+- Omit the hardware-token override, as the plan already permits, since OpenSSH 7.6, Farhelm's minimum, cannot switch it
+  off with `PKCS11Provider=none`.
+- Do not add a generated SSH configuration, raise the minimum OpenSSH version, or exceed the plan's size limit for this.
+- Finish the triage bookkeeping the plan requires: archive the outcome and remove the feedback file and its index entry,
+  noting in the archived entry that this decision narrowed the completion criteria and that certificates and
+  hardware-token keys are documented exceptions.
 
-These are conclusions from OpenSSH's source, not a new gateway experiment. The feedback remains queued and the outcome
-has not been archived. The Security specification's replacement wording is also pending this decision.
-
-### Decision needed
-
-Accept the narrow agent-only fix, with explicit exceptions for configured certificates and hardware-token keys, or
-authorize broader identity isolation to guarantee that Farhelm's key is first. The broader option needs a design that
-keeps supported proxy/jump configuration and the OpenSSH 7.6 floor; it may exceed this plan's approximately 100-line
-limit. Neither a generated SSH configuration nor a higher client minimum has been implemented.
-
-I recommend accepting the agent-only fix and making the specification precise about those exceptions. It implements the
-recorded decision without adding a new configuration mechanism. If first-key ordering in every supported SSH
-configuration is required, the broader work needs explicit authorization and a revised size limit.
+This is a judgment call made on the maintainer's behalf. The alternative was broader identity isolation that guarantees
+Farhelm's key is offered first in every supported SSH configuration, which needs a new design that keeps proxy and jump
+configuration and the OpenSSH 7.6 floor, and more than this plan's size limit. It is recorded in TODO.md's "Plan
+decisions to revisit" for the maintainer.
