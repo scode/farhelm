@@ -39,6 +39,16 @@ worth the human's time at this time", not that the feedback is wrong; its execut
 without a spec or code change. The outcome ledger lives outside this directory and is not a feedback file to add to
 `INDEX.md`.
 
+`TRIAGE_OUTCOMES.md` holds only the decisions whose feedback file is still queued. An entry graduates to root
+`TRIAGE_OUTCOMES_ARCHIVE.md` (moved to its end, unchanged apart from its Execution field) in the same change that
+removes its feedback file or narrows it to an undecided remainder: an executed outcome's PR, a discard's removal, or
+triage's immediate removal of an already fixed, covered or filtered item. Until that change lands on main the entry
+stays in `TRIAGE_OUTCOMES.md`, so a review or triage session still sees the decision while its fix is planned, in flight
+or in review, and does not raise the same item again. The archive is the historical record and nothing more: no reading
+list or coverage search includes it. Open it only to follow a citation into it, or when the maintainer asks about a past
+decision. Citations of `TRIAGE_OUTCOMES.md` written before the archive existed (2026-11-09), by heading or by line
+number, may name entries that now live in the archive; look them up there by heading.
+
 Exception: when triage verifies that a finding is fully covered by an accepted specification rule, an existing `Planned`
 item in TODO.md, a plan in `plans/queue/` that has not landed and whose work fixes it, a known bug recorded in root
 `BUGS.md`, or a filter in `FILTER.md`, record the basis in the ledger and remove the feedback file and index entry
@@ -92,8 +102,8 @@ the documented complexity or scope gate rather than silently expanding it.
 
 Coverage sources, named in several lists here: `SPEC.md`, `SPEC_impl.md`, the `Planned` bucket of `TODO.md`, the plans
 in `plans/queue/` that have not landed, `BUGS.md`, `review_feedback_queue/INDEX.md` and the queue files it lists, and
-`TRIAGE_OUTCOMES.md`. These are searched for the finding at hand, with the matching sections read in full; they are not
-read end to end.
+`TRIAGE_OUTCOMES.md` (not `TRIAGE_OUTCOMES_ARCHIVE.md`). These are searched for the finding at hand, with the matching
+sections read in full; they are not read end to end.
 
 ### Recording a finding ("record review feedback", "add this to the review queue", "queue this finding")
 

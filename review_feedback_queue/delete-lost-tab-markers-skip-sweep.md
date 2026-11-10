@@ -38,8 +38,8 @@ Possible coverage: no exact existing queue/ledger item, accepted specification, 
 route; Planned was empty. The landed plan's ordinary empty-listing repair does not cover facts surviving a lost marker
 read. The success claim and surviving work exclude the rare-glitch filter.
 
-`TRIAGE_OUTCOMES.md`, "startup-probe-false-tmux-absence.md", records the maintainer's broader preference to discard
-old-terminal findings unless very serious. This finding requires old tabs beside a migrated host agent. Whether
+`TRIAGE_OUTCOMES_ARCHIVE.md`, "startup-probe-false-tmux-absence.md", records the maintainer's broader preference to
+discard old-terminal findings unless very serious. This finding requires old tabs beside a migrated host agent. Whether
 successful Delete permanently stranding their jobs meets that exception is unresolved; retain this possible coverage for
 triage rather than silently interpreting the severity boundary. The three specific discarded findings concern unwarned
 termination, not this omission of cleanup.

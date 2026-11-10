@@ -175,8 +175,9 @@ A repo-wide rename, sweep or cleanup leaves these alone; each changes only under
   changes (`lore/AGENTS.md`).
 - Published releases' `CHANGELOG.md` sections, `website/src/release-notes/*.json`, and the release shots and their tests
   are never touched by a refresh, a sweep, or a cleanup, only by a task that targets them.
-- `TRIAGE_OUTCOMES.md` records, older `FLAKES.md` entries, and `plans/`, which has its own editing rules
-  (`plans/AGENTS.md`).
+- `TRIAGE_OUTCOMES.md` and `TRIAGE_OUTCOMES_ARCHIVE.md` records (an entry still graduates to the archive per
+  `review_feedback_queue/AGENTS.md`, "Lifecycle"), older `FLAKES.md` entries, and `plans/`, which has its own editing
+  rules (`plans/AGENTS.md`).
 - The captured agent screens under `crates/farhelm-supervisor/tests/fixtures/screens/`, which change only by re-capture
   (`docs/agent-screen-fixtures.md`).
 - The README hero's and demo video's designs (scenarios, transcripts, `intent.md`) under `docs/readme-hero/` and
@@ -269,7 +270,7 @@ Before creating, editing or deleting anything under these paths, read the file n
 - `releasing/` (except fragment files under `releasing/changelog.d/`), `CHANGELOG.md`, the version in `Cargo.toml` or
   `packaging/farhelm-desktop/dist.toml`, `.github/workflows/release.yml` (generated: never hand-edit it),
   `dist-workspace.toml`, `.github/dist-build-setup.yml`: `releasing/AGENTS.md`.
-- `review_feedback_queue/`, `TRIAGE_OUTCOMES.md`: `review_feedback_queue/AGENTS.md`.
+- `review_feedback_queue/`, `TRIAGE_OUTCOMES.md`, `TRIAGE_OUTCOMES_ARCHIVE.md`: `review_feedback_queue/AGENTS.md`.
 - `website/`, `README.md`: `website/AGENTS.md`.
 - `deflake/`: `deflake/AGENTS.md`.
 - `lore/`: `lore/AGENTS.md`.
