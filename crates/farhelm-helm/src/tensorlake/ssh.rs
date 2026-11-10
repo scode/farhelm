@@ -2,10 +2,10 @@
 //! destination, and what an ssh failure means.
 //!
 //! Every ssh command Farhelm sends to a sandbox goes through Tensorlake's ssh
-//! gateway and authenticates with Farhelm's own key (`ssh_key.rs`), never the
-//! user's: the gateway refuses outright when the first key offered is not
-//! registered with the account, so the user's agent and `~/.ssh` keys must
-//! stay out of it (`IdentitiesOnly=yes`). Host keys go to a known_hosts file
+//! gateway with Farhelm's own key (`ssh_key.rs`). `IdentityAgent=none` stops
+//! ssh from consulting the user's agent: `IdentitiesOnly=yes` alone still
+//! promotes configured keys loaded in that agent ahead of file-only keys.
+//! Host keys go to a known_hosts file
 //! Farhelm owns, under one alias, because every `*.sandbox.tensorlake.ai`
 //! name presents the same gateway host key (measured 2026-11-03): a single
 //! entry covers every sandbox, and the user's own `~/.ssh/known_hosts` is
@@ -20,8 +20,15 @@
 //! share one key policy, one known_hosts file and one host key alias.
 //!
 //! The user's ssh config is still read (`-F` is not passed): a user who needs
-//! a proxy to reach Tensorlake keeps it. Its `IdentityFile` lines are still
-//! offered, but after Farhelm's key, which is what the gateway decides on.
+//! a proxy to reach Tensorlake keeps it. Its plain `IdentityFile` keys can
+//! follow Farhelm's; a configured certificate (even one whose private key
+//! is only in the agent) or a configured PKCS11 key can precede it. A gateway that rejects the
+//! first unknown key can therefore still refuse that setup.
+//! `PKCS11Provider=none` is not a disable switch on supported OpenSSH 7.6
+//! (its `ssh-pkcs11.c` passes the value to `dlopen`). The gateway's assumed
+//! refusal at the first unknown key has not been verified for this change.
+//! A `ProxyJump` hop's separate `ssh -W` child keeps the user's agent: these
+//! options do not reach it (see `crate::ssh::CONNECTION_OVERRIDES`' localhost check).
 //! The options here are on the command line, so they win over the config
 //! for the same keywords.
 
@@ -96,6 +103,7 @@ impl TensorlakeSshAccess {
         Ok(vec![
             crate::ssh::ssh_config_path_option("IdentityFile", &text(&self.identity_file)?)?,
             "IdentitiesOnly=yes".to_string(),
+            "IdentityAgent=none".to_string(),
             crate::ssh::ssh_config_path_option("UserKnownHostsFile", &text(&self.known_hosts)?)?,
             "GlobalKnownHostsFile=/dev/null".to_string(),
             format!("HostKeyAlias={GATEWAY_HOST_KEY_ALIAS}"),
@@ -167,17 +175,16 @@ pub(crate) const AUTH_REFUSED_MESSAGE: &str = "Tensorlake refused Farhelm's SSH 
 mod tests {
     use super::*;
 
-    /// Spec: the options are Farhelm's key with `IdentitiesOnly`, Farhelm's
-    /// known_hosts beside the key directory under the gateway alias with no
+    /// Spec: the options are Farhelm's key with `IdentitiesOnly` and no agent,
+    /// Farhelm's known_hosts beside the key directory under the gateway alias with no
     /// global file, trust on first use with no host-key updates, a 30-second
     /// keepalive, and (for the builder's one-shot commands only) errors only
     /// in ssh's own output, in that order; paths with spaces and apostrophes survive ssh's config
     /// parsing. Composed with the one-shot argv, `--` still precedes the
     /// destination.
     ///
-    /// Why: these options are the whole difference between reaching a
-    /// sandbox and being refused by the gateway (the user's own keys first),
-    /// writing the user's known_hosts, or prompting under `BatchMode`.
+    /// Why: losing an option can consult the user's agent, write the user's
+    /// known_hosts, or prompt under `BatchMode` instead of using the sandbox policy.
     #[farhelm_testtrace::test]
     fn options_name_farhelms_key_and_known_hosts_and_never_share() {
         let dir = Path::new("/state dir/te'nsor/tensorlake");
@@ -188,6 +195,7 @@ mod tests {
             [
                 r#"IdentityFile="/state dir/te'nsor/tensorlake/ssh-key/id_ed25519""#,
                 "IdentitiesOnly=yes",
+                "IdentityAgent=none",
                 r#"UserKnownHostsFile="/state dir/te'nsor/tensorlake/known_hosts""#,
                 "GlobalKnownHostsFile=/dev/null",
                 "HostKeyAlias=sandbox.tensorlake.ai",

@@ -85,10 +85,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   discovery fails while cleanup remains unfinished, earlier orphan rows disappear and unrelated fleet updates keep
   retrying the failed read.
 
-- [`sandbox-ssh-agent-key-ordering-unresolved.md`](sandbox-ssh-agent-key-ordering-unresolved.md) — Configured SSH-agent
-  keys can precede Farhelm's selected key and may prevent sandbox access. The current gateway's authentication behavior
-  remains unverified after investigation.
-
 - [`credential-push-misses-retired-lifetime.md`](credential-push-misses-retired-lifetime.md) — A replacement connection
   can hide the last lease's zero transition, allowing obsolete credential transport work to delay reconnect. No
   disclosure, wrong-machine delivery or user-work loss is established.

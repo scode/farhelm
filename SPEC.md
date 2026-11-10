@@ -4269,9 +4269,12 @@ a Tensorlake API key is saved, the helm calls Tensorlake's REST API at `https://
 token, for the Tensorlake actions the user takes (Settings' **Test** lists the account's sandboxes; a snapshot build or
 preparation creates, snapshots and deletes sandboxes and snapshots; a sandbox-session launch creates its own sandbox,
 whose Delete terminates it and removes its snapshots). These requests follow no redirects and are not retried, and the
-key appears in no reply, error message or log. A snapshot build or preparation also reaches its sandbox with `ssh`
-through Tensorlake's gateway, with Farhelm's own key alone, and records the gateway's host key on first use in a
-known_hosts file in the helm's state directory, never in the user's own.
+key appears in no reply, error message or log. Snapshot builds, preparation and sandbox-host connections reach the
+sandbox with `ssh` through Tensorlake's gateway, using Farhelm's key without consulting the user's SSH agent. The user's
+SSH configuration still applies: a configured certificate (even one whose private key is only in the agent), or a
+configured hardware-token key, can precede Farhelm's key, so a gateway that rejects the first unknown key can still
+refuse that setup. The gateway's host key is recorded on first use in a known_hosts file in the helm's state directory,
+never in the user's own.
 
 - **Client to helm**: a standalone helm serves its web UI over plain HTTP bound to loopback only, with a required token.
   The helm refuses to bind non-loopback addresses in v1; TLS serving is post-v1. Reaching the UI from another machine

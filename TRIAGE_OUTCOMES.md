@@ -1980,30 +1980,6 @@
   index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
 - Execution: `` planned in `plans/queue/sandbox-stop-click-guards.md` ``.
 
-## sandbox-ssh-agent-key-ordering-unresolved.md
-
-- Outcome: `fix spec+code`.
-- Assessment: partly confirmed by reading the code on main 1fd93044 (not run, no ssh connection). Tensorlake connections
-  (snapshot builds and host connections) pass `IdentitiesOnly=yes` with Farhelm's registered key and deliberately keep
-  the user's ssh config (`crates/farhelm-helm/src/tensorlake/ssh.rs`, `ssh.rs`), and nothing sets `IdentityAgent`.
-  OpenSSH moves a config-named `IdentityFile` key that is also loaded in the agent ahead of the remaining file keys even
-  with `IdentitiesOnly=yes` (from OpenSSH's key selection, recalled rather than re-read), so a user whose config names a
-  personal key for these hosts and loads it in the agent offers that key first; the module comment saying it is
-  "offered, but after Farhelm's key" is then wrong. Unverified: whether Tensorlake's gateway refuses the whole login at
-  the first unknown key, as Farhelm's code assumes; if it does, builds fail and the host cannot connect, with a hint to
-  register a key the user already registered. SPEC.md "Security" already says builds reach the sandbox "with Farhelm's
-  own key alone"; SPEC_impl.md names `IdentitiesOnly=yes` as the mechanism. No coverage.
-- Decision: the maintainer picked "(a) Stop consulting the ssh-agent for Tensorlake connections" (2026-11-10 high-bucket
-  triage page, Q5), without first checking the gateway live.
-- Completion criteria: Tensorlake ssh options add `IdentityAgent=none` for builds and host connections, so only
-  Farhelm's key file is offered; the module comment is corrected, the option-list test expectations updated, and
-  SPEC.md's "Farhelm's own key alone" covers host connections as well as builds, with SPEC_impl.md naming the mechanism.
-  The executor confirms, by reading OpenSSH documentation or a local check, that a `ProxyJump` hop's separate ssh still
-  uses the user's agent, and says so in the comment. Size gate: about 100 lines of diff (code, tests and docs, not
-  counting `TRIAGE_OUTCOMES.md`, the queue removal or the changelog fragment); over it, block and bring it back. Remove
-  the feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
-- Execution: `` planned in `plans/queue/tensorlake-skip-ssh-agent.md` ``.
-
 ## settings-save-races-final-replacement.md
 
 - Outcome: `fix spec`.
