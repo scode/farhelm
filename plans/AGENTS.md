@@ -38,14 +38,14 @@ and whatever the harness's own defaults encourage.
 Every fork goes one of two ways instead. A decision only the maintainer can make (the goal file's unattended fallback,
 or a landing conflict that needs a design choice) is a block: write the question per
 `plans/.agents/maintainer-writing.md`, "Writing for the maintainer", and run `queue block`, which puts it where the
-review flow finds it and notifies. The landing monitor then answers it on the maintainer's behalf unless the question is
-huge, even when the maintainer is present in its conversation, and records each judgment call as an entry in TODO.md's
-"Plan decisions to revisit" bucket for the maintainer to revisit (`plans/.agents/landing.md`, "Answering blocks").
-Everything else is the agent's to decide: take the option that best fits the plan, its Decisions and the specs, log it
-as a DECISION, and carry on. Things the maintainer should know, optional extras, and possible follow-ups are not
-questions either. They go into the report's "things you should know" and "open questions and possible follow-ups"
-sections (or the monitor's landing notes), written as statements the maintainer can act on during review. An optional
-idea is never a reason to stop, ask, or block.
+landing monitor and the review flow find it. The landing monitor then answers it on the maintainer's behalf unless the
+question is huge (and notifies the maintainer about one it leaves for them), even when the maintainer is present in its
+conversation, and records each judgment call as an entry in TODO.md's "Plan decisions to revisit" bucket for the
+maintainer to revisit (`plans/.agents/landing.md`, "Answering blocks"). Everything else is the agent's to decide: take
+the option that best fits the plan, its Decisions and the specs, log it as a DECISION, and carry on. Things the
+maintainer should know, optional extras, and possible follow-ups are not questions either. They go into the report's
+"things you should know" and "open questions and possible follow-ups" sections (or the monitor's landing notes), written
+as statements the maintainer can act on during review. An optional idea is never a reason to stop, ask, or block.
 
 The one question these flows ask in conversation is whether to carry on without notifications when the ntfy topic file
 is missing (`plans/AGENTS.md`, "Notifications"), at the start of a flow, before any claim, while the maintainer who
@@ -104,12 +104,18 @@ name.
 
 A notification means one thing: progress may be stopped until the maintainer acts. Send one for that and nothing else;
 never for something the maintainer did themselves (releasing a claim, stopping a flow), for a delivery or a landing that
-went through, for an error that is still being retried, or for anything else that is only for their information. The
-agent that discovers the condition sends it: an executor for a plan it blocks or a problem that stops it
-(`plans/.agents/executing.md`, "Executing one plan", and `plans/.agents/watching.md`, "Drain and keep monitoring"), the
-monitor for a block it leaves for the maintainer, a landing it cannot finish, a problem that stops it, and what it sees
-in `queue status` (`plans/.agents/landing.md`, "Landing: "monitor for complete plans", "land the complete plans""). Each
-place in `plans/.agents/` that says to notify is such a condition.
+went through, for an error that is still being retried, or for anything else that is only for their information.
+
+An executor does not notify for anything it hands to the landing monitor through the queue (the maintainer's choice,
+2026-11-10), whatever a plan's goal file says. A plan an executor blocks reaches the monitor, which answers it on the
+maintainer's behalf or, when it leaves the block for the maintainer, notifies (`plans/.agents/landing.md`, "Answering
+blocks"). So the maintainer is told about every block the monitor did not unblock, and about nothing it did. An executor
+notifies only when it stops in a way the monitor will not pick up: a claim given back because of an expired login or a
+full disk, or a drain that stops monitoring (`plans/.agents/executing.md`, "Executing one plan", and
+`plans/.agents/watching.md`, "Drain and keep monitoring"). The monitor notifies for a block it leaves for the
+maintainer, a landing it cannot finish, a problem that stops it, and what it sees in `queue status`
+(`plans/.agents/landing.md`, "Landing: "monitor for complete plans", "land the complete plans""), including an
+executor's claim that went quiet. Each place in `plans/.agents/` that says to notify is such a condition.
 
 When an executor's flow or the monitor starts, check that the file exists without reading it, with
 `test -f ~/.farhelm-ntfy-topic`. If it does not, tell the maintainer the file name and ask whether to carry on without
