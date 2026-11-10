@@ -62,6 +62,47 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Stop asynchronous completions from moving focus or closing things the user has moved on from, across the whole UI.**
+  The plan that lets session actions and launches stop blocking the page (`plans/queue/nonblocking-session-actions.md`)
+  stopped at landing twice on one class of problem. Code that runs when something finishes later (a request's reply, a
+  timer, a feed event) still assumes the user is where the action left them, because it was written when a pending
+  action locked the page. Its second landing found, by reading the code, a launch that finishes moving keyboard focus to
+  New and closing the Hosts panel and open menus, wherever the user is. The focus move to New and the Hosts panel
+  closing were confirmed in the code; none of it was seen in a browser. In the worst case, someone typing into another
+  session's terminal when the launch finishes has their next keystrokes stop reaching that agent, and Enter opens a new
+  launcher. On 2026-11-10 the maintainer revised that plan to fix its own scope with rules rather than case by case.
+  Each completion is split into settling the action (its session's state at once, the rest once no dialog is owed back),
+  bringing a dialog back (for failures, questions and the naming dialog) and leaving everything else alone. A shared
+  helper moves focus after an asynchronous event only when nothing holds focus or focus is still inside the surface
+  being left. A New or Clone opens its new session only if the user has not moved on. The plan writes these into
+  SPEC_impl.md, "GUI: Dioxus", once it lands; use what landed there, not this summary. This entry is the rest of the UI,
+  which that plan deliberately leaves alone. Sweep `crates/farhelm-ui/` for every place that, from an asynchronous
+  callback rather than the user's own event handler, does any of these:
+  - moves focus;
+  - closes or opens a panel, menu or dialog;
+  - changes the selected session;
+  - clears state the user may be using.
+
+  That covers three kinds of code. First, handlers: dozens of focus moves in Rust (`FocusTarget::focus`,
+  `SavedFocus::restore`, `DialogHandle::close` and `focus_surface`, `RecoveryFocus`, direct `document::eval` calls),
+  plus the focus rules in `assets/terminal.js`, `assets/menu-focus.js` and `assets/grid-terminal.js`. Second, reactive
+  effects that close surfaces when some state changes, like the one in `list/view.rs` that closes every open row, host
+  and sort menu whenever the launcher mounts or unmounts. Third, dialogs that open asynchronously (a host dialog
+  admitted later, say), which take the keyboard as soon as they open. The launcher coming back for a failure or question
+  is decided behavior in that plan, and the sweep does not revisit it without the maintainer. Places to check include
+  the host dialogs (`hosts.rs`, `hosts/settings_dialog.rs`), adding a Tensorlake host (`tensorlake/add_host.rs`),
+  Templates (`list/templates.rs`), Trash, Settings (`settings.rs`), provisioning progress (`provisioning.rs`) and
+  approvals (`approvals.rs`). Classify each as the user's own handling (fine as is) or an asynchronous completion. Bring
+  the completions under the plan's rules and helper, with browser tests for the cases a user can realistically hit:
+  focus in a terminal or another dialog when the reply lands. The sweep should also decide whether to make the rule
+  structural rather than a convention. One way is a lint or test that fails when an asynchronous path moves focus
+  without the helper. Another is to give surfaces like the launcher, the Hosts panel and the row menus components that
+  own their own open state, instead of the shared signals in `list/view.rs` (about 7,000 lines) that any handler can
+  change. Isolation while a dialog is open (`modal_dialog.rs`, `modal_isolation.rs`) is not the problem. When a dialog
+  may open asynchronously is in scope. Plan it to run after that plan lands, so the helper and the SPEC_impl.md rule
+  exist. If that plan is abandoned, or its launch half is split off and dropped, this entry adds the helper and the rule
+  itself.
+
 - **Bootstrap a Podman image on a remote host.** Automatically bootstrap a Podman image on a remote host, with some
   reasonable defaults, as a supported flow. Plan: `plans/queue/podman-environments.md`.
 

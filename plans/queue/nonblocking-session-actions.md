@@ -123,8 +123,11 @@ What is true today, from a read of main at 9e3ab60b (line numbers approximate):
   outcome or a follow-up question. The composer stays busy until its own launch finishes; no second launch from it in
   the meantime.
 - **No unwanted jumps.** A finished Replace opens its replacement only if the user is still on the original session;
-  otherwise the user stays where they are and the replacement appears in the sidebar. A finished launch still opens its
-  new session.
+  otherwise the user stays where they are and the replacement appears in the sidebar. A finished New or Clone opens its
+  new session only if the user has not moved on since their last answer to its launcher (revised 2026-11-10; see
+  "Revision of 2026-11-10" below, rule 5); otherwise it appears in the sidebar and the user stays where they are.
+- **Completions leave the user alone.** Every completion in the scope of "Revision of 2026-11-10" below follows its
+  rules 1 to 5, and SPEC.md and SPEC_impl.md say what rule 6 asks.
 - **Delete edge cases.** Automatic selection after a bulk Delete still waits until the accepted batch has settled and
   never opens a session the batch is still deleting, by waiting while `AppBody`'s `deleting` set is non-empty (every
   admitted Delete, queued batch rows included, enters it at admission); bulk Stop batches stop affecting selection.
@@ -154,8 +157,11 @@ Settled with the maintainer on 2026-11-08, after the planning page explained the
 - **Launches are included even though they need the composer made non-modal while pending**, as the stack's last PR,
   decided after the planning review found the composer blocks through modality and not only the lock. The alternative
   was leaving launches as they are.
-- **Replace opens its replacement only if the user is still on the original**; a launch still opens its new session. The
-  alternatives were never moving a user who has switched, or always moving them as today.
+- **Replace opens its replacement only if the user is still on the original.** The alternatives were never moving a user
+  who has switched, or always moving them as today. A launch originally always opened its new session; the maintainer
+  revised that on 2026-11-10: a New or Clone now opens its new session only if the user has not moved on, because
+  opening it while the user types in another session's terminal sends the rest of their typing to the new agent (see
+  "Revision of 2026-11-10" below, rule 5).
 - **Reviewer:** a single fresh-context agent on gpt-6.1-sol at high effort (see Review gate). If it cannot be reached
   when a review is due and is still unreachable after a reasonable retry, block the plan; no substitute reviewer.
 - **No-workhorse mode**, the plans default, stated on the planning page.
@@ -232,6 +238,220 @@ Decisions to log: where the header actions now run and why, how the per-session 
 open header question holds it, the sorting of the `ops.busy_now()` sites, row actions during host mutations, where
 Replace's YOLO question shows, what Restart and Replace show on the row, how a mid-delete row opens, and every review
 finding you decided not to follow.
+
+## Revision of 2026-11-10: close the completion class structurally
+
+The maintainer revised this plan on 2026-11-10 while it was held, after both landings so far had stopped on the same
+class of problem. Read this section before the `## Decisions` entries below. It does two things:
+
+- It changes one earlier decision. The maintainer decided this in conversation while the revision was written: a
+  finished New or Clone opens its new session only if the user has not moved on since their last answer to its launcher
+  (rule 5). The bullet under "Decisions already made" and the "No unwanted jumps" acceptance criterion are updated to
+  match. The latest `## Decisions` entry's item 2 says focus after a launch goes where opening a session normally puts
+  it "when the plan already takes the user to the launched session (a New or Clone, which still opens its new session,
+  or a Replace with whose source is still selected)". That parenthetical described the plan as it stood then. Its rule
+  still holds: focus follows the new session only when the plan takes the user there, and after this revision a New or
+  Clone takes the user there only when rule 5 allows it. The same entry says that a later change of the maintainer's
+  mind "comes as a follow-up to the plan; it does not stop it". This revision is that change, made in this plan's file
+  while it is held, so it is part of this run, not a later follow-up. Neither is a contradiction to resolve by blocking.
+- It says how to satisfy the rest of that entry's item 2, what a completion does to wherever the user is now: with the
+  rules below rather than one fix per finding. Every sub-bullet of item 2 remains a requirement. The rules are how to
+  fix its focus and closing findings. Its other points are fixed as item 2 says, whether or not the rules touch them:
+  - confirm in a browser and fix the launcher showing again between waking a suspended sandbox and the create, keeping
+    it hidden and released (not isolating the page) across that step, for a quick launch too;
+  - the create waiting behind another dialog;
+  - focus returning to a row menu's button when it closes during a pending Clone, Replace with or Restart with;
+  - focus coming back after the quick switcher refuses a quick launch;
+  - SPEC.md's sentence about bulk buttons.
+
+  Items 1, 3, 4, 5 and 6 of that entry also still apply as written.
+
+### Why the per-finding approach did not converge
+
+The first landing stopped on something the user did during a pending launch (opening Rename lost the launch's result).
+The second stopped on what a launch's completion does after the user has moved on. Both are the same mistake: code
+written when every pending action was modal, and the user could only be where the action left them, still assumes so.
+The second landing's findings (focus jumping to New, the Hosts panel and menus closing, a session stuck on "Restarting…"
+behind another dialog) were each one place where a completion acts on a surface the user has left. This revision asks
+for the rules that make that impossible, enforced in one place, instead of another round of instances.
+
+Focus is moved imperatively across the UI: dozens of places in `crates/farhelm-ui/src` move focus from Rust (most by
+evaluating JavaScript that focuses whatever a CSS selector matches), plus the focus rules in `assets/terminal.js`,
+`assets/menu-focus.js` and `assets/grid-terminal.js`. A move made in the user's own event handler is fine. A move made
+when an asynchronous reply arrives is not, unless it first checks where focus is, because by then the user may be typing
+in another session's terminal. Some moves already check: `DialogHandle::close_immediately_if_document_focused` and
+`RecoveryFocus` in `crates/farhelm-ui/src/modal_dialog.rs`, #3278's `restore_composer_modal`, and the terminal's own
+`takesFocus()` and `keyboardHeldElsewhere()` in `assets/terminal.js`. SPEC_impl.md, "GUI: Dioxus", already says
+"Asynchronous retirement uses the existing document-focus guard so a newer approval or control retains focus." Build on
+these, not beside them.
+
+A launch's completion is not one handler. Success is `on_created` in `crates/farhelm-ui/src/list/view.rs`, and a Restart
+with's success is `on_restarted` beside it. Failures, unknown outcomes and questions go through the composer's request
+future in `crates/farhelm-ui/src/list/create_form.rs`, the restart bridge, #3276's `on_replace_failed`, and #3278's
+`on_retired` and `admit_composer_return`. Two different holds are involved. The acted-on session's claim (the source of
+a Restart with or Replace with) is per session. The composer's operation token is what keeps New, launch sequences and
+quick launches from replacing a draft that is still owed back to the user. Some completion behavior is not in any
+handler. The layout effect in `list/view.rs` (around line 1445 on main) reads `show_create()` and closes every open row,
+host and sort menu whenever it changes, so unmounting a finished launcher closes the user's menus.
+
+### The rules
+
+The rules apply to the completion of every action this plan stops blocking: a launch (New, Clone, a quick launch,
+Restart with, Replace with) and a Stop, Restart, Replace or Delete started from a row, the header, the interrupted card
+or the bulk bar. They apply whether or not this plan's PRs edit that code, together with any reactive effect a
+completion sets off. Nothing else is in scope.
+
+1. **Each completion has up to three parts: settle, return and leave alone.**
+   - **Settle, always, as soon as the reply arrives** (before any wait for another dialog to close): clearing any
+     "Stopping…", "Replacing…" or "Restarting…" state, releasing the acted-on session's claim, re-enabling its actions,
+     putting a failure, unknown outcome or partial result on its row, reattaching its terminal, and refreshing the
+     listing.
+   - **Settle, only when no dialog is owed back** (a success that opens no naming dialog, or a launcher opening that was
+     retired, and then only while that opening is still the mounted one, as #3278's `on_retired` checks, so a newer
+     opening keeps its seeds): clearing the pill (rule 5's short report replaces it when nothing navigates), mirroring
+     the submitted launch into the held preferences (success only, as today), clearing the launcher's draft seeds
+     (`chosen_host`, `clone_prefill`, `initial_create_action`, `ordinary_new_cwd`, the restart bridge), releasing the
+     composer's operation token, and unmounting the submitted launcher. Leaving the seeds set would make the next New
+     open as a stale Replace with or on the old host. When a dialog is owed back, the pill, the draft and the token stay
+     until that dialog is shown, as #3278 already does, so no new launch can replace a draft the user is still owed and
+     a failed New is never lost.
+   - **Return** is bringing a dialog back: the launcher for a failure, an unknown outcome, a YOLO question or an
+     ambiguous-create recovery, and the naming dialog after a quick launch (rule 5 says when it is skipped). A returning
+     dialog waits for another open dialog as #3278 already does, then opens and takes focus as that dialog's normal
+     opening does. Rule 2 does not apply to a modal's own opening focus: an open modal takes the keyboard anyway
+     (`modal_isolation.rs`).
+   - **Leave alone** is everything else: a completion never moves focus to New or the marked-sessions menu button, never
+     closes a panel, menu or dialog, never installs modal isolation (a hidden launcher re-isolating itself included)
+     except as a Return, and never changes the selected session, except as rule 5 allows and automatic selection after a
+     Delete (rule 4). Surfaces that belonged to a session the action removed go with it.
+
+   A reply that needs the user's answer (a YOLO question, an ambiguous-create recovery) is not a completion. It is not
+   settled as a completion: rule 5's count is read at the answer, not at this reply, and the launcher's Return applies.
+   It settles progress as today: the question replaces the progress display, Restart with's terminal reattaches after
+   every request as the restart bridge requires, and the composer's operation token is released once the question is
+   shown, so the answer's resubmit can take it. What keeps other actions off the session meanwhile is what keeps them
+   off today: the returned launcher is modal, and an inline question holds its session's question lane. Showing such a
+   question is still asynchronous. A modal question (the launcher) takes focus as its opening does. An inline one, such
+   as the YOLO question of a row or header Replace (`YoloConfirmation` in `crates/farhelm-ui/src/yolo_confirm.rs`, which
+   focuses its Cancel when it first shows), moves focus only through the rule 2 helper.
+2. **Focus moved after an asynchronous event checks first.** Add one helper beside `FocusTarget` in
+   `crates/farhelm-ui/src/modal_dialog.rs`, for example a method on `FocusTarget` used only by such paths. It moves
+   focus only if, at the moment of the move, nothing holds focus (the document body or document element, the same test
+   `close_immediately_if_document_focused` uses) or focus is still inside the surface the move is leaving. The check and
+   the `focus()` call are in one evaluated script, so nothing can move focus in between, and it keeps `FocusTarget`'s
+   quiet (`focusWithoutTooltip`) behavior. Every focus move that runs after a reply, a timer or another asynchronous
+   event in the scope above goes through it, except a returning modal's own opening focus (rule 1). A move made in the
+   user's own event handler is the user's own and does not go through the helper. That includes a move the handler
+   defers by a frame (`requestAnimationFrame` in `DialogHandle::close`) and an `onmounted` handoff of an element the
+   user's own handler mounted. It does not include an effect or `onmounted` focus on something a completion rendered,
+   such as an inline question. "Does not go through the helper" does not mean it needs no fix: item 2's row-menu and
+   quick-switcher focus returns are such moves and must be fixed. Note one interaction: for the frame after a user
+   closes a dialog, focus is on the body until the close's return runs. A completion arriving in that frame may take
+   focus, and a return that only happens when nothing holds focus is then skipped. Do not build on the opposite
+   assumption.
+3. **Reactive effects count.** Include in the inventory every effect that closes, opens, focuses, scrolls or selects
+   something and reads state a completion's settle changes, and make sure none acts unless the layout or state it guards
+   actually changed for the user. The menu-closing effect above is the known case: a hidden launcher's unmount moves no
+   anchor. Another is #3278's presentation effect, which re-isolates the launcher when its pending state clears, which
+   is why the pill and pending state stay until a returned dialog is admitted (rule 1).
+4. **Whether the user is still there is decided from state.** Where a completion's behavior depends on whether the user
+   is still where the action started, write the decision as one small function per kind of action, using state that is
+   reliable: the launcher opening the launch came from (the same identity item 3 of the latest Decisions entry ties the
+   reply to), the selected session, and rule 5's count. Do not use "focus is on nothing" as evidence that the user is
+   still there: on WebKit, a click on a button or on plain content leaves focus on the body. Write such a function only
+   where some behavior depends on it and the existing logic is not already one such check: rule 5, and Replace and
+   Replace with opening the replacement. Automatic selection after a Delete keeps its existing logic.
+5. **A finished New or Clone opens its new session only if the user has not moved on.** New here includes every quick
+   launch (the bolt and number shortcuts, launch sequences, the shortcut that opens a quick launch, and the quick
+   switcher's "New session named X"). The user has moved on if they have pressed a key or a pointer button anywhere in
+   the page since their last answer to this launcher: the submit, or their answer to its YOLO or recovery question.
+   Count presses with one listener on `window` in the capture phase, installed when the page loads, keeping a count on
+   `window` the way `modal_isolation.rs` keeps `__farhelmModalOpening`, and read the count at the answer and at the
+   reply. Do not use the modal-opening count itself: it also counts the launcher's own isolation. Ignore auto-repeat
+   (`event.repeat`), a modifier key pressed alone, and the second press of a double click or a repeated Enter on the
+   launcher's own submit (`event.detail > 1`, or the same key again within the double-click interval), which SPEC.md
+   already guards against submitting twice. For a quick launch, which has no submit the user presses, the baseline is
+   read when the launch dispatches. When a completion waits behind another dialog before it acts (the naming dialog
+   behind a host result, say), read the count again when it acts. The launcher's own steps (waking a sandbox host,
+   dispatching the create, hiding itself) and selection changes the user did not make (automatic selection after a
+   Delete) neither reset nor advance the count. Selecting another session or opening a dialog takes a press, so it
+   counts.
+   - If the user has not moved on, the new session opens exactly as opening it from the sidebar would: the sidebar's
+     selection does what it always does (including closing the Hosts panel if it is open, as `on_created` does today),
+     and the terminal's reveal rules in `assets/terminal.js` decide focus. The completion moves no focus itself, and the
+     comment beside `focusOrigin` in `terminal.js` that relies on the launcher handing focus to New is updated.
+   - If the user has moved on, the session is created and appears in the sidebar, nothing navigates, and focus, panels
+     and menus stay as they are. A quick launch whose naming dialog would have opened skips it, because that dialog is
+     part of opening the session. The session keeps its generated name and can be renamed from its row. It does not
+     persist the new session as the remembered selection either, so a reload still opens the session the user was on.
+     Whenever nothing navigates, the outcome must still be reported, since the new row may be hidden (by the host choice
+     or status filter, or because the Hosts panel is open): the pill shows that the session started, with its name, for
+     a few seconds before it goes, and stays display-only. That report is owned outside the launcher, by the list that
+     renders it. It does not delay the launcher's unmount, the token's release or the seeds' clearing, so New and
+     shortcuts behave as if no launch were pending.
+   - Replace and Replace with keep their existing rule (open the replacement only if the user is still on the original),
+     and a Restart with never navigates.
+6. **Write the rules down.** Add rules 1, 2 and 3 to SPEC_impl.md, "GUI: Dioxus", as the rule for the completions of
+   session actions and launches (the scope named above), with the reason: a pending action no longer owns the page, so
+   its completion must not act as if it did. Name the helper there. Say that other asynchronous paths in the GUI predate
+   the rule, and that the TODO.md entry "Stop asynchronous completions from moving focus or closing things the user has
+   moved on from, across the whole UI" covers them. Change SPEC.md wherever it describes a finished launch opening its
+   session or the naming dialog appearing, so that it states rule 5, including the pill's short report when nothing
+   navigates.
+
+### How to apply them
+
+- Start from item 1's inventory, which has one row per place a pending launch used to block. Add a second table with one
+  row per completion path in the scope above: what it settles at once, what it settles when no dialog is owed back, what
+  it returns, what it leaves alone, and which rule 4 function, if any, decides. Build it from the code (handlers, the
+  composer's future, and effects), not from the earlier review findings. The report gives it in product terms, as
+  `plans/.agents/maintainer-writing.md` asks. The list of every focus call site the rules touch, each with how it is
+  handled, goes in the working log.
+- Put the helper and the SPEC_impl.md text in the lowest PR that needs them, #3276 (its Stop, Restart, Replace and
+  Delete replies are completions, and its row Replace shows the inline YOLO question), stated there for session actions,
+  and have #3278 extend the passage to launches, so #3276 stands on its own if #3278 blocks. If that does not fit the
+  stack, add a PR at the bottom instead.
+- Log as DECISIONs, beside those Fallbacks already names: the classification of each completion path, where the helper
+  went, and how rule 5's count is kept and read.
+- At least two existing tests in #3278's `e2e/tests/nonblocking-launch.spec.ts` change meaning, because they press
+  something during a pending launch, which is now moving on. "quick-launch naming waits for a switcher opened during its
+  create" must now pin that no naming dialog appears and nothing navigates. The New half of "New selects its accepted
+  session after switching during its request" must now pin that the user stays on the session they switched to; its
+  Replace with half stands. Search the specs #3278 touched for any other test that presses something during a pending
+  New or Clone and then expects its session to open. Keep the naming dialog's wait behind another dialog (a host result
+  can still be open); remove only what exists to defer naming behind a dialog the user opened.
+- Tests, beside item 4's browser tests:
+  - The helper: a browser test showing that focus held by another control (a terminal's input, say) is left alone, and
+    that focus on nothing is moved where a real path exists. Test focus inside the surface being left only where a real
+    path exists. A Rust test of the generated script may cover what a browser cannot reach without a test-only product
+    hook. Do not add such a hook.
+  - The case that found this class: focus in another session's terminal when a Replace with finishes, with the next
+    keystroke checked to reach that terminal.
+  - A row Replace's YOLO question arriving while focus is in another session's terminal leaves focus there, and the next
+    Enter reaches that terminal rather than cancelling the Replace.
+  - A New failing while the quick switcher is open: once the switcher closes, the launcher returns with its draft, and a
+    "New session named X" picked meanwhile was refused rather than replacing that draft.
+  - Rule 5, each with the next keystroke checked where it applies:
+    - a New and a Clone finishing while the user types in another session's terminal leave the user there, with the new
+      session in the sidebar;
+    - a New finishing when the user has not moved on opens the new session as before;
+    - a New that needed a YOLO answer, then succeeded with no further input, opens its session;
+    - a quick launch to a suspended sandbox host with no input after it starts opens its session, and one while the user
+      types in another session's terminal never takes that terminal's focus or swallows a key during the wake;
+    - a quick launch with naming finishing after the user moved on shows no naming dialog;
+    - a New finishing after the user moved on to the Hosts panel shows the pill's short report, and New pressed during
+      that report opens a fresh launcher;
+  - Rule 3: a row menu opened during a pending launch stays open when the launch finishes.
+
+### Scope
+
+All of this is authorized and is not one of the departures under Fallbacks. One shared helper, a settle, return and
+leave-alone split of existing completion code, a press count and the pill's short success report are not "a new global
+operation manager" or "a page-wide notification surface". Do not rewrite how open dialogs isolate the page:
+`modal_dialog.rs` and `modal_isolation.rs` already keep focus inside an open dialog. Do not change completion paths
+outside the scope named under the rules; the TODO.md entry named in rule 6 covers the rest of the UI. If applying the
+rules shows that #3276's or #3278's structure needs more than this (moving a handler's state to another component, say),
+that is a scope reassessment, as Fallbacks describes.
 
 ## How to run
 
@@ -345,8 +565,9 @@ The prompt carries this full charter, because the reviewer has nothing else:
 
 The prompt must also name the repository root (the executing checkout), the bookmark or commit range of this one PR, a
 findings file in the scratch directory, and the acceptance criteria (this file's goal, acceptance criteria, Decisions
-already made and outline). When a PR changes tests or their fixtures, include the full text of
-`.agents/test-authoring.md` verbatim in the prompt, as root `AGENTS.md` requires.
+already made, outline, the "Revision of 2026-11-10" section and the `## Decisions` entries). When a PR changes tests or
+their fixtures, include the full text of `.agents/test-authoring.md` verbatim in the prompt, as root `AGENTS.md`
+requires.
 
 Where you disagree with a finding, decide on the merits and log the DECISION. Do not write a launch command here or in
 the log; the harness-shellout skill owns launch mechanics.
