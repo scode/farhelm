@@ -300,20 +300,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   before the shape is settled. Related to, but not the same as, the grid stream's binary encoding (grid-binary-stream,
   landed 2026-11-09), which kept the split and changed how the same lines are encoded.
 
-- **Stop the session header's actions collapsing into their tunnel-pill compact style.** On 2026-11-08 the cluster at
-  the right of a session's header (zoom, Stop, Restart ▾, Replace ▾, Clone, Delete) was seen drawn cramped, suspected to
-  follow switching from the session view to a host view, though not reproducible on demand. The cramped state is exactly
-  the compact block in `crates/farhelm-ui/assets/app.css` (the `.session-topbar:has(> .session-tunnel-pill)` rules near
-  line 9583): measured against a normal shot at the same 2x scale, the gap between actions falls from 6px to 2px, each
-  button's inline padding from 8px to 0, and the labels from 12px to 11px, while icons and button height do not change.
-  That block exists so the header fits its 650px floor while a tunnel pill is present; the pill is rendered by
-  `NativeTunnelStrip` in `crates/farhelm-ui/src/tunnels.rs` only while the session has open tunnels, so find out which
-  of these holds: the selector matching a pill the user cannot see (a stale tunnel list surviving the view switch, or a
-  pill shrunk to zero width, since `.session-tunnel-pill` is `flex: 0 1 auto; min-width: 0`), or a pill that was really
-  there, off to the left of the screenshot's crop, with the compact style keyed off pill presence where it should be
-  keyed off actual width pressure. Fix the trigger, and add a browser test that the actions keep their normal metrics
-  when no pill is visible. Plan: `plans/queue/header-actions-compact.md`.
-
 - **Enforce that one helm owns each supervisor.** SPEC.md (Topology) says the helm that registers a host owns its
   supervisor and every session on it, and that neither moves between helms, but nothing enforces that: a supervisor
   treats every full-authority connection alike, so a second helm can register a host another helm owns and drive its

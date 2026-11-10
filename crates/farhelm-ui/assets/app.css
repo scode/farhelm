@@ -9735,17 +9735,17 @@ a:any-link,
    containment boundary around existing confirmations. */
 .session-topbar:has(> .session-tunnel-pill) { gap: 6px; }
 .session-topbar:has(> .session-tunnel-pill) .tab-strip { flex: 0 1 auto; min-width: 112px; }
-.session-topbar:has(> .session-tunnel-pill) .titlebar-actions { gap: 2px; }
-.session-topbar:has(> .session-tunnel-pill) .titlebar-actions .btn { padding: 2px; }
-/* Stop adds another labelled action to the fixed 650px budget. With a tunnel
-   pill present, tighten only the persistent actions; tabs keep their readable
-   scrollport, ports keep their digits, and menus and questions keep their size. */
-.session-topbar:has(> .session-tunnel-pill) .titlebar-actions :is(.header-stop, .restart-primary, .header-replace, .header-clone, .header-delete, .header-action-caret) {
+.session-topbar.actions-compact:has(> .session-tunnel-pill) .titlebar-actions { gap: 2px; }
+.session-topbar.actions-compact:has(> .session-tunnel-pill) .titlebar-actions .btn { padding: 2px; }
+/* header-layout.js measures normal action widths, this pill's content and the
+   tab floor. Only a row that cannot hold them compacts; a wide row keeps its
+   ordinary spacing even with tunnels. Menus and questions keep their size. */
+.session-topbar.actions-compact:has(> .session-tunnel-pill) .titlebar-actions :is(.header-stop, .restart-primary, .header-replace, .header-clone, .header-delete, .header-action-caret) {
   font-size: 11px;
   padding-inline: 0;
   gap: 2px;
 }
-.session-topbar:has(> .session-tunnel-pill) .titlebar-actions .header-action-menu .menu-item { padding: 6px 7px; }
+.session-topbar.actions-compact:has(> .session-tunnel-pill) .titlebar-actions .header-action-menu .menu-item { padding: 6px 7px; }
 .session-tunnel-pill { position: relative; flex: 0 1 auto; min-width: 0; max-width: 280px; }
 .session-tunnel-pill:has(> .session-tunnel-toggle > .session-tunnel-mapping) { min-width: 154px; }
 .session-tunnel-toggle {

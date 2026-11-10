@@ -717,12 +717,14 @@ title/directory/last-known-status triple is assembled), and nowhere at all for a
 The desktop tunnel owner stays mounted even with no listeners, preserving its controller generation, feed/backstop
 reader and raw terminal-hover metadata bridge. Only its pill disappears at zero listeners. A dedicated teal role in each
 palette distinguishes local listeners from host status; the open disclosure uses the shared accent. Content-sized tabs
-keep the pill beside the last tab at wide widths. With a pill present, tighter horizontal action spacing preserves a
-useful tab scrollport at the 650px floor; only the escaped host field yields within the bounded mapping. Both ports stay
-fixed, and multiple listeners show a count. Its popup uses the shared menu header and separator around an ordinary list
-with native close buttons, not a dynamic command-menu navigation framework. Escape returns focus to the pill; Tab
-leaving and outside-pointer dismissal preserve newer focus. Removing a focused last listener returns to an enabled,
-non-inert Restart caret or bottom-bar copy control.
+keep the pill beside the last tab at wide widths. Header measurement enables tighter horizontal action spacing only when
+this pill, the tab floor and normal-size actions do not fit. It measures normal widths before each decision so
+compaction cannot oscillate, and observes pane and content changes without introducing a containment boundary around the
+anchored confirmations. This preserves a useful tab scrollport at the 650px floor; only the escaped host field yields
+within the bounded mapping. Both ports stay fixed, and multiple listeners show a count. Its popup uses the shared menu
+header and separator around an ordinary list with native close buttons, not a dynamic command-menu navigation framework.
+Escape returns focus to the pill; Tab leaving and outside-pointer dismissal preserve newer focus. Removing a focused
+last listener returns to an enabled, non-inert Restart caret or bottom-bar copy control.
 
 One synchronous close claim excludes overlapping individual and batch closes. Close all snapshots listener IDs, calls
 the existing close endpoint serially, removes acknowledged successes and attempts the remainder after a refusal, then
