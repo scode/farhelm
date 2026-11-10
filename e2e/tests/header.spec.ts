@@ -45,6 +45,41 @@ const PERSISTENT_ACTION_SELECTORS = [
   ".header-delete",
 ] as const;
 
+/** Wait for the rendered action metrics, rather than the observer's class.
+ * The measurements must describe readable controls even if the implementation
+ * changes how it decides to compact. Carets have their own normal padding.
+ */
+async function expectActionMetrics(page: Page, compact: boolean) {
+  const actions = page.locator(".session-topbar .titlebar-actions");
+  await expect(actions).toHaveCSS("gap", compact ? "2px" : "6px");
+  for (const selector of [".header-stop", ".restart-primary", ".header-replace", ".header-clone", ".header-delete"]) {
+    const control = actions.locator(selector);
+    await expect(control).toHaveCSS("font-size", compact ? "11px" : "12px");
+    await expect(control).toHaveCSS("padding-left", compact ? "0px" : "8px");
+    await expect(control).toHaveCSS("padding-right", compact ? "0px" : "8px");
+  }
+  for (const selector of [".restart-menu-toggle", ".replace-menu-toggle"]) {
+    await expect(actions.locator(selector)).toHaveCSS("padding-left", compact ? "0px" : "4px");
+  }
+}
+
+/** A compact layout must stay compact after it has made enough room.
+ * Sampling successive paints catches a feedback loop that alternates normal
+ * and compact sizes, without depending on a guessed settling delay.
+ */
+async function expectStableActionMetrics(page: Page, compact: boolean) {
+  await expectActionMetrics(page, compact);
+  const samples = await page.locator(".header-stop").evaluate(async (element) => {
+    const sizes: string[] = [];
+    for (let frame = 0; frame < 8; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      sizes.push(getComputedStyle(element).fontSize);
+    }
+    return sizes;
+  });
+  expect(samples, "the chosen metrics survive their own layout feedback").toEqual(Array(8).fill(compact ? "11px" : "12px"));
+}
+
 /** Both browser engines measure the native-only pill's CSS at its width floor.
  * Mirrored presentation markup is an explicit visual fixture, not native operation
  * evidence. It catches WebKit font/flex differences that Chromium appshots
@@ -72,6 +107,7 @@ test("native tunnel preview keeps ports and actions inside a 650px pane", async 
       await expect(page.locator("html")).toHaveAttribute("data-appearance", colorScheme);
       for (const state of ["one", "one-list", "many", "many-list", "closing", "error", "error-list"] as const) {
         await mountNativeTunnelPreview(page, state);
+        if (state === "one" || state === "error") await expectActionMetrics(page, state === "one");
         expect((await topbar.boundingBox())!.height).toBe(frame.height);
         expect(await page.locator(".terminal-panes").boundingBox(), "conditional tunnel UI adds no row").toEqual(terminal);
         for (const selector of PERSISTENT_ACTION_SELECTORS) {
@@ -185,6 +221,7 @@ test("native tunnel preview keeps ports and actions inside a 650px pane", async 
       await page.emulateMedia({ colorScheme });
       await page.setViewportSize({ width: Math.round(occupied + 1200), height: 700 });
       await mountNativeTunnelPreview(page, "one", "short");
+      await expectActionMetrics(page, false);
       const strip = page.locator(".tab-strip");
       expect(await strip.evaluate((element) => element.scrollWidth <= element.clientWidth), "wide adjacency needs nonoverflowing tabs").toBe(true);
       const lastTab = (await page.locator(".tab-add").boundingBox())!;
@@ -196,6 +233,16 @@ test("native tunnel preview keeps ports and actions inside a 650px pane", async 
         await page.setViewportSize({ width: Math.round(occupied + width), height: 700 });
         await selectTerminal(page, shell);
         await mountNativeTunnelPreview(page, "one");
+        // Width observation is asynchronous. Wait for the visible fit that
+        // this case measures, rather than racing the old layout's boxes.
+        await expect.poll(() => topbar.evaluate((element) => {
+          const frame = element.getBoundingClientRect();
+          const controls = element.querySelectorAll('.titlebar-actions button, .session-tunnel-toggle .session-tunnel-mapping > span:not(.session-tunnel-host)');
+          return Array.from(controls).filter((control) => control.getClientRects().length > 0).every((control) => {
+            const box = control.getBoundingClientRect();
+            return box.left >= frame.left && box.right <= frame.right + 1;
+          });
+        }), { message: "the observed toolbar fit settles before its geometry is read" }).toBe(true);
         const tabs = (await strip.boundingBox())!;
         const slot = (await page.locator(`.tab-slot[data-tab-id="${shell}"]`).boundingBox())!;
         const label = page.locator(`.tab-slot[data-tab-id="${shell}"] .tab`);
@@ -225,6 +272,226 @@ test("native tunnel preview keeps ports and actions inside a 650px pane", async 
     // Framework screenshots happen after finally. Retain the failed geometry
     // while this owned session still exists, before cleanup changes selection.
     await test.info().attach("tunnel-geometry-at-failure", { body: await page.screenshot(), contentType: "image/png" });
+    throw error;
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/** Pill presence alone must not shrink the toolbar, and a fixed breakpoint
+ * cannot account for different pill contents. The native fixture supplies only
+ * the pill; real action controls and their anchored questions stay in use.
+ */
+test("header actions compact only for measured tunnel pressure and recover when it leaves", async ({ page, request }) => {
+  const session = await createSession(request, { title: `header-pressure-${Date.now()}`, invocation: FAKE_AGENT_INVOCATION });
+  try {
+    await page.goto("/");
+    await row(page, session.id).locator(".session-row-open").click();
+    await waitForSessionRevealed(page, session.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await page.locator(".app-shell").evaluate((element) => element.classList.add("macos-window"));
+    await page.evaluate(() => document.fonts.ready);
+    const topbar = page.locator(".session-topbar");
+    const occupied = (await page.locator(".app-main").boundingBox())!.x;
+
+    // Both floor and wide panes without a pill keep ordinary action metrics.
+    for (const width of [650, 1200]) {
+      await page.setViewportSize({ width: Math.round(occupied + width), height: 700 });
+      expect((await topbar.boundingBox())!.width, "premise: measure the main pane, not the window").toBeCloseTo(width, 0);
+      await expect(topbar.locator(":scope > .session-tunnel-pill")).toHaveCount(0);
+      await expectStableActionMetrics(page, false);
+    }
+
+    // At ample width both actual pill presentations fit. Their normal-size
+    // budgets choose one pane width strictly between the two requirements,
+    // so changing content alone must cross the compaction boundary.
+    const requirements: number[] = [];
+    for (const host of ["short", "long"] as const) {
+      await mountNativeTunnelPreview(page, "one", host);
+      await expectStableActionMetrics(page, false);
+      const pill = topbar.locator(":scope > .session-tunnel-pill");
+      await expect(pill).toBeVisible();
+      requirements.push(await topbar.evaluate((element) => {
+        const style = getComputedStyle(element);
+        const tabs = element.querySelector(".tab-strip")!;
+        const pill = element.querySelector(":scope > .session-tunnel-pill")!;
+        const actions = element.querySelector(".titlebar-actions")!;
+        return actions.getBoundingClientRect().width + pill.getBoundingClientRect().width +
+          parseFloat(getComputedStyle(tabs).minWidth) + 2 * parseFloat(style.columnGap) +
+          parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) +
+          parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth);
+      }));
+    }
+    const [shortRequirement, longRequirement] = requirements;
+    expect(longRequirement, "premise: the two real pill contents require different widths").toBeGreaterThan(shortRequirement + 10);
+    const contentBoundary = Math.ceil((shortRequirement + longRequirement) / 2);
+    expect(contentBoundary, "premise: content-dependent pressure is inside the supported range").toBeGreaterThan(650);
+    expect(contentBoundary).toBeLessThan(1200);
+    await page.setViewportSize({ width: Math.round(occupied + contentBoundary), height: 700 });
+    await mountNativeTunnelPreview(page, "one", "short");
+    for (const host of ["long", "short", "long", "short"] as const) {
+      // Keep the same pill and change its text node, as a refreshed tunnel
+      // read can. Watching only inserted/removed pills would miss this.
+      await page.locator(".session-tunnel-toggle .session-tunnel-host").evaluate((element, host) => {
+        element.firstChild!.textContent = host === "long" ? "gpu-1-with-a-deliberately-long-host-name.example.test" : "devbox";
+      }, host);
+      expect((await topbar.boundingBox())!.width, "changing pill content does not resize the pane").toBeCloseTo(contentBoundary, 0);
+      await expectStableActionMetrics(page, host === "long");
+    }
+
+    // Viewport changes exercise the same mounted toolbar in both directions.
+    // An old compact decision must not survive a later wide pane.
+    await mountNativeTunnelPreview(page, "one");
+    for (const width of [650, 1200, 650]) {
+      await page.setViewportSize({ width: Math.round(occupied + width), height: 700 });
+      await expectStableActionMetrics(page, width === 650);
+    }
+
+    // A mounted but unpainted pill must not reserve room. Keeping the node
+    // here distinguishes visibility changes from the removal check below.
+    const pill = topbar.locator(":scope > .session-tunnel-pill");
+    await pill.evaluate((element) => { (element as HTMLElement).style.display = "none"; });
+    await expect(pill).toBeHidden();
+    await expectStableActionMetrics(page, false);
+    await pill.evaluate((element) => { (element as HTMLElement).style.removeProperty("display"); });
+    await expect(pill).toBeVisible();
+    await expectStableActionMetrics(page, true);
+
+    // Open real menus and destructive questions under compaction. Their
+    // positioning contexts must stay outside the width-measuring mechanism.
+    await addTab(page, 0);
+    await selectTerminal(page, "agent");
+    await mountNativeTunnelPreview(page, "one");
+    await expect(topbar.locator(":scope > .session-tunnel-pill")).toBeVisible();
+    await expectStableActionMetrics(page, true);
+    const frame = (await topbar.boundingBox())!;
+    const terminal = (await page.locator(".terminal-panes").boundingBox())!;
+    for (const [trigger, popup] of [
+      [".replace-menu-toggle", ".header-action-menu"],
+      [".header-stop", ".header-stop-confirm"],
+      [".header-delete", ".header-delete-confirm"],
+    ] as const) {
+      await page.locator(trigger).click();
+      const panel = page.locator(popup);
+      await expect(panel).toBeVisible();
+      const anchor = (await page.locator(trigger).boundingBox())!;
+      const box = (await panel.boundingBox())!;
+      expect(box.x, `${popup} stays inside the window`).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(occupied + 650 + 1);
+      expect(box.y, `${popup} hangs below its own trigger`).toBeGreaterThanOrEqual(anchor.y + anchor.height - 1);
+      expect(box.y + box.height).toBeLessThanOrEqual(701);
+      expect(await topbar.boundingBox(), "the popup adds no toolbar row").toEqual(frame);
+      expect(await page.locator(".terminal-panes").boundingBox(), "the popup displaces no terminal content").toEqual(terminal);
+      await expectActionMetrics(page, true);
+      if (popup === ".header-action-menu") await page.keyboard.press("Escape");
+      else await panel.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(panel).toHaveCount(0);
+    }
+
+    await page.locator("[data-tunnel-preview]").evaluateAll((elements) => elements.forEach((element) => element.remove()));
+    await expect(topbar.locator(":scope > .session-tunnel-pill")).toHaveCount(0);
+    await expectStableActionMetrics(page, false);
+  } catch (error) {
+    await test.info().attach("header-pressure-at-failure", { body: await page.screenshot(), contentType: "image/png" });
+    throw error;
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/** Recovery can replace the tab strip without replacing its header owner.
+ * Stage only the owned session's reported interruption; the real component
+ * removes and recreates its own strip, while its live terminal supplies the
+ * recovery boundary. Reinstalling the layout helper here would hide the bug.
+ */
+test("header pressure follows tab strips added and replaced after interruption", async ({ page, request }) => {
+  const session = await createSession(request, { title: `header-recovery-${Date.now()}`, invocation: FAKE_AGENT_INVOCATION });
+  const detailPath = `/api/sessions/${encodeURIComponent(session.id)}`;
+  let interrupted = true;
+  try {
+    const feed = await stubFeed(page);
+    feed.notifyOnConnect(1);
+    // Both consumers must agree about this boundary: an ordinary listing
+    // refresh must not repair the staged detail before the test releases it.
+    await page.route("**/api/sessions**", async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (!interrupted || route.request().method() !== "GET" || (pathname !== "/api/sessions" && pathname !== detailPath)) {
+        await route.fallback();
+        return;
+      }
+      const response = await route.fetch();
+      const body = await response.json();
+      const target = pathname === detailPath ? body : body.sessions.find((listed: { id: string }) => listed.id === session.id);
+      expect(target, "the staged reply still contains this test's real session").toBeTruthy();
+      target.status = { state: "interrupted" };
+      await route.fulfill({ response, json: body });
+    });
+    await page.goto("/");
+    await row(page, session.id).locator(".session-row-open").click();
+    await expect(page.locator(".session-details .title")).toHaveText(session.title);
+    const topbar = page.locator(".session-topbar");
+    const strip = topbar.locator(":scope > .tab-strip");
+    await expect(page.locator(".interrupted-card")).toBeVisible();
+    await expect(strip, "premise: this header mounts without a tab strip").toHaveCount(0);
+    const header = (await topbar.elementHandle())!;
+    await page.locator(".app-shell").evaluate((element) => element.classList.add("macos-window"));
+    const occupied = (await page.locator(".app-main").boundingBox())!.x;
+    await page.setViewportSize({ width: Math.round(occupied + 1200), height: 700 });
+    await page.evaluate(() => document.fonts.ready);
+    await mountNativeTunnelPreview(page, "one");
+    await expectStableActionMetrics(page, false);
+
+    // Choose a pane that fits actions and pill alone, but cannot also hold
+    // the established 112px tab floor plus its extra gap. This distinguishes
+    // a fresh strip lookup from a remembered absent or detached element.
+    const paneWidth = await topbar.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const actions = element.querySelector(".titlebar-actions")!;
+      const pill = element.querySelector(":scope > .session-tunnel-pill")!;
+      const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+      const border = parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth);
+      const gap = parseFloat(style.columnGap);
+      const withoutTabs = actions.getBoundingClientRect().width + pill.getBoundingClientRect().width + gap + padding + border;
+      return Math.ceil(withoutTabs + (112 + gap) / 2);
+    });
+    expect(paneWidth, "premise: the recovery boundary lies above the supported floor").toBeGreaterThan(650);
+    expect(paneWidth).toBeLessThan(1200);
+    await page.setViewportSize({ width: Math.round(occupied + paneWidth), height: 700 });
+    expect((await topbar.boundingBox())!.width).toBeCloseTo(paneWidth, 0);
+    await expectStableActionMetrics(page, false);
+    await feed.waitForConnection(1);
+
+    interrupted = false;
+    feed.notify(2);
+    await expect(page.locator(".interrupted-card")).toHaveCount(0);
+    await expect(strip).toBeVisible();
+    await waitForSessionRevealed(page, session.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    expect(await header.evaluate((element) => element === document.querySelector(".session-topbar")),
+      "recovery keeps the same header and its original layout observer").toBe(true);
+    const firstStrip = (await strip.elementHandle())!;
+    await expectStableActionMetrics(page, true);
+
+    interrupted = true;
+    feed.notify(3);
+    await expect(page.locator(".interrupted-card")).toBeVisible();
+    await expect(strip).toHaveCount(0);
+    expect(await firstStrip.evaluate((element) => element.isConnected), "interruption actually removes the observed strip").toBe(false);
+    expect(await header.evaluate((element) => element === document.querySelector(".session-topbar"))).toBe(true);
+    await expectStableActionMetrics(page, false);
+
+    interrupted = false;
+    feed.notify(4);
+    await expect(page.locator(".interrupted-card")).toHaveCount(0);
+    await expect(strip).toBeVisible();
+    await waitForSessionRevealed(page, session.id);
+    const secondStrip = (await strip.elementHandle())!;
+    expect(await secondStrip.evaluate((element, first) => element !== first, firstStrip),
+      "the recovered strip is a new DOM node, not the cached original").toBe(true);
+    expect(await header.evaluate((element) => element === document.querySelector(".session-topbar"))).toBe(true);
+    await expectStableActionMetrics(page, true);
+  } catch (error) {
+    await test.info().attach("header-recovery-at-failure", { body: await page.screenshot(), contentType: "image/png" });
     throw error;
   } finally {
     await cleanupSession(request, session.id);

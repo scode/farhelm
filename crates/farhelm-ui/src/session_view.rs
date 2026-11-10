@@ -1897,6 +1897,7 @@ pub(crate) fn SessionView(
         document::eval(
             "window.__farhelmSyncGeneration = (window.__farhelmSyncGeneration || 0) + 1; \
              window.__farhelmOutageLayout?.disconnect(); \
+             window.__farhelmHeaderLayout?.(); \
              if (window.farhelmTerm) { farhelmTerm.unmountAll(); }",
         );
     });
@@ -2199,6 +2200,9 @@ pub(crate) fn SessionView(
             // Tabs share the top row with actions; identity stays below the
             // terminal so a wider path never competes with a lifecycle control.
             header { class: "session-topbar {crate::window_chrome::WINDOW_DRAG_SURFACE}",
+                // The keyed view owns measurement and retires it on exit, so
+                // resizing or late tunnel content cannot affect another session.
+                onmounted: move |_| { document::eval(include_str!("../assets/header-layout.js")); },
                 onmousedown: crate::window_chrome::window_surface_press,
                 // Header questions share Escape cancellation, including their
                 // lifecycle admission. Once an answer has taken a claim, a
