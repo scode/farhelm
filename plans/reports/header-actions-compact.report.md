@@ -57,3 +57,81 @@ The required single fresh GPT-6.1-sol reviewer at high effort passed the correct
 be absent initially or replaced after interruption; the fix now reads the current strip, and the new test verifies those
 real component transitions under the same header. Its recheck found no remaining substantive defect. The commit and PR
 wording also passed its independent cold read.
+
+### Landing
+
+Landed alone, as #3288. Nothing reached main between the plan's base and its merge apart from planning bookkeeping, and
+no other plan landed in the same round, so nothing could interact with it. The landing made no fixes. The only other
+plan with open PRs, the one that stops pending session actions from locking the page (nonblocking-session-actions), also
+changes the session view, but it is on hold and nothing of it is on main.
+
+#### Review
+
+The landing's fresh-context review found nothing that must change. The compact style is decided only from normal-size
+widths (the normal actions, the tunnel indicator's natural width and the tab area's fixed minimum), none of which
+depends on the compact style itself, so the header cannot flip back and forth between the two. Switching sessions stops
+the previous session's measurement before the new one starts. The page code that measures is built into the app the same
+way as the existing code that lays out the connection-lost notice, so the desktop app's list of bundled files is
+unaffected.
+
+#### Things you should know
+
+From the review. None affects users; the landing left them as they are:
+
+- The report says the new interruption and recovery test "verifies those real component transitions". It is weaker than
+  that. The bug it was written for was the measurement keeping the tab area it saw when the header first appeared. When
+  the tab area comes back after recovery, the text-size buttons come back with it and widen the controls by about as
+  much as the room the test leaves to spare, so a measurement still treating the tab area as absent would probably
+  compact anyway and the test would still pass. These widths were estimated from the CSS, not measured. The shipped code
+  looks the tab area up afresh every time, so users are not affected; the test just would not catch that bug coming
+  back. A small follow-up could tighten it; the landing does not think it is worth one on its own.
+- Compacting now happens one frame after the tunnel indicator appears, instead of at once, so at narrow widths a newly
+  shown indicator briefly sits beside normal-size controls. Two browser checks measure right after an indicator appears
+  without waiting for that frame: one indicator state in the header spec's checks at the 650px minimum width, and the
+  docs screenshots' visual review, which could photograph the uncompacted frame. Both pass today because the tests' own
+  steps take longer than a frame, and neither was seen to fail, but they could flake on a loaded machine. Worth fixing
+  if either is ever seen to flake: wait for the compact metrics, as the executor already does elsewhere in that spec.
+
+#### Checks
+
+As the maintainer asked for this session's landings, the browser specs ran on Tensorlake sandboxes (cloud test
+machines), and everything else ran on this development machine.
+
+Run now, on the tree that merged (main equals it outside `plans/`):
+
+- Here: `cargo fmt --all -- --check`, the test-sleep checker, `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`, `cargo build`, the release web
+  build (`dx build --package farhelm-ui --platform web --release`),
+  `cargo clippy -p farhelm-ui --all-targets -- -D warnings` and `cargo check -p farhelm-ui --features desktop` passed.
+- Here, recorded `cargo nextest run -p farhelm-ui`: 937 passed, none skipped (run `34570298`).
+- Tensorlake, the whole browser suite on Chromium and WebKit on ten sandboxes, using the release web build
+  (`scripts/tensorlake/sandbox-tests.ts run --template <template> --shards 10`, no projects named): 3151 passed, 14
+  skipped by design, 3 failed (runs `bf87755c`, `616190d8`, `e5fc9ee1`, `f23a9535`, `86581ac8`, `84dbeb81`, `6b3f7ca8`,
+  `53e1e178`, `d87f47b0`, `c2b71394`). The new script runs in every session view, which nearly every spec opens, so the
+  whole suite ran rather than the two spec files the executor chose. None of the three failures is in code this plan
+  touches:
+  - Chromium's provisioning "incarnation churn keeps a followed run while a target change detaches it", a flake already
+    recorded in FLAKES.md.
+  - WebKit's bulk actions "bulk Stop reports an engaged row without skipping its eligible sibling" (the row's "Stop: not
+    started" error did not appear in time). It also failed once on WebKit in an earlier landing round, on a tree without
+    this plan.
+  - WebKit's terminal reconnect test that a dropped connection which is not a deliberate detach keeps retrying
+    ("a-non-decision-detach-keeps-the-ladder-climbing"): the "reconnecting" overlay stayed up for 20 seconds.
+- Tensorlake, those two WebKit tests alone, five times each on the same build
+  (`sandbox-tests.ts run --reuse-pack --grep <both titles> --repeat 5` with their two WebKit projects): 10 passed (runs
+  `80683163`, `1e634f36`). The landing judges both to be flakes already present on main and not caused by this plan,
+  with good confidence: the plan changes only how the session header's controls are sized, neither test looks at that,
+  both passed every rerun on the same build, and the bulk Stop test also failed on a tree without this plan. The landing
+  did not record them in FLAKES.md. The bulk Stop test, now seen failing twice, is worth a FLAKES.md entry and a deflake
+  follow-up; the reconnect test has been seen once, which is not yet enough to call it a latent flake.
+- The browser runs went through the recorder's general command mode, because its Playwright mode always runs both
+  engines and these runs split the engines across sandboxes. The sandbox image runs Node 24, a slightly older release
+  than this machine's. Every sandbox reported that the services the tests rely on (a per-user systemd and SSH to itself)
+  worked.
+
+Reused from the executor: nothing; the runs above cover the executor's header and lifecycle-progress browser specs and
+the UI crate's Rust tests.
+
+Skipped: the workspace's other Rust tests (only the UI crate changed), the browser suite's tmux-terminal set (the change
+does not touch old terminals), the desktop smoke (no desktop-only code beyond what `cargo check --features desktop`
+compiles), and hosted CI (manual-only, not dispatched).
