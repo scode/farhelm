@@ -64,3 +64,73 @@ python3 ../../../scripts/record-test-run.py --kind development --selection 'asse
 The required single fresh GPT-6.1 Sol high review returned CLEAR, including a final comment-only addendum. The review
 included the full goal and test-authoring checklist. A separate fresh reader understood the PR text, and the full ledger
 and feedback index audit found no duplicate or contradictory decision. No review finding was rejected.
+
+### Landing
+
+Landed alone, as #3289. Nothing reached main between the plan's base and its merge apart from planning bookkeeping, and
+no other plan landed in the same round, so nothing could interact with it.
+
+#### Fix made by the landing
+
+The landing changed the changelog, and nothing else. The executor added a sentence about this fix to the unreleased
+changelog entry for the smaller, cheaper terminal transfers, treating the fix as an amendment to that unreleased work.
+It is not: the code that let an empty scrollback update take the place of real rows is the same in the v0.37.1 release,
+so the bug is in a stable release, though only a broken or malicious host can trigger it. The landing took the sentence
+back out of that entry and gave the fix an entry of its own, as a fix, saying that such a host could make a link in
+scrollback open a different address from the one shown, and that links now always open what they show. This makes untrue
+the report's statement that the existing unreleased fragment was updated rather than adding a second entry.
+
+#### Review
+
+The landing's fresh-context review found the code change correct, and nothing in it needing a change. It went through
+every order in which empty updates, real scrollback, resets and trims can arrive, whether scrollback is loaded at once
+or in slices: for anything an ordinary Farhelm host sends, the result is the same as before, and for a hostile host the
+numbering is now exact, with no overlap with the live screen and no gap. The count of scrollback rows waiting to load
+now matches the rows actually waiting (it could go negative before, which also switched off the limit on how much
+scrollback is kept), and the page stays responsive while scrollback loads even under a flood of empty updates. The new
+test fails on the old code and passes on the new one.
+
+#### Things you should know
+
+From the review; none of it affects users:
+
+- One harmless difference, reachable only from a hostile host: an empty update that arrives right after a scrollback
+  reset, with no real rows after it, now leaves the internal "first scrollback line" at zero rather than at the empty
+  update's number. With no scrollback lines there, nothing reads that number (every reader first checks that scrollback
+  is not empty, and ordinary hosts already reach the same state), and the next real row sets it exactly as before.
+- The reviewer also ran the new test and a comparison against scratch copies of the old and new code, outside the
+  recorder. That supports the review's reasoning but is not part of the landing's checks.
+
+#### Checks
+
+As the maintainer asked for this session's landings, the browser specs that need a real helm and supervisor ran on
+Tensorlake sandboxes (cloud test machines), and everything else ran on this development machine.
+
+Run now, on a tree that differs from what merged only in the changelog fix described above, which no test reads; the
+changelog and formatting checks were run again after that fix.
+
+- Here: the test-sleep checker, `dprint check`, `python3 releasing/check-changelog.py format`, `cargo build` and the
+  release web build (`dx build --package farhelm-ui --platform web --release`) passed.
+- Here, the asset JavaScript unit harness (`node --test` in `crates/farhelm-ui/js-tests`, through the recorder): 551
+  passed, none skipped (run `eb367aed`). It includes the plan's new test.
+- Here, the grid terminal component suite on Chromium and WebKit
+  (`npx playwright test --config grid-client/playwright.config.ts --retries=0`, through the recorder's general command
+  mode): 204 passed (run `19d306e8`). The executor skipped this suite. It runs the terminal component against recorded
+  streams, including scrollback applied in slices and links in scrollback, so it covers the changed code inside a real
+  browser.
+- Tensorlake, the browser specs whose sessions attach to, flood, reconnect to and click links in new terminals, on
+  Chromium and WebKit, on eight sandboxes, using the release web build
+  (`scripts/tensorlake/sandbox-tests.ts run --template <template> --shards 8` with the terminal, terminal-links,
+  grid-flood, terminal-flood, terminal-reconnect, terminal-replay-rename and terminal-attachments projects of both
+  engines): 330 passed, none failed (runs `c6cf6b17`, `6b660e87`, `005e970e`, `ccae467f`, `10248aa6`, `d67754a6`,
+  `7b030666`, `638beed7`). The floods trim queued scrollback, which is the code the plan changed for every stream, not
+  only hostile ones. The runs went through the recorder's general command mode, because its Playwright mode always runs
+  both engines and these runs split the engines across sandboxes. The sandbox image runs Node 24, a slightly older
+  release than this machine's. Every sandbox reported that the services the tests rely on (a per-user systemd and SSH to
+  itself) worked.
+
+Reused from the executor: nothing; the runs above cover its unit harness run.
+
+Skipped: Rust tests and lints (no Rust changed), the desktop compile check (no desktop code changed, and the set of
+bundled asset files is unchanged), the rest of the browser suite (the change is confined to how the terminal component
+queues scrollback, which the runs above exercise), and hosted CI (manual-only, not dispatched).
