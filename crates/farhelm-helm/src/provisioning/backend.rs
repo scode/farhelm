@@ -997,13 +997,15 @@ impl SystemBackend {
                 // The local transport already reads the opened target's mode.
                 // This shared path also installs credentials, so choose native
                 // stat syntax here rather than relying on an earlier plan's OS.
+                // Homebrew can put GNU stat first on a Mac's SSH PATH; only
+                // the system path guarantees the BSD arguments below apply.
                 let output = self
                     .run_shell(
                         target,
                         &format!(
                             "if [ ! -e {path} ]; then exit 44; fi; \
                              {} && os=$(uname -s) && case \"$os\" in \
-                             Darwin) stat -L -f '%Lp' -- {path} ;; \
+                             Darwin) /usr/bin/stat -L -f '%Lp' -- {path} ;; \
                              *) stat -L -c '%a' -- {path} ;; esac",
                             remote_sha256sum(&path)
                         ),
@@ -1989,6 +1991,7 @@ pub(crate) async fn capture_child(
 /// rather than waiting for the polling interval before a later command can run.
 /// The final report covers bytes received after the last periodic sample. The
 /// caller still checks the file's digest; size reports prove progress, not content.
+/// Darwin pins the system stat so a GNU-first PATH cannot suppress those reports.
 /// The temporary is private from its first redirection, including in existing
 /// shared directories: this path also carries agent tokens. The finishing
 /// command applies the requested final mode for binaries and unit files.
@@ -1996,8 +1999,8 @@ pub(super) fn upload_script(remote: &Path) -> Result<String, BackendFailure> {
     let path = shell_path(remote)?;
     let interval = TRANSFER_PROGRESS_POLL.as_secs();
     Ok(format!(
-        "case $(uname -s) in Darwin) size_format='-f %z' ;; *) size_format='-c %s' ;; esac; \
-         report_size() {{ if test -e {path}; then stat $size_format -- {path} 2>/dev/null; fi; }}; \
+        "case $(uname -s) in Darwin) stat=/usr/bin/stat; size_format='-f %z' ;; *) stat=stat; size_format='-c %s' ;; esac; \
+         report_size() {{ if test -e {path}; then \"$stat\" $size_format -- {path} 2>/dev/null; fi; }}; \
          (while :; do report_size; sleep {interval} >/dev/null 2>&1; done) & \
          reporter=$!; \
          trap 'kill \"$reporter\" 2>/dev/null; wait \"$reporter\" 2>/dev/null' 0; \

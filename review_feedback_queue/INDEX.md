@@ -100,9 +100,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   silently overwrite an agent settings save made after its final digest check and before replacement. The new comparison
   protects earlier edits but leaves this narrower window.
 
-- [`mac-update-gnu-stat-path.md`](mac-update-gnu-stat-path.md) — A remote Mac with GNU stat first on its SSH PATH can
-  pass inspection but repeatedly fail Update or recovery on existing files until command selection is repaired.
-
 - [`delete-lost-tab-markers-skip-sweep.md`](delete-lost-tab-markers-skip-sweep.md) — If an old terminal server
   disappears during Delete's tab discovery, Delete can succeed and remove the session while background jobs from an old
   unscoped tab keep running.
