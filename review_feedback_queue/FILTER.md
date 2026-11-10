@@ -250,3 +250,21 @@ A finding matches when all of these hold:
 This covers that specific handoff, including loss of the unrelated process's work. It does not cover selecting the wrong
 host initially, omitting identity verification, storing a process number for later use, or carrying a bare number across
 other asynchronous work or waits outside this verification-to-signal handoff.
+
+### Farhelm's own tmux-based terminals
+
+Added 2026-11-10. Farhelm's tmux support is close to being removed entirely. In the maintainer's words: "discard all
+tmux code review feedback that isn't catastrophic/critical ... it's not worth it."
+
+A finding matches when it concerns only Farhelm's private tmux server or the sessions and terminal tabs that run on it
+(the older terminal backend), so that a host not using those terminals would not see it.
+
+Losing a tmux-backed session's running processes, scrollback or terminal state is within this filter. It does not match
+when the consequence includes any of the following:
+
+- a security or trust-boundary consequence, including exposed credentials;
+- loss of user files or repository data outside the terminal itself;
+- a corrupted helm or supervisor database, or an installation that cannot update or comes up broken;
+- the helm becoming unresponsive or unusable, or hosts other than the affected one being disrupted.
+
+A tmux that the user or an agent runs inside a session is not Farhelm's tmux, and this filter does not cover it.
