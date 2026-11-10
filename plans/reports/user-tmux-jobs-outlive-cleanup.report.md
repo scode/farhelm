@@ -63,3 +63,72 @@ The required single fresh-context GPT-6.1 Sol reviewer at high effort passed the
 and outcome graduation with no findings. No code-review finding was rejected. A separate blind commit-message reader
 confirmed the final explanation matches the change; a fresh native reader also checked this report for an actionable
 account and public-repository hygiene.
+
+### Landing
+
+Landed as #3297, first in a round with one other plan, the remote Mac `stat` fix (mac-system-stat, #3298), which shares
+no code with it. Since these changes were written, main gained the repository-cache lock repair (#3296). That repair is
+safe only if every Git process using a host's repository cache ends with whatever holds Farhelm's lock on it, including
+through session cleanup. The landing's review checked that this plan does not weaken that: a session's Git work on the
+cache runs inside the launch's own systemd group, which cleanup still kills whole, and a user's tmux never runs that
+Git, so the sweep this plan drops never touched it. Rebasing conflicted only in the triage records, where both sides had
+moved entries; the landing kept both.
+
+#### Fix made by the landing
+
+SPEC.md's paragraph on rare accepted failures still listed exceptions to "never alongside them", the old wording of the
+rule that Restart ends the previous run's leftover processes before starting the new one. This plan reworded that rule,
+and two code comments also quoted the old wording. The landing pointed all three at the current wording; nothing
+executable changed.
+
+#### Review
+
+The landing's fresh-context review found nothing that must change. The tmux check is gone entirely, the end-to-end test
+with real tmux now expects the moved job to survive, and the changelog entry edited is not yet in any stable release, so
+editing it rather than adding a second entry is right.
+
+#### Things you should know
+
+- One case beyond the triage decision. When systemd cannot answer whether a session's scope still exists at the moment
+  cleanup checks it (an error, not a "no"), cleanup now always keeps the full machine-wide sweep. That is a third case,
+  separate from the two the report lists as already keeping it (a scope already gone, and one not confirmed in the first
+  place). In that rare case, jobs a user's tmux moved out of the session are still ended, as all of them were before
+  this plan; the maintainer's decision that they may survive does not apply there. It errs toward cleaning up, SPEC.md
+  says uncertain containment keeps the sweep, and no test covers this case.
+- The executor did not run some supervisor tests whose stand-in systemd now behaves differently: units that vanish now
+  take the full sweep in those tests where they used to skip it. Production behavior on those paths is unchanged. The
+  landing ran them (see Checks), and they pass.
+
+#### Checks
+
+The checks ran once for the whole round, which landed user tmux jobs surviving scoped cleanup (#3297) and the remote Mac
+`stat` fix (#3298) together; the supervisor and end-to-end runs cover #3297, the provisioning run covers #3298. Run now
+on this development machine, on the round's stack (both plans on main), all through the recorder with the pinned tmux
+first on `PATH`; none printed a runtime `SKIPPED` line:
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format` and
+  `cargo clippy -p farhelm-supervisor -p farhelm-helm --all-targets -- -D warnings` passed.
+- `cargo nextest run -p farhelm-supervisor --lib -E 'test(/^scope::/) | test(/^service::sweep::/) | test(/^procs::/)'`:
+  152 passed (run `fc62a350-df48-443f-bf57-6794c1c853bf`).
+- `cargo nextest run -p farhelm --test e2e` with the session lifecycle, supervisor stop, tab lifecycle and GitHub
+  checkout modules (`session_lifecycle::`, `supervisor_stop::`, `tab_lifecycle_edges::` and `github_checkouts::`): 121
+  passed (run `628ef238-538e-4858-8417-2c48e673f998`), with the systemd user manager available. The checkout tests are
+  there because the repository-cache fix that landed just before this round relies on session cleanup ending a launch's
+  Git.
+- `cargo nextest run -p farhelm-helm --lib -E 'test(/^provisioning::/)'`: 352 passed (run
+  `fe1109fc-1144-4e98-b2f2-90d7b3c376c9`), every Mac script path, including the reach checks and uninstall tests the
+  changed test helper also serves.
+- For #3297, after the landing's wording fix to it, on that tree: the supervisor's teardown, host-restart and
+  scope-handling units (`cargo nextest run -p farhelm-supervisor --lib -E <filter>` with the filter
+  `test(/^service::teardown::/) | test(/host_restart/)` or `(test(/^service::(core|handlers)::/) & test(/scope/))`): 41
+  passed (run `26f6dfcd-32bb-43a7-beec-2c2f36ff73d2`); and the terminal tab close through its scope (one e2e test,
+  `terminal_tabs::` closing a tab that holds an environment-scrubbed double fork): 1 passed (run
+  `5aa7ba85-d817-42b4-8922-49d48b86fcb3`). These are cleanup paths that now take the full sweep where they used to skip
+  it. The earlier runs predate that fix, which changed only SPEC.md and two comments of #3297.
+
+Reused from the executors: nothing; the runs above include their selections.
+
+Skipped: browser specs (no UI change), the rest of the workspace's Rust tests (only the supervisor's cleanup and the
+helm's Mac scripts changed, and the selections above cover their callers), a real Mac (none available to the landing),
+and hosted CI (manual-only, not dispatched).
