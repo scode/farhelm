@@ -19,10 +19,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`claude-endpoint-change-retains-custom-headers.md`](claude-endpoint-change-retains-custom-headers.md) — Changing
   Claude's API endpoint can retain custom authorization headers and send their old secret to the new endpoint.
 
-- [`approval-grant-outlives-origin-card.md`](approval-grant-outlives-origin-card.md) — A permanent approval answer
-  waiting for a host lock can enable unattended session control after the requesting connection has ended and its card
-  has disappeared. The original command remains fenced, but the saved permission can survive.
-
 - [`sandbox-stop-refresh-weakens-click-guards.md`](sandbox-stop-refresh-weakens-click-guards.md) — Stop and suspend can
   close a terminal tab opened during its activity check even though the initiating click showed no tabs and no
   tab-closing question was shown.

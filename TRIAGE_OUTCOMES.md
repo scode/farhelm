@@ -2043,31 +2043,6 @@
   change.
 - Execution: `pending`.
 
-## approval-grant-outlives-origin-card.md
-
-- Outcome: `fix spec`.
-- Assessment: confirmed as a mechanism by reading the code on main 2e42099a (not run), but not a security issue. An
-  "Always allow" (or "Always allow on <host> only") answer checks that the requesting connection is live when the answer
-  arrives, then waits for the host lock (normally milliseconds) and saves the permission without checking again. If the
-  connection drops during that wait, the card disappears and the request is refused, but the permission stays saved.
-  What is saved is exactly the permission the user picked on a card that was live when the answer arrived, for exactly
-  the install that asked (the write checks the install identity under the lock); the original command never runs, and
-  the GUI already says the permission "may still have been turned on". SPEC_impl.md (the `hosts.commands_without_asking`
-  paragraph) says Always allow "stores it only if the card's connection is still live" without saying when liveness is
-  checked, and already accepts the same outcome when the request expires after the setting is stored. The 2026-10-10
-  decision on `always-allow-grant-permission-host-connection-has.md` (now in `TRIAGE_OUTCOMES_ARCHIVE.md`) accepted the
-  same check-then-lock order for a repointed or replaced host. The landed own-host-sessions-without-asking plan
-  prescribes the current order. Bucket: `other`; moot once decided.
-- Decision: the maintainer picked "both fix spec" (2026-11-09 highest-bucket triage page, Q2, shared with
-  `combined-stop-closes-undisplayed-tabs.md`).
-- Completion criteria: SPEC_impl.md says the liveness check for an "Always allow" answer happens when the answer
-  arrives: a connection that ends while the answer waits for the host lock can still leave the chosen permission saved
-  for that install, with the request refused and the GUI's existing notice saying the permission may have been turned
-  on. This applies to every permission a card's "Always allow" saves (session commands, own-host session management, and
-  the fleet and browser grants that share the path). No code change. Remove the feedback file and its index entry, and
-  move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
-- Execution: `pending`.
-
 ## empty-history-queue-bypasses-bounds.md
 
 - Outcome: `fix code`.
