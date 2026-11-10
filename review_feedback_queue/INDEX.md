@@ -77,10 +77,6 @@ consequences.
   can hide the last lease's zero transition, allowing obsolete credential transport work to delay reconnect. No
   disclosure, wrong-machine delivery or user-work loss is established.
 
-- [`settings-save-races-final-replacement.md`](settings-save-races-final-replacement.md) — Credential delivery can
-  silently overwrite an agent settings save made after its final digest check and before replacement. The new comparison
-  protects earlier edits but leaves this narrower window.
-
 - [`moved-on-launch-return.md`](moved-on-launch-return.md) — A failed launch or follow-up question can reopen the
   launcher and take the keyboard after the user has switched sessions or started typing elsewhere. It should wait behind
   a notice the user opens.
