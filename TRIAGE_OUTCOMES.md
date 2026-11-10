@@ -2043,28 +2043,6 @@
   change.
 - Execution: `pending`.
 
-## combined-stop-closes-undisplayed-tabs.md
-
-- Outcome: `fix spec`.
-- Assessment: confirmed by reading the code on main 2e42099a (not run). Row, header and bulk Stop send only the
-  `refuse_if_tabs_open` and agent-ended booleans, not the tab count the question showed, and the supervisor closes the
-  tabs open when it acts. So when Stop's combined question ("stop the agent and close N tabs") is answered in the
-  fraction of a second before a tab another Farhelm window just opened reaches the question (normally 0.2-0.5 s, after
-  which the question rewords itself), that tab is closed too. SPEC.md "Lifecycle operations" accepts this only for a
-  tabs-only prompt: "Accepted: a terminal tab opened between a tabs-only prompt and the click is closed with the others;
-  the prompt need not name the exact tabs it showed." The combined case is accepted by the 2026-10-01 Delete decision
-  ("a tab opened between the prompt and the click is still closed") and by the landed stop-closes-tabs plan's acceptance
-  ("closes every tab, including one opened in between"), which a browser test asserts; most likely a drafting gap in
-  SPEC.md. Bucket: `other` (needs a second GUI, which "One GUI at a time" makes best-effort; the tab lost is seconds
-  old); moot once decided.
-- Decision: the maintainer picked "both fix spec" (2026-11-09 highest-bucket triage page, Q2, shared with
-  `approval-grant-outlives-origin-card.md`).
-- Completion criteria: SPEC.md's "Accepted" sentence in "Lifecycle operations" covers any destructive prompt that named
-  open terminal tabs, alone or together with stopping the agent, not only a tabs-only prompt: a tab opened between that
-  prompt and the click is closed with the others, and the prompt need not name the exact tabs it showed. No code change.
-  Remove the feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
-- Execution: `pending`.
-
 ## approval-grant-outlives-origin-card.md
 
 - Outcome: `fix spec`.

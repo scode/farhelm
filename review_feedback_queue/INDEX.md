@@ -19,10 +19,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`claude-endpoint-change-retains-custom-headers.md`](claude-endpoint-change-retains-custom-headers.md) — Changing
   Claude's API endpoint can retain custom authorization headers and send their old secret to the new endpoint.
 
-- [`combined-stop-closes-undisplayed-tabs.md`](combined-stop-closes-undisplayed-tabs.md) — Confirming Stop for the agent
-  and a displayed number of terminal tabs can also end a tab opened afterward by another client, including its work.
-  Whether the specification intends to accept that combined-prompt case is unresolved.
-
 - [`approval-grant-outlives-origin-card.md`](approval-grant-outlives-origin-card.md) — A permanent approval answer
   waiting for a host lock can enable unattended session control after the requesting connection has ended and its card
   has disappeared. The original command remains fenced, but the saved permission can survive.

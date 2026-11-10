@@ -1987,8 +1987,8 @@ an idle, waiting or unknown agent is still stopped unasked). A refusal deletes, 
 already created its new session, and reports both, as above), and the next attempt asks again from the current state,
 skipping its question again if the setting remains on. No refusal opens a confirmation by itself. These races are
 reachable in ordinary use because the command line and agents act on sessions while a GUI is open (see One GUI at a
-time). Accepted: a terminal tab opened between a tabs-only prompt and the click is closed with the others; the prompt
-need not name the exact tabs it showed.
+time). Accepted: a terminal tab opened between a prompt that named open tabs (alone, or together with stopping the
+agent) and the click is closed with the others; the prompt need not name the exact tabs it showed.
 
 Process-tree ownership is session-wide. Restart reaps any leftover descendants of the prior run before relaunching —
 never alongside them. Stop and delete reap the agent's processes within the containment limits below. An agent exiting
