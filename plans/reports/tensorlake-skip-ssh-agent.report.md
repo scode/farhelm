@@ -72,3 +72,65 @@ The live installation was not used.
 The required single fresh-context GPT-6.1 Sol reviewer at high effort passed the full final candidate under the latest
 Decisions with no actionable findings. No finding was rejected. A separate native resume check reconciled the earlier
 draft, and a blind commit-message reader found the final explanation consistent with the change.
+
+### Landing
+
+Landed alone (the only plan in this landing round), as #3300, after the landing monitor answered its block on the
+maintainer's behalf (accept the agent-only fix and document the exceptions; see its Decisions). Since these changes were
+written, main gained the Hosts panel's Suspend fix (#3299) and a revision of another plan's file; neither touches SSH.
+Rebasing conflicted only in the triage records, where both sides had moved entries; the landing kept both.
+
+#### Fix made by the landing
+
+The code comments, SPEC.md, SPEC_impl.md and the changelog entry said a configured certificate "with its matching
+private key" could still be offered before Farhelm's key, and so does the report's "Things you should know". The review
+found that OpenSSH offers any configured certificate first, private key on disk or not. That includes a common setup, a
+certificate configured for every host with its private key held only in the agent, whose owner would have read the
+caveat as not applying to them. The landing dropped the qualifier and said so explicitly in the module comment of the
+Tensorlake SSH command code, SPEC.md, SPEC_impl.md and the changelog entry; the monitor's own answer to the block had
+used the same wording. It missed the second Tensorlake module comment (the one on Farhelm's Tensorlake key), which still
+has the qualifier; that is a one-line follow-up. This supersedes the report's statement: any configured certificate can
+be offered first, whether or not its private key is on disk. Nothing executable changed.
+
+#### Review
+
+The landing's fresh-context review found nothing else that must change. OpenSSH 7.6, Farhelm's minimum, supports
+`IdentityAgent=none`, the option that turns the agent off, and a client too old for it already could not connect,
+because Tensorlake connections need 7.6 for another option. macOS's `ssh` is the same code. The option is set in one
+shared place used by snapshot builds, snapshot preparation, setting up a Tensorlake host, sending Farhelm's agent
+credentials to it and connecting to it, and ordinary SSH hosts get nothing new (a test checks that). A jump host in the
+user's own SSH configuration still gets the user's agent. Nothing else relied on the agent: Farhelm's key has no
+passphrase, and agent forwarding was already off.
+
+#### Things you should know
+
+- Someone whose SSH configuration names, for the Tensorlake host, a personal key they registered with Tensorlake and
+  hold only in their SSH agent (instead of Farhelm's key) now has Tensorlake builds and connections fail. That is the
+  intended effect, but the changelog entry does not say so; release curation may want a sentence.
+- SPEC.md's general provisioning bullet still says provisioning uses the user's "keys, agent, and config" without
+  excepting Tensorlake, although the new paragraph a few lines above does make the exception. SPEC_impl.md's later list
+  of Tensorlake SSH options also leaves out the new one, and one of its new sentences reads as change history ("for this
+  change"). Small wording follow-ups.
+
+#### Checks
+
+Run now on this development machine (the two test runs through the recorder with the pinned tmux first on `PATH`;
+neither printed a runtime `SKIPPED` line):
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format` and `cargo clippy -p farhelm-helm --all-targets -- -D warnings` passed.
+- `cargo nextest run -p farhelm-helm --lib -E 'test(/^tensorlake::/) | test(/^provisioning::/)'`: 482 passed (run
+  `e57c3337-15c8-4bac-9995-73668a78b3cb`), on the stack before the landing's wording fix.
+- After that fix, which changed only comments, SPEC.md, SPEC_impl.md and the changelog fragment: every helm caller that
+  passes the Tensorlake SSH options through (`cargo nextest run -p farhelm-helm --lib -E <filter>`, the filter selecting
+  the `tensorlake::`, `ssh::` and `transport::` modules and the provisioning modules `backend`, `snapshot_preparer`,
+  `tensorlake_backend`, `tensorlake_add` and `credential_delivery`): 202 passed (run
+  `cc32b18f-3756-4c00-a5a7-fdec39ebff4a`). It is narrower than the first run because the fix touched only comments and
+  documents. The tree it tested is the one that merged.
+
+Reused from the executor: nothing; the runs above include its selection, and clippy was run again.
+
+Skipped: browser specs (the Tensorlake specs use a stand-in API and shell and never run `ssh` to the gateway), a live
+Tensorlake gateway (whether it rejects the first unknown key stays unverified, as the plan's decision accepts), the rest
+of the workspace's Rust tests (only the helm's Tensorlake SSH options changed), and hosted CI (manual-only, not
+dispatched).
