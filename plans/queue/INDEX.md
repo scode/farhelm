@@ -8,5 +8,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `sandbox-stop-click-guards.md` — A sandbox session's Stop and suspend keeps the no-tabs and agent-ended guards the click saw, so a refresh during its activity check cannot close a new tab or stop a restarted agent unasked
 - [complete] `user-tmux-jobs-outlive-cleanup.md` — Jobs that your own tmux moved out of a session may keep running after Stop, Restart, Delete or closing a tab on Linux hosts with systemd, as they would outside Farhelm; the pre-kill tmux check and its extra sweep go away
 - [complete] `mac-system-stat.md` — Update, setup and uninstall on a remote Mac keep working when GNU coreutils come first on the SSH PATH, because Farhelm always calls the system `/usr/bin/stat` there
-- [pending] `tensorlake-skip-ssh-agent.md` — Tensorlake builds and host connections offer Farhelm's own key first and no longer consult your ssh-agent, so a personal key loaded there cannot get the login refused
+- [in-flight e1f254] `tensorlake-skip-ssh-agent.md` — Tensorlake builds and host connections offer Farhelm's own key first and no longer consult your ssh-agent, so a personal key loaded there cannot get the login refused
 - [in-flight 343a11] `hosts-suspend-confirm-slot.md` — The Hosts panel's Suspend question acts only on the answer to the question you saw, like host Remove
