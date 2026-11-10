@@ -27,6 +27,14 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   waiting for a host lock can enable unattended session control after the requesting connection has ended and its card
   has disappeared. The original command remains fenced, but the saved permission can survive.
 
+- [`sandbox-stop-refresh-weakens-click-guards.md`](sandbox-stop-refresh-weakens-click-guards.md) — Stop and suspend can
+  close a terminal tab opened during its activity check even though the initiating click showed no tabs and no
+  tab-closing question was shown.
+
+- [`empty-history-queue-bypasses-bounds.md`](empty-history-queue-bypasses-bounds.md) — Empty deferred history can
+  corrupt coordinates so a painted URL opens a different, undisclosed screen URL. The source-confirmed action route
+  requires a protocol-valid malicious or broken peer and backlog; original availability uncertainty remains.
+
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
@@ -595,8 +603,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   directory exchange.
 
 - [`installer-leftover-test-rejects-fallback-lock-file.md`](installer-leftover-test-rejects-fallback-lock-file.md) —
-  Installer tests can report leftover debris when the installer correctly retains its permanent fallback lock file on a
-  filesystem without directory locking.
+  Installer leftovers checks and the native legacy-refusal snapshot reject the supported permanent fallback lock. A Mac
+  test volume requiring that fallback remains unverified after investigation.
 
 - [`automatic-reopen-can-launch-older-replacement-app.md`](automatic-reopen-can-launch-older-replacement-app.md) — An
   older bundle substituted during automatic reopening can launch instead of being refused. Native dispatch and timing
@@ -1012,7 +1020,7 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   planning can delay automatic updates for later hosts even though each individual wait is bounded.
 
 - [`finished-task-handle-published-after-host-purge.md`](finished-task-handle-published-after-host-purge.md) — A
-  completed uninstall task can leave bookkeeping reinserted after the host was already removed.
+  completed uninstall or failed initial sandbox launch can leave task bookkeeping reinserted after its host was removed.
 
 - [`unknown-policy-write-overtaking-unresolved.md`](unknown-policy-write-overtaking-unresolved.md) — An uncertain opt-in
   might outlive a later opt-out, but a concrete older request delayed before policy-lock admission remains missing.
@@ -1072,8 +1080,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`late-rail-restoration-retains-menu-coordinates.md`](late-rail-restoration-retains-menu-coordinates.md) — A host menu
   opened before saved expansion finishes restoring may remain at the host's former position.
 
-- [`full-host-tooltip-conflicts-with-line-cap.md`](full-host-tooltip-conflicts-with-line-cap.md) — The promise to reveal
-  full host names conflicts with the shared tooltip's eight-line limit; actual clipping remains unmeasured.
+- [`full-host-tooltip-conflicts-with-line-cap.md`](full-host-tooltip-conflicts-with-line-cap.md) — The shared tooltip
+  cap conflicts with full-value disclosure for host names and approval requester titles. The new admitted long-title
+  route is source-confirmed; original host-alias wrapping remains unmeasured.
 
 - [`selected-expanded-host-hover-white-on-white.md`](selected-expanded-host-hover-white-on-white.md) — In Light
   appearance, hovering the selected expanded host can make its name and destination unreadable.
@@ -1410,11 +1419,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`grid-shift-enter-loses-independent-altgraph.md`](grid-shift-enter-loses-independent-altgraph.md) — On a
   keyboard/browser that reports AltGraph independently of Ctrl and Alt, holding AltGraph while pressing Shift+Enter can
   insert Farhelm newline ESC CR instead of the ordinary Enter CR the existing terminal sends.
-
-- [`empty-history-queue-bypasses-bounds.md`](empty-history-queue-bypasses-bounds.md) — Empty deferred-history messages
-  escape the row cap and an accumulated backlog would bypass yielding. The structural gap is confirmed; material backlog
-  or resource exhaustion remains unverified after investigation, and ordinary senders were not found. The record
-  supplies its missing acceptance context without settling browser scope.
 
 - [`bold-brightening-ignores-redefined-palette.md`](bold-brightening-ignores-redefined-palette.md) — A program
   redefining bright terminal colors still gets the original theme colors for bold text.
@@ -2292,3 +2296,133 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`switch-geometry-row-readiness-unresolved.md`](switch-geometry-row-readiness-unresolved.md) — The session-switch test
   might accept an old-height screen as ready and later compare a correct screen with that stale baseline. The fixture's
   required row change and timing have not been established; this is an investigated uncertainty.
+
+- [`repeated-cleanup-failure-test-misses-recurrence.md`](repeated-cleanup-failure-test-misses-recurrence.md) — The
+  regression can pass without observing the cleanup failure it repeats, leaving recurrence handling unprotected.
+
+- [`unmeasured-notices-can-be-marked-read.md`](unmeasured-notices-can-be-marked-read.md) — Closing a notification panel
+  before its measured placement appears may mark unseen notices read. The required native event ordering remains
+  unverified after investigation; history is retained.
+
+- [`cleanup-retry-omits-recovery-step-times.md`](cleanup-retry-omits-recovery-step-times.md) — After a cleanup failure,
+  Retry can report zero time for recovery steps that actually ran, weakening its diagnostic timing report.
+
+- [`cleanup-list-error-hides-accepted-progress.md`](cleanup-list-error-hides-accepted-progress.md) — Retry can accept
+  cleanup while Trash keeps showing its earlier listing error without running progress, until a successful refresh
+  arrives.
+
+- [`notice-retry-error-hides-clear-failure.md`](notice-retry-error-hides-clear-failure.md) — After Retry fails, a later
+  failed Clear resolved action can show only the earlier Retry error.
+
+- [`large-notice-history-exceeds-mark-budget.md`](large-notice-history-exceeds-mark-budget.md) — Extremely large
+  notification histories may become impossible to acknowledge or clear in the app. Supported lifetime size and
+  successful rendering at that scale remain unverified after investigation.
+
+- [`trash-read-eligibility-can-remain-cached.md`](trash-read-eligibility-can-remain-cached.md) — A queued Trash reader
+  may start an extra listing while cleanup is pending. The required native event ordering remains unverified after
+  investigation; no destructive authority or receipt overwrite is established.
+
+- [`overdue-plan-protection-ages-out.md`](overdue-plan-protection-ages-out.md) — The plan picker can forget that a
+  repeatedly skipped plan is overdue when older claims leave its bounded history.
+
+- [`plan-pass-count-includes-precreation-claims.md`](plan-pass-count-includes-precreation-claims.md) — A plan with a
+  long edit history can be treated as overdue using claims made before that plan existed.
+
+- [`plan-pass-pagination-follows-moving-main.md`](plan-pass-pagination-follows-moving-main.md) — The plan picker can
+  count an in-flight claim as a skipped pass when main changes while history pages are read.
+
+- [`dependency-block-counts-held-plan-time.md`](dependency-block-counts-held-plan-time.md) — A plan temporarily blocked
+  by an abandoned dependency can accumulate overdue passes from time it was explicitly on hold.
+
+- [`plain-url-scan-repeats-history-decoding.md`](plain-url-scan-repeats-history-decoding.md) — Hovering a URL in
+  retained terminal history repeats full-row decoding for its characters. Added work is confirmed; material pointer or
+  UI latency remains unverified after investigation.
+
+- [`attention-save-error-can-exhaust-list-height.md`](attention-save-error-can-exhaust-list-height.md) — A retained
+  update-preference error and wrapped header may leave no reachable attention-list body. The required supported viewport
+  and font geometry remain unverified after investigation.
+
+- [`approval-scrollports-lack-keyboard-entry.md`](approval-scrollports-lack-keyboard-entry.md) — Keyboard users lack a
+  named focus target for horizontally clipped approval facts and text-only scrolling approval bodies. The layout test
+  currently requires that omission.
+
+- [`requester-full-id-uses-unnamed-generic-span.md`](requester-full-id-uses-unnamed-generic-span.md) — The requesting
+  session's shortened ID relies on an accessible label on a generic span, where that label is prohibited. The markup
+  mismatch is confirmed; actual assistive-technology output was not tested.
+
+- [`approval-copy-test-assumes-clipboard-object.md`](approval-copy-test-assumes-clipboard-object.md) — The Copy ID test
+  can fail before its assertion if the engine provides no clipboard object. Whether the supported browser configuration
+  omits it remains unverified after investigation.
+
+- [`short-progress-card-can-hide-overflow-notice.md`](short-progress-card-can-hide-overflow-notice.md) — A very short
+  update-progress hover may hide its Full details guidance even after diagnostics shrink. Reachable native geometry
+  remains unverified after investigation.
+
+- [`progress-hover-keeps-short-host-name.md`](progress-hover-keeps-short-host-name.md) — Update progress repeats a
+  shortened host name instead of revealing its full display name, so similarly named hosts remain indistinguishable
+  there.
+
+- [`progress-hover-test-can-scroll-away-entry.md`](progress-hover-test-can-scroll-away-entry.md) — The browser test may
+  scroll an ancestor after entering the hover target and dismiss the card it is waiting for. The fixture geometry and
+  native ordering remain unverified after investigation.
+
+- [`orphan-cleanup-promises-unheld-provisioning-lock.md`](orphan-cleanup-promises-unheld-provisioning-lock.md) — The
+  implementation specification promises that orphan cleanup checks ownership under the host provisioning lock, but the
+  endpoint does not hold that lock. No supported destructive adoption race was established.
+
+- [`sandbox-lifecycle-questions-lack-opening-guards.md`](sandbox-lifecycle-questions-lack-opening-guards.md) — Sandbox
+  lifecycle questions lack the required opening-token and operation-claim ownership. Same-dialog Cancel and Submit
+  before redraw is product-accepted when its destructive guards hold; a stronger obsolete-opening loss route remains
+  unverified.
+
+- [`sandbox-create-reply-loses-new-recipe-default.md`](sandbox-create-reply-loses-new-recipe-default.md) — Immediately
+  after opening a newly launched sandbox session, New and quick-switcher creation visibly default to Local instead of
+  that sandbox's recipe. Reselecting the session repairs the default.
+
+- [`sandbox-launch-question-lacks-opening-token.md`](sandbox-launch-question-lacks-opening-token.md) — The
+  sandbox-launch question uses unguarded answers instead of the required opening token. Same-burst Cancel and Submit is
+  product-accepted; a stronger obsolete-question consequence remains unverified after investigation.
+
+- [`sandbox-checkout-hides-required-folder-setting.md`](sandbox-checkout-hides-required-folder-setting.md) — A new
+  sandbox checkout can be offered without exposing its missing global checkout-folder setting, then fail before billing
+  with a Settings remedy.
+
+- [`clone-read-overwrites-manual-recipe-choice.md`](clone-read-overwrites-manual-recipe-choice.md) — While Clone waits
+  for its source-host read, choosing another enabled recipe does not take ownership of the draft; the late read can
+  replace that choice.
+
+- [`sandbox-launch-sends-hidden-agent-prompt.md`](sandbox-launch-sends-hidden-agent-prompt.md) — Switching from an agent
+  with Initial prompt to Goose or Pi can hide a retained prompt that still blocks sandbox launch. The backend refuses
+  before billing.
+
+- [`sandbox-launch-bypasses-repository-search-refusal.md`](sandbox-launch-bypasses-repository-search-refusal.md) —
+  Sandbox Launch can proceed with the previous repository or home destination while the form says Select a repository
+  for the unfinished search. With creation questions skipped, it can allocate a billed sandbox.
+
+- [`sandbox-row-menu-owns-transient-lifecycle-state.md`](sandbox-row-menu-owns-transient-lifecycle-state.md) — Closing
+  the row menu can discard a sandbox lifecycle question, its local waiter or its error. The backend operation continues
+  independently, so this does not establish abandoned Stop-and-suspend work.
+
+- [`bulk-sandbox-delete-drops-eligible-peer.md`](bulk-sandbox-delete-drops-eligible-peer.md) — If the first marked
+  sandbox session retains a hidden question, bulk Delete can skip an eligible peer, leave the sandbox untouched, clear
+  both marks and explain only the first refusal.
+
+- [`frozen-sandbox-retains-header-lifecycle-answers.md`](frozen-sandbox-retains-header-lifecycle-answers.md) — Retained
+  header Restart and Replace questions, and an interrupted-session card during refresh, can keep enabled answers for a
+  frozen sandbox. The backend refuses those operations.
+
+- [`sandbox-launch-skips-remembered-agent-choices.md`](sandbox-launch-skips-remembered-agent-choices.md) — A successful
+  sandbox launch does not persist the user's permission or wrapper choice. The initiating page's local mirror hides the
+  omission until a reload.
+
+- [`suspended-sandbox-keeps-row-confirmations-enabled.md`](suspended-sandbox-keeps-row-confirmations-enabled.md) — A
+  Stop or Replace question opened before suspension can remain answerable after the normal menu actions disable.
+  Accepting it dismisses the question and sends a request the backend refuses.
+
+- [`sandbox-outage-card-ignores-host-refresh-failure.md`](sandbox-outage-card-ignores-host-refresh-failure.md) — After
+  Resume, a failed host-list refresh can leave a recovered terminal hidden behind an unqualified Session suspended card,
+  with lifecycle controls disabled until a successful refresh.
+
+- [`attention-retry-omits-failed-save-identity.md`](attention-retry-omits-failed-save-identity.md) — An old Try again
+  activation could restore automatic updates after a newer opt-out, but no ordinary shipped ordering outside accepted
+  input races was established. This remains unverified after investigation.

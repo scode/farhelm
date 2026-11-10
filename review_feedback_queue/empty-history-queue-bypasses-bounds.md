@@ -6,9 +6,46 @@ Reviewed commit: ca9b0a19856dc136f63ad2d14f1076027edce1eb
 
 Empty deferred-history messages escape the row cap and an accumulated backlog would bypass yielding. The structural gap
 is confirmed; material backlog or resource exhaustion remains unverified after investigation, and ordinary senders were
-not found.
+not found. A newly traced consequence can make a displayed scrollback URL open a different, undisclosed screen URL. That
+source-confirmed action mismatch requires a protocol-valid malicious or broken peer and deferred backlog.
 
 ## Details
+
+Current suggested bucket: **highest**, for the paint/action mismatch below. The original availability investigation and
+its uncertainty remain intact; the new route does not depend on proving denial of service or resolving its browser
+acceptance question.
+
+### Empty-entry trimming can redirect a displayed URL
+
+Additional reviewed commit: befe5c72f7af72bb7e2fae339c0f4ca52ff816da, checked through
+0bc984b71384e7b754b55d007b53ebbeb9a076ca. Confidence: **verified source mechanism and action route**; no browser
+reproduction or payload experiment ran.
+
+At `crates/farhelm-ui/assets/grid-model.js:931-944`, trimming encounters an empty queued entry while excess rows remain,
+advances that entry's offset and subtracts the excess from `queuedRows` without trimming the actual rows. Drain then
+uses the shifted empty entry to establish `historyFirst` (`:974`), skips its body and resets `historyNext` (`:999`).
+Later real rows retain that shifted first coordinate. The resulting history end (`:1017-1019`) overlaps the screen's
+absolute coordinates (`:1011-1014`) at ordinary safe counters. This is separate from the extreme-numbering finding.
+
+The painter reads history by stored index (`grid-terminal.js:914-940`), while pointer mapping assigns its shifted
+absolute number (`:555-558,1101-1119`). The text/link source resolves overlapping coordinates screen-first
+(`grid-buffer.js:382-420,585-595`). Hover identity and release checks compare that same screen source
+(`grid-terminal.js:1305-1337,1708-1715`), so they do not detect that another history row was painted under the pointer.
+The provider retains the screen row's plain URL (`terminal.js:1311-1324,1360-1367`), and the ordinary non-loopback URL
+disclosure waiver (`:1247-1263`) lets a primary click open it (`terminal-links.js:79-84,163-168`). No final comparison
+with the painted row closes this gap. This establishes an undisclosed action-target change, not credential theft or code
+execution.
+
+Empty history is protocol-valid (`crates/farhelm-proto/src/grid.rs:224-234`). Deferred receives and sliced drains
+(`grid-terminal.js:1929-1940,1995-2015`) supply the backlog boundary. Production `grid_output.rs:904-931` skips empty
+histories, and both sender paths use that helper (`service/grid_stream.rs:593-599,771-776`), so no ordinary-output
+producer is alleged. The trigger is a malicious or broken protocol-valid peer. SPEC.md's plain-URL rule relies on what
+is shown being what opens; hostile-host availability acceptance does not accept this action mismatch.
+
+Handle zero-count queue entries separately before assigning trim offsets, and preserve exact unconsumed-row accounting
+and aligned history coordinates. Provenance: trailing-review run `4c16ab16-96f7-4f02-9410-50839f5ab1f8`, canonical
+`g035/g035-l06`; interface groups synthesized the route without identifying another root cause. Existing queue coverage
+is extended because the accounting cause is shared. No fix or triage decision was executed.
 
 ### Availability acceptance and browser scope
 

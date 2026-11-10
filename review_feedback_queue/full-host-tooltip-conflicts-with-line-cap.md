@@ -5,9 +5,35 @@ Reviewed commit: d6645f771bee8ed03a66486ef8755834937d759d
 ## TLDR
 
 The promise to reveal full host names conflicts with the shared tooltip's eight-line limit; actual clipping remains
-unmeasured.
+unmeasured. The same cap also clips the newly promised full requesting-session title on an approval card when a long
+accepted title exceeds it.
 
 ## Details
+
+### Approval requester titles share the capped disclosure
+
+Additional reviewed commit: c06d20d45f932746a7f042777671ddfd69d000e7, checked through
+0bc984b71384e7b754b55d007b53ebbeb9a076ca. Suggested bucket remains **other**. Confidence: **verified
+source/specification mismatch and admitted clipping route**; precise font wrapping and native presentation were not
+measured.
+
+`crates/farhelm-ui/src/approvals.rs:634-637` puts the requesting session's full title in an ordinary `data-tooltip`,
+while `app.css:8990-8993` ellipsizes its visible title. The shared tooltip uses `textContent` (`tooltip.js:349-363`) and
+the ordinary eight-line, 280px, hidden-overflow rule (`app.css:1860-1878`). Neither the paragraph nor card exception
+applies (`:1923-1940`); pointer-events also prevent scrolling that ordinary hover.
+
+This consumer has a stronger admitted-length premise than the original host-alias investigation: titles are accepted
+within the 64 KiB create/rename budget (`SPEC.md:935-941`, supervisor `service/handlers.rs:83,2489-2496`), without
+truncation by title validation (`service/core.rs:4272-4279`). Helm cache decoding and requester enrichment retain them
+(`store.rs:9393-9444`, `session_cache.rs:56-80`, UI `approvals.rs:508-511,608-620`). Such allowed lengths exceed the
+finite hover cap. SPEC.md's compact From-line contract promises full title text on hover (`:3705-3707` at the reviewed
+revision); the session-row summary-card clipping exception does not explicitly cover this approval hover.
+
+Provide reachable full-value disclosure for both affected consumers; changing only a paragraph flag still leaves a
+viewport cap. This is added substance to the shared full-value disclosure/cap conflict. It does not claim wrong approval
+authority or user-work loss, and does not resolve the original host-alias geometry uncertainty. The separate requester
+accessible-name finding concerns prohibited generic-span naming, not this hover cap. Provenance: trailing-review run
+`4c16ab16-96f7-4f02-9410-50839f5ab1f8`, `g043/g043-discovery-requester-tooltip-cap`.
 
 Suggested bucket: **other**. Confidence: **verified**. Source-confirmed assessment; conditional routes retain their
 prerequisites and no runtime observation is claimed.
