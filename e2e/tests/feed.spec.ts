@@ -328,7 +328,10 @@ test.describe("the invalidation feed", () => {
 
     await openSession(page, second.id, second.title);
     await waitForFeedReadersSettled(page);
-    const snapshots = await readFeedReaders(page);
+    // The rail bell keeps one trash reader per connected host for the whole
+    // page, independent of which session is open, so it is no part of what
+    // follows selection. Counting it would tie this test to the fleet size.
+    const snapshots = (await readFeedReaders(page)).filter((snapshot) => snapshot.role !== "trash");
     expect(snapshots).toHaveLength(3);
     expect(snapshots.filter((snapshot) => snapshot.role === "session").map((snapshot) => snapshot.id))
       .toEqual([second.id]);

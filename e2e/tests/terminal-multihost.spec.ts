@@ -1712,7 +1712,7 @@ test.describe("multi-host", () => {
       await expect(help).toContainText("These sessions start on this host without asking you to confirm.");
       await expect(dialog.locator(".host-settings-mark [data-glyph=laptop]")).toHaveCount(1);
       await expect(dialog.locator('[data-setting="destination"]')).toHaveCount(0);
-      await expect(dialog.locator(".host-settings-footer")).toContainText("Changes save as you make them");
+      await expect(dialog.locator(".host-settings-footer")).toContainText("Checkout folder saves with Save; other changes save as you make them");
       await test.info().attach("host-settings-local", { body: await dialog.screenshot(), contentType: "image/png" });
       await toggle.click();
       await expect(toggle).not.toBeChecked();
@@ -2052,7 +2052,7 @@ test.describe("multi-host", () => {
     const dismiss = dialog.locator(".host-settings-dismiss");
     const close = dialog.locator(".host-settings-close");
     const note = dialog.locator(".host-settings-footer > span");
-    await expect(note).toHaveText("Changes save as you make them");
+    await expect(note).toHaveText("Checkout folder saves with Save; other changes save as you make them");
     await page.mouse.move(0, 0);
 
     /** Full bounds and a center hit prove the visible control is not covered. */
