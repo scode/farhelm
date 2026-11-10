@@ -5238,33 +5238,28 @@ channel records these notices.
   Confirmed 2026-11-08: the shared reaper skips the machine-wide marker scan and PPID walk only when containment is
   established for every target, a usable manager handles at least one named scope, every named scope is confirmed
   collected, and no validated explicit root survives afterwards. It checks only those root identities, not the process
-  table, before deciding. Confirmed 2026-11-09: before the first scope kill, the reaper checks the scopes it would trust
-  for a running tmux server. A server keeps the full portable sweep: stock systemd-linked tmux moves panes into sibling
-  `tmux-spawn-*.scope` units, and ending the server alone does not end a pane program that ignores SIGHUP. This is
-  ordinary tmux behavior, not the deliberate escape accepted below. The check reads only the selected scopes and their
-  processes, with bounded observations; an unavailable, capped or unreadable observation keeps the sweep rather than
-  proving that no server is present. Scope killing still attempts every selected unit and uses the existing error
-  policy. The tmux check grants no signal authority and does not enumerate the process table.
+  table, before deciding. Confirmed 2026-11-10: stock systemd-linked tmux moves pane jobs into sibling
+  `tmux-spawn-*.scope` units. Those jobs may survive scope-only Stop, Restart, Replace, Delete or tab close, as intended
+  when running them under tmux; the server inside the scope still ends. The reaper does no tmux membership inspection.
 
   When the conditions for scope-only cleanup do not hold, the reaper runs the existing portable sweep unchanged. A named
-  scope that is no longer loaded reads as an empty group, which the tmux check cannot tell from an unreadable one, so it
-  keeps the sweep too: scope-only cleanup applies only while every named scope is still live. Deleting a session whose
-  agent or a tab already exited, a Stop or Restart after the agent exited, and a containerized Delete therefore always
-  sweep. Scope-name provenance and containment completeness are separate inputs: a guessed name that is absent does not
-  prove that a target was scoped. An unscoped launch, an unscoped tab or unavailable selection keeps the sweep required
-  even when optional scope names are added. Delete combines the agent's and every tab's selection, including host tags
-  and tmux scope markers, so a scoped agent cannot hide an unscoped tab's cleanup requirement. It also keeps the sweep
-  when discovery is incomplete: no agent terminal, or an old tmux session absent from its pane listing, means historical
-  unscoped tab jobs may remain. A systemd glob can supply scope handles in those cases, but cannot prove that no such
-  jobs exist. Existing discovery errors still refuse Delete; a successful empty listing does not acquire that new
-  meaning.
+  scope must be observed live before signalling and confirmed collected afterwards; an already-gone or initially
+  unconfirmed scope keeps the sweep. Deleting a session whose agent or a tab already exited, a Stop or Restart after the
+  agent exited, and a containerized Delete therefore always sweep. Scope-name provenance and containment completeness
+  are separate inputs: a guessed name that is absent does not prove that a target was scoped. An unscoped launch, an
+  unscoped tab or unavailable selection keeps the sweep required even when optional scope names are added. Delete
+  combines the agent's and every tab's selection, including host tags and tmux scope markers, so a scoped agent cannot
+  hide an unscoped tab's cleanup requirement. It also keeps the sweep when discovery is incomplete: no agent terminal,
+  or an old tmux session absent from its pane listing, means historical unscoped tab jobs may remain. A systemd glob can
+  supply scope handles in those cases, but cannot prove that no such jobs exist. Existing discovery errors still refuse
+  Delete; a successful empty listing does not acquire that new meaning.
 
   A host at generation zero cannot have migrated from tmux. A later-generation host may still have old tmux tabs, so
   when its tmux session is absent Delete conservatively keeps the sweep; current presence and host records do not retain
   that history. This also costs the sweep for restarted host-only sessions in that state, avoiding a separate persisted
   history mechanism for the optimization.
 
-  This is the maintainer's decision to trust containment and trade the always-run backstop for cost, with the tmux and
+  This is the maintainer's decision to trust containment and trade the always-run backstop for cost, with the
   incomplete-discovery exceptions above. The sweep remains the whole mechanism where no user manager exists. A broken
   manager does not silently pass either: for a scoped launch or tab, a scope that cannot be confirmed collected fails
   the operation even when the sweep found nothing (SPEC.md, Lifecycle operations), since the scope is what catches the

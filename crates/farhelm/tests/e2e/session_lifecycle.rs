@@ -5856,26 +5856,26 @@ async fn a_scope_launched_stop_kills_through_the_cgroup_without_the_marker_sweep
     wait_until_pid_gone(cloaked_pid, 15).await;
 }
 
-/// A tmux server first started by a scoped session still owns its pane jobs.
+/// A scoped Stop ends a user-run tmux server while its migrated jobs survive.
 ///
 /// Stock tmux linked with systemd moves panes into sibling `tmux-spawn`
 /// scopes. Killing only Farhelm's scope therefore ends the server but misses
-/// a pane job that ignores SIGHUP. The server must be observed before that
-/// kill so Stop retains the marker sweep. Actual server and pane membership,
+/// a pane job that ignores SIGHUP. This is the accepted containment boundary,
+/// without a tmux-driven marker sweep. Actual server and pane membership,
 /// the job's ignored-signal mask, and its marker establish this distinction;
 /// a tmux build without pane migration cannot exercise this regression.
 #[farhelm_testtrace::test]
-async fn a_scoped_stop_reaps_jobs_in_a_session_started_stock_tmux_server() {
+async fn a_scoped_stop_leaves_jobs_in_a_session_started_stock_tmux_server() {
     let stock_tmux = std::path::Path::new("/usr/bin/tmux");
     if !stock_tmux.is_file() {
         eprintln!(
-            "SKIPPED a_scoped_stop_reaps_jobs_in_a_session_started_stock_tmux_server: \
+            "SKIPPED a_scoped_stop_leaves_jobs_in_a_session_started_stock_tmux_server: \
              no stock tmux at /usr/bin/tmux; the pinned harness tmux is not this substrate"
         );
         return;
     }
     let Some((h, _scopes)) =
-        scope_gated_harness("a_scoped_stop_reaps_jobs_in_a_session_started_stock_tmux_server")
+        scope_gated_harness("a_scoped_stop_leaves_jobs_in_a_session_started_stock_tmux_server")
             .await
     else {
         return;
@@ -5955,7 +5955,7 @@ async fn a_scoped_stop_reaps_jobs_in_a_session_started_stock_tmux_server() {
         .expect("the owned stock server's mappings must be readable");
     if !maps.lines().any(|line| line.contains("libsystemd.so")) {
         eprintln!(
-            "SKIPPED a_scoped_stop_reaps_jobs_in_a_session_started_stock_tmux_server: \
+            "SKIPPED a_scoped_stop_leaves_jobs_in_a_session_started_stock_tmux_server: \
              stock tmux is not linked with systemd, so it does not supply the pane-migration premise"
         );
         return;
@@ -5970,7 +5970,7 @@ async fn a_scoped_stop_reaps_jobs_in_a_session_started_stock_tmux_server() {
             .unwrap()
             .trim(),
         "tmux: server",
-        "the pre-kill observation must distinguish the real server from its exited client"
+        "the fixture must identify the real server rather than its exited client"
     );
     let unit = format!("farhelm-{}-0.scope", session.id);
     assert_eq!(launch_scope_of(&h, &session.id).await, Some(unit.clone()));
@@ -6020,8 +6020,8 @@ async fn a_scoped_stop_reaps_jobs_in_a_session_started_stock_tmux_server() {
     h.client.stop_session(&session.id).await.expect("stop");
 
     assert!(
-        process_is_gone(job_pid),
-        "Stop returned while the SIGHUP-immune stock-tmux pane job still ran outside Farhelm's scope"
+        !process_is_gone(job_pid),
+        "the SIGHUP-immune stock-tmux pane job must survive Stop outside Farhelm's scope"
     );
     assert!(
         process_is_gone(server_pid),

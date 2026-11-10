@@ -6,8 +6,8 @@
 //! confirmed systemd scope is the containment boundary where one exists.
 //! Otherwise the portable process-table sweep finds descendants and
 //! marked daemons, subject to the marker residuals below. A surviving
-//! explicit root, an unconfirmed scope, incomplete target discovery or a
-//! tmux server inside a trusted scope also requires that sweep. See
+//! explicit root, an already-gone or unconfirmed scope, or incomplete target
+//! discovery also requires that sweep. Migrated user-tmux jobs may survive. See
 //! [`reap_process_tree`] for the shared decision every caller uses.
 //!
 //! "Portable" is now literal rather than aspirational. Every read of the
@@ -1363,20 +1363,18 @@ impl ScopeUnits {
 /// # When the scope is enough
 ///
 /// Complete containment of the required targets, at least one named scope,
-/// a usable manager, every scope confirmed
+/// a usable manager, every scope observed live then confirmed
 /// collected, and no surviving validated explicit root permit skipping the
 /// sweep. Root checks read only those pids, never the process table. This
 /// preserves Restart's earlier-generation roots even when its named scope
 /// covers only the current generation. An unreadable root takes the fallback.
-/// Before killing any scope, bounded membership inspection must rule out a
-/// tmux server in each: stock tmux can move panes into sibling scopes, whose
-/// hangup-immune jobs still need the marker sweep. Incomplete inspection or
-/// target discovery keeps the sweep too, without adding a new refusal.
+/// An already-gone scope or incomplete target discovery keeps the sweep.
 ///
 /// The maintainer chose this containment boundary on 2026-11-08 to avoid
 /// reading every process's environment on scoped stops. A program that moves
 /// itself into another group, or only carries a marker without belonging to
-/// the scope, is outside that boundary. Unscoped launches keep the sweep.
+/// the scope, is outside that boundary. User-run tmux pane jobs moved outside
+/// it may survive too (2026-11-10 decision). Unscoped launches keep the sweep.
 ///
 /// # When a scope failure fails the operation
 ///
@@ -1514,27 +1512,15 @@ where
             }
             Vec::new()
         };
-    // Observe every scope we would trust BEFORE killing any of them. A
-    // systemd-linked tmux server stays here while moving its panes into
-    // sibling scopes; killing it first erases the evidence that we need the
-    // marker sweep for their hangup-immune jobs. Uncertainty only forfeits
-    // the optimization, without changing the existing scope failure policy.
-    if !needs_sweep {
-        for unit in &units {
-            if scopes.needs_tmux_sweep(unit).await {
-                needs_sweep = true;
-                break;
-            }
-        }
-    }
     // Every unit is killed even when an earlier one failed, for
     // `kill_scope`'s own accumulate-never-short-circuit reason one level
     // up: a delete that stopped at the first unresponsive tab scope would
     // skip the agent's, which is the one most likely to have worked.
     let had_scopes = !units.is_empty();
     for unit in units {
-        if let Err(e) = kill_scope(scopes, unit, session_id).await {
-            scope_errors.push(format!("{e:#}"));
+        match kill_scope(scopes, unit, session_id).await {
+            Ok(was_live) => needs_sweep |= !was_live,
+            Err(e) => scope_errors.push(format!("{e:#}")),
         }
     }
     let scope_error = (!scope_errors.is_empty()).then(|| scope_errors.join("; "));
@@ -1748,15 +1734,15 @@ const SCOPE_GRACE_POLL: Duration = Duration::from_millis(200);
 /// "Retired means empty" is systemd's ordinary `--collect` behavior, not
 /// a law: an operator's `systemctl stop` running past its timeout, or a
 /// user manager restarted without its state, can drop a unit whose
-/// processes still run. That is no weaker than the pre-existing
-/// early return for a unit that is already gone before anything is
-/// signalled. `reap_process_tree` still checks its explicitly carried roots,
-/// but otherwise trusts collection rather than looking for escaped members.
+/// processes still run. `reap_process_tree` checks its carried roots, but
+/// otherwise trusts collection after signalling. The returned boolean is true
+/// only when the unit was observed live first; already-gone or initially
+/// unconfirmed units retain the portable sweep, even if escalation succeeds.
 async fn kill_scope(
     scopes: &crate::scope::ScopeManager,
     unit: &str,
     session_id: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     kill_scope_with_grace(scopes, unit, session_id, KILL_GRACE).await
 }
 
@@ -1789,12 +1775,12 @@ async fn kill_scope_with_grace(
     unit: &str,
     session_id: &str,
     grace: Duration,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     // Two buckets on purpose. `advisory` holds what `systemctl` REPORTED
     // (a failed existence check, a non-zero kill exit); the confirmation
     // below decides whether those reports were about anything real.
     let mut advisory: Vec<String> = Vec::new();
-    match scopes.exists(unit).await {
+    let was_live = match scopes.exists(unit).await {
         Ok(false) => {
             // Ordinary, not exceptional: `--collect` disposes of a scope
             // the moment its last process exits, so every stop of an
@@ -1803,14 +1789,17 @@ async fn kill_scope_with_grace(
                 session = %session_id, unit,
                 "the launch's cgroup scope is already gone"
             );
-            return Ok(());
+            return Ok(false);
         }
-        Ok(true) => {}
+        Ok(true) => true,
         // "Cannot tell" is not "gone": the escalation proceeds, because
         // refusing to signal a unit that may well be full of processes is
         // the strictly worse failure.
-        Err(e) => advisory.push(format!("checking whether scope {unit} still exists: {e:#}")),
-    }
+        Err(e) => {
+            advisory.push(format!("checking whether scope {unit} still exists: {e:#}"));
+            false
+        }
+    };
     info!(
         session = %session_id, unit,
         "killing the launch's cgroup scope before checking whether a process-tree sweep is needed"
@@ -1861,7 +1850,7 @@ async fn kill_scope_with_grace(
                      disappearance"
                 );
             }
-            Ok(())
+            Ok(was_live)
         }
         Err(e) => {
             // Unconfirmed: the unit is still loaded, or the manager
@@ -2813,57 +2802,39 @@ mod tests {
         .expect("every scope was confirmed collected");
     }
 
-    /// A server in the second scope must be observed before the first
-    /// scope is killed. Otherwise earlier kills can erase the role evidence
-    /// that explains pane jobs outside these units. Detection retains the
-    /// portable fallback but must still attempt every selected scope kill.
+    /// A scope gone before cleanup supplies no live containment evidence.
+    /// Even without roots or other targets, it must retain the portable sweep.
     #[farhelm_testtrace::test]
-    async fn tmux_inspection_precedes_every_scope_kill_and_keeps_the_sweep() {
+    async fn an_already_gone_scope_keeps_the_portable_sweep() {
         use crate::scope::ScopeOp;
         let session = uuid::Uuid::new_v4().to_string();
         let agent = crate::scope::unit_name(&session, 0).unwrap();
-        let tab = crate::scope::tab_unit_name(&session, &uuid::Uuid::new_v4().to_string()).unwrap();
         let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = {
             let observed = Arc::clone(&observed);
             Arc::new(move |op: &ScopeOp| observed.lock().unwrap().push(op.clone()))
                 as crate::scope::ScopeOpSink
         };
-        let scopes = crate::scope::ScopeManager::fake_vanishing_after_signal("SIGTERM", sink)
-            .with_tmux_sweep_units(vec![tab.clone()]);
-        let mut units = ScopeUnits::recorded(Some(agent.clone()));
-        units.extend_tab(Some(tab.clone()), crate::terminal_process::TabScope::Scoped);
+        let scopes = crate::scope::ScopeManager::fake_vanishing(0, sink);
         let error = reap_process_tree_with_sweep(
             &scopes,
-            units,
+            ScopeUnits::recorded(Some(agent.clone())),
             None,
             &session,
             ScopeKillFailure::Refuse,
             |_| async { anyhow::bail!("portable fallback reached") },
         )
         .await
-        .expect_err("tmux panes may live outside the selected scopes");
+        .expect_err("an already-gone scope requires the sweep");
         assert_eq!(error.to_string(), "portable fallback reached");
         let observed = observed.lock().unwrap();
-        let first_kill = observed
-            .iter()
-            .position(|op| matches!(op, ScopeOp::Kill { .. }))
-            .unwrap();
-        assert!(observed[..first_kill].contains(&ScopeOp::Inspect(agent.clone())));
-        assert!(observed[..first_kill].contains(&ScopeOp::Inspect(tab.clone())));
-        for expected in [agent, tab] {
-            assert!(
-                observed
-                    .iter()
-                    .any(|op| matches!(op, ScopeOp::Kill { unit, .. } if unit == &expected)),
-                "fallback must not skip the scope {expected}: {observed:?}"
-            );
-        }
+        assert!(observed.contains(&ScopeOp::Exists(agent)));
+        assert!(!observed.iter().any(|op| matches!(op, ScopeOp::Kill { .. })));
     }
 
     /// Scope-name success must never erase an unscoped or unknown target.
-    /// An absent guessed unit is the regression case: it never contained
-    /// the tab, even though its cleanup reports success on a usable manager.
+    /// Independently confirmed scopes cannot prove that every target was
+    /// contained; keep them live until signalling to isolate that condition.
     /// The explicit callback error proves fallback without real signalling.
     #[farhelm_testtrace::test]
     async fn unscoped_and_unknown_targets_keep_the_sweep_when_the_manager_is_usable() {
@@ -2875,7 +2846,10 @@ mod tests {
             (true, Some(TabScope::Unscoped)),
             (true, Some(TabScope::Unknown)),
         ] {
-            let scopes = crate::scope::ScopeManager::fake_vanishing(0, Arc::new(|_| {}));
+            let scopes = crate::scope::ScopeManager::fake_vanishing_after_signal(
+                "SIGTERM",
+                Arc::new(|_| {}),
+            );
             let mut units = ScopeUnits::recorded(
                 agent_scoped.then(|| crate::scope::unit_name(&session, 0).unwrap()),
             );
@@ -2899,7 +2873,10 @@ mod tests {
             assert_eq!(error.to_string(), "portable fallback reached");
         }
         for selection in [TabScope::Unscoped, TabScope::Unknown] {
-            let scopes = crate::scope::ScopeManager::fake_vanishing(0, Arc::new(|_| {}));
+            let scopes = crate::scope::ScopeManager::fake_vanishing_after_signal(
+                "SIGTERM",
+                Arc::new(|_| {}),
+            );
             let units = ScopeUnits::tab(
                 crate::scope::tab_unit_name(&session, &uuid::Uuid::new_v4().to_string()),
                 selection,
@@ -2914,7 +2891,7 @@ mod tests {
                 |_| async { anyhow::bail!("portable fallback reached") },
             )
             .await
-            .expect_err("an absent guessed tab scope cannot suppress the sweep");
+            .expect_err("a guessed tab scope cannot suppress the sweep");
             assert_eq!(error.to_string(), "portable fallback reached");
         }
     }
@@ -2928,7 +2905,8 @@ mod tests {
         let root = capture_process_identity(std::process::id())
             .unwrap()
             .unwrap();
-        let scopes = crate::scope::ScopeManager::fake_vanishing(0, Arc::new(|_| {}));
+        let scopes =
+            crate::scope::ScopeManager::fake_vanishing_after_signal("SIGTERM", Arc::new(|_| {}));
         let error = reap_process_tree_with_sweep(
             &scopes,
             ScopeUnits::recorded(crate::scope::unit_name(&session, 0)),
