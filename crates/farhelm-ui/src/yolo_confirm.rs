@@ -11,8 +11,8 @@
 //!
 //! Deliberately hard to miss: accidental YOLO launches on the wrong machine
 //! are the failure it exists to stop, and a subtle prompt is one people
-//! click through. For the same reason it scrolls itself into view when it
-//! appears: in the launcher it once rendered below the dialog's visible edge,
+//! click through. For the same reason a launcher question scrolls itself into
+//! view: it once rendered below the dialog's visible edge,
 //! so pressing Launch seemed to do nothing until the user scrolled.
 //!
 //! It explains itself rather than assuming the user knows the term: what
@@ -32,14 +32,16 @@
 //! and don't ask again on this host" first sets the host to start YOLO
 //! sessions without asking (the same helm write as the host settings
 //! checkbox), then starts the same way; the flow that owns the launch does both, in that order, and
-//! launches nothing if the first step fails. Cancel has the initial focus.
+//! launches nothing if the first step fails. Cancel has the initial focus in
+//! a returned launcher. An inline Replace question arriving after a reply
+//! yields focus and scrolling to any control the user has moved to meanwhile.
 //! The one-off keeps the filled danger style and the permanent choice is only
 //! outlined: a filled button draws the reflex click, and the choice that
 //! turns the question off for good should not be the reflex target.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::modal_dialog::DialogActions;
+use crate::modal_dialog::{DialogActions, FocusTarget};
 
 use dioxus::prelude::*;
 use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection};
@@ -200,20 +202,32 @@ fn scroll_into_view(instance: u64) {
 
 /// Focus this confirmation's cancel button, its safe default answer.
 ///
-/// `only_if_lost` limits it to recovering focus that fell to the page body
-/// (a button the user pressed was disabled while its request ran), so it
-/// never pulls focus away from a control the user moved to on purpose.
+/// `only_if_lost` recovers focus that fell to the page body when a request
+/// disabled its button. `async_inline` applies the shared asynchronous guard
+/// even to the first handoff: an inline refusal must not take focus from the
+/// session the user is typing into. A returned modal owns its normal opening.
 /// Reveal the answer itself: a bounded notice region can clip Cancel even
-/// after the larger question block has scrolled into view.
-fn focus_cancel(instance: u64, only_if_lost: bool) {
+/// after the larger question block has scrolled into view. Inline reveal
+/// follows focus admission, so a denied handoff cannot scroll another surface.
+fn focus_cancel(instance: u64, only_if_lost: bool, async_inline: bool) {
     let selector = instance_selector(instance);
-    let guard = if only_if_lost {
+    let target = FocusTarget::new(
+        format!(r#"[data-yolo-confirm-id="{instance}"] .yolo-cancel"#),
+        None,
+        false,
+    );
+    let focus = if async_inline {
+        target.async_script(None)
+    } else {
+        target.script()
+    };
+    let guard = if only_if_lost && !async_inline {
         "const active = document.activeElement; if (active && active !== document.body) return;"
     } else {
         ""
     };
     document::eval(&format!(
-        "requestAnimationFrame(() => {{ {guard} const cancel = document.querySelector({selector})?.querySelector('.yolo-cancel'); cancel?.focus({{ preventScroll: true }}); cancel?.scrollIntoView({{ block: 'nearest', inline: 'nearest', behavior: 'instant' }}); }})"
+        "requestAnimationFrame(() => {{ {guard} {focus} const cancel = document.querySelector({selector})?.querySelector('.yolo-cancel'); if (!{async_inline} || document.activeElement === cancel) cancel?.scrollIntoView({{ block: 'nearest', inline: 'nearest', behavior: 'instant' }}); }})"
     ));
 }
 
@@ -228,6 +242,9 @@ fn focus_cancel(instance: u64, only_if_lost: bool) {
 /// and resubmission, including rejecting a stale opening before any mutation.
 /// `may_have_started` is for a refused retry of an attempt whose outcome is
 /// unknown: the question then cannot say that nothing has been started.
+/// `async_inline` is for a plain Replace refusal outside a modal: it may reveal
+/// Cancel only when no other control holds focus. Launcher questions retain
+/// their modal opening's ordinary focus and scroll behavior.
 /// Answers follow native reading order: Cancel, optional guarded start,
 /// permanent YOLO, then one-time YOLO. This stays inline; the shared action
 /// row adds no modal boundary or additional close target.
@@ -235,6 +252,7 @@ fn focus_cancel(instance: u64, only_if_lost: bool) {
 pub(crate) fn YoloConfirmation(
     ask: YoloAsk,
     #[props(default)] may_have_started: bool,
+    #[props(default)] async_inline: bool,
     busy: bool,
     error: Option<String>,
     confirm_submits: bool,
@@ -255,7 +273,8 @@ pub(crate) fn YoloConfirmation(
     // which can be after the user has already moved focus to another answer.
     // Later, whenever a request that disabled the buttons ends with the
     // question still up (a failed "don't ask again"), focus that fell to the
-    // page body comes back to cancel.
+    // page body comes back to cancel. Inline replies must pass the same
+    // current-owner check on their first focus too, since no modal owns it.
     let mut focused_once = use_signal(|| false);
     let mut last_busy = use_signal(|| busy);
     use_effect(use_reactive((&busy,), move |(busy,)| {
@@ -266,9 +285,9 @@ pub(crate) fn YoloConfirmation(
         }
         if !*focused_once.peek() {
             focused_once.set(true);
-            focus_cancel(instance, false);
+            focus_cancel(instance, false, async_inline);
         } else if was_busy {
-            focus_cancel(instance, true);
+            focus_cancel(instance, true, async_inline);
         }
     }));
     rsx! {
@@ -277,9 +296,12 @@ pub(crate) fn YoloConfirmation(
             role: "alertdialog",
             aria_label: "Confirm a YOLO launch",
             "data-yolo-confirm-id": "{instance}",
-            // Instant rather than smooth: the point is that it is on screen
-            // by the time the user looks. See `scroll_into_view`.
-            onmounted: move |_| scroll_into_view(instance),
+            // Modal questions need their block revealed before Cancel's focus.
+            // Inline arrivals reveal only after guarded focus succeeds, so a
+            // background Replace cannot move the user's current sidebar view.
+            onmounted: move |_| {
+                if !async_inline { scroll_into_view(instance); }
+            },
             p { class: "yolo-confirmation-heading", "Confirm YOLO launch" }
             p { class: "yolo-confirmation-consequence",
                 "YOLO means the agent bypasses its safety checks: no person, classifier, AI reviewer or sandbox stops its actions on "

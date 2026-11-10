@@ -1053,24 +1053,24 @@ shows, every button carries the token, and an answer whose token is not the open
 prompt up, with no notice. The slot's answer methods (`take`, `cancel_for`, `is_current`) all require a token, and no
 token can be made outside `ops.rs`; what keeps a handler from fetching the live token at click time and answering with
 it is convention, stated in `ConfirmSlot`'s docs and checked by review (`review_feedback_queue/.agents/recording.md`).
-Four prompts stay up through the request their answer starts (host Remove, the desktop tunnel warning, the templates
-editor's "Save these changes before leaving?" prompt, and a session's Replace YOLO question answered with "don't ask
-again", which waits for the host setting to save); they accept an answer while its token is still the open one and let
-the request's outcome retire the prompt, and `ConfirmSlot`'s docs name them as the only exception. All four refuse a
-second answer while their request runs; the Replace question uses the session surface's own running flag to refuse
-Cancel even before its buttons render disabled, so a failed host-setting save keeps its question and reason visible.
-Destructive preconditions travel the same way: the launcher's Guarded answer submits the Replace with precondition and
-the launcher opening of the render the user answered, and its YOLO answers refuse once the launcher has moved to another
-opening and otherwise submit the precondition their render showed, so nothing is recomputed at send time. Two counters
-stay outside the mechanism on purpose, because neither binds an answer to a prompt: the launcher's opening generation
-identifies one opening of the launcher (answers and deferred work check that their opening is still the current one),
-and the approval cards' arm generation times the 700 ms pause SPEC.md names, while the answers themselves are bound by
-the helm's request id. Input the page holds across time is retired when its owner stops observing: a held terminal link
-press is dropped whenever the terminal removes its pointer listeners (as it does when it reconnects), and each snapshot
-of a quick-launch key press is used or dropped by exactly the launch it was taken for, with any still waiting dropped
-when the sidebar list goes away. The link covers under "Session-host file reads" apply the same rule to the destination
-preview: a surface that can hide it marks itself in its own markup, so counting a new cover no longer depends on
-updating a central list.
+Three prompts stay up through the request their answer starts (host Remove, the desktop tunnel warning, and the
+templates editor's "Save these changes before leaving?" prompt); they accept an answer while its token is still the open
+one and let the request's outcome retire the prompt, and `ConfirmSlot`'s docs name them as the only exception. All three
+refuse a second answer while their request runs. Plain Replace's list-owned YOLO questions use one `ConfirmSlots` lane
+per source and consume either answer before dispatch; a failed host-setting save reopens its source's lane with the
+reason only while no newer question occupies that lane. Another source's question remains independent. Destructive
+preconditions travel the same way: the launcher's Guarded answer submits the Replace with precondition and the launcher
+opening of the render the user answered, and its YOLO answers refuse once the launcher has moved to another opening and
+otherwise submit the precondition their render showed, so nothing is recomputed at send time. Two counters stay outside
+the mechanism on purpose, because neither binds an answer to a prompt: the launcher's opening generation identifies one
+opening of the launcher (answers and deferred work check that their opening is still the current one), and the approval
+cards' arm generation times the 700 ms pause SPEC.md names, while the answers themselves are bound by the helm's request
+id. Input the page holds across time is retired when its owner stops observing: a held terminal link press is dropped
+whenever the terminal removes its pointer listeners (as it does when it reconnects), and each snapshot of a quick-launch
+key press is used or dropped by exactly the launch it was taken for, with any still waiting dropped when the sidebar
+list goes away. The link covers under "Session-host file reads" apply the same rule to the destination preview: a
+surface that can hide it marks itself in its own markup, so counting a new cover no longer depends on updating a central
+list.
 
 The dialog installers share a pointer rule: primary mouse-down on unused space cancels the browser's focus change, but
 controls and text keep their native behavior. An Enter listener runs only when the dialog container itself has focus; it
@@ -1095,11 +1095,47 @@ only their triggers are hidden, preserving Trash's active dialog, requests and r
 Single and bulk Stop/Delete share synchronous admission and an owned, initially unpolled completion future. Admission
 does not spawn its request. A batch admits every eligible row before driving any host queue, then awaits one future at a
 time per routing host while different hosts run concurrently. Rows without a known host share a conservative sequential
-lane. The existing row-operation claims cover queued and sending work continuously. No shared page token blocks its own
-row admission, and no second batch lock or automatic-selection exclusion set is needed: ordinary selection already waits
-for the count and rechecks it after its preference read. Stop's completion includes its gated status refetch and
-recovery demand; Delete's includes the ordinary cues, notices, removal, read fence, row error and removal callback
-before another request proceeds.
+lane. A per-session claim excludes an open header or row question from competing actions on its session. Taking the
+rendered confirmation token hands its captured consent to the persistent list owner. That synchronous handler releases
+the question's claim and admits the request before yielding, awaiting, or invoking another callback; no input handler
+can enter between those steps. The existing row admission and completion paths hold queued and sending work until it
+settles. Navigation never consults these claims. Automatic selection waits on the shared set of admitted Deletes and
+rechecks it after its preference read; pending Stop work does not delay it. No second batch lock or automatic-selection
+exclusion set is needed. Stop releases its session claim when the reply settles, before its gated status refetch and
+recovery demand; the host queue still awaits that read before starting its next admitted request. Delete's completion
+includes the ordinary cues, notices, removal, read fence, row error and removal callback before another request
+proceeds.
+
+The persistent list owns header Stop, Restart and Replace requests as well as row actions. Their pending state and
+source-session errors are shared with the keyed session view, so switching views cannot cancel a request or lose its
+outcome. Stop and Restart publish their start and completion boundaries to any mounted view: detail reads spanning
+either boundary are fenced, and Restart's completion reattaches the agent terminal even after a refusal or lost reply. A
+successful reply supplies the terminal kind until a current detail read catches up. A view mounted during the request
+observes its completion, and one opened before the listing catches up can use the retained successful reply. Replace
+uses the existing shared retry identity and selects its replacement only while its source remains selected. Its inline
+YOLO questions coexist per source in the same persistent owner. Their existing exclusion signal participates in the
+common session admission and header gates, while pending-request presentation stays separate so the question's own
+answers remain enabled. An answer consumes its rendered source/token and admits the request synchronously; a refused
+admission restores only that source's question and error under a fresh opening. The page operation token remains the
+launch-versus-host-mutation exclusion, independent of session claims. Header composer openings check both exclusions
+before publishing their prefill, and the list rechecks before consuming it. Releasing a claim between the click and that
+effect cannot revive a refused opening. Only the admitted list opening retires an earlier Replace retry identity.
+
+Session-action completions have three responsibilities: settle, return and leave alone. A pending action no longer owns
+the page, so its reply cannot assume the user is still where it started. Settlement clears progress and the session
+claim, records failures, unknown outcomes or partial results, reattaches the terminal when required and requests the
+listing refresh before waiting for any returning dialog. A dialog still owed to the user returns through its ordinary
+modal admission and opening focus. Everything else stays as the user left it: focus, panels, menus, dialogs and selected
+session, apart from Replace's source-selected rule and automatic selection after Delete.
+
+Asynchronous focus in those paths uses `FocusTarget::async_script`: one evaluated script admits only focus on the
+document body or document element, or inside the surface being left, and then performs the target's ordinary focus
+action, preserving quiet tooltip behavior. It does not infer navigation intent from document focus. Explicit
+user-handler handoffs, including their deferred frames, and a returning modal's own opening focus keep their existing
+policies. Effects that close, open, focus, scroll or select something when settlement changes state must observe an
+actual visible layout or ownership change, rather than treating completion itself as permission. Other asynchronous GUI
+paths predate these rules; the TODO entry “Stop asynchronous completions from moving focus or closing things the user
+has moved on from, across the whole UI” covers them.
 
 The combined `ConfirmSlot` freezes original identities and consequence-bearing displayed facts, including the status
 annotation and displayed rename overlay. Reconciliation does not reset consent for unrelated activity or notification
@@ -1107,9 +1143,25 @@ changes. Changed drawn facts mint a replacement opening; authoritative absence p
 question. Every handler carries its rendered token, and every `DeleteGuard` and Stop no-tabs guard comes from its
 answered snapshot. Live admission can shrink visibility or mark membership but never retarget a question or strengthen
 its guard from a newer read. The modal uses the existing dialog frame, focus and scrolling facilities. Confirming-close
-focus targets the nonsequential marked count while action buttons are locked; cancellation uses the enabled toolbar menu
-button. Batch completion uses the ordinary conditional header handback before clearing marks, preserving independently
-moved focus.
+focus targets the nonsequential marked count, which remains programmatically focusable; cancellation uses the enabled
+toolbar menu button. A page-local marking-interaction revision distinguishes a batch's accepted marking from later
+gestures, including a same-session unmark and re-mark, or a fresh marked-actions menu or bulk question opened over
+unchanged marks. Those explicit opening handlers advance the same revision before publishing their surface; measurement,
+remount and question reconciliation do not. If that revision changed, the old batch leaves every current mark alone,
+even after the newer surface was cancelled. Otherwise it removes only its captured targets after all work settles.
+Automatic pruning and other batch cleanup do not count as user edits. Conditional asynchronous header handback is
+requested before that removal only when it actually removes the currently effective toolbar; hidden marks do not keep
+that toolbar mounted.
+
+Session-heading size changes use the shared ResizeObserver-backed Dioxus event, rather than count-sentence equality. A
+harmless count increment must not dismiss an unchanged row menu. A visible size transition asks captured weak session
+openings to verify their anchors; each row menu or notification list compares its toggle's current rectangle with its
+own measured placement. Only an actual difference closes that exact still-current opening. This also protects a fresh
+opening measured after the layout changed but before an older observer notification arrived. The existing row-local
+lease owns at most one measurement query and one dirty bit, shared by initial placement and later probes; a pending
+placement rechecks before publication when dirtied. Fallback placement remains pinned, and a failed verification does
+not invent movement. The registry keeps only optional probe callbacks and weak opening identities, never DOM handles or
+geometry. Other scroll, row-content, order, removal and recovery invalidation remains unchanged.
 
 Clone reuses the create form rather than a second submit path: the click builds a `CreatePrefill` snapshot of the row's
 `Session` and hands it to the SAME `CreateSessionForm`, tagged with a monotonic generation the list view mints per
@@ -1845,11 +1897,12 @@ stream error. An old terminal, or one whose kind the page does not know, builds 
 has, asks for either kind (`grid=1`), and replaces that surface with the grid component when the helm's stream notice
 says `grid`, before any data has been written to it. That swap is the compatibility path for a kind the page did not
 know or had stale, such as another client's Restart moving an old agent into a new terminal before this view's listing
-caught up. A view's own Restart does not need it: the Restart's reply names the restarted agent's kind, which the
-remount uses until a listing of the restarted run arrives, and while the Restart is in flight, if it can move the agent
-into a new terminal, the agent's spec says `pending` and its reconnect attempts mount nothing until the kind is known.
-The catch-up and its reveal, the heartbeat, detaches, banners, reconnect, resize, paste interception, the clipboard
-queue, links with their hover checks, file downloads and tunnels are shared with xterm.js terminals.
+caught up. A Restart requested by this client does not need it: the retained reply names the restarted agent's kind,
+which the remount uses until a listing of the restarted run arrives, including after switching away and back. While the
+Restart is in flight, if it can move the agent into a new terminal, the agent's spec says `pending` and its reconnect
+attempts mount nothing until the kind is known. The catch-up and its reveal, the heartbeat, detaches, banners,
+reconnect, resize, paste interception, the clipboard queue, links with their hover checks, file downloads and tunnels
+are shared with xterm.js terminals.
 
 The grid's deterministic fit is Farhelm's documented formula (`grid-terminal.js`, "Size"): the character measured by an
 offscreen canvas, the proposal cell rounded through device pixels at a fixed 80-column, 24-row reference, and the room

@@ -11,6 +11,8 @@ import {
 } from "./helpers/fleet";
 import { requireHelmBuild } from "./helpers/helm-build";
 import { attachSession, waitForTermText } from "./helpers/term";
+import { routeGate } from "./helpers/route-gate";
+import { drainedRoute } from "./helpers/drained-route";
 
 type Surface = "row" | "header";
 
@@ -144,6 +146,19 @@ for (const surface of ["row", "header"] as const) {
         const text = ended ? "Close 1 terminal tab?" : "Stop the agent and close 1 terminal tab?";
         await expect(prompt.locator(".confirm-consequence")).toHaveText(text);
         await expect(answer).toBeFocused();
+        if (surface === "header") {
+          // The open header question already owns this session, even before
+          // its answer dispatches a request. A row action cannot bypass it.
+          const source = page.locator(`.session-row[data-session-id="${session.id}"]`);
+          await openRowMenu(source);
+          await expect(source.locator(".session-row-stop")).toBeDisabled();
+          await expect(source.locator(".session-row-delete")).toBeDisabled();
+          await source.locator(".session-row-stop").dispatchEvent("click");
+          await source.locator(".session-row-delete").dispatchEvent("click");
+          await expect(prompt.locator(".confirm-consequence")).toHaveText(text);
+          expect(sent).toEqual([]);
+          await source.locator(".session-row-menu").click();
+        }
         await prompt.getByRole("button", { name: "Cancel", exact: true }).click();
         await expect(prompt).toHaveCount(0);
         expect(sent).toEqual([]);
@@ -212,40 +227,64 @@ for (const surface of ["row", "header"] as const) {
     });
   }
 
-  /** Skipping a tabs question authorizes precisely the visible state and uses
-   * the same notice handling as an answered question. The notice is injected
-   * after a real Stop; unreadable-host cleanup itself has Rust coverage. */
-  test(`${surface} Stop skips the tabs question and displays a partial notice`, async ({ page, request }) => {
+  /** A partial Stop result must outlive the source view. Hold the real Stop's
+   * reply across two switches, then report its injected failed-tab notice on
+   * the row and on the remounted header. Unreadable-host cleanup has Rust coverage. */
+  test(`${surface} Stop keeps its partial notice after switching sessions`, async ({ page, request }) => {
     const previous = await readPreferences(request);
     const session = await createSession(request, { title: `stop-notice-${surface}` });
+    let other: Awaited<ReturnType<typeof createSession>> | undefined;
+    const held = routeGate();
+    let disposeRoute: (() => Promise<void>) | undefined;
     let bodyFailed = false;
     try {
+      other = await createSession(request, { title: `stop-notice-other-${surface}` });
       await patchPreferences(request, { skip_session_confirmations: true });
       await prepare(page, request, session.id, false, 1);
       await load(page, session.id);
       await expect(page.locator(".tab-strip .tab-slot")).toHaveCount(1);
       const build = requireHelmBuild(await request.get("/api/hosts"), "Stop notice");
       const sent: StopGuards[] = [];
-      await page.route((url) => url.pathname === `/api/sessions/${encodeURIComponent(session.id)}/stop`, async (route) => {
+      let replyHeld = false;
+      disposeRoute = await drainedRoute(page, (url) => url.pathname === `/api/sessions/${encodeURIComponent(session.id)}/stop`, async (route) => {
         sent.push(route.request().postDataJSON());
         const stopped = await route.fetch({ maxRetries: 0 });
         expect(stopped.ok(), await stopped.text()).toBe(true);
+        replyHeld = true;
+        await held.wait();
         await route.fulfill({ status: 200, headers: { "content-type": "application/json", "x-farhelm-build": build },
           json: { notice: "Terminal 2 could not be closed: host unavailable" } });
       });
       await clickStop(page, session.id, surface);
-      const error = surface === "header" ? page.locator(".stop-error")
-        : page.locator(`.session-row[data-session-id="${session.id}"] .action-error`);
-      await expect(error).toContainText("Terminal 2 could not be closed: host unavailable");
+      await expect.poll(() => replyHeld, { message: "the real Stop finished, but this page has not received its outcome" }).toBe(true);
+      const source = page.locator(`.session-row[data-session-id="${session.id}"]`);
+      const sibling = page.locator(`.session-row[data-session-id="${other.id}"]`);
+      await expect(source).toContainText("Stopping…");
+      await sibling.locator(".session-row-open").click();
+      await expect(sibling).toHaveAttribute("data-session-selected", "true");
+      await waitForTermText(page, "FAKE-AGENT READY");
+      await source.locator(".session-row-open").click();
+      await expect(page.locator(".session-topbar")).toContainText("Stopping…");
+      await expect(page.locator(".header-stop")).toBeDisabled();
+      await page.locator(".header-stop").dispatchEvent("click");
+      await sibling.locator(".session-row-open").click();
+      await expect(sibling).toHaveAttribute("data-session-selected", "true");
+      held.release();
+      await expect(source.locator(".action-error")).toContainText("Terminal 2 could not be closed: host unavailable");
+      await expect(sibling).toHaveAttribute("data-session-selected", "true");
+      await source.locator(".session-row-open").click();
+      await expect(page.locator(".stop-error")).toContainText("Terminal 2 could not be closed: host unavailable");
       expect(sent).toEqual([{ refuse_if_tabs_open: false, refuse_if_agent_running: false }]);
       await expect(question(page, session.id, surface)).toHaveCount(0);
       await expect(page.locator(`.session-row[data-session-id="${session.id}"]`)).toBeVisible();
       expect((await listSessions(request)).sessions.find((entry) => entry.id === session.id)?.status?.state).toBe("exited");
     } catch (error) { bodyFailed = true; throw error; }
     finally {
+      held.release();
       await cleanupOwnedSteps(bodyFailed, [
-        ["routes", () => page.unrouteAll({ behavior: "wait" })],
+        ["held Stop route", () => disposeRoute?.()],
         ["owned session", () => cleanupSession(request, session.id)],
+        ["other session", () => other && cleanupSession(request, other.id)],
         ["session confirmations", () => patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null })],
       ]);
     }

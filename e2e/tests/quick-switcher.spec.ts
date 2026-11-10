@@ -11,6 +11,8 @@ import {
 import { attachSession, waitForTermText, terminalInput, AGENT_TERMINAL_INPUT, programInput, type InputFrame, recordInput } from "./helpers/term";
 import { waitForSessionReady } from "./helpers/terminal-readiness";
 import { routeGate } from "./helpers/route-gate";
+import { drainedRoute } from "./helpers/drained-route";
+import { requireHelmBuild } from "./helpers/helm-build";
 import { disposeRelease, expectConnectedRelease, observeModalRelease, type ModalReleaseObservation } from "./helpers/modal-release";
 
 /** Override the platform before the shortcut and xterm both classify it. */
@@ -226,8 +228,9 @@ test("a jump to a hidden host resets the selector to ALL", async ({ page, reques
   }
 });
 
-/** A refused pick preserves the selected session, host filter and focus. */
-test("a busy pick leaves navigation and the host filter untouched", async ({ page, request }) => {
+/** A held Stop must not refuse a switcher pick on another host. Reset the
+ * filters only after that accepted pick, while the original request stays held. */
+test("a pending Stop permits a quick-switcher pick outside the current filters", async ({ page, request }) => {
   await platform(page, false);
   const local = await localHostId(request);
   const remote = (await listHosts(request)).find((host) => host.id !== local);
@@ -235,6 +238,7 @@ test("a busy pick leaves navigation and the host filter untouched", async ({ pag
   const owned: string[] = [];
   const gate = routeGate();
   let requested = false;
+  let disposeRoute: (() => Promise<void>) | undefined;
   try {
     const first = await createSession(request, { title: `busy-origin-${Date.now()}`, host: local });
     owned.push(first.id);
@@ -249,16 +253,17 @@ test("a busy pick leaves navigation and the host filter untouched", async ({ pag
       { timeout: 20_000, message: "the busy-navigation origin must match the live-only segment" }).toBe("idle");
     await chooseStatus(page, "Idle");
     const row = page.locator(`[data-session-id="${first.id}"]`);
-    await page.route(`**/api/sessions/${encodeURIComponent(first.id)}/stop`, async (route) => {
+    const build = requireHelmBuild(await request.get("/api/hosts"), "held Stop refusal");
+    disposeRoute = await drainedRoute(page, `**/api/sessions/${encodeURIComponent(first.id)}/stop`, async (route) => {
       requested = true;
       await gate.wait();
-      await route.fulfill({ status: 503, body: "fixture operation refused" });
+      await route.fulfill({ status: 503, headers: { "x-farhelm-build": build }, body: "fixture operation refused" });
     });
     await openRowMenu(row);
     await row.locator(".session-row-stop").click();
     await expect.poll(() => requested).toBe(true);
-    // Stop holds the row navigation lock, independently of New's global lock.
-    await expect(row.locator(".session-row-open")).toBeDisabled();
+    await expect(row.locator(".session-row-open")).toBeEnabled();
+    await expect(row).toContainText("Stopping…");
     const terminal = terminalInput(page);
     await terminal.focus();
     await expect(terminal).toBeFocused();
@@ -267,15 +272,16 @@ test("a busy pick leaves navigation and the host filter untouched", async ({ pag
     await expect(dialog.locator(".quick-switcher-results").getByRole("option")).toHaveCount(1);
     await page.keyboard.press("Enter");
     await expect(dialog).toHaveCount(0);
-    await expect(terminal).toBeFocused();
-    await expect(hostChoice(page, String(local))).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByRole("radio", { name: "Idle", exact: true })).toBeChecked();
-    await expect(row).toHaveAttribute("data-session-selected", "true");
+    await expect(hostChoice(page)).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("radio", { name: "All", exact: true })).toBeChecked();
+    await expect(page.locator(`[data-session-id="${other.id}"]`)).toHaveAttribute("data-session-selected", "true");
+    await expect(row).toContainText("Stopping…");
     gate.release();
-    await expect(row.locator(".session-row-open")).toBeEnabled();
+    await expect(row.locator(".action-error")).toContainText("fixture operation refused");
+    await expect(page.locator(`[data-session-id="${other.id}"]`)).toHaveAttribute("data-session-selected", "true");
   } finally {
     gate.release();
-    await page.unrouteAll({ behavior: "wait" });
+    await disposeRoute?.();
     for (const id of owned.reverse()) await cleanupSession(request, id);
   }
 });

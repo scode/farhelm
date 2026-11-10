@@ -12,11 +12,13 @@
 //! Rendered-content producers retain only their last small render key and one
 //! weak pending snapshot, captured before edits and delivered after publication.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::{Rc, Weak};
 
 use dioxus::prelude::*;
+
+use crate::menu_panel::{PanelPlacement, measurement_outcome};
 
 /// Independent row orders; a host permutation need not move any session row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,6 +112,10 @@ impl Entry {
 struct Anchor {
     row: String,
     ready: Box<dyn Fn() -> bool>,
+    // Geometry stays with the row's existing measurement owner. This optional
+    // callback asks that owner whether its published coordinates still agree;
+    // the registry cannot infer movement from a delayed observer notification.
+    probe: Option<Box<dyn Fn(OpeningTicket)>>,
 }
 
 /// Retire just this row's binding when its measurement scope disappears.
@@ -374,6 +380,18 @@ impl Registration {
         row: String,
         ready: impl Fn() -> bool + 'static,
     ) -> Option<AnchorLease> {
+        self.bind_anchor_with_probe(row, ready, None)
+    }
+
+    /// Opt a measurement lifetime into row-owned geometry verification.
+    /// Ordinary bindings retain their existing behavior. The callback receives
+    /// only an exact weak ticket, so a later query cannot close a fresh opening.
+    fn bind_anchor_with_probe(
+        &self,
+        row: String,
+        ready: impl Fn() -> bool + 'static,
+        probe: Option<Box<dyn Fn(OpeningTicket)>>,
+    ) -> Option<AnchorLease> {
         let entry = self.entry()?;
         if (entry.current_row)().as_deref() != Some(row.as_str()) || self.entry().is_none() {
             return None;
@@ -381,6 +399,7 @@ impl Registration {
         let anchor = Rc::new(Anchor {
             row,
             ready: Box::new(ready),
+            probe,
         });
         *entry.anchor.borrow_mut() = Rc::downgrade(&anchor);
         Some(AnchorLease {
@@ -419,30 +438,74 @@ impl Registration {
 }
 
 impl OpeningTicket {
+    /// Share exact admission across close, probe and async worker checks.
+    /// Reader callbacks run outside registry/binding borrows; registration and
+    /// binding are rechecked after them before either callback can be returned.
+    /// Retaining the owner through delivery preserves dispatch's registry
+    /// lifetime even when an admission callback drops its last external owner.
+    fn current_binding(&self) -> Option<(MovementOwner, Rc<Entry>, Rc<Anchor>)> {
+        let owner = self.owner.upgrade().map(MovementOwner)?;
+        let anchor = self.anchor.upgrade()?;
+        let entry = owner
+            .snapshot()
+            .into_iter()
+            .find_map(|(id, entry)| (id == self.registration).then_some(entry))?;
+        if owner.contains(self.registration)
+            && entry.has_anchor(&self.anchor)
+            && (entry.current_row)().as_deref() == Some(anchor.row.as_str())
+            && entry.has_anchor(&self.anchor)
+            && owner.contains(self.registration)
+            && (anchor.ready)()
+            && owner.contains(self.registration)
+            && entry.has_anchor(&self.anchor)
+            && (entry.current_row)().as_deref() == Some(anchor.row.as_str())
+            && entry.has_anchor(&self.anchor)
+            && owner.contains(self.registration)
+        {
+            Some((owner, entry, anchor))
+        } else {
+            None
+        }
+    }
+
+    /// Admit work only while the captured measurement lifetime still owns the
+    /// live row. Async geometry queries recheck this after every await, before
+    /// reading or changing row-local placement.
+    pub(crate) fn is_current(&self) -> bool {
+        self.current_binding().is_some()
+    }
+
+    /// Ask the same captured row to verify its coordinates. No registry borrow
+    /// survives invoking the callback, which may synchronously retire the row.
+    fn probe_if_current(self) {
+        let Some((_owner, _entry, anchor)) = self.current_binding() else {
+            return;
+        };
+        if let Some(probe) = &anchor.probe {
+            probe(self);
+        }
+    }
+
     /// Invoke the original closer only while this exact opening remains live.
     /// Recheck after the admission callback because it can retire a component;
     /// no closer is called while registry or binding storage is borrowed.
     pub(crate) fn close_if_current(self) {
-        let Some(owner) = self.owner.upgrade().map(MovementOwner) else {
-            return;
-        };
-        let Some(anchor) = self.anchor.upgrade() else {
-            return;
-        };
-        owner.dispatch(|id, entry| {
-            id == self.registration
-                && entry.has_anchor(&self.anchor)
-                && (entry.current_row)().as_deref() == Some(anchor.row.as_str())
-                && entry.has_anchor(&self.anchor)
-                && (anchor.ready)()
-                && entry.has_anchor(&self.anchor)
-                && (entry.current_row)().as_deref() == Some(anchor.row.as_str())
-                && entry.has_anchor(&self.anchor)
-        });
+        if let Some((_owner, entry, _anchor)) = self.current_binding() {
+            (entry.close)();
+        }
     }
 }
 
 impl MovementTicket {
+    /// Verify actual anchor movement instead of treating an observer pulse as
+    /// proof. Each opt-in row owns its query and existing placement; unmeasured
+    /// and fallback handling therefore stay outside the registry.
+    pub(crate) fn probe_if_current(self) {
+        for ticket in self.0 {
+            ticket.probe_if_current();
+        }
+    }
+
     /// Union weak openings, not render events. A registration has one current
     /// binding, so its newest captured opening supersedes its older ticket.
     /// Insert by registration id within each owner to retain delivery order
@@ -512,6 +575,171 @@ pub(crate) fn use_anchor_binding(
     });
     use_callback(move |()| {
         *lease.borrow_mut() = registration.bind_anchor(row.clone(), move || ready.call(()));
+    })
+}
+
+/// Coalesce requests within one row's measurement lifetime, including its
+/// initial query. A resize during that query dirties the same worker instead
+/// of starting a second query or allowing an unverified rect to paint.
+#[derive(Default)]
+struct AnchorQueryState {
+    running: Cell<bool>,
+    dirty: Cell<bool>,
+}
+
+impl AnchorQueryState {
+    /// Return true only when this request must start the sole worker.
+    fn request(&self) -> bool {
+        self.dirty.set(true);
+        !self.running.replace(true)
+    }
+
+    /// The next query covers every request received before it starts.
+    fn begin_query(&self) {
+        self.dirty.set(false);
+    }
+
+    /// A pulse received during the query requires a fresh read. Otherwise the
+    /// worker becomes idle synchronously, so the next pulse can start it.
+    fn query_finished(&self) -> bool {
+        if self.dirty.get() {
+            true
+        } else {
+            self.running.set(false);
+            false
+        }
+    }
+}
+
+/// The row-local runner borrows the caller's existing geometry and generation.
+/// Registry entries hold only a weak callback into this state; they never gain
+/// a DOM handle, placement cache or ownership of the measurement task.
+struct MeasuredAnchor {
+    query: AnchorQueryState,
+    handle: Signal<Option<Rc<MountedData>>>,
+    placement: Signal<PanelPlacement>,
+    generation: Signal<u64>,
+    started_generation: u64,
+}
+
+impl MeasuredAnchor {
+    /// Initial measurement and later verification share the one-query bound.
+    /// Pending openings requery before publishing; measured openings preserve
+    /// their coordinates on query failure and close only for an observed move.
+    fn request(self: Rc<Self>, ticket: OpeningTicket) {
+        if !ticket.is_current() {
+            return;
+        }
+        let initial = match *self.placement.peek() {
+            PanelPlacement::Unmeasured => true,
+            PanelPlacement::Measured(_) => false,
+            PanelPlacement::Fallback => return,
+        };
+        if !self.query.request() {
+            return;
+        }
+        spawn(async move {
+            loop {
+                // Heading reports spawn from their surviving list owner.
+                // Its queued task can outlive this row before the first poll,
+                // so weak admission must precede even reading a Signal handle.
+                if !ticket.is_current() {
+                    self.query.running.set(false);
+                    self.query.dirty.set(false);
+                    return;
+                }
+                if self.started_generation != *self.generation.peek() {
+                    self.query.running.set(false);
+                    self.query.dirty.set(false);
+                    return;
+                }
+                self.query.begin_query();
+                let handle = self.handle.peek().clone();
+                let measured = match handle {
+                    Some(handle) => handle.get_client_rect().await.ok(),
+                    None => None,
+                };
+                // The lease also rejects a remount's replacement measurement
+                // when its existing opening generation happens to be equal.
+                if !ticket.is_current() || self.started_generation != *self.generation.peek() {
+                    self.query.running.set(false);
+                    self.query.dirty.set(false);
+                    return;
+                }
+                if self.query.query_finished() {
+                    continue;
+                }
+                if initial {
+                    if let Some(outcome) = measurement_outcome(
+                        self.started_generation,
+                        *self.generation.peek(),
+                        measured,
+                    ) {
+                        let mut placement = self.placement;
+                        placement.set(outcome);
+                    }
+                } else {
+                    let placement = *self.placement.peek();
+                    if let (PanelPlacement::Measured(expected), Some(actual)) =
+                        (placement, measured)
+                        && expected != actual
+                    {
+                        ticket.close_if_current();
+                    }
+                }
+                return;
+            }
+        });
+    }
+}
+
+/// Opt a row's existing measurement start into delayed geometry verification.
+///
+/// The caller still owns its mounted handle, placement, fresh-open generation
+/// and start timing. A new lease gets fresh query state, so close/reopen and
+/// remount cannot inherit an old dirty pulse. A pending query repeats before
+/// publishing when dirtied; nothing visible has to close in that case. Later
+/// probes compare against the rect already used by this exact opening, which
+/// preserves a fresh opening measured after an older heading resize.
+/// Session rows and bells mount only from a successful listing; recovery
+/// closes retained root slots before publishing rows. Requiring admission at
+/// initial start therefore rejects stale failed-listing events, while a real
+/// recovery/remount measurement still starts at its existing boundary.
+pub(crate) fn use_measured_anchor_binding(
+    registration: Registration,
+    row: String,
+    ready: Callback<(), bool>,
+    handle: Signal<Option<Rc<MountedData>>>,
+    placement: Signal<PanelPlacement>,
+    generation: Signal<u64>,
+) -> Callback<()> {
+    let scope = use_hook(|| Rc::new(RefCell::new(None::<(AnchorLease, Rc<MeasuredAnchor>)>)));
+    let on_drop = scope.clone();
+    use_drop(move || {
+        on_drop.borrow_mut().take();
+    });
+    use_callback(move |()| {
+        let measurement = Rc::new(MeasuredAnchor {
+            query: AnchorQueryState::default(),
+            handle,
+            placement,
+            generation,
+            started_generation: *generation.peek(),
+        });
+        let weak = Rc::downgrade(&measurement);
+        let lease = registration.bind_anchor_with_probe(
+            row.clone(),
+            move || ready.call(()),
+            Some(Box::new(move |ticket| {
+                if let Some(measurement) = weak.upgrade() {
+                    measurement.request(ticket);
+                }
+            })),
+        );
+        *scope.borrow_mut() = lease.map(|lease| (lease, measurement.clone()));
+        if let Some(ticket) = registration.capture_current(&row).0.into_iter().next() {
+            measurement.request(ticket);
+        }
     })
 }
 
@@ -622,6 +850,13 @@ pub(crate) fn use_registration(
 mod tests {
     use super::*;
     use std::cell::Cell;
+    use std::collections::VecDeque;
+    use std::future::Future;
+    use std::pin::Pin;
+
+    use dioxus::html::geometry::PixelsRect;
+    use dioxus::html::{MountedError, MountedResult, RenderedElementBacking};
+    use futures_channel::oneshot;
 
     /// Plain slots exercise the production callbacks without a fake renderer;
     /// a delivery counter also exposes unconditional writes to closed state.
@@ -658,6 +893,363 @@ mod tests {
         let ticket =
             owner.capture_affected(&MovedRows::new(AnchorRegion::Sessions, [row.to_owned()]));
         (!ticket.0.is_empty()).then_some(ticket)
+    }
+
+    /// Hold renderer replies independently from the production query worker.
+    /// Outstanding senders expose the one-query bound without timing sleeps;
+    /// each reply names the exact unsettled query whose result is under test.
+    #[derive(Clone, Default)]
+    struct RectQueries {
+        pending: Rc<RefCell<VecDeque<RectReply>>>,
+        calls: Rc<Cell<usize>>,
+    }
+
+    /// One renderer response remains under fixture control until its oracle is
+    /// asserted; dropping the worker is observable as a failed send.
+    type RectReply = oneshot::Sender<MountedResult<PixelsRect>>;
+
+    /// Match the renderer trait's query future without adding a test executor.
+    type RectQuery = Pin<Box<dyn Future<Output = MountedResult<PixelsRect>>>>;
+
+    impl RenderedElementBacking for RectQueries {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+
+        fn get_client_rect(&self) -> RectQuery {
+            let (sender, receiver) = oneshot::channel();
+            self.calls.set(self.calls.get() + 1);
+            self.pending.borrow_mut().push_back(sender);
+            Box::pin(async move { receiver.await.expect("fixture retains each query reply") })
+        }
+    }
+
+    /// Keep the root slot while the real hook owns measurement and placement.
+    /// The fake supplies only renderer query results, not admission decisions.
+    struct MeasuredFixture {
+        owner: MovementOwner,
+        slot: Slot,
+        registration: Registration,
+        queries: RectQueries,
+        placement: RefCell<Option<Signal<PanelPlacement>>>,
+        begin_open: RefCell<Option<Callback<()>>>,
+        mounted: Cell<bool>,
+        ancestor_scope: Cell<Option<dioxus::core::ScopeId>>,
+        parent_scope: Cell<Option<dioxus::core::ScopeId>>,
+        row_scope: Cell<Option<dioxus::core::ScopeId>>,
+    }
+
+    impl PartialEq for MeasuredFixture {
+        /// Renderer replies and opening state change inside stable root props.
+        fn eq(&self, other: &Self) -> bool {
+            std::ptr::eq(self, other)
+        }
+    }
+
+    impl MeasuredFixture {
+        /// Establish a live root opening before the first row measurement.
+        fn new() -> Rc<Self> {
+            let owner = MovementOwner::default();
+            let slot = Slot::default();
+            slot.open("row");
+            let registration = slot.register(&owner, AnchorRegion::Sessions);
+            Rc::new(Self {
+                owner,
+                slot,
+                registration,
+                queries: RectQueries::default(),
+                placement: RefCell::new(None),
+                begin_open: RefCell::new(None),
+                mounted: Cell::new(true),
+                ancestor_scope: Cell::new(None),
+                parent_scope: Cell::new(None),
+                row_scope: Cell::new(None),
+            })
+        }
+
+        /// Poll the initial production query until its controlled reply waits.
+        fn mount(self: &Rc<Self>) -> VirtualDom {
+            let mut dom = VirtualDom::new_with_props(measured_anchor_app, self.clone());
+            dom.rebuild_to_vec();
+            dom.render_immediate_to_vec();
+            assert_eq!(self.queries.pending.borrow().len(), 1);
+            assert_eq!(self.placement(&dom), PanelPlacement::Unmeasured);
+            assert_eq!(self.registration.capture_current("row").0.len(), 1);
+            dom
+        }
+
+        /// Read the real row-owned placement under its Dioxus runtime.
+        fn placement(&self, dom: &VirtualDom) -> PanelPlacement {
+            dom.in_runtime(|| *self.placement.borrow().expect("mounted placement").peek())
+        }
+
+        /// Queue from the persistent heading owner's actual component scope.
+        /// Merely entering its runtime does not provide the scope spawn needs;
+        /// keeping polling separate permits child retirement before first poll.
+        fn queue_pulse(&self, dom: &VirtualDom) {
+            dom.in_scope(self.parent_scope.get().expect("mounted parent"), || {
+                self.owner
+                    .capture_region(AnchorRegion::Sessions)
+                    .probe_if_current();
+            });
+        }
+
+        /// Render ready scope work as well as polling tasks. A placement write
+        /// dirties its row; process_events alone deliberately stops at that
+        /// boundary and would leave a later probe's query unpolled.
+        fn pulse(&self, dom: &mut VirtualDom) {
+            self.queue_pulse(dom);
+            dom.render_immediate_to_vec();
+        }
+
+        /// Finish one named pending query, then poll only work that it wakes.
+        fn reply(&self, dom: &mut VirtualDom, result: MountedResult<PixelsRect>) {
+            self.queries
+                .pending
+                .borrow_mut()
+                .pop_front()
+                .expect("the intended renderer query is pending")
+                .send(result)
+                .expect("the intended row query remains live");
+            dom.render_immediate_to_vec();
+        }
+
+        /// Revoke the old root opening before its existing fresh-open path.
+        fn reopen(&self, dom: &mut VirtualDom) {
+            self.registration.forget_anchor();
+            self.slot.open("row");
+            dom.in_scope(self.row_scope.get().expect("mounted row"), || {
+                self.begin_open.borrow().expect("mounted opener").call(())
+            });
+            dom.render_immediate_to_vec();
+        }
+    }
+
+    /// Change the list's row projection from above its surviving task owner.
+    /// The explicit prop change forces the list diff without depending on
+    /// equal-props component memoization of the fixture's mutable cells.
+    fn measured_anchor_app(fixture: Rc<MeasuredFixture>) -> Element {
+        fixture
+            .ancestor_scope
+            .set(Some(dioxus::core::current_scope_id()));
+        let mounted = fixture.mounted.get();
+        rsx! { MeasuredAnchorParent { fixture, mounted } }
+    }
+
+    /// Keep the heading's task owner while a conditional measured row retires.
+    #[component]
+    fn MeasuredAnchorParent(fixture: Rc<MeasuredFixture>, mounted: bool) -> Element {
+        fixture
+            .parent_scope
+            .set(Some(dioxus::core::current_scope_id()));
+        rsx! {
+            if mounted {
+                MeasuredAnchorRow { fixture }
+            }
+        }
+    }
+
+    /// Use the menu/bell hook and generation in a disposable child scope.
+    /// Its Signals retire with the child even when a heading-owned task waits.
+    #[component]
+    fn MeasuredAnchorRow(fixture: Rc<MeasuredFixture>) -> Element {
+        fixture
+            .row_scope
+            .set(Some(dioxus::core::current_scope_id()));
+        let queries = fixture.queries.clone();
+        let handle = use_signal(move || Some(Rc::new(MountedData::new(queries))));
+        let mut placement = use_signal(|| PanelPlacement::Unmeasured);
+        let mut generation = use_signal(|| 0_u64);
+        let ready = use_callback(|()| true);
+        let measure = use_measured_anchor_binding(
+            fixture.registration.clone(),
+            "row".into(),
+            ready,
+            handle,
+            placement,
+            generation,
+        );
+        let begin = use_callback(move |()| {
+            generation += 1;
+            placement.set(PanelPlacement::Unmeasured);
+            measure.call(());
+        });
+        fixture.placement.replace(Some(placement));
+        fixture.begin_open.replace(Some(begin));
+        use_hook(move || begin.call(()));
+        // Production presentation subscribes to placement; keep that render
+        // dependency so a reply dirties this child before a later probe runs.
+        let rendered_placement = format!("{:?}", placement());
+        rsx! { span { "{rendered_placement}" } }
+    }
+
+    /// Distinct vertical positions model a heading wrap without fabricating
+    /// row movement inside the production registry or placement owner.
+    fn anchor_rect(y: f64) -> PixelsRect {
+        PixelsRect::new((10.0, y).into(), (20.0, 20.0).into())
+    }
+
+    /// Heading pulses share the original pending query and force a fresh read
+    /// before painting. Later repeated pulses coalesce, equal coordinates keep
+    /// the popup open, and actual movement retires only the measured opening.
+    #[farhelm_testtrace::test]
+    fn measured_anchor_coalesces_pending_and_visible_heading_probes() {
+        let fixture = MeasuredFixture::new();
+        let mut dom = fixture.mount();
+        fixture.pulse(&mut dom);
+        fixture.pulse(&mut dom);
+        assert_eq!(fixture.queries.calls.get(), 1);
+        fixture.reply(&mut dom, Ok(anchor_rect(10.0)));
+        assert_eq!(fixture.placement(&dom), PanelPlacement::Unmeasured);
+        assert_eq!(fixture.queries.calls.get(), 2);
+        fixture.reply(&mut dom, Ok(anchor_rect(30.0)));
+        assert_eq!(
+            fixture.placement(&dom),
+            PanelPlacement::Measured(anchor_rect(30.0))
+        );
+        assert_eq!(fixture.slot.deliveries.get(), 0);
+
+        fixture.pulse(&mut dom);
+        fixture.pulse(&mut dom);
+        fixture.pulse(&mut dom);
+        assert_eq!(fixture.queries.calls.get(), 3);
+        assert_eq!(fixture.queries.pending.borrow().len(), 1);
+        fixture.reply(&mut dom, Ok(anchor_rect(30.0)));
+        assert_eq!(fixture.queries.calls.get(), 4);
+        fixture.reply(&mut dom, Ok(anchor_rect(30.0)));
+        assert_eq!(fixture.slot.deliveries.get(), 0);
+        fixture.pulse(&mut dom);
+        fixture.reply(&mut dom, Ok(anchor_rect(50.0)));
+        assert_eq!(fixture.slot.deliveries.get(), 1);
+    }
+
+    /// An old verification can finish after close/reopen, while a later stale
+    /// observer pulse can reach the fresh opening. Neither may close a popup
+    /// whose own measured coordinates still agree with its current toggle.
+    #[farhelm_testtrace::test]
+    fn measured_anchor_reopen_rejects_old_probe_and_preserves_fresh_coordinates() {
+        let fixture = MeasuredFixture::new();
+        let mut dom = fixture.mount();
+        fixture.reply(&mut dom, Ok(anchor_rect(10.0)));
+        fixture.pulse(&mut dom);
+        fixture.reopen(&mut dom);
+        assert_eq!(fixture.queries.pending.borrow().len(), 2);
+        fixture.reply(&mut dom, Ok(anchor_rect(30.0)));
+        assert_eq!(fixture.slot.deliveries.get(), 0);
+        assert_eq!(fixture.placement(&dom), PanelPlacement::Unmeasured);
+        fixture.reply(&mut dom, Ok(anchor_rect(30.0)));
+        fixture.pulse(&mut dom);
+        fixture.reply(&mut dom, Ok(anchor_rect(30.0)));
+        assert_eq!(fixture.slot.deliveries.get(), 0);
+        assert_eq!(
+            fixture.placement(&dom),
+            PanelPlacement::Measured(anchor_rect(30.0))
+        );
+    }
+
+    /// A heading-owned probe survives child teardown, unlike the row's own
+    /// initial measurement. Retire the child before that queued task's first
+    /// poll; weak admission must prevent any disposed Signal read or DOM query.
+    #[farhelm_testtrace::test]
+    fn measured_anchor_parent_probe_rejects_child_retired_before_first_poll() {
+        let fixture = MeasuredFixture::new();
+        let mut dom = fixture.mount();
+        fixture.reply(&mut dom, Ok(anchor_rect(10.0)));
+        let ancestor = fixture.ancestor_scope.get().expect("mounted ancestor");
+        let parent = fixture.parent_scope.get().expect("mounted parent");
+        let row = fixture.row_scope.get().expect("mounted row");
+        assert_ne!(ancestor, parent);
+        assert_ne!(parent, row);
+        assert!(dom.get_scope(row).is_some());
+        assert!(fixture.queries.pending.borrow().is_empty());
+        assert_eq!(fixture.queries.calls.get(), 1);
+
+        fixture.queue_pulse(&dom);
+        assert_eq!(fixture.queries.calls.get(), 1, "probe has not polled");
+        fixture.mounted.set(false);
+        dom.mark_dirty(ancestor);
+        // Ancestor rendering precedes the queued task: this diff retires the
+        // row's Signal storage while retaining the task's parent owner.
+        dom.render_immediate_to_vec();
+        assert!(dom.get_scope(parent).is_some());
+        assert!(dom.get_scope(row).is_none());
+        assert!(fixture.registration.capture_current("row").0.is_empty());
+        assert!(fixture.queries.pending.borrow().is_empty());
+        assert_eq!(fixture.queries.calls.get(), 1);
+        assert_eq!(fixture.slot.deliveries.get(), 0);
+    }
+
+    /// A failed verification cannot invent movement or replace a good measured
+    /// position with fallback. An initial failure retains the existing pinned
+    /// fallback, which has no row pointer for a heading resize to invalidate.
+    #[farhelm_testtrace::test]
+    fn measured_anchor_failure_preserves_measured_and_fallback_placement() {
+        let fixture = MeasuredFixture::new();
+        let mut dom = fixture.mount();
+        fixture.reply(&mut dom, Ok(anchor_rect(10.0)));
+        fixture.pulse(&mut dom);
+        fixture.reply(&mut dom, Err(MountedError::NotSupported));
+        assert_eq!(fixture.slot.deliveries.get(), 0);
+        assert_eq!(
+            fixture.placement(&dom),
+            PanelPlacement::Measured(anchor_rect(10.0))
+        );
+        fixture.reopen(&mut dom);
+        fixture.reply(&mut dom, Err(MountedError::NotSupported));
+        assert_eq!(fixture.placement(&dom), PanelPlacement::Fallback);
+        let calls = fixture.queries.calls.get();
+        fixture.pulse(&mut dom);
+        assert_eq!(fixture.queries.calls.get(), calls);
+        assert_eq!(fixture.slot.deliveries.get(), 0);
+    }
+
+    /// Probe admission has the same readiness and exact-lifetime boundary as
+    /// closing, and callbacks run outside registry borrows. A callback may
+    /// retain only its weak ticket while a query is pending; rebinding must
+    /// make that ticket inert without affecting the new opening.
+    #[farhelm_testtrace::test]
+    fn geometry_probe_admits_only_the_current_ready_opted_in_opening() {
+        let owner = MovementOwner::default();
+        let slot = Slot::default();
+        slot.open("row");
+        let registration = slot.register(&owner, AnchorRegion::Sessions);
+        let ready = Rc::new(Cell::new(true));
+        let pending = Rc::new(RefCell::new(Vec::<OpeningTicket>::new()));
+        let bind = || {
+            let ready = ready.clone();
+            let pending = pending.clone();
+            let weak_owner = Rc::downgrade(&owner.0);
+            registration
+                .bind_anchor_with_probe(
+                    "row".into(),
+                    move || ready.get(),
+                    Some(Box::new(move |ticket| {
+                        assert!(weak_owner.upgrade().unwrap().try_borrow_mut().is_ok());
+                        pending.borrow_mut().push(ticket);
+                    })),
+                )
+                .unwrap()
+        };
+        let old = bind();
+        let old_ticket = registration.capture_current("row");
+        let current = bind();
+        old_ticket.probe_if_current();
+        assert!(pending.borrow().is_empty());
+        let not_ready = registration.capture_current("row");
+        ready.set(false);
+        not_ready.probe_if_current();
+        assert!(pending.borrow().is_empty());
+        ready.set(true);
+        registration.capture_current("row").probe_if_current();
+        let ticket = pending.borrow_mut().pop().expect("current probe admitted");
+        assert!(ticket.is_current());
+        let ordinary = registration.bind_anchor("row".into(), || true).unwrap();
+        assert!(!ticket.is_current());
+        ticket.close_if_current();
+        registration.capture_current("row").probe_if_current();
+        assert!(pending.borrow().is_empty());
+        assert_eq!(slot.deliveries.get(), 0);
+        drop((old, current, ordinary));
     }
 
     /// Existing audiences and a transition-aware producer share one fixture

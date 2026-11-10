@@ -185,6 +185,7 @@ mod rename;
 mod replace;
 mod rows;
 mod sandbox_sessions;
+mod session_ops;
 mod session_view;
 mod settings;
 mod skew;
@@ -1923,9 +1924,6 @@ fn AppBody() -> Element {
     // A keyed SessionView unmounts on navigation; unresolved Replace belongs
     // to the page so retrying from another surface still names the same create.
     use_context_provider(|| list::ReplaceIntent(Signal::new(None)));
-    use_context_provider(|| {
-        list::ReplaceYoloQuestions(Signal::new(std::collections::HashSet::new()))
-    });
     // Each pending Replace has one clock across its row and selected session.
     // The request task clears its entry on reply or cancellation, independently
     // of the longer-lived retry identity above.
@@ -1941,10 +1939,8 @@ fn AppBody() -> Element {
     // A single one-shot bridge lets the keyed session view request the list's
     // existing clone composer without introducing a registry or context.
     let prefill_request = use_signal(|| None::<HeaderPrefillRequest>);
-    // The same kind of one-shot bridge for the header's delete button: the
-    // header confirms, the list performs the delete (see
-    // `list::HeaderDeleteRequest` for why it is not the header's own call).
-    let header_delete = use_signal(|| None::<list::HeaderDeleteRequest>);
+    // Accepted lifecycle requests use the persistent list's synchronous
+    // SessionOps callback; only composer-opening requests need this mailbox.
     // Header mutations owe the persistent sidebar an attended read even
     // while a build mismatch has withdrawn its background reader.
     let header_refresh = use_signal(|| false);
@@ -1952,15 +1948,15 @@ fn AppBody() -> Element {
     // is the only one) and both panes read it: the row and the header show
     // the same in-progress state until the supervisor's reply lands.
     let deleting = use_signal(std::collections::HashSet::<String>::new);
-    // The cross-pane write gate lives HERE because both panes claim or
-    // consult it (see ops.rs's module doc): the shared token covers the
-    // list's create/host mutations and the view's restart,
-    // and `row_ops` is the list's live per-row-operation count the view's
-    // `PaneGate` refuses claims against. Owning them above both panes is
-    // what makes "neither pane writes under the other" a structural
-    // property instead of a per-pane convention.
+    // Launches and registry mutations share their existing token. Session
+    // questions, request state and outcomes have independent per-session claims
+    // above both siblings, so switching the keyed view loses no accepted work.
     let page_ops = ops::use_op_lock();
-    let row_ops = use_signal(|| 0_u32);
+    let session_ops = use_context_provider(crate::session_ops::SessionOps::new);
+    // The persistent Replace controller owns question tokens, while every
+    // session action observes their exclusion through the same page state.
+    // Keep the existing context as an alias, not another independently held set.
+    use_context_provider(|| list::ReplaceYoloQuestions(session_ops.questions));
     // The selected id as a memo so `ListView` can consult it at reply
     // time and track it in effects (a plain prop would be a stale copy).
     let selected_id = use_memo(move || {
@@ -2148,7 +2144,6 @@ fn AppBody() -> Element {
                                 }
                             },
                             ops: page_ops,
-                            row_ops,
                             // Selection reconciliation: a session the LIST
                             // removed by a successful delete must not stay selected — the
                             // right pane would keep a terminal/detail surface
@@ -2161,7 +2156,6 @@ fn AppBody() -> Element {
                             },
                             layout_epoch,
                             prefill_request,
-                            header_delete,
                             header_refresh,
                             deleting,
                         }
@@ -2220,15 +2214,10 @@ fn AppBody() -> Element {
                                 SessionView {
                                     key: "{session.id.raw()}",
                                     session: session.clone(),
-                                    gate: ops::PaneGate::new(page_ops, row_ops),
-                                    on_replaced: move |replacement: Session| {
-                                        open_session_title.set(Some((replacement.id.raw().to_owned(), replacement.title.raw().to_owned())));
-                                        current.set(Some(replacement));
-                                    },
+                                    composer_ops: page_ops,
                                     selection: current,
                                     open_session_title,
                                     prefill_request,
-                                    header_delete,
                                     header_refresh,
                                     deleting,
                                 }

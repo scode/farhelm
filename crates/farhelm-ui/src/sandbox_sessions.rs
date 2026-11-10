@@ -123,7 +123,7 @@ pub(crate) async fn suspend_asks(
 /// Another viewer may suspend the resource while this viewer's question is
 /// open; answering Suspend must never turn that external change into Resume.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Operation {
+pub(crate) enum Operation {
     Suspend,
     Resume,
     StopAndSuspend,
@@ -144,7 +144,7 @@ impl Operation {
     /// Dispatch captured consent without consulting a refreshed host phase.
     /// Stop's guards still cover the selected session; the host endpoint owns
     /// current resource admission and reports incompatible state normally.
-    async fn execute(
+    pub(crate) async fn execute(
         self,
         base: &str,
         host: HostId,
@@ -163,14 +163,17 @@ impl Operation {
 }
 
 /// Reuse the existing host lifecycle endpoints for a session-facing control.
-/// The caller supplies its existing page claim, so header and row actions
-/// cannot mutate under one another while the activity read or request waits.
+/// The caller supplies its session claim and the existing launch/host token.
+/// Both are held during activity reads and consent, then transfer together to
+/// ListView before an accepted request can yield. Navigation can discard this
+/// surface without cancelling the request or releasing its host exclusion.
 #[component]
 pub(crate) fn Controls(
     host: Host,
     session: Session,
     disabled: bool,
-    claim: Callback<(), Option<crate::ops::OpGuard>>,
+    mut ops: crate::ops::OpLock,
+    claim: Callback<(), Option<crate::session_ops::SessionGuard>>,
     #[props(default)] stop_choice: bool,
     #[props(default)] buttons: Option<Callback<ControlButtons, Element>>,
     on_done: EventHandler<()>,
@@ -185,42 +188,46 @@ pub(crate) fn Controls(
     let hosts = use_context::<Signal<crate::hosts::HostsRead>>();
     let mut error = use_signal(|| None::<String>);
     let mut question = use_signal(|| None::<Operation>);
-    let mut held = use_signal(|| None::<crate::ops::OpGuard>);
+    let mut held = use_signal(|| None::<crate::session_ops::SessionGuard>);
+    let operations = use_context::<crate::session_ops::SessionOps>();
     let suspended = matches!(host.state, HostPhase::Suspended { .. });
     let changing = matches!(host.state, HostPhase::TensorlakeChanging { .. });
     let host_id = host.id;
-    let execute_base = base.clone();
     let execute_session = session.clone();
     let execute = use_callback(move |operation: Operation| {
         question.set(None);
-        busy.set(true);
-        let base = execute_base.clone();
         let session = execute_session.clone();
-        spawn(async move {
-            let result = operation
-                .execute(
-                    &base,
-                    host_id,
-                    session.id.raw(),
+        let guard = held.write().take();
+        if let Some(guard) = guard {
+            if operation == Operation::StopAndSuspend {
+                operations.send(crate::session_ops::HeaderAction::Stop(
+                    session.clone(),
                     session.tabs.is_empty(),
                     session.status.has_ended(),
-                )
-                .await;
-            error.set(result.err());
-            busy.set(false);
-            held.set(None);
-            on_done.call(());
-        });
+                    true,
+                    guard,
+                ));
+            } else {
+                operations.send(crate::session_ops::HeaderAction::Sandbox(
+                    session, host_id, operation, guard,
+                ));
+            }
+        }
+        busy.set(false);
+        on_done.call(());
     });
     let stop_asks = !skip && !session.tabs.is_empty();
     let start = use_callback(move |stop: bool| {
         if disabled || changing || *busy.peek() || question.peek().is_some() {
             return;
         }
+        let Some(host_guard) = ops.claim_guard() else {
+            return;
+        };
         let Some(guard) = claim.call(()) else {
             return;
         };
-        held.set(Some(guard));
+        held.set(Some(guard.with_host_guard(host_guard)));
         error.set(None);
         let operation = Operation::requested(stop, suspended);
         if operation == Operation::Resume {
@@ -244,7 +251,20 @@ pub(crate) fn Controls(
             if let Some(operation) = question() {
                 span { class: "sandbox-session-question header-confirm", role: "alertdialog", tabindex: "-1",
                     aria_label: if operation == Operation::StopAndSuspend { "Stop and suspend sandbox?" } else { "Suspend sandbox?" },
-                    onmounted: move |_| crate::focus_confirmation(".sandbox-session-question .btn-danger", ".sandbox-session-question .btn-neutral"),
+                    onmounted: move |_| {
+                        if operation == Operation::StopAndSuspend {
+                            // Activity is read asynchronously. This Stop question
+                            // must not take input from a session opened meanwhile.
+                            let focus = crate::modal_dialog::FocusTarget::new(
+                                ".sandbox-session-question .btn-danger:not(:disabled)",
+                                Some(".sandbox-session-question .btn-neutral"),
+                                false,
+                            ).async_script(None);
+                            document::eval(&format!("requestAnimationFrame(() => {{ {focus} }});"));
+                        } else {
+                            crate::focus_confirmation(".sandbox-session-question .btn-danger", ".sandbox-session-question .btn-neutral");
+                        }
+                    },
                     onkeydown: move |event: KeyboardEvent| {
                         if event.key() == Key::Escape {
                             event.prevent_default(); event.stop_propagation(); question.set(None); held.set(None);
@@ -267,18 +287,18 @@ pub(crate) fn Controls(
                 }
             } else if let Some(buttons) = buttons {
                 {buttons.call(ControlButtons {
-                    resume: suspended, disabled: disabled || busy() || changing, start,
+                    resume: suspended, disabled: disabled || busy() || changing || ops.busy(), start,
                 })}
             } else {
                 button { r#type: "button", class: if suspended { "btn btn-primary" } else { "btn btn-neutral" },
-                    disabled: disabled || busy() || changing,
+                    disabled: disabled || busy() || changing || ops.busy(),
                     "data-tooltip": if suspended { "Resume: start this session's sandbox again; its frozen processes continue" } else { "Suspend: freeze every process in this session's sandbox until Resume; files remain and snapshot storage still bills" },
                     onclick: move |_| start.call(false),
                     crate::icons::SandboxPause { resume: suspended }
                     if suspended { "Resume" } else { "Suspend" }
                 }
                 if stop_choice && !suspended {
-                    button { r#type: "button", class: "btn btn-danger", disabled: disabled || busy() || changing,
+                    button { r#type: "button", class: "btn btn-danger", disabled: disabled || busy() || changing || ops.busy(),
                         "data-tooltip": "Stop and suspend: stop this session's agent and close its terminal tabs, then suspend the whole sandbox",
                         onclick: move |_| start.call(true), "Stop and suspend" }
                 }

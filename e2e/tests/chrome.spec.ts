@@ -9,7 +9,7 @@
  * The three declared levels must produce distinct computed backgrounds with
  * the right elements grouped onto each one. Keyboard focus uses accent on
  * neutral surfaces and inverse on selection, staying away from mouse clicks. A selected
- * identity must remain readable when a confirmation disables navigation. Kept
+ * identity must remain readable when Rename disables its row's navigation. Kept
  * small and deterministic on purpose — this file is not trying to be a
  * general CSS regression harness, just a witness for the two claims nothing
  * else would catch.
@@ -17,7 +17,7 @@
 import { expect, test } from "./helpers/evidence";
 import { resolveToken } from "./helpers/color";
 import { type Locator, type Page } from "@playwright/test";
-import { cleanupSession, createSession, openRowMenu, patchPreferences, pinAutoSelect, readPreferences } from "./helpers/fleet";
+import { cleanupSession, createSession, openRowMenu, pinAutoSelect } from "./helpers/fleet";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 function row(page: Page, id: string) {
@@ -80,21 +80,19 @@ test("the three-level surface ladder renders distinct, correctly grouped levels"
   }
 });
 
-/** A confirmation must disable activation without dimming selected identity below AA.
+/** Rename must disable activation without dimming selected identity below AA.
  * The native button contains the title and status; opacity on that ancestor
  * blends every inverse value into the periwinkle, even when each computed
- * foreground is correct. Exercise the real confirmation rather than assigning
+ * foreground is correct. Exercise the real editor rather than assigning
  * a disabled property or testing only the title's color.
  */
-test("selected session identity stays legible while confirmation disables navigation", async ({ page, request }) => {
-  const previous = await readPreferences(request);
+test("selected session identity stays legible while Rename disables its open button", async ({ page, request }) => {
   const session = await createSession(request, {
     title: `chrome-disabled-${Date.now()}`,
     cwd: "/tmp",
     invocation: "sleep 300",
   });
   try {
-    await patchPreferences(request, { skip_session_confirmations: false });
     await pinAutoSelect(page, session.id);
     await page.goto("/");
     const target = row(page, session.id);
@@ -102,18 +100,22 @@ test("selected session identity stays legible while confirmation disables naviga
     await expect(target).toHaveAttribute("data-session-selected", "true");
     await expect(target).toHaveAttribute("data-session-stale", "false");
     await openRowMenu(target);
-    await target.locator(".session-row-delete").click();
-    await expect(target.locator(".confirm-consequence")).toBeVisible();
+    await target.locator(".session-row-rename").click();
+    const rename = page.locator(".rename-dialog");
+    await expect(rename.locator(".rename-input")).toBeFocused();
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(target.locator(".session-row-open")).toBeDisabled();
     await expect(target.locator(".session-row-open")).toHaveCSS("opacity", "1");
     await expect(target.locator(".session-title")).toHaveCSS("color", await resolveToken(page, "--on-accent-dim"));
-    await expect(target).toHaveCSS("background-color", await resolveToken(page, "--accent-fill-hover"));
-    await target.locator(".confirm-cancel").click();
+    // Rename closes the row menu, so the selected identity uses its resting
+    // solid fill rather than the menu-owner tint. Both inverse roles stay AA.
+    await expect(target).toHaveCSS("background-color", await resolveToken(page, "--accent-fill"));
+    await rename.locator(".rename-cancel").click();
+    await expect(rename).toHaveCount(0);
     await expect(target.locator(".session-row-open")).toBeEnabled();
     await expect(target.locator(".session-title")).toHaveCSS("color", await resolveToken(page, "--on-fill"));
   } finally {
     await cleanupSession(request, session.id);
-    await patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null });
   }
 });
 

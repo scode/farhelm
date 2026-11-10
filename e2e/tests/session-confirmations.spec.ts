@@ -304,8 +304,11 @@ test("skip session confirmations walks row header interrupted card and tab actio
     owned.add(source.id);
     for (const surface of ["row", "header"] as const) {
       await expect(row(source.id)).toBeVisible();
+      // Both surfaces replace the selected source in this opt-out traversal.
+      // Replacing an unselected row deliberately leaves the current pane alone.
+      await row(source.id).locator(".session-row-open").click();
+      await expect(row(source.id)).toHaveAttribute("data-session-selected", "true");
       if (surface === "row") await openRowMenu(row(source.id));
-      else await row(source.id).locator(".session-row-open").click();
       const replacement = page.waitForResponse((reply) => reply.request().method() === "POST"
         && new URL(reply.url()).pathname === `/api/sessions/${encodeURIComponent(source.id)}/replace`);
       await (surface === "row" ? row(source.id).locator(".session-row-replace") : page.locator(".header-replace")).click();

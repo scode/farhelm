@@ -18,7 +18,7 @@ use crate::modal_dialog::{
     DialogActions, DialogFocus, DialogFooter, DialogHandle, DialogHeader, ModalDialog,
     RecoveryDelay, RecoveryFocus, ScrollRegion,
 };
-use crate::ops::{ConfirmSlot, ConfirmToken, PaneGate, use_confirm_slot};
+use crate::ops::{ConfirmSlot, ConfirmToken, OpLock, use_confirm_slot};
 use crate::peer::display_peer;
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::{ApiBase, Host, HostId, HostPhase};
@@ -815,7 +815,7 @@ fn HostTrashReader(
 pub(super) fn TrashControl(
     hosts: Signal<HostsRead>,
     revision: Signal<TrashRefresh>,
-    gate: PaneGate,
+    gate: OpLock,
     mut actions: Signal<Option<TrashActions>>,
     #[props(default)] trigger_hidden: bool,
 ) -> Element {

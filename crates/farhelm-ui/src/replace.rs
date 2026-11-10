@@ -1,9 +1,9 @@
 //! Plain Replace's retry identity, pending status and YOLO continuation, shared by both panes.
 //!
-//! Admission, tasks and successful selection remain with the surface: sidebar
-//! rows can run independently, whereas the header owns a page operation guard.
-//! This controller owns the rules between those boundaries. A submitted source
-//! and its destructive precondition are snapshots of consent, never live reads.
+//! Admission, tasks and successful selection belong to the persistent list;
+//! header actions forward into those same row cores. This controller owns the
+//! rules between those boundaries. A submitted source and its destructive
+//! precondition are snapshots of consent, never live reads.
 
 use std::collections::{HashMap, HashSet};
 
@@ -11,15 +11,15 @@ use dioxus::prelude::*;
 
 use crate::api::{self, RefusalOutcome};
 use crate::launch_progress::{LaunchAction, PendingLaunch};
-use crate::ops::{ConfirmSlot, ConfirmToken};
+use crate::ops::{ConfirmSlots, ConfirmToken};
 use crate::yolo_confirm::{YoloAsk, YoloReason};
 use crate::{DeleteGuard, HostId, Session};
 
 /// The exact Replace refused by the helm, including the consent it continues.
 ///
 /// A restarted source or a new terminal tab must not broaden an earlier
-/// nothing-alive answer. The key also matters independently of the source:
-/// A → B → A can leave an old A question beside a newer A retry identity.
+/// nothing-alive answer. Retry identity can move independently when another
+/// source starts work; the question keeps the key its refusal actually named.
 #[derive(Clone, PartialEq)]
 pub(crate) struct PendingReplace {
     key: String,
@@ -31,15 +31,13 @@ pub(crate) struct PendingReplace {
 /// One local opening of a Replace question: the shared prompt mechanism's
 /// token, whose key is the captured operation the question displays.
 ///
-/// The opening number comes from the controller's [`ConfirmSlot`], like
+/// The opening number comes from the controller's [`ConfirmSlots`], like
 /// every other prompt in the app; Replace has no counter of its own. Every
-/// answer names the token its render drew, on the sidebar and in the session
-/// header alike, so a queued answer behind Cancel, or behind a reopen of the
-/// same request, cannot dispatch: the reopen is a new opening even when its
-/// [`PendingReplace`] is equal. (The header used to answer whatever question
-/// was current instead; that was reversed on 2026-10-21 so both surfaces
-/// answer only what they showed.) Read what the question shows with
-/// [`ConfirmToken::key`].
+/// answer names the token its render drew, so a queued answer behind Cancel,
+/// or behind a reopen of the same request, cannot dispatch: the reopen is a
+/// new opening even when its [`PendingReplace`] is equal. Header requests use
+/// this same persistent question rather than creating one in the keyed detail
+/// view. Read its consent with [`ConfirmToken::key`].
 pub(crate) type ReplaceYoloQuestion = ConfirmToken<PendingReplace>;
 
 /// Approval to continue one captured Replace, optionally after marking its host.
@@ -50,7 +48,7 @@ pub(crate) struct ReplaceAnswer {
 }
 
 /// An admitted operation whose retry reservation was published synchronously.
-/// Keep this value in the surface-owned task; creating its future alone must
+/// Keep this value in the persistent list task; creating its future alone must
 /// not postpone reserving the source until the executor first polls it.
 pub(crate) struct ReplaceAttempt {
     source: Session,
@@ -62,8 +60,11 @@ pub(crate) struct ReplaceAttempt {
 /// The requests all Replace surfaces are waiting on, keyed by their source.
 ///
 /// The page owns this signal so a sidebar request and the open session show
-/// the same start time. It is presentation only: existing row and lifecycle
-/// guards still decide which requests can run, independently of this map.
+/// the same start time. Both plain Replace and Replace with also defer an
+/// absence-driven removal of the selected source while its request is here:
+/// the backend may remove that source before its successful reply reaches the
+/// selection callback. Explicit user selection remains independent. This map
+/// does not admit requests; existing row and lifecycle guards still do that.
 #[derive(Clone, Copy)]
 pub(crate) struct ReplaceProgress(pub(crate) Signal<HashMap<String, PendingLaunch>>);
 
@@ -84,9 +85,9 @@ fn pending_progress(source: &Session) -> PendingLaunch {
 
 /// Clear only this request's status when its future ends, including cancellation.
 ///
-/// A session view can unmount while a request is pending. The page-owned map
-/// outlives that task, so relying on the normal reply path would leave a spinner
-/// behind. The captured value also prevents an old task clearing a later run.
+/// Navigation leaves the persistent request running, but dropping its future
+/// must still clear the page-owned status. The captured value also prevents
+/// an old task clearing a later run.
 struct ReplaceProgressGuard {
     progress: ReplaceProgress,
     source: String,
@@ -115,73 +116,44 @@ pub(crate) enum ReplaceResult {
     QuestionHandled,
 }
 
-/// Existing surface differences, not independently configurable behaviors.
-/// Sidebar consumes either answer before dispatch; the session surface keeps a
-/// permanent-answer question mounted until its host preference write succeeds.
-#[derive(Clone, Copy, PartialEq)]
-enum QuestionPolicy {
-    Sidebar,
-    Session,
-}
-
-/// Per-surface Replace state over page-owned retry and question-exclusion slots.
+/// Persistent-list Replace state over page-owned retry and question-exclusion slots.
 ///
-/// Copying this handle does not create another state owner. Components create
-/// the local question slot and error signal, and release the current
-/// question's exclusion on unmount; neither unmount nor navigation discards
-/// the page's unresolved retry identity.
+/// Copying this handle does not create another state owner. The list creates
+/// the question lanes and their errors, and releases their exclusions on
+/// unmount; neither unmount nor navigation discards the page's unresolved
+/// retry identity.
 ///
-/// The question is a [`ConfirmSlot`] keyed by the [`PendingReplace`] it
-/// displays, with no payload: the slot alone mints each opening's identity
-/// and decides whether an answer's token still names the open question. The
-/// exclusion, the error text and the retry key live beside it because they
-/// follow rules the slot does not know (a duplicate source refuses to open,
-/// a permanent answer may keep the question up, a cancel ends one key).
+/// Each source has an existing [`ConfirmSlots`] lane keyed by the
+/// [`PendingReplace`] it displays. Independent replies cannot replace a
+/// question the user has not answered. The lane mints opening identity, while
+/// the shared exclusion set makes that question visible to all session action
+/// handlers. Errors stay source-local too. Retry identity remains the existing
+/// single page slot; adding question lanes does not introduce a request queue.
 #[derive(Clone, Copy)]
 pub(crate) struct ReplaceController {
     retry: Signal<Option<(String, Option<String>)>>,
     exclusions: Signal<HashSet<String>>,
     progress: ReplaceProgress,
-    question: ConfirmSlot<PendingReplace>,
-    error: Signal<Option<String>>,
-    policy: QuestionPolicy,
+    question: ConfirmSlots<String, PendingReplace>,
+    errors: Signal<HashMap<String, String>>,
 }
 
 impl ReplaceController {
-    /// Bind a sidebar's local question to the existing page-wide slots.
-    /// Its token-bound answers consume before either kind of continuation.
+    /// Bind the persistent list's question lanes to the existing page state.
+    /// Token-bound answers consume their lane before either continuation.
     pub(crate) fn sidebar(
         retry: Signal<Option<(String, Option<String>)>>,
         exclusions: Signal<HashSet<String>>,
         progress: ReplaceProgress,
-        question: ConfirmSlot<PendingReplace>,
-        error: Signal<Option<String>>,
+        question: ConfirmSlots<String, PendingReplace>,
+        errors: Signal<HashMap<String, String>>,
     ) -> Self {
         Self {
             retry,
             exclusions,
             progress,
             question,
-            error,
-            policy: QuestionPolicy::Sidebar,
-        }
-    }
-
-    /// Bind a session surface without changing its permanent-answer mount.
-    /// Its handlers answer only the opening their render drew, and keep that
-    /// question through a host-setting write, including a failed write's
-    /// busy-to-idle recovery. The surface's own `replacing` flag refuses
-    /// Cancel while that run is in flight, before the disabled render too.
-    pub(crate) fn session(
-        retry: Signal<Option<(String, Option<String>)>>,
-        exclusions: Signal<HashSet<String>>,
-        progress: ReplaceProgress,
-        question: ConfirmSlot<PendingReplace>,
-        error: Signal<Option<String>>,
-    ) -> Self {
-        Self {
-            policy: QuestionPolicy::Session,
-            ..Self::sidebar(retry, exclusions, progress, question, error)
+            errors,
         }
     }
 
@@ -206,31 +178,30 @@ impl ReplaceController {
         }
     }
 
-    /// The open question's token, read reactively while rendering its
-    /// confirmation. The render moves it into every handler it draws.
-    pub(crate) fn question(self) -> Option<ReplaceYoloQuestion> {
-        self.question.current()
+    /// Render unanswered sources in stable order, with each lane's drawn token.
+    /// Reply arrival order cannot replace another source's unanswered question.
+    /// Every handler captures the returned token rather than rereading it later.
+    pub(crate) fn questions(self) -> Vec<ReplaceYoloQuestion> {
+        let mut sources = self.question.open_lanes();
+        sources.sort();
+        sources
+            .into_iter()
+            .filter_map(|source| self.question.current(&source))
+            .collect()
     }
 
     /// The open question's token without subscribing, for tests that name an
     /// opening no render drew. Test-only on purpose: a handler that could
     /// fetch the live token could answer whatever is open at click time;
-    /// handlers test their rendered opening with [`Self::is_open`] instead.
+    /// handlers pass their rendered opening to [`Self::answer_sidebar`] instead.
     #[cfg(test)]
-    fn current_question(self) -> Option<ReplaceYoloQuestion> {
-        self.question.peek_token()
+    fn current_question(self, source: &str) -> Option<ReplaceYoloQuestion> {
+        self.question.peek_token(source)
     }
 
-    /// Whether `question`, the opening a handler's render drew, is still the
-    /// open one, without subscribing. For a handler's early exit before it
-    /// takes a lifecycle claim; the answer itself re-checks.
-    pub(crate) fn is_open(self, question: &ReplaceYoloQuestion) -> bool {
-        self.question.is_current(question)
-    }
-
-    /// Read the host-setting failure associated with the local question.
-    pub(crate) fn error(self) -> Option<String> {
-        self.error.read().clone()
+    /// Read only this source's host-setting failure beside its question.
+    pub(crate) fn error(self, source: &str) -> Option<String> {
+        self.errors.read().get(source).cloned()
     }
 
     /// Retire an ordinary cancelled prompt only when its source owns the slot.
@@ -325,57 +296,60 @@ impl ReplaceController {
         }
     }
 
-    /// Admit a source before replacing the local opening and its failure text.
-    /// A duplicate must leave both existing questions and their errors intact.
+    /// Open an unoccupied source lane without changing any existing answer.
+    /// A duplicate source must preserve its token and failure text; independent
+    /// sources may ask concurrently and retain their own admission exclusion.
     fn open_question(mut self, pending: PendingReplace, error: Option<String>) -> bool {
-        if !self
-            .exclusions
-            .write()
-            .insert(pending.source.id.raw().to_owned())
-        {
+        let source = pending.source.id.raw().to_owned();
+        if self.question.peek_key(source.as_str()).is_some() {
             return false;
         }
-        self.release_question();
-        self.error.set(error);
-        // Replaces any open question; its token, and every handler still
-        // carrying it, stops matching even if `pending` is equal.
-        self.question.open(pending, ());
+        if !self.exclusions.write().insert(source.clone()) {
+            return false;
+        }
+        if let Some(error) = error {
+            self.errors.write().insert(source.clone(), error);
+        } else {
+            self.errors.write().remove(&source);
+        }
+        self.question.open(source, pending, ());
         true
     }
 
-    /// Release only this surface's currently open question's source exclusion.
-    /// Used when a newer question replaces the open one, when the session
-    /// surface's host save succeeds, and on unmount; it never retires a retry
-    /// identity. Answers release through `take_question` instead.
+    /// Release this controller's question lanes when its owner unmounts.
+    /// Other controllers' source exclusions and the page's retry identity stay
+    /// intact. Individual answers use `take_question` instead.
     pub(crate) fn release_question(mut self) {
-        if let Some(pending) = self.question.peek_key() {
-            self.exclusions.write().remove(pending.source.id.raw());
+        for source in self.question.open_lanes() {
+            self.exclusions.write().remove(&source);
+            self.errors.write().remove(&source);
         }
+        self.question.retain(|_| false);
     }
 
     /// Consume exactly one opening; stale handlers leave a newer question alone.
     fn take_question(mut self, question: &ReplaceYoloQuestion) -> bool {
-        if self.question.take(question).is_none() {
+        let source = question.key().source.id.raw();
+        if self.question.take(source, question).is_none() {
             return false;
         }
         // The token matched, so the question just closed was this one and
         // its source is the exclusion to give back.
-        self.exclusions
-            .write()
-            .remove(question.key().source.id.raw());
-        self.error.set(None);
+        self.exclusions.write().remove(source);
+        self.errors.write().remove(source);
         true
     }
 
-    /// Answer a rendered sidebar opening only after row admission succeeds.
-    /// Admission refusal preserves the prompt; admitted-but-stale answers undo
-    /// their row admission. A hostless permanent answer is never dispatched.
+    /// Transfer only the rendered question's exclusion into synchronous admission.
+    /// Taking the matching token releases its source before `admit` checks the
+    /// common session guard, without an await or another event between them.
+    /// Refusal restores the captured question and error under a fresh opening;
+    /// stale answers and hostless permanent answers change nothing.
     pub(crate) fn answer_sidebar(
         self,
         question: &ReplaceYoloQuestion,
         stop_asking: bool,
         admit: impl FnOnce() -> bool,
-        release: impl FnOnce(),
     ) -> Option<ReplaceAnswer> {
         let pending = question.key().clone();
         let stop_asking = if stop_asking {
@@ -383,11 +357,12 @@ impl ReplaceController {
         } else {
             None
         };
-        if !admit() {
-            return None;
-        }
+        let previous_error = self.errors.peek().get(pending.source.id.raw()).cloned();
         if !self.take_question(question) {
-            release();
+            return None;
+        }
+        if !admit() {
+            self.open_question(pending, previous_error);
             return None;
         }
         Some(ReplaceAnswer {
@@ -396,42 +371,8 @@ impl ReplaceController {
         })
     }
 
-    /// Answer the session question `question` names, after its lifecycle guard
-    /// was obtained: `None`, changing nothing, unless that exact opening is
-    /// still the open one. Permanent answers leave it mounted until the host
-    /// save succeeds; the surface must refuse Cancel while its Replace runs
-    /// so a failed save can still show its reason. Its hostless permanent
-    /// button is not offered, but retains the old no-save continuation if
-    /// invoked rather than adding a new refusal here.
-    pub(crate) fn answer_session(
-        mut self,
-        question: &ReplaceYoloQuestion,
-        stop_asking: bool,
-    ) -> Option<ReplaceAnswer> {
-        if !self.is_open(question) {
-            return None;
-        }
-        let pending = question.key().clone();
-        let stop_asking = if stop_asking {
-            pending
-                .ask
-                .host
-                .map(|host| (host, pending.ask.host_name.clone()))
-        } else {
-            self.take_question(question);
-            None
-        };
-        self.error.set(None);
-        Some(ReplaceAnswer {
-            pending,
-            stop_asking,
-        })
-    }
-
-    /// Cancel the rendered question and only its exact retry key. Both
-    /// surfaces' Cancel buttons use it; a stale Cancel changes nothing.
-    /// The session surface must first refuse Cancel while its own Replace
-    /// runs: permanent answers keep the question mounted for save errors.
+    /// Cancel the rendered question and only its exact retry key.
+    /// A stale Cancel leaves a later opening and its retry identity untouched.
     pub(crate) fn cancel_question(self, question: &ReplaceYoloQuestion) {
         if self.take_question(question) {
             let pending = question.key();
@@ -439,41 +380,34 @@ impl ReplaceController {
         }
     }
 
-    /// Apply a completed permanent-answer save without moving surface timing.
-    /// Sidebar has already consumed its question; session keeps it until this
-    /// point. A failed sidebar save may reopen only while its local slot is empty.
-    fn host_saved(mut self, pending: PendingReplace, result: Result<(), String>) -> bool {
+    /// Return failed permanent consent through whichever owner can still show it.
+    /// Answers consume their question before saving the host preference. A failed
+    /// save reopens it only if its source lane is empty and exclusion permits it;
+    /// otherwise its ordinary source outcome must carry the reason. Neither a
+    /// newer question nor its error may be replaced by this late failure.
+    fn host_saved(
+        self,
+        pending: PendingReplace,
+        result: Result<(), String>,
+    ) -> Result<(), ReplaceResult> {
         match result {
-            Ok(()) => {
-                if self.policy == QuestionPolicy::Session {
-                    // Closes whatever is open rather than a token: the save
-                    // carries no opening, and this is the same unconditional
-                    // close the session surface has always done here. Only
-                    // this surface's own Replace run opens its question, and
-                    // the session view starts no second run while this one
-                    // (which is doing the save) is in flight, so what is open
-                    // is the question being answered.
-                    self.release_question();
-                    self.question.clear();
-                }
-                true
-            }
+            Ok(()) => Ok(()),
             Err(reason) => {
-                match self.policy {
-                    QuestionPolicy::Sidebar if self.question.peek_key().is_none() => {
-                        self.open_question(pending, Some(reason));
-                    }
-                    QuestionPolicy::Sidebar => {}
-                    QuestionPolicy::Session => self.error.set(Some(reason)),
+                if self.question.peek_key(pending.source.id.raw()).is_none()
+                    && self.open_question(pending, Some(reason.clone()))
+                {
+                    Err(ReplaceResult::QuestionHandled)
+                } else {
+                    Err(ReplaceResult::Refused(reason))
                 }
-                false
             }
         }
     }
 
     /// Settle one endpoint refusal and decide whether its question represents it.
-    /// Duplicate-source suppression is intentionally silent in the sidebar, while
-    /// the header retains its ordinary refusal text when another pane owns it.
+    /// A source's existing question and error survive a duplicate refusal.
+    /// If no new question can be represented, the caller still receives its
+    /// ordinary row/header refusal rather than silently losing that result.
     fn refused(
         self,
         source: Session,
@@ -510,8 +444,7 @@ impl ReplaceController {
                     guard,
                 },
                 None,
-            ) || self.policy == QuestionPolicy::Sidebar
-            {
+            ) {
                 return ReplaceResult::QuestionHandled;
             }
         }
@@ -535,8 +468,8 @@ impl ReplaceController {
         }) = answer
         {
             let result = crate::yolo_confirm::stop_asking(base, host, &name).await;
-            if !self.host_saved(pending, result) {
-                return ReplaceResult::QuestionHandled;
+            if let Err(outcome) = self.host_saved(pending, result) {
+                return outcome;
             }
         }
         let id = source.id.raw();
@@ -552,7 +485,9 @@ impl ReplaceController {
         };
         let progress = self.start_progress(&source);
         let result = api::replace_session(base, id, &key, guard, allow_yolo).await;
-        // End the status before any callback changes the selected session.
+        // End the status immediately before returning to the selection callback.
+        // No await separates this removal from that callback: a fleet read must
+        // not retire the selected source in the middle of this handoff.
         drop(progress);
         match result {
             Ok((session, notice)) => {
@@ -566,16 +501,20 @@ impl ReplaceController {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
 
     use super::*;
-    use crate::ops::use_confirm_slot;
+    use crate::ops::use_confirm_slots;
+    use crate::session_ops::SessionOps;
 
     std::thread_local! {
         static CONTROLLERS: Cell<Option<(ReplaceController, ReplaceController)>> = const { Cell::new(None) };
+        static OPERATIONS: Cell<Option<SessionOps>> = const { Cell::new(None) };
     }
 
-    /// Give both surfaces their real shared identity/exclusion and local questions.
+    /// Give two list controllers shared identity/exclusion and independent questions.
+    /// Production has one persistent list; the second controller lets tests
+    /// exercise late replies and competing ownership without copying its rules.
     /// The VirtualDom owns the signals throughout every assertion; no second
     /// implementation of the controller's state machine is used by these tests.
     fn with_controllers(test: impl FnOnce(ReplaceController, ReplaceController)) {
@@ -583,31 +522,33 @@ mod tests {
         /// Their signals belong to the same scope but their questions stay local.
         fn app() -> Element {
             let retry = use_signal(|| None);
-            let exclusions = use_signal(HashSet::new);
+            let operations = use_hook(SessionOps::new);
+            let exclusions = operations.questions;
             let progress = ReplaceProgress(use_signal(HashMap::new));
             let sidebar = ReplaceController::sidebar(
                 retry,
                 exclusions,
                 progress,
-                use_confirm_slot(),
-                use_signal(|| None),
+                use_confirm_slots(),
+                use_signal(HashMap::new),
             );
-            let session = ReplaceController::session(
+            let other = ReplaceController::sidebar(
                 retry,
                 exclusions,
                 progress,
-                use_confirm_slot(),
-                use_signal(|| None),
+                use_confirm_slots(),
+                use_signal(HashMap::new),
             );
-            CONTROLLERS.with(|cell| cell.set(Some((sidebar, session))));
+            CONTROLLERS.with(|cell| cell.set(Some((sidebar, other))));
+            OPERATIONS.with(|cell| cell.set(Some(operations)));
             rsx! {}
         }
         let mut dom = VirtualDom::new(app);
         dom.rebuild_in_place();
-        let (sidebar, session) = CONTROLLERS
+        let (sidebar, other) = CONTROLLERS
             .with(Cell::get)
             .expect("both controllers mounted");
-        dom.in_runtime(|| test(sidebar, session));
+        dom.in_runtime(|| test(sidebar, other));
     }
 
     /// A stable source snapshot isolates consent/identity decisions from listing IO.
@@ -717,14 +658,15 @@ mod tests {
         });
     }
 
-    /// An old A question may remain while B then a new A owns retry identity.
-    /// Cancelling it must release its question exclusion without cancelling that
-    /// newer key; ordinary prompt cancellation still owns the whole source slot.
+    /// Exact-key retirement is independent of the action admission boundary.
+    /// Inject a later reservation directly: cancelling the captured question
+    /// must preserve it, even though common UI admission refuses a new same-source
+    /// action while that question is open. Ordinary cancellation owns the source.
     #[farhelm_testtrace::test]
     fn old_question_cancellation_does_not_cancel_a_new_same_source_retry() {
         with_controllers(|sidebar, header| {
             assert!(sidebar.open_question(pending("A", "a1"), None));
-            let old = sidebar.current_question().unwrap();
+            let old = sidebar.current_question("A").unwrap();
             header.prepare(source("B"), DeleteGuard::NothingAlive, None);
             header.prepare(source("A"), DeleteGuard::NothingAlive, None);
             header.publish_key("A", "a2");
@@ -754,18 +696,18 @@ mod tests {
             assert!(header.retry.peek().is_some());
             sidebar.select_source("B");
             assert!(header.retry.peek().is_none());
-            assert!(sidebar.current_question().is_some());
+            assert!(sidebar.current_question("A").is_some());
             header.prepare(source("B"), DeleteGuard::NothingAlive, None);
             sidebar.cancel_all();
             assert!(header.retry.peek().is_none());
-            assert!(sidebar.current_question().is_some());
+            assert!(sidebar.current_question("A").is_some());
             assert!(sidebar.exclusions.peek().contains("A"));
         });
     }
 
-    /// Source exclusion is independent of key and local question replacement.
-    /// Rejecting a duplicate changes neither pane's question/error. A different
-    /// source remains usable, and releasing one pane leaves the other's ownership.
+    /// Every source keeps its own unanswered question and failure text. Opening
+    /// another lane cannot discard its result; a duplicate source is refused
+    /// across owners, and unmount releases only this controller's lanes.
     #[farhelm_testtrace::test]
     fn question_exclusion_preserves_existing_owners_and_failure_text() {
         with_controllers(|sidebar, header| {
@@ -773,24 +715,35 @@ mod tests {
             assert!(header.open_question(pending("B", "b1"), Some("header reason".to_owned())));
             assert!(!sidebar.open_question(pending("B", "b2"), None));
             assert_eq!(
-                sidebar.current_question().unwrap().key().source.id.raw(),
+                sidebar.current_question("A").unwrap().key().source.id.raw(),
                 "A"
             );
-            assert_eq!(sidebar.error().as_deref(), Some("old reason"));
-            assert_eq!(header.error().as_deref(), Some("header reason"));
+            assert_eq!(sidebar.error("A").as_deref(), Some("old reason"));
+            assert_eq!(header.error("B").as_deref(), Some("header reason"));
             assert!(sidebar.open_question(pending("C", "c1"), None));
-            assert!(!header.exclusions.peek().contains("A"));
+            assert!(header.exclusions.peek().contains("A"));
             assert!(header.exclusions.peek().contains("B"));
             assert!(header.exclusions.peek().contains("C"));
+            assert_eq!(
+                sidebar
+                    .questions()
+                    .iter()
+                    .map(|question| question.key().source.id.raw().to_owned())
+                    .collect::<Vec<_>>(),
+                ["A", "C"]
+            );
+            assert_eq!(sidebar.error("A").as_deref(), Some("old reason"));
+            assert!(sidebar.error("C").is_none());
             sidebar.release_question();
+            assert!(!header.exclusions.peek().contains("A"));
             assert!(!header.exclusions.peek().contains("C"));
             assert!(header.exclusions.peek().contains("B"));
         });
     }
 
-    /// Sidebar answer admission precedes consuming its rendered opening. Cancel
-    /// followed by either answer in one event burst sends nothing and rolls back
-    /// any admission; an old same-source opening cannot consume a later one.
+    /// Only a matching token can release a question for synchronous admission.
+    /// Cancel and stale answers never enter admission; a refused current answer
+    /// restores its exact consent and error under a new, independently fenced token.
     #[farhelm_testtrace::test]
     fn cancelled_or_stale_sidebar_answers_dispatch_nothing() {
         with_controllers(|sidebar, _| {
@@ -802,41 +755,42 @@ mod tests {
             let release = || held.set(held.get() - 1);
             for permanent in [false, true] {
                 assert!(sidebar.open_question(pending("A", "a1"), None));
-                let old = sidebar.current_question().unwrap();
+                let old = sidebar.current_question("A").unwrap();
                 sidebar.cancel_question(&old);
                 assert!(
-                    sidebar.current_question().is_none(),
+                    sidebar.current_question("A").is_none(),
                     "premise: Cancel consumed it"
                 );
-                assert!(
-                    sidebar
-                        .answer_sidebar(&old, permanent, admit, release)
-                        .is_none()
-                );
+                assert!(sidebar.answer_sidebar(&old, permanent, admit).is_none());
                 assert_eq!(held.get(), 0);
                 assert!(sidebar.open_question(pending("A", "a1"), Some("reason".to_owned())));
-                assert!(
-                    sidebar
-                        .answer_sidebar(&old, permanent, admit, release)
-                        .is_none()
-                );
-                let current = sidebar.current_question().unwrap();
+                assert!(sidebar.answer_sidebar(&old, permanent, admit).is_none());
+                let current = sidebar.current_question("A").unwrap();
                 assert!(
                     old != current && old.key() == current.key(),
                     "premise: the same request reopened under a new opening"
                 );
+                sidebar.cancel_question(&old);
+                assert!(sidebar.current_question("A").as_ref() == Some(&current));
+                assert!(sidebar.exclusions.peek().contains("A"));
+                assert_eq!(sidebar.error("A").as_deref(), Some("reason"));
                 assert!(
                     sidebar
-                        .answer_sidebar(&current, permanent, || false, release)
+                        .answer_sidebar(&current, permanent, || false)
                         .is_none()
                 );
-                assert_eq!(sidebar.error().as_deref(), Some("reason"));
+                assert_eq!(sidebar.error("A").as_deref(), Some("reason"));
+                let restored = sidebar.current_question("A").unwrap();
+                assert!(restored != current && restored.key() == current.key());
+                sidebar.cancel_question(&current);
+                assert!(sidebar.current_question("A").as_ref() == Some(&restored));
                 let answer = sidebar
-                    .answer_sidebar(&current, permanent, admit, release)
+                    .answer_sidebar(&restored, permanent, admit)
                     .expect("current answer dispatches");
-                assert!(sidebar.current_question().is_none());
+                assert!(sidebar.current_question("A").is_none());
                 assert!(!sidebar.exclusions.peek().contains("A"));
                 assert_eq!(answer.pending.guard, DeleteGuard::NothingAlive);
+                assert_eq!(answer.pending.key, "a1");
                 assert_eq!(
                     answer.stop_asking,
                     permanent.then(|| (7, "build box".to_owned()))
@@ -847,131 +801,136 @@ mod tests {
             let mut hostless = pending("A", "a3");
             hostless.ask.host = None;
             assert!(sidebar.open_question(hostless, None));
-            let question = sidebar.current_question().unwrap();
+            let question = sidebar.current_question("A").unwrap();
+            assert!(sidebar.answer_sidebar(&question, true, admit).is_none());
+            assert_eq!(held.get(), 0);
+            assert!(sidebar.current_question("A").is_some());
+        });
+    }
+
+    /// A rendered answer hands its actual question exclusion to the common
+    /// session guard before dispatch. A stale answer must never call admission
+    /// or release the continuing request, and B's question stays untouched.
+    #[farhelm_testtrace::test]
+    fn own_answer_transfers_question_to_common_session_claim() {
+        with_controllers(|sidebar, _| {
+            let operations = OPERATIONS.with(Cell::get).unwrap();
+            assert!(sidebar.open_question(pending("A", "a1"), None));
+            assert!(sidebar.open_question(pending("B", "b1"), Some("B reason".to_owned())));
+            let question = sidebar.current_question("A").unwrap();
+            let other = sidebar.current_question("B").unwrap();
+            assert!(operations.claim("A").is_none());
+            assert!(operations.claim("B").is_none());
+            let bystander = operations.claim("C").expect("unrelated action can proceed");
+            let held = RefCell::new(None);
+            let answer = sidebar.answer_sidebar(&question, false, || {
+                *held.borrow_mut() = operations.claim("A");
+                held.borrow().is_some()
+            });
+            assert!(
+                answer.is_some(),
+                "the answer must not refuse its own question"
+            );
+            assert!(sidebar.current_question("A").is_none());
+            assert!(!operations.questions.peek().contains("A"));
+            assert!(operations.busy_now("A"), "the request now owns admission");
+            assert!(operations.claim("A").is_none());
             assert!(
                 sidebar
-                    .answer_sidebar(&question, true, admit, release)
+                    .answer_sidebar(&question, false, || panic!("stale answer admitted"))
                     .is_none()
             );
-            assert_eq!(held.get(), 0);
-            assert!(sidebar.current_question().is_some());
+            sidebar.cancel_question(&question);
+            assert!(
+                operations.busy_now("A"),
+                "stale Cancel cannot release a request"
+            );
+            assert!(sidebar.current_question("B").as_ref() == Some(&other));
+            assert_eq!(sidebar.error("B").as_deref(), Some("B reason"));
+            drop(held.borrow_mut().take());
+            assert!(!operations.busy_now("A"));
+            assert!(operations.busy_now("B"));
+            assert!(operations.busy_now("C"));
+            drop(bystander);
         });
     }
 
-    /// Permanent answers preserve each surface's existing mount and focus timing.
-    /// Sidebar consumes before the write and may reopen only an empty slot;
-    /// header stays mounted/excluded through failure and hides only after success.
+    /// A host-save failure restores its source lane even while another source
+    /// asks its own question. It preserves the other lane's token and error;
+    /// a successful save leaves only the answered lane closed.
     #[farhelm_testtrace::test]
-    fn permanent_answer_policy_preserves_the_host_save_boundary() {
-        with_controllers(|sidebar, header| {
+    fn permanent_answer_failure_reopens_its_source_beside_another_question() {
+        with_controllers(|sidebar, _| {
             assert!(sidebar.open_question(pending("A", "a1"), None));
-            let question = sidebar.current_question().unwrap();
-            let answer = sidebar
-                .answer_sidebar(&question, true, || true, || {})
-                .unwrap();
+            let question = sidebar.current_question("A").unwrap();
+            assert!(sidebar.exclusions.peek().contains("A"));
+            let answer = sidebar.answer_sidebar(&question, true, || true).unwrap();
             assert!(
-                sidebar.current_question().is_none(),
+                sidebar.current_question("A").is_none(),
                 "sidebar is down while save waits"
             );
-            assert!(!sidebar.host_saved(answer.pending.clone(), Err("save failed".to_owned())));
-            assert_eq!(sidebar.error().as_deref(), Some("save failed"));
-            let question = sidebar.current_question().unwrap();
+            assert!(matches!(
+                sidebar.host_saved(answer.pending.clone(), Err("save failed".to_owned())),
+                Err(ReplaceResult::QuestionHandled)
+            ));
+            assert_eq!(sidebar.error("A").as_deref(), Some("save failed"));
+            let question = sidebar.current_question("A").unwrap();
+            assert_eq!(question.key().source.id.raw(), "A");
+            assert_eq!(question.key().key, "a1");
+            assert_eq!(question.key().guard, DeleteGuard::NothingAlive);
+            assert!(sidebar.exclusions.peek().contains("A"));
+            let answer = sidebar.answer_sidebar(&question, true, || true).unwrap();
+            assert!(sidebar.open_question(pending("C", "c1"), Some("newer failure".to_owned())));
+            let newer = sidebar.current_question("C").unwrap();
+            assert!(matches!(
+                sidebar.host_saved(answer.pending, Err("late failure".to_owned())),
+                Err(ReplaceResult::QuestionHandled)
+            ));
+            assert!(sidebar.current_question("C").as_ref() == Some(&newer));
+            assert_eq!(sidebar.error("C").as_deref(), Some("newer failure"));
+            assert_eq!(sidebar.error("A").as_deref(), Some("late failure"));
+            assert!(sidebar.exclusions.peek().contains("C"));
+
+            let question = sidebar.current_question("C").unwrap();
+            let answer = sidebar.answer_sidebar(&question, true, || true).unwrap();
+            assert!(sidebar.current_question("C").is_none());
+            assert!(sidebar.host_saved(answer.pending, Ok(())).is_ok());
+            assert!(sidebar.current_question("C").is_none());
+            assert!(!sidebar.exclusions.peek().contains("C"));
+            assert!(sidebar.current_question("A").is_some());
+        });
+    }
+
+    /// An empty local slot is insufficient if another controller owns the
+    /// failed source's question exclusion. The late save must return a visible
+    /// refusal rather than claim a question reopened when admission rejected it.
+    #[farhelm_testtrace::test]
+    fn permanent_answer_failure_reports_a_refused_question_reopen() {
+        with_controllers(|sidebar, other| {
+            assert!(sidebar.open_question(pending("A", "a1"), None));
+            let old = sidebar.current_question("A").unwrap();
             let answer = sidebar
-                .answer_sidebar(&question, true, || true, || {})
-                .unwrap();
-            assert!(sidebar.open_question(pending("C", "c1"), None));
-            assert!(!sidebar.host_saved(answer.pending, Err("late failure".to_owned())));
-            assert_eq!(
-                sidebar.current_question().unwrap().key().source.id.raw(),
-                "C"
-            );
-            assert!(
-                sidebar.error().is_none(),
-                "late failure never replaces a newer question"
-            );
-
-            assert!(header.open_question(pending("B", "b1"), None));
-            let question = header.current_question().unwrap();
-            let answer = header.answer_session(&question, true).unwrap();
-            assert!(
-                header.current_question().as_ref() == Some(&question),
-                "header stays mounted while save waits"
-            );
-            assert!(header.exclusions.peek().contains("B"));
-            assert!(!header.host_saved(answer.pending.clone(), Err("save failed".to_owned())));
-            assert!(header.current_question().as_ref() == Some(&question));
-            assert_eq!(header.error().as_deref(), Some("save failed"));
-            let answer = header.answer_session(&question, true).unwrap();
-            assert!(header.error().is_none());
-            assert!(header.host_saved(answer.pending, Ok(())));
-            assert!(header.current_question().is_none());
-            assert!(!header.exclusions.peek().contains("B"));
-            assert!(header.exclusions.peek().contains("C"));
-            assert!(header.open_question(pending("B", "b2"), None));
-            let question = header.current_question().unwrap();
-            assert!(header.answer_session(&question, false).is_some());
-            assert!(
-                header.current_question().is_none(),
-                "one-off consumes before dispatch"
-            );
+                .answer_sidebar(&old, true, || true)
+                .expect("premise: permanent answer consumed the old question");
+            assert!(sidebar.current_question("A").is_none());
+            assert!(other.open_question(pending("A", "a2"), Some("newer failure".to_owned())));
+            let newer = other.current_question("A").unwrap();
+            assert!(matches!(
+                sidebar.host_saved(answer.pending, Err("late failure".to_owned())),
+                Err(ReplaceResult::Refused(reason)) if reason == "late failure"
+            ));
+            assert!(sidebar.current_question("A").is_none());
+            assert!(sidebar.error("A").is_none());
+            assert!(other.current_question("A").as_ref() == Some(&newer));
+            assert_eq!(other.error("A").as_deref(), Some("newer failure"));
+            assert!(other.exclusions.peek().contains("A"));
         });
     }
 
-    /// Why: the session header's YOLO buttons used to answer whatever Replace
-    /// question was open when the click ran, so a click queued behind a
-    /// Cancel and a reopen could approve a question the user had not seen.
-    /// The maintainer decided on 2026-10-21 that the header answers only what
-    /// it showed, like the sidebar.
-    ///
-    /// Spec: a header answer or Cancel drawn for an earlier opening does
-    /// nothing to a later opening of the same request (same source, same
-    /// retry key), leaving it open with its error; an answer for the open
-    /// opening proceeds, and a hostless permanent answer keeps today's
-    /// no-save continuation.
+    /// A duplicate refusal preserves the owning question and its failure text,
+    /// but still returns a visible source outcome when no new lane can be opened.
     #[farhelm_testtrace::test]
-    fn session_answers_only_the_rendered_opening() {
-        with_controllers(|_, header| {
-            assert!(header.open_question(pending("A", "a1"), None));
-            let old = header.current_question().unwrap();
-            header.cancel_question(&old);
-            assert!(
-                header.current_question().is_none(),
-                "premise: Cancel closed it"
-            );
-            assert!(header.open_question(pending("A", "a1"), None));
-            let later = header.current_question().unwrap();
-            assert!(
-                old != later && old.key() == later.key(),
-                "premise: the same request reopened under a new opening"
-            );
-            // Give the reopened question an error a stale click must not clear.
-            let saving = header.answer_session(&later, true).unwrap();
-            assert!(!header.host_saved(saving.pending, Err("save failed".to_owned())));
-            assert!(header.is_open(&later) && !header.is_open(&old));
-            assert!(header.answer_session(&old, false).is_none());
-            assert!(header.answer_session(&old, true).is_none());
-            header.cancel_question(&old);
-            assert!(
-                header.current_question().as_ref() == Some(&later),
-                "a stale header answer or Cancel leaves the reopened question"
-            );
-            assert_eq!(header.error().as_deref(), Some("save failed"));
-            let answer = header.answer_session(&later, false).unwrap();
-            assert_eq!(answer.pending.key, "a1");
-            let mut hostless = pending("A", "a3");
-            hostless.ask.host = None;
-            assert!(header.open_question(hostless, None));
-            let question = header.current_question().unwrap();
-            let answer = header.answer_session(&question, true).unwrap();
-            assert!(answer.stop_asking.is_none());
-            assert!(header.current_question().is_some());
-        });
-    }
-
-    /// Duplicate-source refusal has different existing presentation per surface:
-    /// sidebar silently leaves the owner alone, header shows its ordinary reason.
-    #[farhelm_testtrace::test]
-    fn duplicate_yolo_refusal_keeps_surface_error_routing() {
+    fn duplicate_yolo_refusal_preserves_the_existing_question() {
         with_controllers(|sidebar, header| {
             let refusal = || api::ActionRefusal {
                 outcome: RefusalOutcome::NeedsYoloConfirmation,
@@ -979,9 +938,15 @@ mod tests {
                 deadline_expired: false,
             };
             assert!(sidebar.open_question(pending("A", "a1"), Some("kept".to_owned())));
-            assert!(
-                matches!(header.refused(source("A"), DeleteGuard::NothingAlive, "a2".to_owned(), refusal()), ReplaceResult::Refused(text) if text == "refused")
-            );
+            assert!(matches!(
+                header.refused(
+                    source("A"),
+                    DeleteGuard::NothingAlive,
+                    "a2".to_owned(),
+                    refusal()
+                ),
+                ReplaceResult::Refused(text) if text == "refused"
+            ));
             assert!(matches!(
                 sidebar.refused(
                     source("A"),
@@ -989,10 +954,10 @@ mod tests {
                     "a2".to_owned(),
                     refusal()
                 ),
-                ReplaceResult::QuestionHandled
+                ReplaceResult::Refused(text) if text == "refused"
             ));
-            assert_eq!(sidebar.error().as_deref(), Some("kept"));
-            assert!(header.current_question().is_none());
+            assert_eq!(sidebar.error("A").as_deref(), Some("kept"));
+            assert!(header.current_question("A").is_none());
         });
     }
 

@@ -1,4 +1,4 @@
-import type { Locator, Page } from "@playwright/test";
+import type { ElementHandle, Locator, Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { chooseSort, chooseStatus } from "./helpers/list-header";
@@ -948,13 +948,196 @@ async function establishStarted(page: Page, id: string) {
   await expect(target.locator(".status-badge")).toHaveText(/^(Running|Waiting|Idle(?: — new output)?)$/);
 }
 
+for (const laterIntent of ["another question", "the same source remarked", "same marks menu", "same marks question"] as const) {
+  /** A finished batch owns its submitted marking, not the user's next one.
+   * Holding A's Stop leaves time to replace that intent with B/C's unanswered
+   * Delete question, unmark and remark A itself, or open a new surface over
+   * unchanged marks. Set equality cannot distinguish these later intentions.
+   * A rendered refusal proves the old request settled before preservation is
+   * checked. The same-mark question is then answered through a controlled
+   * refusal: preserving its DOM must also preserve authority to act on A. */
+  test(`bulk completion preserves ${laterIntent}`, async ({ page, request }) => {
+    const ids: string[] = [];
+    const release = routeGate();
+    let originalSurface: ElementHandle<HTMLElement | SVGElement> | null = null;
+    let stops = 0;
+    const deletes: URL[] = [];
+    let bodyFailed = false;
+    await resetPreferences(request);
+    try {
+      const count = laterIntent === "another question" ? 3 : 1;
+      for (let n = 0; n < count; n++) {
+        ids.push((await createSession(request, { title: `bulk-later-intent-${n}-${Date.now()}` })).id);
+      }
+      await pinAutoSelect(page, ids[0]);
+      await page.goto("/");
+      for (const id of ids) await establishStarted(page, id);
+      await chooseSort(page, "title");
+      const source = row(page, ids[0]);
+      const listingReply = await request.get("/api/sessions");
+      expect(listingReply.ok()).toBe(true);
+      const listing = await listingReply.json() as { sessions: Array<{ id: string; tabs: unknown[] }> };
+      expect(listing.sessions.find((session) => session.id === ids[0])?.tabs,
+        "the held Stop has no tab-consent step before dispatch").toEqual([]);
+      const build = requireHelmBuild(await request.get("/api/hosts"), "bulk completion ownership");
+      await page.route(
+        (url) => url.pathname === `/api/sessions/${encodeURIComponent(ids[0])}/stop`,
+        async (route) => {
+          expect(route.request().method()).toBe("POST");
+          stops++;
+          await release.wait();
+          await route.fulfill({
+            status: 409,
+            headers: { "x-farhelm-build": build },
+            body: "the first marked batch was refused",
+          });
+        },
+      );
+      if (laterIntent === "same marks question") {
+        await page.route(
+          (url) => url.pathname === `/api/sessions/${encodeURIComponent(ids[0])}`,
+          async (route) => {
+            if (route.request().method() !== "DELETE") return route.fallback();
+            deletes.push(new URL(route.request().url()));
+            await route.fulfill({
+              status: 409,
+              headers: { "x-farhelm-build": build },
+              body: "the later marked Delete was refused",
+            });
+          },
+        );
+      }
+      await markRows(page, [ids[0]]);
+      await page.locator(".marked-stop").click();
+      await expect.poll(() => stops, { message: "A's accepted bulk Stop is held before its reply" }).toBe(1);
+      await expect(source.locator(".stop-progress")).toHaveText("Stopping…");
+      await expect(source.locator(".session-row-open")).toBeEnabled();
+      const question = page.locator(".bulk-delete-dialog");
+      const menu = page.getByRole("menu", { name: "Marked session actions", exact: true });
+      const expectedMarks = laterIntent === "another question" ? ids.slice(1) : [ids[0]];
+      if (laterIntent === "another question" || laterIntent === "same marks question") {
+        if (laterIntent === "another question") {
+          await page.locator(".marked-clear").click();
+          await expect(page.locator(".marked-bar")).toHaveCount(0);
+          await markRows(page, ids.slice(1));
+        }
+        await expect.poll(() => markedIds(page)).toEqual(expectedMarks);
+        await page.locator(".marked-delete").click();
+        await expect(question.locator(".bulk-delete-row")).toHaveCount(expectedMarks.length);
+        for (const id of expectedMarks) {
+          await expect(question.locator(`[data-delete-target="${id}"]`)).toBeVisible();
+        }
+        if (laterIntent === "another question") {
+          await expect(question.locator(`[data-delete-target="${ids[0]}"]`)).toHaveCount(0);
+        } else {
+          await expect(question.locator(`[data-delete-target="${ids[0]}"] .bulk-delete-consequence`))
+            .toContainText("Still running");
+          expect(deletes, "opening the later question sends no Delete").toHaveLength(0);
+        }
+        await expect(question.locator(".bulk-delete-confirm")).toBeFocused();
+        await question.locator(".bulk-delete-cancel").focus();
+        await expect(question.locator(".bulk-delete-cancel")).toBeFocused();
+        originalSurface = await question.elementHandle();
+        expect(originalSurface, "the later unanswered question is mounted before A completes").toBeTruthy();
+      } else if (laterIntent === "the same source remarked") {
+        // Marking remains available on A even while its lifecycle claim is
+        // held. This physical unmark/remark is a new intent with the same ids.
+        await source.locator(".session-row-open").click({ modifiers: ["Control"] });
+        await expect(source).toHaveAttribute("data-session-marked", "false");
+        await expect(page.locator(".marked-bar")).toHaveCount(0);
+        await source.locator(".session-row-open").click({ modifiers: ["Control"] });
+        await expect.poll(() => markedIds(page)).toEqual([ids[0]]);
+        await page.locator(".marked-clear").focus();
+        await expect(page.locator(".marked-clear")).toBeFocused();
+      } else {
+        // Opening a new menu is an independent intent even when the marked
+        // membership never changes while the old batch is waiting.
+        await expect.poll(() => markedIds(page)).toEqual(expectedMarks);
+        const toggle = page.locator(".marked-menu-toggle");
+        await toggle.focus();
+        await expect(toggle).toBeFocused();
+        await toggle.press("ArrowDown");
+        await expect(menu).toBeVisible();
+        await expect(menu.getByRole("menuitem").first()).toBeFocused();
+        originalSurface = await page.locator(".marked-menu-flyout").elementHandle();
+        expect(originalSurface, "the new marked-actions menu is mounted before A completes").toBeTruthy();
+        await expect.poll(() => markedIds(page)).toEqual(expectedMarks);
+      }
+      release.release();
+      await expect(source.locator(".action-error")).toContainText("Stop: the first marked batch was refused");
+      await expect(source.locator(".stop-progress")).toHaveCount(0);
+      // Cross the old reply's rendering boundary, so a still-held route or
+      // the paint before its completion cannot masquerade as preservation.
+      await page.evaluate(() =>
+        new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      );
+      await expect.poll(() => markedIds(page)).toEqual(expectedMarks);
+      if (laterIntent === "another question" || laterIntent === "same marks question") {
+        await expect(question).toBeVisible();
+        expect(await page.evaluate(
+          (node) => node!.isConnected && node === document.querySelector(".bulk-delete-dialog"),
+          originalSurface,
+        ), "the later question keeps its mounted owner").toBe(true);
+        await expect(question.locator(".bulk-delete-row")).toHaveCount(expectedMarks.length);
+        await expect(question.locator(".bulk-delete-cancel")).toBeFocused();
+        await question.locator(".bulk-delete-cancel").press("Tab");
+        await expect(question.locator(".bulk-delete-confirm")).toBeFocused();
+        if (laterIntent === "same marks question") {
+          await question.locator(".bulk-delete-confirm").click();
+          await expect.poll(() => deletes.length, { message: "the preserved answer still targets A" }).toBe(1);
+          expect(deletes[0].pathname).toBe(`/api/sessions/${encodeURIComponent(ids[0])}`);
+          // The question described a live agent, so its affirmative answer
+          // must not silently become an ended-agent or nothing-alive guard.
+          expect(deletes[0].searchParams.get("only_if_nothing_alive")).toBeNull();
+          expect(deletes[0].searchParams.get("only_if_agent_ended")).toBeNull();
+          await expect(source.locator(".action-error")).toHaveText("Delete: the later marked Delete was refused");
+          await expect(source).toBeVisible();
+          await expect(question).toHaveCount(0);
+        } else {
+          await question.locator(".bulk-delete-cancel").click();
+          await expect(question).toHaveCount(0);
+          await expect.poll(() => markedIds(page)).toEqual(expectedMarks);
+        }
+      } else if (laterIntent === "same marks menu") {
+        await expect(menu).toBeVisible();
+        expect(await page.evaluate(
+          (node) => node!.isConnected && node === document.querySelector(".marked-menu-flyout"),
+          originalSurface,
+        ), "the later menu keeps its mounted owner").toBe(true);
+        await expect(menu.getByRole("menuitem").first()).toBeFocused();
+        await menu.getByRole("menuitem").first().press("Escape");
+        await expect(menu).toHaveCount(0);
+        await expect(page.locator(".marked-menu-toggle")).toBeFocused();
+        await expect.poll(() => markedIds(page)).toEqual(expectedMarks);
+      } else {
+        await expect(page.locator(".marked-bar")).toHaveAttribute("data-marked-count", "1");
+        await expect(page.locator(".marked-clear")).toBeFocused();
+      }
+      expect(stops, "the later marking and unanswered question submit no second Stop").toBe(1);
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      release.release();
+      await cleanupOwnedSteps(bodyFailed, [
+        ["routes", () => page.unrouteAll({ behavior: "wait" })],
+        ["surface handle", async () => { await originalSurface?.dispose(); }],
+        ...ids.map((id): [string, () => Promise<void>] => ["owned session", () => cleanupSession(request, id)]),
+        ["preferences", () => resetPreferences(request)],
+      ]);
+    }
+  });
+}
+
 /** More than the supervisor's admission limit must succeed without a burst.
  * Holding the first request on each real host proves simultaneous host lanes;
  * counting each request through its server reply distinguishes dispatch pacing
- * from sequential result collection. Queued rows must already lock navigation. */
+ * from sequential result collection. Queued rows retain their own claims while
+ * navigation and marking controls remain available throughout the batch. */
 test("bulk Stop paces nine rows on one host while another host progresses", async ({ page, request }) => {
   test.setTimeout(180_000);
   const ids: string[] = [];
+  let other: string | undefined;
   const release = routeGate();
   let bodyFailed = false;
   await resetPreferences(request);
@@ -971,11 +1154,18 @@ test("bulk Stop paces nine rows on one host while another host progresses", asyn
       ids.push(created.id);
       hostById.set(created.id, host);
     }
+    other = (await createSession(request, { title: `bulk-stop-independent-${Date.now()}`, host: local.id })).id;
     await pinAutoSelect(page, ids[0]);
     await page.goto("/");
     for (const id of ids) await establishStarted(page, id);
+    await establishStarted(page, other);
+    // Activity can change between the order snapshot and toolbar acceptance.
+    // Fixed titles make the exact per-host dispatch order a stable premise.
+    await chooseSort(page, "title");
     await markRows(page, ids);
+    await expect.poll(() => markedIds(page)).toEqual(ids);
     const drawn = await markedIds(page);
+    expect(drawn).toEqual(ids);
     const started: string[] = [];
     const active = new Map<number, number>();
     const maximum = new Map<number, number>();
@@ -1002,12 +1192,26 @@ test("bulk Stop paces nine rows on one host while another host progresses", asyn
     await page.locator(".marked-stop").click();
     await expect.poll(() => started.length).toBe(2);
     expect(new Set(started.map((id) => hostById.get(id)))).toEqual(new Set([local.id, remote.id]));
-    for (const id of ids) await expect(row(page, id).locator(".session-row-open")).toBeDisabled();
-    for (const action of [".marked-stop", ".marked-delete", ".marked-menu-toggle", ".marked-clear"]) {
-      await expect(page.locator(action)).toBeDisabled();
-    }
+    for (const id of ids) await expect(row(page, id).locator(".session-row-open")).toBeEnabled();
+    await expect(page.locator(".marked-clear")).toBeEnabled();
+    await page.locator(".marked-clear").click();
+    await expect(page.locator(".marked-bar")).toHaveCount(0);
+    // A plain Open clears marks in its own right, so exercise explicit Clear
+    // first while the accepted batch still owns both held host lanes.
+    await row(page, ids[9]).locator(".session-row-open").click();
+    await expect(row(page, ids[9])).toHaveAttribute("data-session-selected", "true");
+    await expect(page.locator(".session-topbar")).toContainText("Stopping…");
+    // New marks and a second batch target only the independent session;
+    // clearing the old marks must not cancel or release any queued source.
+    await row(page, other).locator(".session-row-open").click({ modifiers: ["Control"] });
+    await expect(page.locator(".marked-bar")).toHaveAttribute("data-marked-count", "1");
+    await expect(page.locator(".marked-stop")).toBeEnabled();
+    await page.locator(".marked-stop").click();
+    await expect.poll(async () => (await listSessions(request)).sessions.find((entry) => entry.id === other)?.status?.state,
+      { timeout: 20_000, message: "the new marked session stops while the first batch is held" }).toBe("exited");
+    expect(started).toHaveLength(2);
     release.release();
-    await expect(page.locator(".marked-bar")).toHaveCount(0, { timeout: 60_000 });
+    await expect.poll(() => replies.length, { timeout: 60_000, message: "clearing marks does not cancel the accepted batch" }).toBe(10);
     expect(started).toHaveLength(10);
     expect(replies).toHaveLength(10);
     expect(replies.every((status) => status >= 200 && status < 300)).toBe(true);
@@ -1031,6 +1235,7 @@ test("bulk Stop paces nine rows on one host while another host progresses", asyn
     await cleanupOwnedSteps(bodyFailed, [
       ["routes", () => page.unrouteAll({ behavior: "wait" })],
       ...ids.map((id): [string, () => Promise<void>] => ["owned session", () => cleanupSession(request, id)]),
+      ["independent session", () => other && cleanupSession(request, other)],
       ["preferences", () => resetPreferences(request)],
     ]);
   }
@@ -1112,16 +1317,14 @@ test("bulk Delete keeps drawn guards, row errors and cross-host selection exclus
     await expect(dialog).toHaveCount(0);
     await expect.poll(() => sent.length).toBe(2);
     await expect(page.locator(".marked-count")).toBeFocused();
-    for (const action of [".marked-stop", ".marked-delete", ".marked-menu-toggle", ".marked-clear"]) {
-      await expect(page.locator(action)).toBeDisabled();
-    }
+    await expect(page.locator(".marked-clear")).toBeEnabled();
     localRelease.release();
     await expect(row(page, live)).toHaveCount(0, { timeout: 20_000 });
     await expect(row(page, tabbed).locator(".action-error")).toContainText("Delete: bulk fixture refusal");
     await expect(page.locator('.session-row[data-session-selected="true"]')).toHaveCount(0);
     await expect(row(page, ended)).toBeVisible();
-    await expect(row(page, ended).locator(".session-row-open")).toBeDisabled();
-    expect(newAttachments.filter((id) => ids.includes(id)), "no still-deleting target may be opened").toEqual([]);
+    await expect(row(page, ended).locator(".session-row-open")).toBeEnabled();
+    expect(newAttachments.filter((id) => ids.includes(id)), "automatic selection must not open a still-deleting target").toEqual([]);
     await expect(page.locator(".marked-bar")).toBeVisible();
     // Isolate the toolbar's completion handback from the later legitimate
     // focus handoff when automatic selection reveals a surviving terminal.
@@ -1206,12 +1409,25 @@ for (const skip of [false, true]) {
       await page.locator(".marked-delete").click();
       await expect.poll(() => sent.length).toBe(1);
       await expect(page.locator(".bulk-delete-dialog")).toHaveCount(0);
-      await expect(page.locator(".marked-delete")).toBeDisabled();
+      await expect(page.locator(".marked-clear")).toBeEnabled();
+      // The toolbar stays enabled, but queued rows already own their claims.
+      // A second invocation must refuse those rows without duplicating work.
+      await page.locator(".marked-delete").dispatchEvent("click");
+      for (const id of ids) {
+        await expect(row(page, id).locator(".action-error")).toHaveText(
+          "Delete: not started, another operation is in progress; try again",
+        );
+      }
+      expect(sent, "both refusals are reported while the original first Delete remains held").toHaveLength(1);
       release.release();
-      await expect(page.locator(".marked-bar")).toHaveCount(0, { timeout: 30_000 });
+      // A refused second batch may retire its own unchanged marking. The
+      // original admitted queue must still dispatch and settle both deletes.
+      await expect.poll(() => sent.length, { timeout: 30_000 }).toBe(2);
+      for (const id of ids) await expect(row(page, id)).toHaveCount(0, { timeout: 30_000 });
       expect(sent).toHaveLength(2);
+      expect(sent.map((url) => decodeURIComponent(url.pathname.split("/")[3])).sort()).toEqual([...ids].sort());
       for (const url of sent) expect(url.searchParams.get("only_if_nothing_alive")).toBe(skip ? null : "true");
-      for (const id of ids) await expect(row(page, id)).toHaveCount(0);
+      await expect(page.locator(".marked-bar")).toHaveCount(0, { timeout: 30_000 });
     } catch (error) {
       bodyFailed = true;
       throw error;

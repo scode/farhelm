@@ -1,60 +1,11 @@
-//! The two panes' shared concurrency disciplines: the single live-operation
-//! token ([`OpLock`], shared across the shell via [`PaneGate`]) and the
-//! read generation gate ([`ReadGate`]).
+//! The launch/host-mutation token, read generation fences and drawn-answer slots.
 //!
-//! They solve mirrored halves of one problem. The token decides which
-//! WRITES may run; the gate decides which READS may be believed. Both exist
-//! because this page has several asynchronous things in flight against one
-//! screen, and both are claimed synchronously — a value computed during a
-//! render is already stale by the time a handler or a completion consults
-//! it.
-//!
-//! ## What this replaces, and why a boolean prop could not do it
-//!
-//! The list page runs several mutually exclusive operations — a create, any
-//! host mutation, an add-host — and the exclusion between them was a set of
-//! booleans computed during RENDER and handed down as props (`blocked`,
-//! `submitting`, `nav_locked`). That is a race wearing a guard's clothes.
-//! A prop is a value captured when the component last rendered, so two
-//! handlers firing before the next render both read `false` and both
-//! proceed: a click on "add host" landing in the same frame as a create's
-//! submit sees a page that was idle when it was drawn. Widening the render
-//! gap is not even necessary to hit it — a queued click and a synthetic
-//! double-click are both inside one frame.
-//!
-//! The token closes that by construction: the claim is a synchronous
-//! test-and-set performed INSIDE the handler, at entry, against state that
-//! no render sits between. Whoever claims it first wins; everyone else
-//! returns immediately. The `disabled` attributes stay, but they are now
-//! cosmetic — a reflection of the token for the user's benefit, never the
-//! thing that enforces anything.
-//!
-//! ## What it covers, and what it deliberately does not
-//!
-//! It covers the operations that can invalidate each OTHER's premises: a
-//! create choosing a target host, the five host mutations, and the add-host
-//! form. A removal landing between a create's target being chosen and that
-//! create reaching the helm files a session against a host that no longer
-//! exists; an adopt landing there purges the cache the create is about to be
-//! recorded in.
-//!
-//! It also gates the session-OPEN click, which starts nothing but swaps
-//! everything: selecting a row replaces the keyed `SessionView` (tearing
-//! down the previous one's tasks) and repaints the list an in-flight
-//! mutation is about to reconcile. That one reads the token rather than
-//! claiming it.
-//!
-//! Since the two-pane shell, the token is OWNED BY `AppBody` and shared
-//! with the selected session's view (see [`PaneGate`]): the view's
-//! rename/restart claim the same token the list's create and host
-//! mutations do, so neither pane can start a write under the other's, and
-//! the open click's read covers view-side work too.
-//!
-//! Per-session stop/rename/delete are deliberately NOT under it. They are
-//! scoped to their own row, cannot invalidate anything another row is doing,
-//! and the browser suite pins that two rows' lifecycle actions stay usable
-//! at once. They keep their per-session in-flight set, and the open click
-//! consults both.
+//! OpLock excludes a launch choosing a host from mutations of that registry.
+//! Session-facing sandbox mutations share it because they change that host.
+//! Ordinary session questions and requests use session_ops instead: neither this
+//! token nor the read gates block navigation. Claims are synchronous handler-time
+//! test-and-set operations, so stale disabled markup cannot admit another write.
+//! ConfirmSlot binds every answer to the opening its render actually showed.
 
 use std::borrow::Borrow;
 use std::collections::HashMap;
@@ -76,9 +27,9 @@ pub(crate) struct OpLock {
 ///
 /// Component-scoped futures are dropped when their component disappears. A
 /// manual `release()` at the end of such a future is therefore not a release
-/// guarantee: removing the row that owns it can skip that line and leave the
-/// whole page inert. Keeping the claim in the future's owned state makes
-/// cancellation take the same path as every ordinary return.
+/// guarantee: removing the row that owns it can skip that line and leave
+/// launches and host changes disabled. Keeping the claim in the future's owned
+/// state makes cancellation take the same path as every ordinary return.
 pub(crate) struct OpGuard {
     held: Signal<bool>,
 }
@@ -116,9 +67,9 @@ impl OpLock {
     /// Whether an operation is live, for a HANDLER.
     ///
     /// `peek`, deliberately: a handler is not a reactive scope and must not
-    /// subscribe the component that happens to be rendering. Used by the
-    /// session-open click, which does not claim the token but must not run
-    /// while one is held.
+    /// subscribe the component that happens to be rendering. Admission checks
+    /// use it before opening a composer or accepting a host mutation; session
+    /// navigation never consults this token.
     pub(crate) fn busy_now(&self) -> bool {
         *self.held.peek()
     }
@@ -129,83 +80,6 @@ impl OpLock {
     /// changes. Everything this feeds is cosmetic — see the module docs.
     pub(crate) fn busy(&self) -> bool {
         *self.held.read()
-    }
-}
-
-/// The session view's face of the SHARED cross-pane write gate.
-///
-/// Under the two-pane shell both `ListView` and the selected `SessionView`
-/// can mutate the same fleet at once, from surfaces that used to be
-/// mutually exclusive pages with a private token each. `AppBody` therefore
-/// owns ONE `OpLock` and hands it to both panes; this wrapper is what the
-/// session view holds, and it adds the one rule the bare token cannot
-/// express: the sidebar's per-row stop/delete/rename deliberately
-/// do NOT claim the token (two rows' operations must stay concurrent — a
-/// pinned property), so the view's claim must ALSO refuse while any of
-/// those row operations is in flight. `row_ops` is the live count the list
-/// maintains for exactly that question.
-///
-/// The asymmetry is deliberate: row operations check the token but never
-/// hold it, so they stay concurrent with each other while still being
-/// refused during a view-side operation — and the view is refused during
-/// theirs. Same-frame races resolve through the token's synchronous
-/// test-and-set plus a `peek` of the count, both consulted inside the
-/// handler, never through render-time booleans.
-#[derive(Clone, Copy, PartialEq)]
-pub(crate) struct PaneGate {
-    lock: OpLock,
-    row_ops: Signal<u32>,
-}
-
-impl PaneGate {
-    pub(crate) fn new(lock: OpLock, row_ops: Signal<u32>) -> Self {
-        Self { lock, row_ops }
-    }
-
-    /// Claim the shared token, refusing while any sidebar row operation is
-    /// in flight, and return the cancellation-safe release guard
-    /// ([`OpGuard`]). Otherwise the same contract as [`OpLock::claim_guard`].
-    ///
-    /// The only way the session view claims the token: the guard is held by
-    /// a [`ConfirmSlot`] while a prompt is open, by the view's own claim slot
-    /// while a Restart is pending (a confirmed Restart prompt hands its claim
-    /// there), or by the task a confirmation starts. Each
-    /// of those is dropped with the view, so no claim can outlive it. There
-    /// is deliberately no bare `claim`/`release` pair here: a hand-released
-    /// claim is exactly what used to strand the token when the view unmounted
-    /// mid-operation and left every write action in the window disabled.
-    pub(crate) fn claim_guard(&mut self) -> Option<OpGuard> {
-        if *self.row_ops.peek() > 0 {
-            return None;
-        }
-        self.lock.claim_guard()
-    }
-
-    /// [`Self::claim_guard`] into a slot the claiming component owns,
-    /// returning whether the claim succeeded. Releasing is setting the slot
-    /// to `None`; the slot is a signal of that component, so when the
-    /// component unmounts the guard is dropped with it and the claim cannot
-    /// outlive it. This is how the session view holds its Restart claims.
-    pub(crate) fn claim_into(&mut self, slot: &mut Signal<Option<OpGuard>>) -> bool {
-        match self.claim_guard() {
-            Some(guard) => {
-                slot.set(Some(guard));
-                true
-            }
-            None => false,
-        }
-    }
-
-    /// Handler-time busyness: the token OR a row operation. `peek`s, like
-    /// [`OpLock::busy_now`], and for the same reason.
-    pub(crate) fn busy_now(&self) -> bool {
-        self.lock.busy_now() || *self.row_ops.peek() > 0
-    }
-
-    /// Render-time busyness for the view's disabled attributes — cosmetic,
-    /// like [`OpLock::busy`]; the claim is what enforces.
-    pub(crate) fn busy(&self) -> bool {
-        self.lock.busy() || *self.row_ops.read() > 0
     }
 }
 
@@ -382,14 +256,10 @@ impl<K> ConfirmToken<K> {
 /// changes before leaving?" prompt is the third: its "save" answer leaves the
 /// prompt up through the save and after a failed one, the save's success
 /// retires it, and the dialog's busy flag refuses its other answers
-/// meanwhile. The fourth is a session's Replace YOLO question answered with
-/// "don't ask again" (`ReplaceController::answer_session` in `replace.rs`):
-/// it stays up while the host setting saves, and the save's success
-/// retires it. The surface's own `replacing` flag refuses Cancel while
-/// the Replace runs, including a Cancel queued before the disabled render,
-/// so a failed save still has a question to show its reason on. The page's
-/// operation claim refuses a second launch answer. Every other prompt answers
-/// through `take`.
+/// meanwhile. Every other prompt answers through `take`. Plain Replace's YOLO
+/// question belongs to the persistent list: either answer consumes it before
+/// dispatch, and a failed host-setting save reopens it with the reason only
+/// while no newer question occupies that slot.
 ///
 /// `Copy` because it is a handle to a signal, like [`OpLock`]. Render code
 /// uses the tracked readers ([`Self::is_open`], [`Self::current`]);
@@ -1457,15 +1327,9 @@ mod tests {
         assert!(gate.accept_success(refresh));
     }
 
-    /// Why this matters: the session view's Restart controls hold the
-    /// shared lock between a click and the end of the restart (the stop-first
-    /// prompt, the "Restart with" dialog, the request in flight), and the
-    /// view can unmount meanwhile (the session deleted from another client).
-    /// The lock is owned by the page shell, so a hand-released claim used to
-    /// outlive the view and leave every write action in the window disabled.
-    /// Spec: a claim taken with `PaneGate::claim_into` into a slot the
-    /// claiming component owns holds the lock while that component is
-    /// mounted and is released when it unmounts.
+    /// A component-owned launch/registry claim must release on cancellation.
+    /// Otherwise an abandoned dialog could leave later launches disabled even
+    /// though no request still owns that exclusion.
     #[farhelm_testtrace::test]
     fn a_view_claim_is_released_when_the_view_unmounts() {
         use std::cell::Cell;
@@ -1475,23 +1339,24 @@ mod tests {
         }
 
         #[component]
-        fn View(gate: PaneGate) -> Element {
+        fn View(gate: OpLock) -> Element {
             let mut slot = use_signal(|| None::<OpGuard>);
             use_hook(move || {
                 let mut gate = gate;
-                assert!(gate.claim_into(&mut slot), "premise: the claim succeeds");
+                slot.set(Some(
+                    gate.claim_guard().expect("premise: the claim succeeds"),
+                ));
             });
             rsx! {}
         }
 
         fn app() -> Element {
             let lock = use_op_lock();
-            let row_ops = use_signal(|| 0u32);
             HELD.with(|held| held.set(Some(lock.busy_now())));
             let show = SHOW.with(Cell::get);
             rsx! {
                 if show {
-                    View { gate: PaneGate::new(lock, row_ops) }
+                    View { gate: lock }
                 }
             }
         }

@@ -145,7 +145,7 @@ test("plain Restart shows host and elapsed time until a real refusal arrives", a
     await expectPendingStatus(page, progress, "Restarting");
     gate.release();
     await expect(progress).toHaveCount(0);
-    await expect(page.locator(".restart-error")).toHaveText("the host refused this operation");
+    await expect(page.locator(".restart-error")).toHaveText("Restart: the host refused this operation");
     await expect(page.locator(".restart-error")).not.toContainText("Still waiting");
   } finally {
     gate.release();

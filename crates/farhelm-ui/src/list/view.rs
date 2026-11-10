@@ -37,6 +37,7 @@ use crate::rows::{
     self, absence_is_evidence, apply_optimistic_renames, count_banner,
     remove_row_reporting_menu_move, retire_vanished_renames, settle_optimistic_renames,
 };
+use crate::session_ops::{HeaderAction, SessionGuard, SessionOps};
 use crate::{ApiBase, Host, HostId, Session, SessionStatus};
 
 use super::create_form::{
@@ -178,17 +179,18 @@ fn capture_identity_movement(
 pub(crate) enum HeaderPrefillRequest {
     Clone(Session),
     ReplaceWith(Session),
-    RestartWith(Session, RestartBridge),
+    RestartWith(Session),
 }
 
-/// Keep terminal lifecycle work in its keyed view while the launcher owns
-/// editing and dispatch. A disposed view needs no remount; fallible reads
-/// prevent a late reply from invoking a callback whose scope was removed.
+/// The persistent launcher's source and callbacks for Restart with.
+/// ListView owns all three handles, so a keyed view disappearing revokes neither
+/// an accepted request nor its completion's detail-read boundary.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct RestartBridge {
-    pub(crate) current: Signal<Session>,
+    pub(crate) current: Signal<Option<Session>>,
     pub(crate) before: Callback<api::RestartEdit, Result<(), String>>,
     pub(crate) after: EventHandler<RestartOutcome>,
+    pub(crate) error: EventHandler<String>,
 }
 
 /// What one finished Restart POST tells the session view that reattaches
@@ -229,9 +231,12 @@ impl RestartOutcome {
 impl RestartBridge {
     /// Admission immediately precedes the POST, after any host-setting await.
     pub(crate) fn begin(self, edit: api::RestartEdit) -> Result<(), String> {
-        let alive = self.current.try_read().is_ok();
+        let alive = self
+            .current
+            .try_read()
+            .is_ok_and(|current| current.is_some());
         if !alive {
-            return Err("The session view closed; reopen restart with".into());
+            return Err("The restart launcher closed; reopen restart with".into());
         }
         self.before.call(edit)
     }
@@ -244,28 +249,8 @@ impl RestartBridge {
     }
 }
 
-/// One-shot request from a session header to delete the session it shows,
-/// sent after its confirmation was answered or skipped by the session preference.
-///
-/// The delete itself runs through the list's ordinary delete path, not a
-/// second implementation in the header: that path owns the per-row
-/// operation gate, the optimistic row removal once the reply lands, the read
-/// fence that keeps an older listing from resurrecting the row, and the
-/// selection clearing, and the header would otherwise have to duplicate all
-/// of it. Like [`HeaderPrefillRequest`], AppBody owns the signal so the
-/// request outlives the keyed session view, and ListView consumes it once.
-#[derive(Clone, PartialEq)]
-pub(crate) struct HeaderDeleteRequest {
-    pub(crate) sandbox: Option<HostId>,
-    pub(crate) id: String,
-    /// The precondition the header's render, as the user saw it, covered
-    /// (see `status::delete_guard`).
-    pub(crate) guard: crate::DeleteGuard,
-}
-
-/// How long the pointer must rest completely still over the session list
-/// before a held order is released anyway. Chosen by the user: long enough
-/// to finish aiming at a row, short enough that a pointer left parked over
+/// How long a motionless pointer keeps the displayed row order held.
+/// Chosen to leave time to finish aiming at a row, while a pointer parked over
 /// the list does not freeze its order indefinitely.
 const ORDER_HOLD_STILL_MS: u128 = 5_000;
 
@@ -408,8 +393,9 @@ pub(crate) struct DeleteNotice(pub(crate) Signal<Option<String>>, Callback<Optio
 #[derive(Clone, Copy)]
 pub(crate) struct ReplaceIntent(pub(crate) Signal<Option<(String, Option<String>)>>);
 
-/// Only one pane may own a YOLO question per source, independently of retry keys.
-/// Each local question releases its source on consumption or unmount; other rows stay usable.
+/// Only one owner may hold a YOLO question per source, independently of retry keys.
+/// Common session admission reads this same signal. Each question releases its
+/// source on consumption or unmount; questions on other rows remain independent.
 /// Retry identity may change A → B → A while the original question remains open.
 #[derive(Clone, Copy)]
 pub(crate) struct ReplaceYoloQuestions(pub(crate) Signal<HashSet<String>>);
@@ -693,32 +679,24 @@ fn admit_row_op(pending: &mut HashSet<String>, asking: bool, id: &str) -> bool {
     true
 }
 
-/// Reserve a row and publish its cross-pane claim in the same synchronous turn.
-/// Queued bulk work uses this same admission as ordinary row actions; no future
-/// may be polled before its count already excludes navigation and pane claims.
-pub(super) fn begin_row_operation(
-    ops: OpLock,
-    mut pending: Signal<HashSet<String>>,
-    mut count: Signal<u32>,
-    asking: bool,
-    id: &str,
-) -> bool {
-    if ops.busy_now() || !admit_row_op(&mut pending.write(), asking, id) {
+/// Admit one session request synchronously, leaving unrelated sessions usable.
+/// A header or row question releases its owned guard immediately before this
+/// admission in the same callback, without an await, effect or reentrant call.
+pub(super) fn begin_row_operation(mut operations: SessionOps, asking: bool, id: &str) -> bool {
+    if asking
+        || operations.busy_now(id)
+        || !admit_row_op(&mut operations.pending.write(), asking, id)
+    {
         return false;
     }
-    count += 1;
+    operations.held.write().insert(id.to_owned());
     true
 }
 
-/// Release exactly one admitted row, preserving the count while others wait.
-pub(super) fn end_row_operation(
-    mut pending: Signal<HashSet<String>>,
-    mut count: Signal<u32>,
-    id: &str,
-) {
-    if pending.write().remove(id) {
-        count -= 1;
-    }
+/// Release this request after all its ordinary completion bookkeeping settles.
+pub(super) fn end_row_operation(mut operations: SessionOps, id: &str) {
+    operations.pending.write().remove(id);
+    operations.held.write().remove(id);
 }
 
 /// Name a chosen host even after its registry row disappears.
@@ -849,25 +827,17 @@ fn FilterHostLabel(
 /// `accepts_listing`), since a walk under the previous order is a correct
 /// list of the wrong sequence.
 ///
-/// ## One operation at a time
+/// ## Launch and host mutation exclusion
 ///
-/// The create, the five host mutations and the add-host form are mutually
-/// exclusive, and the exclusion is `ops::OpLock` — a token each handler
-/// claims synchronously at entry — rather than a set of render-time
-/// booleans. See that module for why the booleans could not work: they are
-/// values captured at the last render, so two clicks inside one frame both
-/// see an idle page.
+/// A launch choosing its destination and a mutation of the host registry
+/// exclude each other through `ops::OpLock`. Session-facing sandbox Suspend,
+/// Resume and Stop and suspend mutate hosts too, so their session claims
+/// carry that same token through consent and the persistent request.
 ///
-/// The session-OPEN click is gated by the same token even though the
-/// sidebar layout no longer unmounts this component on open. What the
-/// gate still buys is coherence, not survival: selecting a session swaps
-/// the MAIN pane (remounting `SessionView` and its attachments), and
-/// doing that mid-mutation would let the mutation's completion race a
-/// right-pane world that changed under it — the same
-/// two-actions-one-frame class the token exists for. Per-session
-/// stop/rename/delete stay outside the token, on their own per-row set —
-/// they cannot invalidate one another's premises, and two rows acting at
-/// once is behavior the browser suite pins.
+/// Navigation and ordinary session actions use no page token. Their requests
+/// run here, outside the keyed session view, and the shared per-session claims
+/// exclude only competing work on the same source. Admission is synchronous:
+/// stale disabled markup cannot admit two writes in one event burst.
 #[component]
 pub(crate) fn ListView(
     on_open: EventHandler<Session>,
@@ -880,18 +850,10 @@ pub(crate) fn ListView(
     /// or adopt landing between selection and create. The folder comes from
     /// that same snapshot even when sidebar filtering hides the selected row.
     open_destination: Option<OpenDestination>,
-    /// The SHARED live-operation token (see `ops`'s module docs): owned by
-    /// `AppBody` rather than created here, because the selected session's
-    /// view claims the same token for its own restart — a private
-    /// token per pane would let the two panes mutate the fleet under each
-    /// other.
+    /// Excludes submitted launches from registry mutations and another composer
+    /// submission. Sandbox host mutations share it; ordinary per-session
+    /// actions and navigation do not consult it.
     ops: OpLock,
-    /// Live count of this list's per-row operations, maintained here and
-    /// read by the session view's `PaneGate`: row operations never hold
-    /// the token (rows must stay concurrent with each other), so this
-    /// count is the only way the other pane can refuse to start a write
-    /// while one is in flight.
-    row_ops: Signal<u32>,
     /// A session this list removed through a successful delete. `AppBody` reconciles the
     /// selection: without this, deleting the selected row would leave the
     /// right pane showing a session this client knows is gone.
@@ -946,8 +908,6 @@ pub(crate) fn ListView(
     /// touch this counter at all.
     layout_epoch: ReadSignal<u64>,
     prefill_request: Signal<Option<HeaderPrefillRequest>>,
-    /// The session header's confirmed deletes, run through `do_delete`.
-    header_delete: Signal<Option<HeaderDeleteRequest>>,
     /// One-shot attended listing demand from a successful header mutation.
     header_refresh: Signal<bool>,
     /// Sessions with an admitted delete, written only by the shared Delete core and
@@ -976,6 +936,7 @@ pub(crate) fn ListView(
     let skip_session_confirmations = preferences.0.read().skip_session_confirmations == Some(true);
     let mut deleting = deleting;
     let mut listing = use_signal(|| None::<Result<SessionListing, String>>);
+    let replace_progress = use_context::<crate::replace::ReplaceProgress>();
     // Deliver local archive changes, content-free feed news and weak fallback
     // ticks without losing their authority before the per-host reader sees them.
     // Only hosts already removing files have a separate completion cadence.
@@ -1072,7 +1033,8 @@ pub(crate) fn ListView(
     // failure on a different one — which a single `Option<String>` would
     // do on every write regardless of which session it was about. Keyed
     // by session id so each row renders only its own entry.
-    let mut errors = use_signal(HashMap::<String, String>::new);
+    let mut operations = use_context::<SessionOps>();
+    let mut errors = operations.errors;
     // The seen writer outlives this component. It reports success through
     // this list-owned counter; the effect below owns the actual refresh task.
     let seen_toggle_successes = use_signal(|| 0_u64);
@@ -1082,13 +1044,14 @@ pub(crate) fn ListView(
     // or rename in flight. It disables that row's buttons and is the
     // re-entry guard the click handlers check, since the DOM update
     // disabling a button is not synchronous with its click handler. Entered
-    // only through `begin_row_op` and left only through `end_row_op`; see
+    // through the row cores or persistent launcher, and cleared by their
+    // completion owner; see
     // `admit_row_op` for why it is held apart from the questions below.
-    let row_pending = use_signal(HashSet::<String>::new);
+    let row_pending = operations.pending;
     // Each row's open inline question (Stop, Delete or Replace), one lane per row,
     // so several rows can hold a question at once and each answer is bound
-    // to the opening its render drew. Opening identity is all this holds:
-    // whether the row may start an operation is `row_pending`'s job.
+    // to the opening its render drew. Each payload owns a session guard so
+    // the header cannot start work underneath a sidebar question.
     //
     // The questions are deliberately client-side with no timeout and no
     // refresh-driven reset: a listing refresh must leave an in-progress
@@ -1096,37 +1059,32 @@ pub(crate) fn ListView(
     // must a filter or a failed read that only stops drawing the row. The
     // one reconciliation is in `commit_listing`, which closes a question
     // once its session is no longer in the listing at all.
-    let mut row_questions = use_confirm_slots::<String, RowQuestion, ()>();
+    let mut row_questions = use_confirm_slots::<String, RowQuestion, SessionGuard>();
     // Filtering conceals identities without proving they vanished. Only the
     // authoritative-listing boundary below prunes stored marks; every target
     // projection intersects them with the existing held display instead.
     let mut marked = use_signal(HashSet::<String>::new);
+    // A batch may retire only the marking interaction it accepted. A newer
+    // gesture can produce the same ids, or open a menu/question over them,
+    // so set equality cannot identify that ownership. Automatic pruning,
+    // measurement and batch cleanup do not advance this revision.
+    let mut marking_interaction_revision = use_signal(|| 0_u64);
+    let marking_surface_opened = use_callback(move |()| marking_interaction_revision += 1);
     // This opening belongs to the list, not the conditional marked toolbar:
     // accepted listings can conceal every effective mark while it is open.
     let mut bulk_delete_question = use_confirm_slot::<Vec<DeleteSnapshot>, ()>();
     let mut bulk_stop_question = use_confirm_slot::<Vec<DeleteSnapshot>, ()>();
-    // `row_pending`'s entry and exit, with the cross-pane bookkeeping attached:
-    // every row operation must (a) refuse to start while the SHARED token
-    // is held — the session view or a page operation is mid-write, and a
-    // row op landing under it is exactly the cross-pane race the shared
-    // gate exists to close — and (b) keep `row_ops` equal to
-    // `row_pending`'s size, because that count is what the session view's
-    // `PaneGate` consults to refuse ITS claims while a row op runs. Paired
-    // helpers rather than open-coded at each site so no exit path can forget
-    // the decrement (a stuck count would leave the session view inert).
-    // Borrow raw identity so decoded references and local action snapshots
-    // enter the same gate without changing the set's owned keys. A row with
-    // its question open is refused too (`admit_row_op`).
+    // Both panes reserve the same session synchronously. Row questions own
+    // guards until their drawn answer synchronously releases the question and
+    // admits its request. The list owns completions, including queued bulk work. Unrelated
+    // sessions and navigation never consult this exclusion.
     let begin_row_op = move |id: &str| -> bool {
         let asking = row_questions.peek_key(id).is_some();
-        begin_row_operation(ops, row_pending, row_ops, asking, id)
+        begin_row_operation(operations, asking, id)
     };
     let end_row_op = move |id: &String| {
-        end_row_operation(row_pending, row_ops, id);
+        end_row_operation(operations, id);
     };
-    // Session-facing host controls claim the same page/row exclusion as the
-    // header. Their activity read must not race a separate row mutation.
-    use_context_provider(move || crate::ops::PaneGate::new(ops, row_ops));
     // At most one row's actions menu is open, and this parent owns which.
     // A per-row boolean would let two menus fight, and the parent is the
     // only place "opening yours closes mine" can live. Defined up here with
@@ -1403,6 +1361,31 @@ pub(crate) fn ListView(
     // resize callback is gated at the presentation boundary; hidden progress
     // cannot move session or rail anchors. Actual scrolls remain invalidators.
     let mut hosts_panel_layout_epoch = use_signal(|| 0_u64);
+    // Count wording can change without moving a row; only rendered heading
+    // size asks existing openings to verify their own measured anchor. The
+    // observer can arrive after a fresh opening, so it cannot close blindly.
+    let mut session_heading_size = use_signal(|| None::<(f64, f64)>);
+    let heading_popovers = popovers.clone();
+    let session_heading_resized = use_callback(move |event: ResizeEvent| {
+        let Ok(size) = event.get_border_box_size() else {
+            return;
+        };
+        if *hosts_panel_open.peek() || size.width <= 0.0 || size.height <= 0.0 {
+            session_heading_size.set(None);
+            return;
+        }
+        let size = (size.width, size.height);
+        let previous = *session_heading_size.peek();
+        if previous == Some(size) {
+            return;
+        }
+        session_heading_size.set(Some(size));
+        if previous.is_some() {
+            heading_popovers
+                .capture_region(AnchorRegion::Sessions)
+                .probe_if_current();
+        }
+    });
     // A shape signature for the always-mounted host list. A memo prevents
     // ordinary phase-only polls and progress-step churn from closing fixed
     // surfaces while still catching every rendered trace transition, every
@@ -1708,8 +1691,9 @@ pub(crate) fn ListView(
                 );
                 if reconciled.is_empty() {
                     bulk_delete_question.clear();
-                    crate::modal_dialog::DialogHandle::new(lifecycle::DIALOG)
-                        .close(lifecycle::CANCEL_FOCUS);
+                    crate::modal_dialog::DialogHandle::new(lifecycle::DIALOG).close_after_async(
+                        &FocusTarget::new(".marked-menu-toggle", Some(".sort-title"), false),
+                    );
                 } else if reconciled != drawn {
                     bulk_delete_question.open(reconciled, ());
                 }
@@ -1728,8 +1712,9 @@ pub(crate) fn ListView(
                 );
                 if reconciled.is_empty() {
                     bulk_stop_question.clear();
-                    crate::modal_dialog::DialogHandle::new(lifecycle::DIALOG)
-                        .close(lifecycle::CANCEL_FOCUS);
+                    crate::modal_dialog::DialogHandle::new(lifecycle::DIALOG).close_after_async(
+                        &FocusTarget::new(".marked-menu-toggle", Some(".sort-title"), false),
+                    );
                 } else if reconciled != drawn {
                     bulk_stop_question.open(reconciled, ());
                 }
@@ -1778,13 +1763,9 @@ pub(crate) fn ListView(
             // Report displayed rows once, independently of popup kinds. The
             // outgoing listing borrow must end before closers or the final
             // listing write can run, preserving the old commit boundary.
-            let (moved, banner_changed, recovered) = {
+            let (moved, recovered) = {
                 let previous = listing_signal.peek();
                 let recovered = matches!(previous.as_ref(), Some(Err(_)));
-                let banner_changed = match previous.as_ref() {
-                    Some(Ok(previous)) => count_banner(previous) != count_banner(listing),
-                    _ => false,
-                };
                 let previous_sessions = match previous.as_ref() {
                     Some(Ok(prev)) => Some(prev.sessions.as_slice()),
                     _ => None,
@@ -1834,7 +1815,7 @@ pub(crate) fn ListView(
                         compact: !detail_lines_shown,
                     },
                 ));
-                (moved, banner_changed, recovered)
+                (moved, recovered)
             };
             listing_popovers.close_affected(&MovedRows::new(AnchorRegion::Sessions, moved));
             // A reply replacing a failed read must not bring back a session
@@ -1846,20 +1827,6 @@ pub(crate) fn ListView(
             // movement, so this closes them instead.
             if recovered {
                 listing_popovers.close_open_in(&[AnchorRegion::Sessions]);
-            }
-            // The count sentence and header actions can rewrap above every
-            // session anchor. Admission excludes retained Err/remount slots;
-            // this report stays synchronous before the original publication.
-            if banner_changed {
-                listing_popovers
-                    .capture_affected(&MovedRows::new(
-                        AnchorRegion::Sessions,
-                        listing
-                            .sessions
-                            .iter()
-                            .map(|session| session.id.raw().to_owned()),
-                    ))
-                    .close_if_current();
             }
             // Still open: this listing's entries are what the list shows next.
             let still_shown = bell_open.peek().as_ref().and_then(|open| {
@@ -1924,6 +1891,12 @@ pub(crate) fn ListView(
             // These keys reconcile local row state against routing identities,
             // never against the escaped spelling a user sees in a label.
             let live_ids: HashSet<&str> = listing.sessions.iter().map(|s| s.id.raw()).collect();
+            let held = operations.held.peek();
+            operations
+                .lifecycle
+                .write()
+                .retain(|id, _| live_ids.contains(id.as_str()) || held.contains(id));
+            drop(held);
             row_questions.retain(|id| live_ids.contains(id.as_str()));
             marked.write().retain(|id| live_ids.contains(id.as_str()));
             // A complete committed fleet read is the only absence proof
@@ -1949,10 +1922,12 @@ pub(crate) fn ListView(
             // walk proves nothing about what it did not reach; the
             // absence gate above is precisely "this reply speaks for the
             // fleet".
-            let selected_vanished = selected
-                .peek()
-                .as_ref()
-                .is_some_and(|id| !live_ids.contains(id.as_str()));
+            // Replace itself can remove the source before its reply arrives.
+            // Keep that actual selection until completion chooses the result;
+            // an explicit sidebar or switcher choice remains independent.
+            let selected_vanished = selected.peek().as_ref().is_some_and(|id| {
+                !live_ids.contains(id.as_str()) && !replace_progress.0.peek().contains_key(id)
+            });
             if selected_vanished && let Some(id) = selected.peek().clone() {
                 on_removed.call(id);
             }
@@ -2371,7 +2346,8 @@ pub(crate) fn ListView(
     let mut admit_stop = move |id: String,
                                refuse_if_tabs_open: bool,
                                refuse_if_agent_running: bool,
-                               suspend: bool|
+                               suspend: bool,
+                               host_guard: Option<crate::ops::OpGuard>|
           -> Option<RowWork> {
         // Cross-guard against an open row question, not just
         // `row_pending`: the stop/delete buttons are only ABSENT from the
@@ -2406,11 +2382,14 @@ pub(crate) fn ListView(
         // button should already stop this, but the click and the
         // re-render that disables it are not synchronous, so the handler
         // checks for itself too. Refused both when an op for this id is
-        // already running and while the shared token is held (see
+        // already running or its header holds a question (see
         // `begin_row_op`).
         if !begin_row_op(&id) {
             return None;
         }
+        operations.stopping.write().insert(id.clone());
+        operations.errors.write().remove(&id);
+        operations.boundary(&id, None);
         // Acceptance completes the menu interaction; a later stop failure
         // belongs in the row's error line. Close here so async completion
         // cannot dismiss a menu the user opens while the request is pending.
@@ -2434,6 +2413,11 @@ pub(crate) fn ListView(
             } else {
                 stop_session(&base, &id, refuse_if_tabs_open, refuse_if_agent_running).await
             };
+            // Stop-and-suspend excludes other host mutations through its actual
+            // reply, not through the subsequent display-only status read.
+            drop(host_guard);
+            operations.stopping.write().remove(&id);
+            operations.boundary(&id, None);
             match outcome {
                 Err(e) => {
                     errors.write().insert(id.clone(), format!("Stop: {e}"));
@@ -2448,14 +2432,12 @@ pub(crate) fn ListView(
                     } else {
                         errors.write().remove(&id);
                     }
-                    // `pending` stays set across this extra fetch — not
-                    // released until it completes: `on_delete`'s confirm
-                    // wording is decided from the `status` the LATEST
-                    // listing carries, and without this, an instant
-                    // delete right after this stop would still see the
-                    // stale pre-stop live status (up to `POLL_INTERVAL_MS`)
-                    // and confirm with the wrong "is still running"
-                    // wording for a session that just got stopped.
+                    // The reply settles this session before any further read.
+                    // A slow status refresh must not keep its actions locked.
+                    // Until it arrives a new question can describe the older
+                    // displayed status; its request still carries that exact
+                    // consent and the supervisor checks it before acting.
+                    end_row_op(&id);
                     //
                     // Through the SAME gate every other read uses, which is
                     // the whole reason the gate is per-request rather than
@@ -2511,30 +2493,33 @@ pub(crate) fn ListView(
                     if failed {
                         stop_recovery(Trigger::Explicit);
                     }
-                    end_row_op(&id);
                 }
             }
         }))
     };
     let mut bulk_admit_stop = admit_stop.clone();
+    let mut header_stop = admit_stop.clone();
     let mut stop_confirmed = admit_stop.clone();
     let mut stop_suspend_confirmed = admit_stop.clone();
     let confirm_stop_suspend = move |(id, token, no_tabs, ended): super::row::StopConfirmation| {
-        if ops.busy_now()
-            || *token.key() != RowQuestion::Stop
-            || row_questions.take(&id, &token).is_none()
-        {
+        // This answer adds a host mutation to the ordinary Stop question.
+        // Refusal leaves that question intact; an admitted suspension keeps
+        // the page token through the persistent Stop-and-suspend request's reply.
+        let mut host_ops = ops;
+        let Some(host_guard) = host_ops.claim_guard() else {
+            return;
+        };
+        if *token.key() != RowQuestion::Stop || row_questions.take(&id, &token).is_none() {
             return;
         }
-        if let Some(work) = stop_suspend_confirmed(id, no_tabs, ended, true) {
+        if let Some(work) = stop_suspend_confirmed(id, no_tabs, ended, true, Some(host_guard)) {
             spawn(work);
         }
     };
     // Capture consent from the clicked render, never a fresh listing. The
     // question keeps the menu open so its ordinary prompt layout owns focus.
     let on_stop = move |target: DeleteTarget| {
-        if ops.busy_now()
-            || row_pending.peek().contains(&target.id)
+        if operations.busy_now(&target.id)
             || row_questions.peek_key(&target.id).is_some()
             || rename_editor
                 .peek()
@@ -2544,12 +2529,15 @@ pub(crate) fn ListView(
             return;
         }
         if target.tabs > 0 && !skip_session_confirmations {
-            row_questions.open(target.id, RowQuestion::Stop, ());
+            if let Some(claim) = operations.claim(&target.id) {
+                row_questions.open(target.id, RowQuestion::Stop, claim);
+            }
         } else if let Some(work) = admit_stop(
             target.id,
             target.tabs == 0,
             target.status.has_ended(),
             false,
+            None,
         ) {
             spawn(work);
         }
@@ -2560,14 +2548,16 @@ pub(crate) fn ListView(
         bool,
         bool,
     )| {
-        if ops.busy_now()
-            || *token.key() != RowQuestion::Stop
-            || row_questions.take(&id, &token).is_none()
-        {
+        if *token.key() != RowQuestion::Stop || row_questions.take(&id, &token).is_none() {
             return;
         }
-        if let Some(work) = stop_confirmed(id, refuse_if_tabs_open, refuse_if_agent_running, false)
-        {
+        if let Some(work) = stop_confirmed(
+            id,
+            refuse_if_tabs_open,
+            refuse_if_agent_running,
+            false,
+            None,
+        ) {
             spawn(work);
         }
     };
@@ -2776,8 +2766,9 @@ pub(crate) fn ListView(
     // never opens in the first place. A row asking its Replace question is
     // refused for the same reason: one question per row.
     let mut do_delete_on_confirm = do_delete.clone();
+    let mut header_delete_action = do_delete.clone();
     let on_delete = move |target: DeleteTarget| {
-        if row_pending.read().contains(&target.id)
+        if (operations.busy_now(&target.id) && row_questions.peek_key(&target.id).is_none())
             || row_questions
                 .peek_key(&target.id)
                 .is_some_and(|question| question != RowQuestion::Delete)
@@ -2845,8 +2836,10 @@ pub(crate) fn ListView(
             // render that swapped the menu for the prompt must not retire
             // the opening that render's answers carry. (The Replace
             // question was refused above, so an open lane here is Delete.)
-            if row_questions.peek_key(&target.id).is_none() {
-                row_questions.open(target.id, RowQuestion::Delete, ());
+            if row_questions.peek_key(&target.id).is_none()
+                && let Some(claim) = operations.claim(&target.id)
+            {
+                row_questions.open(target.id, RowQuestion::Delete, claim);
             }
         }
     };
@@ -2869,7 +2862,6 @@ pub(crate) fn ListView(
     // would fall through to `do_delete` regardless, which for the
     // cancel-then-confirm race would delete a session the user just told
     // the UI to leave alone.
-    let mut header_do_delete = do_delete.clone();
     // `guard` and `token` come from the row render that drew the prompt the
     // user answered (`status::delete_guard`), not from the row as it reads now.
     let confirm_delete = move |(id, token, guard, sandbox): (
@@ -2878,15 +2870,9 @@ pub(crate) fn ListView(
         crate::DeleteGuard,
         Option<HostId>,
     )| {
-        // Refused OUTRIGHT while the shared token is held, BEFORE the
-        // question is touched: `do_delete`'s own `begin_row_op`
-        // would refuse anyway, but by then the question is gone and the
-        // prompt has silently dismissed itself with nothing deleted —
-        // the confirmation must survive a refusal so the user can answer
-        // it again once the other pane's operation finishes.
-        if ops.busy_now() {
-            return;
-        }
+        // Consume only the opening that supplied the displayed consequence.
+        // Its guard drops before synchronous admission below, without an event
+        // or callback between releasing the question and claiming the request.
         if *token.key() != RowQuestion::Delete || row_questions.take(&id, &token).is_none() {
             return;
         }
@@ -2902,55 +2888,21 @@ pub(crate) fn ListView(
         }
     };
 
-    // A delete the session header already confirmed. The header released its
-    // lifecycle claim just before sending this, because `begin_row_op`
-    // refuses while the shared token is held, so a request that still finds
-    // the page busy lost a race in the frame between the two: another
-    // operation claimed the token, or this row is engaged on its own (an
-    // operation in flight, or its sidebar question open). Nothing was deleted
-    // then, and the refusal is shown on the session's row, where every other
-    // delete failure is reported, rather than dropped silently.
-    use_effect(move || {
-        let Some(request) = header_delete.read().clone() else {
-            return;
-        };
-        header_delete.set(None);
-        if !header_do_delete(request.id.clone(), request.guard, request.sandbox) {
-            errors.write().insert(
-                request.id,
-                "Delete: not started, another operation is in progress; try again".to_string(),
-            );
-        }
-    });
-
-    // Replace shares the per-row operation gate with stop, rename, and
-    // delete (`begin_row_op`, which is also what enforces the
-    // page-wide nav lock here — see that helper's own doc), but its
-    // success path does something none of the others do: it changes which
-    // session is SELECTED, not merely how the clicked row itself now reads.
-    //
-    // The selection write happens BEFORE `refresh` requests the next
-    // listing read, and that ordering is load-bearing, not incidental.
-    // `ListView`'s own auto-select effect only runs while `selected` reads
-    // `None` — see that effect's guard — so writing the new session as the
-    // selection FIRST is what keeps the reconciliation path from ever
-    // getting a chance to run at all: there is no window where the old
-    // row's disappearance leaves the pane momentarily unselected for that
-    // effect to fill with whatever the fallback would have picked.
-    // `remember_selection` is the same "a user-initiated choice" write
-    // `guarded_open` and the create form's `on_created` make; `on_open` is
-    // what actually swaps the right pane, which a stored preference alone
-    // does not do for a client that already has a page open.
+    // Replace keeps ordinary source admission, retry identity and partial-failure
+    // reporting. Completion selects its replacement only while the source is
+    // still selected; a user who switched elsewhere keeps that newer choice.
+    // The listing fence precedes selection and refresh so an old list cannot
+    // establish the newly created session's absence.
     let replace_base = base.clone();
     let replace_refresh = request_listing.clone();
     // Local question state, over the same page-owned retry and source exclusion
     // used by the header. Admission and successful selection remain list-owned.
-    let yolo_replace = use_confirm_slot::<PendingReplace, ()>();
-    let yolo_replace_error = use_signal(|| None::<String>);
+    let yolo_replace = use_confirm_slots::<String, PendingReplace, ()>();
+    let yolo_replace_error = use_signal(HashMap::<String, String>::new);
     let replace_controller = ReplaceController::sidebar(
         use_context::<ReplaceIntent>().0,
         use_context::<ReplaceYoloQuestions>().0,
-        use_context::<crate::replace::ReplaceProgress>(),
+        replace_progress,
         yolo_replace,
         yolo_replace_error,
     );
@@ -2973,9 +2925,10 @@ pub(crate) fn ListView(
                         // absence. Fence it before selecting the bare reply.
                         listing_reads.write().fence();
                         let session = super::with_source_host(*session, &source);
-                        remember_selection(&base, preferences, session.id.raw());
-                        on_open.call(session);
-                        refresh(Trigger::Explicit);
+                        if selected.peek().as_deref() == Some(id.as_str()) {
+                            remember_selection(&base, preferences, session.id.raw());
+                            on_open.call(session);
+                        }
                     }
                     ReplaceResult::Refused(reason) => {
                         // Partial failure belongs beside the source row; its
@@ -2987,6 +2940,10 @@ pub(crate) fn ListView(
                     ReplaceResult::QuestionHandled => {}
                 }
                 end_row_op(&id);
+                // A complete read may have deferred this source's absence
+                // while Replace was pending, including a failed operation.
+                // Ordinary query authority still decides whether it is gone.
+                refresh(Trigger::Explicit);
             });
         };
     // The "replace" menu item's click: guarded by the SAME predicate
@@ -3005,9 +2962,116 @@ pub(crate) fn ListView(
     // The direct route acquires the same row operation and uses the same
     // rendered source and guard, including the existing YOLO refusal path.
     let mut direct_do_replace = do_replace.clone();
+    // Header confirmation guards transfer synchronously into these same row
+    // paths. Releasing and re-admitting happens without an await or effect gap.
+    let mut header_replace = do_replace.clone();
+    let header_base = base.clone();
+    let header_listing = request_listing.clone();
+    let header_actions = use_callback(move |action: HeaderAction| match action {
+        HeaderAction::Stop(source, no_tabs, ended, suspend, mut claim) => {
+            // Stop re-admits its session through the established row core.
+            // A suspension's host claim must cross that handoff unchanged;
+            // ordinary Stop carries None and never acquires the page token.
+            let host_guard = claim.take_host_guard();
+            drop(claim);
+            if let Some(work) = header_stop(
+                source.id.raw().to_owned(),
+                no_tabs,
+                ended,
+                suspend,
+                host_guard,
+            ) {
+                spawn(work);
+            }
+        }
+        HeaderAction::Delete(id, guard, sandbox, claim) => {
+            drop(claim);
+            if !header_delete_action(id.clone(), guard, sandbox) {
+                errors.write().insert(
+                    id,
+                    "Delete: not started, another operation is in progress; try again".into(),
+                );
+            }
+        }
+        HeaderAction::Replace(source, guard, answered, claim) => {
+            drop(claim);
+            if begin_row_op(source.id.raw()) {
+                replace_controller.select_source(source.id.raw());
+                header_replace(source, guard, answered.map(|answer| *answer));
+            }
+        }
+        HeaderAction::Restart(source, stop_first, claim) => {
+            drop(claim);
+            let id = source.id.raw().to_owned();
+            if !begin_row_op(&id) {
+                return;
+            }
+            errors.write().remove(&id);
+            let pending = crate::launch_progress::PendingLaunch::new(
+                crate::launch_progress::LaunchAction::Restart,
+                source
+                    .host_name
+                    .as_ref()
+                    .map_or_else(|| "this host".into(), |name| name.raw().to_owned()),
+                None,
+            );
+            operations
+                .restarting
+                .write()
+                .insert(id.clone(), pending.clone());
+            operations.boundary(&id, None);
+            let base = header_base.clone();
+            let refresh = header_listing.clone();
+            spawn(async move {
+                let result = api::restart_session(&base, &id, stop_first, None, false).await;
+                if let Err(error) = &result {
+                    let reason = if error.deadline_expired {
+                        pending.unknown_outcome(false)
+                    } else {
+                        error.text.clone()
+                    };
+                    errors
+                        .write()
+                        .insert(id.clone(), format!("Restart: {reason}"));
+                }
+                operations.restarting.write().remove(&id);
+                operations.boundary(&id, Some(RestartOutcome::of(&result)));
+                refresh(Trigger::Explicit);
+                end_row_op(&id);
+            });
+        }
+        HeaderAction::Sandbox(source, host, operation, claim) => {
+            let id = source.id.raw().to_owned();
+            operations.pending.write().insert(id.clone());
+            errors.write().remove(&id);
+            let base = header_base.clone();
+            let refresh = header_listing.clone();
+            spawn(async move {
+                let result = operation
+                    .execute(
+                        &base,
+                        host,
+                        &id,
+                        source.tabs.is_empty(),
+                        source.status.has_ended(),
+                    )
+                    .await;
+                if let Err(reason) = result {
+                    errors
+                        .write()
+                        .insert(id.clone(), format!("Sandbox: {reason}"));
+                }
+                operations.pending.write().remove(&id);
+                drop(claim);
+                refresh(Trigger::Explicit);
+                header_refresh.set(true);
+            });
+        }
+    });
+    use_effect(move || operations.dispatch.set(Some(header_actions)));
     let on_replace = move |session: Session| {
         if clone_is_refused(
-            ops.busy_now(),
+            operations.busy_now(session.id.raw()),
             session.id.raw(),
             &row_pending.read(),
             row_questions.peek_key(session.id.raw()),
@@ -3027,7 +3091,9 @@ pub(crate) fn ListView(
         } else {
             // `clone_is_refused` above refused a row already asking, so
             // this opening never replaces another question of this row.
-            row_questions.open(session.id.raw().to_owned(), RowQuestion::Replace, ());
+            if let Some(claim) = operations.claim(session.id.raw()) {
+                row_questions.open(session.id.raw().to_owned(), RowQuestion::Replace, claim);
+            }
         }
     };
     // The loud YOLO confirmation's own way back into the same replace.
@@ -3038,15 +3104,16 @@ pub(crate) fn ListView(
     // looked up and missed. The token is that same render's opening: an
     // answer drawn for an earlier showing of the question takes nothing.
     let confirm_replace = move |(source, token): (Session, ConfirmToken<RowQuestion>)| {
-        // Same shared-token refusal as `confirm_delete`, for the same
-        // keep-the-prompt reason.
-        if ops.busy_now() {
+        // Only the opening on screen can hand its captured consent to the
+        // request. An earlier answer must leave a reopened question intact.
+        if *token.key() != RowQuestion::Replace {
             return;
         }
-        if *token.key() == RowQuestion::Replace
-            && row_questions.take(source.id.raw(), &token).is_some()
-            && begin_row_op(source.id.raw())
-        {
+        let Some(claim) = row_questions.take(source.id.raw(), &token) else {
+            return;
+        };
+        drop(claim);
+        if begin_row_op(source.id.raw()) {
             let guard = crate::status::delete_guard(&source.status, source.tabs.len());
             do_replace(source, guard, None);
         }
@@ -3095,7 +3162,7 @@ pub(crate) fn ListView(
     // into a fresh clone right now.
     let on_clone = move |session: Session| {
         if clone_is_refused(
-            ops.busy_now(),
+            ops.busy_now() || operations.busy_now(session.id.raw()),
             session.id.raw(),
             &row_pending.read(),
             row_questions.peek_key(session.id.raw()),
@@ -3130,6 +3197,93 @@ pub(crate) fn ListView(
     // listing lacks it would show what an earlier opening saw instead of its
     // own, newer snapshot.
     let mut replace_source_seen = use_signal(|| None::<(String, (SessionStatus, usize))>);
+    // One composer is open at a time. Its source and lifecycle callbacks belong
+    // to this persistent list, not to whichever keyed view opened it.
+    let mut restart_source = use_signal(|| None::<Session>);
+    let mut restart_claim = use_signal(|| None::<SessionGuard>);
+    let restart_before = use_callback(move |edit: api::RestartEdit| {
+        let Some(source) = restart_source.peek().clone() else {
+            return Err("Reopen restart with".into());
+        };
+        if let Some(reason) = crate::session_view::restart_with_reason(&source) {
+            return Err(reason);
+        }
+        let same_kind = match (&edit, &source.launch) {
+            (
+                api::RestartEdit::Agent(selection) | api::RestartEdit::NamedAgent(selection, _),
+                Some(crate::SessionLaunch::Agent {
+                    selection: saved, ..
+                }),
+            ) => selection.harness == saved.harness,
+            (api::RestartEdit::Command(command), Some(crate::SessionLaunch::Command(saved))) => {
+                command.agent == saved.agent && command.resume.is_some()
+            }
+            _ => false,
+        };
+        if !same_kind {
+            return Err("The session's launch kind and agent type cannot be changed here".into());
+        }
+        let Some(claim) = operations.claim(source.id.raw()) else {
+            return Err("Another action on this session is in progress".into());
+        };
+        operations
+            .pending
+            .write()
+            .insert(source.id.raw().to_owned());
+        operations.errors.write().remove(source.id.raw());
+        operations.restarting.write().insert(
+            source.id.raw().to_owned(),
+            crate::launch_progress::PendingLaunch::new(
+                crate::launch_progress::LaunchAction::Restart,
+                source
+                    .host_name
+                    .as_ref()
+                    .map_or_else(|| "this host".into(), |host| host.raw().to_owned()),
+                None,
+            ),
+        );
+        operations.boundary(source.id.raw(), None);
+        restart_claim.set(Some(claim));
+        Ok(())
+    });
+    let restart_after = use_callback(move |outcome: RestartOutcome| {
+        if let Some(source) = restart_source.peek().as_ref() {
+            operations.restarting.write().remove(source.id.raw());
+            operations.pending.write().remove(source.id.raw());
+            operations.boundary(source.id.raw(), Some(outcome));
+        }
+        restart_claim.set(None);
+        header_refresh.set(true);
+    });
+    let restart_error = use_callback(move |reason: String| {
+        if let Some(source) = restart_source.peek().as_ref() {
+            errors
+                .write()
+                .insert(source.id.raw().to_owned(), format!("Restart: {reason}"));
+        }
+    });
+    let persistent_restart_bridge = RestartBridge {
+        current: restart_source,
+        before: restart_before,
+        after: restart_after,
+        error: restart_error,
+    };
+    use_effect(move || {
+        let Some(source) = restart_source.read().clone() else {
+            return;
+        };
+        let fresh = listing
+            .read()
+            .as_ref()
+            .and_then(|answer| answer.as_ref().ok())
+            .and_then(|rows| rows.sessions.iter().find(|row| row.id == source.id))
+            .cloned();
+        if let Some(fresh) = fresh
+            && fresh != source
+        {
+            restart_source.set(Some(fresh));
+        }
+    });
     use_effect(move || {
         let Some(source) = clone_prefill
             .read()
@@ -3159,7 +3313,7 @@ pub(crate) fn ListView(
     // rather than by the form.
     let on_replace_with = move |session: Session| {
         if clone_is_refused(
-            ops.busy_now(),
+            ops.busy_now() || operations.busy_now(session.id.raw()),
             session.id.raw(),
             &row_pending.read(),
             row_questions.peek_key(session.id.raw()),
@@ -3200,10 +3354,12 @@ pub(crate) fn ListView(
             HeaderPrefillRequest::Clone(session) | HeaderPrefillRequest::ReplaceWith(session) => {
                 (session, None)
             }
-            HeaderPrefillRequest::RestartWith(session, bridge) => (session, Some(bridge)),
+            HeaderPrefillRequest::RestartWith(session) => {
+                (session, Some(persistent_restart_bridge))
+            }
         };
         if clone_is_refused(
-            ops.busy_now(),
+            ops.busy_now() || operations.busy_now(session.id.raw()),
             session.id.raw(),
             &row_pending.read(),
             row_questions.peek_key(session.id.raw()),
@@ -3234,6 +3390,7 @@ pub(crate) fn ListView(
             return;
         }
         restart_bridge.set(bridge);
+        restart_source.set(bridge.map(|_| session.clone()));
         opening_generation += 1;
         quick_launch_pending.set(false);
         auto_launch.set(false);
@@ -3252,22 +3409,27 @@ pub(crate) fn ListView(
     // closes before the dialog mounts, so no fixed-position popup remains to
     // reappear after completion or detach while the list reorders.
     let on_rename_start = move |(id, title, shortcut, naming): (String, String, bool, bool)| {
-        // The shared token counts too: the disabled attribute on the menu's
+        // The source's shared claim counts too: disabled markup on the menu's
         // rename control is cosmetic (a dispatched synthetic click still
         // reaches this handler), and opening the field while the other
         // pane's operation owns the gate would present an editor whose
         // submit is guaranteed to be refused.
-        if ops.busy_now()
-            || row_pending.read().contains(&id)
+        if operations.busy_now(&id)
             || row_questions.peek_key(&id).is_some()
             || rename_editor.peek().is_some()
         {
             return;
         }
-        // Retire a held quick read here so cancelling Rename cannot revive it.
-        opening_generation += 1;
-        quick_launch_pending.set(false);
-        auto_launch.set(false);
+        // Rename may own the foreground while a submitted launcher waits.
+        // Preserve that request's opening and quick-launch provenance, just
+        // as the switcher does, so its result returns after Rename closes.
+        // Unsubmitted quick reads still retire: cancelling Rename must not
+        // revive a launch the user interrupted before submission.
+        if !(*show_create.peek() && ops.busy_now()) {
+            opening_generation += 1;
+            quick_launch_pending.set(false);
+            auto_launch.set(false);
+        }
         rename_draft.set(crate::peer::editable_peer(&title));
         rename_error.set(None);
         rename_focus_owned.set(false);
@@ -3408,22 +3570,11 @@ pub(crate) fn ListView(
 
     // Opening a row swaps which session the keyed `SessionView` beside this
     // list shows. The sidebar itself stays mounted now, but the selection
-    // change still tears down the previous keyed view — and an operation
-    // this list has in flight is about to repaint rows whose identity a
-    // same-frame selection change would pull out from under it. So the open
-    // click consults the page token AND this view's own per-session set,
-    // and it does so INSIDE the handler — the `nav_locked` value below is
-    // what the button renders with, and a render-time value is exactly what
-    // a click landing in the same frame as the operation it should have
-    // seen would read as idle.
-    // Closures below need OWNED copies of the API base (`open_base` here,
-    // `sort_base` and `created_base` likewise): each is `move`d into a
-    // handler that outlives this render, so a borrow cannot serve.
+    // change still tears down the previous keyed view. Accepted session work
+    // belongs to this persistent list, so navigation no longer consults writes.
+    // Selection still uses the ordinary preference path and host-qualified id.
     let open_base = base.clone();
     let guarded_open = move |session: Session| {
-        if ops.busy_now() || !row_pending.peek().is_empty() {
-            return false;
-        }
         remember_selection(&open_base, preferences, session.id.raw());
         on_open.call(session);
         true
@@ -3434,24 +3585,24 @@ pub(crate) fn ListView(
     // no hook depends on fleet size and unchanged rows remain memoized when
     // their parent refreshes.
     let guarded_open = use_callback(guarded_open);
-    // Sidebar rows do not consume the acceptance result; the switcher does
-    // so a busy refusal preserves both the filter and the opener's focus.
+    // The switcher uses the common opening path before widening its filters;
+    // neither entry point consults pending session requests.
     let row_open = use_callback(move |(session, gesture): (Session, Gesture)| {
-        if ops.busy_now() || !row_pending.peek().is_empty() || hosts_panel_open() {
+        if hosts_panel_open() {
             return;
         }
-        // Disabled markup is only a reflection. A queued gesture must also
-        // respect a question or rename that opened after that row was drawn.
-        if row_questions.peek_key(session.id.raw()).is_some()
-            || rename_editor
-                .peek()
-                .as_ref()
-                .is_some_and(|editor| editor.id == session.id.raw())
+        // Rename retains its actual editor boundary. Inline lifecycle
+        // questions instead keep the ordinary outside-pointer Cancel rule.
+        if rename_editor
+            .peek()
+            .as_ref()
+            .is_some_and(|editor| editor.id == session.id.raw())
         {
             return;
         }
         if gesture == Gesture::Open {
             if guarded_open.call(session) {
+                marking_interaction_revision += 1;
                 marked.write().clear();
             }
             return;
@@ -3461,6 +3612,7 @@ pub(crate) fn ListView(
             return;
         };
         let displayed = rows::held_display_order(order_hold.peek().as_ref(), &current.sessions);
+        marking_interaction_revision += 1;
         marking::mark(
             &mut marked.write(),
             &displayed,
@@ -3470,7 +3622,8 @@ pub(crate) fn ListView(
         );
     });
     let clear_marks = use_callback(move |()| {
-        if !ops.busy_now() && row_pending.peek().is_empty() && !hosts_panel_open() {
+        if !hosts_panel_open() {
+            marking_interaction_revision += 1;
             marked.write().clear();
         }
     });
@@ -3494,13 +3647,12 @@ pub(crate) fn ListView(
         }
         // Tracked admission reads matter: a pick deferred during an operation
         // must run when it ends, even if no new fleet event arrives.
-        let page_busy = ops.busy();
-        let rows_busy = *row_ops.read() > 0;
+        let deletes_busy = !deleting.read().is_empty();
         let listing_read = listing.read();
         let Some(Ok(listing_ok)) = listing_read.as_ref() else {
             return;
         };
-        if page_busy || rows_busy {
+        if deletes_busy {
             return;
         }
         if !listing_ok
@@ -3517,11 +3669,7 @@ pub(crate) fn ListView(
             let fresh = api::fetch_preferences(&base).await;
             // A manual selection or operation admitted during the read wins.
             // Choose from the latest committed rows, not a pre-await snapshot.
-            if selected.peek().is_none()
-                && !ops.busy_now()
-                && *row_ops.peek() == 0
-                && row_pending.peek().is_empty()
-            {
+            if selected.peek().is_none() && deleting.peek().is_empty() {
                 let mut preferences = preferences;
                 if let Ok(fresh) = fresh {
                     // An incidental read must not refresh unrelated settings
@@ -3842,8 +3990,7 @@ pub(crate) fn ListView(
     // reply changed adjacency while the intent crossed the eval bridge.
     let on_drag_pin = use_callback(move |intent: crate::pin_drag::Intent| {
         if hosts_panel_open()
-            || ops.busy_now()
-            || !row_pending.peek().is_empty()
+            || operations.busy_now(&intent.id)
             || deleting.peek().contains(&intent.id)
             || row_questions.current(&intent.id).is_some()
             || rename_editor
@@ -3919,7 +4066,7 @@ pub(crate) fn ListView(
             if targets.is_empty() {
                 return;
             }
-            if ops.busy_now() || !row_pending.peek().is_empty() || hosts_panel_open() {
+            if hosts_panel_open() {
                 for target in targets {
                     errors
                         .write()
@@ -3927,6 +4074,13 @@ pub(crate) fn ListView(
                 }
                 return;
             }
+            // Capture before sandbox deduplication and row refusals: each drawn
+            // target belongs to this marking choice, even when its work refuses.
+            let marking_revision = *marking_interaction_revision.peek();
+            let marking_targets = targets
+                .iter()
+                .map(|target| target.id.raw().to_owned())
+                .collect::<HashSet<_>>();
             let sandbox_ids = targets
                 .iter()
                 .filter(|target| target.sandbox)
@@ -3948,9 +4102,13 @@ pub(crate) fn ListView(
             let work = lifecycle::admit_batch(
                 targets,
                 |id, guard, refuse_if_tabs_open, refuse_if_agent_running| match action {
-                    LifecycleAction::Stop => {
-                        bulk_admit_stop(id, refuse_if_tabs_open, refuse_if_agent_running, false)
-                    }
+                    LifecycleAction::Stop => bulk_admit_stop(
+                        id,
+                        refuse_if_tabs_open,
+                        refuse_if_agent_running,
+                        false,
+                        None,
+                    ),
                     LifecycleAction::Delete => {
                         let sandbox = sandbox_ids
                             .contains(&id)
@@ -3967,8 +4125,38 @@ pub(crate) fn ListView(
             // whose effective projection can vanish during an accepted listing.
             spawn(async move {
                 lifecycle::run_paced(work).await;
-                marking::return_header_focus();
-                marked.write().clear();
+                if *marking_interaction_revision.peek() != marking_revision {
+                    // Even old targets remain marked after a newer choice;
+                    // guessing which part of that choice to erase loses intent.
+                    return;
+                }
+                let retained = marked
+                    .peek()
+                    .difference(&marking_targets)
+                    .cloned()
+                    .collect::<HashSet<_>>();
+                let removes_toolbar = {
+                    let current = listing.peek();
+                    current
+                        .as_ref()
+                        .and_then(|reply| reply.as_ref().ok())
+                        .is_some_and(|current| {
+                            let displayed = rows::held_display_order(
+                                order_hold.peek().as_ref(),
+                                &current.sessions,
+                            );
+                            displayed
+                                .iter()
+                                .any(|row| marked.peek().contains(row.id.raw()))
+                                && !displayed.iter().any(|row| retained.contains(row.id.raw()))
+                        })
+                };
+                if removes_toolbar {
+                    // Capture ownership before rendering removes the bar. Hidden
+                    // marks alone do not keep its effective projection mounted.
+                    marking::return_header_focus_after_async();
+                }
+                marked.set(retained);
             });
         },
     );
@@ -4004,11 +4192,14 @@ pub(crate) fn ListView(
             // opening or start another lifecycle action behind the question.
             return;
         }
-        if ops.busy_now() || !row_pending.peek().is_empty() || hosts_panel_open() {
+        if hosts_panel_open() {
             bulk_run.call((action, targets));
             return;
         }
         if action.needs_confirmation(&targets, skip_session_confirmations) {
+            // The question owns the unchanged marks too. An older batch must
+            // not erase them and turn this new question's answer into a no-op.
+            marking_surface_opened.call(());
             match action {
                 LifecycleAction::Delete => {
                     bulk_delete_question.open(targets, ());
@@ -4025,15 +4216,15 @@ pub(crate) fn ListView(
         if !bulk_delete_question.is_current(&shown) {
             return;
         }
-        if ops.busy_now() || !row_pending.peek().is_empty() || hosts_panel_open() {
+        if hosts_panel_open() {
             return;
         }
         if bulk_delete_question.take(&shown).is_none() {
             return;
         }
         bulk_run.call((LifecycleAction::Delete, shown.key().clone()));
-        // Accepted row claims disable the action buttons before modal close's
-        // deferred handback. The nonsequential count remains focusable instead.
+        // Return to the stable nonsequential count while admitted row work runs;
+        // the other marked actions retain their ordinary per-target admission.
         crate::modal_dialog::DialogHandle::new(lifecycle::DIALOG).close(lifecycle::ACCEPTED_FOCUS);
     });
     let bulk_cancel = use_callback(move |shown: ConfirmToken<Vec<DeleteSnapshot>>| {
@@ -4045,11 +4236,7 @@ pub(crate) fn ListView(
     // Stop shares Delete's target retirement and focus handoff, while keeping
     // separate openings so a queued answer cannot change lifecycle verbs.
     let bulk_confirm_stop = use_callback(move |shown: ConfirmToken<Vec<DeleteSnapshot>>| {
-        if ops.busy_now()
-            || !row_pending.peek().is_empty()
-            || hosts_panel_open()
-            || bulk_stop_question.take(&shown).is_none()
-        {
+        if hosts_panel_open() || bulk_stop_question.take(&shown).is_none() {
             return;
         }
         bulk_run.call((LifecycleAction::Stop, shown.key().clone()));
@@ -4065,7 +4252,7 @@ pub(crate) fn ListView(
     // being visible or marked. The existing row callbacks remain responsible
     // for requests and failures; this caller owns no second write lifecycle.
     let bulk_metadata = use_callback(move |(action, drawn): (MetadataAction, Vec<Session>)| {
-        if ops.busy_now() || !row_pending.peek().is_empty() || hosts_panel_open() {
+        if hosts_panel_open() {
             return;
         }
         let targets = {
@@ -4103,6 +4290,7 @@ pub(crate) fn ListView(
         // These callbacks finish acceptance at dispatch: Pin spawns its own
         // request and seen writes enter the existing shared writer. Neither
         // claims row_pending or returns completion to await here.
+        marking_interaction_revision += 1;
         marked.write().clear();
     });
     // Stable handles let rows stay memoized while use_callback refreshes each
@@ -4143,7 +4331,7 @@ pub(crate) fn ListView(
     // Cosmetic reflection of the same conditions, for the disabled
     // attributes. Not the guard — see `ops`.
     let busy = ops.busy();
-    let nav_locked = busy || !row_pending.read().is_empty();
+    let nav_locked = false;
     // EVERY host is offered as a create target, whatever phase it is in.
     // Filtering to connected hosts — which this used to do — quietly
     // rewrites SPEC.md's default: the local row is the fallback
@@ -4220,6 +4408,7 @@ pub(crate) fn ListView(
     // the same "do not wait for the feed" nudge `do_replace` gives an
     // ordinary replace's own success path.
     let created_listing = request_listing.clone();
+    let failed_replace_listing = request_listing.clone();
     let created_hosts = request_hosts.clone();
     // The order hold that applies to the list being shown, if any, as the
     // slots and original pins `rows::held_display_order` keeps. Read rather
@@ -4844,8 +5033,8 @@ pub(crate) fn ListView(
         // click elsewhere is taken as the prompt's safe answer, cancel, so the
         // relay closes that question too. Rows with an open question keep a
         // relay even when another menu replaced their panel, so that answer is
-        // not lost to the race above. Cancelling holds no claim to release;
-        // it only closes the question, exactly as the prompt's cancel does,
+        // not lost to the race above. Cancelling releases only the question's
+        // guard, with no request admitted, exactly as its Cancel button does,
         // and like that cancel it carries the opening this render drew. So a
         // relay click drawn before the row's current opening closes only the
         // menu and leaves the question open. That covers a click left over
@@ -5003,12 +5192,12 @@ pub(crate) fn ListView(
         // The ordering is the list's title; count and icon actions share its
         // band. At minimum width the action group wraps as a whole.
         div { class: "list-header",
-            div { class: "session-heading", hidden: hosts_panel_open(),
+            div { class: "session-heading", hidden: hosts_panel_open(), onresize: session_heading_resized,
                 if !effective_marks.is_empty() {
                     marking::MarkedBar {
                         targets: effective_marks.clone(), disabled: nav_locked,
                         layout_epoch, on_action: bulk_metadata, on_clear: clear_marks,
-                        on_lifecycle: bulk_lifecycle,
+                        on_lifecycle: bulk_lifecycle, on_open: marking_surface_opened,
                     }
                     if let Some(Ok(listing)) = &*listing.read() {
                         // Marking replaces the ordinary count, never its
@@ -5051,7 +5240,7 @@ pub(crate) fn ListView(
                     super::trash::TrashControl {
                         hosts, revision: trash_revision,
                         actions: trash_actions,
-                        gate: crate::ops::PaneGate::new(ops, row_ops),
+                        gate: ops,
                         trigger_hidden: !effective_marks.is_empty(),
                     }
                     // Beside New, the action it feeds (SPEC.md: "The Templates
@@ -5151,6 +5340,7 @@ pub(crate) fn ListView(
                     initial_cwd: ordinary_new_cwd(),
                     auto_launch,
                     opening_generation,
+                    on_replace_failed: move |_| failed_replace_listing(Trigger::Explicit),
                     initial_error: initial_create_error(),
                     prefill: clone_prefill(),
                     restart_bridge: restart_bridge(),
@@ -5226,6 +5416,8 @@ pub(crate) fn ListView(
                     },
                     on_created: move |created: CreatedSession| {
                         hosts_panel_open.set(false);
+                        let replaced_source = clone_prefill.peek().as_ref().and_then(|prefill| prefill.mode.replace_source().map(str::to_owned));
+                        let should_open = replaced_source.as_ref().is_none_or(|source| selected.peek().as_deref() == Some(source.as_str()));
                         let CreatedSession {
                             session,
                             submitted_launch,
@@ -5239,7 +5431,7 @@ pub(crate) fn ListView(
                         // can trigger reconciliation against a late old reply.
                         listing_reads.write().fence();
                         // Creation is a user-initiated selection too.
-                        remember_selection(&created_base, preferences, session.id.raw());
+                        if should_open { remember_selection(&created_base, preferences, session.id.raw()); }
                         // Mirror the structured launch THIS client submitted
                         // (never the reply's `session.launch`, which the
                         // remote host writes: SPEC.md allows only explicit
@@ -5273,11 +5465,11 @@ pub(crate) fn ListView(
                         clone_prefill.set(None);
                         initial_create_action.set(None);
                         ordinary_new_cwd.set(None);
-                        let naming = name_created_session(
+                        let naming = (should_open && name_created_session(
                             new_was_never_shown,
                             preferences.0.peek().name_session_on_quick_launch,
-                        ).then(|| (session.id.raw().to_owned(), session.title.raw().to_owned()));
-                        on_open.call(session);
+                        )).then(|| (session.id.raw().to_owned(), session.title.raw().to_owned()));
+                        if should_open { on_open.call(session); }
                         if let Some((id, title)) = naming {
                             // Selection and the modal mount share this completion
                             // event. The accepted create has already released its
@@ -5406,30 +5598,40 @@ pub(crate) fn ListView(
                             },
                         }
                     }
-                    if let Some(question) = replace_controller.question() {
-                        // Keyed by the source row, so another row's question
-                        // mounts fresh (scrolled into view, cancel focused)
-                        // instead of reusing this one's element.
-                        crate::yolo_confirm::YoloConfirmation {
+                    for question in replace_controller.questions() {
+                        // Each source keeps its own answer lane. Its label is
+                        // needed when independent Replace replies both ask for
+                        // consent; neither reply may replace the other's prompt.
+                        div {
                             key: "{question.key().source.id.raw()}",
+                            class: "replace-yolo-question",
+                            role: "group",
+                            aria_label: format!("Replace {}", question.key().source.title.escaped()),
+                            p { class: "yolo-confirmation-heading",
+                                "Replace "
+                                span { class: "peer-value", dir: "ltr", "{question.key().source.title.escaped()}" }
+                            }
+                        crate::yolo_confirm::YoloConfirmation {
                             ask: question.key().ask.clone(),
                             // This flow holds a row operation rather than
                             // the page's token (`begin_row_op`), so its own
                             // in-flight replace shows as the source row's
                             // pending phase, not as `ops.busy()`.
-                            busy: ops.busy()
-                                || row_pending.read().contains(question.key().source.id.raw()),
-                            error: replace_controller.error(),
+                            busy: row_pending.read().contains(question.key().source.id.raw()),
+                            error: replace_controller.error(question.key().source.id.raw()),
                             confirm_submits: false,
+                            async_inline: true,
                             // Both answers continue the Replace the user
                             // confirmed, with the row snapshot and the
                             // nothing-alive answer that prompt carried, and
                             // only by taking this opening of the question
-                            // (`ReplaceController::answer_sidebar`), once row
-                            // admission succeeds. Taking it closes it, so the
+                            // (`ReplaceController::answer_sidebar`), transferring
+                            // its question claim into the request synchronously.
+                            // Taking it closes it, so the
                             // permanent answer leaves it down while the host
                             // is marked; the controller reopens it with the
-                            // reason if that fails and no newer question exists.
+                            // reason if that fails and no newer question exists
+                            // for that source.
                             on_confirm: {
                                 let mut do_replace = yolo_do_replace.clone();
                                 let question = question.clone();
@@ -5439,7 +5641,6 @@ pub(crate) fn ListView(
                                         &question,
                                         false,
                                         || begin_row_op(&id),
-                                        || end_row_op(&id),
                                     ) {
                                         let pending = answer.pending.clone();
                                         do_replace(pending.source, pending.guard, Some(answer));
@@ -5455,7 +5656,6 @@ pub(crate) fn ListView(
                                         &question,
                                         true,
                                         || begin_row_op(&id),
-                                        || end_row_op(&id),
                                     ) {
                                         let pending = answer.pending.clone();
                                         do_replace(pending.source, pending.guard, Some(answer));
@@ -5468,6 +5668,7 @@ pub(crate) fn ListView(
                                     replace_controller.cancel_question(&question);
                                 }
                             },
+                        }
                         }
                     }
                     crate::pin_drag::PinDragList {
@@ -5503,6 +5704,8 @@ pub(crate) fn ListView(
                         for (session, row_deleting, row_activity) in displayed_rows.clone().unwrap_or_default() {
                             SessionRow {
                                 key: "{session.id.raw()}",
+                                host_ops: ops,
+                                stopping: operations.stopping.read().contains(session.id.raw()),
                                 replace_progress: replace_controller.progress(session.id.raw()),
                                 menu_registration: menu_registration.clone(),
                                 bell_registration: bell_registration.clone(),
@@ -5514,14 +5717,10 @@ pub(crate) fn ListView(
                                 pin_neighbors: pin_neighbors.get(session.id.raw()).cloned(),
                                 state: RowState {
                                     error: errors.read().get(session.id.raw()).cloned(),
-                                    // The shared token counts as busy for
-                                    // every row's action buttons, not just
-                                    // this row's own in-flight op: while
-                                    // the other pane (or a page operation)
-                                    // holds it, `begin_row_op` refuses row
-                                    // ops anyway, and the disabled state is
-                                    // that refusal made visible.
-                                    busy: busy || row_pending.read().contains(session.id.raw()),
+                                    // A header question owns this same source claim.
+                                    // A row's own question keeps its confirming answer
+                                    // enabled; every admitted request disables its row.
+                                    busy: row_pending.read().contains(session.id.raw()) || (operations.busy(session.id.raw()) && row_questions.peek_key(session.id.raw()).is_none()),
                                     // The opening this render draws; the
                                     // row's answers carry it back.
                                     question: row_questions.current(session.id.raw()),

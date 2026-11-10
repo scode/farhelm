@@ -1,27 +1,10 @@
-// An open session view's claim on the page's operation lock never outlives
-// the view.
-//
-// The session view takes the window-wide operation lock for its Restart
-// controls: the stop-first Restart prompt, the "Restart with" dialog, a
-// Restart in flight, and the interrupted card's Replace prompt. While the
-// lock is held the sidebar refuses to open another session and every other
-// write action is disabled. The lock is owned by the page shell, not by the
-// view, so a claim the view forgot to release survived the view going away
-// (the session deleted from another client) and left the window inert until
-// it was reloaded. Each test here holds one of those claims, deletes the
-// session from outside the page so the view goes away, and checks the sidebar
-// still opens another session.
-//
-// The "Restart with" dialog and the interrupted card's Replace prompt are
-// covered by unit tests in crates/farhelm-ui/src/ops.rs instead. The dialog
-// needs a captured conversation and the card a host reboot, neither of which
-// this stack's fake agents produce, and attempts to stage them through
-// stubbed listing, detail and feed routes did not get the page to re-read
-// the staged session (2026-10-02), so it could not be made to go away. The
-// dialog's claim takes the same path as the two Restart claims tested here
-// (`PaneGate::claim_into`), and the card's prompt closes on the same
-// condition that draws the card (`interrupted_card_shown` in
-// session_view.rs).
+// Removing the open session from another client must leave navigation usable,
+// whether its Restart question is open or its accepted request is pending.
+// Questions hold a per-session claim in the keyed view; accepted requests run
+// in the persistent list and survive that view disappearing. Neither blocks
+// navigation, so these cases establish the removal-and-navigation contract,
+// not release of a page-wide lock. Shared claim and completion ownership have
+// their own Rust tests; the browser observes the real disappearing view here.
 import { type APIRequestContext, type Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
 import {
@@ -51,9 +34,8 @@ async function bystanders(request: APIRequestContext, cwd: string): Promise<stri
 }
 
 /**
- * The property every test here ends on: the sidebar opens another session,
- * which it refuses while the operation lock is held. Opens whichever of `ids`
- * is not selected.
+ * Open a bystander after removal without mistaking an automatic pick for a
+ * successful click. At least one of the two candidates must be unselected.
  */
 async function expectSidebarOpens(page: Page, ids: string[]): Promise<void> {
   for (const id of ids) await expect(row(page, id)).toBeVisible({ timeout: 20_000 });
@@ -64,7 +46,7 @@ async function expectSidebarOpens(page: Page, ids: string[]): Promise<void> {
   expect(unselected.length, "at least one bystander is not selected").toBeGreaterThan(0);
   const target = row(page, unselected[0]);
   await target.locator(".session-row-open").click();
-  await expect(target, "the window's write actions must not stay locked").toHaveAttribute(
+  await expect(target, "navigation remains usable after the source view disappears").toHaveAttribute(
     "data-session-selected",
     "true",
     { timeout: 10_000 },
@@ -73,9 +55,9 @@ async function expectSidebarOpens(page: Page, ids: string[]): Promise<void> {
 
 /**
  * A session deleted by another client while its view's stop-first Restart
- * prompt holds the lock leaves the sidebar usable.
+ * prompt holds its source claim leaves the sidebar usable.
  */
-test("a Restart prompt's claim is released when another client deletes the session", async ({
+test("navigation survives another client deleting a session with a Restart prompt", async ({
   page,
   request,
 }) => {
@@ -100,8 +82,8 @@ test("a Restart prompt's claim is released when another client deletes the sessi
     await restart.click();
     await expect(page.locator(".restart-confirm")).toBeVisible();
     // Premise, observed directly: the header's other lifecycle actions are
-    // disabled while the view holds the operation lock.
-    await expect(page.locator(".header-replace"), "premise: the view holds the operation lock").toBeDisabled();
+    // disabled while the question owns this session's lifecycle claim.
+    await expect(page.locator(".header-replace"), "premise: the question excludes competing source actions").toBeDisabled();
 
     await cleanupSession(request, source.id);
     await expect(row(page, source.id)).toHaveCount(0, { timeout: 20_000 });
@@ -117,7 +99,7 @@ test("a Restart prompt's claim is released when another client deletes the sessi
  * in flight leaves the sidebar usable. The restart's reply is held so the
  * claim is certainly still owned by the running restart when the view goes.
  */
-test("an in-flight Restart's claim is released when another client deletes the session", async ({
+test("navigation survives another client deleting a session during Restart", async ({
   page,
   request,
 }) => {
@@ -141,7 +123,7 @@ test("an in-flight Restart's claim is released when another client deletes the s
     );
     await restart.click();
     await sent;
-    await expect(page.locator(".header-replace"), "premise: the restart holds the operation lock").toBeDisabled();
+    await expect(page.locator(".header-replace"), "premise: the restart excludes competing source actions").toBeDisabled();
 
     await cleanupSession(request, source.id);
     await expect(row(page, source.id)).toHaveCount(0, { timeout: 20_000 });
