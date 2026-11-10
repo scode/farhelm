@@ -51,9 +51,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`container-token-read-blocks-host-admission.md`](container-token-read-blocks-host-admission.md) — A blocking
   configured token file can hold up other session creates and deletes across the host.
 
-- [`container-attachments-use-unreachable-host-paths.md`](container-attachments-use-unreachable-host-paths.md) — Normal
-  image/file paste can report success but insert a host path that the container's agent or tab cannot read.
-
 - [`podman-storage-selection-escapes-lifecycle-lookup.md`](podman-storage-selection-escapes-lifecycle-lookup.md) — A
   container created under a login shell's Podman configuration can survive while Stop reports absence from a different
   store.

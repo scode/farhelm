@@ -1979,3 +1979,180 @@
   ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its
   index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
 - Execution: `` planned in `plans/queue/sandbox-stop-click-guards.md` ``.
+
+## cancelled-suspend-can-accept-queued-answer.md
+
+- Outcome: `fix code`.
+- Assessment: partly correct, by reading the code on main 1fd93044 (not run). In the Hosts panel, the "Suspend
+  <host>?" question for a Tensorlake host is a plain signal (`crates/farhelm-ui/src/hosts.rs`, `suspend_question`): its
+  Escape, close and Cancel handlers clear it, and its Suspend button calls the lifecycle request without checking that
+  the question it was drawn with is still open. A Cancel and a Suspend handled before the next redraw therefore still
+  suspend the host (processes freeze until the user clicks Resume; no data loss is established). That consequence is
+  accepted by SPEC.md "Maintainer-confirmed decisions" ("A Cancel and a submit of the same dialog that arrive together
+  before a redraw may still submit"), so the finding's `high` bucket overstates it; `other` fits what remains. What
+  remains contradicts SPEC_impl.md "GUI: Dioxus", "Answers bind to what was drawn": "Every question, confirmation and
+  destructive prompt goes through `ConfirmSlot` ... an answer whose token is not the open one does nothing". Host Remove
+  in the same file already uses `ConfirmSlot`; host Suspend is not among the four prompts that stay up through their
+  request. Double-clicking Suspend is not a route (the page's operation lock refuses the second request). The session
+  toolbar's Suspend question has the same gap and is a separate undecided item
+  (`sandbox-lifecycle-questions-lack-opening-guards.md`), not in this scope.
+- Decision: recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
+  "Preparing each item"): SPEC_impl.md states the required mechanism in so many words, the code contradicts it, and the
+  fix copies host Remove's pattern. The maintainer can revise it.
+- Completion criteria: the Hosts-panel Suspend question opens through a `ConfirmSlot`, the render that draws it reads
+  the token, Escape, close and Cancel answer with `cancel_for` on that token, and Suspend acts only when `take` with the
+  drawn token succeeds; the question does not stay up through the request (it is not one of the four that do). A UI unit
+  test in the style of host Remove's shows a Suspend answer carrying a cancelled opening's token does nothing. Size
+  gate: about 100 lines of diff (code, tests and docs, not counting `TRIAGE_OUTCOMES.md`, the queue removal or a
+  changelog fragment); over it, block and bring it back. Remove the feedback file and its index entry, and move this
+  entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
+- Execution: `pending`.
+
+## cache-cleanup-leaves-packed-ref-lock.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed on Farhelm's side by reading the code on main 1fd93044 (not run); Git's side rests on the
+  reviewer's citations of Git's source and was not re-checked. After each new checkout the supervisor runs a background
+  job on the host's repository cache (the ready-checkout spare build, or Git housekeeping with `gc --auto`, both under
+  Farhelm's exclusive cache lock; `spare_build.rs`, `launch.rs`). Every cancellation (supervisor stop or update, a
+  crash, a spare-setting or checkout-root change, the ten-minute deadline) is an immediate hard kill
+  (`service/spare_builder.rs`, `bounded_command.rs`). A kill while Git rewrites the packed branch and tag list leaves
+  `packed-refs.lock`; nothing in Farhelm removes Git lock files (`launch.rs` says "no staging or cache repair policy"),
+  so once an upstream ref is deleted every later `fetch --prune` in that cache fails and every new checkout of that
+  repository on that host fails at the clone stage until manual repair or 30-day eviction (`repo_cache.rs`). A spare
+  build's own pruning refresh is a second route. Contradicts SPEC.md ("a failed build leaves no spare, so a later launch
+  can clone normally") and SPEC_impl.md ("leave ordinary visible clone available"). Not clearly settled: several fix
+  shapes. No coverage.
+- Decision: the maintainer picked "(a) Clear leftover Git locks under Farhelm's cache lock" (2026-11-10 high-bucket
+  triage page, Q2).
+- Completion criteria: before each Git command Farhelm runs in a repository cache, while holding Farhelm's exclusive
+  cache lock, Git lock files left in that cache are removed (at least `packed-refs.lock`; the executor decides whether
+  to cover Git's other ref and index locks, and says which in a comment that explains why removal is safe: every Farhelm
+  Git process in the cache runs under that lock, so any Git lock found then is a leftover). SPEC_impl.md gains a
+  sentence on this repair. A test plants a stale `packed-refs.lock` in a cache whose upstream deleted a branch and shows
+  the next checkout succeeds. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  `TRIAGE_OUTCOMES.md`, the queue removal or the changelog fragment); over it, block and bring it back. Remove the
+  feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
+- Execution: `pending`.
+
+## mac-update-gnu-stat-path.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by reading the code on main 1fd93044 (not run). Mac inspection only checks that a `stat` exists
+  (`provisioning/backend.rs`, unlike its working-`readlink -f` test); artifact inspection then runs the BSD form
+  `stat -L -f '%Lp'` through the SSH command's PATH, chosen from `uname -s` alone, and fails on GNU `stat`. Update
+  (manual, Update all, automatic), re-running setup on an existing Mac, and uninstall's stop step
+  (`provisioning/macos.rs`, `stat -f '%HT'`) fail every time with a cryptic error; Update is also the documented restart
+  path after a reboot. Fresh setup works, but the upload's size reports become unusable, so its 60-second stall timeout
+  never arms. The trigger needs `gnubin` deliberately ahead of the system tools for non-interactive SSH commands (for
+  example in `~/.zshenv`); a stock Homebrew setup in `~/.zprofile` does not trigger it. Contradicts SPEC.md "Supported
+  user environments" (an unsupported configuration is refused with a clear message) and the Mac inspection rules either
+  way. Remote Macs not yet in a stable release. Not clearly settled: two fix shapes. No coverage.
+- Decision: the maintainer picked "(a) Support it: always call `/usr/bin/stat` on Macs" (2026-11-10 high-bucket triage
+  page, Q3).
+- Completion criteria: every `stat` Farhelm runs on a remote Mac (artifact inspection, the shared uploader's size
+  reports, uninstall's stop step, and any other Darwin `stat` call the executor finds) calls `/usr/bin/stat`, so a
+  GNU-first PATH no longer matters; the Linux tests that fake a Darwin `stat` through PATH get a seam to substitute it.
+  SPEC_impl.md "Provisioning" says Darwin uses the system `/usr/bin/stat` regardless of PATH. A test shows a GNU-style
+  `stat` first on PATH no longer breaks the Darwin path. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting `TRIAGE_OUTCOMES.md`, the queue removal or the changelog fragment); over it, block and bring it back. Remove
+  the feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
+- Execution: `pending`.
+
+## sandbox-ssh-agent-key-ordering-unresolved.md
+
+- Outcome: `fix spec+code`.
+- Assessment: partly confirmed by reading the code on main 1fd93044 (not run, no ssh connection). Tensorlake connections
+  (snapshot builds and host connections) pass `IdentitiesOnly=yes` with Farhelm's registered key and deliberately keep
+  the user's ssh config (`crates/farhelm-helm/src/tensorlake/ssh.rs`, `ssh.rs`), and nothing sets `IdentityAgent`.
+  OpenSSH moves a config-named `IdentityFile` key that is also loaded in the agent ahead of the remaining file keys even
+  with `IdentitiesOnly=yes` (from OpenSSH's key selection, recalled rather than re-read), so a user whose config names a
+  personal key for these hosts and loads it in the agent offers that key first; the module comment saying it is
+  "offered, but after Farhelm's key" is then wrong. Unverified: whether Tensorlake's gateway refuses the whole login at
+  the first unknown key, as Farhelm's code assumes; if it does, builds fail and the host cannot connect, with a hint to
+  register a key the user already registered. SPEC.md "Security" already says builds reach the sandbox "with Farhelm's
+  own key alone"; SPEC_impl.md names `IdentitiesOnly=yes` as the mechanism. No coverage.
+- Decision: the maintainer picked "(a) Stop consulting the ssh-agent for Tensorlake connections" (2026-11-10 high-bucket
+  triage page, Q5), without first checking the gateway live.
+- Completion criteria: Tensorlake ssh options add `IdentityAgent=none` for builds and host connections, so only
+  Farhelm's key file is offered; the module comment is corrected, the option-list test expectations updated, and
+  SPEC.md's "Farhelm's own key alone" covers host connections as well as builds, with SPEC_impl.md naming the mechanism.
+  The executor confirms, by reading OpenSSH documentation or a local check, that a `ProxyJump` hop's separate ssh still
+  uses the user's agent, and says so in the comment. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting `TRIAGE_OUTCOMES.md`, the queue removal or the changelog fragment); over it, block and bring it back. Remove
+  the feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
+- Execution: `pending`.
+
+## scoped-cleanup-misses-late-tmux.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by reading the code on main 1fd93044 (not run). The tmux here is one the user or an agent runs
+  inside a session, not Farhelm's own tmux-based terminals. On scoped Linux hosts, stock tmux moves each pane's program
+  into its own `tmux-spawn-*.scope`, outside the session's groups; ending the session's groups kills the tmux server,
+  and a pane job that ignores hangup survives unless the machine-wide sweep runs. Since 2026-11-09 scoped cleanup checks
+  each group once for a running tmux server before any kill (`crates/farhelm-supervisor/src/service/sweep.rs`,
+  `scope.rs`) and keeps the sweep only on a hit. A tmux server started after that check and before the kill (seconds for
+  Delete, which checks every group before ending them one by one) is missed, and Stop, Restart, Delete or tab close
+  report success while its jobs run on; after Restart they run beside the new agent. Contradicted SPEC.md "Lifecycle
+  operations" ("those programs still end with the agent or tab that started the server") and "Ownership during cleanup
+  and provisioning". No coverage (`scoped-stop-without-sweep` landed and is the check in question).
+- Decision: the maintainer, 2026-11-10 high-bucket triage page, Q1: "if the issue is just that user started tmux
+  sessions don't get killed, that's fine. this is essentially the intent the user has when using tmux, and we can call
+  it out in the spec." On the follow-up they picked "Say these jobs survive, and remove the check" over keeping it as
+  best effort, reversing the 2026-11-09 decision that kept the sweep when a tmux server is running. Decided together
+  with `scoped-cleanup-forgets-ended-tmux.md`.
+- Completion criteria: SPEC.md ("Lifecycle operations" and "Ownership during cleanup and provisioning") and SPEC_impl.md
+  say that programs a user-run tmux places outside the session's process groups are not ended by Stop, Restart, Replace,
+  Delete or tab close on scoped hosts, as the intent of running them under tmux, and drop the promise and the pre-kill
+  tmux check. The pre-kill tmux check and the sweep it keeps are removed from scoped cleanup, with its tests and the e2e
+  regression for it removed or inverted to the new rule; scoped cleanup never runs the machine-wide sweep because of
+  tmux. Unscoped hosts keep their sweep unchanged. A changelog fragment states the new behavior (`changed`). One change
+  executes both items. Size gate: about 100 lines of added code, tests and docs (removed lines do not count); over it,
+  block and bring it back. Remove both feedback files and their index entries, and move both entries to
+  `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
+- Execution: `pending`.
+
+## scoped-cleanup-forgets-ended-tmux.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by reading the code on main 1fd93044 (not run), with one correction: tmux, not Farhelm, moves
+  the pane jobs out of the session's group, and Farhelm keeps no record of them. If a user- or agent-started tmux server
+  has already exited (`kill-server`, or its last session closing) while a hangup-ignoring pane job lives on, the
+  pre-kill check sees no server and scoped cleanup skips the sweep, so the job survives a successful Stop, Restart or
+  Delete while the session's group is still live. A failed-Restart variant (`host_restart.rs`) reads the same way and
+  was not verified further. Same spec contradiction and coverage as `scoped-cleanup-misses-late-tmux.md`.
+- Decision: the same 2026-11-10 decision recorded under `scoped-cleanup-misses-late-tmux.md`: jobs a user-run tmux moved
+  out of the session may survive cleanup, called out in the spec, and the pre-kill tmux check is removed.
+- Completion criteria: executed together with `scoped-cleanup-misses-late-tmux.md`, under its criteria and size gate.
+  Remove this feedback file and its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
+- Execution: `pending`.
+
+## settings-save-races-final-replacement.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by reading the code on main 1fd93044 (not run). When a Tensorlake recipe carries credentials,
+  Farhelm merges them into Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/config.toml` on the sandbox at
+  setup, on each connection whose recorded delivery is out of date, and when a named token is replaced (SPEC.md
+  "Topology"), so some deliveries happen while agents run. Since #3173 the final install compares the destination with
+  the bytes read, but the check and `chmod` + `mv -f` are separate steps in one remote command
+  (`crates/farhelm-helm/src/provisioning/backend.rs`), so a save by the agent or the user that lands in that gap of a
+  few milliseconds (estimated, not measured) is overwritten silently and the delivery recorded as done. Contradicts the
+  archived principle "Farhelm's delivery into an agent settings file never undoes a change saved to that file after
+  Farhelm read it" (`TRIAGE_OUTCOMES_ARCHIVE.md`, `agent-settings-save-overwrites-concurrent-editor.md`). Fully closing
+  it needs a lock the agents also honor; none is known. No coverage.
+- Decision: the maintainer asked why delivery edits these files after agents start, then whether credentials could move
+  out of the agents' settings files; the page answered that Claude's API endpoint and Subscription and Codex's API
+  endpoint could go into the launch environment (Codex's provider through `-c` overrides and an `env_key` token), Codex
+  Subscription cannot (Codex owns `auth.json`), and that this is a redesign. They picked "Accept the gap in the spec,
+  and add a TODO for launch-environment credentials" (2026-11-10 high-bucket triage page, Q4), and said in conversation:
+  "the todo item for credentials hsould be in near term bucket".
+- Completion criteria: SPEC_impl.md "Adding Tensorlake hosts" states that a save landing between the final comparison
+  and the replacement can still be overwritten, because closing it needs a lock the agents would also honor; the
+  archived principle is narrowed to match where SPEC_impl.md states it (it is not edited in the archive). TODO.md's
+  `Near term` bucket gains an entry: deliver recipe credentials through the agent's launch environment instead of its
+  settings files (Claude `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`; Codex provider via
+  `-c` overrides with an `env_key` token; Codex Subscription stays in `auth.json`), noting the costs raised in triage
+  (only Farhelm-started shells get the credentials, rotation reaches agents at next launch, a one-time cleanup of keys
+  earlier releases wrote, spec rewrite) and that it would remove this race. No code change. Remove the feedback file and
+  its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
+- Execution: `pending`.

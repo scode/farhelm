@@ -20096,3 +20096,21 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   change.
 - Execution: change `tktklzkolpsv`, bookmark `plan/endpoint-credential-ownership/02-claude-custom-headers`,
   https://github.com/scode/farhelm/pull/3291/changes.
+
+## container-attachments-use-unreachable-host-paths.md
+
+- Outcome: `other`.
+- Assessment: confirmed by reading the code on main 1fd93044 (not run). In a containerized session (experimental since
+  v0.32.0), an image or file paste uploads to the supervisor's attachments area on the host
+  (`crates/farhelm-supervisor/src/service/uploads.rs`, `attachments.rs`) and the browser types that host path at the
+  cursor (`crates/farhelm-ui/assets/terminal.js`), but the container mounts only the checkout
+  (`crates/farhelm-supervisor/src/container.rs`), so the agent or tab shell gets "no such file". Nothing is lost; the
+  paste looks successful. The upload code has no container case, and SPEC.md "Attachments" (host-side path, data area
+  outside the working directory) and "Containerized sessions" (no Farhelm state inside) cannot all hold for such a
+  session.
+- Decision: skipped as already planned work. `plans/queue/podman-environments.md` (`[pending]`) removes the cause: its
+  acceptance "Ordinary-session features inside" lists attachments as working in container sessions, because the
+  supervisor runs inside the container, and its "Retirement" acceptance makes today's containerized sessions delete-only
+  ("an existing one can be deleted ... and nothing else"), so no paste into one remains. Planned, not implemented.
+- Completion criteria: remove the feedback file and its index entry immediately; the fix lands with that plan.
+- Execution: `complete` for the queue cleanup; removed during the 2026-11-10 triage of the high bucket.
