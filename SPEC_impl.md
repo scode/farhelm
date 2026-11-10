@@ -9034,12 +9034,15 @@ refusal.
 
 The "Run farhelm commands from this host without asking" setting is `hosts.commands_without_asking` in `helm.db` (schema
 40), off by default, and reset to off whenever the row adopts a different install, exactly as the YOLO setting is.
-"Always allow" on a card stores it only if the card's connection is still live, and stores it only while the host row
-still records the install identity it had when the request arrived (`allow_commands_for_identity`, under the host write
-lock), so a card raised by a replaced installation cannot grant its successor the setting. The setting and the request
-can race: when the request expires between the setting being stored and the request being taken, the answer gets 410 and
-the setting stays on, and the GUI's notice says the answer did not take effect and, after an "Always allow", that the
-host's setting may still have been turned on.
+"Always allow" on a card stores it only if the card's connection is still live when the answer arrives, and stores it
+only while the host row still records the install identity it had when the request arrived
+(`allow_commands_for_identity`, under the host write lock), so a card raised by a replaced installation cannot grant its
+successor the setting. The setting and the request can race: when the request expires between the setting being stored
+and the request being taken, the answer gets 410 and the setting stays on, and the GUI's notice says the answer did not
+take effect and, after an "Always allow", that the host's setting may still have been turned on. The liveness check is
+not repeated once the host write lock is held, so a connection that ends while the answer waits for that lock is the
+same race: the setting the user chose is stored for that install, the request is refused, and the same notice applies.
+This holds for every setting a card's "Always allow" stores, including the own-host and link grants below.
 
 The independent **Manage sessions on this host without asking** permission is `hosts.own_sessions_without_asking`
 (schema 80), default off for existing and new hosts, Tensorlake hosts included, and reset on identity adoption in the
