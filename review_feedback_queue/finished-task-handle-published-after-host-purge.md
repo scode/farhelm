@@ -4,9 +4,29 @@ Reviewed commit: d6645f771bee8ed03a66486ef8755834937d759d
 
 ## TLDR
 
-A completed uninstall task can leave bookkeeping reinserted after the host was already removed.
+A completed uninstall task or failed initial sandbox launch can leave bookkeeping reinserted after the host was already
+removed.
 
 ## Details
+
+### Failed initial sandbox launch adds another producer
+
+Additional reviewed commit: 0ff236126fe94cee84973dc142d17b70fc15bcf3, checked through
+0bc984b71384e7b754b55d007b53ebbeb9a076ca. Confidence: **verified source race**; occurrence, retained size and material
+resource impact remain unmeasured. Suggested bucket remains **other**.
+
+`crates/farhelm-helm/src/provisioning/tensorlake_add.rs:605-613` spawns execution before inserting the task handle. A
+child on another worker can finish failed-launch cleanup while the parent is descheduled before insertion. Cleanup
+transfers the provisioning guard with `Detach` (`:675-685`); `provisioning/service.rs:2078-2080,2102-2107` removes the
+host and purges its memory before any handle exists. The parent then inserts the finished handle for the deleted host.
+There is no completion sweep of that map; host IDs are not reused (`store.rs:2590-2591`). The shipped multithreaded
+runtime is established at `crates/farhelm/src/main.rs:2672-2677`.
+
+A pre-create lookup failure can reach never-created cleanup without destructive vendor work. The consequence is stale
+map/handle bookkeeping until restart, with no established credential retention, live process, billed-resource leak or
+availability failure. Gate child execution until registration, or hold the registration lock across spawn and insert,
+while preserving detached cleanup. This extends the same ordering defect as uninstall rather than creating another queue
+item. Provenance: trailing-review run `4c16ab16-96f7-4f02-9410-50839f5ab1f8`, `g053/g053-007`.
 
 Suggested bucket: **other**. Confidence: **verified**. Source-confirmed assessment; conditional routes retain their
 prerequisites and no runtime observation is claimed.
