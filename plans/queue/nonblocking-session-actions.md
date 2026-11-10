@@ -529,93 +529,155 @@ Fix, then deliver again:
   main causes, which a separate fix covers (the multi-host host-settings tests and the feed spec's reader count), can be
   named as such in the report.
 
-## Blocked
+### 2026-11-10: answer to a blocked question
 
-Blocked while landing on 2026-11-10 (claim cafa53).
+The question, as the executor put it:
 
-### Landing stopped: a finished launch still acts as if the launcher owned the page
+> Blocked while landing on 2026-11-10 (claim cafa53).
+>
+> ### Landing stopped: a finished launch still acts as if the launcher owned the page
+>
+> This plan makes pending session actions stop blocking the rest of the page. Before it, while a Stop, Restart, Replace
+> or Delete waited for its reply, or while a new session launched, the whole page was locked until the reply came. Now
+> only the session being acted on refuses competing actions, and a submitted launch hides the launcher and shows a small
+> progress indicator at the bottom of the window (the "pill") while you carry on elsewhere.
+>
+> The plan has two PRs. #3276 frees the page during a pending Stop, Restart, Replace or Delete. #3278 frees it during a
+> launch, which covers New, Clone, and the launcher-based "Restart with" and "Replace with" (where you edit the launch
+> before it runs).
+>
+> The landing monitor stopped this landing before merging anything: neither PR is on main, and main holds nothing of the
+> plan.
+>
+> #### What the maintainer asked for
+>
+> The previous landing found that opening Rename during a launch threw away that launch's result. The maintainer then
+> asked for two things if this landing failed again: send it back requiring the executor to close the whole class of
+> problems where something the user does during a pending action collides with it, rather than one finding at a time,
+> because every landing so far has found another one; and put the plan on hold, so that other plans make progress
+> meanwhile.
+>
+> #### What the landing found
+>
+> The landing's independent review read the code for every place the old page lock used to block (the row menus, the top
+> bar, the sidebar, the quick switcher, keyboard shortcuts, the host rail and its dialogs, the bulk bar, Templates, New,
+> Clone, Rename, Settings, Trash, sandbox Suspend and Resume). It found no remaining way to lose or strand a pending
+> launch: each of these either refuses while a launch is pending or leaves the launch alone, and a launch whose launcher
+> was closed or reopened meanwhile still clears the pill, Replace with's "Replacing…" and Restart with's lock on the
+> session.
+>
+> What remains is the other side of the same class: when a launch finishes, it still treats the page as if the launcher
+> had owned it, which was true before this plan and is not now. All of this is in #3278. The landing monitor confirmed
+> in the code that a successful launch moves focus to New and closes the Hosts panel; everything else below comes from
+> the review's reading of the code. None of it was observed in a browser.
+>
+> - After a launch succeeds, keyboard focus moves to the New button wherever the user is. Run Replace with on one
+>   session, switch to another and type into its terminal: when the replacement finishes, you stay on the other session
+>   (as the plan intends), but your keystrokes stop reaching its agent, and the next Enter or Space opens a new
+>   launcher. A successful launch also closes the Hosts panel if you had opened it meanwhile, and closes any row, host
+>   or sort menu you had opened. No test checks focus or open panels after a launch completes.
+> - When Restart with or Replace with fails while another dialog is open (Settings, Rename, the quick switcher), the
+>   acted-on session keeps showing "Restarting…" or "Replacing…", with its actions disabled and its failure hidden,
+>   until that dialog closes. SPEC.md says only the launcher waits for another dialog, not the session's own state.
+> - A launch to a suspended sandbox host appears to show the launcher again for a moment between waking the sandbox and
+>   creating the session, which could take focus from whatever you are typing into; and the create itself waits while
+>   another dialog is open, although the pill says the session starts when it is ready.
+> - Smaller points: while a Clone, Replace with or Restart with is pending, closing any row menu loses focus; a refused
+>   quick launch from the quick switcher does not give focus back; and one SPEC.md sentence still describes bulk buttons
+>   locked during a launch, which no longer happens.
+>
+> #### Checks
+>
+> Everything else the landing ran passed. The whole browser suite ran on Chromium and WebKit, on ten Tensorlake
+> sandboxes (cloud test machines) at the maintainer's request, with
+> `scripts/tensorlake/sandbox-tests.ts run --template <template> --shards 10` and no projects named, each shard recorded
+> through the recorder's generic mode: 3,175 passed, 14 skipped by design, 3 failed (runs `22625548`, `72ebf196`,
+> `ed7247b1`, `53af9bd7`, `c86e5443`, `a0b82874`, `61e890a4`, `a2de92ab`, `8432fda2`, `1d7062fc`). The three failures
+> are flakes already on record, in code this plan does not touch: two Chromium host-setup tests in the provisioning spec
+> ("expanded setup failure closes the menu below it" and "incarnation churn keeps a followed run while a target change
+> detaches it") and the window chrome spec's Chromium version double-click. The previous landing had 49 failures: 8 came
+> from main and were fixed separately by #3275, which has since landed, and the other 41 no longer fail after the
+> executor's changes (stale tests updated, the regressions among them fixed). The UI crate's Rust tests passed
+> (`cargo nextest run -p farhelm-ui` through the recorder, 944 passed, run `b76fcf27`), as did
+> `cargo fmt --all -- --check`, `scripts/check-test-sleeps.py`, `dprint check`, `releasing/check-changelog.py format`,
+> `scripts/check-agents-md.py`, `cargo build`, the release web build
+> (`dx build --package farhelm-ui --platform web --release`), `cargo clippy -p farhelm-ui --all-targets -- -D warnings`
+> and `cargo check -p farhelm-ui --features desktop`.
+>
+> #### Question
+>
+> How should the plan go on?
+>
+> - Send it back to close the completion side of the class as a whole, and put it on hold (recommended, and what the
+>   maintainer asked for if this landing failed again). The executor would go through everything a launch's completion
+>   does (success, failure, unknown outcome, question) to wherever the user now is: focus, open panels, menus and
+>   dialogs, selection, and the acted-on session's own status. It would fix each place that disturbs the user and pin it
+>   with tests, run the whole browser suite before delivering, and get a second fresh review aimed at what the user can
+>   do while a launch, Stop, Restart or Replace is pending. Cost: another round once the maintainer takes it off hold.
+> - Fix the focus jump in the landing and land now. Users get the whole plan at once, and the remaining points are
+>   smaller. But it patches one instance of a class the maintainer asked to see closed as a whole, and leaves the rest
+>   of the completion behavior unexamined.
+> - Land #3276 alone now, and split #3278 into its own plan, as the plan's outline allows. Users would get a pending
+>   Stop, Restart, Replace or Delete that no longer locks the page right away, and every finding above stays with the
+>   launch half. Not recommended for now: the launch half is converging (this round found no lost or stranded launch,
+>   only side effects of a launch finishing, and the browser suite is clean apart from known flakes), and splitting
+>   costs a replan.
 
-This plan makes pending session actions stop blocking the rest of the page. Before it, while a Stop, Restart, Replace or
-Delete waited for its reply, or while a new session launched, the whole page was locked until the reply came. Now only
-the session being acted on refuses competing actions, and a submitted launch hides the launcher and shows a small
-progress indicator at the bottom of the window (the "pill") while you carry on elsewhere.
+The maintainer's answer:
 
-The plan has two PRs. #3276 frees the page during a pending Stop, Restart, Replace or Delete. #3278 frees it during a
-launch, which covers New, Clone, and the launcher-based "Restart with" and "Replace with" (where you edit the launch
-before it runs).
+The landing monitor answered this on the maintainer's behalf, under `plans/.agents/landing.md`, "Answering blocks",
+following two instructions the maintainer gave for this plan before this landing: a further send-back must have the
+executor close the whole class of problems rather than the individual findings, because fixing them one landing at a
+time has not converged; and if the plan came back blocked again, it goes on hold so that other plans make progress
+meanwhile. So the monitor took the first option: send it back to close the class, and put the plan on hold. It runs
+again only when the maintainer takes it off hold. Both PRs stay in this plan and are delivered together. Should the
+maintainer later want any of the instructions below changed, that comes as a follow-up to the plan; it does not stop it.
 
-The landing monitor stopped this landing before merging anything: neither PR is on main, and main holds nothing of the
-plan.
+The class is everything the user can do while a launch, Stop, Restart, Replace or Delete is pending, and everything that
+pending action's completion does to wherever the user has gone meanwhile. Items 1 to 4 cover launches (#3278); item 2
+also covers the completion of a pending Stop, Restart, Replace or Delete (#3276). Close it, then deliver again:
 
-#### What the maintainer asked for
+1. List, in the report, every place where a pending launch used to block the user, either by refusing the action or by
+   the launcher covering the page: row menu items, the top bar's actions, the sidebar, the quick switcher, keyboard
+   shortcuts, the host rail and its dialogs, the bulk action bar, Templates, New, Clone, Rename, Settings, Trash, and a
+   sandbox's Suspend and Resume. For each, say what it does to the pending launch (whether it can reopen, replace or
+   hide the launcher, change its draft or destination, or affect Replace with's or Restart with's lock on their session)
+   and why that is safe. Build this table yourself from the code. The landing's review found every one of them either
+   refuses while a launch is pending or leaves the launch alone; the report should show that for each, and fix any that
+   does not.
+2. Do the same for completion: what a launch's success, failure, unknown outcome, YOLO question or the dialog that asks
+   to name a new session does, and what a pending Stop, Restart, Replace or Delete's reply does, to keyboard focus, the
+   Hosts panel and other open panels, open menus, other open dialogs, the selected session, and the acted-on session's
+   own status. Fix each place that disturbs a user who has moved on. In particular:
+   - A successful launch must not move focus to New, close the Hosts panel or close a menu the user opened meanwhile,
+     except when the plan already takes the user to the launched session (a New or Clone, which still opens its new
+     session, or a Replace with whose source is still selected); then focus goes where opening a session normally puts
+     it. A Restart with never moves the user, so its success leaves focus and panels alone.
+   - When Restart with or Replace with fails or has an unknown outcome while another dialog is open, settle the acted-on
+     session at once: clear "Restarting…" or "Replacing…", re-enable its actions, show the failure on its row, and
+     reattach its terminal. Only the returning launcher waits for the other dialog.
+   - The landing's review read from the code, without seeing it in a browser, that a launch to a suspended sandbox host
+     shows the launcher again for a moment between waking the sandbox and creating the session, and that the create
+     waits while another dialog is open. Confirm that in a browser first; if it holds, keep the launcher hidden across
+     that step and do not hold the create back for another dialog.
+   - While a Clone, Replace with or Restart with is pending, closing a row menu must return focus to the menu's button,
+     and a quick launch that the quick switcher refuses must give focus back.
+   - Update SPEC.md's sentence about bulk buttons being locked during a launch, which no longer happens.
+3. As hardening (the landing's review found no current path that strands a launch): make sure that whenever a launch's
+   reply arrives after its launcher was closed or reopened, the progress pill, Replace with's progress and Restart
+   with's lock on the session are still cleared. Today a reply finds its launcher by a counter read when the launch was
+   submitted; tie it instead to the launcher opening it was submitted from, so that nothing advancing the counter in
+   between can leave a launch unsettled, and pin that with a test.
+4. Pin item 2 with browser tests that check focus and open panels, not only which session is selected, after each kind
+   of completion while the user is on another session.
+5. Before delivering, run the whole browser suite on both engines, not a named subset, through the test recorder as
+   `.agents/validation.md` describes for the full browser run, and account in the report for every failure. Main's own
+   browser-test fix (#3275) has landed, so the host settings footer and feed reader-count failures should no longer
+   appear; any such failure is new.
+6. Besides the usual review gate (the fresh GPT review the plan already uses), get one fresh-context review from a
+   Claude Opus session (started with `claude -p`), aimed at what the user can do while a launch, Stop, Restart or
+   Replace is pending, and what each one's completion does to where the user is.
 
-The previous landing found that opening Rename during a launch threw away that launch's result. The maintainer then
-asked for two things if this landing failed again: send it back requiring the executor to close the whole class of
-problems where something the user does during a pending action collides with it, rather than one finding at a time,
-because every landing so far has found another one; and put the plan on hold, so that other plans make progress
-meanwhile.
-
-#### What the landing found
-
-The landing's independent review read the code for every place the old page lock used to block (the row menus, the top
-bar, the sidebar, the quick switcher, keyboard shortcuts, the host rail and its dialogs, the bulk bar, Templates, New,
-Clone, Rename, Settings, Trash, sandbox Suspend and Resume). It found no remaining way to lose or strand a pending
-launch: each of these either refuses while a launch is pending or leaves the launch alone, and a launch whose launcher
-was closed or reopened meanwhile still clears the pill, Replace with's "Replacing…" and Restart with's lock on the
-session.
-
-What remains is the other side of the same class: when a launch finishes, it still treats the page as if the launcher
-had owned it, which was true before this plan and is not now. All of this is in #3278. The landing monitor confirmed in
-the code that a successful launch moves focus to New and closes the Hosts panel; everything else below comes from the
-review's reading of the code. None of it was observed in a browser.
-
-- After a launch succeeds, keyboard focus moves to the New button wherever the user is. Run Replace with on one session,
-  switch to another and type into its terminal: when the replacement finishes, you stay on the other session (as the
-  plan intends), but your keystrokes stop reaching its agent, and the next Enter or Space opens a new launcher. A
-  successful launch also closes the Hosts panel if you had opened it meanwhile, and closes any row, host or sort menu
-  you had opened. No test checks focus or open panels after a launch completes.
-- When Restart with or Replace with fails while another dialog is open (Settings, Rename, the quick switcher), the
-  acted-on session keeps showing "Restarting…" or "Replacing…", with its actions disabled and its failure hidden, until
-  that dialog closes. SPEC.md says only the launcher waits for another dialog, not the session's own state.
-- A launch to a suspended sandbox host appears to show the launcher again for a moment between waking the sandbox and
-  creating the session, which could take focus from whatever you are typing into; and the create itself waits while
-  another dialog is open, although the pill says the session starts when it is ready.
-- Smaller points: while a Clone, Replace with or Restart with is pending, closing any row menu loses focus; a refused
-  quick launch from the quick switcher does not give focus back; and one SPEC.md sentence still describes bulk buttons
-  locked during a launch, which no longer happens.
-
-#### Checks
-
-Everything else the landing ran passed. The whole browser suite ran on Chromium and WebKit, on ten Tensorlake sandboxes
-(cloud test machines) at the maintainer's request, with
-`scripts/tensorlake/sandbox-tests.ts run --template <template> --shards 10` and no projects named, each shard recorded
-through the recorder's generic mode: 3,175 passed, 14 skipped by design, 3 failed (runs `22625548`, `72ebf196`,
-`ed7247b1`, `53af9bd7`, `c86e5443`, `a0b82874`, `61e890a4`, `a2de92ab`, `8432fda2`, `1d7062fc`). The three failures are
-flakes already on record, in code this plan does not touch: two Chromium host-setup tests in the provisioning spec
-("expanded setup failure closes the menu below it" and "incarnation churn keeps a followed run while a target change
-detaches it") and the window chrome spec's Chromium version double-click. The previous landing had 49 failures: 8 came
-from main and were fixed separately by #3275, which has since landed, and the other 41 no longer fail after the
-executor's changes (stale tests updated, the regressions among them fixed). The UI crate's Rust tests passed
-(`cargo nextest run -p farhelm-ui` through the recorder, 944 passed, run `b76fcf27`), as did
-`cargo fmt --all -- --check`, `scripts/check-test-sleeps.py`, `dprint check`, `releasing/check-changelog.py format`,
-`scripts/check-agents-md.py`, `cargo build`, the release web build
-(`dx build --package farhelm-ui --platform web --release`), `cargo clippy -p farhelm-ui --all-targets -- -D warnings`
-and `cargo check -p farhelm-ui --features desktop`.
-
-#### Question
-
-How should the plan go on?
-
-- Send it back to close the completion side of the class as a whole, and put it on hold (recommended, and what the
-  maintainer asked for if this landing failed again). The executor would go through everything a launch's completion
-  does (success, failure, unknown outcome, question) to wherever the user now is: focus, open panels, menus and dialogs,
-  selection, and the acted-on session's own status. It would fix each place that disturbs the user and pin it with
-  tests, run the whole browser suite before delivering, and get a second fresh review aimed at what the user can do
-  while a launch, Stop, Restart or Replace is pending. Cost: another round once the maintainer takes it off hold.
-- Fix the focus jump in the landing and land now. Users get the whole plan at once, and the remaining points are
-  smaller. But it patches one instance of a class the maintainer asked to see closed as a whole, and leaves the rest of
-  the completion behavior unexamined.
-- Land #3276 alone now, and split #3278 into its own plan, as the plan's outline allows. Users would get a pending Stop,
-  Restart, Replace or Delete that no longer locks the page right away, and every finding above stays with the launch
-  half. Not recommended for now: the launch half is converging (this round found no lost or stranded launch, only side
-  effects of a launch finishing, and the browser suite is clean apart from known flakes), and splitting costs a replan.
+The landing's whole browser suite on this delivery had three failures, all flakes already on record in code this plan
+does not touch (two host-setup tests in the provisioning spec and the window chrome spec's version double-click, all on
+Chromium). Name them as such in the report if they come back, and account for anything else.
