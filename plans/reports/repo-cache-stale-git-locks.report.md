@@ -57,3 +57,71 @@ real maintenance process at the instant Git created that lock.
 The required single fresh-context GPT-6.1 Sol reviewer at high effort passed the implementation and then the final
 branch-deletion adjustment, including the specification, test contract, changelog and outcome graduation. No findings
 were rejected. A separate fresh-context commit-message reader passed the title and explanation.
+
+### Landing
+
+Landed alone (the only plan in this landing round), as #3296. Nothing reached main between the plan's base and its merge
+apart from planning bookkeeping, so nothing could interact with it. The landing made no changes.
+
+#### Review
+
+The fix removes Git's own lock files from a host's repository cache, so the landing's fresh-context review attacked the
+claim that makes that safe: that no Git process can still be running and own such a lock when Farhelm removes it. It
+holds. Every way Farhelm runs Git in the cache does so while holding Farhelm's own lock on that cache, and that Git
+process ends with whatever holds Farhelm's lock. A visible launch's Git runs in the session's own terminal process
+group, which is hung up when its owner dies, and Stop and Delete signal the whole tree. The background ready-checkout
+builder and cache cleanup run in their own session, whose process group is killed outright. Automatic Git housekeeping
+runs in the foreground, so no Git process detaches. Every release since v0.26.0 uses the same lock and the same
+foreground housekeeping, so an older Farhelm running alongside after an update cannot be using the cache unseen either.
+
+#### Things you should know
+
+From the review; none of it affects users in normal use. The report says no follow-ups are required; the landing adds
+two possible ones, in the first two items below.
+
+- Before this change, Git's lock file was a backstop: had a Git process somehow outlived Farhelm's lock, the next fetch
+  would have failed cleanly instead of racing it. Now Farhelm deletes that file. One manual action defeats the
+  guarantee: killing Farhelm's processes by hand with SIGKILL during background cache cleanup can leave its `git`
+  running with nothing to stop it, and a later launch could then race it on the cache's branch list. Nothing in Farhelm
+  does this. Possible follow-up, recommended but not urgent: have the kernel end cache Git processes when their parent
+  dies, which is cheap hardening on Linux.
+- SPEC_impl.md says cache Git processes "end with their preparation job", and the cache code's comment says they die
+  with it. Strictly, Git killed with an ordinary termination signal can still run its own cleanup just after Farhelm's
+  lock is released. The worst result found is that Git's final step of a ref update fails, so that launch's checkout
+  fails and a retry succeeds; the cache is not damaged. Possible follow-up, optional: soften that wording, which the
+  hardening above would also make true.
+- A cache path that is a plain file instead of a directory now fails a checkout with the misleading "could not clear
+  cache Git locks: Not a directory" rather than Git's own error. The changed test expects the new message. No working
+  cache is affected.
+- The repair covers Git's default way of storing branches. A cache using Git's newer "reftable" storage, or with
+  per-branch history logs turned on, can leave lock files the repair does not remove. Farhelm turns on neither, but
+  cache Git runs with the user's own Git settings, so a global setting could.
+- The test proves the fix: it confirms a planted `packed-refs.lock` blocks pruning a deleted branch, then shows the next
+  checkout succeeds and prunes it. It covers that one lock on a launch's checkout clone, not the walk through `refs/`,
+  the refusal to follow a symlinked `refs/`, or the repair on the background cleanup path.
+
+#### Checks
+
+Run now on this development machine, on the tree that merged:
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format` and `cargo clippy -p farhelm-supervisor --all-targets -- -D warnings`
+  passed.
+- Recorded
+  `cargo nextest run -p farhelm-supervisor --lib -E 'test(/^repo_cache::/) | test(/^launch::/) | test(/spare_build/)'`,
+  with the pinned tmux: 104 passed (run `e536c9cb-7e49-496f-840b-971921692f66`). This is wider than the executor's 13
+  cache tests: every checkout clone and the cache maintenance job now run the repair first, and these are the
+  supervisor's tests of both, including the real-Git checkout tests.
+- Recorded `cargo nextest run -p farhelm --test e2e -E 'test(/^github_checkouts::/)'`: 6 passed (run
+  `23cc3be3-606f-4169-9a81-426ee44dd5ef`), a real supervisor making checkouts.
+- Recorded `cargo nextest run -p farhelm -p farhelm-supervisor --lib --test spare_builder -E <filter>` with the filter
+  `binary(spare_builder) | test(/^service::spare_builder::/) | test(/^spare_build::/)`: 25 passed (run
+  `45c326c5-4e63-40bd-b4e9-beb508f8133a`). These run the real background builder, including its cache-only cleanup and
+  the case where its owner is killed with SIGKILL, which the repair's safety argument relies on.
+
+All three ran with the pinned tmux first on `PATH`, and none printed a runtime `SKIPPED` line.
+
+Reused from the executor: nothing; the runs above include its 13 cache tests.
+
+Skipped: browser specs (no UI change), the rest of the workspace's Rust tests (only the supervisor's cache preparation
+changed, and the selections above cover its callers), and hosted CI (manual-only, not dispatched).
