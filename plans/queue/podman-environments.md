@@ -720,3 +720,104 @@ verification is recorded in the working log (and carried into the report when yo
 TODO.md as described. Open, not merged. If a `## Decisions` section exists, its latest entry must also be satisfied.
 Then close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12). Never edit `plans/`
 yourself.
+
+## Blocked
+
+Blocked while landing on 2026-11-11 (claim 413bb7).
+
+### Landing stopped: tests fail where the plan changed things
+
+Container sessions (a rootless Podman container on one of your Linux hosts as a session's own machine, built from a
+shared recipe, with the old containerized sessions retired) came in as nine PRs, #3305 to #3330. Before merging, the
+landing monitor ran the full workspace Rust tests and the full browser suite, which the executor had skipped in favor of
+targeted selections. About a dozen tests fail, each in code or wording this plan changed. Nothing has merged; main holds
+none of this plan.
+
+#### Rust tests
+
+These fail at the plan's tip. They were first seen in the Rust tests split across Tensorlake sandboxes, then reproduced
+on the development machine (run `aea2ab94-c47b-4750-a081-deca25a794ac`):
+
+- Two checkout-configuration tests (`checkout_config::tests::checkout_migration_from_26_recreates_the_config_tables` and
+  `checkout_open_existing_refuses_older_schema_without_migrating`). Test out of date: they build today's database and
+  strip it back by hand to an old release's layout, and that strip-back does not yet remove the plan's new container
+  columns and launch-choice table. A real upgrade from an older release is unaffected; the upgrade itself only adds
+  them.
+- A template applied together with launch flags
+  (`agent_launch::tests::flags_edit_the_templates_result_and_win_over_it`). Test out of date: its sample template
+  carries the retired containerized setting, which a template is now refused for, as the plan decided.
+- Two provisioning tests about suspended Tensorlake sandboxes
+  (`provisioning::tests::a_suspended_sandbox_is_never_probed_for_update_or_setup` and
+  `a_plan_made_while_running_does_not_run_once_suspended`). A wording change for Tensorlake users: updating or adding a
+  suspended sandbox used to say "resume the sandbox first" and now says "this host's environment is suspended, so
+  Farhelm cannot reach it; resume it first".
+- The session list's selection toolbar (`list::marking::tests::locked_toolbar_keeps_a_programmatic_count_target`). Not
+  yet known: the toolbar's Stop button and action menu now appear only in some cases, and the test sees two controls
+  locked during a running action instead of four. Either the test counts the wrong place now or the lock no longer
+  covers those two.
+
+Two other Rust tests failed only on the sandboxes and pass on the development machine at the plan's tip:
+`attribute_compile_contract_matrix` (it compiles code, and the sandboxes have no Rust compiler) and
+`host_creates::a_retry_waits_out_a_forked_second_stage_before_relaunching` (its stand-in process did not start there;
+cause unknown). The plan does not change either test or the code they cover.
+
+#### Browser tests
+
+The whole suite ran on Tensorlake sandboxes at the maintainer's request, split across ten sandboxes (runs
+`00367aac-fc4b-43a8-93af-ee6c02ed9f31`, `a1ef27b7-ced1-46f1-befa-9e767059a007`, `b8c2f857-6bcc-422d-ac34-52eed7b4af00`,
+`4b70f2fb-e30f-4d6d-bacf-ec67a4f15e36`, `a9e8e687-c702-41a3-b98d-44d7801474ef`, `b554c9c6-7e05-41be-9994-a4ba4917df30`,
+`72e8d474-0389-4108-a3b4-de5695d0f9f6`, `097b64d4-a3ef-4348-9657-38547743c5c3`, `c9d847c1-d646-46dd-ac26-41e1c3374730`
+and `eb1983ea-14d3-4bd3-a5be-52aa608629a2`). Failing on both engines unless noted:
+
+- Settings navigation lists two more sections than the test expects. Test out of date: the plan adds Recipes and
+  Containers.
+- A Tensorlake host row after Suspend says "Freeze the sandbox; its processes continue on Resume. … Suspension completed
+  from Farhelm" instead of "Suspended from Farhelm". A wording regression for Tensorlake users, the same one as the
+  session card in the first review finding below.
+- The Tensorlake Add host form keeps another recipe selected instead of the one the test picked (Chromium only). Looks
+  like a bug; not yet confirmed.
+- The recipe editor no longer shows "Farhelm then adds Claude Code and Codex with their official installers and takes a
+  snapshot." Not yet known whether the line was dropped on purpose now that recipes are shared with containers.
+- In the session launcher, Tab with the menu closed no longer reaches the Host control in the order the test expects.
+  Not yet known whether the order or the test is wrong.
+- Credentials settings' "recipe references refresh deletion guards and preserve unavailable picker choices" times out.
+  Not yet known.
+- On WebKit only, "settings keeps the pending Claude hint choice clickable through a held read" timed out once. Not yet
+  known whether the plan caused it.
+
+The browser tests for old terminals passed. WebKit's "bulk Stop reports an engaged row without skipping its eligible
+sibling" also failed; it is a known flake with a TODO.md entry and not this plan's.
+
+#### Review findings
+
+The landing's independent review found no defect that by itself would stop the merge. It did find these:
+
+- A suspended Tensorlake session's card now shows the Suspend button's help ("Freeze the sandbox; …") instead of saying
+  the sandbox is suspended with its processes preserved, and for a suspension that did not come from Farhelm it no
+  longer says "Tensorlake suspends this sandbox after 30 minutes without a connection from Farhelm". The browser test
+  was changed to expect the new text.
+- An agent in a container session is refused with "Agents in sandbox sessions can't ask Farhelm to act yet."; SPEC.md
+  requires "Agents in sandbox and container sessions …".
+- The release notes draft does not list the retirement of containerized sessions, which shipped in a stable release, as
+  a breaking change; it is mentioned only under the new feature.
+- Proxy settings, a proxy password included, reach containers as text on command lines, so another user on the machine
+  running Farhelm or on the container host can read the password with `ps` while those commands run. Credentials from
+  the recipe catalog are already passed in a file, out of other users' sight.
+- When Podman refuses to create a container outright (a full disk, say), Farhelm treats it as possibly still starting:
+  the new session cannot be deleted for 15 minutes, and a recipe build on that host is blocked for 15 minutes.
+- For an old containerized session with closed terminal tabs, the automatic tab cleanup is refused every two seconds
+  with a logged warning each time, and other sessions' closed tabs can stop being cleaned up because of it.
+
+### Question
+
+What should happen before this lands?
+
+- Send it back to fix every failing test and every review finding above, then deliver again. Recommended: the fixes are
+  the plan's own work, the Tensorlake wording changes are regressions Tensorlake users would see, and the proxy password
+  exposure is a security gap on shared machines. "Fix" here means finding out, for each item not yet known, whether the
+  code or the test is wrong, and fixing that.
+- Send it back to fix only the failing tests and the findings users would see (the Tensorlake wording, the agent refusal
+  wording, the release notes, the proxy password), and record the 15-minute stuck session and the tab-cleanup churn as
+  follow-ups. It lands a little sooner and leaves those two in the next release.
+- Land it as it is and record everything as follow-ups. Not viable: the failing tests would stay failing on main, and
+  every later plan's checks would trip over them.
