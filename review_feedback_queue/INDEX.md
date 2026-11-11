@@ -367,10 +367,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   change the future confirmation preference. The helper explicitly preserves that same-burst behavior; the operation
   itself remains guarded.
 
-- [`terminal-focus-origin-overwrites-header-focus.md`](terminal-focus-origin-overwrites-header-focus.md) — Delayed
-  terminal-script loading and automatic fallback after a tab disappears can move focus from a surviving header button
-  into the agent terminal. The source paths are established; harmful commands or approvals are not.
-
 - [`narrow-outage-card-left-edge-unreachable.md`](narrow-outage-card-left-edge-unreachable.md) — A very narrow, short
   viewport may put part of an outage explanation beyond the left reachable edge. Actual supported sizing and recovery
   geometry remain unverified; this differs from accepted overlap that remains scrollable.
