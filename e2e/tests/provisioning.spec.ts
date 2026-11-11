@@ -1440,8 +1440,9 @@ test("real discovery offers one peer-safe concrete plan and mutates nothing befo
 });
 
 /** An accepted agent request retains its origin through a definite setup
- * refusal/reopen. The user's saved shortcut must never auto-submit either
- * setup offer, and approval itself carries only the edited destination. */
+ * refusal/reopen. The explicit card open makes each later setup question
+ * user-triggered, with Set up focused; the saved shortcut must never submit
+ * either offer, and approval carries only the edited destination. */
 test("agent host add asks before setup despite preference and after refusal reopen", async ({ page, request }, testInfo) => {
   const original = destination(testInfo, "agent-original");
   const edited = destination(testInfo, "agent-edited");
@@ -1486,12 +1487,15 @@ test("agent host add asks before setup despite preference and after refusal reop
   await expect(page.locator(".hosts-panel-toggle")).toHaveAttribute("aria-pressed", "false");
   await expect(page.locator(".hosts-heading")).not.toBeVisible();
   waiting = true; feed.notify(2);
+  await page.locator('[data-approval-id="agent-setup"]')
+    .getByRole("button", { name: "Open add dialog", exact: true }).click();
   let form = page.locator(".add-host-form");
   await expect(form).toBeVisible();
   await form.locator(".add-host-ssh").fill(edited);
   await form.locator(".add-host-alias").fill("edited agent alias");
   await form.locator(".add-host-submit").click();
   await expect(form.locator(".provisioning-plan")).toBeVisible();
+  await expect(form.getByRole("button", { name: "Set up", exact: true })).toBeFocused();
   expect(order).toEqual(["allow", "probe"]);
   expect(answers).toEqual([{ answer: "allow", host_add: { destination: edited } }]);
   expect(probes[0]).toMatchObject({ target: { destination: edited }, new_entry: { alias: "edited agent alias" } });
@@ -1505,6 +1509,7 @@ test("agent host add asks before setup despite preference and after refusal reop
   expect((await readPreferences(request)).skip_host_setup_confirmation).toBe(true);
   await form.locator(".add-host-submit").click();
   await expect(form.locator(".provisioning-plan")).toBeVisible();
+  await expect(form.getByRole("button", { name: "Set up", exact: true })).toBeFocused();
   expect(provisions, "origin retained after pending card is gone and form remounted").toBe(1);
   expect(answers, "reprobe is ordinary flow, not a new approval").toHaveLength(1);
   expect((await backendEvents()).map((event) => event.event)).toEqual(["probe", "inspect", "probe", "inspect"]);

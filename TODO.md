@@ -37,15 +37,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Stop an agent's host-add request from opening its dialog by itself.** Found by a code reading on 2026-11-10 while
-  settling the keyboard focus rulebook (SPEC.md, "Keyboard focus"). In the focused window, an agent's
-  `farhelm agent host add` request opens the Add host dialog by itself, even while the user types in a terminal, and
-  moves focus into it. Once the 700 ms approval pause ends, a fresh Enter clicks Add, which approves the request; a
-  dialog that opened after waiting behind another dialog gets no pause at all, and Enter in its destination field
-  approves at once. An approved destination that already runs Farhelm is added with no further prompt. SPEC.md now says
-  every window shows the request as a card whose action opens the dialog, and the request never opens the dialog by
-  itself. Plan: `plans/queue/agent-host-add-card.md`.
-
 - **Stop two launch paths from leaving the page stuck after waking a host.** Found by the landing review of
   nonblocking-session-actions (2026-11-10) and landed unfixed as narrow cases. First: a quick launch whose template
   checks out a GitHub repository on a suspended sandbox host, if its retry after the wake is refused without an error

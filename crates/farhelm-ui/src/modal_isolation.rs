@@ -72,16 +72,8 @@ use dioxus::prelude::*;
 /// A node-local reservation is claimed in JavaScript before Rust renders the child, so two waiters cannot both
 /// see an empty page. It lasts until unmount; no operation token or host result is owned here. The waiting
 /// observer also retires when this wrapper disappears, so cancellation cannot admit a stale result.
-/// An automatic agent add samples live window activity at admission, after
-/// the current modal leaves. A lost focus rejects that presentation instead
-/// of opening a prefilled question in a background window; explicit opens
-/// and ordinary host results keep the usual unconditional admission.
 #[component]
-pub(crate) fn HostModal(
-    children: Element,
-    #[props(default)] require_active: bool,
-    on_rejected: Option<EventHandler<()>>,
-) -> Element {
+pub(crate) fn HostModal(children: Element) -> Element {
     let mut ready = use_signal(|| false);
     let id = format!("host-modal-{}", dioxus::core::current_scope_id().0);
     let script = format!(
@@ -91,9 +83,6 @@ pub(crate) fn HostModal(
             function admit() {{
                 if (!slot?.isConnected) {{ observer.disconnect(); resolve(false); return; }}
                 if (document.querySelector('[role="dialog"][aria-modal="true"], [data-host-modal-admitted]')) return;
-                if ({require_active} && (!document.hasFocus() || document.visibilityState === 'hidden')) {{
-                    observer.disconnect(); resolve(false); return;
-                }}
                 slot.setAttribute('data-host-modal-admitted', '');
                 observer.disconnect();
                 resolve(true);
@@ -109,8 +98,6 @@ pub(crate) fn HostModal(
                 spawn(async move {
                     if matches!(document::eval(&script).join::<bool>().await, Ok(true)) {
                         ready.set(true);
-                    } else if let Some(on_rejected) = on_rejected {
-                        on_rejected.call(());
                     }
                 });
             },

@@ -59,10 +59,11 @@ pub(crate) struct AgentAddBridge {
 
 /// Freeze one form opening across listing refreshes. Accepted stays true
 /// after its pending card disappears, until ordinary add cancellation/setup.
+/// Only the card's explicit open action creates this presentation; observing
+/// a new request never authorizes a dialog or a focus change.
 #[derive(Clone, PartialEq)]
 pub(crate) struct AgentAddOpening {
     pub(crate) card: PendingApproval,
-    pub(crate) automatic: bool,
     pub(crate) accepted: bool,
     pub(crate) error: Option<String>,
 }
@@ -94,7 +95,6 @@ impl AgentAddBridge {
 pub(crate) fn ApprovalCards() -> Element {
     let base = use_context::<ApiBase>().0;
     let mut add = use_context::<AgentAddBridge>();
-    let mut seen_adds = use_signal(HashSet::<String>::new);
     let mut add_openings = use_signal(Vec::<AgentAddOpening>::new);
     #[cfg(native_desktop)]
     let tunnel_controller = use_context::<crate::tunnels::TunnelController>();
@@ -145,37 +145,12 @@ pub(crate) fn ApprovalCards() -> Element {
                     if expired {
                         add.opening.set(None);
                     }
-                    // Only still-waiting ids need an observation history;
-                    // completed requests must not accumulate for the page's life.
-                    seen_adds.write().retain(|id| waiting.contains(id));
-                    let candidates: Vec<_> = list
-                        .iter()
-                        .filter(|card| {
-                            matches!(card.action, ApprovalAction::HostAdd { .. })
-                                && !seen_adds.peek().contains(&card.id)
-                        })
-                        .cloned()
-                        .collect();
                     add_openings
                         .write()
                         .retain(|opening| waiting.contains(&opening.card.id));
-                    for card in &list {
-                        if matches!(card.action, ApprovalAction::HostAdd { .. }) {
-                            seen_adds.write().insert(card.id.clone());
-                        }
-                    }
                     errors.write().retain(|id, _| waiting.contains(id));
                     answered.write().retain(|id| waiting.contains(id));
                     approvals.set(list);
-                    if !candidates.is_empty() {
-                        // Sample the live activity predicate; admission samples
-                        // it again after any other modal has left the page.
-                        if matches!(document::eval("return document.hasFocus() && document.visibilityState !== 'hidden';").join::<bool>().await, Ok(true))
-                        {
-                            add_openings.write().extend(candidates.into_iter().map(|card|
-                                AgentAddOpening { card, automatic: true, accepted: false, error: None }));
-                        }
-                    }
                     true
                 }
                 Err(_) => false,
@@ -207,9 +182,9 @@ pub(crate) fn ApprovalCards() -> Element {
         .filter(|card| !answered.read().contains(&card.id))
         .cloned()
         .collect();
-    // Several requests can arrive in one listing. Preserve their order as
-    // presentation candidates, while the existing modal owner keeps drafts
-    // intact. Requests first observed inactive are never queued by focus alone.
+    // Only a card click queues an opening. Keep those explicit requests in
+    // order while the existing modal owner preserves any draft already open;
+    // a listing refresh alone must never interrupt what the user is doing.
     use_effect(move || {
         if add.opening.read().is_none() && !add_openings.read().is_empty() {
             let opening = add_openings.write().remove(0);
@@ -305,7 +280,7 @@ pub(crate) fn ApprovalCards() -> Element {
                                     // Explicit opens wait behind an existing
                                     // draft too; they do not replace it.
                                     add_openings.write().retain(|opening| opening.card.id != id);
-                                    add_openings.write().push(AgentAddOpening { card: add_card.clone(), automatic: false, accepted: false, error: None });
+                                    add_openings.write().push(AgentAddOpening { card: add_card.clone(), accepted: false, error: None });
                                 }
                                 return;
                             }
