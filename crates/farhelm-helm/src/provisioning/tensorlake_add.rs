@@ -7,7 +7,6 @@ use super::super::{
     plan::{PlanStep, PlanSteps},
 };
 use super::*;
-use crate::ssh::SshAccessKind;
 use crate::store::{NewHostEntry, NewTensorlakeHost};
 use crate::tensorlake::{
     Tensorlake,
@@ -1057,10 +1056,8 @@ impl ProvisioningService {
         // ambiguous create retains ordinary vendor failure/retry semantics;
         // the in-memory guard is not a crash-safe source dependency record.
         drop(source_guard);
-        let target = ProvisioningTarget::Ssh {
-            destination: plan.destination.clone(),
-            access: SshAccessKind::Tensorlake,
-        };
+        let target =
+            ProvisioningTarget::Remote(crate::tensorlake::ssh::route(plan.destination.clone()));
         // The API's Running state can precede the gateway. Wait without running
         // the ordinary preparation script: this clone must boot on its own.
         self.backend.wait_tensorlake_ssh(&target).await?;
@@ -1176,10 +1173,8 @@ impl ProvisioningService {
         plan: &TensorlakeAddPlan,
         index: &mut usize,
     ) -> anyhow::Result<()> {
-        let target = ProvisioningTarget::Ssh {
-            destination: plan.destination.clone(),
-            access: SshAccessKind::Tensorlake,
-        };
+        let target =
+            ProvisioningTarget::Remote(crate::tensorlake::ssh::route(plan.destination.clone()));
         self.set_step(host, *index, StepStatus::Running, None).await;
         let home = self.backend.prepare_tensorlake_sandbox(&target).await?;
         let home_notice = self

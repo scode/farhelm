@@ -1,7 +1,7 @@
-//! Host transports are the seam between connection actors and local or SSH
-//! connections.
+//! Host transports connect actors to local sockets and routed child processes.
 
-use crate::store::{HostId, HostKind, HostRow};
+use crate::access::{HostAccess, RemoteRoute};
+use crate::store::{HelmStore, HostId, HostRow};
 use anyhow::Context as _;
 use std::{
     collections::VecDeque,
@@ -29,7 +29,7 @@ pub type TransportPair = (
     Box<dyn AsyncWrite + Send + Unpin>,
 );
 
-/// An opened byte stream and, for SSH only, its attempt's process ownership.
+/// An opened byte stream and its optional child-process ownership.
 ///
 /// The client consumes `io` without knowing its transport. The actor keeps
 /// `ssh` until connection failure has settled, so dropping the client's reader
@@ -72,11 +72,12 @@ pub trait HostTransport: Send + Sync + 'static {
         host: &'a HostRow,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<TransportConnection>> + Send + 'a>>;
 
-    /// Close the shared ssh connections this transport keeps to `host`
+    /// Close the shared ssh connections owned by `host`
     /// (both masters, see [`crate::ssh::SharedConnection`]), best effort and
     /// bounded. Called when a Tensorlake sandbox is found suspended and
     /// before one is deleted: a master outlives its sandbox's suspension,
-    /// and a new session on it hangs rather than failing.
+    /// and a new session on it hangs rather than failing. A container borrows
+    /// its place's master, which this operation must leave open.
     ///
     /// The default does nothing, which is right for every transport that
     /// keeps no shared connections (the scripted test peers).
@@ -89,15 +90,13 @@ pub trait HostTransport: Send + Sync + 'static {
     }
 }
 
-/// The production transport: unix socket for the reserved local row, the
-/// user's own `ssh` running `farhelm internal stdio` for an ssh row.
+/// The production transport opens the local socket or runs a route's stdio
+/// helper, with the same child ownership for SSH and Podman exec.
 ///
 /// The exact two paths `connect_supervisor` in `lib.rs` has taken since
 /// M1, generalized from "whatever argv said" to "whatever this row says".
-/// The ssh argv itself is still built by [`crate::ssh::ssh_stdio_args`] — shared
-/// rather than reimplemented, because its quoting rules are the subtlest
-/// correctness surface in the transport and two copies would eventually
-/// disagree.
+/// The shared route lowering owns execution layers and authentication. This
+/// transport owns the byte stream and the child's diagnostic lifetime.
 pub struct SystemTransport {
     /// The helm's own state directory: where the local supervisor's socket
     /// lives, and where ssh ControlMaster sockets are kept.
@@ -105,6 +104,9 @@ pub struct SystemTransport {
     /// Injecting the executable keeps process-ordering tests independent of
     /// the running test process's PATH and the operator's SSH configuration.
     ssh_program: PathBuf,
+    /// Production refreshes registry routes per attempt. Row-injected fixtures
+    /// can omit the store while using the same command and lifetime machinery.
+    store: Option<HelmStore>,
 }
 
 impl SystemTransport {
@@ -117,6 +119,16 @@ impl SystemTransport {
         SystemTransport {
             state_dir: state_dir.into(),
             ssh_program: PathBuf::from("ssh"),
+            store: None,
+        }
+    }
+
+    /// Bind production dialing to the live registry. Container routes will
+    /// resolve their editable place host through this same lookup.
+    pub fn with_store(state_dir: impl Into<PathBuf>, store: HelmStore) -> Self {
+        Self {
+            store: Some(store),
+            ..Self::new(state_dir)
         }
     }
 
@@ -131,19 +143,17 @@ impl SystemTransport {
         Self {
             state_dir: state_dir.into(),
             ssh_program: ssh_program.into(),
+            store: None,
         }
     }
 
-    /// How ssh authenticates to `host`, resolved against this helm's state
-    /// directory. The local row never reaches here; anything without an
-    /// ssh access choice gets the user's own setup.
-    fn access(&self, host: &HostRow) -> anyhow::Result<crate::ssh::SshAccess> {
-        crate::ssh::SshAccess::resolve(
-            host.kind
-                .ssh_access()
-                .unwrap_or(crate::ssh::SshAccessKind::UserConfig),
-            &self.state_dir,
-        )
+    /// Fresh access for every dial and release, with a row-only seam for
+    /// fixtures which have no registry. Never cache an editable destination.
+    async fn access(&self, host: &HostRow) -> anyhow::Result<HostAccess> {
+        match &self.store {
+            Some(store) => crate::access::resolve_host_access(store, host.id).await,
+            None => crate::access::host_access(host),
+        }
     }
 }
 
@@ -165,8 +175,9 @@ impl HostTransport for SystemTransport {
         host: &'a HostRow,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<TransportConnection>> + Send + 'a>> {
         Box::pin(async move {
-            match host.kind {
-                HostKind::Local => {
+            let access = self.access(host).await?;
+            match &access {
+                HostAccess::Local => {
                     let stream = farhelm_supervisor::service::connect(&self.state_dir)
                         .await
                         .map_err(classify_local_dial)?;
@@ -176,24 +187,22 @@ impl HostTransport for SystemTransport {
                         Box::new(w) as Box<dyn AsyncWrite + Send + Unpin>,
                     )))
                 }
-                // A sandbox uses Farhelm's key and negotiates the helper's
-                // silence limit. Ordinary SSH retains the legacy command;
-                // its caller has made no heartbeat/expiry contract.
-                HostKind::Ssh | HostKind::Tensorlake => {
-                    let dest = host.destination.as_deref().context(
-                        "an ssh registry row has no destination; the schema's CHECK constraint \
-                         should have made this impossible",
-                    )?;
-                    let access = self.access(host)?;
-
-                    let mut cmd = tokio::process::Command::new(&self.ssh_program);
-                    cmd.args(crate::ssh::ssh_stdio_args(
-                        dest,
-                        &self.state_dir,
-                        &access,
+                HostAccess::Remote(route) => {
+                    let argv = access.stdio_argv(
                         host.remote_farhelm.as_deref().unwrap_or("farhelm"),
                         host.remote_state_dir.as_deref(),
-                    )?);
+                    );
+                    let mut lowered = route.command(
+                        &self.state_dir,
+                        crate::access::ConnectionPolicy::Shared(
+                            crate::ssh::SharedConnection::Supervisor,
+                        ),
+                        crate::access::RemoteCommand::Argv(&argv),
+                    )?;
+                    if lowered.program == std::path::Path::new("ssh") {
+                        lowered.program = self.ssh_program.clone();
+                    }
+                    let mut cmd = lowered.command();
                     // stderr is PIPED and relayed as tracing events, not
                     // inherited. Inheriting is what the M1 single-host path
                     // does, and it was defensible there: one connection the
@@ -215,8 +224,13 @@ impl HostTransport for SystemTransport {
                         .stderr(Stdio::piped())
                         .kill_on_drop(true)
                         .spawn()
-                        .context("spawning ssh")?;
-                    Ok(ssh_connection(child, host.id, dest.to_string()))
+                        .context("spawning the supervisor connection process")?;
+                    Ok(process_connection(
+                        child,
+                        host.id,
+                        route.destination().to_string(),
+                        ProcessRoute::for_route(route),
+                    ))
                 }
             }
         })
@@ -232,16 +246,26 @@ impl HostTransport for SystemTransport {
         host: &'a HostRow,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
-            let Some(dest) = host.destination.as_deref() else {
-                return;
-            };
-            if host.kind.ssh_access().is_none() {
-                return;
-            }
-            let access = match self.access(host) {
-                Ok(access) => access,
+            let (dest, kind) = match self.access(host).await {
+                Ok(HostAccess::Remote(RemoteRoute::Ssh {
+                    destination,
+                    access,
+                })) => (destination, access),
+                // Container exec borrows its place's master. Its own child is
+                // already closed by the actor hold, and closing the master
+                // would disconnect the place and every sibling environment.
+                Ok(HostAccess::Local | HostAccess::Remote(RemoteRoute::PodmanExec { .. })) => {
+                    return;
+                }
                 Err(error) => {
                     warn!(host = host.id, error = %format!("{error:#}"), "could not build the ssh -O exit command");
+                    return;
+                }
+            };
+            let access = match crate::ssh::SshAccess::resolve(kind, &self.state_dir) {
+                Ok(access) => access,
+                Err(error) => {
+                    warn!(host = host.id, %error, "could not resolve shared SSH access");
                     return;
                 }
             };
@@ -250,7 +274,7 @@ impl HostTransport for SystemTransport {
                 crate::ssh::SharedConnection::Provisioning,
             ] {
                 let args = match crate::ssh::ssh_control_exit_args(
-                    dest,
+                    &dest,
                     &self.state_dir,
                     connection,
                     &access,
@@ -301,12 +325,12 @@ const RELEASE_TIMEOUT: Duration = Duration::from_secs(5);
 /// No detached task owns or waits for the child. Dropping the last anchor
 /// aborts stderr drainage and drops the kill-on-drop child, including when an
 /// attempt is cancelled or a descendant keeps the stderr pipe open forever.
-struct SshLifetime {
+struct ProcessLifetime {
     child: tokio::sync::Mutex<tokio::process::Child>,
     stderr_task: tokio::task::AbortHandle,
 }
 
-impl Drop for SshLifetime {
+impl Drop for ProcessLifetime {
     fn drop(&mut self) {
         self.stderr_task.abort();
     }
@@ -314,12 +338,12 @@ impl Drop for SshLifetime {
 
 /// The reader keeps successful connections alive after the actor drops its
 /// diagnostics owner. Failure diagnosis temporarily holds the other anchor.
-struct SshChannel {
+struct ProcessChannel {
     stdout: tokio::process::ChildStdout,
-    _lifetime: Arc<SshLifetime>,
+    _lifetime: Arc<ProcessLifetime>,
 }
 
-impl AsyncRead for SshChannel {
+impl AsyncRead for ProcessChannel {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -348,6 +372,54 @@ pub(crate) struct SshStderrLine {
     pub truncated: bool,
 }
 
+/// Exit codes belong to the outer process. In particular, 255 from a local
+/// Podman client carries no evidence about SSH authentication.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ProcessRoute {
+    #[default]
+    DirectSsh,
+    LocalPodman,
+    NestedSsh {
+        destination: String,
+    },
+}
+
+impl ProcessRoute {
+    /// Retain enough route context for diagnosis after the registry changes.
+    fn for_route(route: &RemoteRoute) -> Self {
+        match route {
+            RemoteRoute::Ssh { .. } => Self::DirectSsh,
+            RemoteRoute::PodmanExec {
+                via: crate::access::BaseRoute::Local,
+                ..
+            } => Self::LocalPodman,
+            RemoteRoute::PodmanExec {
+                via: crate::access::BaseRoute::Ssh { destination, .. },
+                ..
+            } => Self::NestedSsh {
+                destination: destination.clone(),
+            },
+        }
+    }
+}
+
+/// Recognize the client's mux-session refusal from bounded diagnostic bytes.
+/// This evidence survives subsequent noninteractive login failure.
+pub(crate) fn ssh_session_refused(bytes: &[u8]) -> bool {
+    String::from_utf8_lossy(bytes)
+        .to_ascii_lowercase()
+        .contains("session open refused by peer")
+}
+
+/// Name the place behind a failed nested login, preserving the bounded host
+/// spelling until the caller performs its ordinary final diagnostic escaping.
+pub(crate) fn ssh_session_limit_detail(destination: &str) -> String {
+    format!(
+        "container host {} refused an SSH session channel. Its SSH session limit may have been reached",
+        crate::manager::diagnostic_excerpt(destination, 128)
+    )
+}
+
 /// Evidence available now; it makes no claim that process or stderr is done.
 ///
 /// The tail contains at most two lines, oldest first, including the current
@@ -355,6 +427,10 @@ pub(crate) struct SshStderrLine {
 /// text. EOF and a read error are distinct, and neither implies child exit.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct SshSnapshot {
+    pub process_route: ProcessRoute,
+    /// Retain the first capped mux refusal even when later fallback errors
+    /// displace it from the ordinary two-line diagnostic tail.
+    pub session_refusal: Option<SshStderrLine>,
     pub connected_marker_seen: bool,
     pub stderr_tail: Vec<SshStderrLine>,
     pub stderr_eof: bool,
@@ -382,6 +458,8 @@ struct SshObserved {
 /// to expose the newest two without evicting a diagnostic for a marker line.
 #[derive(Default)]
 struct SshState {
+    process_route: ProcessRoute,
+    session_refusal: Option<SshStderrLine>,
     complete: VecDeque<SshStderrLine>,
     pending: Vec<u8>,
     pending_truncated: bool,
@@ -415,6 +493,8 @@ impl SshObservation {
             tail.remove(0);
         }
         SshSnapshot {
+            process_route: state.process_route.clone(),
+            session_refusal: state.session_refusal.clone(),
             connected_marker_seen: state.connected_marker_seen,
             stderr_tail: tail,
             stderr_eof: state.stderr_eof,
@@ -449,6 +529,9 @@ impl SshObservation {
                 first_marker |= !state.connected_marker_seen;
                 state.connected_marker_seen = true;
             } else {
+                if state.session_refusal.is_none() && ssh_session_refused(&line.bytes) {
+                    state.session_refusal = Some(line.clone());
+                }
                 state.complete.push_back(line.clone());
                 if state.complete.len() > 2 {
                     state.complete.pop_front();
@@ -474,6 +557,9 @@ impl SshObservation {
                 bytes: std::mem::take(&mut state.pending),
                 truncated: std::mem::take(&mut state.pending_truncated),
             };
+            if state.session_refusal.is_none() && ssh_session_refused(&line.bytes) {
+                state.session_refusal = Some(line.clone());
+            }
             state.complete.push_back(line.clone());
             if state.complete.len() > 2 {
                 state.complete.pop_front();
@@ -495,7 +581,7 @@ impl SshObservation {
 /// Dropping all diagnostics and the reader cancels the child and stderr task.
 #[derive(Clone)]
 pub struct SshDiagnostics {
-    lifetime: Arc<SshLifetime>,
+    lifetime: Arc<ProcessLifetime>,
     observation: SshObservation,
 }
 
@@ -564,30 +650,37 @@ impl SshDiagnostics {
     }
 }
 
-/// Attach exactly one drainer and one shared child anchor to piped SSH.
+/// Attach exactly one drainer and one shared child anchor to a piped process.
 /// The drainer holds observations only, so cancellation cannot form a cycle.
-fn ssh_connection(
+fn process_connection(
     mut child: tokio::process::Child,
     host: HostId,
     destination: String,
+    process_route: ProcessRoute,
 ) -> TransportConnection {
     let stdout = child.stdout.take().expect("piped stdout");
     let stdin = child.stdin.take().expect("piped stdin");
     let stderr = child.stderr.take().expect("piped stderr");
     let observation = SshObservation::new();
-    let stderr_task = tokio::spawn(relay_ssh_stderr(
+    observation
+        .0
+        .state
+        .lock()
+        .expect("process observation mutex")
+        .process_route = process_route;
+    let stderr_task = tokio::spawn(relay_process_stderr(
         host,
         destination,
         stderr,
         observation.clone(),
     ));
-    let lifetime = Arc::new(SshLifetime {
+    let lifetime = Arc::new(ProcessLifetime {
         child: tokio::sync::Mutex::new(child),
         stderr_task: stderr_task.abort_handle(),
     });
     TransportConnection {
         io: (
-            Box::new(SshChannel {
+            Box::new(ProcessChannel {
                 stdout,
                 _lifetime: lifetime.clone(),
             }),
@@ -600,7 +693,7 @@ fn ssh_connection(
     }
 }
 
-/// Longest single line of an ssh child's stderr this side will relay.
+/// Longest single line of a connection process's stderr this side will relay.
 ///
 /// Not a formatting preference: the far side decides how long a "line" is,
 /// and a remote that writes megabytes without a newline would otherwise be
@@ -609,7 +702,7 @@ fn ssh_connection(
 /// more".
 const SSH_STDERR_LINE_CAP: usize = 512;
 
-/// How many stderr lines one ssh child may have relayed before the rest are
+/// How many stderr lines one connection process may relay before the rest are
 /// dropped.
 ///
 /// A per-CHILD budget rather than a rate: an ssh that has said two hundred
@@ -619,7 +712,7 @@ const SSH_STDERR_LINE_CAP: usize = 512;
 /// budget on every reconnect rather than going permanently quiet.
 const SSH_STDERR_LINE_BUDGET: usize = 200;
 
-/// Relay one ssh child's stderr into the tracing trail, bounded and
+/// Relay one connection process's stderr into the tracing trail, bounded and
 /// escaped, and attributed to the host it came from.
 ///
 /// Every line is `Debug`-formatted, because this is text a REMOTE party
@@ -630,7 +723,7 @@ const SSH_STDERR_LINE_BUDGET: usize = 200;
 ///
 /// Child exit and stderr EOF are independent: a descendant can retain stderr.
 /// The lifetime anchor aborts this task when its final owner drops.
-async fn relay_ssh_stderr<R>(
+async fn relay_process_stderr<R>(
     host: HostId,
     destination: String,
     mut stderr: R,
@@ -646,7 +739,7 @@ async fn relay_ssh_stderr<R>(
         match stderr.read(&mut bytes).await {
             Ok(0) => {
                 if let Some(line) = observation.finish_stderr(false) {
-                    log_ssh_line(host, &destination, &line, &mut relayed);
+                    log_process_line(host, &destination, &line, &mut relayed);
                 }
                 break;
             }
@@ -654,12 +747,12 @@ async fn relay_ssh_stderr<R>(
                 // Observation continues past the warning budget. Otherwise a
                 // chatty peer could hide its connected marker or final error.
                 for line in observation.observe_chunk(&bytes[..count]) {
-                    log_ssh_line(host, &destination, &line, &mut relayed);
+                    log_process_line(host, &destination, &line, &mut relayed);
                 }
             }
             Err(_) => {
                 if let Some(line) = observation.finish_stderr(true) {
-                    log_ssh_line(host, &destination, &line, &mut relayed);
+                    log_process_line(host, &destination, &line, &mut relayed);
                 }
                 break;
             }
@@ -669,7 +762,7 @@ async fn relay_ssh_stderr<R>(
 
 /// Warnings stop at the existing per-child budget; drainage never stops there.
 /// Saturating the count avoids growing a counter on an endless stderr flood.
-fn log_ssh_line(host: HostId, destination: &str, line: &SshStderrLine, relayed: &mut usize) {
+fn log_process_line(host: HostId, destination: &str, line: &SshStderrLine, relayed: &mut usize) {
     if *relayed >= SSH_STDERR_LINE_BUDGET {
         return;
     }
@@ -679,7 +772,7 @@ fn log_ssh_line(host: HostId, destination: &str, line: &SshStderrLine, relayed: 
             host,
             destination,
             budget = SSH_STDERR_LINE_BUDGET,
-            "the ssh child for this host has said enough; dropping the rest of its \
+            "the connection process for this host has said enough; dropping the rest of its \
              stderr for this connection"
         );
         return;
@@ -689,9 +782,9 @@ fn log_ssh_line(host: HostId, destination: &str, line: &SshStderrLine, relayed: 
         host,
         destination,
         truncated = line.truncated,
-        // Debug-formatted deliberately; see relay_ssh_stderr's docs.
+        // Debug-formatted deliberately; see relay_process_stderr's docs.
         message = ?text,
-        "ssh reported a problem for this host"
+        "the connection process reported a problem for this host"
     );
 }
 
@@ -728,8 +821,38 @@ pub(crate) fn classify_local_dial(error: anyhow::Error) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::HostKind;
 
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    /// A failed fresh login can print after the mux refusal. The first capped
+    /// refusal must survive tail eviction and a final segment without newline.
+    #[farhelm_testtrace::test]
+    fn session_refusal_survives_later_fallback_diagnostics() {
+        let refusal =
+            b"mux_client_request_session: session request failed: Session open refused by peer";
+        let observation = SshObservation::new();
+        observation.observe_chunk(refusal);
+        observation
+            .observe_chunk(b"\nfirst fallback line\nsecond fallback line\nthird fallback line\n");
+        let snapshot = observation.snapshot();
+        assert_eq!(snapshot.session_refusal.unwrap().bytes, refusal);
+        assert_eq!(snapshot.stderr_tail.len(), 2);
+        assert!(
+            snapshot
+                .stderr_tail
+                .iter()
+                .all(|line| !ssh_session_refused(&line.bytes))
+        );
+
+        let unterminated = SshObservation::new();
+        unterminated.observe_chunk(refusal);
+        unterminated.finish_stderr(false);
+        assert_eq!(
+            unterminated.snapshot().session_refusal.unwrap().bytes,
+            refusal
+        );
+    }
 
     /// A timeout must see the capped current segment even before EOF. A
     /// newline-free peer must not choose the helm's retained allocation.
@@ -814,7 +937,7 @@ mod tests {
         input.extend_from_slice(farhelm_proto::io::SUPERVISOR_CONNECTED_MARKER.as_bytes());
         input.extend_from_slice(b"\nlate error\nfinal segment");
         let observation = SshObservation::new();
-        relay_ssh_stderr(1, "fixture".into(), input.as_slice(), observation.clone()).await;
+        relay_process_stderr(1, "fixture".into(), input.as_slice(), observation.clone()).await;
         let snapshot = observation.snapshot();
         assert!(snapshot.connected_marker_seen);
         assert!(snapshot.stderr_eof);
@@ -947,7 +1070,7 @@ mod tests {
             .spawn()
             .unwrap();
         let pid = child.id().unwrap();
-        let connection = ssh_connection(child, 1, "fixture".into());
+        let connection = process_connection(child, 1, "fixture".into(), ProcessRoute::DirectSsh);
         let ((reader, writer), diagnostics) = (connection.io, connection.ssh.unwrap());
         tokio::time::timeout(Duration::from_secs(5), diagnostics.wait_connected())
             .await
@@ -975,7 +1098,7 @@ mod tests {
             .kill_on_drop(true)
             .spawn()
             .unwrap();
-        let connection = ssh_connection(child, 1, "fixture".into());
+        let connection = process_connection(child, 1, "fixture".into(), ProcessRoute::DirectSsh);
         let diagnostics = connection.ssh.unwrap();
         let snapshot = diagnostics.settle().await;
         assert!(snapshot.stderr_eof);
@@ -1005,14 +1128,14 @@ mod tests {
         let (stderr, held_open) = tokio::io::duplex(16);
         let observation = SshObservation::new();
         observation.record_exit(SshExit::Status(status));
-        let task = tokio::spawn(relay_ssh_stderr(
+        let task = tokio::spawn(relay_process_stderr(
             1,
             "fixture".into(),
             stderr,
             observation.clone(),
         ));
         let diagnostics = SshDiagnostics {
-            lifetime: Arc::new(SshLifetime {
+            lifetime: Arc::new(ProcessLifetime {
                 child: tokio::sync::Mutex::new(child),
                 stderr_task: task.abort_handle(),
             }),

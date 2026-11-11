@@ -89,6 +89,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::warn;
 
+/// Shared machine execution routes for transport, provisioning and credentials.
+mod access;
 mod client;
 mod downloads;
 mod environment;
@@ -268,7 +270,7 @@ pub use token_control::{
     show as show_token,
 };
 
-/// Local and SSH transport implementations behind the connection manager's seam.
+/// Local sockets and routed child processes behind the connection manager's seam.
 mod transport;
 
 /// The systemd user units Farhelm writes, shared by `farhelm helm setup`
@@ -2427,7 +2429,10 @@ async fn serve_with_ready(
     )?;
     let manager = manager::ConnectionManager::start_with_providers(
         store.clone(),
-        Arc::new(manager::SystemTransport::new(&state_dir)),
+        Arc::new(manager::SystemTransport::with_store(
+            &state_dir,
+            store.clone(),
+        )),
         manager::Cadence {
             refresh: args
                 .backstop_refresh_secs

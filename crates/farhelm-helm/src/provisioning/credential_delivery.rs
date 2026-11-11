@@ -402,12 +402,16 @@ impl CredentialDelivery {
             record.home = Some(home);
             guard = self.write_record(row, &record, guard).await?;
         }
-        let target = ProvisioningTarget::Ssh {
-            destination: row
-                .destination
-                .clone()
-                .ok_or("the host has no SSH destination")?,
-            access: crate::ssh::SshAccessKind::Tensorlake,
+        // Delivery and supervisor dialing must select the same live route.
+        // A container's place destination can change after this lease began.
+        let target = match crate::access::resolve_host_access(&self.store, row.id)
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            crate::access::HostAccess::Remote(route) => ProvisioningTarget::Remote(route),
+            crate::access::HostAccess::Local => {
+                return Err("environment credentials require a remote route".into());
+            }
         };
         for (is_claude, folder, file, endpoint, login) in [
             (

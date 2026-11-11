@@ -33,9 +33,8 @@
 //! terminator, and the destination's placement AFTER that terminator. That
 //! ordering is what keeps a user-supplied destination from being read as an ssh
 //! option (see its docs), so it is stated once here and inherited by every
-//! remote command built on top of it. `ssh_stdio_args` builds the steady-state
-//! `farhelm internal stdio` proxy; provisioning reuses the prefix for its
-//! discovery, reach checks, convergence commands, and payload uploads.
+//! remote command built on top of it. The shared route lowering builds the
+//! steady-state proxy, discovery, convergence scripts and payload uploads.
 //!
 //! ## Two shared connections per host, and why
 //!
@@ -188,7 +187,7 @@ impl SharedConnection {
 /// it into the files it names.
 ///
 /// Serialized into provisioning plans, where an ordinary ssh host omits it
-/// (see `ProvisioningTarget::Ssh`), so plans for existing hosts keep their
+/// (see `ProvisioningTarget::Remote`), so plans for existing hosts keep their
 /// shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -263,7 +262,7 @@ impl SshAccess {
 /// connection involved at all — for as long as the option terminator sits
 /// anywhere after it. Placed first, `--` ends option parsing before ssh
 /// ever looks at the destination, and it still covers the remote argv
-/// (`--state-dir` in [`ssh_stdio_args`]) that the old placement was
+/// (`--state-dir` in the stdio invocation) that the old placement was
 /// protecting.
 /// [`crate::store::HelmStore::add_ssh_host`] additionally refuses
 /// option-shaped destinations at the registry boundary so the user gets a
@@ -443,6 +442,7 @@ pub(crate) fn ssh_control_exit_args(
 /// Everything before the remote command — including the option-terminator
 /// placement that makes a hostile destination harmless — is
 /// [`ssh_base_args`]' business, not this function's.
+#[cfg(test)]
 pub(crate) fn ssh_stdio_args(
     dest: &str,
     control_dir: &std::path::Path,
@@ -450,34 +450,22 @@ pub(crate) fn ssh_stdio_args(
     remote_farhelm: &str,
     remote_state_dir: Option<&str>,
 ) -> anyhow::Result<Vec<String>> {
-    let mut args = ssh_base_args(dest, control_dir, SharedConnection::Supervisor, access)?;
-    args.extend([
-        shell_quote(remote_farhelm),
-        "internal".to_string(),
-        "stdio".to_string(),
-    ]);
-    if let Some(remote_state) = remote_state_dir {
-        args.push("--state-dir".to_string());
-        args.push(shell_quote(remote_state));
-    }
-    if matches!(access, SshAccess::Tensorlake(_)) {
-        // Probe the executable itself before passing a new option: an older
-        // helper must reach the normal hello/version-skew path, not fail in
-        // clap before it can report its protocol. Help never opens a socket;
-        // its output is captured so stdout remains a pure protocol stream.
-        let command_start = args
-            .iter()
-            .position(|arg| arg == "--")
-            .expect("ssh terminator")
-            + 2;
-        let command = args[command_start..].join(" ");
-        let probe = format!("{} internal stdio --help", shell_quote(remote_farhelm));
-        args.truncate(command_start);
-        args.push(format!(
-            "case \"$({probe} 2>/dev/null)\" in *--stdin-idle-limit-secs*) exec {command} --stdin-idle-limit-secs 120 ;; *) exec {command} ;; esac"
-        ));
-    }
-    Ok(args)
+    let kind = match access {
+        SshAccess::UserConfig => SshAccessKind::UserConfig,
+        SshAccess::Tensorlake(_) => SshAccessKind::Tensorlake,
+    };
+    let host = crate::access::HostAccess::Remote(crate::access::RemoteRoute::Ssh {
+        destination: dest.into(),
+        access: kind,
+    });
+    let argv = host.stdio_argv(remote_farhelm, remote_state_dir);
+    crate::access::ssh_command_args(
+        dest,
+        control_dir,
+        crate::access::ConnectionPolicy::Shared(SharedConnection::Supervisor),
+        access,
+        &argv,
+    )
 }
 
 /// Encode one word for the remote login shell (OpenSSH hands the joined
@@ -1107,59 +1095,33 @@ mod tests {
         shell_words::split(&remote).expect("remote command must be shell-parseable")
     }
 
-    /// A new helm must never pass an unknown flag to an old helper: that
-    /// would hide its normal absence/version-skew evidence behind clap's
-    /// usage error. Execute the reconstructed remote shell command against
-    /// both helper generations, with hostile paths, and preserve exit 75.
+    /// Environment helpers always receive their stdin deadline. A help probe
+    /// would make that lifetime guarantee depend on an older executable and
+    /// would add another process before the byte-exact stdio protocol.
     #[farhelm_testtrace::test]
-    fn tensorlake_stdio_negotiates_the_idle_option_without_polluting_stdout() {
-        use std::os::unix::fs::PermissionsExt as _;
-        let dir = tempfile::tempdir().unwrap();
-        let program = dir.path().join("helper's $program");
-        let access =
-            super::SshAccess::resolve(super::SshAccessKind::Tensorlake, dir.path()).unwrap();
-        for supported in [false, true] {
-            let help = if supported {
-                "--stdin-idle-limit-secs <SECONDS>"
-            } else {
-                "legacy stdio help"
-            };
-            let reject = if supported {
-                ""
-            } else {
-                "for arg; do test \"$arg\" != --stdin-idle-limit-secs || exit 2; done"
-            };
-            std::fs::write(&program, format!(
-                "#!/bin/sh\nif test \"$3\" = --help; then printf '%s\\n' '{help}'; exit 0; fi\n{reject}\nprintf '<%s>\\n' \"$@\"\nexit 75\n"
-            )).unwrap();
-            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
-            let args = super::ssh_stdio_args(
-                "fixture",
-                dir.path(),
-                &access,
-                program.to_str().unwrap(),
-                Some("/state's $literal"),
-            )
-            .unwrap();
-            let start = args.iter().position(|arg| arg == "--").unwrap() + 2;
-            let output = std::process::Command::new("/bin/sh")
-                .arg("-c")
-                .arg(args[start..].join(" "))
-                .output()
-                .unwrap();
-            assert_eq!(output.status.code(), Some(75), "{output:?}");
-            let expected = if supported {
-                "<internal>\n<stdio>\n<--state-dir>\n</state's $literal>\n<--stdin-idle-limit-secs>\n<120>\n"
-            } else {
-                "<internal>\n<stdio>\n<--state-dir>\n</state's $literal>\n"
-            };
-            assert_eq!(
-                output.stdout,
-                expected.as_bytes(),
-                "help must not reach protocol stdout"
-            );
-            assert!(output.stderr.is_empty());
-        }
+    fn tensorlake_stdio_always_passes_the_idle_option() {
+        let dir = std::path::Path::new("/state");
+        let access = super::SshAccess::resolve(super::SshAccessKind::Tensorlake, dir).unwrap();
+        let args = super::ssh_stdio_args(
+            "fixture",
+            dir,
+            &access,
+            "/helper's $program",
+            Some("/state's $literal"),
+        )
+        .unwrap();
+        assert_eq!(
+            remote_command(&args),
+            [
+                "/helper's $program",
+                "internal",
+                "stdio",
+                "--state-dir",
+                "/state's $literal",
+                "--stdin-idle-limit-secs",
+                "120"
+            ]
+        );
     }
 
     /// The argv-injection regression: OpenSSH parses options up to the

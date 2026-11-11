@@ -9,12 +9,9 @@
 //! fake (`e2e.rs`), and the engine's unit tests a scripted one, so nothing
 //! above this seam knows whether ssh ran.
 //!
-//! Why not provisioning's runner: it is bound to provisioning's targets and
-//! its shared connection, takes no extra ssh options, and a shared master is
-//! exactly wrong for a builder whose name is reused. What it does have is
-//! reused here instead of copied: the spawn seam, the process-group
-//! isolation that lets a timeout kill the whole ssh process tree, and the
-//! bounded capture of both streams.
+//! Route lowering is shared with provisioning and supervisor connections.
+//! This caller still owns its named build steps, one-shot policy, process
+//! group and bounded capture, which are the recipe engine's contract.
 
 use std::{process::Stdio, sync::Arc, time::Duration};
 
@@ -134,9 +131,14 @@ pub(crate) fn script_argv(
     sandbox: &str,
     script: &str,
 ) -> Result<Vec<String>, String> {
-    let mut argv = crate::ssh::ssh_oneshot_args(&destination(sandbox), &access.oneshot_options()?);
-    argv.push(format!("sh -c {}", crate::ssh::shell_quote(script)));
-    Ok(argv)
+    crate::access::ssh_command_args(
+        &destination(sandbox),
+        std::path::Path::new(""),
+        crate::access::ConnectionPolicy::OneShot,
+        &crate::ssh::SshAccess::Tensorlake(access.clone()),
+        &["sh".into(), "-c".into(), script.into()],
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[async_trait]

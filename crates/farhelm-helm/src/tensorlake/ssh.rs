@@ -49,6 +49,16 @@ const KNOWN_HOSTS: &str = "known_hosts";
 const SERVER_ALIVE_INTERVAL: u32 = 30;
 const SERVER_ALIVE_COUNT_MAX: u32 = 3;
 
+/// Route to a sandbox, builder or preparer whose destination is already
+/// selected. These machines need no registry row to share the host command
+/// lowering, and key files stay resolved against the executing helm's state.
+pub(crate) fn route(destination: impl Into<String>) -> crate::access::RemoteRoute {
+    crate::access::RemoteRoute::Ssh {
+        destination: destination.into(),
+        access: crate::ssh::SshAccessKind::Tensorlake,
+    }
+}
+
 /// Farhelm's ssh credentials for Tensorlake: its private key and its
 /// known_hosts file. Both paths are on the helm's machine.
 #[derive(Clone, Debug, PartialEq, Eq)]

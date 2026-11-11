@@ -67,7 +67,7 @@ pub use crate::feed::{FeedSeat, FleetEvents};
 pub use crate::transport::{
     HostTransport, LocalSupervisorNotRunning, SystemTransport, TransportConnection, TransportPair,
 };
-use crate::transport::{SshDiagnostics, SshExit, SshObservation, SshSnapshot};
+use crate::transport::{ProcessRoute, SshDiagnostics, SshExit, SshObservation, SshSnapshot};
 
 use crate::client::{SessionListing, SupervisorClient, SupervisorError, SupervisorTransportError};
 use crate::environment::{ConnectedResources, EnvironmentStatus, Providers, StatusUnanswered};
@@ -3812,7 +3812,7 @@ impl HostActor {
     /// the row, and a hung dial would ignore the edit for as long as
     /// [`Cadence::attempt_timeout`] allows. Losing that race cancels the
     /// attempt in flight — which, for the ssh transport, kills the child
-    /// (see `transport::SshChannel`) rather than leaving it behind.
+    /// (see `transport::ProcessChannel`) rather than leaving it behind.
     async fn connect_phase(
         &self,
         row: &HostRow,
@@ -5182,7 +5182,7 @@ fn request_lost_connection(error: &anyhow::Error) -> bool {
 /// Clip a raw diagnostic component without escaping it. The complete failure
 /// crosses `peer_text` once, after composition; truncation stays visible and
 /// UTF-8 boundaries remain valid even for lossy-decoded stderr.
-fn diagnostic_excerpt(text: &str, cap: usize) -> String {
+pub(crate) fn diagnostic_excerpt(text: &str, cap: usize) -> String {
     let end = (0..=text.len().min(cap))
         .rev()
         .find(|end| text.is_char_boundary(*end))
@@ -5230,10 +5230,12 @@ fn remote_supervisor_remedy(row: &HostRow) -> String {
 /// the original error gets 320, with its root first so EPIPE cannot be hidden
 /// behind an outer context. Retention's 512-byte parser cap is independent.
 ///
-/// Numeric SSH exits classify only an otherwise unsettled hello. Marker or
+/// Numeric process exits classify only an otherwise unsettled hello. Marker or
 /// successful-hello evidence outranks them. Signals, wait failure and absent
 /// status never manufacture an ordinary exit code, and protocol errors request
 /// only literal status context rather than a remote-command diagnosis.
+/// The captured route keeps a local exec's 255 from claiming an SSH failure,
+/// and a nested channel refusal names the place host whose sshd refused it.
 fn ssh_failure_detail(
     row: &HostRow,
     stage: ConnectionStage,
@@ -5252,36 +5254,81 @@ fn ssh_failure_detail(
         _ => None,
     };
     let can_classify = classify_exit && stage == ConnectionStage::ConnectingToHost;
-    let mut detail = match (can_classify, code) {
-        (true, Some(255)) => "SSH could not connect or log in to the host".to_string(),
-        (true, Some(126)) => format!(
+    let mut detail = match (&snapshot.process_route, can_classify, code) {
+        (ProcessRoute::LocalPodman, true, Some(code)) => {
+            format!("container execution failed (exit status {code})")
+        }
+        (ProcessRoute::LocalPodman, _, _) => stage.failure_context().to_string(),
+        (ProcessRoute::NestedSsh { destination }, true, Some(255))
+            if snapshot.session_refusal.is_some()
+                || snapshot
+                    .stderr_tail
+                    .iter()
+                    .any(|line| crate::transport::ssh_session_refused(&line.bytes)) =>
+        {
+            crate::transport::ssh_session_limit_detail(destination)
+        }
+        (ProcessRoute::NestedSsh { destination }, true, Some(255)) => format!(
+            "SSH could not connect or log in to container host {}",
+            diagnostic_excerpt(destination, 128)
+        ),
+        (ProcessRoute::NestedSsh { destination }, true, Some(code)) => format!(
+            "container execution through container host {} failed (exit status {code})",
+            diagnostic_excerpt(destination, 128)
+        ),
+        (ProcessRoute::DirectSsh, true, Some(255)) => {
+            "SSH could not connect or log in to the host".to_string()
+        }
+        (ProcessRoute::DirectSsh, true, Some(126)) => format!(
             "reached the host, but Farhelm could not be executed at {}",
             diagnostic_excerpt(row.remote_farhelm.as_deref().unwrap_or("farhelm"), 128),
         ),
-        (true, Some(127)) => format!(
+        (ProcessRoute::DirectSsh, true, Some(127)) => format!(
             "reached the host, but Farhelm could not be found at {}",
             diagnostic_excerpt(row.remote_farhelm.as_deref().unwrap_or("farhelm"), 128),
         ),
-        (true, Some(75)) => format!(
+        (ProcessRoute::DirectSsh, true, Some(75)) => format!(
             "Farhelm is on the host, but no supervisor is running there; {}",
             remote_supervisor_remedy(row),
         ),
-        (true, Some(code)) => {
+        (ProcessRoute::DirectSsh, true, Some(code)) => {
             format!("reached the host, but the remote Farhelm command failed (exit status {code})",)
         }
-        _ if !classify_exit && stage == ConnectionStage::ConnectingToHost => {
+        (ProcessRoute::DirectSsh | ProcessRoute::NestedSsh { .. }, _, _)
+            if !classify_exit && stage == ConnectionStage::ConnectingToHost =>
+        {
             "the connection failed before a supervisor hello completed".to_string()
         }
-        _ if stage == ConnectionStage::ConnectingToHost && prior_marker_seen => {
+        (ProcessRoute::DirectSsh | ProcessRoute::NestedSsh { .. }, _, _)
+            if stage == ConnectionStage::ConnectingToHost && prior_marker_seen =>
+        {
             "SSH had not reached Farhelm on the host: still connecting or logging in".to_string()
         }
-        _ => stage.failure_context().to_string(),
+        (ProcessRoute::DirectSsh | ProcessRoute::NestedSsh { .. }, _, _) => {
+            stage.failure_context().to_string()
+        }
+    };
+    let process = match &snapshot.process_route {
+        ProcessRoute::DirectSsh | ProcessRoute::NestedSsh { .. } => "SSH",
+        ProcessRoute::LocalPodman => "container exec",
     };
 
     // Keep peer output ahead of the command/error chain: a long configured
     // path or contextual error must not consume the whole-message cap first.
+    if let Some(refusal) = &snapshot.session_refusal
+        && !snapshot
+            .stderr_tail
+            .iter()
+            .any(|line| line.bytes == refusal.bytes)
+    {
+        detail.push_str(&format!(". Earlier {process} refusal "));
+        detail.push_str(&diagnostic_excerpt(
+            &String::from_utf8_lossy(&refusal.bytes),
+            128,
+        ));
+    }
     if !snapshot.stderr_tail.is_empty() {
-        detail.push_str("; SSH stderr: ");
+        detail.push_str(&format!("; {process} stderr: "));
         for (index, line) in snapshot.stderr_tail.iter().enumerate() {
             if index != 0 {
                 detail.push_str(" / ");
@@ -5297,17 +5344,21 @@ fn ssh_failure_detail(
     }
     match &snapshot.exit {
         Some(SshExit::Status(status)) if code.is_none() => {
-            detail.push_str(&format!("; SSH terminated without an exit code ({status})"));
+            detail.push_str(&format!(
+                "; {process} terminated without an exit code ({status})"
+            ));
         }
-        Some(SshExit::WaitFailed) => detail.push_str("; SSH exit status could not be read"),
-        None => detail.push_str("; SSH exit status is not yet known"),
+        Some(SshExit::WaitFailed) => {
+            detail.push_str(&format!("; {process} exit status could not be read"))
+        }
+        None => detail.push_str(&format!("; {process} exit status is not yet known")),
         Some(SshExit::Status(_)) if !can_classify => {
-            detail.push_str(&format!("; SSH exited with status {}", code.unwrap()));
+            detail.push_str(&format!("; {process} exited with status {}", code.unwrap()));
         }
         _ => {}
     }
     if snapshot.stderr_read_failed {
-        detail.push_str("; SSH stderr could not be read completely");
+        detail.push_str(&format!("; {process} stderr could not be read completely"));
     }
     if let Some(error) = error {
         detail.push_str("; cause: ");
@@ -5319,9 +5370,9 @@ fn ssh_failure_detail(
     detail
 }
 
-/// Preserve setup/protocol errors while adding only the SSH evidence this
+/// Preserve setup/protocol errors while adding only the process evidence this
 /// attempt owns. Local failures retain their typed missing-supervisor cause;
-/// every composed SSH diagnostic is normalized exactly once by `failure`.
+/// every composed diagnostic is normalized exactly once by `failure`.
 fn attempt_failure(
     row: &HostRow,
     error: anyhow::Error,
@@ -5487,6 +5538,95 @@ mod tests {
     fn diagnostic_status(code: i32) -> SshExit {
         use std::os::unix::process::ExitStatusExt as _;
         SshExit::Status(std::process::ExitStatus::from_raw(code << 8))
+    }
+
+    /// A local Podman exec's 255 belongs to that process, so the diagnostic
+    /// must retain its status and stderr without inventing an SSH login failure.
+    #[farhelm_testtrace::test]
+    fn local_container_exit_does_not_claim_an_ssh_failure() {
+        let row = diagnostic_ssh_row();
+        let snapshot = SshSnapshot {
+            process_route: ProcessRoute::LocalPodman,
+            session_refusal: Some(crate::transport::SshStderrLine {
+                bytes: b"Session open refused by peer".to_vec(),
+                truncated: false,
+            }),
+            exit: Some(diagnostic_status(255)),
+            stderr_tail: vec![crate::transport::SshStderrLine {
+                bytes: b"fixture podman exec failure".to_vec(),
+                truncated: false,
+            }],
+            ..Default::default()
+        };
+        let text = ssh_failure_detail(
+            &row,
+            ConnectionStage::ConnectingToHost,
+            false,
+            &snapshot,
+            true,
+            None,
+        );
+        assert!(
+            text.contains("container execution failed (exit status 255)"),
+            "{text}"
+        );
+        assert!(text.contains("container exec stderr"), "{text}");
+        assert!(text.contains("fixture podman exec failure"), "{text}");
+        assert!(!text.contains("SSH"), "{text}");
+    }
+
+    /// A nested exec consumes a session on the place host's shared SSH
+    /// connection. A refused channel must name that host and the session limit,
+    /// keep the underlying diagnostic, and yield to a reached-Farhelm marker.
+    #[farhelm_testtrace::test]
+    fn nested_container_channel_refusal_names_the_place_host() {
+        let row = diagnostic_ssh_row();
+        let mut snapshot = SshSnapshot {
+            process_route: ProcessRoute::NestedSsh { destination: "place.example".into() },
+            exit: Some(diagnostic_status(255)),
+            stderr_tail: vec![crate::transport::SshStderrLine {
+                bytes: b"mux_client_request_session: session request failed: Session open refused by peer".to_vec(),
+                truncated: false,
+            }],
+            ..Default::default()
+        };
+        let render = |snapshot: &SshSnapshot| {
+            ssh_failure_detail(
+                &row,
+                ConnectionStage::ConnectingToHost,
+                false,
+                snapshot,
+                true,
+                None,
+            )
+        };
+        let text = render(&snapshot);
+        assert!(
+            text.contains("container host place.example refused an SSH session channel"),
+            "{text}"
+        );
+        assert!(text.contains("SSH session limit"), "{text}");
+        assert!(text.contains("Session open refused by peer"), "{text}");
+        snapshot.session_refusal = Some(snapshot.stderr_tail[0].clone());
+        snapshot.stderr_tail = vec![crate::transport::SshStderrLine {
+            bytes: b"later fallback diagnostic".to_vec(),
+            truncated: false,
+        }];
+        let text = render(&snapshot);
+        assert!(text.contains("SSH session limit"), "{text}");
+        assert!(text.contains("Session open refused by peer"), "{text}");
+        assert!(text.contains("later fallback diagnostic"), "{text}");
+        snapshot.exit = Some(diagnostic_status(125));
+        let text = render(&snapshot);
+        assert!(!text.contains("SSH session limit"), "{text}");
+        assert!(text.contains("exit status 125"), "{text}");
+        snapshot.exit = None;
+        assert!(!render(&snapshot).contains("SSH session limit"));
+        snapshot.exit = Some(diagnostic_status(255));
+        snapshot.connected_marker_seen = true;
+        let text = render(&snapshot);
+        assert!(!text.contains("SSH session limit"), "{text}");
+        assert!(text.contains("SSH exited with status 255"), "{text}");
     }
 
     /// SSH owns only 255; all other ordinary statuses came from the remote

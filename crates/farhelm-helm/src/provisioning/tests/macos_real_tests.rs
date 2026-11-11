@@ -629,7 +629,7 @@ async fn remote_macos_setup_update_crash_recovery_and_uninstall() {
         fixture.shell(&format!("{}\n[ \"$active\" = inactive ] && [ ! -e {lib} ] && [ ! -e {state} ]",
             fixture.job_script(), lib = shell_path(&fixture.lib).unwrap(), state = shell_path(&fixture.state).unwrap()),
             "confirm the owned installation is absent before setup").await;
-        let ProvisioningTarget::Ssh { destination, .. } = &fixture.target else { unreachable!() };
+        let ProvisioningTarget::Remote(crate::access::RemoteRoute::Ssh { destination, .. }) = &fixture.target else { unreachable!() };
         let probe = || ProbeRequest {
             target: ProbeDestination::Ssh { destination: destination.clone() },
             remote_farhelm: Some(fixture.lib.join("farhelm").to_str().unwrap().into()),
@@ -898,16 +898,12 @@ async fn mac_reboot_shell(
     script: &str,
     budget: Duration,
 ) -> Option<CommandResult> {
-    let ProvisioningTarget::Ssh {
-        destination,
-        access,
-    } = &fixture.target
-    else {
+    let ProvisioningTarget::Remote(route) = &fixture.target else {
         unreachable!()
     };
     let mut command = fixture
         .backend
-        .ssh_command(destination, *access, script.into())
+        .remote_command(route, script.into())
         .unwrap_or_else(|_| panic!("could not construct the reboot observation"));
     command
         .stdin(Stdio::null())
