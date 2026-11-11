@@ -191,3 +191,130 @@ The required single fresh-context GPT-6.1 Sol reviewer at high effort cleared ea
 additional fresh Claude Opus completion review read the full combined change and its corrective deltas; no product
 finding remains open. Its final test-cleanup finding was fixed and checked by the same second-PR Sol reviewer. These are
 source verdicts; the checks section records runtime evidence separately.
+
+### Landing
+
+Landed alone (the only plan in this landing round) as its two PRs: #3276, which keeps the page usable while a Stop,
+Restart, Replace or Delete runs, then #3278, which does the same for launching a session and adds the count of key and
+pointer presses that tells whether the user has moved on since answering the launcher. Nothing reached main between this
+delivery's base and the landing except planning-queue bookkeeping, so the stack rebased onto main unchanged.
+
+The first two deliveries went back from landing for completions that moved focus or closed things the user had moved on
+from. This third one passed review, but three of its keyboard-focus tests failed in WebKit, the engine family the
+desktop app uses, each reproducible on repeat and each passing every time on main. Following the maintainer's
+instruction during this landing ("Unless you find something else horribly bad, just fix it yourself", and for a rare
+edge case that is not a fundamental issue, "make it a near-term follow-up"), the landing fixed those three itself and
+recorded the narrower findings as near-term TODO entries.
+
+#### Fixes made by the landing
+
+All of them are in #3278's commit, because the first relies on the press count #3278 introduces. #3276 alone, on main
+for the minutes between the two merges, still had the first problem.
+
+- **Cancel is focused again when a Replace turns into a YOLO question.** A plain Replace (the one that recreates the
+  session with its stored launch, as opposed to Replace with) that the host refuses because it would start a YOLO
+  session shows the "Confirm YOLO launch" question. Started from the session's header with the session confirmation
+  turned off, the question appeared without focus in 7 of 10 WebKit runs, so Enter or Space went to the session's
+  terminal instead of the question's safe answer. The plan let a question that arrives after a reply take focus only
+  when nothing else holds it, and in WebKit clicking a header button does not move focus, so the terminal still held it.
+  A Replace now records the press count when the user starts it, and its question focuses Cancel outright while the
+  count is unchanged; after any later press it keeps the plan's rule. This relaxes that rule, so it has a "Plan
+  decisions to revisit" TODO entry, and SPEC.md and SPEC_impl.md say so.
+- **A hidden launcher no longer keeps keyboard focus.** After Launch is pressed with Enter, the launcher hides while the
+  session starts. WebKit sometimes left focus on the hidden Launch button, so keys went to a control nobody could see,
+  where Chromium moves focus to the page (3 of 10 WebKit runs of the test of a repeated Enter). Once the hidden launcher
+  is drawn, its focused control now gives focus back to the page.
+- **Pressing Home, End or an arrow on the launcher's Agent and Command tabs no longer pulls focus back.** Those keys
+  move focus to the selected tab one frame later. The plan's extra work per keypress shifted that frame, so a fast move
+  from the tabs to Launch was undone and focus jumped back to the tab (2 to 5 of 10 WebKit runs of the launcher retry
+  test). The delayed focus now acts only while focus is still on a tab.
+- **SPEC.md** now says what the plan intended in two places it had not updated: a finished Replace opens its replacement
+  only if its source session is still selected (the plan's own SPEC.md text said so elsewhere), and each bulk Stop or
+  Delete batch keeps its one-request-at-a-time pace per host, so a second batch, which the plan now allows while a first
+  runs, can send to a host the first is still working on. Neither is a behavior change the plan did not intend. The YOLO
+  question's focus is the third place, above.
+- **Two terminal status-dot tests** now read whether the row is selected and the dot's colour in one step. The page can
+  select the only session between two separate reads, which failed one of them twice in 20 WebKit runs. These tests did
+  not change in this plan, and whether main shows the race too was not checked.
+
+#### Review
+
+Three fresh-context reviews read the whole change, and two more read the landing's fixes. In the combined change they
+found nothing else that had to change before merging. #3276 on its own also showed a YOLO question as an error on the
+session's row; #3278 already fixes that. The press count follows the rule the maintainer approved in the plan's revision
+of 2026-11-10 and adds nothing beyond it. These went to near-term TODO entries instead of being fixed here:
+
+- Two narrow launch paths that leave the page stuck after waking a host: a quick launch with a GitHub checkout on a
+  suspended sandbox host whose retry is refused without a message leaves an invisible launcher over the page until
+  Escape; and a launch that woke a host waits with no time limit, and no Cancel, if the page never sees that host
+  connect.
+- About 600 lines that keep a session row's menu open when the session count shown above the list changes, which a
+  design of about 30 lines could replace.
+- Browser tests whose check that a returning dialog waited can pass before the reply was handled.
+- A Restart that finished while the user was on another session is remembered until the session is opened again, which
+  can show a dead terminal after a later host reboot; and Replace with's "Replacing…" indicator has no cleanup if its
+  request is abandoned.
+
+#### Things you should know
+
+- **A regression this plan caused landed unfixed.** In WebKit, a bulk Stop that finishes one marked row sometimes closes
+  a Delete confirmation the user left open on another marked row (2 to 4 of 20 runs; Chromium 20 of 20; main passes).
+  Nothing is deleted, and that row still shows "Stop: not started". It needs a Delete confirmation left open while
+  running a bulk Stop over the same rows, so under the maintainer's instruction it is a near-term TODO entry rather than
+  a fix here. Its test stays flaky in WebKit until then.
+- **One failure is not understood.** In Chromium, double-clicking the version text in the window header sometimes
+  selects nothing (once in a whole-suite run, once in 20 repeats). This plan changed header styling and added a
+  window-level key and pointer listener, but whether it causes this was not established; it has a near-term TODO entry.
+- In WebKit, a plain Replace's YOLO question now takes focus from the session's terminal when the user has pressed
+  nothing since starting the Replace, a relaxation of the plan's rule recorded for you to revisit.
+- The executor's report says its full browser run failed only on two unrelated timing cases. On Tensorlake's quieter
+  machines the plan's own focus failures showed instead; the checks below supersede the report's account of the browser
+  suite.
+
+#### Checks
+
+The browser runs were on Tensorlake sandboxes at the maintainer's request, through the recorder's generic mode (one run
+per shard, `npx playwright test --project=<project> ... --retries=0`, three workers with one stack each); the sandboxes
+run Node 24.16 against 24.20 on the development machine. Everything else ran on the development machine, the Rust tests
+through the recorder.
+
+Run now, on the tree that merged:
+
+- `cargo fmt --all -- --check`, `dprint check`, `python3 releasing/check-changelog.py format`, the test-delay checker
+  (`python -B scripts/check-test-sleeps.py`, 429 delays, none unannotated),
+  `cargo clippy -p farhelm-ui --all-targets -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, and the UI
+  crate's JavaScript tests (`node --test` in `crates/farhelm-ui/js-tests`, on the tree before the landing's fixes, which
+  change no JavaScript asset) passed.
+- `cargo nextest run -p farhelm-ui`: 953 passed (run `cd6792cc`).
+- The whole browser suite, both engines, every project: 3,257 passed, 14 skipped (the declared exclusions), 3 failed
+  (shard runs `7d8a1f57`, `c3c6f7a8`, `f9cb20f8`, `1d99bc25`, `fe9f6b0f`, `8cd184af`, `7a7ffd10`, `70275fd8`,
+  `e4305ff9`, `395815e7`). Not a pass; each failure was repeated twenty times on the same build:
+  - WebKit, bulk Stop reporting an engaged row without skipping its sibling: failed 4 of 20 (`94be824c`) and 2 of 20
+    with a temporary state report added (`2b017565`; Chromium 20 of 20, `7cdc7268`). When it fails, the row's open
+    Delete confirmation has closed while the row shows "Stop: not started": the bulk Stop finishing the other row closes
+    it. Caused by this plan and not fixed here; it has a near-term TODO entry.
+  - Chromium, double-clicking the version text selects it: failed 1 of 20 (`580f1199`). Not diagnosed; whether this plan
+    causes it is unknown, and it has a near-term TODO entry.
+  - WebKit, an open Update card following its current step in a short viewport: passed 20 of 20 (`b7584b93`), and in the
+    three earlier whole-suite runs; taken as a one-off, not investigated further.
+- The three focus tests the landing fixed, WebKit, twenty times each on the final build: all passed (`99a7d0ca`,
+  `21c1295d`, `c4cf4ece`, `b482578b`, which also ran the first terminal status-dot test twenty times). Both terminal
+  status-dot tests with their final single-read check, twenty times each: all passed (`daa596dd`).
+
+Earlier runs in this landing, kept as the evidence for the fixes:
+
+- The whole suite on the delivered tree: 3,256 passed, 14 skipped, 4 failed, the three focus failures and the known
+  provisioning host-menu flake (`120e98bf`, `c153e62a`, `e0e45463`, `aa25ea2a`, `e6ea792b`, `e886c32a`, `1f35ef40`,
+  `1b103c65`, `e954ba0c`, `6c104dc1`).
+- Ten-times reruns of the focus tests on that tree (`c7f21429`, `9413d15c`, `0e56251d`), and the same reruns on main
+  before this plan, which passed every time (`64bd11f2`, `a9074963`; the repeated-Enter test is new and has no main
+  counterpart).
+- Two whole-suite runs on intermediate fixes. The first failed the known Chromium Trash-dialog flake and a WebKit
+  custom-permissions case that then passed 10 of 10 (`95dccd87`) (`ffc16e36`, `e94ab4cd`, `5734f2cb`, `ae5e45aa`,
+  `0ad79b8d`, `e0b48883`, `0a0d5f80`, `35c94f4b`, `d20583da`, `9027c34b`). The second failed only the terminal test race
+  fixed above (`df88f358`, `44709b6f`, `ab9ab494`, `7de3eabe`, `68406cdf`, `b57841a3`, `fdc41bcf`, `67114b5e`,
+  `8e4d148b`, `1212416c`).
+
+Reused from the executor: nothing. Skipped: installer, release, provisioning and the rest of the workspace's Rust tests
+(only the web UI and its tests changed), native macOS execution (WebKit stands in for the desktop engine family), and
+hosted CI (manual-only).
