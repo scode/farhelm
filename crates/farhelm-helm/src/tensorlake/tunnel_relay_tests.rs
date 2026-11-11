@@ -390,7 +390,7 @@ impl RecipeFixture {
                 disk_gb: 20,
             },
             packages: vec![],
-            base: RecipeBase::Image {
+            base: RecipeBase::TensorlakeImage {
                 image: "tensorlake/ubuntu-systemd".into(),
             },
             claude: None,

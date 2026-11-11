@@ -378,7 +378,7 @@ mod tests {
                 disk_gb: 10,
             },
             packages: vec![],
-            base: RecipeBase::Image {
+            base: RecipeBase::TensorlakeImage {
                 image: "tensorlake/ubuntu-systemd".into(),
             },
             claude: None,

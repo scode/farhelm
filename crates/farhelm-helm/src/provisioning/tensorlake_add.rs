@@ -430,6 +430,17 @@ impl ProvisioningService {
             .tensorlake_recipe_row(&recipe_name)
             .await?
             .ok_or_else(|| refused(format!("no Tensorlake recipe is named {recipe_name}")))?;
+        // A cached checkpoint can outlive a switch to a Podman-only base.
+        // New work must honor that choice, while recovery of a recorded create
+        // continues from its saved installation facts after recipe edits.
+        if new_install
+            && !saved_prepared
+            && !recipe
+                .base
+                .supports(farhelm_proto::ProviderKind::Tensorlake)
+        {
+            return Err(refused("this recipe's base cannot run on Tensorlake"));
+        }
         if let Some(size) = size {
             recipe.size = size;
         }

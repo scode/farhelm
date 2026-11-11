@@ -44,6 +44,9 @@ enum Base {
     TensorlakeUbuntu,
     Image,
     Snapshot,
+    /// Preserve a shared-catalog base while this Tensorlake editor is staged.
+    /// Its reference and user remain intact unless the user chooses a new base.
+    ContainerImage,
 }
 
 /// One endpoint's URL and named credential selection, with no secret draft.
@@ -84,6 +87,8 @@ struct Draft {
     packages: String,
     image: String,
     snapshot_id: String,
+    container_reference: String,
+    container_user: String,
     claude: EndpointDraft,
     codex: EndpointDraft,
     claude_mode: AgentMode,
@@ -107,6 +112,8 @@ impl Draft {
             packages: String::new(),
             image: String::new(),
             snapshot_id: String::new(),
+            container_reference: String::new(),
+            container_user: String::new(),
             claude: EndpointDraft::default(),
             codex: EndpointDraft::default(),
             claude_mode: AgentMode::None,
@@ -128,16 +135,21 @@ impl Draft {
         draft.disk_gb = view.size.disk_gb.to_string();
         draft.packages = view.packages.join("\n");
         match &view.base {
-            RecipeBase::TensorlakeUbuntu => {
+            RecipeBase::ManagedUbuntu => {
                 draft.base = Base::TensorlakeUbuntu;
             }
-            RecipeBase::Image { image } => {
+            RecipeBase::TensorlakeImage { image } => {
                 draft.base = Base::Image;
                 draft.image = image.clone();
             }
-            RecipeBase::Snapshot { snapshot_id } => {
+            RecipeBase::TensorlakeSnapshot { snapshot_id } => {
                 draft.base = Base::Snapshot;
                 draft.snapshot_id = snapshot_id.clone();
+            }
+            RecipeBase::ContainerImage { reference, user } => {
+                draft.base = Base::ContainerImage;
+                draft.container_reference = reference.clone();
+                draft.container_user = user.clone();
             }
         }
         let endpoint = |view: &Option<EndpointView>| EndpointDraft {
@@ -203,12 +215,16 @@ impl Draft {
             disk_gb: number(&self.disk_gb, "disk")?,
         };
         let base = match self.base {
-            Base::TensorlakeUbuntu => RecipeBase::TensorlakeUbuntu,
-            Base::Image => RecipeBase::Image {
+            Base::TensorlakeUbuntu => RecipeBase::ManagedUbuntu,
+            Base::Image => RecipeBase::TensorlakeImage {
                 image: self.image.trim().to_string(),
             },
-            Base::Snapshot => RecipeBase::Snapshot {
+            Base::Snapshot => RecipeBase::TensorlakeSnapshot {
                 snapshot_id: self.snapshot_id.trim().to_string(),
+            },
+            Base::ContainerImage => RecipeBase::ContainerImage {
+                reference: self.container_reference.clone(),
+                user: self.container_user.clone(),
             },
         };
         let tunnels = self
@@ -642,6 +658,14 @@ pub(crate) fn RecipeEditor(
                         span { class: "recipe-source-card-title", "Your snapshot" }
                         span { class: "recipe-source-card-help", "A snapshot in your Tensorlake project, by ID." }
                     }
+                    if !draft.read().container_reference.is_empty() {
+                        button { r#type: "button", class: "recipe-source-card", disabled: locked,
+                            aria_pressed: recipe_base == Base::ContainerImage,
+                            onclick: move |_| { draft.write().base = Base::ContainerImage; error.set(None); },
+                            span { class: "recipe-source-card-title", "Container image" }
+                            span { class: "recipe-source-card-help", "Runs on Podman hosts." }
+                        }
+                    }
                 }
             }
             if recipe_base != Base::TensorlakeUbuntu {
@@ -652,13 +676,20 @@ pub(crate) fn RecipeEditor(
                             oninput: move |event| { draft.write().image = event.value(); error.set(None); } }
                     }
                     p { class: "host-settings-help", "A Tensorlake image in your project; `tl sbx image ls` lists them." }
-                } else {
+                } else if recipe_base == Base::Snapshot {
                     label { class: "checkout-root-label", span { "Snapshot ID" }
                         input { r#type: "text", class: "font-mono", value: "{draft.read().snapshot_id}", readonly: locked,
                             autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                             oninput: move |event| { draft.write().snapshot_id = event.value(); error.set(None); } }
                     }
                     p { class: "host-settings-help", "A Tensorlake snapshot in your project; `tl sbx checkpoint ls` lists them." }
+                } else if recipe_base == Base::ContainerImage {
+                    label { class: "checkout-root-label", span { "Container image" }
+                        input { r#type: "text", class: "font-mono", value: "{draft.read().container_reference}", readonly: true }
+                    }
+                    label { class: "checkout-root-label", span { "Container login user" }
+                        input { r#type: "text", class: "font-mono", value: "{draft.read().container_user}", readonly: true }
+                    }
                 }
                 p { class: "host-settings-help recipe-base-requirements",
                     "Farhelm builds on this base. It must boot systemd as its init system, let the sandbox user use sudo without a password, be Ubuntu or Debian with apt, and have bash, curl and git. The build checks these first and stops with the one that's missing."

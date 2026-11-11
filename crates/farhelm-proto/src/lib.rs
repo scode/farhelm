@@ -71,7 +71,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod environment;
-pub use environment::{ProviderKind, WhenStatusUnanswered};
+pub use environment::{Place, ProviderKind, WhenStatusUnanswered};
 
 #[cfg(feature = "io")]
 pub mod tcp_relay;
@@ -135,8 +135,9 @@ pub mod credentials;
 /// caps both enforce (see the module's own docs).
 pub mod feedback;
 pub mod ntfy;
-/// The helm's Tensorlake account settings and recipes as the UI reads and
-/// writes them (see the module's own docs).
+/// The shared environment recipe catalog and validation.
+pub mod recipes;
+/// The helm's Tensorlake account settings and compatibility recipe imports.
 pub mod tensorlake;
 
 /// The one list of characters that must never be shown as themselves when

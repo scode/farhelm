@@ -15,7 +15,11 @@
 //!
 //! Every builder and snapshot bills until deleted, so the engine's rule is
 //! that a durable record of each exists from the moment Tensorlake has it
-//! until it is gone, in the recipe's `state_json` ([`RecipeState`]):
+//! until it is gone, in the recipe's `state_json` ([`RecipeState`]).
+//!
+//! The shared state also holds Podman artifacts by place. Every Tensorlake
+//! read-modify-write preserves those fields in the same immediate transaction.
+//!
 //!
 //! - the builder's sandbox ID is persisted right after create returns. Its
 //!   name alone is not enough: once terminated, a sandbox can no longer be
@@ -207,63 +211,8 @@ pub(crate) struct FailureRecord {
     pub(crate) at: i64,
 }
 
-/// A recipe's `state_json`: both snapshot jobs' ownership bookkeeping, written
-/// only by this engine and recipe deletion. Saves never retire a
-/// snapshot: a successful replacement build does. `{}` decodes to the
-/// default; unknown fields are ignored so an older helm can read a newer
-/// state.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(default)]
-pub(crate) struct RecipeState {
-    /// The built software layer from which preparation starts.
-    pub(crate) snapshot: Option<BuiltSnapshot>,
-    /// Current installation checkpoint; failures preserve its provenance even
-    /// when age, Farhelm version or a newer built source makes it unusable.
-    pub(crate) prepared: Option<PreparedSnapshot>,
-    /// Preparation owns a distinct sandbox and pending request, so a rebuild
-    /// cannot mistake installation work for its own interrupted builder.
-    pub(crate) preparer_sandbox_id: Option<String>,
-    pub(crate) prepare_pending_create_at: Option<i64>,
-    pub(crate) prepare_started_at: Option<i64>,
-    pub(crate) last_prepare_failure: Option<PrepareFailureRecord>,
-    /// The builder sandbox, from right after create (or from when one is
-    /// found by its name) until it is terminated and its snapshots are
-    /// deleted.
-    pub(crate) builder_sandbox_id: Option<String>,
-    /// When a builder create was sent whose outcome Farhelm does not know
-    /// yet: written before the request goes out, cleared when the builder's
-    /// ID is recorded, when Tensorlake refused the create outright, or when
-    /// a lookup of the builder's name finds nothing at least
-    /// [`CREATE_SETTLE_SECS`] after the create was sent. While set, the next
-    /// build and the recipe's deletion must look the name up.
-    pub(crate) pending_create_at: Option<i64>,
-    /// Set when a build starts and cleared when it ends either way; set with
-    /// no live build means the helm stopped mid-build.
-    pub(crate) build_started_at: Option<i64>,
-    pub(crate) last_failure: Option<FailureRecord>,
-    /// Snapshots this recipe no longer uses whose deletion has not succeeded
-    /// yet: superseded by a rebuild, or retained from an older helm's
-    /// save-time retirement rule.
-    pub(crate) retired_snapshots: Vec<String>,
-}
-
-impl RecipeState {
-    /// Whether billed resources or an interrupted build still need settling
-    /// before the recipe can be forgotten. A build start keeps deletion on
-    /// the cleanup path, but does not authorize adopting a sandbox by name;
-    /// that needs the pending-create marker written before the request.
-    pub(crate) fn needs_cleanup(&self) -> bool {
-        self.snapshot.is_some()
-            || self.prepared.is_some()
-            || self.preparer_sandbox_id.is_some()
-            || self.prepare_pending_create_at.is_some()
-            || self.prepare_started_at.is_some()
-            || self.builder_sandbox_id.is_some()
-            || self.pending_create_at.is_some()
-            || self.build_started_at.is_some()
-            || !self.retired_snapshots.is_empty()
-    }
-}
+// The build engine keeps its existing import path for shared recipe state.
+pub(crate) use crate::environment::recipes::RecipeState;
 
 /// Decode a stored state. A state that does not decode is an error rather
 /// than the default: the default would forget recorded IDs of billed
@@ -429,6 +378,8 @@ struct Registry {
 #[derive(Debug)]
 pub(crate) enum StartRefusal {
     Missing,
+    /// The shared catalog can contain bases this build engine cannot use.
+    UnsupportedBase,
     NoApiKey,
     /// Farhelm's ssh key is missing or unreadable; the text says which.
     NoSshKey(String),
@@ -605,7 +556,8 @@ impl RecipeBuilds {
     /// Start a build of the recipe `name`, or join the one already running
     /// (a second Build, Rebuild or Retry click starts nothing).
     ///
-    /// Refuses a recipe that does not exist, and a helm
+    /// Refuses a base that Tensorlake cannot build before resource work, a
+    /// recipe that does not exist, and a helm
     /// without an API key or ssh key. `events` is bumped at every step.
     pub(crate) async fn start_or_join(
         self: &Arc<Self>,
@@ -634,6 +586,9 @@ impl RecipeBuilds {
             .map_err(StartRefusal::Storage)?
             .ok_or(StartRefusal::Missing)?;
         let spec = frozen.unwrap_or(stored);
+        if !spec.base.supports(farhelm_proto::ProviderKind::Tensorlake) {
+            return Err(StartRefusal::UnsupportedBase);
+        }
         let key = self
             .api_key()
             .await
@@ -705,7 +660,8 @@ impl RecipeBuilds {
     /// Return a recipe's built snapshot, building it when absent
     /// and joining an already running rebuild. A host keeps its confirmed
     /// definition; edits made while confirmation was open cannot change the
-    /// base, packages or size of a build it starts. Existing snapshots keep the
+    /// base, packages or size of a build it starts. Unsupported bases refuse
+    /// even when an older Tensorlake snapshot remains recorded. Existing snapshots keep the
     /// recipe's explicit-rebuild semantics (base or package edits do not rebuild).
     /// Progress follows the same watch channel Settings reads, without a
     /// second builder, detached waiter, or polling timer.
@@ -720,6 +676,12 @@ impl RecipeBuilds {
         F: FnMut(String) -> Fut,
         Fut: Future<Output = ()>,
     {
+        anyhow::ensure!(
+            frozen
+                .base
+                .supports(farhelm_proto::ProviderKind::Tensorlake),
+            "this recipe's base cannot run on Tensorlake"
+        );
         let (_, state) = self
             .store
             .tensorlake_recipe_row(name)
@@ -739,6 +701,8 @@ impl RecipeBuilds {
             .map_err(|reason| {
                 anyhow::anyhow!(match reason {
                     StartRefusal::Missing => "the recipe no longer exists".into(),
+                    StartRefusal::UnsupportedBase =>
+                        "this recipe's base cannot run on Tensorlake".into(),
                     StartRefusal::NoApiKey =>
                         "save a Tensorlake API key in Settings → Tensorlake first".into(),
                     StartRefusal::NoSshKey(message) => message,
@@ -1050,6 +1014,16 @@ impl RecipeBuilds {
         builder: &mut Option<String>,
     ) -> Result<String, Stop> {
         let step = BuildStep::Creating;
+        let source = match &ctx.base {
+            RecipeBase::ManagedUbuntu => SandboxSource::Image(TENSORLAKE_BASE_IMAGE.to_string()),
+            RecipeBase::TensorlakeImage { image } => SandboxSource::Image(image.clone()),
+            RecipeBase::TensorlakeSnapshot { snapshot_id } => {
+                SandboxSource::Snapshot(snapshot_id.clone())
+            }
+            RecipeBase::ContainerImage { .. } => {
+                return Err(failed(step, "this recipe's base cannot run on Tensorlake"));
+            }
+        };
         let sent = now_secs();
         match self
             .store
@@ -1064,15 +1038,7 @@ impl RecipeBuilds {
         }
         let request = CreateSandbox {
             name: ctx.builder.clone(),
-            source: match &ctx.base {
-                RecipeBase::TensorlakeUbuntu => {
-                    SandboxSource::Image(TENSORLAKE_BASE_IMAGE.to_string())
-                }
-                RecipeBase::Image { image } => SandboxSource::Image(image.clone()),
-                RecipeBase::Snapshot { snapshot_id } => {
-                    SandboxSource::Snapshot(snapshot_id.clone())
-                }
-            },
+            source,
             resources: Resources {
                 cpus: f64::from(ctx.size.cpus),
                 memory_mb: u64::from(ctx.size.memory_gb) * 1024,
@@ -1770,6 +1736,12 @@ impl RecipeBuilds {
         F: FnMut(String) -> Fut,
         Fut: Future<Output = ()>,
     {
+        anyhow::ensure!(
+            frozen
+                .base
+                .supports(farhelm_proto::ProviderKind::Tensorlake),
+            "this recipe's base cannot run on Tensorlake"
+        );
         loop {
             if built_only {
                 anyhow::ensure!(

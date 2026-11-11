@@ -350,6 +350,62 @@ struct Fixture {
     builder: String,
 }
 
+/// Shared catalog admission must reject a Podman-only base before starting any
+/// billed work or leaving a pending-create marker. Cached Tensorlake artifacts
+/// must not let an unsupported frozen definition bypass that check either.
+#[farhelm_testtrace::test]
+async fn container_bases_are_refused_before_tensorlake_resource_work() {
+    let f = fixture().await;
+    let mut save = tests_support::save();
+    save.base = RecipeBase::ContainerImage {
+        reference: "example.test/team/dev:latest".into(),
+        user: "dev".into(),
+    };
+    let spec = f
+        .store
+        .update_tensorlake_recipe(RECIPE.into(), save)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!spec.base.supports(farhelm_proto::ProviderKind::Tensorlake));
+    assert!(matches!(
+        f.builds.start_or_join(RECIPE, Arc::clone(&f.events)).await,
+        Err(StartRefusal::UnsupportedBase)
+    ));
+    assert_eq!(f.state().await, RecipeState::default());
+    f.store
+        .update_tensorlake_recipe_state(RECIPE, |_, state| {
+            state.snapshot = Some(BuiltSnapshot {
+                id: "tensorlake-built".into(),
+                ..BuiltSnapshot::default()
+            });
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(f.state().await.snapshot.unwrap().id, "tensorlake-built");
+    assert!(
+        f.builds
+            .ensure_snapshot(RECIPE, &spec, Arc::clone(&f.events), |_| async {})
+            .await
+            .is_err()
+    );
+    assert!(
+        f.builds
+            .ensure_prepared_snapshot_from_built(RECIPE, &spec, Arc::clone(&f.events), |_| async {})
+            .await
+            .is_err()
+    );
+    assert!(
+        f.api.ops().is_empty(),
+        "unsupported bases must never reach the provider"
+    );
+    let state = f.state().await;
+    assert_eq!(state.snapshot.unwrap().id, "tensorlake-built");
+    assert!(state.pending_create_at.is_none());
+    assert!(state.prepare_pending_create_at.is_none());
+}
+
 /// A store with an API key, a stand-in ssh key on disk (nothing runs ssh),
 /// the managed recipe [`RECIPE`], and an engine over the fakes.
 async fn fixture() -> Fixture {
@@ -538,7 +594,7 @@ async fn a_build_records_its_snapshot_and_leaves_nothing_else_billing() {
             snapshot.codex_version.as_deref(),
         ),
         (
-            RecipeBase::TensorlakeUbuntu,
+            RecipeBase::ManagedUbuntu,
             20,
             vec!["git".to_string(), "ripgrep".to_string()],
             Some("1.0.0 (Claude Code)"),
@@ -603,11 +659,11 @@ async fn all_bases_build_their_selected_source_and_record_the_layers() {
         let f = fixture().await;
         let users_snapshot = f.api.model().plant_snapshot("usersbuilder");
         let base = match choice {
-            0 => RecipeBase::TensorlakeUbuntu,
-            1 => RecipeBase::Image {
+            0 => RecipeBase::ManagedUbuntu,
+            1 => RecipeBase::TensorlakeImage {
                 image: "team/base".into(),
             },
-            _ => RecipeBase::Snapshot {
+            _ => RecipeBase::TensorlakeSnapshot {
                 snapshot_id: users_snapshot.clone(),
             },
         };
@@ -640,12 +696,15 @@ async fn all_bases_build_their_selected_source_and_record_the_layers() {
         let model = f.api.model();
         let builder = &model.sandboxes[0];
         match base {
-            RecipeBase::TensorlakeUbuntu => {
+            RecipeBase::ManagedUbuntu => {
                 assert_eq!(builder.image.as_deref(), Some(TENSORLAKE_BASE_IMAGE))
             }
-            RecipeBase::Image { image } => assert_eq!(builder.image, Some(image)),
-            RecipeBase::Snapshot { snapshot_id } => {
+            RecipeBase::TensorlakeImage { image } => assert_eq!(builder.image, Some(image)),
+            RecipeBase::TensorlakeSnapshot { snapshot_id } => {
                 assert_eq!(builder.snapshot_id, Some(snapshot_id))
+            }
+            RecipeBase::ContainerImage { .. } => {
+                panic!("the fixture only selects Tensorlake bases")
             }
         }
         assert_eq!(builder.status, "terminated");
@@ -669,7 +728,7 @@ async fn edits_during_build_keep_frozen_provenance_until_rebuilt() {
     f.start().await;
     f.shell.started(1).await;
     let mut save = tests_support::save();
-    save.base = RecipeBase::Image {
+    save.base = RecipeBase::TensorlakeImage {
         image: "team/next".into(),
     };
     save.packages = vec!["jq".into()];
@@ -681,7 +740,7 @@ async fn edits_during_build_keep_frozen_provenance_until_rebuilt() {
     f.shell.hold.send_replace(false);
     f.finish().await;
     let previous = f.state().await.snapshot.unwrap();
-    assert_eq!(previous.base, RecipeBase::TensorlakeUbuntu);
+    assert_eq!(previous.base, RecipeBase::ManagedUbuntu);
     assert_eq!(previous.packages, vec!["git", "ripgrep"]);
     let (spec, _) = f
         .store
@@ -1213,7 +1272,7 @@ async fn switching_to_an_image_keeps_the_snapshot_until_rebuilt() {
         .ok()
         .unwrap();
     assert!(f.state().await.snapshot.is_some());
-    save.base = RecipeBase::Image {
+    save.base = RecipeBase::TensorlakeImage {
         image: "team-base".into(),
     };
     f.store
@@ -1353,7 +1412,7 @@ async fn the_build_route_refuses_what_it_cannot_build_and_joins_a_running_build(
         }
     };
     let mut reuse = tests_support::save();
-    reuse.base = RecipeBase::Image {
+    reuse.base = RecipeBase::TensorlakeImage {
         image: "team-base".into(),
     };
     for (name, save) in [("reuse", reuse), (RECIPE, tests_support::save())] {
@@ -1773,7 +1832,7 @@ async fn reusing_a_snapshot_farhelm_built_is_refused() {
     .await;
     let reuse = |snapshot_id: &str| {
         let mut save = tests_support::save();
-        save.base = RecipeBase::Snapshot {
+        save.base = RecipeBase::TensorlakeSnapshot {
             snapshot_id: snapshot_id.into(),
         };
         save
@@ -1845,7 +1904,7 @@ async fn a_switch_to_an_image_does_not_attempt_snapshot_deletion() {
         },
     );
     let mut save = tests_support::save();
-    save.base = RecipeBase::Image {
+    save.base = RecipeBase::TensorlakeImage {
         image: "team-base".into(),
     };
     f.store

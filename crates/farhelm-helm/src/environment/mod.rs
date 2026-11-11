@@ -10,6 +10,9 @@
 //!   including the policy for a status channel that could not answer.
 //! - [`ProviderHandle`] owns the provider-specific binding. The store decodes
 //!   it through [`HostRow::environment_binding`], preserving existing columns.
+//! - [`recipes::Recipe`] is the shared catalog definition. Its wire base decides
+//!   supported providers exhaustively. Tensorlake keeps its existing snapshot
+//!   state, with Podman artifacts keyed by place host in the same state_json.
 //! - [`EnvironmentProvider`] owns I/O and the interpretation of provider
 //!   observations. Tensorlake's adapter lives in [`crate::tensorlake::hosts`]
 //!   and its bounded lifecycle polling in [`crate::tensorlake::lifecycle`].
@@ -33,6 +36,7 @@
 //! does. Account settings and the underlying build engines stay provider-owned.
 
 pub(crate) mod lifecycle;
+pub(crate) mod recipes;
 
 use crate::{
     client::SupervisorClient,

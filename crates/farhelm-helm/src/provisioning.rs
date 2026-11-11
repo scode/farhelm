@@ -4213,7 +4213,7 @@ mod tests {
             .ok()
             .expect("save fixture Tensorlake settings");
         let mut recipe = crate::tensorlake::recipes::tests_support::save();
-        recipe.base = RecipeBase::Image {
+        recipe.base = RecipeBase::TensorlakeImage {
             image: "example/systemd".into(),
         };
         harness
