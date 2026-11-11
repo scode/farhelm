@@ -1872,37 +1872,6 @@
   and its index entry.
 - Execution: `pending`.
 
-## sandbox-stop-refresh-weakens-click-guards.md
-
-- Outcome: `fix code`.
-- Assessment: confirmed by reading the code on main 2e42099a (not run). A sandbox session's row-menu Stop and suspend
-  fixes whether to ask, and the operation, at the click (`crates/farhelm-ui/src/sandbox_sessions.rs`, `start`), but its
-  `execute` callback recomputes the no-tabs and agent-ended guards from the session of the latest render
-  (`session.tabs.is_empty()`, `session.status.has_ended()`); Dioxus `use_callback` replaces its closure on every render.
-  A listing refresh landing during the activity check that runs between the click and `execute` can therefore send a
-  weakened guard: a tab another window opened meanwhile is closed without a question, and an agent restarted meanwhile
-  (by the command line or an agent) is stopped. The finding argued only the tab guard; the ended-agent guard has the
-  same cause. The window is one helm HTTP read, so it is narrow. Bucket: not `highest` (realistically `other`); moot
-  once decided. The finding's Suspend-versus-Resume sub-claim is not carried: the direction is captured at the click
-  (`Operation::requested`, covered by `captured_suspend_and_resume_keep_their_endpoint_after_a_phase_change`), and the
-  remaining button-under-cursor race is the sub-second one SPEC.md accepts (line ~4856) and FILTER.md "Races a person
-  would have to win inside a sub-second window" matches. Required behavior, SPEC.md "Lifecycle operations": "When the
-  session setting skips a prompt, the click authorizes only the state the screen showed, under the same guards ... a
-  Stop whose click showed no tabs is refused if any tab is open, and a Stop whose click showed an ended agent is refused
-  if the agent is alive again or cannot be confirmed ended". SPEC_impl.md "Answers bind to what was drawn": a control
-  "acts on what the render that drew the control showed, never on state it reads when it runs ... nothing is recomputed
-  at send time."
-- Decision: recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item"), 2026-11-09 highest-bucket triage. The maintainer can revise it.
-- Completion criteria: Stop and suspend captures the no-tabs and agent-ended guards at the click, alongside the existing
-  ask decision, and sends those captured values on both the skipped-question and the answered-question paths (click-time
-  values can only refuse more, never authorize more). A test shows a refresh between the click and the request does not
-  weaken either guard. The undecided queue item `sandbox-lifecycle-questions-lack-opening-guards.md` is in the same
-  component but is not part of this outcome. Size gate: about 100 lines of diff (code, tests and docs, not counting this
-  ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its
-  index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
-- Execution: `` planned in `plans/queue/sandbox-stop-click-guards.md` ``.
-
 ## settings-save-races-final-replacement.md
 
 - Outcome: `fix spec`.
