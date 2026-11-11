@@ -54,7 +54,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (`crates/farhelm-ui/src/list/create_form.rs`, the quick-launch reveal effect and the continued-submit branch). Second:
   a launch that woke a host waits with no time limit for the page to see that host connected; if it never does, New,
   quick launches and host changes stay refused and the hidden launcher has no Cancel. Before that plan the launcher was
-  visible and could be cancelled there. Give that wait a limit that returns the launcher with an error.
+  visible and could be cancelled there. Give that wait a limit that returns the launcher with an error. Plan:
+  `plans/queue/wake-launch-stuck.md`.
 
 - **Fix two leftover session-action state bugs from nonblocking-session-actions.** Found by its landing review
   (2026-11-10). A Restart that succeeded while the user was on another session is remembered until that session is next
@@ -62,13 +63,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   card with its Restart offer (`crates/farhelm-ui/src/session_view.rs`). Clear the remembered outcome when the listing
   shows the session running or its host gone. And Replace with's "Replacing…" progress has no cleanup guard
   (`create_form.rs`), so an abandoned request would leave it shown for the life of the page; plain Replace already uses
-  a guard for this.
+  a guard for this. Plan: `plans/queue/session-action-leftovers.md`.
 
 - **Find out why double-clicking the version text sometimes selects nothing in Chromium.**
   `header controls stay interactive and text stays selectable beside the forced-class spacer` in
   `e2e/tests/window-chrome.spec.ts` failed once in a whole browser run and 1 of 20 repeats (Chromium, Tensorlake) during
   the landing of nonblocking-session-actions on 2026-11-10, which changed header CSS and added a window-level key and
-  pointer capture listener. Not diagnosed, and not checked on main; first establish whether it predates that plan.
+  pointer capture listener. Not diagnosed, and not checked on main; first establish whether it predates that plan. Plan:
+  `plans/queue/version-dblclick-flake.md`.
 
 - **Bootstrap a Podman image on a remote host.** Automatically bootstrap a Podman image on a remote host, with some
   reasonable defaults, as a supported flow. Plan: `plans/queue/podman-environments.md`.
@@ -334,7 +336,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Cmd-click** field defaults to `md, txt, json`; add jpeg, png and a few more common safe image formats to that default
   (gif, webp, bmp and avif are the obvious candidates; svg stays out, being HTML-like and already warned about). The
   default is `DEFAULT` in `crates/farhelm-proto/src/open_extensions.rs`, and its warning classification needs to treat
-  the new types as safe, or the settings dialog warns about its own default.
+  the new types as safe, or the settings dialog warns about its own default. Plan: `plans/queue/cmd-click-images.md`.
 
 ## Mid term
 
