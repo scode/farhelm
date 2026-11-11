@@ -1,5 +1,48 @@
 # Podman environments
 
+## Since the last review
+
+Nothing from this stack had landed when the monitor returned it. The same nine draft PRs remain; #3325, #3328, #3329 and
+#3330 changed. The earlier five retain their reviewed content after rebase. No PR was added or dropped.
+
+The returned failures were diagnosed individually. Two old-database tests failed because their rewind fixture retained
+new columns and history in a database labelled as an old release; the fixture now removes them. The template flag test
+used the deliberately retired setting and now uses a supported template while retaining its precedence assertions. The
+toolbar still locked all four actions, but its test missed two controls inside conditional fragments; it now checks the
+named rendered buttons. These were test corrections, with no change to their intended product behavior.
+
+Tensorlake's changed suspension wording was a product regression. Its host row, session card, external 30-minute idle
+explanation and “resume the sandbox first” refusal are restored. Containers have their own accurate process and memory
+wording. Add host's selected recipe was also a product bug: remounting native options after Back displayed the first
+recipe instead. Explicit option selection now preserves the choice, with a competing earlier recipe in the test. The
+shared recipe editor again explains the retained snapshot or container image as appropriate.
+
+The Settings inventory and launcher Tab-order tests were stale: Recipes and Containers are intentional new sections, and
+the three Runs on buttons intentionally precede Host. Credentials testing still navigated to Tensorlake to edit a
+recipe; it now opens Recipes. The WebKit Claude-hint timeout occurred in an extra response-body completion wait after
+the held clicks and successful bodyless response. The test now requires both the actual backend commit and browser
+response, retaining its serialization and readback checks. The precise WebKit notification cause remains an inference.
+
+The other returned findings are fixed. Agent refusal uses the required sandbox-and-container wording. A separate
+breaking-change entry explains Delete-only legacy sessions, their still-running agent, container destruction and removal
+of an old template setting. Proxy values travel through private input and a private file, rather than command arguments.
+A definitively refused container create with confirmed absence settles immediately, so cleanup and recipe builds do not
+wait fifteen minutes. Automatic closed-tab cleanup skips legacy containerized sessions before consuming its budget;
+explicit Delete retains its cleanup.
+
+Fresh source review found and corrected five further defects: stale successful launches could rewrite history after
+identity adoption and suggestion eviction; a newly cloned supervisor could retain preparation-time proxies; package
+installation lost proxies at sudo; restored placement fields could display a different recipe or host than they would
+submit; and a background history refresh could replace a focused Recent setup. Old launch completions now preserve their
+successful result without changing newer choices. Initial setup refreshes the supervisor's proxies before admitting a
+session, package commands retain the supported proxies, and visible launch choices stay stable until a deliberate
+interaction.
+
+Broader validation also exposed three latent fixture defects. A corrupt-sentinel test had not established that its
+terminal had ended; a busy-row menu retry could spend most of its budget on one dismissed flyout; and a late container
+probe could scroll the launcher while a permission tooltip was pending. Each fixture is corrected without relaxing its
+behavior assertions. The failed broad runs and separate corrected evidence remain distinguished below.
+
 ## What this was about
 
 Container sessions now get their own disposable Linux machine, with Farhelm's supervisor, checkout and agent inside it.
@@ -41,6 +84,9 @@ shared behavior, with exhaustive decisions for Tensorlake and Podman.
   live across a changed boot and preservation of known exits. A same-host container stop returns ordinary exited
   sessions. The original fixture incorrectly demanded Interrupted for that incident, and the new specifications and
   guide were qualified to preserve Farhelm's existing durability contract after an independent scope assessment.
+- Changing or removing a container host's proxies after preparation is covered by production control-flow tests, and the
+  package commands have an actual child-environment test with a strict sudo stand-in. A changed proxy reaching an actual
+  session through a real systemd user manager while reusing the same prepared image remains unverified.
 
 The earlier Podman review findings were resolved as follows.
 
@@ -95,90 +141,118 @@ The frozen Overview page still mirrors older README claims. Its three proposed f
 
 ## Checks run, reused and skipped
 
-Current targeted checks cover the retirement boundary and interactions with newly landed SSH identity, Trash updates,
-host-add focus handling and approval geometry. The stack was carefully rebased onto current main, preserving those
-contracts. Earlier successful checks are reused per command where the intervening changes preserve their coverage.
+The returned plan required full workspace Rust tests and both engines' affected-screen browser specs. The Rust run
+finished with one existing fixture failure and 6,067 other passes; the eight browser batches finished with two fixture
+failures, 3,282 passes and 14 configured skips. Each failure was retained, diagnosed and corrected, with separate narrow
+passing evidence below. Those original failed commands remain failed observations.
 
-- `cargo nextest run` on the retired-session, cleanup, SSH-route and Delete/Trash selections passed 69 tests in
-  `abc2f359-d40d-4016-8801-1f3972f3cf02`. Four legacy-session cases use stored rows, and the prompt-drift retry
-  regression uses ordinary admission. The setup step is counted separately from the 69 tests.
-- Both-engine browser runs passed the exact two retirement cases in `652e3fba-668e-424b-88cc-cefaca2f0ea9` and the
-  remaining 18 targeted cases in `3dfaad15-2e0c-4dfa-8cb8-545217ae43b2`. The first attempt
-  `2d03b916-3460-4fc8-abbc-2d4f79e04784` exposed an incorrect new-test Restart selector and exceeded the policy-report
-  size limit with its long evidence path. The selector and evidence location were corrected, and that failed attempt
-  remains retained.
-- Asset JavaScript passed 37 terminal-file cases in `d779f73e-74dc-401b-91e3-501cf883039c`. The archive configuration
-  checks passed six cases in `20c19f26-2767-4277-b2a1-b29aa8ae5b23`. Imported sandbox harness checks passed five cases
-  in `fe3ef151-ce9d-463c-87d2-fccdc454b2ed`.
-- Local real acceptance and the three existing boot-classification cases passed in
-  `1072cb0c-9842-4553-91bb-fdd5fd1e2125`, four actual tests and two separate setup steps. The real case took 225
-  seconds. The recorded command selected the real local lifecycle case and the three ordinary boot cases with
-  `cargo nextest run --locked -p farhelm -p farhelm-supervisor --lib --test e2e -E <four-test-selection>`.
-- The archive worker selected the exact ignored SSH case with
-  `nextest run --archive-file <archive> --partition hash:1/1 --test-threads 4 --retries 0 --run-ignored only -E 'test(/^podman_environments::real_ssh_environment_managed_checkout_and_ordinary_features$/)'`.
-  Worker run `61f3c0fd-04de-4adf-a5a2-991f7a1c7f7b` passed one actual test in 96 seconds and one separate payload setup
-  step. Its generic recorder has no normalized nextest counts, so raw JUnit, console and summary were checked together.
-  Source was clean at `a77c1394`, strict localhost SSH succeeded, the required base was present and there were no
-  runtime skips. The imported evidence includes every current run record, JUnit, console, summary and configuration.
-  Successful default-root trace slimming had already removed its detailed traces. The parent client record is
-  `643bb8a9-f8af-4964-8e24-811de1e97271`.
-- The first real local attempt `e42111b2-a5e3-40ff-a6ad-342c52c661ae` found a launch race between the container reaching
-  Running and its user bus becoming available. Launch now waits with the existing bounded, read-only readiness script.
-  Twenty-four focused readiness, launch-ordering, failure-cleanup and shared-preparation tests passed in
-  `d49963ab-2c01-4bc7-8778-abb30ea4e4c7`. The second real attempt `e96663ec-4075-4453-bc4f-7e6c149474b9` reached the
-  running agent and managed checkout, then found a test assertion passing a full Git origin URL to the owner/repository
-  identifier parser. The assertion now checks the canonical clone URL. Both whole failed attempts remain retained.
-- The third local attempt `dcc39971-f51d-491e-895b-e9c32c0779b8` passed the ordinary feature protocols, pause/Resume,
-  explicit Stop and conversation Restart, helm reconnection and the automatic container start. It then exposed that
-  incorrect Interrupted assertion. Its whole failed record remains retained. The separate owned probe
-  `def1c682-63b2-49ee-898c-618a1e33a244` confirmed that a container stop/start leaves the host kernel boot unchanged and
-  removed its probe container after checking absence.
-- Formatting, touched-crate all-target Clippy, shipped-binary Clippy, desktop compilation, the pinned web build, the
-  36-page website build and internal-link validation, instruction lint, test-delay lint, shell syntax and ShellCheck,
-  Deno checks, generated release-workflow parity and changelog format passed. The static provisioning CLI and pinned
-  tmux both passed static-ELF checks. The test-delay check inspected 424 delays with zero missing rationales.
-- Earlier command identities and tested source snapshots are listed below. Those commands ran with tracked changes on
-  the named HEAD, so the fingerprint identifies the tested snapshot including its delta. Hashes are abbreviated. Prior
-  failed commands remain failed observations, with corrected cases verified by separate retained retries.
-- The full workspace and browser batteries, hosted CI, installer suites and native desktop runtime were skipped.
-  Targeted checks cover the changed behavior and rebase interactions. No live installation was used. Published release
-  shots and historical material retain their existing source.
+- `cargo nextest run --workspace --exclude farhelm-desktop`, run `a6a1f51c-6706-4333-a9af-bbdbb8d1504d`, executed 6,068
+  tests: 6,067 passed, one failed and 72 were ignored. Its two setup steps passed separately. Clean source
+  `b1640e841c311adb3b630ac378f28ebcc593dfab`, fingerprint
+  `74268f54cf7fc698f3e56fdbe6ce18471059a9a537e27adaf1436937d75f58be`. Pinned nextest 0.9.148, four slots, zero retries
+  and pinned tmux 3.7c. Complete report/output, no forwarding loss and no runtime substrate skips. The real local Podman
+  case passed in 221.592 seconds, including checkout, ordinary features, lifecycle and cleanup.
+- That run's corrupt-sentinel test treated an unavailable terminal as proof it had ended, allowing its runtime to stop
+  before reconciliation. The fixture now shuts down its owning runtime and requires confirmed absence before planting
+  the corrupt evidence, preserving all original durability and repair assertions. The exact corrected case passed in
+  `40c6da7b-f7f8-4631-9d6b-7b1beecc9f82`, one actual test in 0.543 seconds plus separate setup, clean `28961fd9`,
+  fingerprint `cc09eb103e30d13175ef96491fac684b3dd0e625eabb80c25160a5c4640c90a7`. Six complete isolated old-source
+  passes remain classification evidence; one run with incomplete console forwarding is excluded.
+- Subsequent Rust changes only remove needless returns in thirteen test-fake match arms. Their eleven failure-model
+  cases passed in `141ae218-24ed-4956-8978-2703ee4b3ba9`, using the workspace graph with
+  `-E 'test(environment::podman::failure_tests::)'`; no setup step or runtime skip. Clean `d10f932f`, fingerprint
+  `4aac83272c0cf621abbc4433b60782f495bcc0685b14c4680b2de831f505867d`. Both all-target and shipped-binary Clippy commands
+  passed in `ccac7213-1e29-46b5-be32-a2f2169f60e4` on that same source. The initial Clippy failure remains retained. No
+  production Rust changed after the full run.
+- Eight recorded `npx playwright test <whole-spec-file-patterns>` batches covered all 130 ordinary specs, once per
+  engine: 3,298 listed cases, three workers with one owned stack each and zero retries. All eight reports, source
+  records, output and forwarding were complete. The portable summary explicitly discovered all eight runs. Chromium had
+  1,646 passes, two skips and one failure; WebKit had 1,636 passes, twelve skips and one failure.
 
-### Reused command identities
+| Batch | Recorder run                           | Actual result                                    |
+| ----- | -------------------------------------- | ------------------------------------------------ |
+| 1     | `e6093065-7afe-4ffa-97af-8daf4602895e` | 414 passed                                       |
+| 2     | `1cd61d98-e960-43ea-b40c-985de6c586c7` | 411 passed, one WebKit busy-row failure          |
+| 3     | `fe2fe85d-4ae6-44f5-933f-63bdd6bacc94` | 403 passed, nine WebKit clipboard skips          |
+| 4     | `28315abf-d086-4c99-9404-79e0eb4df54a` | 412 passed, including all Podman specs           |
+| 5     | `2a5835a5-ec22-42b9-8c30-62af9e59cfe7` | 411 passed, one WebKit visual-matrix skip        |
+| 6     | `041d85b0-29c6-4d7c-bda4-ff4d441c44d5` | 410 passed, two vendor-agent skips               |
+| 7     | `b20e250a-70fd-44eb-82ae-5efd362202ef` | 410 passed, two vendor-agent skips               |
+| 8     | `96c9c47c-734d-4578-9e50-92a7353a1c6a` | 411 passed, one Chromium permission-help failure |
 
-All rows passed with complete source and output records. Each command's `-E` argument is its recorded selection.
+Batches 1–2 used clean `fe085427ccfd53c2c27371f5fb5f49b9c24126ac`, fingerprint
+`c18bdd4c05b26e2e004a0e0c9a342696554048795642efff9b53347eb8ee609b`; batches 3–8 used clean
+`31449dd259cd7f73c988df12aa4af9422c0cd9d6`, fingerprint
+`e85a68b9b3a665e98ca5f2370774de26f03fe8b39ab5eeeee3a92f1050b86fbf`. The intervening browser-helper correction preserves
+every other caller's defaults; the later batches exercise those callers again. All skip annotations were read: WebKit
+cannot grant the clipboard permissions used by nine cases, one visual matrix is intentionally Chromium-only, and four
+cases require actual vendor turns. These are missing coverage, not passes.
 
-| Command                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Recorder run                                      | Tested source                               |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------- |
-| `cargo nextest run -p farhelm-helm --lib -E 'test(the_environment_gate_decides_every_status) \| test(tensorlake_status_translation_preserves_every_state) \| test(an_unanswered_status_check_dials_anyway) \| test(a_suspended_sandbox_is_never_dialed_and_resumes_by_itself) \| test(a_deleted_sandbox_is_unreachable_with_the_remedy) \| test(the_store_refuses_to_lose_a_sandbox)'`                                                                                                                                           | `b6f49cee-12a7-41e0-9467-eb9c0fb9d0e9`, 6 tests   | HEAD `253639d3`, fingerprint `9fe7eb009668` |
-| `cargo nextest run -p farhelm-helm --lib -E 'test(/^tensorlake::hosts::tests::/) \| test(recipe_session_) \| test(route_replacement_covers_the_hook_publication_gap_and_reports_failures) \| test(actor_hold_cancels_the_real_hook_before_acknowledging_parking)'`                                                                                                                                                                                                                                                               | `3faa7ae1-dd9a-443d-a8a2-7eb29cc29531`, 36 tests  | HEAD `253639d3`, fingerprint `a4d58cd08b2f` |
-| `cargo nextest run -p farhelm-helm --lib -E 'test(/^access::/) \| test(/^ssh::/) \| test(/^transport::/) \| test(/^provisioning::/) \| test(/^tensorlake::shell::/) \| test(/^manager::tests::ssh_/) \| test(local_container_exit_does_not_claim_an_ssh_failure) \| test(nested_container_channel_refusal_names_the_place_host)'`                                                                                                                                                                                                | `996c006c-afba-41f7-87e8-60e8e33e7489`, 400 tests | HEAD `6d2e38aa`, fingerprint `f75fa1f58e1c` |
-| `cargo nextest run -p farhelm-helm --lib -E 'test(/^access::/) \| test(/^transport::/) \| test(/^manager::tests::ssh_/) \| test(local_container_exit_does_not_claim_an_ssh_failure) \| test(nested_container_channel_refusal_names_the_place_host)'`                                                                                                                                                                                                                                                                             | `fbb65d0f-e934-438e-8eb1-71d67df4b629`, 24 tests  | HEAD `a06d463b`, fingerprint `6335899c5453` |
-| `cargo nextest run -p farhelm-helm --lib -E 'test(local_container_exit_does_not_claim_an_ssh_failure) \| test(nested_container_channel_refusal_names_the_place_host) \| test(session_refusal_survives_later_fallback_diagnostics)'`                                                                                                                                                                                                                                                                                              | `f4b45c6e-210d-4052-adff-d1e2c99d519e`, 3 tests   | HEAD `a06d463b`, fingerprint `3606dced2401` |
-| `cargo nextest run -p farhelm-helm -p farhelm-proto -p farhelm-ui --lib -E 'test(/^recipes::tests::/) \| test(/^environment::recipes::tests::/) \| test(/^tensorlake::recipes::tests::/) \| test(/^tensorlake::build::tests::/) \| test(/^tensorlake::prepared::tests::/) \| test(/^provisioning::tensorlake_add_tests::/) \| test(/^tensorlake::recipe_editor::tests::/)'`                                                                                                                                                      | `0898d080-5533-47e2-8e49-47b3107c9bbe`, 95 tests  | HEAD `ef3a8194`, fingerprint `0041ede355d0` |
-| `cargo nextest run -p farhelm-helm --lib -E 'test(tensorlake_add::tests::)'`                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `c7a814b8-4ef7-4535-aed8-a0430ae813c5`, 25 tests  | HEAD `ef3a8194`, fingerprint `0041ede355d0` |
-| `cargo nextest run -p farhelm-helm --lib -E 'test(=store::tests::history_schema_migrations_discard_schema_22_history_while_preserving_the_host_registry) \| test(=store::tests::schema_28_preserves_history_without_inventing_repo_intent) \| test(=store::tests::schema_82_adds_ownership_without_cascading_host_rows) \| test(unknown_provider_refuses_discovered_ssh_convergence_without_mutation) \| test(update_refuses_unfinished_container_before_probing) \| test(copied_supervisor_state_refuses_before_installation)'` | `343459cf-1942-477f-98b3-0fd8526ceacd`, 6 tests   | HEAD `122ebdbf`, fingerprint `1527ee303b3c` |
-| `cargo nextest run -p farhelm-helm --lib -E 'test(environment_history) \| test(schema_66_starts_empty_visits_and_preserves_legacy_preferences)'`                                                                                                                                                                                                                                                                                                                                                                                 | `b8c9959b-ab6f-4f51-af2f-58976283c72d`, 9 tests   | HEAD `ed4c15b2`, fingerprint `ef8f0d11ba20` |
-| `cargo nextest run -p farhelm-helm --lib -E 'test(=environment::recipes::tests::podman_places_round_trip_independently_of_tensorlake_state) \| test(=environment::recipes::tests::every_owned_podman_resource_blocks_recipe_removal) \| test(=provisioning::service::tensorlake_add::tests::an_unrequested_name_collision_refuses_setup_and_delete_leaves_it_alone)'`                                                                                                                                                            | `a8827950-615b-4f2a-b1c0-df720cc17f07`, 3 tests   | HEAD `b725cbeb`, fingerprint `53289bf8515d` |
-| `cargo nextest run -p farhelm-ui --lib -E 'test(=hosts::tests::a_tensorlake_host_is_deleted_not_removed)'`                                                                                                                                                                                                                                                                                                                                                                                                                       | `35d1e34b-36b8-42b5-8130-67996f4c2132`, 1 test    | HEAD `47a026a1`, fingerprint `c248ae62ddd8` |
-| `cargo nextest run -p farhelm-ui --lib`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `b7d6f858-191b-4e05-9e30-70af0df7029c`, 964 tests | HEAD `47a026a1`, fingerprint `d66378556b51` |
-
-The provider and Tensorlake lifecycle rows retain their delegated status, destruction and actor behavior. The routing
-rows cover the shared connection paths, followed by the two narrower commands for their corrections. The later 69-test
-command covers the newly landed Tensorlake SSH identity restriction and retirement interactions. Recipe and Tensorlake
-creation rows retain their shared catalog and installation behavior. Storage's migration was mechanically renumbered on
-rebase while preserving its SQL operations and historical-data assertions. Intent-history behavior is preserved. These
-review units had empty per-unit interdiffs after rebase. The later container boot wait is separately covered by the
-24-test command and both real runs.
-
-The exact host-Delete correction and full UI command cover the preserved launcher, template and Settings logic. Later
-targeted Rust and both-engine browser commands cover retirement, approval geometry and presentation changes. The full UI
-run is reused for that preserved logic, with the later commands supplying evidence for the changed portions.
+- The busy-row failure spent five seconds of an eight-second retry waiting for an already dismissed flyout. The next
+  attempt reached the correct disabled Settings item, but the outer deadline expired just before its assertion passed.
+  That case alone now opts into one-second inner waits, retaining native input, measured-menu readiness, all state
+  assertions and the outer bound. The exact corrected case passed on both engines in
+  `d1fab191-7f8e-4a7b-85cb-05d4d273f55a`, two actual tests at clean `d10f932f` and fingerprint `4aac83272c0c…`. Three
+  old-source WebKit repetitions also passed. The original flyout dismissal's precise trigger remains unknown.
+- The permission-help capture showed a late usable container-host probe adding Runs on. Browser scroll anchoring
+  scrolled its form 99.3 milliseconds after Guarded pointer entry, before the tooltip's 300-millisecond rest delay;
+  ancestor scrolling intentionally cancels pending help. This ordinary-host fixture now supplies an empty environment
+  catalog, preserving every original native-hover, phone, mode, flags and paint assertion and its timeouts. The
+  temporary observer and unproven tall-viewport experiments were removed. Exact noninstrumented run
+  `ee434afd-f6b1-441e-8c4d-b48419e091f1` passed twenty repetitions, ten per engine, with complete generic console
+  counts. Controlled whole-spec run `957ecd13-c918-4a37-973a-e64926d8e237` passed four actual cases, two per engine,
+  with no skips and a complete report. Both used clean `cb6e71ca64d82e9757c00c86273bb303f94c171e`, fingerprint
+  `58087882d456e380b94f6281593c45d292f9dc7d34a95a833099c451629dd603`; later changes only append and format its flake
+  record. Diagnostic `6051ecc3-f3ba-42dd-a4f2-ab063ac8a542` stopped at one failure with one pass, two interrupted and
+  sixteen unstarted planned cases; it establishes the captured sequence, not a validation pass. Earlier failed
+  tall-viewport experiments remain retained, and their same-session fixture errors are not latent-flake entries.
+- `cargo check -p farhelm-ui --features desktop` and `cargo check -p farhelm-desktop` passed in
+  `41a5e342-b111-4eb6-955d-4bcda0092754` at clean `31449dd2`, fingerprint `e85a68b9b3a6…`.
+  `cargo nextest run -p farhelm-ui --features desktop` passed all 1,156 tests, with no skips, in
+  `bcf0fc14-f477-4c9c-9a70-b1717a4fa15b` at clean `8f9910a6`, fingerprint
+  `709d6b02a6ac678d8a3a4c4286cc40594ae80356907a9c843c0ef16bafd13278`. Later changes are browser fixtures and prose only;
+  these desktop checks retain their coverage. They do not establish native GUI gestures.
+- Workspace doctest discovery/compilation and the separate desktop-feature variant completed successfully in
+  `c975a13c-b533-4978-97c6-517433a7409b` at clean `e11458a0`, fingerprint
+  `9a6d3093e0b8c3032ddef116cf3f479526bf92190afbebb6e7f43067aa1b72da`. Commands were
+  `cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4` and
+  `cargo test --locked --doc -p farhelm-ui --features desktop -- --show-output --test-threads=4`, serially. All nine
+  workspace targets and the desktop variant contained zero actual doctests; this is compilation/discovery evidence, not
+  executed doctest coverage. Later changes only wrap the new flake entry.
+- The terminal-file asset's 37 JavaScript tests passed in `7783f601-cf5d-4cc9-8bc1-3d9af5810b9e` at clean `b1640e84` and
+  fingerprint `74268f54cf7f…`. The normal CLI/fixture build and pinned release web build also passed there. Their
+  production inputs are unchanged by the later Rust-test, browser-fixture and prose corrections, so the browser runs
+  reuse those builds.
+- SSH real acceptance reuses worker run `61f3c0fd-04de-4adf-a5a2-991f7a1c7f7b`, one actual pass in 96 seconds plus
+  payload setup at clean original `a77c1394`. The archive selected the exact ignored
+  `podman_environments::real_ssh_environment_managed_checkout_and_ordinary_features` case with four slots and zero
+  retries. Strict localhost SSH, raw JUnit, console and summary were checked together before the sandbox was terminated.
+  Its generic recorder supplies no normalized nextest counts. Parent record `643bb8a9-f8af-4964-8e24-811de1e97271`
+  retained imported evidence; successful default-root slimming had already removed detailed traces. Later fixes have
+  current local runtime and source evidence, but this is not a new real-SSH pass for those fixes. The one-sandbox total
+  budget is consumed and its cleanup is complete.
+- `deno test -A scripts/tensorlake/rust-tests.ts` passed six archive-configuration tests in
+  `db4e4279-0cde-427e-a06c-ca237adb4302`, complete source/output and no forwarding loss, at clean
+  `bb138fa025a4e421c377f19a6651d59d99b32992`, fingerprint
+  `768bb166d34c8126a5e0b452e55114c94fe4283c7ce6eb8d616b9a6b01a42684`. This starts no cloud machine. A fresh
+  `bun run build` at that same revision built all 36 website pages and validated every internal link.
+- Current `cargo fmt --all -- --check`, `git diff --check`, full `dprint check`, instruction lint, changelog format,
+  Bash syntax/ShellCheck for the three changed shell scripts, and Deno type-check passed. The test-delay check inspected
+  424 delays with zero missing rationales. Instruction lint reports one pre-existing archived-heading warning and zero
+  errors; changelog format covers 45 fragments. Generated release-workflow parity passed using the required dist 0.32.0;
+  the ambient 0.34.0 invocation refused the version mismatch and is not a pass. The final documentation pass covered
+  each corrected source and test file.
+- Hosted CI, another cloud allocation, installer/provisioning platform suites, native GUI smoke and actual vendor turns
+  were skipped: they do not add required coverage within this plan's substrate and budget. No live installation was
+  changed. Published release shots and historical material were left alone. Unaffected full-suite commands were not
+  repeated after test-only corrections; each correction has focused evidence above.
 
 ## Review gate outcome
 
-Every PR passed its required single fresh-context Sol-high source review, including the rebase and subsequent narrow
-corrections. Accepted findings were fixed and checked again by the same reviewer. Required Opus consultations covered
-the significant abstraction proposals. The independent scope audits accepted the reduced lifecycle contract, the
-existing-handler UI corrections and the ordinary reboot/exit classification correction. All nine PRs were independently
-verified open and draft at their expected heads and bases.
+Every PR passed its required single fresh-context Sol-high source review. Accepted findings were fixed and checked again
+by the same reviewer. Required Opus consultations covered the significant abstraction proposals. Independent scope
+audits accepted the reduced lifecycle contract, existing-handler UI corrections, ordinary reboot/exit classification,
+captured-claim history guard, narrow proxy refresh and stable Recent choices. The final hover scope audit rejected
+speculative whole-dialog fit and accepted bounded diagnosis; the same source reviewer then accepted the fixed catalog
+and the flake record. All nine PRs were independently verified open and draft at the expected pushed heads and linear
+bases. Nothing from this stack was merged by the executor.
