@@ -303,8 +303,13 @@ fn record_launch_history(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LaunchHistoryEntry {
     pub host: HostId,
+    /// Fresh environment intent survives removal of its original installation.
+    /// Ordinary host history retains its existing identity-bound authority.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<farhelm_proto::LaunchTarget>,
     /// Accepted fresh-checkout intent. Reuse must obtain a new preview for
-    /// this repository; `cwd` remains the previous launch's diagnostic path.
+    /// this repository. Environment entries use `cwd = "~"` as home intent,
+    /// while ordinary entries retain their previous diagnostic path.
     pub github_repo: Option<farhelm_proto::GithubRepo>,
     /// The destination identity accepted with this particular create. A
     /// missing value belongs to a legacy row whose display spelling is the
@@ -312,8 +317,12 @@ pub struct LaunchHistoryEntry {
     pub canonical_cwd: Option<String>,
     pub cwd: String,
     pub selection: LaunchSelection,
+    /// Ordinary entries retain the peer's creation time. Environment entries
+    /// use helm admission time because their independent supervisors' clocks
+    /// cannot order the shared history window.
     pub created_at: i64,
-    /// `None` preserves the protocol's legacy timestamp/id ordering fact.
+    /// Ordinary entries retain the peer sequence, including legacy absence.
+    /// Environment entries use the shared admission order across all places.
     pub creation_seq: Option<u64>,
 }
 
@@ -336,8 +345,9 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 83;
+pub(crate) const SCHEMA_VERSION: i64 = 84;
 
+mod environment_history;
 mod podman;
 pub(crate) use podman::PodmanInstallGuard;
 pub use podman::{NewPodmanHost, PodmanBinding};
@@ -1435,6 +1445,11 @@ pub fn is_known_remembered_permissions_word(text: &str) -> bool {
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
+    /// The place from the last admitted container create, including raw commands.
+    /// Maintained from captured launch intent. A missing host stays a stale ID
+    /// until another container launch replaces it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_container_host: Option<HostId>,
     /// Only true authorizes the helm to update eligible remote hosts without a window.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_update_remote_hosts: Option<bool>,
@@ -2648,6 +2663,8 @@ pub struct HelmStore {
 ///   hosts or adding session-membership state.
 /// - 83: nullable provider and container coordinates, with a non-cascading
 ///   foreign key retaining the ordinary host that owns the container storage.
+/// - 84: bounded reusable environment intent independent of disposable host
+///   lifetime, admitted by the existing successful-create transaction.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2880,7 +2897,8 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
                  remembered_wrapper_prefixes TEXT NOT NULL DEFAULT '{{}}',
                  open_extensions TEXT,
                  visit_history TEXT NOT NULL DEFAULT '[]',
-                 auto_update_remote_hosts INTEGER CHECK (auto_update_remote_hosts IN (0, 1))
+                 auto_update_remote_hosts INTEGER CHECK (auto_update_remote_hosts IN (0, 1)),
+                 last_container_host INTEGER
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -2977,12 +2995,13 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 83;",
+              PRAGMA user_version = 84;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
         ))
         .context("creating schema")?;
         podman::migrate(&tx)?;
+        environment_history::migrate(&tx)?;
         tx.execute(
             "INSERT INTO helm_creation_build (singleton, build) VALUES (1, ?1)",
             [creation_build],
@@ -4773,6 +4792,13 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         tx.execute_batch("PRAGMA user_version = 83;")?;
         version = 83;
     }
+    if version == 83 {
+        // Reusable recipe/place intent has no disposable-host foreign key.
+        // Existing installation-bound directory history keeps its own lifetime.
+        environment_history::migrate(&tx)?;
+        tx.execute_batch("PRAGMA user_version = 84;")?;
+        version = 84;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -5927,12 +5953,13 @@ impl HelmStore {
         self.conn.call("preference read task panicked", move |conn: &mut Connection| -> anyhow::Result<Preferences> {
             conn
                 .query_row(
-                    "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, remembered_wrapper_prefixes, open_extensions, visit_history, auto_update_remote_hosts \
+                    "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, remembered_wrapper_prefixes, open_extensions, visit_history, auto_update_remote_hosts, last_container_host \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
                         let remembered_permissions: Option<String> = row.get(3)?;
                         Ok(Preferences {
+                            last_container_host: row.get(23)?,
                             auto_update_remote_hosts: row.get(22)?,
                             codex_trust_hint_dismissed: row.get(4)?,
                             muse_trust_hint_dismissed: row.get(16)?,
@@ -8660,9 +8687,9 @@ impl HelmStore {
     /// frequency, and recording this best-effort fact can never make a
     /// completed create look failed to its caller.
     ///
-    /// Test-only: production has exactly one caller of the full form,
-    /// `sessions::do_create_session`, which must pass the origin gate
-    /// explicitly. Keeping this defaulting wrapper out of the shipped
+    /// Test-only shorthand for a create whose request authority is already known.
+    /// Production acceptance supplies captured intent and current connection
+    /// authority to the guarded form. Keeping this defaulting wrapper out of the shipped
     /// binary means no production path can remember a permissions choice
     /// without having decided whose choice it was.
     #[cfg(test)]
@@ -8747,6 +8774,75 @@ impl HelmStore {
         github_repo: Option<&farhelm_proto::GithubRepo>,
         explicit_selection: Option<&LaunchSelection>,
     ) -> anyhow::Result<bool> {
+        self.record_create_history_with_environment(
+            host,
+            identity,
+            entry,
+            paths,
+            github_repo,
+            explicit_selection,
+            None,
+        )
+        .await
+    }
+
+    /// Admit captured environment intent in the same transaction as ordinary
+    /// history and remembered GUI defaults. Only the protected environment
+    /// launch path supplies this target, including lookup-only reconciliation.
+    /// Existing installation admission, replay and eviction checks still apply.
+    /// This storage-only form checks durable identity, not a live connection
+    /// claim. Ingress holding captured operation authority must use the guarded
+    /// form so adoption followed by a return to the same identity cannot revive
+    /// that operation after its bounded source key has been evicted.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "extends the established history API while preserving its callers"
+    )]
+    pub async fn record_create_history_with_environment(
+        &self,
+        host: HostId,
+        identity: &str,
+        entry: &CachedRow,
+        paths: HistoryPaths<'_>,
+        github_repo: Option<&farhelm_proto::GithubRepo>,
+        explicit_selection: Option<&LaunchSelection>,
+        environment_target: Option<&farhelm_proto::LaunchTarget>,
+    ) -> anyhow::Result<bool> {
+        self.record_create_history_with_environment_if_current(
+            host,
+            identity,
+            entry,
+            paths,
+            github_repo,
+            explicit_selection,
+            environment_target,
+            || Some(()),
+        )
+        .await
+    }
+
+    /// Check ingress authority only after this task owns the SQLite connection.
+    /// The returned guard stays alive through the existing history transaction,
+    /// even if the async waiter is cancelled while the blocking task is queued.
+    /// Returning `None` skips every admission, projection and preference write.
+    /// The caller defines current authority; storage knows no connection manager.
+    /// Its transactional identity check still closes an adoption committed
+    /// before the caller's live authority was republished.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "adds a write-boundary authority guard to the established history inputs"
+    )]
+    pub(crate) async fn record_create_history_with_environment_if_current<G: Send + 'static>(
+        &self,
+        host: HostId,
+        identity: &str,
+        entry: &CachedRow,
+        paths: HistoryPaths<'_>,
+        github_repo: Option<&farhelm_proto::GithubRepo>,
+        explicit_selection: Option<&LaunchSelection>,
+        environment_target: Option<&farhelm_proto::LaunchTarget>,
+        current: impl FnOnce() -> Option<G> + Send + 'static,
+    ) -> anyhow::Result<bool> {
         let github_repo = github_repo
             .map(|repo| {
                 farhelm_proto::parse_github_repo(&format!("{}/{}", repo.owner, repo.name))
@@ -8761,9 +8857,11 @@ impl HelmStore {
         let identity = identity.to_string();
         let entry = entry.info().clone();
         let explicit_selection = explicit_selection.cloned();
+        let environment_target = environment_target.cloned();
         let canonical_cwd = canonical_cwd.to_string();
         let display_cwd = display_cwd.to_string();
         self.conn.call("record create history task panicked", move |conn: &mut Connection| -> anyhow::Result<bool> {
+            let Some(_guard) = current() else { return Ok(false); };
             let tx = conn
                 .transaction()
                 .context("beginning create-history transaction")?;
@@ -8912,10 +9010,18 @@ impl HelmStore {
                 ordering_kind,
                 ordering_value,
             };
-            let folder_changed = github_repo.is_none()
+            let folder_changed = environment_target.is_none() && github_repo.is_none()
                 && upsert_folder_history(&tx, &create, &canonical_cwd)?;
-            let launch_changed =
-                record_launch_history(&tx, &create, explicit_selection.as_ref())?;
+            let environment_changed = environment_history::record(
+                &tx, &create, environment_target.as_ref(), explicit_selection.as_ref(), github_repo.as_deref(),
+            )?;
+            // Retained environment source keys survive host adoption. Their
+            // novelty gate also protects remembered GUI permissions and wrappers
+            // while that source remains in the shared window. Captured ingress
+            // authority must reject obsolete completions after both bounded
+            // keys have gone; storage identity alone cannot recognize A-to-B-to-A.
+            let launch_changed = (environment_target.is_none() || environment_changed)
+                && record_launch_history(&tx, &create, explicit_selection.as_ref())?;
 
             // Find the newest row that will be evicted before deleting it.
             // Persisting this lower watermark is what keeps a delayed replay
@@ -9013,7 +9119,7 @@ impl HelmStore {
             )
             .context("removing structured projections evicted from the admission window")?;
             tx.commit().context("committing create history")?;
-            Ok(folder_changed || launch_changed || github_repo.is_some())
+            Ok(folder_changed || launch_changed || environment_changed || github_repo.is_some())
         })
 .await
     }
@@ -9199,6 +9305,7 @@ impl HelmStore {
                 };
                 entries.push(LaunchHistoryEntry {
                     host,
+                    target: None,
                     github_repo,
                     canonical_cwd,
                     cwd,
@@ -10140,6 +10247,504 @@ mod tests {
         );
     }
 
+    /// Supply the explicit GUI selection separately from a raw peer reply.
+    /// The environment-history tests rely on that difference to exercise
+    /// the request provenance boundary rather than echoing peer authority.
+    fn environment_history_selection() -> LaunchSelection {
+        LaunchSelection {
+            permission_flags: None,
+            harness: farhelm_proto::LaunchHarness::Codex,
+            model: Some("gpt-6-astra".into()),
+            effort: Some(farhelm_proto::LaunchEffort::High),
+            permissions: None,
+            wrapper_prefix: None,
+            container: None,
+            workspace_trust: None,
+        }
+    }
+
+    /// Exercise the production admission transaction with captured home intent.
+    /// The synthetic peer path must never become a reusable environment folder.
+    async fn record_environment_home(
+        store: &HelmStore,
+        host: HostId,
+        identity: &str,
+        entry: &SessionInfo,
+        target: &farhelm_proto::LaunchTarget,
+    ) -> bool {
+        store
+            .record_create_history_with_environment(
+                host,
+                identity,
+                &admitted_row(host, entry),
+                HistoryPaths {
+                    canonical_cwd: "/ephemeral/home",
+                    display_cwd: "/ephemeral/home",
+                },
+                None,
+                Some(&environment_history_selection()),
+                Some(target),
+            )
+            .await
+            .unwrap()
+    }
+
+    /// The disposable host can be deleted while its captured launch choice
+    /// remains reusable. Reconciliation of the same create cannot change
+    /// that choice, increase its frequency or retain ephemeral directories.
+    #[farhelm_testtrace::test]
+    async fn environment_history_survives_host_delete_and_replay_preserves_intent() {
+        let (dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "environment-origin.example", "identity-a").await;
+        let entry = session("environment-first", 100);
+        let target = farhelm_proto::LaunchTarget::Environment {
+            recipe: "removed-recipe".into(),
+            place: farhelm_proto::Place::PodmanHost(9876),
+        };
+        assert!(record_environment_home(&store, host, "identity-a", &entry, &target).await);
+        let before = store.environment_launch_history().await.unwrap();
+        assert_eq!(before.len(), 1);
+        assert_eq!(before[0].target.as_ref(), Some(&target));
+        assert_eq!(before[0].selection, environment_history_selection());
+        assert_eq!(before[0].cwd, "~");
+        assert!(before[0].canonical_cwd.is_none());
+        assert!(before[0].github_repo.is_none());
+        assert!(
+            store
+                .folder_history(host, "identity-a")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let changed_target = farhelm_proto::LaunchTarget::Environment {
+            recipe: "other".into(),
+            place: farhelm_proto::Place::TensorlakeAccount,
+        };
+        assert!(
+            !record_environment_home(&store, host, "identity-a", &entry, &changed_target).await
+        );
+        assert_eq!(store.environment_launch_history().await.unwrap(), before);
+        store.remove_ssh_host(host).await.unwrap();
+        assert!(
+            store
+                .launch_history(host, "identity-a")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(store.environment_launch_history().await.unwrap(), before);
+        drop(store);
+        let reopened = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        assert_eq!(reopened.environment_launch_history().await.unwrap(), before);
+    }
+
+    /// Only explicit request provenance can teach environment recents. A raw
+    /// launch or a reply carrying a different repository must not acquire
+    /// authority over the next launch's agent, recipe, place or destination.
+    #[farhelm_testtrace::test]
+    async fn environment_history_uses_explicit_selection_and_accepted_repository() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "environment-provenance.example", "identity-a").await;
+        let target = farhelm_proto::LaunchTarget::Environment {
+            recipe: "dev".into(),
+            place: farhelm_proto::Place::TensorlakeAccount,
+        };
+        let mut entry = session("raw-environment", 100);
+        entry.launch = crate::launches::test_agent_launch(environment_history_selection());
+        let repo = farhelm_proto::parse_github_repo("acme/accepted").unwrap();
+        entry.github_repo = Some(farhelm_proto::parse_github_repo("peer/forged").unwrap());
+        store
+            .record_create_history_with_environment(
+                host,
+                "identity-a",
+                &admitted_row(host, &entry),
+                HistoryPaths {
+                    canonical_cwd: "/ephemeral/repo",
+                    display_cwd: "/ephemeral/repo",
+                },
+                Some(&repo),
+                None,
+                Some(&target),
+            )
+            .await
+            .unwrap();
+        assert!(store.environment_launch_history().await.unwrap().is_empty());
+        entry.id = "explicit-environment".into();
+        entry.created_at = 101;
+        store
+            .record_create_history_with_environment(
+                host,
+                "identity-a",
+                &admitted_row(host, &entry),
+                HistoryPaths {
+                    canonical_cwd: "/ephemeral/repo",
+                    display_cwd: "/ephemeral/repo",
+                },
+                Some(&repo),
+                Some(&environment_history_selection()),
+                Some(&target),
+            )
+            .await
+            .unwrap();
+        let entries = store.environment_launch_history().await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].github_repo.as_ref(), Some(&repo));
+        assert_eq!(entries[0].target.as_ref(), Some(&target));
+        assert_eq!(entries[0].selection, environment_history_selection());
+        assert_eq!(entries[0].cwd, "~");
+    }
+
+    /// Independent supervisors' clocks and sequences cannot order reusable
+    /// intent. The shared admission order bounds all places together and a
+    /// replay outside the existing create window cannot resurrect an eviction.
+    #[farhelm_testtrace::test]
+    async fn environment_history_has_one_bounded_order_across_places() {
+        let (_dir, store) = fresh_store().await;
+        let first = host_with_identity(&store, "environment-order-a.example", "identity-a").await;
+        let second = host_with_identity(&store, "environment-order-b.example", "identity-b").await;
+        let target = farhelm_proto::LaunchTarget::Environment {
+            recipe: "first".into(),
+            place: farhelm_proto::Place::TensorlakeAccount,
+        };
+        let original = SessionInfo {
+            creation_seq: Some(1),
+            ..session("original", 10000)
+        };
+        assert!(record_environment_home(&store, first, "identity-a", &original, &target).await);
+        for index in 0..MAX_LAUNCH_HISTORY {
+            let entry = SessionInfo {
+                creation_seq: Some(u64::try_from(index + 2).unwrap()),
+                ..session(&format!("environment-{index}"), 1)
+            };
+            let target = farhelm_proto::LaunchTarget::Environment {
+                recipe: format!("recipe-{index}"),
+                place: farhelm_proto::Place::PodmanHost(second),
+            };
+            assert!(record_environment_home(&store, first, "identity-a", &entry, &target).await);
+        }
+        assert!(!record_environment_home(&store, first, "identity-a", &original, &target).await);
+        let entries = store.environment_launch_history().await.unwrap();
+        assert_eq!(entries.len(), usize::try_from(MAX_LAUNCH_HISTORY).unwrap());
+        assert_eq!(
+            entries[0].target.as_ref().unwrap().recipe(),
+            format!("recipe-{}", MAX_LAUNCH_HISTORY - 1)
+        );
+        let newest = SessionInfo {
+            creation_seq: Some(1),
+            ..session("second-host", 0)
+        };
+        assert!(record_environment_home(&store, second, "identity-b", &newest, &target).await);
+        let entries = store.environment_launch_history().await.unwrap();
+        assert_eq!(entries.len(), usize::try_from(MAX_LAUNCH_HISTORY).unwrap());
+        assert_eq!(entries[0].host, second);
+        assert_eq!(entries[0].target.as_ref(), Some(&target));
+    }
+
+    /// A schema-83 installation acquires the independent projection without
+    /// changing any host row or its existing installation-bound history.
+    #[farhelm_testtrace::test]
+    async fn schema_84_adds_environment_history_without_changing_existing_history() {
+        let (dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "environment-migration.example", "identity-a").await;
+        store
+            .record_create_history(host, "identity-a", &session("ordinary", 1))
+            .await
+            .unwrap();
+        let before_hosts = store.list_hosts().await.unwrap();
+        let before_folders = store.folder_history(host, "identity-a").await.unwrap();
+        {
+            let conn = store.conn.lock();
+            conn.execute_batch("DROP TABLE environment_launch_history; ALTER TABLE preferences DROP COLUMN last_container_host; PRAGMA user_version = 83;")
+                .unwrap();
+            assert!(
+                conn.prepare("SELECT admission_order FROM environment_launch_history")
+                    .is_err()
+            );
+        }
+        drop(store);
+        let migrated = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        assert_eq!(migrated.list_hosts().await.unwrap(), before_hosts);
+        assert_eq!(
+            migrated.folder_history(host, "identity-a").await.unwrap(),
+            before_folders
+        );
+        assert!(
+            migrated
+                .environment_launch_history()
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let fresh = HelmStore::open(&dir.path().join("fresh.db")).await.unwrap();
+        assert_eq!(
+            schema_objects(&migrated.conn.lock()),
+            schema_objects(&fresh.conn.lock())
+        );
+    }
+
+    /// A raw command has a real accepted place but no structured setup.
+    /// Remembering that place must not fabricate a recent setup or let a
+    /// replay replace the last place chosen by a later successful create.
+    #[farhelm_testtrace::test]
+    async fn environment_history_raw_create_remembers_place_without_a_recent_setup() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "environment-raw.example", "identity-a").await;
+        let first_target = farhelm_proto::LaunchTarget::Environment {
+            recipe: "dev".into(),
+            place: farhelm_proto::Place::PodmanHost(91),
+        };
+        let second_target = farhelm_proto::LaunchTarget::Environment {
+            recipe: "other".into(),
+            place: farhelm_proto::Place::PodmanHost(92),
+        };
+        let entry = session("raw-first", 100);
+        let record = |entry: SessionInfo, target: farhelm_proto::LaunchTarget| {
+            let store = store.clone();
+            async move {
+                store
+                    .record_create_history_with_environment(
+                        host,
+                        "identity-a",
+                        &admitted_row(host, &entry),
+                        HistoryPaths {
+                            canonical_cwd: "/raw/home",
+                            display_cwd: "/raw/home",
+                        },
+                        None,
+                        None,
+                        Some(&target),
+                    )
+                    .await
+                    .unwrap()
+            }
+        };
+        assert!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .last_container_host
+                .is_none()
+        );
+        assert!(record(entry.clone(), first_target.clone()).await);
+        assert_eq!(
+            store.preferences().await.unwrap().last_container_host,
+            Some(91)
+        );
+        assert!(store.environment_launch_history().await.unwrap().is_empty());
+        assert!(record(session("raw-second", 101), second_target).await);
+        assert_eq!(
+            store.preferences().await.unwrap().last_container_host,
+            Some(92)
+        );
+        assert!(!record(entry, first_target).await);
+        assert_eq!(
+            store.preferences().await.unwrap().last_container_host,
+            Some(92)
+        );
+        assert!(store.environment_launch_history().await.unwrap().is_empty());
+        assert!(
+            serde_json::from_value::<PreferencePatch>(serde_json::json!({
+                "last_container_host": 93
+            }))
+            .is_err(),
+            "only captured successful launch intent writes this default"
+        );
+    }
+
+    /// Every successful environment create ages the shared window, including
+    /// raw commands from distinct installations. Their admission markers must
+    /// evict older setup frequency without offering raw commands as setups.
+    #[farhelm_testtrace::test]
+    async fn environment_history_raw_creates_age_the_shared_window() {
+        let (_dir, store) = fresh_store().await;
+        let first = host_with_identity(&store, "environment-window.example", "identity-a").await;
+        let target = farhelm_proto::LaunchTarget::Environment {
+            recipe: "agent".into(),
+            place: farhelm_proto::Place::TensorlakeAccount,
+        };
+        let original = session("agent-first", 100);
+        assert!(record_environment_home(&store, first, "identity-a", &original, &target).await);
+        assert_eq!(store.environment_launch_history().await.unwrap().len(), 1);
+        let raw_target = farhelm_proto::LaunchTarget::Environment {
+            recipe: "raw".into(),
+            place: farhelm_proto::Place::PodmanHost(91),
+        };
+        let mut last = None;
+        for index in 0..MAX_LAUNCH_HISTORY {
+            let identity = format!("raw-origin-{index}");
+            let host =
+                host_with_identity(&store, &format!("raw-origin-{index}.example"), &identity).await;
+            let entry = session("raw", index + 101);
+            assert!(
+                store
+                    .record_create_history_with_environment(
+                        host,
+                        &identity,
+                        &admitted_row(host, &entry),
+                        HistoryPaths {
+                            canonical_cwd: "/raw",
+                            display_cwd: "/raw"
+                        },
+                        None,
+                        None,
+                        Some(&raw_target),
+                    )
+                    .await
+                    .unwrap()
+            );
+            last = Some((host, identity, entry));
+        }
+        assert!(store.environment_launch_history().await.unwrap().is_empty());
+        let marker_window = || {
+            store
+                .conn
+                .lock()
+                .query_row(
+                    "SELECT count(*), max(admission_order) FROM environment_launch_history",
+                    [],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .unwrap()
+        };
+        let before = marker_window();
+        assert_eq!(before.0, MAX_LAUNCH_HISTORY);
+        let (host, identity, entry) = last.unwrap();
+        assert!(
+            !store
+                .record_create_history_with_environment(
+                    host,
+                    &identity,
+                    &admitted_row(host, &entry),
+                    HistoryPaths {
+                        canonical_cwd: "/raw",
+                        display_cwd: "/raw"
+                    },
+                    None,
+                    None,
+                    Some(&raw_target),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(!record_environment_home(&store, first, "identity-a", &original, &target).await);
+        assert_eq!(marker_window(), before);
+        assert!(store.environment_launch_history().await.unwrap().is_empty());
+    }
+
+    /// The independent source key survives adoption even when the ordinary
+    /// installation's admission rows are cleared. A replay after A-to-B-to-A
+    /// must preserve newer setup, place and permission choices together.
+    #[farhelm_testtrace::test]
+    async fn environment_history_adoption_replay_preserves_newer_defaults() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "environment-adoption.example", "identity-a").await;
+        let entry = SessionInfo {
+            creation_seq: Some(1),
+            ..session("old-source", 100)
+        };
+        let old_target = farhelm_proto::LaunchTarget::Environment {
+            recipe: "old".into(),
+            place: farhelm_proto::Place::PodmanHost(91),
+        };
+        let mut old_selection = environment_history_selection();
+        old_selection.permissions = Some(farhelm_proto::LaunchPermission::Yolo);
+        assert!(
+            store
+                .record_create_history_with_environment(
+                    host,
+                    "identity-a",
+                    &admitted_row(host, &entry),
+                    HistoryPaths {
+                        canonical_cwd: "/old",
+                        display_cwd: "/old"
+                    },
+                    None,
+                    Some(&old_selection),
+                    Some(&old_target),
+                )
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .remembered_permissions
+                .as_deref(),
+            Some("yolo")
+        );
+        store
+            .adopt_identity(
+                host,
+                &dialed_as(&store, host).await,
+                "identity-a",
+                "identity-b",
+            )
+            .await
+            .unwrap();
+        store
+            .adopt_identity(
+                host,
+                &dialed_as(&store, host).await,
+                "identity-b",
+                "identity-a",
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .conn
+                .lock()
+                .query_row(
+                    "SELECT count(*) FROM create_history_sessions WHERE host_id = ?1",
+                    [host],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0,
+            "premise: adoption cleared ordinary admissions"
+        );
+        let newer = SessionInfo {
+            creation_seq: Some(2),
+            ..session("new-source", 200)
+        };
+        let new_target = farhelm_proto::LaunchTarget::Environment {
+            recipe: "new".into(),
+            place: farhelm_proto::Place::PodmanHost(92),
+        };
+        assert!(record_environment_home(&store, host, "identity-a", &newer, &new_target).await);
+        let before = store.environment_launch_history().await.unwrap();
+        assert_eq!(
+            before.len(),
+            2,
+            "premise: the independent old source survived adoption"
+        );
+        let preferences = store.preferences().await.unwrap();
+        assert_eq!(preferences.last_container_host, Some(92));
+        assert!(preferences.remembered_permissions.is_none());
+        assert!(
+            !store
+                .record_create_history_with_environment(
+                    host,
+                    "identity-a",
+                    &admitted_row(host, &entry),
+                    HistoryPaths {
+                        canonical_cwd: "/old",
+                        display_cwd: "/old"
+                    },
+                    None,
+                    Some(&old_selection),
+                    Some(&old_target),
+                )
+                .await
+                .unwrap()
+        );
+        assert_eq!(store.environment_launch_history().await.unwrap(), before);
+        assert_eq!(store.preferences().await.unwrap(), preferences);
+    }
+
     /// An existing schema-27 installation must retain ordinary history
     /// when repo intent is added; fresh and migrated DDL must agree. Later
     /// columns are removed from the fixture so the ladder assigns their real
@@ -10157,6 +10762,8 @@ mod tests {
         {
             let conn = store.conn.lock();
             rewind_environment_host_columns(&conn);
+            conn.execute_batch("ALTER TABLE preferences DROP COLUMN last_container_host;")
+                .expect("rewind the environment preference before older columns");
             // Restore the historical cache column as well: the upgrade must
             // cross its removal after adding repository intent to history.
             // Schema 36 drops the profile tables, so a file claiming a
@@ -10290,6 +10897,7 @@ mod tests {
                 .expect("read"),
             vec![LaunchHistoryEntry {
                 host,
+                target: None,
                 github_repo: None,
                 canonical_cwd: None,
                 cwd: "/created".to_string(),
@@ -12879,6 +13487,7 @@ mod tests {
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
+                last_container_host: None,
             },
             "a selection write must not discard the sort written before it"
         );
@@ -12915,6 +13524,7 @@ mod tests {
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
+                last_container_host: None,
             },
             "a later sort replaces the earlier one, and an empty patch is a no-op"
         );
@@ -12950,6 +13560,7 @@ mod tests {
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
+                last_container_host: None,
             },
             "an explicit null clears selection and its visits without changing settings"
         );
@@ -13034,6 +13645,7 @@ mod tests {
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
+                last_container_host: None,
             },
             "null clears exactly the permissions memory and disturbs nothing else"
         );
@@ -13850,7 +14462,8 @@ mod tests {
         let conn = Connection::open(&path).unwrap();
         let fresh_schema = schema_objects(&conn);
         conn.execute_batch(
-            "ALTER TABLE preferences DROP COLUMN visit_history;
+            "ALTER TABLE preferences DROP COLUMN last_container_host;
+             ALTER TABLE preferences DROP COLUMN visit_history;
              ALTER TABLE preferences DROP COLUMN auto_update_remote_hosts;
              PRAGMA user_version = 65;",
         )
@@ -16507,6 +17120,8 @@ mod tests {
         {
             let conn = Connection::open(&path).expect("reopen raw schema-22 fixture");
             rewind_environment_host_columns(&conn);
+            conn.execute_batch("ALTER TABLE preferences DROP COLUMN last_container_host;")
+                .expect("rewind the environment preference before older columns");
             // Schema 36 drops the profile tables, so a file claiming a
             // version between 15 and 35 has to hold them.
             conn.execute_batch(PROFILE_TABLES_V15)
@@ -16784,6 +17399,7 @@ mod tests {
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
+                last_container_host: None,
             },
             "compact defaults absent, sort survives, and an unowned legacy selection clears"
         );
@@ -16868,6 +17484,7 @@ mod tests {
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
+                last_container_host: None,
             },
             "permissions defaults absent, other choices survive, and an unowned selection clears"
         );

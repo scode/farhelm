@@ -3262,9 +3262,9 @@ mod tests {
     /// Rewind a current-schema database to the exact schema-26 shape.
     /// Later checkout configuration tables and `remembered_workspace_trust`
     /// did not exist in v26; remove them, restore the retired `archived`
-    /// cache column, and remove repository-history provenance before stamping
-    /// the old version. Tests then exercise the real migrations instead of a
-    /// current schema carrying an old label.
+    /// cache column, and remove repository-history provenance and environment
+    /// launch storage before stamping the old version. Tests then exercise the
+    /// real migrations instead of a current schema carrying an old label.
     async fn rewind_to_v26(path: &Path) {
         let store = HelmStore::open(path).await.expect("open to rewind");
         let conn = store.conn();
@@ -3277,7 +3277,8 @@ mod tests {
             // `launch_templates`, schema 41's `session_notification_marks`,
             // schema 47's `ntfy_alerts`, schema 52's `session_pins`, schema
             // 54's `registry_namespace`, schema 70's `tensorlake_account`,
-            // schema 71's `tensorlake_recipes` and schema 75's `credentials`.
+            // schema 71's `tensorlake_recipes`, schema 75's `credentials`, and
+            // schema 84's provider-neutral launch history and host preference.
             // A new table that is missing here fails the DDL comparison
             // below, not a migration.
             // Every later preference column also goes, including nullable
@@ -3296,6 +3297,8 @@ mod tests {
                  DROP TABLE tensorlake_account;
                  DROP TABLE tensorlake_recipes;
                  DROP TABLE credentials;
+                 DROP TABLE environment_launch_history;
+                 ALTER TABLE preferences DROP COLUMN last_container_host;
                  ALTER TABLE create_history_sessions DROP COLUMN github_repo;
                  ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
@@ -3329,6 +3332,17 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE hosts DROP COLUMN links_without_asking;
                  ALTER TABLE hosts DROP COLUMN local_links_without_asking;
+                 -- Schema 83 added the container place index and coordinates.
+                 -- Remove the index before its column, and the provider's
+                 -- columns before the older environment ownership constraint.
+                 DROP INDEX hosts_place_host;
+                 ALTER TABLE hosts DROP COLUMN environment_provider;
+                 ALTER TABLE hosts DROP COLUMN place_host;
+                 ALTER TABLE hosts DROP COLUMN podman_container_id;
+                 ALTER TABLE hosts DROP COLUMN podman_user;
+                 ALTER TABLE hosts DROP COLUMN podman_home;
+                 ALTER TABLE hosts DROP COLUMN podman_uid;
+                 ALTER TABLE hosts DROP COLUMN podman_pending_create_at;
                  -- Schema 82's ownership check refers to the Tensorlake columns.
                  ALTER TABLE hosts DROP COLUMN session_owned;
                  -- Schema 72 added the Tensorlake host columns.
@@ -3518,7 +3532,7 @@ mod tests {
         );
     }
 
-    /// Spec: the 26→27 migration creates the config tables while preserving
+    /// Spec: upgrading v26 creates the config tables while preserving
     /// populated historical cache and create-history content, including its
     /// ordering and bounded eviction state; the upgraded helm still starts
     /// checkout configuration unset at revision 0, like a fresh database.
@@ -3642,11 +3656,13 @@ mod tests {
             .unwrap();
         assert_eq!(
             additive_tables, 0,
-            "only the two post-v26 tables are removed"
+            "neither checkout configuration table existed in v26"
         );
         drop(raw);
 
-        let store = HelmStore::open(&path).await.expect("migrate to 27");
+        let store = HelmStore::open(&path)
+            .await
+            .expect("migrate to current schema");
         assert_eq!(store.cached_sessions(host).await.unwrap(), cached_before);
         assert_eq!(
             store.launch_history(host, identity).await.unwrap(),

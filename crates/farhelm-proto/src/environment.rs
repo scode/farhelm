@@ -29,6 +29,14 @@ pub enum Place {
 
 #[warn(clippy::wildcard_enum_match_arm)]
 impl Place {
+    /// Accepted container launches update their last-used place independently
+    /// of whether they carry a reusable structured agent selection.
+    pub fn container_host(self) -> Option<i64> {
+        match self {
+            Self::TensorlakeAccount => None,
+            Self::PodmanHost(host) => Some(host),
+        }
+    }
     /// Provider identity follows the place, including when its host is absent.
     /// Resolving or validating the current host remains the helm's responsibility.
     pub fn provider(self) -> ProviderKind {
@@ -61,5 +69,33 @@ impl ProviderKind {
             Self::Tensorlake => WhenStatusUnanswered::DialAnyway,
             Self::Podman => WhenStatusUnanswered::RetryLater,
         }
+    }
+}
+
+/// Captured fresh-machine intent, independent of the installation it creates.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum LaunchTarget {
+    Environment { recipe: String, place: Place },
+}
+
+impl LaunchTarget {
+    /// The selected catalog name remains explicit even when it was removed.
+    pub fn recipe(&self) -> &str {
+        match self {
+            Self::Environment { recipe, .. } => recipe,
+        }
+    }
+
+    /// The selected place outlives the disposable environment created there.
+    pub fn place(&self) -> Place {
+        match self {
+            Self::Environment { place, .. } => *place,
+        }
+    }
+
+    /// Provider selection follows the captured place.
+    pub fn provider(&self) -> ProviderKind {
+        self.place().provider()
     }
 }

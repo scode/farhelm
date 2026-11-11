@@ -1076,6 +1076,7 @@ mod tests {
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
+                last_container_host: None,
             },
             "each sparse patch lands its own field and keeps the others"
         );
@@ -1194,6 +1195,7 @@ mod tests {
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
+                last_container_host: None,
             },
             "an explicit null clears selection and visits without changing settings"
         );

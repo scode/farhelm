@@ -71,7 +71,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod environment;
-pub use environment::{Place, ProviderKind, WhenStatusUnanswered};
+pub use environment::{LaunchTarget, Place, ProviderKind, WhenStatusUnanswered};
 
 #[cfg(feature = "io")]
 pub mod tcp_relay;
