@@ -105,6 +105,9 @@ pub(super) fn unusable_host(state: &HostState, twin: Option<(&str, HostKind)>) -
                     "That machine is the Tensorlake sandbox of {other}. To stop using it, \
                      delete that sandbox, then remove this entry"
                 ),
+                Some((_, HostKind::Podman)) => format!(
+                    "That machine is the container of {other}. To stop using it, delete that container, then remove this entry"
+                ),
                 // No twin means the registry no longer holds the entry that owned
                 // the machine: it was removed, and this entry stays a duplicate
                 // until Retry lets it connect (SPEC.md's duplicate remedy). Pointing

@@ -582,6 +582,8 @@ struct AppState {
     /// The same concrete services dispatch lifecycle and resource destruction.
     /// Actor status fakes remain independently injectable in test managers.
     providers: environment::Providers,
+    /// Place probes are process-local observations and never gate reading Hosts.
+    podman_places: Arc<environment::podman_probe::PodmanPlaces>,
     /// Acting agent requests waiting for the user's answer (see
     /// `approvals`). A field rather than a global so each helm in a test
     /// process has its own table, and so a test can shorten the wait.
@@ -655,6 +657,9 @@ impl AppState {
             provisioning.credential_delivery(),
         );
         AppState {
+            podman_places: environment::podman_probe::PodmanPlaces::new(
+                provisioning.local_state_dir(),
+            ),
             _automatic_updates: provisioning::AutomaticUpdates::start(&provisioning),
             mode,
             ntfy: manager.ntfy.clone(),
@@ -801,6 +806,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::post(provisioning::probe_host),
         )
         .route("/api/hosts/{id}", axum::routing::delete(hosts::remove_host))
+        .route(
+            "/api/hosts/{id}/podman-probe",
+            get(hosts::podman_probe).post(hosts::refresh_podman_probe),
+        )
         .route(
             "/api/hosts/{id}/uninstall",
             axum::routing::post(provisioning::uninstall_host),

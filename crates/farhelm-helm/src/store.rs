@@ -336,7 +336,11 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 82;
+pub(crate) const SCHEMA_VERSION: i64 = 83;
+
+mod podman;
+pub(crate) use podman::PodmanInstallGuard;
+pub use podman::{NewPodmanHost, PodmanBinding};
 
 /// Named secrets have their own table so list responses never need to decode a
 /// secret-bearing configuration object. The monotonically increasing revision
@@ -356,8 +360,8 @@ const CREDENTIALS_SCHEMA: &str = "CREATE TABLE credentials (
 /// [`apply_schema`] repeats (`a_migrated_database_matches_a_freshly_created_one`
 /// holds the two to the same text).
 ///
-/// - `tensorlake_sandbox`: the sandbox's name. Non-null exactly for a
-///   Tensorlake host, which [`HostKind::from_columns`] derives from it; the
+/// - `tensorlake_sandbox`: the environment's name, shared by providers.
+///   [`HostKind::from_columns`] decodes it with the nullable provider; the
 ///   CHECK keeps it off the local row. It is the only column with a CHECK:
 ///   schema 58 had to rebuild columns to relax schema 44's per-column
 ///   CHECKs, and the others need none.
@@ -671,7 +675,7 @@ macro_rules! host_kind_sql {
 }
 
 /// A `hosts` row's kind: the reserved local row, a registered ssh
-/// destination, or a Tensorlake sandbox Farhelm created. See the module docs
+/// destination, or an environment Farhelm created. See the module docs
 /// and [`apply_schema`] for the shape this constrains in SQL.
 ///
 /// Only the first two have an on-disk spelling of their own. A Tensorlake
@@ -712,6 +716,9 @@ pub enum HostKind {
     /// refuses to forget one without a
     /// [`crate::environment::Destroyed`] proof.
     Tensorlake,
+    /// A session-owned rootless container reached through its current place.
+    /// Its synthetic destination is registry identity, never an SSH endpoint.
+    Podman,
 }
 
 #[warn(clippy::wildcard_enum_match_arm)]
@@ -722,6 +729,45 @@ impl HostKind {
         match self {
             HostKind::Local | HostKind::Ssh => None,
             HostKind::Tensorlake => Some(farhelm_proto::ProviderKind::Tensorlake),
+            HostKind::Podman => Some(farhelm_proto::ProviderKind::Podman),
+        }
+    }
+
+    /// Only ordinary hosts can supply a container place. Environment nesting
+    /// would require another execution route and is deliberately unrepresentable.
+    pub fn can_host_environments(self) -> bool {
+        match self {
+            Self::Local | Self::Ssh => true,
+            Self::Tensorlake | Self::Podman => false,
+        }
+    }
+
+    /// Ordinary discovery may refresh admitted Tensorlake installations, but
+    /// a container's coordinates always require its binding-specific guard.
+    /// The transaction decodes the current kind before consulting this rule.
+    fn require_discovered_install_admission(
+        self,
+        host: HostId,
+        unfinished: bool,
+    ) -> anyhow::Result<()> {
+        match self {
+            Self::Local | Self::Ssh => Ok(()),
+            Self::Tensorlake if unfinished => {
+                Err(HostStoreError::TensorlakeSetupRequired(host).into())
+            }
+            Self::Tensorlake => Ok(()),
+            Self::Podman => {
+                anyhow::bail!("host {host} needs container-specific installation admission")
+            }
+        }
+    }
+
+    /// The legacy binding columns describe Tensorlake only. Podman shares
+    /// their environment-name column while retaining its own canonical handle.
+    fn tensorlake_environment_name(self, name: Option<String>) -> Option<String> {
+        match self {
+            Self::Tensorlake => name,
+            Self::Local | Self::Ssh | Self::Podman => None,
         }
     }
 
@@ -734,19 +780,28 @@ impl HostKind {
     /// edit, a downgrade), so a corrupt value is reported, not silently
     /// coerced.
     ///
-    /// `tensorlake_sandbox` is the discriminator column: a reader that
+    /// `tensorlake_sandbox` and `environment_provider` form the discriminator: a reader that
     /// decoded the kind from `kind` alone would take a sandbox for a plain
     /// ssh row and let it be retargeted or forgotten, so every reader selects
-    /// both.
-    fn from_columns(kind: &str, tensorlake_sandbox: Option<&str>) -> anyhow::Result<HostKind> {
-        match (kind, tensorlake_sandbox) {
-            (host_kind_sql!(local), None) => Ok(HostKind::Local),
-            (host_kind_sql!(ssh), None) => Ok(HostKind::Ssh),
-            (host_kind_sql!(ssh), Some(_)) => Ok(HostKind::Tensorlake),
-            (host_kind_sql!(local), Some(_)) => {
-                anyhow::bail!("the local hosts row names a Tensorlake sandbox")
+    /// all three columns. NULL provider retains pre-existing Tensorlake rows;
+    /// an explicit provider without an environment name is corrupt input.
+    fn from_columns(
+        kind: &str,
+        environment_name: Option<&str>,
+        provider: Option<&str>,
+    ) -> anyhow::Result<HostKind> {
+        match (kind, environment_name, provider) {
+            (host_kind_sql!(local), None, None) => Ok(HostKind::Local),
+            (host_kind_sql!(ssh), None, None) => Ok(HostKind::Ssh),
+            (host_kind_sql!(ssh), Some(_), None | Some("tensorlake")) => Ok(HostKind::Tensorlake),
+            (host_kind_sql!(ssh), Some(_), Some("podman")) => Ok(HostKind::Podman),
+            (host_kind_sql!(local), Some(_), _) => {
+                anyhow::bail!("the local hosts row names an environment")
             }
-            (other, _) => anyhow::bail!("hosts row has unrecognized kind {other:?}"),
+            (_, _, Some(other)) => {
+                anyhow::bail!("hosts row has invalid environment provider {other:?}")
+            }
+            (other, _, _) => anyhow::bail!("hosts row has unrecognized kind {other:?}"),
         }
     }
 
@@ -754,7 +809,7 @@ impl HostKind {
     pub fn column(self) -> &'static str {
         match self {
             HostKind::Local => host_kind_sql!(local),
-            HostKind::Ssh | HostKind::Tensorlake => host_kind_sql!(ssh),
+            HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => host_kind_sql!(ssh),
         }
     }
 
@@ -764,7 +819,7 @@ impl HostKind {
     pub fn is_reserved_local(self) -> bool {
         match self {
             HostKind::Local => true,
-            HostKind::Ssh | HostKind::Tensorlake => false,
+            HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => false,
         }
     }
 
@@ -774,7 +829,7 @@ impl HostKind {
     pub fn has_remote_install(self) -> bool {
         match self {
             HostKind::Local => false,
-            HostKind::Ssh | HostKind::Tensorlake => true,
+            HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => true,
         }
     }
 
@@ -786,7 +841,7 @@ impl HostKind {
     pub fn panel_updates(self) -> bool {
         match self {
             HostKind::Local => false,
-            HostKind::Ssh | HostKind::Tensorlake => true,
+            HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => true,
         }
     }
 
@@ -799,7 +854,7 @@ impl HostKind {
     /// ([`Self::removal_deletes_machine`]).
     pub fn panel_uninstalls(self) -> bool {
         match self {
-            HostKind::Local | HostKind::Tensorlake => false,
+            HostKind::Local | HostKind::Tensorlake | HostKind::Podman => false,
             HostKind::Ssh => true,
         }
     }
@@ -810,7 +865,7 @@ impl HostKind {
     pub fn reports_missing_local_supervisor(self) -> bool {
         match self {
             HostKind::Local => true,
-            HostKind::Ssh | HostKind::Tensorlake => false,
+            HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => false,
         }
     }
 
@@ -821,7 +876,7 @@ impl HostKind {
     pub fn is_remote(self) -> bool {
         match self {
             HostKind::Local => false,
-            HostKind::Ssh | HostKind::Tensorlake => true,
+            HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => true,
         }
     }
 
@@ -830,7 +885,7 @@ impl HostKind {
     /// own ssh setup; a sandbox adds Farhelm's key and known-hosts file.
     pub(crate) fn ssh_access(self) -> Option<crate::ssh::SshAccessKind> {
         match self {
-            HostKind::Local => None,
+            HostKind::Local | HostKind::Podman => None,
             HostKind::Ssh => Some(crate::ssh::SshAccessKind::UserConfig),
             HostKind::Tensorlake => Some(crate::ssh::SshAccessKind::Tensorlake),
         }
@@ -843,7 +898,7 @@ impl HostKind {
     pub fn destination_is_editable(self) -> bool {
         match self {
             HostKind::Ssh => true,
-            HostKind::Local | HostKind::Tensorlake => false,
+            HostKind::Local | HostKind::Tensorlake | HostKind::Podman => false,
         }
     }
 
@@ -854,7 +909,7 @@ impl HostKind {
     pub fn offers_manual_ssh_masters(self) -> bool {
         match self {
             HostKind::Ssh => true,
-            HostKind::Local | HostKind::Tensorlake => false,
+            HostKind::Local | HostKind::Tensorlake | HostKind::Podman => false,
         }
     }
 
@@ -863,7 +918,7 @@ impl HostKind {
     /// forgetting the entry. [`HelmStore::remove_host_row`] enforces it.
     pub fn removal_deletes_machine(self) -> bool {
         match self {
-            HostKind::Tensorlake => true,
+            HostKind::Tensorlake | HostKind::Podman => true,
             HostKind::Local | HostKind::Ssh => false,
         }
     }
@@ -875,7 +930,7 @@ impl HostKind {
     fn default_appearance(self) -> (&'static str, &'static str) {
         match self {
             HostKind::Local => ("laptop", "red"),
-            HostKind::Ssh | HostKind::Tensorlake => ("cloud", "default"),
+            HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => ("cloud", "default"),
         }
     }
 }
@@ -927,7 +982,7 @@ pub struct HostRow {
     /// Retargeting and adopting an installation preserve it; removal and re-addition do not.
     pub entry_uuid: String,
     pub kind: HostKind,
-    /// This Tensorlake resource was registered for a session launch. It keeps
+    /// This environment was registered for a session launch. It keeps
     /// ordinary host diagnostics and connection machinery; the marker records
     /// its disposable lifecycle, not a session inventory or a permission grant.
     pub session_owned: bool,
@@ -973,6 +1028,9 @@ pub struct HostRow {
     /// The sandbox behind a [`HostKind::Tensorlake`] row; `Some` exactly for
     /// that kind, by construction in [`HelmStore::list_hosts`].
     pub tensorlake: Option<TensorlakeBinding>,
+    /// Canonical container coordinates, retained even while creation has no
+    /// settled outcome. The place destination is resolved from its own row.
+    pub podman: Option<PodmanBinding>,
 }
 
 impl HostRow {
@@ -980,15 +1038,19 @@ impl HostRow {
     /// The provider handle keeps the saved ID and pending-create evidence that
     /// deletion needs after the resource's name has stopped resolving.
     pub(crate) fn environment_binding(&self) -> Option<crate::environment::EnvironmentBinding> {
-        self.tensorlake
-            .as_ref()
-            .map(|binding| crate::environment::EnvironmentBinding {
-                host: self.id,
-                handle: crate::environment::ProviderHandle::Tensorlake(binding.clone()),
-            })
+        use crate::environment::{EnvironmentBinding, ProviderHandle};
+        let handle = match self.kind {
+            HostKind::Local | HostKind::Ssh => return None,
+            HostKind::Tensorlake => ProviderHandle::Tensorlake(self.tensorlake.clone()?),
+            HostKind::Podman => ProviderHandle::Podman(self.podman.clone()?),
+        };
+        Some(EnvironmentBinding {
+            host: self.id,
+            handle,
+        })
     }
 
-    /// Whether a session launch owns this sandbox's whole-resource lifecycle.
+    /// Whether a session launch owns this environment's whole-resource lifecycle.
     ///
     /// Ownership is fixed at registration and survives ordinary row changes.
     /// It says nothing about how many sessions remain after a failed Replace;
@@ -998,10 +1060,16 @@ impl HostRow {
     }
 }
 
-/// A `hosts` row's `kind` and three nullable text columns, read by a single
-/// row lookup; the alias keeps clippy's `type_complexity` lint quiet, and
-/// each reader's `SELECT` says which three columns it holds.
-type KindAndThreeColumns = (String, Option<String>, Option<String>, Option<String>);
+/// Two display columns and the full kind/name/provider discriminator. Scalar
+/// readers must carry the provider too, or an unknown provider could be edited
+/// or forgotten through a reader that silently treated it as Tensorlake.
+type KindAndBindingColumns = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
 
 /// One `hosts` row's columns, read positionally by [`HelmStore::list_hosts`]
 /// before the fallible [`HostKind::from_columns`] decode — mirrors the
@@ -1037,6 +1105,14 @@ type RawHostRow = (
     Option<i64>,
     bool,
     bool,
+    // Schema 83: provider plus the immutable Podman creation coordinates.
+    Option<String>,
+    Option<HostId>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<u32>,
+    Option<i64>,
 );
 
 /// Which command authority an approval grants to the requesting installation.
@@ -1842,18 +1918,20 @@ pub enum HostStoreError {
     /// [`HelmStore::update_ssh_destination`] named a Tensorlake host, whose
     /// destination is derived from its sandbox's name (see
     /// [`HostKind::destination_is_editable`]).
-    #[error("this host's address belongs to its Tensorlake sandbox and cannot be changed")]
+    #[error("this host's address belongs to its environment and cannot be changed")]
     DestinationManaged,
     /// Ordinary SSH discovery or planning cannot admit a sandbox whose
     /// initial setup has not passed its copied-supervisor check. Checked
     /// inside the convergence transaction, after any remote probe returns.
     #[error("host {0} needs initial Tensorlake setup; run setup again from its host row")]
     TensorlakeSetupRequired(HostId),
-    /// [`HelmStore::remove_host_row`] was asked to forget a Tensorlake host
-    /// without proof that its sandbox was deleted. Reaching this is a bug in
+    /// [`HelmStore::remove_host_row`] was asked to forget an environment host
+    /// without proof that its resource was deleted. Reaching this is a bug in
     /// the caller, not a user error: every user-facing removal of such a
     /// host deletes the sandbox first.
-    #[error("host {0} is a Tensorlake sandbox; Farhelm removes it only after deleting the sandbox")]
+    #[error(
+        "host {0} owns an environment; Farhelm removes it only after confirmed environment deletion"
+    )]
     SandboxNotDeleted(HostId),
     /// The stored identity no longer matches what a caller assumed it still
     /// was. Two distinct callers hit this: [`HelmStore::adopt_identity`]'s
@@ -2003,7 +2081,9 @@ fn new_entry_conflict(
     entry: &NewHostEntry,
 ) -> anyhow::Result<()> {
     let mut rows = tx
-        .prepare("SELECT kind, destination, alias, tensorlake_sandbox FROM hosts")
+        .prepare(
+            "SELECT kind, destination, alias, tensorlake_sandbox, environment_provider FROM hosts",
+        )
         .context("reading host display names before adding a new entry")?;
     let rows = rows
         .query_map([], |row| {
@@ -2012,16 +2092,17 @@ fn new_entry_conflict(
                 row.get::<_, Option<String>>(1)?,
                 row.get::<_, Option<String>>(2)?,
                 row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
             ))
         })
         .context("querying host display names")?
         .collect::<Result<Vec<_>, _>>()?;
     let mut taken = None;
-    for (kind, existing, alias, sandbox) in rows {
+    for (kind, existing, alias, sandbox, provider) in rows {
         // As in `update_alias`: a row this build cannot decode refuses the
         // write rather than dropping out of the comparison.
         let name = host_display_name(
-            HostKind::from_columns(&kind, sandbox.as_deref())?,
+            HostKind::from_columns(&kind, sandbox.as_deref(), provider.as_deref())?,
             existing.as_deref(),
             alias.as_deref(),
         );
@@ -2160,6 +2241,9 @@ impl DialedAs {
 /// another. Refusing it at the registry boundary means the string that is
 /// stored is the string that will be dialed.
 pub(crate) fn destination_is_usable(destination: &str) -> bool {
+    if destination.starts_with("podman:") {
+        return false;
+    }
     !destination.is_empty() && !destination.starts_with('-') && !destination.contains('\0')
 }
 
@@ -2562,6 +2646,8 @@ pub struct HelmStore {
 /// - 81: shared condition notices, retaining existing hosts and preferences.
 /// - 82: default-off session ownership on Tensorlake hosts, without rebuilding
 ///   hosts or adding session-membership state.
+/// - 83: nullable provider and container coordinates, with a non-cascading
+///   foreign key retaining the ordinary host that owns the container storage.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2891,11 +2977,12 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 82;",
+              PRAGMA user_version = 83;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
         ))
         .context("creating schema")?;
+        podman::migrate(&tx)?;
         tx.execute(
             "INSERT INTO helm_creation_build (singleton, build) VALUES (1, ?1)",
             [creation_build],
@@ -4678,6 +4765,13 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         tx.execute_batch("PRAGMA user_version = 82;")
             .context("migrating helm.db to schema version 82")?;
         version = 82;
+    }
+    if version == 82 {
+        // ADD COLUMN preserves every dependent table and its cascading rows.
+        // NULL provider keeps all existing sandbox rows Tensorlake-owned.
+        podman::migrate(&tx)?;
+        tx.execute_batch("PRAGMA user_version = 83;")?;
+        version = 83;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -6542,7 +6636,7 @@ impl HelmStore {
                      links_without_asking, local_links_without_asking, entry_uuid, \
                      tensorlake_sandbox, tensorlake_sandbox_id, tensorlake_recipe, \
                      tensorlake_resources, tensorlake_suspended_at, tensorlake_pending_create_at, own_sessions_without_asking, session_owned \
-                     FROM hosts ORDER BY id ASC",
+                     , environment_provider, place_host, podman_container_id, podman_user, podman_home, podman_uid, podman_pending_create_at FROM hosts ORDER BY id ASC",
                 )
                 .context("preparing host list query")?;
                     let raw: Vec<RawHostRow> = stmt
@@ -6571,6 +6665,13 @@ impl HelmStore {
                                 r.get(20)?,
                                 r.get(21)?,
                                 r.get(22)?,
+                                r.get(23)?,
+                                r.get(24)?,
+                                r.get(25)?,
+                                r.get(26)?,
+                                r.get(27)?,
+                                r.get(28)?,
+                                r.get(29)?,
                             ))
                         })
                         .context("querying hosts")?
@@ -6602,13 +6703,25 @@ impl HelmStore {
                                 tensorlake_pending_create_at,
                                 own_sessions_without_asking,
                                 session_owned,
+                                environment_provider,
+                                place_host,
+                                container_id,
+                                container_user,
+                                container_home,
+                                container_uid,
+                                podman_pending_create_at,
                             )| {
                                 let host_kind =
-                                    HostKind::from_columns(&kind, tensorlake_sandbox.as_deref())?;
+                                    HostKind::from_columns(&kind, tensorlake_sandbox.as_deref(), environment_provider.as_deref())?;
                                 let (default_icon, default_color) = host_kind.default_appearance();
+                                let podman = podman::decode_binding(
+                                    host_kind, tensorlake_sandbox.as_deref(), tensorlake_recipe.as_deref(),
+                                    place_host, container_id, container_user, container_home, container_uid,
+                                    podman_pending_create_at, session_owned,
+                                )?;
                                 let tensorlake = tensorlake_binding(
                                     id,
-                                    tensorlake_sandbox,
+                                    host_kind.tensorlake_environment_name(tensorlake_sandbox),
                                     tensorlake_sandbox_id,
                                     tensorlake_recipe,
                                     tensorlake_resources,
@@ -6636,6 +6749,7 @@ impl HelmStore {
                                     color: color.as_deref().unwrap_or(default_color).parse()
                                         .map_err(anyhow::Error::msg)?,
                                     tensorlake,
+                                    podman,
                                 })
                             },
                         )
@@ -6909,7 +7023,7 @@ impl HelmStore {
                     let changed = conn
                         .execute(
                             "UPDATE hosts SET tensorlake_sandbox_id = ?2, tensorlake_pending_create_at = NULL \
-                             WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL",
+                             WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL AND (environment_provider IS NULL OR environment_provider = 'tensorlake')",
                             rusqlite::params![host, sandbox_id],
                         )
                         .context("recording the Tensorlake sandbox id")?;
@@ -6931,7 +7045,7 @@ impl HelmStore {
             Ok(conn.execute(
                 "UPDATE hosts SET tensorlake_pending_create_at = ?2, \
                  tensorlake_prepared_install_json = CASE WHEN ?2 IS NULL THEN NULL ELSE tensorlake_prepared_install_json END \
-                 WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL",
+                 WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL AND (environment_provider IS NULL OR environment_provider = 'tensorlake')",
                 rusqlite::params![host, sent],
             )? == 1)
         }).await
@@ -6953,7 +7067,7 @@ impl HelmStore {
         self.conn.call("record prepared Tensorlake create task panicked", move |conn| {
             Ok(conn.execute(
                 "UPDATE hosts SET tensorlake_pending_create_at = ?2, tensorlake_prepared_install_json = ?3 \
-                 WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL \
+                 WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL AND (environment_provider IS NULL OR environment_provider = 'tensorlake') \
                    AND tensorlake_sandbox_id IS NULL AND remote_farhelm IS NULL AND remote_state_dir IS NULL",
                 rusqlite::params![host, sent, json],
             )? == 1)
@@ -6969,7 +7083,7 @@ impl HelmStore {
     ) -> anyhow::Result<Option<crate::tensorlake::prepared::PreparedInstallFacts>> {
         self.conn.call("read prepared Tensorlake create task panicked", move |conn| {
             let json: Option<String> = conn.query_row(
-                "SELECT tensorlake_prepared_install_json FROM hosts WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL",
+                "SELECT tensorlake_prepared_install_json FROM hosts WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL AND (environment_provider IS NULL OR environment_provider = 'tensorlake')",
                 [host],
                 |row| row.get(0),
             ).optional()?.flatten();
@@ -6995,7 +7109,7 @@ impl HelmStore {
                     let changed = conn
                         .execute(
                             "UPDATE hosts SET tensorlake_suspended_at = ?2 \
-                             WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL",
+                             WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL AND (environment_provider IS NULL OR environment_provider = 'tensorlake')",
                             rusqlite::params![host, at],
                         )
                         .context("recording the Tensorlake suspend time")?;
@@ -7026,7 +7140,7 @@ impl HelmStore {
         self.conn.call("admit Tensorlake install task panicked", move |conn| {
             Ok(conn.execute(
                 "UPDATE hosts SET remote_farhelm = ?2, remote_state_dir = ?3, tensorlake_prepared_install_json = NULL \
-                 WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL",
+                 WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL AND (environment_provider IS NULL OR environment_provider = 'tensorlake')",
                 rusqlite::params![host, remote_farhelm, remote_state_dir],
             )? == 1)
         }).await
@@ -7094,25 +7208,34 @@ impl HelmStore {
                         new_entry_conflict(&tx, &destination, entry)?;
                     }
                     let alias = new_entry.as_ref().and_then(NewHostEntry::alias);
-                    let existing: Option<(HostId, Option<String>, bool)> = tx
+                    let existing: Option<(HostId, Option<String>, bool, HostKind)> = tx
                         .query_row(
                             concat!(
-                                "SELECT id, host_identity, tensorlake_sandbox IS NOT NULL AND \
-                                 (remote_farhelm IS NULL OR remote_state_dir IS NULL) FROM hosts \
+                                "SELECT id, host_identity, \
+                                 (remote_farhelm IS NULL OR remote_state_dir IS NULL), \
+                                 kind, tensorlake_sandbox, environment_provider FROM hosts \
                                  WHERE kind = '",
                                 host_kind_sql!(ssh),
                                 "' AND destination = ?1"
                             ),
                             rusqlite::params![destination],
-                            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                            |row| {
+                                let kind: String = row.get(3)?;
+                                let name: Option<String> = row.get(4)?;
+                                let provider: Option<String> = row.get(5)?;
+                                let kind = HostKind::from_columns(
+                                    &kind, name.as_deref(), provider.as_deref(),
+                                ).map_err(|error| rusqlite::Error::FromSqlConversionFailure(
+                                    3, rusqlite::types::Type::Text, error.into(),
+                                ))?;
+                                Ok((row.get(0)?, row.get(1)?, row.get(2)?, kind))
+                            },
                         )
                         .optional()
                         .context("looking up a discovered ssh destination")?;
 
-                    let (host, inserted) = if let Some((host, recorded, unfinished_tensorlake)) = existing {
-                        if unfinished_tensorlake {
-                            return Err(anyhow::Error::new(HostStoreError::TensorlakeSetupRequired(host)));
-                        }
+                    let (host, inserted) = if let Some((host, recorded, unfinished, kind)) = existing {
+                        kind.require_discovered_install_admission(host, unfinished)?;
                         if let (Some(recorded), Some(reported)) = (&recorded, &host_identity)
                             && recorded != reported
                         {
@@ -7385,17 +7508,21 @@ impl HelmStore {
             let tx = conn
                 .transaction()
                 .context("beginning update destination transaction")?;
-            let current: Option<(String, Option<String>, Option<String>)> = tx
+            #[allow(
+                clippy::type_complexity,
+                reason = "keep the full storage discriminator beside the alias at the SQL boundary"
+            )]
+            let current: Option<(String, Option<String>, Option<String>, Option<String>)> = tx
                 .query_row(
-                    "SELECT kind, alias, tensorlake_sandbox FROM hosts WHERE id = ?1",
+                    "SELECT kind, alias, tensorlake_sandbox, environment_provider FROM hosts WHERE id = ?1",
                     rusqlite::params![host],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
                 )
                 .optional()
                 .context("looking up host before updating its destination")?;
             let current = match current {
-                Some((kind, alias, sandbox)) => {
-                    Some((HostKind::from_columns(&kind, sandbox.as_deref())?, alias))
+                Some((kind, alias, sandbox, provider)) => {
+                    Some((HostKind::from_columns(&kind, sandbox.as_deref(), provider.as_deref())?, alias))
                 }
                 None => None,
             };
@@ -7406,10 +7533,11 @@ impl HelmStore {
                 }
                 // The sandbox's name is the destination; see
                 // `HostKind::destination_is_editable`.
-                Some((HostKind::Tensorlake, _)) => {
+                Some((HostKind::Tensorlake | HostKind::Podman, _)) => {
                     Err(anyhow::Error::new(HostStoreError::DestinationManaged))
                 }
                 Some((HostKind::Ssh, alias)) => {
+                    podman::refuse_referenced_place(&tx, host)?;
                     // Explicit aliases and the unaliased local display name
                     // are compared here. Colliding with another SSH row's
                     // plain, unaliased destination is not this check's job.
@@ -7616,19 +7744,19 @@ impl HelmStore {
                     let tx = conn
                         .transaction()
                         .context("beginning host appearance write")?;
-                    let current: Option<KindAndThreeColumns> = tx
+                    let current: Option<KindAndBindingColumns> = tx
                         .query_row(
-                            "SELECT kind, icon, color, tensorlake_sandbox FROM hosts WHERE id = ?1",
+                            "SELECT kind, icon, color, tensorlake_sandbox, environment_provider FROM hosts WHERE id = ?1",
                             [host],
-                            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
                         )
                         .optional()
                         .context("looking up host appearance")?;
-                    let Some((kind, current_icon, current_color, sandbox)) = current else {
+                    let Some((kind, current_icon, current_color, sandbox, provider)) = current else {
                         return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
                     };
                     let (default_icon, default_color) =
-                        HostKind::from_columns(&kind, sandbox.as_deref())?.default_appearance();
+                        HostKind::from_columns(&kind, sandbox.as_deref(), provider.as_deref())?.default_appearance();
                     let default_icon: HostIcon =
                         default_icon.parse().map_err(anyhow::Error::msg)?;
                     let default_color: HostColor =
@@ -7770,18 +7898,18 @@ impl HelmStore {
                     let tx = conn
                         .transaction()
                         .context("beginning update alias transaction")?;
-                    let current: Option<KindAndThreeColumns> = tx
+                    let current: Option<KindAndBindingColumns> = tx
                         .query_row(
-                            "SELECT kind, destination, alias, tensorlake_sandbox FROM hosts WHERE id = ?1",
+                            "SELECT kind, destination, alias, tensorlake_sandbox, environment_provider FROM hosts WHERE id = ?1",
                             rusqlite::params![host],
-                            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
                         )
                         .optional()
                         .context("looking up host before updating its alias")?;
-                    let Some((kind, destination, current_alias, sandbox)) = current else {
+                    let Some((kind, destination, current_alias, sandbox, provider)) = current else {
                         return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
                     };
-                    let kind = HostKind::from_columns(&kind, sandbox.as_deref())?;
+                    let kind = HostKind::from_columns(&kind, sandbox.as_deref(), provider.as_deref())?;
                     if current_alias == alias {
                         tx.commit().context("committing unchanged alias")?;
                         return Ok(false);
@@ -7796,7 +7924,7 @@ impl HelmStore {
                     };
                     let mut other = tx
                         .prepare(
-                            "SELECT kind, destination, alias, tensorlake_sandbox FROM hosts WHERE id != ?1",
+                            "SELECT kind, destination, alias, tensorlake_sandbox, environment_provider FROM hosts WHERE id != ?1",
                         )
                         .context("reading display names before updating an alias")?;
                     let rows = other
@@ -7806,6 +7934,7 @@ impl HelmStore {
                                 row.get::<_, Option<String>>(1)?,
                                 row.get::<_, Option<String>>(2)?,
                                 row.get::<_, Option<String>>(3)?,
+                                row.get::<_, Option<String>>(4)?,
                             ))
                         })
                         .context("querying other host display names")?
@@ -7821,8 +7950,8 @@ impl HelmStore {
                     // reconcile against.
                     let names = rows
                         .into_iter()
-                        .map(|(kind, destination, alias, sandbox)| {
-                            HostKind::from_columns(&kind, sandbox.as_deref()).map(|kind| {
+                        .map(|(kind, destination, alias, sandbox, provider)| {
+                            HostKind::from_columns(&kind, sandbox.as_deref(), provider.as_deref()).map(|kind| {
                                 host_display_name(kind, destination.as_deref(), alias.as_deref())
                             })
                         })
@@ -7886,31 +8015,32 @@ impl HelmStore {
                 true,
                 "remove host task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<()> {
-                    let kind: Option<(String, Option<String>)> = conn
+                    let tx = conn.transaction().context("beginning host removal")?;
+                    podman::refuse_referenced_place(&tx, host)?;
+                    let kind: Option<(String, Option<String>, Option<String>)> = tx
                         .query_row(
-                            "SELECT kind, tensorlake_sandbox FROM hosts WHERE id = ?1",
+                            "SELECT kind, tensorlake_sandbox, environment_provider FROM hosts WHERE id = ?1",
                             rusqlite::params![host],
-                            |r| Ok((r.get(0)?, r.get(1)?)),
+                            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                         )
                         .optional()
                         .context("looking up host before removing it")?;
                     let kind = kind
-                        .map(|(kind, sandbox)| HostKind::from_columns(&kind, sandbox.as_deref()))
+                        .map(|(kind, sandbox, provider)| HostKind::from_columns(&kind, sandbox.as_deref(), provider.as_deref()))
                         .transpose()?;
-                    let delete = |conn: &mut Connection| -> anyhow::Result<()> {
-                        conn.execute("DELETE FROM hosts WHERE id = ?1", rusqlite::params![host])
-                            .context("removing host")?;
-                        Ok(())
-                    };
                     match kind {
                         None => Err(anyhow::Error::new(HostStoreError::HostNotFound(host))),
                         Some(HostKind::Local) => {
                             Err(anyhow::Error::new(HostStoreError::LocalHostImmutable))
                         }
-                        Some(HostKind::Tensorlake) if !proven => {
+                        Some(HostKind::Tensorlake | HostKind::Podman) if !proven => {
                             Err(anyhow::Error::new(HostStoreError::SandboxNotDeleted(host)))
                         }
-                        Some(HostKind::Ssh | HostKind::Tensorlake) => delete(conn),
+                        Some(HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman) => {
+                            tx.execute("DELETE FROM hosts WHERE id = ?1", [host])?;
+                            tx.commit().context("committing host removal")?;
+                            Ok(())
+                        }
                     }
                 },
             )
@@ -10026,6 +10156,7 @@ mod tests {
         let schema = schema_objects(&store.conn.lock());
         {
             let conn = store.conn.lock();
+            rewind_environment_host_columns(&conn);
             // Restore the historical cache column as well: the upgrade must
             // cross its removal after adding repository intent to history.
             // Schema 36 drops the profile tables, so a file claiming a
@@ -15141,6 +15272,32 @@ mod tests {
         .expect("read schema")
     }
 
+    /// Historical fixtures must remove schema 83 before rewinding older host
+    /// columns. Leaving these columns in place changes their final position
+    /// when the migration ladder appends the older columns again.
+    fn rewind_environment_host_columns(conn: &Connection) {
+        conn.execute_batch(
+            "DROP INDEX hosts_place_host;
+             ALTER TABLE hosts DROP COLUMN environment_provider;
+             ALTER TABLE hosts DROP COLUMN place_host;
+             ALTER TABLE hosts DROP COLUMN podman_container_id;
+             ALTER TABLE hosts DROP COLUMN podman_user;
+             ALTER TABLE hosts DROP COLUMN podman_home;
+             ALTER TABLE hosts DROP COLUMN podman_uid;
+             ALTER TABLE hosts DROP COLUMN podman_pending_create_at;",
+        )
+        .expect("rewind the environment columns before historical migrations");
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM pragma_table_info('hosts') WHERE name = 'environment_provider'",
+                [],
+                |row| row.get::<_, i64>(0),
+            ).unwrap(),
+            0,
+            "premise: this historical schema has no environment provider column",
+        );
+    }
+
     /// The migration's DATA half: a version-1 database may already hold two
     /// rows claiming ONE identity, because nothing stopped it. Version 2's
     /// index cannot simply be created over that, and which row keeps the
@@ -15715,6 +15872,7 @@ mod tests {
         drop(store);
         {
             let conn = Connection::open(&path).unwrap();
+            rewind_environment_host_columns(&conn);
             conn.execute_batch("PRAGMA foreign_keys = ON; ALTER TABLE hosts DROP COLUMN session_owned; PRAGMA user_version = 81;").unwrap();
             assert_eq!(
                 conn.query_row(
@@ -16348,6 +16506,7 @@ mod tests {
         // this historical fixture reaches schema 62, just as on a real upgrade.
         {
             let conn = Connection::open(&path).expect("reopen raw schema-22 fixture");
+            rewind_environment_host_columns(&conn);
             // Schema 36 drops the profile tables, so a file claiming a
             // version between 15 and 35 has to hold them.
             conn.execute_batch(PROFILE_TABLES_V15)

@@ -123,7 +123,11 @@ impl EnvironmentProvider for Tensorlake {
         &self,
         binding: &EnvironmentBinding,
     ) -> Result<EnvironmentStatus, StatusUnanswered> {
-        let ProviderHandle::Tensorlake(binding) = &binding.handle;
+        let ProviderHandle::Tensorlake(binding) = &binding.handle else {
+            return Err(unanswered(
+                "the registry binding belongs to another provider".into(),
+            ));
+        };
         self.check_sandbox(&binding.sandbox).await
     }
 
@@ -144,7 +148,9 @@ impl EnvironmentProvider for Tensorlake {
     }
 
     async fn destroy(&self, binding: &EnvironmentBinding) -> anyhow::Result<Destroyed> {
-        let ProviderHandle::Tensorlake(tensorlake) = &binding.handle;
+        let ProviderHandle::Tensorlake(tensorlake) = &binding.handle else {
+            anyhow::bail!("the registry binding belongs to another provider");
+        };
         self.delete_binding(binding.host, tensorlake).await
     }
 

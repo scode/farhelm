@@ -376,7 +376,7 @@ pub(crate) fn HostDialogHeader(
             HostKind::Local => {
                 Some(rsx! { HostMark { icon: host.icon, color: host.color, local: true } })
             }
-            HostKind::Ssh | HostKind::Tensorlake => {
+            HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => {
                 Some(rsx! { HostMark { icon: host.icon, color: host.color } })
             }
             HostKind::Unrecognized => None,

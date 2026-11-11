@@ -36,6 +36,7 @@
 //! does. Account settings and the underlying build engines stay provider-owned.
 
 pub(crate) mod lifecycle;
+pub(crate) mod podman_probe;
 pub(crate) mod recipes;
 
 use crate::{
@@ -63,10 +64,16 @@ impl EnvironmentBinding {
 }
 
 /// Provider-owned coordinates, decoded from the current host representation.
-/// Podman's handle joins this enum with the storage change that can construct it.
+/// A Podman handle keeps its place ID, so later access resolves the place's
+/// current endpoint rather than retaining the destination observed at create.
 #[derive(Clone, Debug)]
 pub(crate) enum ProviderHandle {
     Tensorlake(TensorlakeBinding),
+    #[allow(
+        dead_code,
+        reason = "the next provider unit consumes durable container coordinates"
+    )]
+    Podman(crate::store::PodmanBinding),
 }
 
 #[warn(clippy::wildcard_enum_match_arm)]
@@ -75,6 +82,7 @@ impl ProviderHandle {
     pub(crate) fn provider(&self) -> ProviderKind {
         match self {
             Self::Tensorlake(_) => ProviderKind::Tensorlake,
+            Self::Podman(_) => ProviderKind::Podman,
         }
     }
 
@@ -85,6 +93,7 @@ impl ProviderHandle {
             Self::Tensorlake(_) => {
                 "initial Tensorlake setup has not passed the supervisor state check; run setup again to continue"
             }
+            Self::Podman(_) => "initial container setup has not passed the supervisor state check",
         }
     }
 }

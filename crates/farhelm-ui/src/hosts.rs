@@ -4311,6 +4311,7 @@ fn HostRow(
         HostKind::Local => "local",
         HostKind::Ssh => "ssh",
         HostKind::Tensorlake => "tensorlake",
+        HostKind::Podman => "podman",
         HostKind::Unrecognized => "unrecognized",
     };
     // Raw for the request, escaped for the label — the asymmetry `adoptable`
@@ -4631,7 +4632,7 @@ fn HostRow(
                         HostMark { icon: host.icon, color: host.color, local: true }
                         span { class: "visually-hidden", "Local" }
                     },
-                    HostKind::Ssh | HostKind::Tensorlake => rsx! {
+                    HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => rsx! {
                         HostMark { icon: host.icon, color: host.color }
                         span { class: "visually-hidden", "Remote" }
                     },

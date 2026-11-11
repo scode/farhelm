@@ -993,6 +993,7 @@ mod tests {
             local_links_without_asking: false,
             icon: farhelm_proto::host_appearance::HostIcon::default(),
             color: farhelm_proto::host_appearance::HostColor::default(),
+            podman: None,
             tensorlake: None,
         }
     }
@@ -1168,6 +1169,7 @@ mod tests {
         HostRow {
             kind: HostKind::Tensorlake,
             destination: Some("sbx@sbx.sandbox.tensorlake.ai".into()),
+            podman: None,
             tensorlake: Some(crate::store::TensorlakeBinding {
                 sandbox: "sbx".into(),
                 sandbox_id: Some("sbx-1".into()),

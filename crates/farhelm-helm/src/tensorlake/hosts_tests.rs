@@ -143,7 +143,9 @@ impl EnvironmentProvider for FakeApi {
         &self,
         binding: &EnvironmentBinding,
     ) -> Result<EnvironmentStatus, StatusUnanswered> {
-        let ProviderHandle::Tensorlake(binding) = &binding.handle;
+        let ProviderHandle::Tensorlake(binding) = &binding.handle else {
+            panic!("the Tensorlake fake received another provider's binding");
+        };
         let sandbox = &binding.sandbox;
         match self.get_sandbox(&ApiKey::new(KEY.into()), sandbox).await {
             Ok(info) => Ok(environment_status(sandbox, info.status, info.error_details)),

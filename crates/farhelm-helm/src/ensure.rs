@@ -267,6 +267,7 @@ mod tests {
                 local_links_without_asking: false,
                 icon: Default::default(),
                 color: Default::default(),
+                podman: None,
                 tensorlake: None,
             }
         };
