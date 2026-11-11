@@ -200,16 +200,22 @@ impl Operation {
 }
 
 /// Reuse the existing host lifecycle endpoints for a session-facing control.
-/// The caller supplies its session claim and the existing launch/host token.
-/// Both are held during activity reads and consent, then transfer together to
-/// ListView before an accepted request can yield. Navigation can discard this
-/// surface without cancelling the request or releasing its host exclusion.
+/// The caller supplies its session claim, held during activity reads and
+/// consent, then transferred to ListView before an accepted request can yield.
+/// Navigation can discard this surface without cancelling the request.
+///
+/// Suspend and Resume are not host registry changes, so this takes no page
+/// token: launches on other hosts and host changes elsewhere proceed beside
+/// it. `ops` is read only for this page's launch target. While a launch
+/// targets or wakes this very host, the buttons are disabled and a click or
+/// answer is refused; once the request is sent, a launch on this host is left
+/// to the launcher's own availability rule and the helm's lifecycle lock.
 #[component]
 pub(crate) fn Controls(
     host: Host,
     session: Session,
     disabled: bool,
-    mut ops: crate::ops::OpLock,
+    ops: crate::ops::OpLock,
     claim: Callback<(), Option<crate::session_ops::SessionGuard>>,
     #[props(default)] stop_choice: bool,
     #[props(default)] buttons: Option<Callback<ControlButtons, Element>>,
@@ -255,6 +261,15 @@ pub(crate) fn Controls(
     let execute_session = session.clone();
     let execute = use_callback(move |operation: Operation| {
         question.set(None);
+        // The activity read and the question can outlast the click's check.
+        // A launch that began targeting this host meanwhile wins; say so,
+        // since nothing on screen would otherwise explain the lost answer.
+        if ops.launch_targets_now(host_id) {
+            held.set(None);
+            busy.set(false);
+            error.set(Some(LAUNCH_ON_THIS_HOST.into()));
+            return;
+        }
         let session = execute_session.clone();
         let guard = held.write().take();
         if let Some(guard) = guard {
@@ -275,16 +290,18 @@ pub(crate) fn Controls(
     let clicked_guards = (session.tabs.is_empty(), session.status.has_ended());
     let stop_asks = !skip && !clicked_guards.0;
     let start = use_callback(move |stop: bool| {
-        if disabled || changing || *busy.peek() || question.peek().is_some() {
+        if disabled
+            || changing
+            || *busy.peek()
+            || question.peek().is_some()
+            || ops.launch_targets_now(host_id)
+        {
             return;
         }
-        let Some(host_guard) = ops.claim_guard() else {
-            return;
-        };
         let Some(guard) = claim.call(()) else {
             return;
         };
-        held.set(Some(guard.with_host_guard(host_guard)));
+        held.set(Some(guard));
         stop_guards.set(clicked_guards);
         error.set(None);
         let operation = Operation::requested(stop, suspended);
@@ -304,6 +321,7 @@ pub(crate) fn Controls(
             }
         });
     });
+    let launch_here = ops.launch_targets(host_id);
     rsx! {
         span { class: "sandbox-session-controls",
             if let Some(operation) = question() {
@@ -336,23 +354,24 @@ pub(crate) fn Controls(
                     "data-tooltip": presentation.suspend_cancel(operation == Operation::StopAndSuspend),
                     onclick: move |_| { question.set(None); held.set(None); }, "Cancel" }
                 button { r#type: "button", class: "btn btn-danger", onkeydown: crate::guard_confirmation_enter,
+                    disabled: launch_here,
                     "data-tooltip": presentation.suspend_action(operation == Operation::StopAndSuspend),
                     onclick: move |_| execute.call(operation), if operation == Operation::StopAndSuspend { "Stop and suspend" } else { "Suspend" } }
                 }
             } else if let Some(buttons) = buttons {
                 {buttons.call(ControlButtons {
-                    resume: suspended, disabled: disabled || busy() || changing || ops.busy(), start,
+                    resume: suspended, disabled: disabled || busy() || changing || launch_here, start,
                 })}
             } else {
                 button { r#type: "button", class: if suspended { "btn btn-primary" } else { "btn btn-neutral" },
-                    disabled: disabled || busy() || changing || ops.busy(),
+                    disabled: disabled || busy() || changing || launch_here,
                     "data-tooltip": if suspended { presentation.resume_help(stopped) } else { suspend_help },
                     onclick: move |_| start.call(false),
                     crate::icons::SandboxPause { resume: suspended }
                     if suspended { "Resume" } else { "Suspend" }
                 }
                 if stop_choice && !suspended {
-                    button { r#type: "button", class: "btn btn-danger", disabled: disabled || busy() || changing || ops.busy(),
+                    button { r#type: "button", class: "btn btn-danger", disabled: disabled || busy() || changing || launch_here,
                         "data-tooltip": presentation.suspend_action(true),
                         onclick: move |_| start.call(true), "Stop and suspend" }
                 }
@@ -361,6 +380,11 @@ pub(crate) fn Controls(
         }
     }
 }
+
+/// Why a Suspend, Resume or Stop and suspend of a host was not sent: this
+/// page's own launch targets or is waking that host.
+pub(crate) const LAUNCH_ON_THIS_HOST: &str =
+    "A launch on this host is in progress; try again once it finishes";
 
 /// A row supplies its established menu focus wiring without owning lifecycle
 /// admission or confirmation. Header controls use the adapter's default buttons.

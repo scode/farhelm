@@ -1034,8 +1034,10 @@ pub(super) type StopConfirmation = (String, ConfirmToken<RowQuestion>, bool, boo
 pub(super) fn SessionRow(
     session: Session,
     state: RowState,
-    /// Only sandbox mutations consult the launch/host token. Ordinary row
-    /// actions and selection stay usable while another launch is pending.
+    /// Only sandbox Suspend and Resume consult the launch/host token, and only
+    /// for its launch target: they are refused while this page's launch
+    /// targets the session's own host. Ordinary row actions and selection stay
+    /// usable while another launch is pending.
     host_ops: crate::ops::OpLock,
     /// A Stop's request lifetime is independent of the last reported agent status.
     #[props(default)]
@@ -2386,10 +2388,16 @@ pub(super) fn SessionRow(
                                     }, "Confirm stop"
                                 }
                                 if sandbox.is_some() {
-                                    button { r#type: "button", class: "btn btn-danger", disabled: busy || host_ops.busy(),
+                                    button { r#type: "button", class: "btn btn-danger",
+                                        disabled: busy || sandbox.is_some_and(|host| host_ops.launch_targets(host)),
                                         "data-tooltip": "Stop this session's agent and close its terminal tabs, then suspend the whole environment",
                                         onkeydown: crate::guard_confirmation_enter,
                                         onclick: move |_| {
+                                            // Suspend takes no page token; only this
+                                            // page's launch on the same host refuses it.
+                                            if sandbox.is_some_and(|host| host_ops.launch_targets_now(host)) {
+                                                return;
+                                            }
                                             if let (Some(answer), Some(token)) = (on_confirm_stop_suspend, suspend_stop_question.clone()) {
                                                 answer.call((suspend_stop_id.clone(), token, stop_refuse_if_tabs_open, stop_refuse_if_agent_running));
                                             }

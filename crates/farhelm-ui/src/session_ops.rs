@@ -83,7 +83,6 @@ impl SessionOps {
         Some(SessionGuard {
             operations: self,
             id: id.to_owned(),
-            host_operation: None,
         })
     }
 
@@ -125,30 +124,11 @@ impl SessionOps {
 }
 
 /// One question/request's release authority; a refused claimant owns nothing.
-/// A sandbox host mutation also carries the page token in this same owner, so
-/// cancellation and persistent dispatch cannot separate the two exclusions.
+/// Sandbox Suspend and Resume hold only this session claim: they are not host
+/// registry changes and carry no page token (see the `ops` module).
 pub(crate) struct SessionGuard {
     operations: SessionOps,
     id: String,
-    /// Sandbox actions mutate the host too. Carry the existing page token
-    /// with their session claim through activity reads, consent and dispatch.
-    host_operation: Option<crate::ops::OpGuard>,
-}
-
-impl SessionGuard {
-    /// Bind a claimed host mutation to this session action's whole lifetime.
-    /// Ordinary lifecycle actions carry no page token and remain independent.
-    pub(crate) fn with_host_guard(mut self, guard: crate::ops::OpGuard) -> Self {
-        self.host_operation = Some(guard);
-        self
-    }
-
-    /// Preserve host exclusion when Stop transfers to the existing row path.
-    /// That path synchronously releases and reclaims the session, so its
-    /// caller must keep this distinct host guard in the persistent future.
-    pub(crate) fn take_host_guard(&mut self) -> Option<crate::ops::OpGuard> {
-        self.host_operation.take()
-    }
 }
 
 impl Drop for SessionGuard {
@@ -200,91 +180,16 @@ mod tests {
 
     thread_local! {
         static OPERATIONS: Cell<Option<SessionOps>> = const { Cell::new(None) };
-        static HOST_OPS: Cell<Option<crate::ops::OpLock>> = const { Cell::new(None) };
-        static HELD: Cell<Option<Signal<Option<SessionGuard>>>> = const { Cell::new(None) };
         static SELECTED: Cell<Option<Signal<String>>> = const { Cell::new(None) };
     }
 
     /// Own signals outside the child surface whose navigation is being modeled.
     fn owner() -> Element {
         let operations = use_hook(SessionOps::new);
-        let host_ops = crate::ops::use_op_lock();
-        let held = use_signal(|| None);
         let selected = use_signal(|| "a".to_owned());
         OPERATIONS.with(|slot| slot.set(Some(operations)));
-        HOST_OPS.with(|slot| slot.set(Some(host_ops)));
-        HELD.with(|slot| slot.set(Some(held)));
         SELECTED.with(|slot| slot.set(Some(selected)));
         rsx! {}
-    }
-
-    /// A sandbox question's cancellation releases both exclusions. Ordinary
-    /// actions on another session remain admissible while it is held; the
-    /// page token excludes launches and host changes, not those actions.
-    #[farhelm_testtrace::test]
-    fn sandbox_question_owns_both_claims_until_cancellation() {
-        let mut dom = VirtualDom::new(owner);
-        dom.rebuild_in_place();
-        dom.in_runtime(|| {
-            let operations = OPERATIONS.with(Cell::get).unwrap();
-            let mut host_ops = HOST_OPS.with(Cell::get).unwrap();
-            let claim = operations
-                .claim("sandbox")
-                .expect("premise: source session is idle")
-                .with_host_guard(host_ops.claim_guard().expect("premise: host token is free"));
-            let other = operations
-                .claim("other")
-                .expect("other session remains usable");
-            assert!(operations.claim("sandbox").is_none());
-            assert!(host_ops.claim_guard().is_none());
-            let mut held = HELD.with(Cell::get).unwrap();
-            held.set(Some(claim));
-            drop(held.write().take());
-            assert!(!operations.busy_now("sandbox"));
-            assert!(operations.busy_now("other"));
-            assert!(!host_ops.busy_now());
-            drop(other);
-        });
-    }
-
-    /// Stop and suspend reuses Stop's synchronous session re-admission. Its
-    /// host token must survive dropping the old session claim, then remain
-    /// owned until the persistent request finishes or is cancelled.
-    #[farhelm_testtrace::test]
-    fn sandbox_host_claim_survives_stop_session_handoff() {
-        let mut dom = VirtualDom::new(owner);
-        dom.rebuild_in_place();
-        dom.in_runtime(|| {
-            let operations = OPERATIONS.with(Cell::get).unwrap();
-            let mut host_ops = HOST_OPS.with(Cell::get).unwrap();
-            let mut claim = operations
-                .claim("sandbox")
-                .expect("premise: source session is idle")
-                .with_host_guard(host_ops.claim_guard().expect("premise: host token is free"));
-            let host_guard = claim
-                .take_host_guard()
-                .expect("suspension owns host exclusion");
-            drop(claim);
-            assert!(!operations.busy_now("sandbox"));
-            assert!(
-                host_ops.claim_guard().is_none(),
-                "session release must not release the host"
-            );
-            let request = operations
-                .claim("sandbox")
-                .expect("Stop can re-admit its source");
-            drop(request);
-            assert!(
-                host_ops.busy_now(),
-                "host exclusion belongs to the persistent request"
-            );
-            drop(host_guard);
-            assert!(!host_ops.busy_now());
-            let next = host_ops
-                .claim_guard()
-                .expect("a later launch or host change can proceed");
-            drop(next);
-        });
     }
 
     /// A question and a request exclude the same source synchronously, while a

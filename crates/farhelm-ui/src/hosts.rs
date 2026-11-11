@@ -2162,20 +2162,31 @@ pub(crate) fn HostsPanel(
     // dialog's writes act on: only a write that started gets its outcome
     // attributed to a setting (`dialog_write`). A refused start leaves the
     // host's existing line, if any, belonging to whatever produced it.
-    let mut run = move |host: HostId, request: HostRequest, display: HostRequestDisplay| -> bool {
-        if provisioning_busy_hosts.peek().contains(&host) {
+    //
+    // Two entry points share the body below. `run` is for registry changes
+    // and claims the page token. `run_lifecycle` is for Suspend and Resume,
+    // which are not registry changes: they take no token, so launches on
+    // other hosts and host changes elsewhere proceed beside them, and they
+    // are refused only while this page's launch targets or wakes that host.
+    // Both keep this host's own busy checks.
+    //
+    // `claim` is `None` only for `run_lifecycle`. When present it is the
+    // guard, not a bare claim, because this panel can unmount with the
+    // request still in flight (the browser's token prompt replaces the page
+    // when another request is refused), and that drops the task below before
+    // it reaches any release of its own. Moved into the task, the guard
+    // releases the page lock either way; a bare claim stranded it, and every
+    // lock-gated control on the page then refused silently until a reload.
+    let mut run_with = move |host: HostId,
+                             request: HostRequest,
+                             display: HostRequestDisplay,
+                             claim: Option<OpGuard>|
+          -> bool {
+        if provisioning_busy_hosts.peek().contains(&host)
+            || mutation_busy_hosts.peek().contains(&host)
+        {
             return false;
         }
-        // The guard, not a bare claim, because this panel can unmount
-        // with the request still in flight (the browser's token prompt
-        // replaces the page when another request is refused), and that
-        // drops the task below before it reaches any release of its own.
-        // Moved into the task, the guard releases the page lock either way;
-        // a bare claim stranded it, and every lock-gated control on the
-        // page then refused silently until a reload.
-        let Some(claim) = ops.claim_guard() else {
-            return false;
-        };
         mutation_busy_hosts.write().insert(host);
         errors.write().remove(&host);
         warnings.write().remove(&host);
@@ -2269,6 +2280,25 @@ pub(crate) fn HostsPanel(
         });
         true
     };
+    let mut run = move |host: HostId, request: HostRequest, display: HostRequestDisplay| -> bool {
+        let Some(claim) = ops.claim_guard() else {
+            return false;
+        };
+        run_with(host, request, display, Some(claim))
+    };
+    let mut run_lifecycle =
+        move |host: HostId, request: HostRequest, display: HostRequestDisplay| -> bool {
+            if ops.launch_targets_now(host) {
+                // Reached from an answered Suspend question whose launch began
+                // after it opened: the dialog has closed, so say why nothing
+                // happened on the row rather than dropping the answer silently.
+                errors
+                    .write()
+                    .insert(host, crate::sandbox_sessions::LAUNCH_ON_THIS_HOST.into());
+                return false;
+            }
+            run_with(host, request, display, None)
+        };
 
     let retry_base = base.clone();
     let on_retry = move |host: HostId| {
@@ -2310,7 +2340,7 @@ pub(crate) fn HostsPanel(
     let lifecycle = use_callback(move |(snapshot, resume): (Host, bool)| {
         let host = snapshot.id;
         let base = lifecycle_base.clone();
-        run(
+        run_lifecycle(
             host,
             Box::pin(async move {
                 if resume {
@@ -2341,8 +2371,11 @@ pub(crate) fn HostsPanel(
             return;
         };
         // A queued click must not start a competing request after another
-        // surface acquires the lifecycle hold.
-        if matches!(snapshot.state, HostPhase::TensorlakeChanging { .. }) {
+        // surface acquires the lifecycle hold, nor one this page's launch on
+        // this host would refuse (`run_lifecycle` rechecks at dispatch).
+        if matches!(snapshot.state, HostPhase::TensorlakeChanging { .. })
+            || ops.launch_targets_now(host)
+        {
             return;
         }
         if resume {
@@ -3279,6 +3312,9 @@ pub(crate) fn HostsPanel(
                                 busy: mutation_busy_hosts.read().contains(&host.id)
                                     || provisioning_busy_hosts.read().contains(&host.id)
                                     || busy,
+                                lifecycle_busy: mutation_busy_hosts.read().contains(&host.id)
+                                    || provisioning_busy_hosts.read().contains(&host.id)
+                                    || ops.launch_targets(host.id),
                                 error: (*settings_open.read() != Some(host.id))
                                     .then(|| errors.read().get(&host.id).cloned())
                                     .flatten(),
@@ -3542,6 +3578,9 @@ pub(crate) fn HostsPanel(
                                         r#type: "button",
                                         class: "btn btn-primary",
                                         "data-tooltip": "Suspend: pause this sandbox until it is resumed",
+                                        // A launch on this host can start while the activity
+                                        // read that opened this question was pending.
+                                        disabled: ops.launch_targets(host.id),
                                         onclick: move |_| {
                                             let Some(host) = answer_suspend(&mut suspend_question, &shown) else { return; };
                                             DialogHandle::new(".host-suspend-dialog").release();
@@ -3960,6 +3999,10 @@ struct HostRowActivity {
     /// flight — this host's own mutation or provisioning run, or the page's
     /// operation token held by any other row.
     busy: bool,
+    /// The same for Suspend and Resume alone, which are not registry changes
+    /// and ignore the page token: this host's own mutation or provisioning
+    /// run, or this page's launch targeting or waking this host.
+    lifecycle_busy: bool,
     /// The last verb's REFUSAL, as the helm wrote it, or `None` when the last
     /// one succeeded or none has run yet.
     error: Option<String>,
@@ -4329,6 +4372,7 @@ fn HostRow(
     let HostRowControls { menu_open } = controls;
     let HostRowActivity {
         busy,
+        lifecycle_busy,
         error,
         warning,
     } = activity;
@@ -4706,7 +4750,7 @@ fn HostRow(
                 }
                 span { class: "host-name peer-value", dir: "ltr", "{shown_name}" }
                 if offers_resume {
-                    button { class: "btn host-resume", disabled: busy || lifecycle_changing, onclick: move |_| { if !busy && !lifecycle_changing { on_lifecycle.call((id, true)); } }, "Resume" }
+                    button { class: "btn host-resume", disabled: lifecycle_busy || lifecycle_changing, onclick: move |_| { if !lifecycle_busy && !lifecycle_changing { on_lifecycle.call((id, true)); } }, "Resume" }
                 }
                 span {
                     // `updating` lets the status group shrink so the step
@@ -4926,14 +4970,14 @@ fn HostRow(
                                 }
                                 if let Some(action) = lifecycle_action {
                                     button { class: "btn menu-item host-row-menu-item", role: "menuitem",
-                                        disabled: busy || lifecycle_changing,
+                                        disabled: lifecycle_busy || lifecycle_changing,
                                         tabindex: if menu_tab_stop == Some(action) { "0" } else { "-1" },
                                         "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, action),
                                         onmounted: move |element| remember_menu_item(menu_wiring, action, element.data()),
                                         onfocusin: move |_| record_menu_item_focus(menu_wiring, action),
                                         onfocusout: move |_| menu_focus.set(None),
                                         onkeydown: move |evt| handle_menu_key(&evt, menu_order.position(action), menu_wiring, &id),
-                                        onclick: move |_| { if !busy && !lifecycle_changing { on_lifecycle.call((id, offers_resume)); } },
+                                        onclick: move |_| { if !lifecycle_busy && !lifecycle_changing { on_lifecycle.call((id, offers_resume)); } },
                                         HostMenuActionIcon { action }
                                         if offers_resume { "Resume" } else { "Suspend" }
                                     }
@@ -8676,10 +8720,12 @@ mod tests {
         assert!(
             HostRowActivity {
                 busy: false,
+                lifecycle_busy: false,
                 error: raw.error.clone(),
                 warning: raw.warning.clone()
             } != HostRowActivity {
                 busy: false,
+                lifecycle_busy: false,
                 error: spelled.error.clone(),
                 warning: spelled.warning.clone()
             },
@@ -8836,7 +8882,7 @@ mod tests {
     fn real_host_row_reports_only_retained_diagnostic_changes() {
         std::thread_local! {
             static ACTIVITY: std::cell::RefCell<HostRowActivity> =
-                const { std::cell::RefCell::new(HostRowActivity { busy: false, error: None, warning: None }) };
+                const { std::cell::RefCell::new(HostRowActivity { busy: false, lifecycle_busy: false, error: None, warning: None }) };
             static CHANGED_BUILD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
             static CAPTURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
         }
@@ -8899,6 +8945,7 @@ mod tests {
         ACTIVITY.with(|activity| {
             *activity.borrow_mut() = HostRowActivity {
                 busy: false,
+                lifecycle_busy: false,
                 error: None,
                 warning: None,
             }
@@ -9070,6 +9117,7 @@ mod tests {
                     },
                     activity: HostRowActivity {
                         busy: false,
+                        lifecycle_busy: false,
                         error: None,
                         warning: None,
                     },
@@ -9148,6 +9196,7 @@ mod tests {
                         controls: HostRowControls { menu_open: false },
                         activity: HostRowActivity {
                             busy: false,
+                            lifecycle_busy: false,
                             error: (refused == Some(id))
                                 .then(|| "the helm refused this verb".to_string()),
                             warning: None,

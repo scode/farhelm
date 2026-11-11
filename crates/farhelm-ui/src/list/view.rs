@@ -897,9 +897,10 @@ fn FilterHostLabel(
 /// ## Launch and host mutation exclusion
 ///
 /// A launch choosing its destination and a mutation of the host registry
-/// exclude each other through `ops::OpLock`. Session-facing sandbox Suspend,
-/// Resume and Stop and suspend mutate hosts too, so their session claims
-/// carry that same token through consent and the persistent request.
+/// exclude each other through `ops::OpLock`. Sandbox Suspend, Resume and Stop
+/// and suspend are not registry changes and take no token: their session
+/// claims alone carry consent and the persistent request, and they are refused
+/// only while this page's launch targets or wakes the same host.
 ///
 /// Navigation and ordinary session actions use no page token. Their requests
 /// run here, outside the keyed session view, and the shared per-session claims
@@ -918,8 +919,8 @@ pub(crate) fn ListView(
     /// that same snapshot even when sidebar filtering hides the selected row.
     open_destination: Option<OpenDestination>,
     /// Excludes submitted launches from registry mutations and another composer
-    /// submission. Sandbox host mutations share it; ordinary per-session
-    /// actions and navigation do not consult it.
+    /// submission. Sandbox Suspend and Resume read only its launch target;
+    /// ordinary per-session actions and navigation do not consult it.
     ops: OpLock,
     /// A session this list removed through a successful delete. `AppBody` reconciles the
     /// selection: without this, deleting the selected row would leave the
@@ -2451,8 +2452,7 @@ pub(crate) fn ListView(
     let mut admit_stop = move |id: String,
                                refuse_if_tabs_open: bool,
                                refuse_if_agent_running: bool,
-                               suspend: bool,
-                               host_guard: Option<crate::ops::OpGuard>|
+                               suspend: bool|
           -> Option<RowWork> {
         // Cross-guard against an open row question, not just
         // `row_pending`: the stop/delete buttons are only ABSENT from the
@@ -2519,9 +2519,6 @@ pub(crate) fn ListView(
             } else {
                 stop_session(&base, &id, refuse_if_tabs_open, refuse_if_agent_running).await
             };
-            // Stop-and-suspend excludes other host mutations through its actual
-            // reply, not through the subsequent display-only status read.
-            drop(host_guard);
             operations.stopping.write().remove(&id);
             operations.boundary(&id, None);
             match outcome {
@@ -2607,18 +2604,15 @@ pub(crate) fn ListView(
     let mut header_stop = admit_stop.clone();
     let mut stop_confirmed = admit_stop.clone();
     let mut stop_suspend_confirmed = admit_stop.clone();
+    // This answer adds a host Suspend to the ordinary Stop question. Suspend
+    // is not a host registry change and takes no page token; the row refuses
+    // the answer while this page's launch targets the session's host, before
+    // it reaches here.
     let confirm_stop_suspend = move |(id, token, no_tabs, ended): super::row::StopConfirmation| {
-        // This answer adds a host mutation to the ordinary Stop question.
-        // Refusal leaves that question intact; an admitted suspension keeps
-        // the page token through the persistent Stop-and-suspend request's reply.
-        let mut host_ops = ops;
-        let Some(host_guard) = host_ops.claim_guard() else {
-            return;
-        };
         if *token.key() != RowQuestion::Stop || row_questions.take(&id, &token).is_none() {
             return;
         }
-        if let Some(work) = stop_suspend_confirmed(id, no_tabs, ended, true, Some(host_guard)) {
+        if let Some(work) = stop_suspend_confirmed(id, no_tabs, ended, true) {
             spawn(work);
         }
     };
@@ -2644,7 +2638,6 @@ pub(crate) fn ListView(
             target.tabs == 0,
             target.status.has_ended(),
             false,
-            None,
         ) {
             spawn(work);
         }
@@ -2658,13 +2651,8 @@ pub(crate) fn ListView(
         if *token.key() != RowQuestion::Stop || row_questions.take(&id, &token).is_none() {
             return;
         }
-        if let Some(work) = stop_confirmed(
-            id,
-            refuse_if_tabs_open,
-            refuse_if_agent_running,
-            false,
-            None,
-        ) {
+        if let Some(work) = stop_confirmed(id, refuse_if_tabs_open, refuse_if_agent_running, false)
+        {
             spawn(work);
         }
     };
@@ -3079,19 +3067,10 @@ pub(crate) fn ListView(
     let header_base = base.clone();
     let header_listing = request_listing.clone();
     let header_actions = use_callback(move |action: HeaderAction| match action {
-        HeaderAction::Stop(source, no_tabs, ended, suspend, mut claim) => {
+        HeaderAction::Stop(source, no_tabs, ended, suspend, claim) => {
             // Stop re-admits its session through the established row core.
-            // A suspension's host claim must cross that handoff unchanged;
-            // ordinary Stop carries None and never acquires the page token.
-            let host_guard = claim.take_host_guard();
             drop(claim);
-            if let Some(work) = header_stop(
-                source.id.raw().to_owned(),
-                no_tabs,
-                ended,
-                suspend,
-                host_guard,
-            ) {
+            if let Some(work) = header_stop(source.id.raw().to_owned(), no_tabs, ended, suspend) {
                 spawn(work);
             }
         }
@@ -4246,13 +4225,9 @@ pub(crate) fn ListView(
             let work = lifecycle::admit_batch(
                 targets,
                 |id, guard, refuse_if_tabs_open, refuse_if_agent_running| match action {
-                    LifecycleAction::Stop => bulk_admit_stop(
-                        id,
-                        refuse_if_tabs_open,
-                        refuse_if_agent_running,
-                        false,
-                        None,
-                    ),
+                    LifecycleAction::Stop => {
+                        bulk_admit_stop(id, refuse_if_tabs_open, refuse_if_agent_running, false)
+                    }
                     LifecycleAction::Delete => {
                         let sandbox = sandbox_ids
                             .contains(&id)

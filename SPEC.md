@@ -1330,11 +1330,15 @@ convenience and never a prerequisite.
 After submitting a launch, including Restart with or Replace with, the launcher hides while the request is pending. The
 user can switch sessions, type in their terminals and act on other sessions. The same launcher remains busy and cannot
 accept a second launch or be replaced with another draft. Launches and changes to the host registry still exclude each
-other. Preparation and required confirmations remain modal until the launch is submitted. A failure, unknown outcome or
-follow-up question restores the same launcher with its draft and ordinary retry rules if the user has not moved on since
-submitting it. Otherwise a notice offers it, and the launcher returns when the user opens that notice (see
-[Keyboard focus](#keyboard-focus)). Whether such a notice keeps New and other launches refused until it is opened is not
-settled yet. Switching to a session on another host does not change the submitted launch's destination or retry
+other. Suspend and Resume are not changes to the host registry: from Hosts or from a sandbox session's row, top bar or
+Stop question (Stop and suspend), they are refused only while this page's own launch targets or is waking that same
+host, and their buttons are disabled for exactly that. Launches on other hosts and host changes elsewhere proceed while
+one is pending, and a launch on that host is left to the launcher's availability rule below and to the host's own
+lifecycle lock. Preparation and required confirmations remain modal until the launch is submitted. A failure, unknown
+outcome or follow-up question restores the same launcher with its draft and ordinary retry rules if the user has not
+moved on since submitting it. Otherwise a notice offers it, and the launcher returns when the user opens that notice
+(see [Keyboard focus](#keyboard-focus)). Whether such a notice keeps New and other launches refused until it is opened
+is not settled yet. Switching to a session on another host does not change the submitted launch's destination or retry
 identity. The acted-on session's progress, actions, terminal attachment and row outcome settle as soon as the reply
 arrives; only the launcher's return depends on the user. Successfully waking a suspended sandbox continues to create
 without revealing the launcher, restoring its page isolation or waiting for another dialog.

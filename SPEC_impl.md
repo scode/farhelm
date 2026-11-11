@@ -1141,9 +1141,15 @@ YOLO questions coexist per source in the same persistent owner. Their existing e
 common session admission and header gates, while pending-request presentation stays separate so the question's own
 answers remain enabled. An answer consumes its rendered source/token and admits the request synchronously; a refused
 admission restores only that source's question and error under a fresh opening. The page operation token remains the
-launch-versus-host-mutation exclusion, independent of session claims. Header composer openings check both exclusions
-before publishing their prefill, and the list rechecks before consuming it. Releasing a claim between the click and that
-effect cannot revive a refused opening. Only the admitted list opening retires an earlier Replace retry identity.
+launch-versus-host-mutation exclusion, independent of session claims. Suspend and Resume, from Hosts or a sandbox
+session (Stop and suspend included), are not registry mutations and never claim it. The token instead records the
+existing host a launch resolved (`OpGuard::target`, set synchronously once the submit has resolved and checked that
+host, cleared when the launch's guard drops), and those controls are refused while it names their host, at the click and
+again at the answer. A launch that creates its own environment records no target: its host does not exist until the
+create, and that session's controls appear only after it. Hosts' per-host busy checks still serialize this page's
+requests on one host. Header composer openings check both exclusions before publishing their prefill, and the list
+rechecks before consuming it. Releasing a claim between the click and that effect cannot revive a refused opening. Only
+the admitted list opening retires an earlier Replace retry identity.
 
 Session-action and launch completions have three responsibilities: settle, return and leave alone. These rules cover
 New, Clone, quick launch, Restart with, Replace with, and Stop, Restart, Replace and Delete from rows, headers,
