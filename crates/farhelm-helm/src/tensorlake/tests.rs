@@ -650,7 +650,9 @@ async fn schema_70_adds_an_empty_account_that_persists() {
 /// Spec: reading the settings reports `NotCreated` and writes nothing; the
 /// explicit create generates an ed25519 pair (private key mode 0600, the
 /// comment naming the helm tag) inside `<state>/tensorlake/ssh-key/` and
-/// removes a leftover temporary folder; the command passes the public key
+/// removes a leftover temporary folder. Its algorithm matches the Tensorlake
+/// connection's accepted key type, so changing generation cannot silently
+/// make every gateway login refuse. The command passes the public key
 /// line as one argument; a second create, also through a fresh service as
 /// after a restart, keeps the same key. Needs `ssh-keygen` on PATH, as the
 /// helm itself does.
@@ -685,6 +687,11 @@ async fn the_ssh_key_is_created_only_on_request_with_private_permissions() {
     assert_eq!(settings.helm_tag, tag);
     assert_eq!(name, format!("farhelm-{tag}"));
     assert!(public_key.starts_with("ssh-ed25519 "));
+    let access = super::ssh::TensorlakeSshAccess::for_state_dir(&state).unwrap();
+    assert!(access.options().unwrap().contains(&format!(
+        "PubkeyAcceptedKeyTypes={}",
+        public_key.split_whitespace().next().unwrap()
+    )));
     assert!(public_key.ends_with(&format!(" farhelm-{tag}")));
     let key_dir = state.join("tensorlake/ssh-key");
     assert_eq!(

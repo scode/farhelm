@@ -1379,6 +1379,8 @@ mod tests {
             r#"IdentityFile="/state dir/normal/tensorlake/ssh-key/id_ed25519""#,
             "IdentitiesOnly=yes",
             "IdentityAgent=none",
+            "PubkeyAcceptedKeyTypes=ssh-ed25519",
+            "PKCS11Provider=none",
             r#"UserKnownHostsFile="/state dir/normal/tensorlake/known_hosts""#,
             "GlobalKnownHostsFile=/dev/null",
             "HostKeyAlias=sandbox.tensorlake.ai",

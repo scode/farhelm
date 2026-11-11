@@ -4317,11 +4317,10 @@ token, for the Tensorlake actions the user takes (Settings' **Test** lists the a
 preparation creates, snapshots and deletes sandboxes and snapshots; a sandbox-session launch creates its own sandbox,
 whose Delete terminates it and removes its snapshots). These requests follow no redirects and are not retried, and the
 key appears in no reply, error message or log. Snapshot builds, preparation and sandbox-host connections reach the
-sandbox with `ssh` through Tensorlake's gateway, using Farhelm's key without consulting the user's SSH agent. The user's
-SSH configuration still applies: a configured certificate (even one whose private key is only in the agent), or a
-configured hardware-token key, can precede Farhelm's key, so a gateway that rejects the first unknown key can still
-refuse that setup. The gateway's host key is recorded on first use in a known_hosts file in the helm's state directory,
-never in the user's own.
+sandbox with `ssh` through Tensorlake's gateway. Public-key authentication offers Farhelm's registered ed25519 key
+first, excluding configured certificates and hardware-token keys that could take priority. Other configured key files
+may follow it. The user's proxy and jump configuration still applies. The gateway's host key is recorded on first use in
+a known_hosts file in the helm's state directory, never in the user's own.
 
 - **Client to helm**: a standalone helm serves its web UI over plain HTTP bound to loopback only, with a required token.
   The helm refuses to bind non-loopback addresses in v1; TLS serving is post-v1. Reaching the UI from another machine
@@ -4385,21 +4384,22 @@ Further requirements:
 - SSH is Farhelm's one transport integration for reaching hosts: given passwordless SSH access, the helm rides it
   automatically for provisioning, updates, and all supervisor communication. How the SSH connection itself is possible
   (a tailnet, a LAN, whatever) is the user's business. No public relay, no third-party rendezvous service.
-- Provisioning rides the user's existing SSH access — their keys, agent, and config. Farhelm stores no SSH credentials
-  of its own, with one exception for Tensorlake sandboxes: Tensorlake's SSH gateway admits only keys registered with the
-  user's Tensorlake account, and only a user login, not an API key, can register one. For those hosts alone the helm
-  keeps an ed25519 key pair of its own in its state directory (private key mode 0600, no passphrase), generated with
-  `ssh-keygen` only when the user asks for it in Settings and never replaced while it exists; Settings then shows the
-  command that registers it. Farhelm never offers this key to any other host. Confirmed 2026-10-01: the config governs
-  reaching and authenticating to the host (keys, the agent used to authenticate, ProxyJump, Match blocks), not what
-  rides Farhelm's connections. Whatever the config says, Farhelm's own ssh connections, the supervisor connection and
-  every provisioning step alike, disable SSH agent, X11 and port forwarding, and override the settings that would
-  replace or wrap Farhelm's own remote command: a `RemoteCommand`, a forced terminal, and a `LocalCommand`. A remote
-  host therefore cannot reach the helm machine's ssh agent, display or local ports through SSH forwarding on a
-  connection that stays up around the clock. Explicit localhost tunnels are a separate, consented raw-TCP relay inside
-  Farhelm's protocol, from the Mac to the session host's loopback only. Accepted: right after an upgrade, a helm started
-  within a minute of the previous version stopping (the desktop app reopened, or a helm run by hand) can attach to a
-  shared ssh connection the previous version left open, and port forwards that connection set up last until it closes.
+- Provisioning rides the user's existing SSH access — their keys, agent, and config, with the Tensorlake identity policy
+  above as the exception. Farhelm stores no SSH credentials of its own, with one exception for Tensorlake sandboxes:
+  Tensorlake's SSH gateway admits only keys registered with the user's Tensorlake account, and only a user login, not an
+  API key, can register one. For those hosts alone the helm keeps an ed25519 key pair of its own in its state directory
+  (private key mode 0600, no passphrase), generated with `ssh-keygen` only when the user asks for it in Settings and
+  never replaced while it exists; Settings then shows the command that registers it. Farhelm never offers this key to
+  any other host. Confirmed 2026-10-01: the config governs reaching and authenticating to the host (keys, the agent used
+  to authenticate, ProxyJump, Match blocks), not what rides Farhelm's connections. Whatever the config says, Farhelm's
+  own ssh connections, the supervisor connection and every provisioning step alike, disable SSH agent, X11 and port
+  forwarding, and override the settings that would replace or wrap Farhelm's own remote command: a `RemoteCommand`, a
+  forced terminal, and a `LocalCommand`. A remote host therefore cannot reach the helm machine's ssh agent, display or
+  local ports through SSH forwarding on a connection that stays up around the clock. Explicit localhost tunnels are a
+  separate, consented raw-TCP relay inside Farhelm's protocol, from the Mac to the session host's loopback only.
+  Accepted: right after an upgrade, a helm started within a minute of the previous version stopping (the desktop app
+  reopened, or a helm run by hand) can attach to a shared ssh connection the previous version left open, and port
+  forwards that connection set up last until it closes.
 
   Tensorlake recipe tunnels are raw-TCP relays over the host's existing supervisor connection, in the other direction:
   the supervisor listens on the configured sandbox IPv4 loopback ports, and the helm connects only to destinations in
