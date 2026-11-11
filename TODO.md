@@ -36,18 +36,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the click and let the question take focus only from that element, which needs per-request focus bookkeeping. Plan:
   `plans/queue/yolo-focus-origin.md`.
 
-- **Revisit accepting the agent-only SSH key fix for Tensorlake hosts.** Decided on the maintainer's behalf on
-  2026-11-10 when tensorlake-skip-ssh-agent blocked: Tensorlake snapshot builds and sandbox-host connections could offer
-  a key from your SSH agent before Farhelm's registered key, which fails if Tensorlake's gateway rejects the first
-  unknown key (that gateway behavior was never verified live). The plan stops consulting the SSH agent for the gateway,
-  but a certificate or a hardware-token key configured in your own SSH configuration can still be offered before
-  Farhelm's key, and OpenSSH 7.6, Farhelm's minimum, cannot switch the hardware-token one off. The plan was told to
-  accept that, document both as exceptions (with the advice to leave those settings out of the configuration that
-  applies to the Tensorlake host), and drop the promise that Farhelm's key is always offered first. The alternative was
-  broader identity isolation guaranteeing Farhelm's key goes first in every supported SSH configuration, which needs a
-  new design that keeps proxy and jump configuration and the OpenSSH 7.6 floor, and more than the plan's size limit.
-  Plan: `plans/queue/tensorlake-key-order.md`.
-
 - **Revisit keeping a sandbox session's Suspend and Resume exclusive with launches.** Decided on the maintainer's behalf
   on 2026-11-10 when landing nonblocking-session-actions stopped: that plan lets you act on other sessions while a
   launch or a session action is pending, and as delivered it also let Suspend and Resume from a sandbox session's row or

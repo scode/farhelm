@@ -7,9 +7,9 @@
 //! registers it. Connections pass the private key to ssh with
 //! `IdentitiesOnly=yes` and `IdentityAgent=none` for builds and hosts, so the
 //! user's agent cannot promote another configured key ahead of Farhelm's.
-//! Configured file keys can still follow it; a certificate with its matching
-//! private key or a configured PKCS11 key can precede it. A gateway that rejects
-//! the first unknown key can still refuse that setup (see `super::ssh`). This
+//! During public-key authentication, the shared options exclude certificates
+//! and token keys that could precede Farhelm's generated key. Other configured
+//! file keys can still follow it (see `super::ssh`). This
 //! is the one place Farhelm stores an ssh credential of its own; SPEC.md's
 //! "Farhelm stores no SSH credentials of its own" carries the exception.
 //!

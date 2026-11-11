@@ -20,13 +20,13 @@
 //! share one key policy, one known_hosts file and one host key alias.
 //!
 //! The user's ssh config is still read (`-F` is not passed): a user who needs
-//! a proxy to reach Tensorlake keeps it. Its plain `IdentityFile` keys can
-//! follow Farhelm's; a configured certificate (even one whose private key
-//! is only in the agent) or a configured PKCS11 key can precede it. A gateway that rejects the
-//! first unknown key can therefore still refuse that setup.
-//! `PKCS11Provider=none` is not a disable switch on supported OpenSSH 7.6
-//! (its `ssh-pkcs11.c` passes the value to `dlopen`). The gateway's assumed
-//! refusal at the first unknown key has not been verified for this change.
+//! a proxy to reach Tensorlake keeps it. Public-key authentication offers
+//! Farhelm's generated ed25519 key first: `PubkeyAcceptedKeyTypes=ssh-ed25519`
+//! excludes certificates, and `PKCS11Provider=none` prevents token keys from
+//! jumping ahead. Other configured file keys may follow Farhelm's key.
+//! The older accepted-types spelling preserves the OpenSSH 7.6 floor. On
+//! 7.6–7.9 the provider value produces a nonfatal `dlopen none failed`
+//! diagnostic; the key-type filter also excludes those versions' RSA tokens.
 //! A `ProxyJump` hop's separate `ssh -W` child keeps the user's agent: these
 //! options do not reach it (see `crate::ssh::CONNECTION_OVERRIDES`' localhost check).
 //! The options here are on the command line, so they win over the config
@@ -104,6 +104,8 @@ impl TensorlakeSshAccess {
             crate::ssh::ssh_config_path_option("IdentityFile", &text(&self.identity_file)?)?,
             "IdentitiesOnly=yes".to_string(),
             "IdentityAgent=none".to_string(),
+            "PubkeyAcceptedKeyTypes=ssh-ed25519".to_string(),
+            "PKCS11Provider=none".to_string(),
             crate::ssh::ssh_config_path_option("UserKnownHostsFile", &text(&self.known_hosts)?)?,
             "GlobalKnownHostsFile=/dev/null".to_string(),
             format!("HostKeyAlias={GATEWAY_HOST_KEY_ALIAS}"),
@@ -175,7 +177,8 @@ pub(crate) const AUTH_REFUSED_MESSAGE: &str = "Tensorlake refused Farhelm's SSH 
 mod tests {
     use super::*;
 
-    /// Spec: the options are Farhelm's key with `IdentitiesOnly` and no agent,
+    /// Spec: the options put Farhelm's plain ed25519 key first, with no agent
+    /// or token provider and certificates excluded from public-key authentication;
     /// Farhelm's known_hosts beside the key directory under the gateway alias with no
     /// global file, trust on first use with no host-key updates, a 30-second
     /// keepalive, and (for the builder's one-shot commands only) errors only
@@ -196,6 +199,8 @@ mod tests {
                 r#"IdentityFile="/state dir/te'nsor/tensorlake/ssh-key/id_ed25519""#,
                 "IdentitiesOnly=yes",
                 "IdentityAgent=none",
+                "PubkeyAcceptedKeyTypes=ssh-ed25519",
+                "PKCS11Provider=none",
                 r#"UserKnownHostsFile="/state dir/te'nsor/tensorlake/known_hosts""#,
                 "GlobalKnownHostsFile=/dev/null",
                 "HostKeyAlias=sandbox.tensorlake.ai",

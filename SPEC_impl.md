@@ -3397,19 +3397,20 @@ locally, so "local host" and "remote host" differ only in transport. Connection 
 versions; it refuses protocol-version incompatibility per SPEC.md's version-skew rule, while build versions travel for
 diagnostics only — mixed builds with a compatible protocol are the normal steady state SPEC.md describes.
 
-Motivation: SPEC.md promises provisioning and transport ride "the user's keys, agent, and config" — only the real ssh
-binary honors ~/.ssh/config fully (ProxyJump, Match blocks, the agent used to authenticate, ControlMaster). russh was
-rejected for exactly that: partial config support would quietly break the promise. What the config does not get is what
-rides Farhelm's connections: every ssh invocation carries `-o` overrides (`CONNECTION_OVERRIDES` in
-`crates/farhelm-helm/src/ssh.rs`) for agent, X11 and port forwarding, `RemoteCommand`, `RequestTTY` and
-`PermitLocalCommand`, which win over the config file. They set an OpenSSH 7.6 floor on the helm machine, and settings
-whose override keywords are newer (`SessionType`, `StdinNull`, `ForkAfterAuthentication`, all 8.7) are left alone rather
-than break older ssh. A port forward set up by a shared connection's master that predates an upgrade survives if the new
-helm reuses that master within its 60 seconds of persistence (the ordinary path for the macOS desktop app: quit,
-install, reopen), and lasts until the master exits (left unused for over a minute, its connection to the host dropped,
-or `ssh -O exit` on its socket); see the `CONNECTION_OVERRIDES` docs. `ClearAllForwardings` leaves ProxyJump working,
-because the jump runs as its own `ssh -W` child; that was checked with a real connection through a jump on localhost.
-JSON control frames keep the protocol debuggable by eye; raw binary data channels keep PTY throughput off the JSON path.
+Motivation: SPEC.md promises provisioning and transport ride "the user's keys, agent, and config", apart from
+Tensorlake's identity policy — only the real ssh binary honors ~/.ssh/config fully (ProxyJump, Match blocks, the agent
+used to authenticate, ControlMaster). russh was rejected for exactly that: partial config support would quietly break
+the promise. What the config does not get is what rides Farhelm's connections: every ssh invocation carries `-o`
+overrides (`CONNECTION_OVERRIDES` in `crates/farhelm-helm/src/ssh.rs`) for agent, X11 and port forwarding,
+`RemoteCommand`, `RequestTTY` and `PermitLocalCommand`, which win over the config file. They set an OpenSSH 7.6 floor on
+the helm machine, and settings whose override keywords are newer (`SessionType`, `StdinNull`, `ForkAfterAuthentication`,
+all 8.7) are left alone rather than break older ssh. A port forward set up by a shared connection's master that predates
+an upgrade survives if the new helm reuses that master within its 60 seconds of persistence (the ordinary path for the
+macOS desktop app: quit, install, reopen), and lasts until the master exits (left unused for over a minute, its
+connection to the host dropped, or `ssh -O exit` on its socket); see the `CONNECTION_OVERRIDES` docs.
+`ClearAllForwardings` leaves ProxyJump working, because the jump runs as its own `ssh -W` child; that was checked with a
+real connection through a jump on localhost. JSON control frames keep the protocol debuggable by eye; raw binary data
+channels keep PTY throughput off the JSON path.
 
 ### Grid streams
 
@@ -6674,25 +6675,28 @@ sweep of that builder then deletes it; finding its ID takes listing the account'
 running or interrupted build and pending cleanup for every recipe. Build, Rebuild and Retry are available for every
 base.
 
-Tensorlake builds and hosts add `IdentityAgent=none`, so the gateway connection never consults the user's SSH agent. The
-user's SSH configuration still applies: a configured certificate (even one whose private key is only in the agent) or a
-configured hardware-token key can precede Farhelm's key, and a gateway that rejects the first unknown key can still
-refuse that setup. That gateway behavior was not verified live for this change. OpenSSH 7.6, the supported minimum,
-treats `PKCS11Provider=none` as a library name, so Farhelm leaves that option out.
+Tensorlake builds and hosts share an identity policy that offers Farhelm's generated key first during public-key
+authentication. `IdentityAgent=none` prevents agent-key promotion, `PubkeyAcceptedKeyTypes=ssh-ed25519` excludes
+certificates, and `PKCS11Provider=none` prevents a token key from preceding the file key. Other configured file keys may
+follow it. The older accepted-types spelling works on the supported OpenSSH 7.6 floor and remains an alias on newer
+clients. OpenSSH 7.6–7.9 treats the provider value as a library name and emits a nonfatal `dlopen none failed`
+diagnostic; the type filter excludes those versions' RSA-only token keys. Proxy and jump configuration still applies,
+and a ProxyJump hop's separate ssh child keeps its own agent and identity policy.
 
 The build's scripts (`build_script.rs`) run as the sandbox user under `sh -c`, through the narrow `SandboxShell` trait.
 Its production implementation runs `ssh` with `ssh_oneshot_args` (the connection overrides, `BatchMode=yes`,
 `ControlMaster=no`, `ControlPath=none`): a builder's name is reused, so a `ControlPersist` master to an earlier builder
 would carry commands to a terminated sandbox, where a new channel hangs. The Tensorlake ssh options
-(`tensorlake/ssh.rs`, shared with Tensorlake hosts) are Farhelm's key with `IdentitiesOnly=yes`; `UserKnownHostsFile` in
-`<state>/tensorlake/known_hosts` with `GlobalKnownHostsFile=/dev/null`, `HostKeyAlias=sandbox.tensorlake.ai` (every
-sandbox name presents the gateway's one host key), `StrictHostKeyChecking=accept-new` and `UpdateHostKeys=no`; and
-`ServerAliveInterval=30` with `ServerAliveCountMax=3`, inside the gateway's measured 300 to 400 second silent-drop
-window. The builder alone adds `LogLevel=ERROR`, which drops the gateway's login banner from every command's stderr; a
-host's connections leave it out, because their failure text is ssh's stderr tail and OpenSSH logs a server's disconnect
-reason below that level. Paths are quoted for ssh_config. Tensorlake access refuses a path containing `%`, `"` or `\`,
-which supported older OpenSSH versions cannot carry safely, or `${`, which ssh would expand, with a message naming the
-path and asking the user to move the helm's state directory. The Tensorlake directory both use is computed in one place
+(`tensorlake/ssh.rs`, shared with Tensorlake hosts) are Farhelm's key with `IdentitiesOnly=yes`, `IdentityAgent=none`,
+`PubkeyAcceptedKeyTypes=ssh-ed25519` and `PKCS11Provider=none`; `UserKnownHostsFile` in `<state>/tensorlake/known_hosts`
+with `GlobalKnownHostsFile=/dev/null`, `HostKeyAlias=sandbox.tensorlake.ai` (every sandbox name presents the gateway's
+one host key), `StrictHostKeyChecking=accept-new` and `UpdateHostKeys=no`; and `ServerAliveInterval=30` with
+`ServerAliveCountMax=3`, inside the gateway's measured 300 to 400 second silent-drop window. The builder alone adds
+`LogLevel=ERROR`, which drops the gateway's login banner from every command's stderr; a host's connections leave it out,
+because their failure text is ssh's stderr tail and OpenSSH logs a server's disconnect reason below that level. Paths
+are quoted for ssh_config. Tensorlake access refuses a path containing `%`, `"` or `\`, which supported older OpenSSH
+versions cannot carry safely, or `${`, which ssh would expand, with a message naming the path and asking the user to
+move the helm's state directory. The Tensorlake directory both use is computed in one place
 (`tensorlake::tensorlake_dir`). The child runs in its own process group and is captured through provisioning's bounded
 `capture_child`, which fails past 64 KiB of output, so every script logs to `/var/tmp/farhelm-build-<step>.log` on the
 sandbox and sends back only the log's last 8 KiB on failure; the helm keeps the last 12 lines, at most 2000 characters,

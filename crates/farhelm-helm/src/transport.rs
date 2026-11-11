@@ -1062,7 +1062,8 @@ mod tests {
     /// the user's agent instead of using the sandbox identity policy (D3).
     ///
     /// Spec: dialing a Tensorlake row runs ssh with Farhelm's key file under
-    /// the helm's state directory, `IdentitiesOnly=yes` and `IdentityAgent=none`;
+    /// the helm's state directory, no agent or token provider, and a plain
+    /// ed25519 accepted type that keeps certificates from taking priority;
     /// an ordinary ssh row's argv names none of them. The stand-in ssh prints its argv on stdout,
     /// which the connection's reader returns.
     #[farhelm_testtrace::test]
@@ -1097,10 +1098,15 @@ mod tests {
             sandbox.lines().any(|line| line == "IdentityAgent=none"),
             "{sandbox}"
         );
+        for option in ["PubkeyAcceptedKeyTypes=ssh-ed25519", "PKCS11Provider=none"] {
+            assert!(sandbox.lines().any(|line| line == option), "{sandbox}");
+        }
         let plain = argv(ssh_row()).await;
         assert!(!plain.contains("IdentityFile"), "{plain}");
         assert!(!plain.contains("IdentitiesOnly"), "{plain}");
         assert!(!plain.contains("IdentityAgent"), "{plain}");
+        assert!(!plain.contains("PubkeyAcceptedKeyTypes"), "{plain}");
+        assert!(!plain.contains("PKCS11Provider"), "{plain}");
     }
 
     /// Why: a suspended or deleted sandbox's shared masters must go, or the
@@ -1144,6 +1150,11 @@ mod tests {
             );
             assert!(run.contains(&"IdentitiesOnly=yes"), "{run:?}");
             assert!(run.contains(&"IdentityAgent=none"), "{run:?}");
+            assert!(
+                run.contains(&"PubkeyAcceptedKeyTypes=ssh-ed25519"),
+                "{run:?}"
+            );
+            assert!(run.contains(&"PKCS11Provider=none"), "{run:?}");
         }
     }
 }
