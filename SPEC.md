@@ -2583,12 +2583,14 @@ red when any update is required, amber otherwise; its accessible name and hover 
 The attention list above sessions has one row per host, with its rail mark and short name, its state, and the action
 that state offers. Live setup, update or uninstall progress takes precedence over a problem, which takes precedence over
 an available update. Working rows say **Setting up**, **Updating** or **Uninstalling**, followed by the current step's
-name when known, ellipsized to fit. Their identity button opens the shared progress card on hover or keyboard focus,
-with the same detail as the Hosts progress line, and their marks and bars have no separate plain tooltip. Step-name
-changes do not invalidate session menus below the list. Working rows show a progress bar, filled as steps complete when
-a step count is available and otherwise left empty and static, which keeps the row's height; they have no action button.
-A connection interruption during that work does not replace its progress with a problem. Problems appear first, then
-working hosts, then updates, in rail order within each group.
+name when known, ellipsized to fit. Hovering anywhere on a working row opens the identity button's shared progress card,
+including its bar, gaps and padding. Moving within that row keeps the card in place, and pressing anywhere dismisses it.
+Keyboard focus on the identity button opens the same card, with the same detail as the Hosts progress line. Before step
+data arrives, the whole row shares the button's plain tooltip. Their marks and bars have no separate plain tooltip.
+Step-name changes do not invalidate session menus below the list. Working rows show a progress bar, filled as steps
+complete when a step count is available and otherwise left empty and static, which keeps the row's height; they have no
+action button. A connection interruption during that work does not replace its progress with a problem. Problems appear
+first, then working hosts, then updates, in rail order within each group.
 
 Problem rows offer **Details**: Unreachable (worded **Unreachable, retrying**), Identity mismatch, Identity unverified,
 Duplicate, Retired, Unrecognized, a protocol skew without an available Update or with the host's higher protocol, a

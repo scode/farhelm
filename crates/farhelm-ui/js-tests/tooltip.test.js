@@ -329,6 +329,13 @@ function menuTooltipPage(menuFirst) {
       sidebar.getBoundingClientRect = () => rect(0, 0, 396, 800);
       return element({ "data-tooltip-anchor": "session-row", "data-tooltip": "row help" }, sidebar);
     },
+    /** A progress bar and grid padding share the button's plain fallback help. */
+    attentionRow() {
+      const row = element({ "data-tooltip-host-progress": "true" });
+      const open = element({ "data-tooltip": "working host" }, row);
+      row.querySelector = selector => { assert.equal(selector, ".host-attention-open"); return open; };
+      return { row, open, bar: element({}, row), nearer: element({ "data-tooltip": "nearer help" }, row) };
+    },
     outside: doc.body,
     visible() { return tooltips.filter(tip => !tip.hidden && tip.className === "farhelm-tooltip"); },
     pointers() { return tooltips.filter(tip => !tip.hidden && tip.className === "farhelm-tooltip-pointer"); },
@@ -348,6 +355,45 @@ function menuTooltipPage(menuFirst) {
     },
   };
 }
+
+/** Movement across a bar restarts the same owner's timer, then keeps its box. */
+test("working host row space shares the button's rest delay and shown tooltip", () => {
+  const p = menuTooltipPage(true);
+  const { row, open, bar } = p.attentionRow();
+  p.dispatch("pointerover", bar, { pointerType: "mouse" });
+  p.advance(200);
+  p.dispatch("pointermove", row, { pointerType: "mouse" });
+  p.advance(299);
+  assert.equal(p.visible().length, 0, "movement through padding must restart rest");
+  p.advance(1);
+  const tip = p.visible()[0];
+  assert.equal(tip.textContent, "working host", "the no-step text fallback uses the same owner");
+  for (const target of [open, bar, row]) {
+    p.dispatch("pointerover", target, { pointerType: "mouse" });
+    assert.deepEqual(p.visible(), [tip], "crossing the row must keep the shown box");
+  }
+});
+
+/** A press anywhere in the row keeps help down until the pointer leaves it. */
+test("working host row presses share dismissal and nearer help still wins", () => {
+  const p = menuTooltipPage(true);
+  const { row, open, bar, nearer } = p.attentionRow();
+  p.dispatch("pointerover", open, { pointerType: "mouse" });
+  p.advance(300);
+  assert.equal(p.visible().length, 1);
+  p.dispatch("pointerdown", bar);
+  for (const target of [row, open, bar]) {
+    p.dispatch("pointerover", target, { pointerType: "mouse" });
+    p.advance(300);
+    assert.equal(p.visible().length, 0, "the bar and padding must retain dismissal");
+  }
+  p.dispatch("pointerover", p.outside, { pointerType: "mouse" });
+  p.dispatch("pointerover", bar, { pointerType: "mouse" });
+  p.advance(300);
+  assert.equal(p.visible()[0].textContent, "working host");
+  p.dispatch("pointerover", nearer, { pointerType: "mouse" });
+  assert.equal(p.visible()[0].textContent, "nearer help");
+});
 
 /** The ring/notch must never survive their placement. Exercise the actual
  * installed lifecycle, rather than just recomputing a pure position: a

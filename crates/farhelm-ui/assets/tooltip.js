@@ -277,7 +277,8 @@
    * The tooltip target for an event target: the nearest element at or
    * above it carrying non-empty text or a card source id, or null. Nearest
    * wins, so an icon with its own text inside a card-bearing button keeps
-   * its own help.
+   * its own help. Working host rows delegate their unlabelled space to the
+   * identity button, preserving one placement, rest timer and dismissal owner.
    */
   function tooltipTarget(node) {
     let el = node && node.nodeType === 1 ? node : node && node.parentElement;
@@ -285,6 +286,7 @@
       const text = el.getAttribute("data-tooltip");
       const card = el.getAttribute("data-tooltip-card");
       if ((text !== null && text.trim() !== "") || (card !== null && card.trim() !== "")) return el;
+      if (el.getAttribute("data-tooltip-host-progress") !== null) return el.querySelector(".host-attention-open");
       el = el.parentElement;
     }
     return null;
@@ -554,8 +556,10 @@
           suppressed = null;
           suppressedByInitialFocus = false;
         }
-        if (suppressed && !suppressed.contains(event.target)) suppressed = null;
         const next = tooltipTarget(event.target);
+        // Delegated row space belongs to the same dismissed button. Ordinary
+        // descendants retain their existing suppression across nested help.
+        if (suppressed && !suppressed.contains(event.target) && next !== suppressed) suppressed = null;
         if (next === null) {
           if (!viaFocus) hide(true);
           return;
@@ -582,7 +586,7 @@
       "pointermove",
       (event) => {
         if (showTimer === null || viaFocus || event.pointerType === "touch") return;
-        if (target === null || !target.contains(event.target)) return;
+        if (target === null || (!target.contains(event.target) && tooltipTarget(event.target) !== target)) return;
         win.clearTimeout(showTimer);
         showTimer = win.setTimeout(show, SHOW_DELAY_MS);
       },
