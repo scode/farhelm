@@ -256,3 +256,137 @@ captured-claim history guard, narrow proxy refresh and stable Recent choices. Th
 speculative whole-dialog fit and accepted bounded diagnosis; the same source reviewer then accepted the fixed catalog
 and the flake record. All nine PRs were independently verified open and draft at the expected pushed heads and linear
 bases. Nothing from this stack was merged by the executor.
+
+### Landing
+
+#### What landed with it
+
+Nothing else landed in this round, and main gained no code since the stack was based: only plan bookkeeping commits.
+This was the plan's second landing round. The first one (round 230) sent it back for about a dozen failing tests and six
+review findings; this delivery fixed them, and the landing's independent review confirmed each fix.
+
+#### Fixes made while landing
+
+The landing's review of what changed since round 230 found one regression the redelivery introduced and two smaller
+problems, all fixed in the stack before merging. A second independent review checked these fixes.
+
+- A container recipe build that failed no longer said why. The redelivery had cut the error output of every build step
+  (the base requirement check, packages, the two agent installers, prepare) down to "container setup failed (status
+  Some(1))", so a base without curl no longer reported "the base is missing curl", which SPEC.md requires. Its reason
+  was sound: the build runs with the container host's proxy settings exported, a tool can print them, and a proxy
+  address can carry a password. The error output is now shown again with every proxy value masked first: the whole
+  value, its user name and password, and the password alone when it is at least four characters long. A step that prints
+  nothing reports its exit status or signal instead. In #3328. What the masking does not catch is in the follow-ups.
+- Tensorlake wording the plan had generalized is back in three more places, for Tensorlake hosts only: the refusal to
+  set up or update a suspended host again says "this host's Tensorlake sandbox is suspended" (#3328); a host row waiting
+  on a suspend or resume request again says "Asked Tensorlake to suspend at …" or "Asked Tensorlake to resume at …"
+  (#3329); and a failed resume again starts "Tensorlake could not resume the sandbox: …" (#3329). For a container host
+  the waiting row now says "Asked the container host to …" where the plan had "Asked the environment provider to …".
+  Four other messages still have the plan's generic wording; see the follow-ups.
+- FLAKES.md, the log of tests that fail intermittently for reasons older than the change that saw them: the entry the
+  plan added for the permission-help hover test is gone. That failure is caused by this plan's own new code (a late
+  check of container hosts adds the "Runs on" row to the new-session form and scrolls it), so it never existed before
+  this plan and is not that kind of flake; the plan's fix to the test stays, so it should not recur. In #3330.
+- The workspace Rust tests, run on Tensorlake test machines, caught a second test failing the way one the executor fixed
+  had. Both are older tests of how a session whose agent could not start is classified: Farhelm leaves a small status
+  file when an agent's launch fails, and the tests plant one and check the session is listed as failed once its terminal
+  is gone. This one, `the_dead_or_absent_gate_ignores_a_sentinel_behind_a_live_pane_until_the_pane_dies`, ended the
+  terminal by connecting to it from outside, which can leave the supervisor unsure whether the terminal still exists, so
+  the session was listed as unknown instead of failed. It now ends the terminal through the supervisor's own connection,
+  as its sibling does. The test and the way it ended the terminal predate this plan, so unlike the entry above it gets a
+  FLAKES.md entry. In #3330.
+
+The report says no production Rust changed after the executor's full Rust run; the first two fixes above change
+production code in the helm and the UI, and the checks below cover them.
+
+#### Possible follow-ups
+
+- A user-visible wording bug on main now: an action on a session in a suspended container (opening a tab, say, or
+  sending a prompt) is refused with "the host's Tensorlake sandbox is suspended …". That is main's message from before
+  this plan, written when only Tensorlake hosts could be suspended; container hosts now reach it too. It should name the
+  container. The fix is small but means passing the host's provider into code that builds the message from the host's
+  state alone, which the landing left to a follow-up rather than restructure while landing.
+- Four Tensorlake messages still read "environment" where main said "Tensorlake sandbox", because they need the same
+  change: when setup stops because the host was suspended during it, when setup stops because a suspend or resume is in
+  progress, when setup or Update is refused while one is in progress, and the session error shown while one is in
+  progress. The wording is correct, just less specific, and the last three only show during a suspend or resume.
+- The masking of proxy values in a failed build's error misses a password shorter than four characters printed on its
+  own, and a value a tool prints in another form (percent-decoded, say). The text goes wherever the app shows the failed
+  build; I did not trace whether it is also stored or logged. The common tools (apt, curl) report the proxy's host or an
+  authentication error, not its credentials.
+- The bulk Stop test `bulk Stop carries each target's tab precondition with skip false` (stop-tabs) failed in this
+  round's full browser run and in 3 of 30 repeats on this plan's build, and also in 2 of 15 repeats on a build without
+  this plan, so it is a flake already on main. The landing monitor records it in its own PR right after this landing: a
+  FLAKES.md entry, a Deflake entry in TODO.md and a line in `deflake/known-flakes.txt`.
+- The release build's Rust tests now include the real Podman test, which builds a recipe from the network inside a
+  container. It has not been tried on GitHub's release runner; if it fails there, the next release build fails. Worth a
+  manual run of the release workflow's test job, or moving that test out of the default run, before the next tag.
+
+#### Checks
+
+Test runs went through the recorder with the pinned tmux first on `PATH`. Browser and workspace Rust runs were on
+Tensorlake sandboxes at the maintainer's request, ten at a time, which run Node 24.16 against 24.20 locally; the shards
+use the recorder's generic mode (the browser shards because they select projects, the Rust shards because they run a
+nextest archive).
+
+On the stack as delivered (tip `058464ed`, the redelivery rebased onto main with no other change):
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+  `cargo check -p farhelm-ui --features desktop` passed.
+- The whole browser suite, `npx playwright test` split by project over ten sandboxes: 3,281 passed, 14 skipped and 3
+  failed (runs `1e14b98c-50a2-4f07-8a55-1e4345b2185a`, `0c24f1ab-49b3-460e-bbdc-0004db38bc13`,
+  `16a74afe-08f1-40a4-bb07-c4904a0bfba6`, `8636882c-565e-416c-b431-4a2636965c71`,
+  `5606195f-2baa-4af0-8ac7-6d79af03224a`, `4b9c5927-2abf-4298-a638-81375806c9da`,
+  `e233379a-03d1-4c5d-b122-c485fac9cbed`, `b36e6868-c14f-4fec-a442-1ce10c1737e9`, `fdd8c8c5-a327-4021-8a5d-e783cd81472f`
+  and `c0dc482a-4c10-4e31-9a84-0e8faed726c0`). The failures:
+  - WebKit's `bulk Stop reports an engaged row without skipping its eligible sibling`, the known flake with a TODO.md
+    entry.
+  - WebKit's `closes a number popup below a new bolt chord` (template shortcuts), which then passed 30 of 30 repeats, 15
+    per engine (runs `124a534b-7d00-41bd-9e40-41a31577b723` and `589cf0ea-34ca-4c20-97e7-302ed9fb0665`, with `--grep`
+    and `--repeat-each=15`). The plan does not change that spec or what it drives. It is not logged in FLAKES.md: one
+    failure with no cause found and every repeat passing; a recurrence would get an entry.
+  - Chromium's stop-tabs `bulk Stop carries each target's tab precondition with skip false`, which failed 3 of 30
+    repeats in the same runs (they selected both tests), and also 2 of 15 on round 229's build, which has none of this
+    plan (run `5da3ee4c-297d-4393-9895-d8eeb4329fcb`), and 1 of 15 on round 230's build of this plan (run
+    `68636f1e-a0cd-4c3f-925d-89037527e244`): the test reads the session list once, right after the bulk Stop finishes,
+    and sometimes sees the stopped session still running or with its tab. A flake already on main, recorded in the
+    monitor's own PR after this landing.
+
+  The skips are WebKit's nine clipboard-permission cases, one Chromium-only visual matrix and four that need real vendor
+  agent turns.
+- The whole workspace's Rust tests, `cargo nextest run --workspace --exclude farhelm-desktop` as an archive over ten
+  sandboxes with `FARHELM_TEST_SKIP_PODMAN=1`: 6,066 of 6,068 passed (runs `27329145-383a-4195-93d0-746c2e5bc54c`,
+  `99c3c2ee-4083-4f13-9afa-9deb38741de4`, `2991141c-3dad-4b2c-8833-358b5aab643e`,
+  `a1712b78-64d1-4e4b-b737-be83c86c842a`, `b838d783-a0ce-46e1-b1b8-962c281c28ef`,
+  `b17c6445-331d-4f28-b001-1d702fca539c`, `fe5fbc66-ee98-421c-9af5-1de24ab2ff99`,
+  `3a7f624e-e422-4684-b637-b9f73b1d6204`, `30fb2b73-5a79-4abb-927f-32aad4c64668` and
+  `449c1b7a-f7d8-46b6-a126-dc0467b222b9`). `attribute_compile_contract_matrix` fails there because the sandboxes have no
+  Rust compiler, as in earlier rounds (it compiles test code; it passed in the executor's local whole-workspace run, and
+  nothing the landing changed is in what it compiles); the dead-or-absent sentinel test is the one fixed above. Runtime
+  `SKIPPED` lines, all from the sandboxes' substrate: the real Podman module (skipped on purpose; the executor's local
+  pass of it is reused), eight OMP live-admission checks (no Bun there), and two tmux cases that need a stock or second
+  tmux.
+- `cargo test --locked --doc --workspace --exclude farhelm-desktop` (run `47de50d2-5720-4758-a4ee-d19041506504`; no
+  doctests in the changed crates) and `cargo nextest run -p farhelm-ui --features desktop`: 1,156 passed (run
+  `0bca77bb-a5fc-4ff8-ac7e-2dbdcd6324ba`).
+
+After the landing fixes (tip `9dab2455`; the final tip differs from it only in FLAKES.md):
+
+- `cargo fmt --all -- --check`, the test-sleep check, `dprint check`, both clippy commands above and the desktop check
+  passed.
+- `cargo nextest run -p farhelm-helm -p farhelm-ui --lib`: 2,720 passed (run `d8ce214e-27b8-44cb-b0c3-5eb93a262059`),
+  including the new masking test and the restored wording assertions.
+- `cargo nextest run -p farhelm --test e2e -E 'test(/^launch_sentinel_error_status::/)' --stress-count 10`: ten
+  iterations of the module's ten tests passed (run `a3898bfa-35e7-4745-aa83-7f699051f5af`).
+- The browser specs that draw the changed host rows, cards and refusals, on both engines (tensorlake-lifecycle,
+  tensorlake-hosts, tensorlake-sandbox-sessions and podman-environments), on four sandboxes from a fresh build: 120
+  passed (runs `f0236f90-86ac-4aa0-9558-57428c8403ec`, `428c142f-f269-44e6-8b7f-b9ceed5153eb`,
+  `2e04473b-2919-42c6-bcb4-f625fb592316` and `386479ee-1853-4473-ab51-0da7f83fc2b7`).
+
+Reused from the executor: the real local Podman test (its whole-workspace run, `a6a1f51c-6706-4333-a9af-bbdbb8d1504d`,
+after which no production Rust it covers changed, and none of the landing fixes touch what it exercises beyond the error
+text of a failed build step) and the real SSH acceptance run. Skipped: the old-terminal browser set (the browser tests
+that exist only for older tmux-based terminals), which passed in round 230 and which nothing since touches; hosted CI
+(manual-only, not dispatched).
