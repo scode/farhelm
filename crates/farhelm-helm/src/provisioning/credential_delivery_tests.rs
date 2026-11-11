@@ -17,6 +17,56 @@ const CODEX_FIRST: &str =
     r#"{"tokens":{"refresh_token":"fictional-codex-seed"},"vendor_field":true}"#;
 const CODEX_REFRESHED: &str = r#"{"tokens":{"refresh_token":"fictional-codex-refreshed"}}"#;
 
+/// Both providers resolve current named selections and retain home/stamps in
+/// the same guarded record. A Podman row has no legacy Tensorlake binding,
+/// which catches a hook that silently rejects containers before delivery.
+#[farhelm_testtrace::test]
+async fn container_connections_resolve_shared_recipe_selections_and_delivery_records() {
+    let f = Fixture::new(false).await;
+    let place = f
+        .store
+        .list_hosts()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.kind.can_host_environments())
+        .unwrap()
+        .id;
+    let host = f
+        .store
+        .register_session_container(crate::store::NewPodmanHost {
+            name: "farhelm-sess-credential".into(),
+            recipe: "recipe".into(),
+            place_host: place,
+            user: "image-user".into(),
+            home: "/home/image-user".into(),
+            uid: 1000,
+        })
+        .await
+        .unwrap();
+    let row = f
+        .store
+        .list_hosts()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == host)
+        .unwrap();
+    assert!(
+        row.tensorlake.is_none() && row.podman.is_some(),
+        "premise: this is a real decoded container binding"
+    );
+    assert!(f.delivery.read_bindings(&row).await.unwrap().uses("work"));
+    f.delivery
+        .remember_home(&row, "/home/image-user".into())
+        .await
+        .unwrap();
+    assert_eq!(
+        f.delivery.read_record(&row).await.unwrap().home.as_deref(),
+        Some(Path::new("/home/image-user"))
+    );
+}
+
 /// A saved edit must survive delivery, whether the initial read found a file or
 /// absence. Two competing saves exhaust the retry without falsely stamping success.
 #[farhelm_testtrace::test]
@@ -1270,6 +1320,50 @@ struct HookGate {
 
 #[async_trait::async_trait]
 impl EnvironmentProvider for HookGate {
+    /// This observation fixture must fail if production sends creation or Settings work here.
+    async fn places(&self) -> anyhow::Result<Vec<crate::environment::EnvironmentPlace>> {
+        unreachable!("observation fixture")
+    }
+    async fn rebuild_recipe(
+        &self,
+        _: &str,
+        _: farhelm_proto::Place,
+        _: std::sync::Arc<crate::feed::FleetEvents>,
+    ) -> anyhow::Result<()> {
+        unreachable!("observation fixture")
+    }
+    async fn clean_recipe(
+        &self,
+        _: &str,
+        _: &crate::tensorlake::build::DeleteGuard,
+    ) -> anyhow::Result<()> {
+        unreachable!("observation fixture")
+    }
+    async fn ensure_prepared(
+        &self,
+        _: &str,
+        _: &crate::environment::recipes::Recipe,
+        _: farhelm_proto::Place,
+        _: std::sync::Arc<crate::feed::FleetEvents>,
+        _: &dyn crate::environment::PreparationProgress,
+    ) -> anyhow::Result<crate::environment::PreparedArtifact> {
+        unreachable!("observation fixture")
+    }
+    async fn create(
+        &self,
+        _: &crate::environment::EnvironmentBinding,
+        _: Option<crate::environment::PreparedArtifact>,
+        _: &dyn crate::environment::PreparationProgress,
+    ) -> anyhow::Result<crate::environment::CreatedEnvironment> {
+        unreachable!("observation fixture")
+    }
+    async fn list_owned(
+        &self,
+        _: farhelm_proto::Place,
+    ) -> anyhow::Result<Vec<crate::environment::OwnedEnvironment>> {
+        unreachable!("observation fixture")
+    }
+
     async fn status(
         &self,
         _binding: &EnvironmentBinding,
@@ -1281,7 +1375,7 @@ impl EnvironmentProvider for HookGate {
 
     async fn suspend(
         &self,
-        _state: &crate::AppState,
+        _manager: &crate::manager::ConnectionManager,
         _binding: &EnvironmentBinding,
     ) -> anyhow::Result<()> {
         unreachable!("the hook fixture exercises connection resources only")
@@ -1289,7 +1383,7 @@ impl EnvironmentProvider for HookGate {
 
     async fn resume(
         &self,
-        _state: &crate::AppState,
+        _manager: &crate::manager::ConnectionManager,
         _binding: &EnvironmentBinding,
     ) -> anyhow::Result<()> {
         unreachable!("the hook fixture exercises connection resources only")

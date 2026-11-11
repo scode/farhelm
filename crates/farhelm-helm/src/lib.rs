@@ -579,9 +579,10 @@ struct AppState {
     /// key. A field rather than a global so each test helm has its own, and
     /// so a test can put a stub API behind it.
     tensorlake: tensorlake::Tensorlake,
-    /// The same concrete services dispatch lifecycle and resource destruction.
-    /// Actor status fakes remain independently injectable in test managers.
-    providers: environment::Providers,
+    /// The manager's exact Podman service, cloned for provider-owned Containers
+    /// HTTP and safe tunnel projection. Lifecycle/create/status always dispatch
+    /// through manager.providers(); injected assemblies may omit this handle.
+    podman: Option<Arc<environment::podman::Podman>>,
     /// Place probes are process-local observations and never gate reading Hosts.
     podman_places: Arc<environment::podman_probe::PodmanPlaces>,
     /// Acting agent requests waiting for the user's answer (see
@@ -611,6 +612,11 @@ enum ServingMode {
 pub type ClipboardSink = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
 impl AppState {
+    /// Both providers' artifact tasks and Settings projections use this one
+    /// registry; its legacy Tensorlake owner does not create another engine.
+    pub(crate) fn recipe_builds(&self) -> &Arc<tensorlake::build::RecipeBuilds> {
+        self.tensorlake.builds()
+    }
     /// The shared state as production builds it: the two halves of the
     /// fleet, provisioning authority, and every bound/cache at its default.
     ///
@@ -626,6 +632,7 @@ impl AppState {
         manager: Arc<manager::ConnectionManager>,
         store: store::HelmStore,
         tensorlake: tensorlake::Tensorlake,
+        podman: Option<Arc<environment::podman::Podman>>,
         state_dir: PathBuf,
         sources: provisioning::ProductionProvisioning,
         mode: ServingMode,
@@ -637,7 +644,7 @@ impl AppState {
             sources,
         )?;
         Ok(AppState {
-            providers: environment::Providers::with_tensorlake(Arc::new(tensorlake.clone())),
+            podman,
             tensorlake,
             ..Self::with_provisioning(manager, store, provisioning, mode)
         })
@@ -657,15 +664,13 @@ impl AppState {
             provisioning.credential_delivery(),
         );
         AppState {
-            podman_places: environment::podman_probe::PodmanPlaces::new(
-                provisioning.local_state_dir(),
-            ),
+            podman_places: provisioning.credential_delivery().places(),
             _automatic_updates: provisioning::AutomaticUpdates::start(&provisioning),
             mode,
             ntfy: manager.ntfy.clone(),
             // No state directory reaches this seam, so no ssh key and no
             // API; `new` replaces it with the production service.
-            providers: environment::Providers::with_tensorlake(Arc::new(tensorlake.clone())),
+            podman: None,
             tensorlake,
             manager,
             store: store.clone(),
@@ -713,6 +718,10 @@ fn api_router(state: Arc<AppState>) -> Router {
         )
         .route("/api/launch-catalog", get(sessions::launch_catalog))
         .route(
+            "/api/environment-sessions",
+            axum::routing::post(sessions::create_environment_session),
+        )
+        .route(
             "/api/sandbox-sessions",
             axum::routing::post(sessions::create_sandbox_session),
         )
@@ -733,6 +742,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::put(templates::put_template).delete(templates::delete_template),
         )
         .route("/api/launch-history", get(sessions::launch_history))
+        .route(
+            "/api/environment-launch-history",
+            get(sessions::environment_launch_history),
+        )
         .route(
             "/api/sessions/{id}/restart",
             axum::routing::post(sessions::restart_session),
@@ -795,6 +808,16 @@ fn api_router(state: Arc<AppState>) -> Router {
         // exactly one thing, and naming the thing is clearer than inventing
         // a partial-update shape this API has nowhere else.
         .route("/api/hosts", get(hosts::list_hosts).post(hosts::add_host))
+        .route("/api/environment-places", get(hosts::environment_places))
+        .route("/api/recipe-places", get(hosts::recipe_places))
+        .route(
+            "/api/recipes/{name}/rebuild",
+            axum::routing::post(hosts::rebuild_recipe),
+        )
+        .route(
+            "/api/container-orphans",
+            get(environment::podman::list_leftovers).delete(environment::podman::delete_leftover),
+        )
         // Provisioning is separate from registry management: probe is
         // discovery-first. It changes nothing when no supervisor answers, and
         // registers the host (on a helm-owned task) when one does; provision,
@@ -2436,11 +2459,23 @@ async fn serve_with_ready(
         Arc::clone(&sources.delivery),
         sources.snapshot_preparer(&state_dir),
     )?;
+    // Both providers share exactly one recipe registry and one place cache.
+    // The concrete handle below is cloned for provider-owned Containers HTTP;
+    // actors and lifecycle dispatch use this same service through the registry.
+    let podman = Arc::new(environment::podman::Podman::new(
+        store.clone(),
+        sources.delivery.places(),
+        Arc::clone(&sources.delivery),
+        Arc::clone(tensorlake.builds()),
+        sources.environment_preparer(&state_dir),
+    ));
+    let providers = environment::Providers::new(Arc::new(tensorlake.clone()), podman.clone());
     let manager = manager::ConnectionManager::start_with_providers(
         store.clone(),
         Arc::new(manager::SystemTransport::with_store(
             &state_dir,
             store.clone(),
+            sources.delivery.places(),
         )),
         manager::Cadence {
             refresh: args
@@ -2448,11 +2483,19 @@ async fn serve_with_ready(
                 .map_or(manager::REFRESH_INTERVAL, std::time::Duration::from_secs),
             ..manager::Cadence::default()
         },
-        environment::Providers::with_tensorlake(Arc::new(tensorlake.clone())),
+        providers,
     )
     .await?;
 
-    let mut app = AppState::new(manager, store, tensorlake, state_dir.clone(), sources, mode)?;
+    let mut app = AppState::new(
+        manager,
+        store,
+        tensorlake,
+        Some(podman),
+        state_dir.clone(),
+        sources,
+        mode,
+    )?;
     app.clipboard_sink = clipboard_sink;
     app.link_opener = link_opener;
     if let Some(downloads) = downloads {

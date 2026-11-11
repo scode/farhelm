@@ -577,22 +577,21 @@ pub(crate) async fn update_recipe(
     }
 }
 
-/// `DELETE /api/tensorlake/recipes/{name}`: remove a recipe and everything
-/// Tensorlake bills for it. 404 when it does not exist, 409 while a host
-/// uses it.
-///
-/// A recipe with a snapshot, a recorded builder or retired snapshots, or an
-/// interrupted build, is cleaned up first: a running build is cancelled,
-/// the builder is terminated and its snapshots deleted, and the recipe's
-/// snapshots are deleted. Any Tensorlake failure refuses the delete with
-/// its reason and keeps the row (with whatever is left recorded), so a retry
-/// finishes the job; no path forgets a billed resource. A recipe with
-/// nothing billed is deleted without calling Tensorlake.
+/// The compatibility route deletes the one shared recipe across all places.
+/// Admission excludes new builds and source users before either provider
+/// cleans resources. Partial failure retains the row and remaining ownership;
+/// an empty Tensorlake side needs no cloud credentials for Podman cleanup.
 pub(crate) async fn delete_recipe(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> Response {
-    // Refuse a recipe in use before deleting anything on Tensorlake: hosts
+    crate::run_owned(async move { delete_recipe_owned(state, name).await }).await
+}
+
+/// Keep deletion admission through job cancellation and every confirmed
+/// cleanup even if the HTTP caller disappears during a remote command.
+async fn delete_recipe_owned(state: Arc<AppState>, name: String) -> Response {
+    // Refuse a recipe in use before deleting anything at any place: hosts
     // started from its snapshot keep working without it, but the user asked
     // for nothing to change while the refusal stands.
     match state.store.tensorlake_recipe_users(name.clone()).await {
@@ -601,13 +600,17 @@ pub(crate) async fn delete_recipe(
         Err(error) => return storage_failure("delete the Tensorlake recipe", error),
     }
     let builds = Arc::clone(state.tensorlake.builds());
-    let guard = match builds.clean_for_delete(&name).await {
+    let guard = match builds.begin_delete(&name) {
         Ok(guard) => guard,
         Err(refusal) => {
             state.manager.events().bump();
             return cleanup_refusal_response(&name, refusal);
         }
     };
+    if let Err(error) = state.manager.providers().clean_recipe(&name, &guard).await {
+        state.manager.events().bump();
+        return crate::http_error(error);
+    }
     let deleted = state.store.delete_tensorlake_recipe(name.clone()).await;
     drop(guard);
     state.manager.events().bump();

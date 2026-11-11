@@ -350,7 +350,7 @@ pub(crate) const SCHEMA_VERSION: i64 = 84;
 mod environment_history;
 mod podman;
 pub(crate) use podman::PodmanInstallGuard;
-pub use podman::{NewPodmanHost, PodmanBinding};
+pub use podman::{NewPodmanHost, PodmanBinding, PodmanLogin};
 
 /// Named secrets have their own table so list responses never need to decode a
 /// secret-bearing configuration object. The monotonically increasing revision
@@ -795,7 +795,7 @@ impl HostKind {
     /// ssh row and let it be retargeted or forgotten, so every reader selects
     /// all three columns. NULL provider retains pre-existing Tensorlake rows;
     /// an explicit provider without an environment name is corrupt input.
-    fn from_columns(
+    pub(crate) fn from_columns(
         kind: &str,
         environment_name: Option<&str>,
         provider: Option<&str>,
@@ -6744,7 +6744,7 @@ impl HelmStore {
                                 let podman = podman::decode_binding(
                                     host_kind, tensorlake_sandbox.as_deref(), tensorlake_recipe.as_deref(),
                                     place_host, container_id, container_user, container_home, container_uid,
-                                    podman_pending_create_at, session_owned,
+                                    podman_pending_create_at, session_owned, remote_farhelm.is_some() || remote_state_dir.is_some(),
                                 )?;
                                 let tensorlake = tensorlake_binding(
                                     id,

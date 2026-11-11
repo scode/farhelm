@@ -29,6 +29,14 @@ pub enum Place {
 
 #[warn(clippy::wildcard_enum_match_arm)]
 impl Place {
+    /// A host-backed place retains the registry entry even when unavailable.
+    /// Account places need no host lookup. Absence never selects a fallback.
+    pub fn host(self) -> Option<i64> {
+        match self {
+            Self::TensorlakeAccount => None,
+            Self::PodmanHost(host) => Some(host),
+        }
+    }
     /// Accepted container launches update their last-used place independently
     /// of whether they carry a reusable structured agent selection.
     pub fn container_host(self) -> Option<i64> {
@@ -62,6 +70,13 @@ pub enum WhenStatusUnanswered {
 
 #[warn(clippy::wildcard_enum_match_arm)]
 impl ProviderKind {
+    /// Billed cloud creation uses the account's explicit consent setting.
+    pub fn asks_before_creating(self) -> bool {
+        match self {
+            Self::Tensorlake => true,
+            Self::Podman => false,
+        }
+    }
     /// An unavailable status channel must not take running Tensorlake hosts
     /// offline. Podman's status and exec both depend on the place-host route.
     pub fn when_status_unanswered(self) -> WhenStatusUnanswered {
@@ -98,4 +113,54 @@ impl LaunchTarget {
     pub fn provider(&self) -> ProviderKind {
         self.place().provider()
     }
+}
+
+/// Readiness projected from recorded per-place state and the shared build job.
+/// Timestamps use epoch seconds. Resource IDs and installation facts stay private.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecipePlaceView {
+    pub recipe: String,
+    pub place: Place,
+    pub ready: bool,
+    pub building: bool,
+    pub reason: Option<String>,
+    pub built_at: Option<i64>,
+    pub prepared_at: Option<i64>,
+    pub step: Option<String>,
+    pub cleanup_pending: bool,
+}
+
+/// Cached availability is safe to display while background probes settle.
+/// Executable paths, proxy values and login coordinates stay private.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnvironmentPlaceView {
+    pub place: Place,
+    pub name: String,
+    pub reason: Option<String>,
+    pub refreshing: bool,
+}
+
+/// Owned-resource presentation and fresh Clone intent share one target.
+/// Connection hooks project their health independently of reachability.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnvironmentHostView {
+    pub name: String,
+    #[serde(default)]
+    pub place_name: Option<String>,
+    pub target: LaunchTarget,
+    #[serde(default)]
+    pub tunnels: Option<crate::tensorlake::TunnelView>,
+    #[serde(default)]
+    pub credential_warning: Option<String>,
+}
+
+/// Cleanup identifies confirmed owned resources separately from their names.
+/// Interrupted launches with a recorded host use ordinary whole-host removal.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContainerLeftoverView {
+    pub id: String,
+    pub name: String,
+    pub place: Place,
+    pub role: String,
+    pub host: Option<i64>,
 }

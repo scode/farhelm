@@ -66,6 +66,9 @@ pub(crate) struct HostView {
     /// the JSON for every other host, so their shape is unchanged.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) tensorlake: Option<TensorlakeHostView>,
+    /// Public ownership/placement facts, without execution coordinates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) environment: Option<farhelm_proto::EnvironmentHostView>,
     /// `None` for the local row, always `Some` for an ssh row.
     pub(crate) destination: Option<String>,
     /// The stored optional alias, kept distinct from `name` so clients can
@@ -240,6 +243,7 @@ pub(crate) enum HostStateView {
     /// ordinary Connecting phase.
     #[serde(rename = "tensorlake-changing")]
     TensorlakeChanging {
+        starting: bool,
         direction: farhelm_proto::tensorlake::LifecycleDirection,
         requested_at: i64,
     },
@@ -257,6 +261,12 @@ pub(crate) enum HostStateView {
         observed_at: i64,
         suspended_by_farhelm_at: Option<i64>,
         resume_failed: Option<String>,
+    },
+    /// Stopped retains files without pretending paused processes survive.
+    #[serde(rename = "stopped")]
+    Stopped {
+        start_failed: Option<String>,
+        waiting_for_place: bool,
     },
     /// No actor is running for this row — it retired with its registry row,
     /// or its task panicked. Reported rather than hidden so an operation
@@ -291,6 +301,7 @@ impl HostStateView {
             HostStateView::Duplicate { .. } => "duplicate",
             HostStateView::TensorlakeChanging { .. } => "tensorlake-changing",
             HostStateView::Suspended { .. } => "suspended",
+            HostStateView::Stopped { .. } => "stopped",
             HostStateView::Retired { .. } => "retired",
         }
     }
@@ -393,9 +404,11 @@ impl From<&HostState> for HostStateView {
                 identity: identity.clone(),
             },
             HostState::TensorlakeChanging {
+                starting,
                 direction,
                 requested_at,
             } => HostStateView::TensorlakeChanging {
+                starting: *starting,
                 direction: *direction,
                 requested_at: *requested_at,
             },
@@ -407,6 +420,13 @@ impl From<&HostState> for HostStateView {
                 observed_at: *observed_at,
                 suspended_by_farhelm_at: *suspended_by_farhelm_at,
                 resume_failed: resume_failed.clone(),
+            },
+            HostState::Stopped {
+                start_failed,
+                waiting_for_place,
+            } => HostStateView::Stopped {
+                start_failed: start_failed.clone(),
+                waiting_for_place: *waiting_for_place,
             },
             HostState::Retired { reason } => HostStateView::Retired {
                 reason: reason.clone(),
@@ -514,6 +534,28 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                     HostKind::Podman => "podman",
                 },
                 is_session_owned: snapshot.is_session_owned,
+                environment: registry.and_then(|row| row.kind.environment_view(row)).map(
+                    |mut view| {
+                        view.place_name = view
+                            .target
+                            .place()
+                            .host()
+                            .and_then(|id| rows.get(&id))
+                            .map(|place| {
+                                host_display_name(
+                                    place.kind,
+                                    place.destination.as_deref(),
+                                    place.alias.as_deref(),
+                                )
+                            });
+                        view.credential_warning =
+                            state.tensorlake.credential_delivery().warning(snapshot.id);
+                        if snapshot.state.is_connected() {
+                            view.tunnels = snapshot.kind.environment_tunnels(state, snapshot.id);
+                        }
+                        view
+                    },
+                ),
                 tensorlake: registry
                     .and_then(|row| row.tensorlake.as_ref())
                     .map(|binding| {
@@ -1440,9 +1482,13 @@ pub(crate) async fn forget_host_locked(
             let binding = row.environment_binding().ok_or_else(|| {
                 anyhow::anyhow!("host {host} has no recorded environment binding")
             })?;
-            let provider = state.providers.get(binding.provider()).map_err(|reason| {
-                crate::SupervisorError::helm(farhelm_proto::ErrorKind::Conflict, reason.0)
-            })?;
+            let provider = state
+                .manager
+                .providers()
+                .get(binding.provider())
+                .map_err(|reason| {
+                    crate::SupervisorError::helm(farhelm_proto::ErrorKind::Conflict, reason.0)
+                })?;
             provider.destroy(&binding).await
         }
         .await;
@@ -1764,10 +1810,12 @@ mod tests {
                 identity: "a".to_string(),
             },
             HostStateView::TensorlakeChanging {
+                starting: false,
                 direction: farhelm_proto::tensorlake::LifecycleDirection::Suspending,
                 requested_at: 1,
             },
             HostStateView::TensorlakeChanging {
+                starting: false,
                 direction: farhelm_proto::tensorlake::LifecycleDirection::Resuming,
                 requested_at: 2,
             },
@@ -1801,6 +1849,7 @@ mod tests {
             (LifecycleDirection::Resuming, "resuming"),
         ] {
             let state = HostState::TensorlakeChanging {
+                starting: false,
                 direction,
                 requested_at: 1_700_000_000_000,
             };
@@ -1810,6 +1859,7 @@ mod tests {
                 serde_json::to_value(&view).unwrap(),
                 serde_json::json!({
                     "phase": "tensorlake-changing",
+                    "starting": false,
                     "direction": word,
                     "requested_at": 1_700_000_000_000_i64,
                 })
@@ -4203,5 +4253,176 @@ mod tests {
             super::registry_row(state, host).await.is_err(),
             "the host was removed"
         );
+    }
+}
+/// Public environment projection belongs to the exhaustive host-kind decision.
+/// Ordinary rows never acquire resource metadata from a destination spelling.
+impl HostKind {
+    pub(crate) fn environment_view(
+        self,
+        row: &HostRow,
+    ) -> Option<farhelm_proto::EnvironmentHostView> {
+        use farhelm_proto::{EnvironmentHostView, LaunchTarget, Place};
+        match self {
+            Self::Local | Self::Ssh => None,
+            Self::Tensorlake => row.tensorlake.as_ref().map(|binding| EnvironmentHostView {
+                name: binding.sandbox.clone(),
+                place_name: None,
+                tunnels: None,
+                credential_warning: None,
+                target: LaunchTarget::Environment {
+                    recipe: binding.recipe.clone(),
+                    place: Place::TensorlakeAccount,
+                },
+            }),
+            Self::Podman => row.podman.as_ref().map(|binding| EnvironmentHostView {
+                name: binding.name.clone(),
+                place_name: None,
+                tunnels: None,
+                credential_warning: None,
+                target: LaunchTarget::Environment {
+                    recipe: binding.recipe.clone(),
+                    place: Place::PodmanHost(binding.place_host),
+                },
+            }),
+        }
+    }
+}
+
+/// Read provider-owned cached availability and schedule ordinary-host probes.
+/// Refresh joins return immediately; opening a launcher never waits for fan-out.
+pub(crate) async fn environment_places(
+    State(state): State<Arc<AppState>>,
+) -> axum::response::Response {
+    let result = async {
+        let rows = state.store.list_hosts().await?;
+        for row in rows.iter().filter(|row| row.kind.can_host_environments()) {
+            let cached = state.podman_places.view(row)?;
+            if cached.checked_at.is_none() && !cached.refreshing {
+                state
+                    .podman_places
+                    .refresh(state.store.clone(), row.id)
+                    .await?;
+            }
+        }
+        let places = state.manager.providers().places().await?;
+        Ok::<_, anyhow::Error>(
+            places
+                .into_iter()
+                .map(|place| {
+                    let row = place
+                        .place
+                        .host()
+                        .and_then(|host| rows.iter().find(|row| row.id == host));
+                    farhelm_proto::EnvironmentPlaceView {
+                        place: place.place,
+                        reason: place.reason,
+                        name: row
+                            .map(|row| {
+                                host_display_name(
+                                    row.kind,
+                                    row.destination.as_deref(),
+                                    row.alias.as_deref(),
+                                )
+                            })
+                            .unwrap_or_default(),
+                        refreshing: row
+                            .and_then(|row| state.podman_places.view(row).ok())
+                            .is_some_and(|view| view.refreshing),
+                    }
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
+    .await;
+    match result {
+        Ok(places) => axum::Json(places).into_response(),
+        Err(error) => http_error(error),
+    }
+}
+
+/// Secret-free per-place progress comes from the same recipe state and active
+/// job registry used by launch preparation. Recorded places remain visible even
+/// after their host disappears, so failed cleanup has a discoverable remedy.
+pub(crate) async fn recipe_places(State(state): State<Arc<AppState>>) -> axum::response::Response {
+    let result = async {
+        let places = state.manager.providers().places().await?;
+        let recipes = state.store.tensorlake_recipe_rows().await?;
+        let mut views = Vec::new();
+        for (name, recipe, build) in recipes {
+            let mut recorded = build.recorded_places();
+            for place in &places {
+                if recipe.base.supports(place.place.provider()) && !recorded.contains(&place.place)
+                {
+                    recorded.push(place.place);
+                }
+            }
+            for place in recorded {
+                let mut view = state.recipe_builds().place_view(&name, &build, place);
+                if view.reason.is_none() {
+                    view.reason = places
+                        .iter()
+                        .find(|current| current.place == place)
+                        .and_then(|current| current.reason.clone());
+                }
+                views.push(view);
+            }
+        }
+        Ok::<_, anyhow::Error>(views)
+    }
+    .await;
+    match result {
+        Ok(views) => axum::Json(views).into_response(),
+        Err(error) => http_error(error),
+    }
+}
+
+/// Rebuild targets an explicit place and admits work through its provider's
+/// existing build engine. The feed carries progress after this response or after
+/// Settings closes; the adapter never owns a second task or image registry.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RebuildRecipeRequest {
+    pub(crate) place: farhelm_proto::Place,
+}
+
+/// Delegate explicit rebuild admission to the selected provider and shared job registry.
+pub(crate) async fn rebuild_recipe(
+    State(state): State<Arc<AppState>>,
+    AxPath(name): AxPath<String>,
+    body: Result<axum::Json<RebuildRecipeRequest>, axum::extract::rejection::JsonRejection>,
+) -> axum::response::Response {
+    let Ok(axum::Json(body)) = body else {
+        return (axum::http::StatusCode::BAD_REQUEST, "invalid recipe place").into_response();
+    };
+    let provider = match state.manager.providers().get(body.place.provider()) {
+        Ok(provider) => provider,
+        Err(reason) => return (axum::http::StatusCode::CONFLICT, reason.0).into_response(),
+    };
+    match provider
+        .rebuild_recipe(&name, body.place, Arc::clone(state.manager.events()))
+        .await
+    {
+        Ok(()) => axum::http::StatusCode::ACCEPTED.into_response(),
+        Err(error) => http_error(error),
+    }
+}
+
+/// Runtime tunnel engines are provider-owned; public projection only selects
+/// the already-observed view. No read starts a new listener or provider request.
+impl HostKind {
+    fn environment_tunnels(
+        self,
+        state: &AppState,
+        host: HostId,
+    ) -> Option<farhelm_proto::tensorlake::TunnelView> {
+        match self {
+            Self::Local | Self::Ssh => None,
+            Self::Tensorlake => state.tensorlake.tunnel_view(host),
+            Self::Podman => state
+                .podman
+                .as_ref()
+                .and_then(|podman| podman.tunnel_view(host)),
+        }
     }
 }

@@ -1,26 +1,29 @@
-//! Sandbox preparation and bounded agent-settings reads on the selected
-//! provisioning SSH transport. Secrets only travel through captured stdout
-//! and upload stdin; every read failure discards the capture's diagnostic.
+//! Environment login preparation and bounded reads on the selected route.
+//! Secrets only travel through captured stdout and upload stdin. Read failures
+//! discard peer diagnostics; only a locally typed SSH session-limit refusal
+//! survives redaction so a container place can name its actual access failure.
 
 use super::*;
 
 pub(super) const NO_SYSTEMD: &str = "This sandbox's image does not run systemd as its init system. Your image must have systemd installed, enabled, and running as the init system at startup (for example, images built from tensorlake/ubuntu-systemd).";
 
-/// Start logind and linger for the actual login user, then wait for the user
-/// manager. The gateway does not run PAM, so merely logging in cannot do this.
+/// Establish logind and linger before waiting for the actual login user.
+/// Gateway and direct exec access do not run PAM, so merely entering a builder
+/// cannot establish its persistent per-user service manager. Podman clones
+/// use the shared read-only waiter without this service-changing prefix.
 const PREPARE: &str = r#"
 [ "$(cat /proc/1/comm 2>/dev/null)" = systemd ] || exit 3
 sudo -n systemctl unmask systemd-logind && sudo -n systemctl daemon-reload && sudo -n systemctl start systemd-logind && sudo -n loginctl enable-linger "$(id -un)" || exit 4
-uid=$(id -u) || exit 4
-i=0
-while [ "$i" -lt 30 ]; do
-    s=$(XDG_RUNTIME_DIR=/run/user/$uid systemctl --user is-system-running 2>/dev/null)
-    case "$s" in running|degraded) printf '%s' "$HOME"; exit 0;; esac
-    i=$((i + 1)); sleep 1
-done
-echo 'the sandbox user manager did not start within 30 seconds' >&2
-exit 5
 "#;
+
+/// Keep ordinary preparation's startup changes and readiness contract together.
+/// Clone admission can reuse the waiter while preserving proof of boot setup.
+fn preparation_script() -> String {
+    format!(
+        "{PREPARE}{}",
+        crate::tensorlake::build_script::user_manager_ready()
+    )
+}
 
 impl SystemBackend {
     /// Preserve the enabled boot installation while removing everything that
@@ -94,7 +97,7 @@ impl SystemBackend {
     ) -> Result<PathBuf, BackendFailure> {
         self.wait_sandbox_ssh(target).await?;
         let output = self
-            .run_shell(target, PREPARE, Duration::from_secs(90))
+            .run_shell(target, &preparation_script(), Duration::from_secs(90))
             .await?;
         match output.code {
             Some(3) => return Err(BackendFailure::new(NO_SYSTEMD, "")),
@@ -145,7 +148,7 @@ impl SystemBackend {
         let size = self
             .run_shell(target, &size_script, COMMAND_TIMEOUT)
             .await
-            .map_err(|_| failure())?;
+            .map_err(|error| error.redacted(failure()))?;
         if size.code == Some(75) {
             return Ok(None);
         }
@@ -163,7 +166,7 @@ impl SystemBackend {
             let out = self
                 .run_shell(target, &script, COMMAND_TIMEOUT)
                 .await
-                .map_err(|_| failure())?;
+                .map_err(|error| error.redacted(failure()))?;
             if out.code != Some(0) {
                 return Err(failure());
             }
@@ -172,7 +175,7 @@ impl SystemBackend {
         let after = self
             .run_shell(target, &size_script, COMMAND_TIMEOUT)
             .await
-            .map_err(|_| failure())?;
+            .map_err(|error| error.redacted(failure()))?;
         if bytes.len() != size
             || after.code != Some(0)
             || String::from_utf8_lossy(&after.stdout).trim() != size.to_string()
@@ -590,7 +593,7 @@ stat() {
         }
         assert!(
             std::process::Command::new("sh")
-                .args(["-n", "-c", PREPARE])
+                .args(["-n", "-c", &preparation_script()])
                 .status()
                 .unwrap()
                 .success()

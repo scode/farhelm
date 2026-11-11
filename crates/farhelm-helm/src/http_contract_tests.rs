@@ -117,6 +117,7 @@ fn session_list_body() -> SessionListBody {
 /// `HostStateView` variant's payload is pinned.
 fn host_list_body() -> serde_json::Value {
     let host = |id: i64, kind: &'static str, state: HostStateView| HostView {
+        environment: None,
         id,
         entry_uuid: "11111111-1111-4111-8111-111111111111".to_string(),
         kind,

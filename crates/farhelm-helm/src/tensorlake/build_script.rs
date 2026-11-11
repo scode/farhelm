@@ -1,9 +1,12 @@
-//! The shell scripts a snapshot build runs in its build sandbox, as pure
-//! functions so their text can be pinned by tests.
+//! Shared recipe-build and environment-readiness scripts, as pure functions
+//! so their text can be pinned by tests.
 //!
-//! Each script runs under `sh -c` as the sandbox's login user (`tl-user`,
-//! with passwordless sudo) through [`super::shell::SandboxShell`]. Three
-//! rules hold for all of them:
+//! Tensorlake runs these under `sh -c` as the sandbox's login user (`tl-user`,
+//! with passwordless sudo) through [`super::shell::SandboxShell`]. Podman uses
+//! its direct-exec route and observed login account. Final container clones
+//! use only the read-only user-manager wait.
+//!
+//! Three rules hold for all of them:
 //!
 //! - Output goes to a log on the sandbox, and only a bounded tail of it comes
 //!   back, on stderr, when a command fails. The capture on Farhelm's side
@@ -26,6 +29,10 @@ use crate::ssh::shell_quote;
 /// How much of a step's log a failure sends back, in bytes. Enough for apt's
 /// last few lines of context around its error.
 const LOG_TAIL_BYTES: u32 = 8192;
+
+/// sudo resets the caller's environment. Preserve only the supported proxy
+/// names so apt and dpkg inherit exact values without putting secrets in argv.
+const PACKAGE_PROXY_ENV: &str = "http_proxy,https_proxy,ftp_proxy,all_proxy,no_proxy,HTTP_PROXY,HTTPS_PROXY,FTP_PROXY,ALL_PROXY,NO_PROXY";
 
 /// The official installers (goal D12).
 pub(crate) const CLAUDE_INSTALLER: &str = "https://claude.ai/install.sh";
@@ -62,6 +69,26 @@ fn prelude(step: &str) -> String {
 /// `tensorlake/ubuntu-systemd` builder, 2026-11-03).
 pub(crate) fn ready() -> String {
     readiness_script("/proc/1/comm", "/etc/os-release")
+}
+
+/// Wait for the login user's boot-started manager without repairing the image.
+/// A container can be Running before its user bus exists. Prepared clones must
+/// establish this boundary before provisioning reads that bus. Ordinary image
+/// preparation also uses this waiter after establishing logind and linger.
+/// Success returns HOME for the preparation backend's existing home contract.
+/// Callers bound command execution as well as this nominal 30-second poll.
+pub(crate) fn user_manager_ready() -> &'static str {
+    r#"
+uid=$(id -u) || exit 4
+i=0
+while [ "$i" -lt 30 ]; do
+    s=$(XDG_RUNTIME_DIR=/run/user/$uid systemctl --user is-system-running 2>/dev/null)
+    case "$s" in running|degraded) printf '%s' "$HOME"; exit 0;; esac
+    i=$((i + 1)); sleep 1
+done
+echo 'the user manager did not start within 30 seconds' >&2
+exit 5
+"#
 }
 
 /// Keep filesystem probes explicit so tests can run the real refusal script
@@ -103,8 +130,9 @@ fn readiness_script(pid1: &str, os_release: &str) -> String {
 /// these packages (apt treats already-installed packages as
 /// no-ops).
 ///
-/// - `sudo -n env ...`: sudo resets the environment, so the variables must be
-///   set on its far side.
+/// - `sudo -n --preserve-env=... env ...`: sudo retains only the fixed proxy
+///   names from the caller; their values never enter a command argument. The
+///   package-manager controls are fixed inputs set on sudo's far side.
 /// - `DPkg::Lock::Timeout`: a systemd-booted Ubuntu runs apt's daily timers,
 ///   which can hold the dpkg lock just after boot.
 /// - `dpkg --configure -a` first is cheap and repairs a half-configured dpkg.
@@ -120,8 +148,8 @@ pub(crate) fn packages(packages: &[String]) -> String {
     ];
     words.extend(packages.iter().map(|package| shell_quote(package)));
     format!(
-        "{}apt_get() {{ sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -q -y -o DPkg::Lock::Timeout=600 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \"$@\" >>\"$log\" 2>&1 || fail; }}\n\
-         sudo -n env DEBIAN_FRONTEND=noninteractive dpkg --configure -a >>\"$log\" 2>&1 || fail\n\
+        "{}apt_get() {{ sudo -n --preserve-env={PACKAGE_PROXY_ENV} env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -q -y -o DPkg::Lock::Timeout=600 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \"$@\" >>\"$log\" 2>&1 || fail; }}\n\
+         sudo -n --preserve-env={PACKAGE_PROXY_ENV} env DEBIAN_FRONTEND=noninteractive dpkg --configure -a >>\"$log\" 2>&1 || fail\n\
          apt_get update\n\
          apt_get install {}\n",
         prelude("packages"),
@@ -362,8 +390,8 @@ mod tests {
         assert!(script.ends_with(
             "apt_get update\napt_get install ca-certificates curl gh 'ripgrep' 'g++' 'pkg:amd64=1.0'\n"
         ), "{script}");
-        assert!(script.contains("sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -q -y -o DPkg::Lock::Timeout=600"));
-        assert!(script.contains("sudo -n env DEBIAN_FRONTEND=noninteractive dpkg --configure -a"));
+        assert!(script.contains(&format!("sudo -n --preserve-env={PACKAGE_PROXY_ENV} env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -q -y -o DPkg::Lock::Timeout=600")));
+        assert!(script.contains(&format!("sudo -n --preserve-env={PACKAGE_PROXY_ENV} env DEBIAN_FRONTEND=noninteractive dpkg --configure -a")));
         let words = shell_words::split(script.lines().last().unwrap()).unwrap();
         assert_eq!(
             words,
@@ -379,6 +407,172 @@ mod tests {
             ]
         );
         assert!(packages(&[]).ends_with("apt_get install ca-certificates curl gh\n"));
+    }
+
+    /// Execute the production package script across an actual env-resetting
+    /// child boundary. The sudo stand-in preserves only explicitly named
+    /// proxies, and apt/dpkg record their own environment and argv. Searching
+    /// script text alone would miss a proxy silently removed by sudo policy.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    async fn package_children_inherit_exact_proxies_through_named_sudo_preservation() {
+        use std::collections::BTreeMap;
+        use std::os::unix::fs::{PermissionsExt as _, symlink};
+        use std::process::Stdio;
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        // Python supplies structured byte-safe observations and a real exec
+        // environment reset. It is the existing Unix runtime-test substrate,
+        // not an implementation of sudo's authentication or privilege policy.
+        let stand_in = r#"#!/usr/bin/python3
+import json, os, pathlib, subprocess, sys
+root = pathlib.Path(__ROOT__)
+names = 'http_proxy,https_proxy,ftp_proxy,all_proxy,no_proxy,HTTP_PROXY,HTTPS_PROXY,FTP_PROXY,ALL_PROXY,NO_PROXY'.split(',')
+program = pathlib.Path(sys.argv[0]).name
+args = sys.argv[1:]
+entry = {'program': program, 'argv': args}
+if program == 'sudo':
+    preserve = []
+    while args and args[0].startswith('-'):
+        option, args = args[0], args[1:]
+        if option == '-n':
+            continue
+        if option.startswith('--preserve-env='):
+            preserve = option.split('=', 1)[1].split(',')
+            assert all(name in names for name in preserve)
+            assert len(preserve) == len(set(preserve))
+        else:
+            raise AssertionError('unsupported sudo option')
+    entry['preserve'] = preserve
+    with (root / 'events.jsonl').open('a') as output:
+        output.write(json.dumps(entry) + '\n')
+    environment = {'PATH': str(root / 'bin')}
+    environment.update({name: os.environ[name] for name in preserve if name in os.environ})
+    sys.exit(subprocess.run(args, env=environment, check=False).returncode)
+assert program in ('apt-get', 'dpkg')
+entry['proxy'] = {name: os.environ[name] for name in names if name in os.environ}
+entry['unrelated'] = 'UNRELATED_PROXY_TEST' in os.environ
+entry['frontend'] = os.environ.get('DEBIAN_FRONTEND')
+with (root / 'events.jsonl').open('a') as output:
+    output.write(json.dumps(entry) + '\n')
+"#.replace("__ROOT__", &serde_json::to_string(root.path().to_str().unwrap()).unwrap());
+        for name in ["sudo", "apt-get", "dpkg"] {
+            let path = bin.join(name);
+            std::fs::write(&path, &stand_in).unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        symlink("/usr/bin/env", bin.join("env")).unwrap();
+        symlink("/usr/bin/tail", bin.join("tail")).unwrap();
+        let names = [
+            "http_proxy",
+            "https_proxy",
+            "ftp_proxy",
+            "all_proxy",
+            "no_proxy",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "FTP_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+        ];
+        let proxy = names
+            .iter()
+            .filter(|name| **name != "no_proxy")
+            .map(|name| {
+                (
+                    (*name).to_string(),
+                    if *name == "HTTP_PROXY" {
+                        String::new()
+                    } else {
+                        format!(
+                            "https://u:package-private-marker a'$x\\\"@proxy.example/{name}\nline"
+                        )
+                    },
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert!(!proxy.contains_key("no_proxy") && proxy.get("HTTP_PROXY") == Some(&String::new()));
+        // Only the log coordinate differs from the production script. The
+        // privileged commands and preservation option execute unchanged; PATH
+        // has no route to the machine's installed sudo, apt or dpkg.
+        let script = packages(&["ripgrep".into()]).replacen(
+            "log=/var/tmp/farhelm-build-packages.log",
+            &format!(
+                "log={}",
+                shell_quote(root.path().join("packages.log").to_str().unwrap())
+            ),
+            1,
+        );
+        assert!(!script.contains("package-private-marker"));
+        let path = root.path().join("packages.sh");
+        std::fs::write(&path, script).unwrap();
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command
+            .arg(&path)
+            .env_clear()
+            .env("PATH", &bin)
+            .envs(&proxy)
+            .env("UNRELATED_PROXY_TEST", "must not survive sudo")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        assert!(
+            command
+                .as_std()
+                .get_args()
+                .all(|arg| !arg.to_string_lossy().contains("package-private-marker"))
+        );
+        crate::provisioning::isolate_process_group(&mut command);
+        let output = crate::provisioning::capture_child(
+            command.spawn().unwrap(),
+            std::time::Duration::from_secs(10),
+            "the proxy package fixture",
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.code, Some(0), "{}", output.stderr);
+        let events = std::fs::read_to_string(root.path().join("events.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            events.len(),
+            6,
+            "sudo and each of dpkg/update/install must actually run"
+        );
+        for event in &events {
+            let argv = event["argv"].as_array().unwrap();
+            assert!(
+                argv.iter()
+                    .all(|arg| !arg.as_str().unwrap().contains("package-private-marker")),
+                "a privileged argv leaked a proxy"
+            );
+            if event["program"] == "sudo" {
+                assert_eq!(event["preserve"], serde_json::json!(names));
+            } else {
+                assert_eq!(event["proxy"], serde_json::to_value(&proxy).unwrap());
+                assert_eq!(event["unrelated"], false);
+                assert_eq!(event["frontend"], "noninteractive");
+            }
+        }
+        assert_eq!(events[1]["program"], "dpkg");
+        assert_eq!(events[3]["program"], "apt-get");
+        assert_eq!(events[5]["program"], "apt-get");
+        assert!(
+            events[3]["argv"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("update"))
+        );
+        assert!(
+            events[5]["argv"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("install"))
+        );
     }
 
     /// Spec: each agent script downloads its official installer over HTTPS

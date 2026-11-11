@@ -119,6 +119,50 @@ struct FakeApi(Arc<Mutex<FakeState>>);
 /// after a successful Suspend and hide the persistent-state contract.
 #[async_trait::async_trait]
 impl EnvironmentProvider for FakeApi {
+    /// This observation fixture must fail if production sends creation or Settings work here.
+    async fn places(&self) -> anyhow::Result<Vec<crate::environment::EnvironmentPlace>> {
+        unreachable!("observation fixture")
+    }
+    async fn rebuild_recipe(
+        &self,
+        _: &str,
+        _: farhelm_proto::Place,
+        _: std::sync::Arc<crate::feed::FleetEvents>,
+    ) -> anyhow::Result<()> {
+        unreachable!("observation fixture")
+    }
+    async fn clean_recipe(
+        &self,
+        _: &str,
+        _: &crate::tensorlake::build::DeleteGuard,
+    ) -> anyhow::Result<()> {
+        unreachable!("observation fixture")
+    }
+    async fn ensure_prepared(
+        &self,
+        _: &str,
+        _: &crate::environment::recipes::Recipe,
+        _: farhelm_proto::Place,
+        _: std::sync::Arc<crate::feed::FleetEvents>,
+        _: &dyn crate::environment::PreparationProgress,
+    ) -> anyhow::Result<crate::environment::PreparedArtifact> {
+        unreachable!("observation fixture")
+    }
+    async fn create(
+        &self,
+        _: &crate::environment::EnvironmentBinding,
+        _: Option<crate::environment::PreparedArtifact>,
+        _: &dyn crate::environment::PreparationProgress,
+    ) -> anyhow::Result<crate::environment::CreatedEnvironment> {
+        unreachable!("observation fixture")
+    }
+    async fn list_owned(
+        &self,
+        _: farhelm_proto::Place,
+    ) -> anyhow::Result<Vec<crate::environment::OwnedEnvironment>> {
+        unreachable!("observation fixture")
+    }
+
     async fn connected(
         &self,
         row: &HostRow,
@@ -156,7 +200,7 @@ impl EnvironmentProvider for FakeApi {
 
     async fn suspend(
         &self,
-        _state: &crate::AppState,
+        _manager: &crate::manager::ConnectionManager,
         _binding: &EnvironmentBinding,
     ) -> anyhow::Result<()> {
         unreachable!("lifecycle dispatch uses the test AppState's Tensorlake service")
@@ -164,7 +208,7 @@ impl EnvironmentProvider for FakeApi {
 
     async fn resume(
         &self,
-        _state: &crate::AppState,
+        _manager: &crate::manager::ConnectionManager,
         _binding: &EnvironmentBinding,
     ) -> anyhow::Result<()> {
         unreachable!("lifecycle dispatch uses the test AppState's Tensorlake service")
@@ -1833,6 +1877,7 @@ async fn lifecycle_suspend_holds_routing_and_excludes_removal() {
     let HostState::TensorlakeChanging {
         direction,
         requested_at,
+        starting: false,
     } = held.state
     else {
         panic!(
@@ -1916,6 +1961,7 @@ async fn lifecycle_resume_holds_its_direction_until_the_api_finishes() {
         HostState::TensorlakeChanging {
             direction: LifecycleDirection::Resuming,
             requested_at: 1..,
+            starting: false,
         }
     ));
     assert!(held.client.is_none());

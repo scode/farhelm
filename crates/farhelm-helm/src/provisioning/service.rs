@@ -4,6 +4,10 @@
 mod automatic;
 #[path = "tensorlake_add.rs"]
 mod tensorlake_add;
+
+#[cfg(test)]
+#[path = "session_launch_failure_tests.rs"]
+pub(crate) mod session_launch_failure_tests;
 pub(crate) use automatic::AutomaticUpdates;
 
 use super::backend::{
@@ -287,10 +291,13 @@ fn attach_refusal(state: &HostState) -> Option<BackendFailure> {
         // Not a refusal of the supervisor, but just as final for this run:
         // nothing is dialed while the sandbox is suspended, so waiting out
         // the attach would only time out.
-        HostState::Suspended { .. } => "the host's Tensorlake sandbox was suspended during \
+        HostState::Suspended { .. } => "the host's environment was suspended during \
              setup; resume it and run setup again"
             .to_string(),
-        HostState::TensorlakeChanging { .. } => "the host's Tensorlake sandbox is changing \
+        HostState::Stopped { .. } => {
+            "the host's environment is stopped; use Resume to start it".into()
+        }
+        HostState::TensorlakeChanging { .. } => "the host's environment is changing \
              its running state; wait for that operation, then run setup again"
             .to_string(),
         _ => return None,
@@ -427,7 +434,8 @@ impl ProductionProvisioning {
                 production_payloads(selection, state_dir, release_build, &cwd)?,
             )
         };
-        let delivery = CredentialDelivery::new(store, Arc::clone(&backend));
+        let places = crate::environment::podman_probe::PodmanPlaces::new(state_dir);
+        let delivery = CredentialDelivery::with_places(store, Arc::clone(&backend), places);
         Ok(Self {
             backend,
             preparation_backend,
@@ -443,6 +451,21 @@ impl ProductionProvisioning {
         &self,
         state_dir: &Path,
     ) -> Arc<dyn crate::tensorlake::prepared::SnapshotPreparer> {
+        Arc::new(
+            crate::tensorlake::prepared::TensorlakeSnapshotPreparer::new(
+                Arc::clone(&self.preparation_backend),
+                self.environment_preparer(state_dir),
+                state_dir,
+            )
+            .expect("the selected helm state directory has valid Tensorlake access"),
+        )
+    }
+
+    /// Both providers checkpoint installations through this same executor.
+    pub(crate) fn environment_preparer(
+        &self,
+        state_dir: &Path,
+    ) -> Arc<dyn crate::environment::EnvironmentPreparer> {
         Arc::new(super::snapshot_preparer::InstallerSnapshotPreparer::new(
             Arc::clone(&self.preparation_backend),
             Arc::clone(&self.payloads),
@@ -460,12 +483,20 @@ impl ProvisioningService {
     pub(super) fn snapshot_preparer(
         &self,
     ) -> Arc<dyn crate::tensorlake::prepared::SnapshotPreparer> {
-        Arc::new(super::snapshot_preparer::InstallerSnapshotPreparer::new(
+        let installer = Arc::new(super::snapshot_preparer::InstallerSnapshotPreparer::new(
             Arc::clone(&self.backend),
             Arc::clone(&self.payloads),
             self.layout.clone(),
             self.helm_build(),
-        ))
+        ));
+        Arc::new(
+            crate::tensorlake::prepared::TensorlakeSnapshotPreparer::new(
+                self.backend.clone(),
+                installer,
+                &self.layout.local_state_dir,
+            )
+            .expect("the injected state directory has valid Tensorlake access"),
+        )
     }
 
     /// Drive one real scan with caller-owned attempt memory, without a timer or
@@ -765,10 +796,7 @@ impl ProvisioningService {
         // checks the standard flat install path for that recovery case.
         // Setting up a known host again is refused while its sandbox is
         // suspended, before anything dials it (see `suspended_refusal`).
-        if let Some(reason) = stored
-            .as_ref()
-            .and_then(|row| self.suspended_refusal(row.id))
-        {
+        if let Some(reason) = stored.as_ref().and_then(|row| self.suspended_refusal(row)) {
             return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
                 reason.to_string(),
             )));
@@ -1331,7 +1359,7 @@ impl ProvisioningService {
                 binding.handle.initial_setup_refusal().into(),
             )));
         }
-        if let Some(reason) = self.suspended_refusal(host) {
+        if let Some(reason) = self.suspended_refusal(&row) {
             return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
                 reason.to_string(),
             )));
@@ -2195,9 +2223,10 @@ impl ProvisioningService {
                 registration,
                 original_target,
             } => {
-                self.require_registration_unchanged(host, registration)
+                let row = self
+                    .require_registration_unchanged(host, registration)
                     .await?;
-                self.require_not_suspended(host)?;
+                self.require_not_suspended(&row)?;
                 let mut observation = self.backend.probe(original_target).await?;
                 let installed_target = ProbeTarget {
                     transport: pending.plan.target.clone(),
@@ -2280,9 +2309,10 @@ impl ProvisioningService {
                 registration,
                 ..
             } => {
-                self.require_registration_unchanged(host, registration)
+                let row = self
+                    .require_registration_unchanged(host, registration)
                     .await?;
-                self.require_not_suspended(host)?;
+                self.require_not_suspended(&row)?;
                 self.require_update_trusted(host)?;
                 let observation = self.backend.probe(target).await?;
                 let (plan, discovered) = match observation {
@@ -2416,11 +2446,15 @@ impl ProvisioningService {
         }
     }
 
+    /// Return the row whose registration still matches the confirmed plan.
+    /// State gates can then use its provider binding without a second read
+    /// that might describe another registration. Live state is checked after
+    /// this identity check and before the backend probe for setup and Update.
     async fn require_registration_unchanged(
         &self,
         host: HostId,
         expected: &ProbeRegistration,
-    ) -> Result<(), BackendFailure> {
+    ) -> Result<HostRow, BackendFailure> {
         let row = self.host_row(host).await.map_err(|error| {
             BackendFailure::new("re-reading the confirmed host row", format!("{error:#}"))
         })?;
@@ -2436,29 +2470,34 @@ impl ProvisioningService {
                 "discard this plan and plan again",
             ));
         }
-        Ok(())
+        Ok(row)
     }
 
-    /// Why provisioning must not reach `host` now, when it is a Tensorlake
-    /// host whose sandbox is suspended or changing its running state.
+    /// Refuse provisioning while an environment cannot accept a connection.
     ///
-    /// Every setup, rerun and Update step opens ssh to the host, and the
-    /// connection actor deliberately stops dialing a suspended sandbox: a new
-    /// connection is refused, and one on a surviving shared connection hangs
-    /// until the probe's deadline. Nothing here resumes a sandbox, so the
-    /// answer is to resume it first. Asked before planning probes anything and
-    /// again before a confirmed run does, so a plan made while the sandbox ran
+    /// The connection actor deliberately stops dialing a suspended environment:
+    /// a sandbox refuses new connections and a paused container blocks exec.
+    /// Provisioning uses its own connection, so it must enforce the same gate.
+    /// Nothing here resumes the environment. Asked before planning probes
+    /// anything and again before a confirmed run does, so a plan made while it ran
     /// cannot proceed after it was suspended or a lifecycle request began.
-    fn suspended_refusal(&self, host: HostId) -> Option<&'static str> {
-        match self.manager.state(host) {
-            Some(HostState::Suspended { .. }) => Some(
-                "this host's Tensorlake sandbox is suspended, so Farhelm cannot reach it; resume the \
-                 sandbox first, then try again",
+    fn suspended_refusal(&self, row: &HostRow) -> Option<&'static str> {
+        match self.manager.state(row.id) {
+            Some(HostState::Stopped { .. }) => Some(
+                "this host's environment is stopped; use Resume before setting it up or updating it",
             ),
+            Some(HostState::Suspended { .. }) => {
+                // Keep refusing even if the registry row no longer carries
+                // the environment binding for the actor's published state.
+                Some(row.environment_binding().map_or(
+                    "this host's environment is suspended, so Farhelm cannot reach it; resume it first, then try again",
+                    |binding| binding.handle.suspended_provisioning_refusal(),
+                ))
+            }
             // A released hold can retain this label until the actor next
             // publishes. Do not let that gap authorize a setup SSH probe.
             Some(HostState::TensorlakeChanging { .. }) => Some(
-                "this host's Tensorlake sandbox is changing its running state; wait for that \
+                "this host's environment is changing its running state; wait for that \
                  operation to finish, then try again",
             ),
             _ => None,
@@ -2466,8 +2505,8 @@ impl ProvisioningService {
     }
 
     /// [`Self::suspended_refusal`] as the failure a confirmed run ends with.
-    fn require_not_suspended(&self, host: HostId) -> Result<(), BackendFailure> {
-        match self.suspended_refusal(host) {
+    fn require_not_suspended(&self, row: &HostRow) -> Result<(), BackendFailure> {
+        match self.suspended_refusal(row) {
             Some(reason) => Err(BackendFailure::new(reason, "")),
             None => Ok(()),
         }
@@ -2952,7 +2991,9 @@ impl ProvisioningService {
     /// stay those of the admitted host, while its route comes from the store.
     async fn probe_target_for_row(&self, row: &HostRow) -> anyhow::Result<ProbeTarget> {
         Ok(
-            match crate::access::resolve_host_access(&self.store, row.id).await? {
+            match crate::access::resolve_host_access(&self.store, row.id, &self.delivery.places())
+                .await?
+            {
                 crate::access::HostAccess::Local => ProbeTarget {
                     transport: ProvisioningTarget::Local,
                     probe_farhelm: self.local_farhelm.clone(),

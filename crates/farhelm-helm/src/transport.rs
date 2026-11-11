@@ -107,6 +107,7 @@ pub struct SystemTransport {
     /// Production refreshes registry routes per attempt. Row-injected fixtures
     /// can omit the store while using the same command and lifetime machinery.
     store: Option<HelmStore>,
+    places: Arc<crate::environment::podman_probe::PodmanPlaces>,
 }
 
 impl SystemTransport {
@@ -116,8 +117,10 @@ impl SystemTransport {
     /// sockets are written, and neither is a location this type is free to
     /// choose for itself.
     pub fn new(state_dir: impl Into<std::path::PathBuf>) -> SystemTransport {
+        let state_dir = state_dir.into();
         SystemTransport {
-            state_dir: state_dir.into(),
+            places: crate::environment::podman_probe::PodmanPlaces::new(&state_dir),
+            state_dir,
             ssh_program: PathBuf::from("ssh"),
             store: None,
         }
@@ -125,9 +128,14 @@ impl SystemTransport {
 
     /// Bind production dialing to the live registry. Container routes will
     /// resolve their editable place host through this same lookup.
-    pub fn with_store(state_dir: impl Into<PathBuf>, store: HelmStore) -> Self {
+    pub(crate) fn with_store(
+        state_dir: impl Into<PathBuf>,
+        store: HelmStore,
+        places: Arc<crate::environment::podman_probe::PodmanPlaces>,
+    ) -> Self {
         Self {
             store: Some(store),
+            places,
             ..Self::new(state_dir)
         }
     }
@@ -141,9 +149,8 @@ impl SystemTransport {
         ssh_program: impl Into<PathBuf>,
     ) -> Self {
         Self {
-            state_dir: state_dir.into(),
             ssh_program: ssh_program.into(),
-            store: None,
+            ..Self::new(state_dir)
         }
     }
 
@@ -151,7 +158,7 @@ impl SystemTransport {
     /// fixtures which have no registry. Never cache an editable destination.
     async fn access(&self, host: &HostRow) -> anyhow::Result<HostAccess> {
         match &self.store {
-            Some(store) => crate::access::resolve_host_access(store, host.id).await,
+            Some(store) => crate::access::resolve_host_access(store, host.id, &self.places).await,
             None => crate::access::host_access(host),
         }
     }
@@ -418,6 +425,40 @@ pub(crate) fn ssh_session_limit_detail(destination: &str) -> String {
         "container host {} refused an SSH session channel. Its SSH session limit may have been reached",
         crate::manager::diagnostic_excerpt(destination, 128)
     )
+}
+
+/// Probe refusals normally discard command output because it can contain
+/// manager credentials. This typed, locally written diagnosis may survive
+/// that redaction without trusting arbitrary peer stderr as a public reason.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub(crate) struct SessionLimitRefusal(String);
+
+impl SessionLimitRefusal {
+    /// Only the bounded place name reaches the public diagnosis.
+    pub(crate) fn at(destination: &str) -> Self {
+        Self(ssh_session_limit_detail(destination))
+    }
+}
+
+/// A refused mux channel matters only if SSH itself then failed. OpenSSH
+/// may successfully open another login and run a command which exits 125,
+/// 126 or 127; those failures must retain their actual command diagnosis.
+/// Callers with a hello protocol invoke this only before hello completion.
+pub(crate) fn nested_session_failure(
+    route: &RemoteRoute,
+    code: Option<i32>,
+    stderr: &[u8],
+) -> Option<SessionLimitRefusal> {
+    match route {
+        RemoteRoute::PodmanExec {
+            via: crate::access::BaseRoute::Ssh { destination, .. },
+            ..
+        } if code == Some(255) && ssh_session_refused(stderr) => {
+            Some(SessionLimitRefusal::at(destination))
+        }
+        RemoteRoute::Ssh { .. } | RemoteRoute::PodmanExec { .. } => None,
+    }
 }
 
 /// Evidence available now; it makes no claim that process or stderr is done.

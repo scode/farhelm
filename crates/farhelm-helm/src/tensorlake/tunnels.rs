@@ -1,6 +1,6 @@
 //! Recipe tunnels share the supervisor connection's lifetime and transport.
 //!
-//! Only this Tensorlake hook asks for listeners. The supervisor reports a
+//! Both providers use this same listener lease. The supervisor reports a
 //! claimed port, never a destination: every dial uses the recipe snapshot
 //! retained here, so a sandbox cannot redirect the helm to another service.
 
@@ -80,18 +80,36 @@ impl Drop for TunnelLease {
     }
 }
 
-impl Tensorlake {
-    /// Snapshot the recipe once per connection. The actor calls this only
-    /// for a Tensorlake row, after connecting and before publishing Connected.
-    /// Retry may recover a refused bind, but cannot widen the granted recipe.
-    pub(crate) async fn start_tunnels(
+impl Tunnels {
+    /// Recipe relays are provider-neutral: they ride the supervisor protocol
+    /// and retain the same lease through connection acquisition and serving.
+    pub(crate) async fn start(
         &self,
-        row: &HostRow,
+        store: &crate::store::HelmStore,
+        host: HostId,
+        recipe: &str,
         client: Arc<SupervisorClient>,
         events: Arc<FleetEvents>,
     ) -> Option<TunnelLease> {
-        let binding = row.tensorlake.as_ref()?;
-        let recipe = self.0.store.tensorlake_recipe_row(&binding.recipe).await;
+        self.start_with_fake(store, host, recipe, client, events, String::new(), None)
+            .await
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the marked browser fixture adds sandbox identity to the shared connection lease inputs"
+    )]
+    async fn start_with_fake(
+        &self,
+        store: &crate::store::HelmStore,
+        host: HostId,
+        recipe: &str,
+        client: Arc<SupervisorClient>,
+        events: Arc<FleetEvents>,
+        sandbox: String,
+        fake: Option<Arc<super::e2e::E2eTensorlake>>,
+    ) -> Option<TunnelLease> {
+        let recipe = store.tensorlake_recipe_row(recipe).await;
         let (definitions, failure) = match recipe {
             Ok(Some((recipe, _))) => (recipe.tunnels, None),
             Ok(None) => (
@@ -113,16 +131,12 @@ impl Tensorlake {
                 delay_secs: 0,
             },
         });
-        self.0
-            .tunnels
-            .views
+        self.views
             .lock()
             .expect("tunnel views poisoned")
-            .insert(row.id, rx);
+            .insert(host, rx);
         let worker_events = events.clone();
         let worker_client = client.clone();
-        let sandbox = binding.sandbox.clone();
-        let fake = self.0.tunnel_fake.clone();
         let task = tokio::spawn(async move {
             let publish = |state| {
                 tx.send_modify(|view| view.state = state);
@@ -162,10 +176,35 @@ impl Tensorlake {
         Some(TunnelLease {
             client,
             task: task.abort_handle(),
-            views: self.0.tunnels.views.clone(),
-            host: row.id,
+            views: self.views.clone(),
+            host,
             events,
         })
+    }
+}
+
+impl Tensorlake {
+    /// Keep the marked Tensorlake browser fake on the same shared relay
+    /// implementation; production relays know only their supervisor client.
+    pub(crate) async fn start_tunnels(
+        &self,
+        row: &HostRow,
+        client: Arc<SupervisorClient>,
+        events: Arc<FleetEvents>,
+    ) -> Option<TunnelLease> {
+        let binding = row.tensorlake.as_ref()?;
+        self.0
+            .tunnels
+            .start_with_fake(
+                &self.0.store,
+                row.id,
+                &binding.recipe,
+                client,
+                events,
+                binding.sandbox.clone(),
+                self.0.tunnel_fake.clone(),
+            )
+            .await
     }
 }
 

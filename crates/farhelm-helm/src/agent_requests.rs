@@ -338,10 +338,11 @@ const AGENT_PROMPTS_ENABLED: bool = false;
 const AGENT_PROMPTS_OFF_REFUSAL: &str = "sending prompts to other sessions is turned off in this version of Farhelm, so nothing \
      was sent";
 
-/// Disposable sandboxes have no agent-request authority in this first version.
+/// Disposable sandbox and container sessions have no agent-request authority.
 /// The owning helm enforces this at the existing relay boundary, without asking
 /// the supervisor to persist policy or produce a notification.
-const SANDBOX_AGENT_REFUSAL: &str = "Agents in sandbox sessions can't ask Farhelm to act yet.";
+const SANDBOX_AGENT_REFUSAL: &str =
+    "Agents in sandbox and container sessions can't ask Farhelm to act yet.";
 
 /// The most ENCODED session bytes one `sessions` reply will ever carry.
 ///
@@ -4552,6 +4553,7 @@ mod tests {
     /// of the registry while preserving a distinct identity for each host number.
     fn host_view(id: i64, name: &str, kind: &'static str, state: HostStateView) -> HostView {
         HostView {
+            environment: None,
             id,
             entry_uuid: format!("{id:08x}-0000-4000-8000-000000000000"),
             kind,
@@ -13297,7 +13299,10 @@ mod tests {
         ] {
             let (kind, message) = refused(handler.handle(origin, "owned-session", verb).await);
             assert_eq!(kind, ErrorKind::Unauthorized);
-            assert_eq!(message, SANDBOX_AGENT_REFUSAL);
+            assert_eq!(
+                message,
+                "Agents in sandbox and container sessions can't ask Farhelm to act yet."
+            );
             assert!(h.state.approvals.list().is_empty());
         }
         assert_eq!(

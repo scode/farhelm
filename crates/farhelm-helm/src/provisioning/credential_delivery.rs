@@ -212,6 +212,7 @@ impl Drop for ConnectionLease {
 /// Detached settings-only test services deliberately have no remote backend.
 pub(crate) struct CredentialDelivery {
     store: HelmStore,
+    places: Arc<crate::environment::podman_probe::PodmanPlaces>,
     backend: Option<Arc<dyn ProvisioningBackend>>,
     entries: Mutex<HashMap<HostId, Arc<Entry>>>,
     budget: Duration,
@@ -220,9 +221,25 @@ pub(crate) struct CredentialDelivery {
 impl CredentialDelivery {
     /// Bind delivery to the same already-selected backend as host setup. The
     /// manager must receive this object before its first actor can connect.
+    #[cfg(test)]
     pub(super) fn new(store: HelmStore, backend: Arc<dyn ProvisioningBackend>) -> Arc<Self> {
+        Self::with_places(
+            store,
+            backend,
+            crate::environment::podman_probe::PodmanPlaces::new(Path::new("")),
+        )
+    }
+
+    /// Production supplies the single cache before actors or setup can use
+    /// it; delivery must resolve the same executable observation as dialing.
+    pub(super) fn with_places(
+        store: HelmStore,
+        backend: Arc<dyn ProvisioningBackend>,
+        places: Arc<crate::environment::podman_probe::PodmanPlaces>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             store,
+            places,
             backend: Some(backend),
             entries: Mutex::default(),
             budget: COMMAND_TIMEOUT,
@@ -234,10 +251,22 @@ impl CredentialDelivery {
     pub(crate) fn detached(store: HelmStore) -> Arc<Self> {
         Arc::new(Self {
             store,
+            places: crate::environment::podman_probe::PodmanPlaces::new(Path::new("")),
             backend: None,
             entries: Mutex::default(),
             budget: COMMAND_TIMEOUT,
         })
+    }
+
+    /// Settings, actor transport and installation share this exact cache.
+    pub(crate) fn places(&self) -> Arc<crate::environment::podman_probe::PodmanPlaces> {
+        Arc::clone(&self.places)
+    }
+
+    /// Provider readiness uses the transport selected for this same delivery
+    /// service. Detached settings-only fixtures deliberately have none.
+    pub(crate) fn backend(&self) -> Option<Arc<dyn ProvisioningBackend>> {
+        self.backend.clone()
     }
 
     /// Numeric IDs alone cannot authorize work after a host entry is replaced.
@@ -380,7 +409,7 @@ impl CredentialDelivery {
                 .filter(|(_, binding)| binding.uses(name)).map(|(row, _)| row.clone())?;
             entry.warning(attempt, result.clone().err(), events);
             result.err().map(|reason| DeliveryFailure {
-                host: row.alias.or_else(|| row.tensorlake.map(|binding| binding.sandbox)).unwrap_or_else(|| "host".into()),
+                host: row.alias.clone().or_else(|| row.environment_binding().map(|binding| binding.handle.name().to_owned())).unwrap_or_else(|| "host".into()),
                 reason,
             })
         }).buffer_unordered(PUSH_CONCURRENCY).filter_map(|result| async { result }).collect().await
@@ -404,7 +433,7 @@ impl CredentialDelivery {
         }
         // Delivery and supervisor dialing must select the same live route.
         // A container's place destination can change after this lease began.
-        let target = match crate::access::resolve_host_access(&self.store, row.id)
+        let target = match crate::access::resolve_host_access(&self.store, row.id, &self.places)
             .await
             .map_err(|error| error.to_string())?
         {
@@ -452,12 +481,9 @@ impl CredentialDelivery {
                     .as_ref()
                     .ok_or("credential delivery is unavailable")?;
                 if record.home.is_none() {
-                    record.home = Some(
-                        backend
-                            .host_home(&target)
-                            .await
-                            .map_err(|_| "could not read the sandbox's home directory")?,
-                    );
+                    record.home = Some(backend.host_home(&target).await.map_err(|error| {
+                        error.redacted_reason("could not read the sandbox's home directory")
+                    })?);
                     guard = self.write_record(row, &record, guard).await?;
                 }
                 let directory = record.home.as_ref().unwrap().join(folder);
@@ -465,7 +491,7 @@ impl CredentialDelivery {
                 let previous = backend
                     .read_small_file(&target, &path)
                     .await
-                    .map_err(|_| "could not read the agent settings")?;
+                    .map_err(|error| error.redacted_reason("could not read the agent settings"))?;
                 let expected = previous.as_deref().map(super::backend::hex_sha256);
                 let bytes = if let Some(endpoint) = &slot.endpoint {
                     Some(if is_claude {
@@ -494,7 +520,9 @@ impl CredentialDelivery {
                             }],
                         )
                         .await
-                        .map_err(|_| "could not prepare the agent settings directory")?;
+                        .map_err(|error| {
+                            error.redacted_reason("could not prepare the agent settings directory")
+                        })?;
                     let temporary = path
                         .with_file_name(format!(".{file}.farhelm-tmp-{}", uuid::Uuid::new_v4()));
                     match backend
@@ -515,7 +543,9 @@ impl CredentialDelivery {
                             continue;
                         }
                         result => {
-                            result.map_err(|_| "could not install the agent settings")?;
+                            result.map_err(|error| {
+                                error.redacted_reason("could not install the agent settings")
+                            })?;
                         }
                     }
                 }
@@ -567,13 +597,15 @@ impl CredentialDelivery {
                         }],
                     )
                     .await
-                    .map_err(|_| "could not prepare the Codex login directory")?;
+                    .map_err(|error| {
+                        error.redacted_reason("could not prepare the Codex login directory")
+                    })?;
                 let temporary =
                     path.with_file_name(format!(".auth.json.farhelm-tmp-{}", uuid::Uuid::new_v4()));
                 backend
                     .install_bytes(&target, auth.as_bytes(), &path, &temporary, 0o600)
                     .await
-                    .map_err(|_| "could not install the Codex login")?;
+                    .map_err(|error| error.redacted_reason("could not install the Codex login"))?;
                 record.codex_auth = Some(stamp);
                 guard = self.write_record(row, &record, guard).await?;
             }
@@ -607,7 +639,9 @@ impl CredentialDelivery {
                         }],
                     )
                     .await
-                    .map_err(|_| "could not prepare the GitHub token directory")?;
+                    .map_err(|error| {
+                        error.redacted_reason("could not prepare the GitHub token directory")
+                    })?;
                 let temporary = path.with_file_name(format!(
                     ".github-token.farhelm-tmp-{}",
                     uuid::Uuid::new_v4()
@@ -615,12 +649,11 @@ impl CredentialDelivery {
                 backend
                     .install_bytes(&target, token.as_bytes(), &path, &temporary, 0o600)
                     .await
-                    .map_err(|_| "could not install the GitHub token")?;
+                    .map_err(|error| error.redacted_reason("could not install the GitHub token"))?;
                 if !matches!(record.github, Some(GithubStamp::Token { .. })) {
-                    let available = backend
-                        .setup_github_git(&target)
-                        .await
-                        .map_err(|_| "could not configure GitHub's git helper")?;
+                    let available = backend.setup_github_git(&target).await.map_err(|error| {
+                        error.redacted_reason("could not configure GitHub's git helper")
+                    })?;
                     if !available {
                         return Err(
                             "GitHub CLI (gh) is missing; private clones need gh installed".into(),
@@ -631,7 +664,9 @@ impl CredentialDelivery {
                 backend
                     .remove_github_token(&target, &path)
                     .await
-                    .map_err(|_| "could not remove the managed GitHub token")?;
+                    .map_err(|error| {
+                        error.redacted_reason("could not remove the managed GitHub token")
+                    })?;
             }
             record.github = Some(github.stamp);
             self.write_record(row, &record, guard).await?;
@@ -642,11 +677,11 @@ impl CredentialDelivery {
     /// Load only credential selections, without build state or vendor auth.
     async fn read_bindings(&self, row: &HostRow) -> Result<Bindings, String> {
         let name = row
-            .tensorlake
-            .as_ref()
-            .ok_or("the host is not a Tensorlake sandbox")?
-            .recipe
-            .clone();
+            .environment_binding()
+            .ok_or("the host is not an environment")?
+            .handle
+            .recipe()
+            .to_owned();
         self.store
             .conn()
             .call("credential recipe selection", move |conn| {

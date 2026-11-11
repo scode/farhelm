@@ -856,3 +856,6 @@ pub fn check_recipe(recipe: &RecipeSave) -> Result<(), String> {
 #[cfg(test)]
 #[path = "tensorlake/recipes_tests.rs"]
 mod tests;
+
+/// Public per-place status uses the shared environment placement vocabulary.
+pub use crate::environment::RecipePlaceView;

@@ -1,6 +1,6 @@
 //! Install a bootable supervisor without joining the host registry.
 //!
-//! The recipe engine owns sandbox creation and checkpointing. This executor
+//! The provider owns helper creation and checkpointing. This executor
 //! returns install facts only after the enabled installation is stopped and
 //! its entire identity/state tree is verified absent. It deliberately has no
 //! credential delivery or connection-manager dependency.
@@ -11,8 +11,8 @@ use super::payloads::PayloadSource;
 use super::plan::{
     PlanLayout, ProvisioningAction, ProvisioningOperation, ProvisioningPlan, ProvisioningTarget,
 };
-use crate::tensorlake::prepared::{PreparedInstallFacts, SnapshotPreparer};
-use crate::tensorlake::ssh::TensorlakeSshAccess;
+use crate::environment::EnvironmentPreparer;
+use crate::tensorlake::prepared::PreparedInstallFacts;
 use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -63,23 +63,16 @@ impl InstallerSnapshotPreparer {
 }
 
 #[async_trait]
-impl SnapshotPreparer for InstallerSnapshotPreparer {
+impl EnvironmentPreparer for InstallerSnapshotPreparer {
     /// Install through the ordinary Add plan, then withhold all facts until
     /// its stopped, boot-enabled installation has passed the checkpoint guard.
     /// Inherited authentication is left alone; no delivery or attach runs here.
     async fn prepare(
         &self,
-        sandbox: &str,
-        access: &TensorlakeSshAccess,
+        route: &crate::access::RemoteRoute,
+        home: PathBuf,
     ) -> anyhow::Result<PreparedInstallFacts> {
-        anyhow::ensure!(
-            *access == TensorlakeSshAccess::for_state_dir(&self.layout.local_state_dir)?,
-            "the snapshot preparer's SSH access differs from the selected helm access"
-        );
-        let target = ProvisioningTarget::Remote(crate::tensorlake::ssh::route(
-            crate::tensorlake::ssh::destination(sandbox),
-        ));
-        let home = self.backend.prepare_tensorlake_sandbox(&target).await?;
+        let target = ProvisioningTarget::Remote(route.clone());
         let reach = match self
             .backend
             .inspect(&ProbeTarget {
@@ -134,6 +127,8 @@ mod tests {
     use super::super::backend::{CommandLauncher, Reach, SystemBackend};
     use super::super::plan::{PayloadKind, PayloadTarget};
     use super::*;
+    use crate::tensorlake::prepared::{SnapshotPreparer, TensorlakeSnapshotPreparer};
+    use crate::tensorlake::ssh::TensorlakeSshAccess;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     /// Sandbox preparation establishes linger before installation. An image
@@ -163,12 +158,14 @@ mod tests {
             "premise: this image refuses the redundant ordinary linger action"
         );
         std::fs::write(fixture.join("events.jsonl"), "").unwrap();
-        let preparer = InstallerSnapshotPreparer::new(
-            backend,
+        let installer = InstallerSnapshotPreparer::new(
+            backend.clone(),
             Arc::new(E2ePayloads(marker)),
             PlanLayout::production(root.path().to_path_buf()),
             "fixture-version".into(),
         );
+        let preparer =
+            TensorlakeSnapshotPreparer::new(backend, Arc::new(installer), root.path()).unwrap();
         let access = TensorlakeSshAccess::for_state_dir(root.path()).unwrap();
         let facts = preparer.prepare("fixture-preparer", &access).await.unwrap();
         assert_eq!(facts.farhelm_version, "fixture-version");

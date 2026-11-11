@@ -390,7 +390,15 @@ impl ProvisioningBackend for E2eProvisioningBackend {
     ) -> Result<ActionOutcome, BackendFailure> {
         // This browser fixture records workflow only; owned-filesystem and real
         // finishing-command tests exercise the content precondition itself.
-        let outcome = self.action(target, "write-unit").await?;
+        // Proxy files reuse the credential byte installer. Keep their fault
+        // boundary separate so a unit-install fault still tests installation,
+        // after proxy inheritance has succeeded on the same helper.
+        let event = if destination.ends_with("90-farhelm-proxy.conf") {
+            "write-proxy"
+        } else {
+            "write-unit"
+        };
+        let outcome = self.action(target, event).await?;
         // Generic uploads also include the supervisor unit. A fixed completion
         // marker lets setup tests prove this particular credential file was
         // delivered before enablement, without recording its path or contents.

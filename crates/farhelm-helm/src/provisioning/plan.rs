@@ -53,7 +53,7 @@ impl ProvisioningOperation {
 /// Transport facts retained in the plan so execution cannot silently switch
 /// machines or access policies between confirmation and execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum ProvisioningTarget {
+pub(crate) enum ProvisioningTarget {
     Local,
     /// Remote filesystem operations and probes always execute through their
     /// route, including a container reached by a local Podman process.

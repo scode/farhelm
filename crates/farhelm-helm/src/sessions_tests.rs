@@ -7,6 +7,371 @@ use super::{resolve_owner, store};
 use crate::rest_harness::{self, WsTestClient, silent_supervisor};
 use std::time::Duration;
 
+/// Captured create authority expires independently of bounded suggestion data.
+mod captured_create_history {
+    use super::super::{
+        CreateAcceptance, accept_created_session, create_target, qualify_session_info,
+        record_created_history,
+    };
+    use super::*;
+    use crate::manager::HostState;
+    use crate::rest_harness::{FleetBuilder, Harness, HostScript};
+    use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection, LaunchTarget, Place};
+    use futures_util::FutureExt;
+
+    /// Distinct private launch inputs make stale preference publication visible.
+    /// These represent the trusted composer intent, never a peer's echoed launch.
+    fn intent(recipe: &str, place: store::HostId, yolo: bool) -> CreateAcceptance {
+        CreateAcceptance {
+            environment_target: Some(LaunchTarget::Environment {
+                recipe: recipe.into(),
+                place: Place::PodmanHost(place),
+            }),
+            github_repo: None,
+            requested_cwd: "~".into(),
+            accept_result: None,
+            explicit_selection: Some(LaunchSelection {
+                permission_flags: None,
+                harness: LaunchHarness::Codex,
+                model: Some(recipe.into()),
+                effort: None,
+                permissions: Some(if yolo {
+                    LaunchPermission::Yolo
+                } else {
+                    LaunchPermission::Approve
+                }),
+                wrapper_prefix: Some(vec![format!("{recipe}-wrapper")]),
+                container: None,
+                workspace_trust: None,
+            }),
+        }
+    }
+
+    /// Include raw admission markers and all preference columns, not just visible
+    /// suggestions. A stale write must not mutate hidden deduplication state or
+    /// defaults that a narrower presentation snapshot would omit.
+    async fn snapshot(h: &Harness) -> Vec<(String, Vec<Vec<String>>)> {
+        h.store
+            .conn()
+            .call("history assertion snapshot", |conn| {
+                let mut snapshot = Vec::new();
+                for table in [
+                    "environment_launch_history",
+                    "create_history_sessions",
+                    "create_history_partitions",
+                    "create_history_cutoffs",
+                    "launch_history",
+                    "folder_history",
+                    "preferences",
+                ] {
+                    let mut statement =
+                        conn.prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))?;
+                    let columns = statement.column_count();
+                    let rows = statement
+                        .query_map([], |row| {
+                            (0..columns)
+                                .map(|index| Ok(format!("{:?}", row.get_ref(index)?)))
+                                .collect::<rusqlite::Result<Vec<_>>>()
+                        })?
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                    snapshot.push((table.to_string(), rows));
+                }
+                Ok(snapshot)
+            })
+            .await
+            .unwrap()
+    }
+
+    /// Drive the actual adoption boundary, including its newly published claim.
+    /// Reusing identity text must not reuse the connection incarnation.
+    async fn adopt(h: &Harness, host: store::HostId, identity: &str) {
+        h.fleet.edit(host, |script| {
+            script.identity = Some(identity.into());
+            script.peer = None;
+            script.sessions.clear();
+        });
+        h.fleet.kill_connection(host);
+        h.await_state(host, |state| {
+            matches!(state,
+                HostState::IdentityMismatch { reported, .. } if reported == identity
+            )
+        })
+        .await;
+        h.manager.adopt(host, identity).await.unwrap();
+        h.await_refreshed_as(host, identity, 0).await;
+    }
+
+    /// Global eviction and adoption can reclaim both durable replay keys. The
+    /// original successful reply still belongs to its captured entry, but only
+    /// a current claim may teach suggestions or overwrite newer GUI defaults.
+    #[farhelm_testtrace::test]
+    async fn evicted_pre_adoption_completion_keeps_success_without_rewriting_history() {
+        use crate::rest_harness::FakeSupervisor;
+        use farhelm_proto::ControlMsg;
+        let (client, peer) = tokio::io::duplex(64 * 1024);
+        let (release, hold) = tokio::sync::oneshot::channel();
+        let peer = tokio::spawn(async move {
+            let mut peer = FakeSupervisor::accept(peer).await;
+            let request = peer.recv().await;
+            let ControlMsg::CreateSession { req_id, .. } = request else {
+                panic!("expected captured create, got {request:?}");
+            };
+            let mut session = rest_harness::session("captured-old", 1000);
+            session.creation_seq = Some(1000);
+            peer.send(&ControlMsg::SessionCreated { req_id, session })
+                .await;
+            let _ = hold.await;
+        });
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "history.example",
+                HostScript {
+                    identity: Some("history-a".into()),
+                    peer: Some(client),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let (builder, other) = builder
+            .ssh(
+                "other-history.example",
+                HostScript {
+                    identity: Some("history-other".into()),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let h = builder.start().await;
+        h.await_refreshed_as(host, "history-a", 0).await;
+        h.await_refreshed_as(other, "history-other", 0).await;
+        let (claim, client) = create_target(&h.state, Some(host)).unwrap();
+        let reply = client
+            .create_session("~", "agent", None, 80, 24)
+            .await
+            .unwrap();
+        assert_eq!(reply.id, "captured-old");
+
+        // Establish an ordinary cutoff as well as the original admission, so
+        // adoption must actually purge both forms of installation replay memory.
+        for index in 1..=101 {
+            let mut earlier = rest_harness::session(&format!("earlier-{index}"), index);
+            earlier.creation_seq = Some(index as u64);
+            h.store
+                .record_create_history(host, "history-a", &earlier)
+                .await
+                .unwrap();
+        }
+        // Initial environment provisioning keeps this distinct lock through
+        // acceptance. History must acquire only the cache/registry writer.
+        let provisioning = h.manager.host_provision_lock(host).await;
+        let accepted = tokio::time::timeout(
+            Duration::from_secs(10),
+            accept_created_session(&h.state, &claim, reply.clone(), intent("old", host, true)),
+        )
+        .await
+        .expect("history must not reacquire the provisioning lock")
+        .unwrap();
+        drop(provisioning);
+        assert_eq!(accepted, reply);
+        let entries = h.store.environment_launch_history().await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].target,
+            intent("old", host, true).environment_target
+        );
+        let preferences = h.store.preferences().await.unwrap();
+        assert_eq!(preferences.last_container_host, Some(host));
+        assert_eq!(preferences.remembered_permissions.as_deref(), Some("yolo"));
+        let first = snapshot(&h).await;
+        accept_created_session(&h.state, &claim, reply.clone(), intent("old", host, true))
+            .await
+            .unwrap();
+        assert_eq!(
+            snapshot(&h).await,
+            first,
+            "current-claim replay stays deduplicated"
+        );
+
+        let (other_claim, _) = create_target(&h.state, Some(other)).unwrap();
+        for index in 1..=100 {
+            let mut session = rest_harness::session(&format!("other-{index}"), index);
+            session.creation_seq = Some(index as u64);
+            accept_created_session(
+                &h.state,
+                &other_claim,
+                session,
+                intent("other", other, false),
+            )
+            .await
+            .unwrap();
+        }
+        {
+            let db = h.store.connection_for_test();
+            let db = db.lock();
+            let retained: i64 = db.query_row(
+                "SELECT count(*) FROM environment_launch_history WHERE origin_host_id = ?1 AND session_id = 'captured-old'",
+                [host], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(
+                retained, 0,
+                "premise: other hosts evicted the independent source key"
+            );
+            let admitted: i64 = db.query_row(
+                "SELECT count(*) FROM create_history_sessions WHERE host_id = ?1 AND session_id = 'captured-old'",
+                [host], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(
+                admitted, 1,
+                "premise: ordinary admission survived global eviction"
+            );
+            let cutoffs: i64 = db
+                .query_row(
+                    "SELECT count(*) FROM create_history_cutoffs WHERE host_id = ?1",
+                    [host],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(cutoffs, 1, "premise: adoption has a real cutoff to purge");
+        }
+        adopt(&h, host, "history-b").await;
+        adopt(&h, host, "history-a").await;
+        let (current, _) = create_target(&h.state, Some(host)).unwrap();
+        assert_eq!(current.identity, claim.identity);
+        assert_eq!(current.entry_uuid, claim.entry_uuid);
+        assert_ne!(current.incarnation, claim.incarnation);
+        {
+            let db = h.store.connection_for_test();
+            let db = db.lock();
+            for table in [
+                "create_history_sessions",
+                "create_history_cutoffs",
+                "create_history_partitions",
+            ] {
+                let rows: i64 = db
+                    .query_row(
+                        &format!("SELECT count(*) FROM {table} WHERE host_id = ?1"),
+                        [host],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(rows, 0, "premise: adoption purged {table}");
+            }
+        }
+        let mut newer = rest_harness::session("current-newer", 2000);
+        newer.creation_seq = Some(2000);
+        accept_created_session(&h.state, &current, newer, intent("new", other, false))
+            .await
+            .unwrap();
+        assert_eq!(
+            h.store.preferences().await.unwrap().last_container_host,
+            Some(other)
+        );
+        assert_eq!(
+            h.store
+                .preferences()
+                .await
+                .unwrap()
+                .remembered_permissions
+                .as_deref(),
+            Some("approve"),
+            "the newer explicit guarded choice replaced the old YOLO default"
+        );
+        assert_eq!(
+            h.store.environment_launch_history().await.unwrap()[0].target,
+            intent("new", other, false).environment_target
+        );
+        let before = snapshot(&h).await;
+        let accepted = accept_created_session(&h.state, &claim, reply, intent("old", host, true))
+            .await
+            .unwrap();
+        let qualified = qualify_session_info(&claim.entry_uuid, accepted).unwrap();
+        assert_eq!(qualified.id, h.session_ref(host, "captured-old"));
+        assert_eq!(
+            snapshot(&h).await,
+            before,
+            "obsolete captured completion changes no bookkeeping"
+        );
+        release.send(()).expect("captured peer is still owned");
+        peer.await.unwrap();
+    }
+
+    /// Cancellation cannot drop the registry fence while a queued SQLite write
+    /// still owns it. Invalidating the real claim after queuing distinguishes a
+    /// write-boundary check from an early check made before database admission.
+    #[farhelm_testtrace::test]
+    async fn queued_history_rechecks_claim_and_retains_guard_after_waiter_cancellation() {
+        let h = FleetBuilder::new()
+            .await
+            .local(HostScript {
+                identity: Some("queued-history-install".into()),
+                ..Default::default()
+            })
+            .await
+            .start()
+            .await;
+        let host = rest_harness::local_id(&h.store).await;
+        h.await_refreshed(host).await;
+        let (claim, _) = create_target(&h.state, Some(host)).unwrap();
+        assert!(
+            claim.identity.is_some(),
+            "premise: history has durable identity"
+        );
+        let session = rest_harness::session("queued-create", 100);
+        let acceptance = intent("queued", host, true);
+        let before = snapshot(&h).await;
+        let mut next = Box::pin(h.manager.host_write_lock(host));
+        {
+            let db = h.store.connection_for_test();
+            let _held = db.lock();
+            let mut history = Box::pin(record_created_history(
+                &h.state, &claim, &session, acceptance,
+            ));
+            assert!(
+                history.as_mut().now_or_never().is_none(),
+                "premise: history queued behind SQLite"
+            );
+            assert!(
+                next.as_mut().now_or_never().is_none(),
+                "queued task owns registry guard"
+            );
+            // The existing connection hold publishes a new incarnation before
+            // waiting for the actor. Polling once invalidates without a sleep
+            // or requiring an actor/database write to finish behind our lock.
+            let _ = h
+                .manager
+                .hold_connection(
+                    host,
+                    HostState::Suspended {
+                        observed_at: 0,
+                        suspended_by_farhelm_at: None,
+                        resume_failed: None,
+                    },
+                )
+                .now_or_never();
+            let withdrawn = h.manager.status(host).unwrap();
+            assert_ne!(withdrawn.incarnation, claim.incarnation);
+            assert!(withdrawn.client.is_none());
+            drop(history);
+            assert!(
+                next.as_mut().now_or_never().is_none(),
+                "cancelled waiter cannot release transferred guard"
+            );
+        }
+        let guard = tokio::time::timeout(Duration::from_secs(10), next)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            snapshot(&h).await,
+            before,
+            "queued stale claim writes no history or preferences"
+        );
+        drop(guard);
+        h.manager.release_hold(host, true);
+    }
+}
+
 /// A recipe launch accepts repository intent before its machine exists. Once
 /// connected it must obtain that machine's exact preview, honor template Base
 /// numbering, and dispatch only one create through ordinary checkout admission.
@@ -8005,6 +8370,7 @@ async fn a_create_with_another_entries_suffix_returns_its_own_prefix() {
                 &claim,
                 reply,
                 CreateAcceptance {
+                    environment_target: None,
                     github_repo: None,
                     requested_cwd: "/work".into(),
                     accept_result: None,

@@ -11,6 +11,52 @@ use super::ssh::TensorlakeSshAccess;
 // Existing snapshot consumers keep their import path for these shared facts.
 pub(crate) use crate::environment::recipes::PreparedInstallFacts;
 
+/// Tensorlake supplies its gateway access and logind setup before entering
+/// the common route/home installer. Keeping this wrapper here preserves the
+/// build engine's existing injected machine-preparation seam.
+pub(crate) struct TensorlakeSnapshotPreparer {
+    backend: std::sync::Arc<dyn crate::provisioning::ProvisioningBackend>,
+    installer: std::sync::Arc<dyn crate::environment::EnvironmentPreparer>,
+    access: TensorlakeSshAccess,
+}
+
+impl TensorlakeSnapshotPreparer {
+    /// Freeze the same selected backend and key coordinates as provisioning.
+    pub(crate) fn new(
+        backend: std::sync::Arc<dyn crate::provisioning::ProvisioningBackend>,
+        installer: std::sync::Arc<dyn crate::environment::EnvironmentPreparer>,
+        state: &std::path::Path,
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            backend,
+            installer,
+            access: TensorlakeSshAccess::for_state_dir(state)?,
+        })
+    }
+}
+
+#[async_trait]
+impl SnapshotPreparer for TensorlakeSnapshotPreparer {
+    async fn prepare(
+        &self,
+        sandbox: &str,
+        access: &TensorlakeSshAccess,
+    ) -> anyhow::Result<PreparedInstallFacts> {
+        anyhow::ensure!(
+            *access == self.access,
+            "the snapshot preparer's SSH access differs from the selected helm access"
+        );
+        let route = super::ssh::route(super::ssh::destination(sandbox));
+        let home = self
+            .backend
+            .prepare_tensorlake_sandbox(&crate::provisioning::ProvisioningTarget::Remote(
+                route.clone(),
+            ))
+            .await?;
+        self.installer.prepare(&route, home).await
+    }
+}
+
 /// Install and leave a sandbox safe to checkpoint without delivering credentials.
 ///
 /// Success requires a boot-enabled supervisor unit, a stopped supervisor, an
@@ -64,15 +110,14 @@ impl PreparedSnapshot {
         version: &str,
         source: Option<&str>,
     ) -> Option<PreparedStaleReason> {
-        if self.farhelm_version != version {
-            Some(PreparedStaleReason::FarhelmUpdated)
-        } else if source != Some(self.source_snapshot.as_str()) {
-            Some(PreparedStaleReason::SnapshotRebuilt)
-        } else if now.saturating_sub(self.prepared_at) > 86_400 {
-            Some(PreparedStaleReason::Expired)
-        } else {
-            None
-        }
+        crate::environment::recipes::prepared_stale_reason(
+            self.prepared_at,
+            &self.farhelm_version,
+            &self.source_snapshot,
+            now,
+            version,
+            source,
+        )
     }
 
     /// The public summary excludes install paths, which only clone admission uses.
