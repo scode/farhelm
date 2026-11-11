@@ -1648,6 +1648,18 @@ impl LaunchDraftState {
         .is_some()
     }
 
+    /// Retain an admitted request's host when navigation can change New's default.
+    /// Call only at the submitted handoff, with the host already validated for
+    /// that request. Keep it on failure or unknown outcome so the same draft can
+    /// answer YOLO or retry its original identity after selection moves elsewhere.
+    /// This promotes the current effective host without editing the draft or
+    /// retiring its key: `choose_host` would instead clear placement authority
+    /// and retire retries even for the same id. Only the row id is pinned;
+    /// registry installation changes still pass through ordinary reconciliation.
+    pub(super) fn pin_submitted_host(mut self, id: HostId) {
+        self.chosen_host.set(Some(id));
+    }
+
     /// Seed a host's default folder (SPEC.md, "Working directory") into a draft
     /// whose folder is still a default: a folder or repository the person chose
     /// in this draft is theirs, so it is left alone. Returns whether the draft
@@ -6011,7 +6023,9 @@ mod tests {
                     ..Default::default()
                 },
             );
-            // Resume released admission but has not delivered a Ready preview.
+            // The accepted resume stamp still waits for a Ready preview.
+            // This draft-only fixture owns no running form future or retained
+            // launch token; the production form keeps that token separately.
             // Use the production identity so omitting Custom text fails this oracle.
             assert!(!owner.ops.busy_now());
             assert_eq!(
@@ -6034,6 +6048,7 @@ mod tests {
                 None,
                 String::new(),
                 crate::DeleteGuard::NothingAlive,
+                None,
             )
             .after_resume(6, None);
             authority.incarnation = 6;

@@ -61,6 +61,73 @@ const NEW_SESSION_TOOLTIP: &str = if crate::HAS_NEW_SESSION_SHORTCUT {
     "New session: start an agent or a command on any host"
 };
 
+/// Automatic selection needs an unspent startup or actual-removal reason.
+/// An accepted create takes over an empty startup opportunity before the
+/// server can publish its row. Leaving that old opportunity armed would let
+/// a feed select the row before the launch can check whether the user moved on.
+/// A real last selection remains separate, preserving Delete's successor pick.
+#[derive(Clone, PartialEq, Eq)]
+enum SelectionIntent {
+    Startup,
+    LastSelected(String),
+    RetainedEmpty,
+}
+
+impl SelectionIntent {
+    /// Preserve the removed reference across a cleared pane and a stale list.
+    /// RetainedEmpty grants no automatic authority; manual opens remain free.
+    fn excluded(&self) -> Option<&str> {
+        match self {
+            Self::LastSelected(id) => Some(id),
+            Self::Startup | Self::RetainedEmpty => None,
+        }
+    }
+
+    /// Retire only startup's empty-pane choice, never a real removal fallback.
+    /// Called at dispatch, rather than reply, because a feed may win that race.
+    fn create_dispatched(&mut self, selected: Option<&str>) {
+        if matches!(self, Self::Startup) && selected.is_none() {
+            *self = Self::RetainedEmpty;
+        }
+    }
+}
+
+/// Retire only the mounted draft whose request just lost return admission.
+/// The global opening counter can revoke a form while it stays mounted, so
+/// that counter alone cannot identify which draft a late completion may close.
+/// A newer admitted opening must retain both its form and its seeds.
+fn retire_composer_opening(current: &mut Option<u64>, owner: u64) -> bool {
+    if *current != Some(owner) {
+        return false;
+    }
+    *current = None;
+    true
+}
+
+/// Replacement follows its source only while that source remains selected.
+/// Unlike New and Clone, intervening input does not change this established
+/// navigation rule. A retired launcher still cannot act for a newer opening.
+fn replacement_is_current(
+    mounted: Option<u64>,
+    opening: u64,
+    source: &str,
+    selected: Option<&str>,
+) -> bool {
+    mounted == Some(opening) && selected == Some(source)
+}
+
+/// A quick pick may not replace a draft or an already accepted launch read.
+/// The switcher checks this again after unmount, when a waiting reply may have
+/// changed admission. Refusal then owes its opener the ordinary focus return.
+fn quick_launch_is_refused(
+    pending: bool,
+    mounted: Option<u64>,
+    templates: bool,
+    busy: bool,
+) -> bool {
+    (pending && mounted.is_none()) || templates || busy
+}
+
 /// Whether a fleet-wide switcher pick needs the sidebar widened to reveal it.
 ///
 /// This is a navigation decision, not a second list filter: the helm still
@@ -922,6 +989,22 @@ pub(crate) fn ListView(
         .as_ref()
         .map(|destination| destination.cwd.clone());
     let base = use_context::<ApiBase>().0;
+    let launch_activity = use_context::<crate::launch_activity::LaunchActivity>();
+    let mut selection_intent = use_signal(move || {
+        selected
+            .peek()
+            .as_ref()
+            .map_or(SelectionIntent::Startup, |id| {
+                SelectionIntent::LastSelected(id.clone())
+            })
+    });
+    // Record actual selection at the common opening boundary, not only in an
+    // effect: a fast Some-to-None removal must retain its successor authority.
+    let parent_open = on_open;
+    let on_open = use_callback(move |session: Session| {
+        selection_intent.set(SelectionIntent::LastSelected(session.id.raw().to_owned()));
+        parent_open.call(session);
+    });
     // The helm's shared preference, already read by `PreferencesGate` —
     // this component never mounts before it has (see `SharedPreferences`).
     let mut preferences = use_context::<SharedPreferences>();
@@ -1226,7 +1309,9 @@ pub(crate) fn ListView(
     // all speak of a "poll sequence", and renaming the counter without them
     // would leave two vocabularies for one number.
     let mut poll_sequence = use_signal(|| 0_u64);
-    let mut show_create = use_signal(|| false);
+    // The opening id belongs to the mounted draft, independently of the
+    // global counter that other dialogs can advance to revoke its authority.
+    let mut show_create = use_signal(|| None::<u64>);
     // A switcher choice is an accepted search action, not a clone seed.
     let mut initial_create_action =
         use_signal(|| None::<crate::launch_composer::ComposerSearchResult>);
@@ -1234,6 +1319,14 @@ pub(crate) fn ListView(
     // names against another fetch could compose a different setup mid-opening.
     let mut initial_quick_templates =
         use_signal(Vec::<farhelm_proto::launcher::LaunchTemplate>::new);
+    // This belongs to the accepted quick dispatch, before any fresh reads or
+    // host wake. An automatic form submit must not forget input during them.
+    let mut initial_quick_baseline = use_signal(|| None::<u64>);
+    // A successful launch hidden by the user's current view still reports its
+    // outcome. The list owns this brief display independently of the draft,
+    // so it holds no token and cannot seed or delay the next New opening.
+    let mut started_report = use_signal(|| None::<(u64, String)>);
+    let mut started_report_generation = use_signal(|| 0_u64);
     let mut initial_partial_template =
         use_signal(|| None::<crate::launch_sequence::PartialTemplateBanner>);
     // Quick launch owns one fetch/mount/submit handoff. New still composes the
@@ -1248,6 +1341,7 @@ pub(crate) fn ListView(
             Vec<crate::launch_sequence::TemplateReference>,
             crate::launch_sequence::QuickLaunchOrigin,
             bool,
+            Option<u64>,
         )>::new,
     );
     let mut shortcut_dispatch_running = use_signal(|| false);
@@ -1427,7 +1521,9 @@ pub(crate) fn ListView(
     let layout_popovers = popovers.clone();
     use_effect(move || {
         layout_epoch();
-        show_create();
+        // A submitted launcher stays hidden and moves no anchor when it
+        // retires. Explicit modal handoffs close their originating menus;
+        // mounted request ownership is not a layout invalidation.
         if hosts_panel_open() {
             hosts_list_shape();
         }
@@ -1555,6 +1651,7 @@ pub(crate) fn ListView(
     // rerenders alone never rerun a `use_effect`.
     use_effect(use_reactive((&open_host,), move |(open_host,)| {
         let wanted = show_create()
+            .is_some()
             .then(|| {
                 let read = hosts.read();
                 let options = host_options(read.hosts().unwrap_or_default());
@@ -2916,7 +3013,11 @@ pub(crate) fn ListView(
             errors.write().remove(&id);
             let base = replace_base.clone();
             let refresh = replace_refresh.clone();
-            let attempt = replace_controller.prepare(source.clone(), guard, answered);
+            // Every caller is the user's own Replace answer (a row, header or
+            // YOLO click), so this count includes that press and nothing later.
+            let attempt = replace_controller
+                .prepare(source.clone(), guard, answered)
+                .with_press_baseline(launch_activity.snapshot());
             spawn(async move {
                 match replace_controller.run(&base, attempt).await {
                     ReplaceResult::Replaced(session, notice) => {
@@ -3160,6 +3261,7 @@ pub(crate) fn ListView(
     // rename editor open — any of which means this row's own `Session` is
     // about to change or is mid-decision, not a stable thing to snapshot
     // into a fresh clone right now.
+    let clone_popovers = popovers.clone();
     let on_clone = move |session: Session| {
         if clone_is_refused(
             ops.busy_now() || operations.busy_now(session.id.raw()),
@@ -3173,6 +3275,7 @@ pub(crate) fn ListView(
         ) {
             return;
         }
+        clone_popovers.close_open_in(&[AnchorRegion::Hosts, AnchorRegion::Sessions]);
         menu_open.set(None);
         let generation = clone_prefill
             .peek()
@@ -3183,7 +3286,7 @@ pub(crate) fn ListView(
         auto_launch.set(false);
         initial_create_action.set(None);
         clone_prefill.set(Some(prefill_from(&session, generation)));
-        show_create.set(true);
+        show_create.set(Some(*opening_generation.peek()));
     };
 
     // The last (status, tab count) a successful listing showed for the open
@@ -3311,6 +3414,7 @@ pub(crate) fn ListView(
     // handler's own doc). See `on_clone`'s doc above for why the guard runs
     // before any signal is touched and why the generation is minted here
     // rather than by the form.
+    let replace_with_popovers = popovers.clone();
     let on_replace_with = move |session: Session| {
         if clone_is_refused(
             ops.busy_now() || operations.busy_now(session.id.raw()),
@@ -3325,6 +3429,7 @@ pub(crate) fn ListView(
             return;
         }
         replace_controller.cancel_all();
+        replace_with_popovers.close_open_in(&[AnchorRegion::Hosts, AnchorRegion::Sessions]);
         menu_open.set(None);
         let generation = clone_prefill
             .peek()
@@ -3340,12 +3445,13 @@ pub(crate) fn ListView(
         auto_launch.set(false);
         initial_create_action.set(None);
         clone_prefill.set(Some(prefill));
-        show_create.set(true);
+        show_create.set(Some(*opening_generation.peek()));
     };
 
     // Header actions arrive through the single AppBody-owned request signal;
     // consuming and clearing it here prevents a keyed view remount from
     // replaying an old clone, replace-with or restart-with request.
+    let prefill_popovers = popovers.clone();
     use_effect(move || {
         let Some(request) = prefill_request.read().clone() else {
             return;
@@ -3390,6 +3496,7 @@ pub(crate) fn ListView(
             return;
         }
         restart_bridge.set(bridge);
+        prefill_popovers.close_open_in(&[AnchorRegion::Hosts, AnchorRegion::Sessions]);
         restart_source.set(bridge.map(|_| session.clone()));
         opening_generation += 1;
         quick_launch_pending.set(false);
@@ -3401,7 +3508,7 @@ pub(crate) fn ListView(
         // launcher's ordinary return control only after admission succeeds.
         host_menu_open.set(None);
         hosts_panel_open.set(false);
-        show_create.set(true);
+        show_create.set(Some(*opening_generation.peek()));
         prefill_request.set(None);
     });
 
@@ -3425,7 +3532,7 @@ pub(crate) fn ListView(
         // as the switcher does, so its result returns after Rename closes.
         // Unsubmitted quick reads still retire: cancelling Rename must not
         // revive a launch the user interrupted before submission.
-        if !(*show_create.peek() && ops.busy_now()) {
+        if !(show_create.peek().is_some() && ops.busy_now()) {
             opening_generation += 1;
             quick_launch_pending.set(false);
             auto_launch.set(false);
@@ -3635,14 +3742,16 @@ pub(crate) fn ListView(
     // then remember the pick through the same sparse writer as a row click.
     let resolve_base = base.clone();
     let mut resolving_selection = use_signal(|| false);
-    // Keep one transient exclusion across Some -> None. A local delete can
-    // clear the pane before the refreshed listing drops its old row.
-    let mut last_opened = use_signal(|| None::<String>);
     use_effect(move || {
         if let Some(id) = selected.read().as_ref() {
-            if last_opened.peek().as_ref() != Some(id) {
-                last_opened.set(Some(id.clone()));
+            let intent = SelectionIntent::LastSelected(id.clone());
+            if *selection_intent.peek() != intent {
+                selection_intent.set(intent);
             }
+            return;
+        }
+        let intent = selection_intent.read().clone();
+        if matches!(intent, SelectionIntent::RetainedEmpty) {
             return;
         }
         // Tracked admission reads matter: a pick deferred during an operation
@@ -3658,7 +3767,7 @@ pub(crate) fn ListView(
         if !listing_ok
             .sessions
             .iter()
-            .any(|session| last_opened.peek().as_deref() != Some(session.id.raw()))
+            .any(|session| intent.excluded() != Some(session.id.raw()))
             || *resolving_selection.read()
         {
             return;
@@ -3669,7 +3778,10 @@ pub(crate) fn ListView(
             let fresh = api::fetch_preferences(&base).await;
             // A manual selection or operation admitted during the read wins.
             // Choose from the latest committed rows, not a pre-await snapshot.
-            if selected.peek().is_none() && deleting.peek().is_empty() {
+            if selected.peek().is_none()
+                && deleting.peek().is_empty()
+                && *selection_intent.peek() == intent
+            {
                 let mut preferences = preferences;
                 if let Ok(fresh) = fresh {
                     // An incidental read must not refresh unrelated settings
@@ -3692,7 +3804,7 @@ pub(crate) fn ListView(
                                 .last_selected
                                 .as_ref()
                                 .map(PeerText::raw),
-                            last_opened.peek().as_deref(),
+                            intent.excluded(),
                         )
                         .cloned()
                     });
@@ -4303,6 +4415,7 @@ pub(crate) fn ListView(
     let confirm_delete = use_callback(confirm_delete);
     let cancel_delete = use_callback(cancel_delete);
     let on_clone = use_callback(on_clone);
+    let on_replace_with = use_callback(on_replace_with);
     let on_replace = use_callback(on_replace);
     let confirm_replace = use_callback(confirm_replace);
     let cancel_replace = use_callback(cancel_replace);
@@ -4403,12 +4516,10 @@ pub(crate) fn ListView(
     // The create form's own copy of the API base, for recording a created
     // session as the selection (see `remember_selection`).
     let created_base = base.clone();
-    // The create form's own copy of the listing requester, for the explicit
-    // refresh a successful replace-with issues (see `on_created` below) —
-    // the same "do not wait for the feed" nudge `do_replace` gives an
-    // ordinary replace's own success path.
+    // Every launch reply requests its successor read before a returning
+    // dialog waits elsewhere. It must not wait for a feed notice or for the
+    // eventual selection/naming callback to reveal the settled fleet state.
     let created_listing = request_listing.clone();
-    let failed_replace_listing = request_listing.clone();
     let created_hosts = request_hosts.clone();
     // The order hold that applies to the list being shown, if any, as the
     // slots and original pins `rows::held_display_order` keeps. Read rather
@@ -4523,6 +4634,7 @@ pub(crate) fn ListView(
     let new_hosts = host_options.clone();
     let new_open_host = open_host.clone();
     let new_open_destination = open_destination.clone();
+    let new_popovers = popovers.clone();
     let open_new = use_callback(
         move |action: Option<crate::launch_composer::ComposerSearchResult>| {
             if ops.busy_now() {
@@ -4530,6 +4642,8 @@ pub(crate) fn ListView(
             }
             // An admitted launcher handoff exposes its ordinary return
             // controls too. A refused shortcut leaves presentation alone.
+            new_popovers.close_open_in(&[AnchorRegion::Hosts, AnchorRegion::Sessions]);
+            menu_open.set(None);
             host_menu_open.set(None);
             hosts_panel_open.set(false);
             opening_generation += 1;
@@ -4550,8 +4664,9 @@ pub(crate) fn ListView(
             initial_create_error.set(None);
             initial_create_action.set(action);
             initial_quick_templates.set(Vec::new());
+            initial_quick_baseline.set(None);
             initial_partial_template.set(None);
-            show_create.set(true);
+            show_create.set(Some(*opening_generation.peek()));
             true
         },
     );
@@ -4564,9 +4679,12 @@ pub(crate) fn ListView(
             Vec<crate::launch_sequence::TemplateReference>,
             crate::launch_sequence::QuickLaunchOrigin,
         )| {
-            let refused = (*quick_launch_pending.peek() && !*show_create.peek())
-                || *templates_open.peek()
-                || ops.busy_now();
+            let refused = quick_launch_is_refused(
+                *quick_launch_pending.peek(),
+                *show_create.peek(),
+                *templates_open.peek(),
+                ops.busy_now(),
+            );
             // Keyboard clicks always enqueue, even refused or empty ones, so
             // the worker drains the JS snapshot each one owns in press order.
             let blocked =
@@ -4575,15 +4693,19 @@ pub(crate) fn ListView(
                     crate::launch_sequence::ShortcutAdmission::Drain => true,
                     crate::launch_sequence::ShortcutAdmission::Dispatch => false,
                 };
-            let opening = if blocked || *show_create.peek() {
+            let opening = if blocked || show_create.peek().is_some() {
                 *opening_generation.peek()
             } else {
                 opening_generation += 1;
                 *opening_generation.peek()
             };
-            shortcut_dispatch_queue
-                .write()
-                .push_back((opening, references, origin, blocked));
+            shortcut_dispatch_queue.write().push_back((
+                opening,
+                references,
+                origin,
+                blocked,
+                launch_activity.snapshot(),
+            ));
             // Only an entry that can launch refuses the next press. A drained
             // one launches nothing, so it must not disable Begin and the
             // direct shortcuts while the worker takes its snapshot. Raise the
@@ -4604,7 +4726,7 @@ pub(crate) fn ListView(
                     // Drop the signal's write guard before any await: a second
                     // shortcut must be able to join the queue during this read.
                     let next = { shortcut_dispatch_queue.write().pop_front() };
-                    let Some((opening, references, origin, blocked)) = next else {
+                    let Some((opening, references, origin, blocked, press_baseline)) = next else {
                         break;
                     };
                     // The capture listener and dispatch ask the same DOM rule.
@@ -4679,7 +4801,7 @@ pub(crate) fn ListView(
                                 fresh.quick_launch_template;
                             preferences.0.write().template_shortcuts = fresh.template_shortcuts;
                             if entry.context == "launcher" {
-                                if !*show_create.peek() {
+                                if show_create.peek().is_none() {
                                     continue;
                                 }
                                 let refusal = if typed_refusal.is_some() {
@@ -4714,7 +4836,7 @@ pub(crate) fn ListView(
                                         refusal,
                                     },
                                 );
-                            } else if !*show_create.peek() {
+                            } else if show_create.peek().is_none() {
                                 if let Some(templates) = resolved {
                                     if open_new.call(None) {
                                         let launchable =
@@ -4722,6 +4844,7 @@ pub(crate) fn ListView(
                                                 templates.iter().map(|template| &template.fields),
                                             );
                                         auto_launch.set(launchable);
+                                        initial_quick_baseline.set(press_baseline);
                                         if !launchable {
                                             initial_partial_template
                                                 .set(Some(origin.incomplete_banner(&templates)));
@@ -4771,7 +4894,7 @@ pub(crate) fn ListView(
                             }
                         }
                         Err(message) => {
-                            if entry.context == "launcher" && *show_create.peek() {
+                            if entry.context == "launcher" && show_create.peek().is_some() {
                                 shortcut_apply_requests.write().push_back(
                                     super::create_form::ShortcutApplyRequest {
                                         opening,
@@ -4783,7 +4906,7 @@ pub(crate) fn ListView(
                                     },
                                 );
                             } else if entry.context == "page"
-                                && !*show_create.peek()
+                                && show_create.peek().is_none()
                                 && open_new.call(None)
                             {
                                 initial_create_error
@@ -4802,6 +4925,20 @@ pub(crate) fn ListView(
         if *quick_switcher_closing.peek() {
             return;
         }
+        // Delivery decides whether this press may replace the launcher. The
+        // removal await can admit its held response and release its guard;
+        // replaying a busy New/template pick afterward would erase that draft.
+        // Session navigation stays available, and the later handlers still
+        // recheck admission for a launch that started during the handoff.
+        let pick = if ops.busy_now()
+            && !matches!(
+                pick.as_ref(),
+                Some(super::quick_switcher::SwitcherPick::Session(_))
+            ) {
+            None
+        } else {
+            pick
+        };
         quick_switcher_closing.set(true);
         // The surviving task waits for removal, but its first poll can follow
         // that render. Release while this exact switcher is still mounted.
@@ -4847,21 +4984,39 @@ pub(crate) fn ListView(
                 Some(super::quick_switcher::SwitcherPick::New(action)) => {
                     restore = !open_new.call(Some(*action));
                 }
-                Some(super::quick_switcher::SwitcherPick::QuickLaunch) => {
+                Some(super::quick_switcher::SwitcherPick::QuickLaunch)
+                    if !quick_launch_is_refused(
+                        *quick_launch_pending.peek(),
+                        *show_create.peek(),
+                        *templates_open.peek(),
+                        ops.busy_now(),
+                    ) =>
+                {
                     quick_launch.call((
                         vec![crate::launch_sequence::TemplateReference::Bolt],
                         crate::launch_sequence::QuickLaunchOrigin::QuickSwitcher,
                     ));
                     restore = false;
                 }
-                Some(super::quick_switcher::SwitcherPick::TemplateLaunch(name)) => {
+                Some(super::quick_switcher::SwitcherPick::TemplateLaunch(name))
+                    if !quick_launch_is_refused(
+                        *quick_launch_pending.peek(),
+                        *show_create.peek(),
+                        *templates_open.peek(),
+                        ops.busy_now(),
+                    ) =>
+                {
                     quick_launch.call((
                         vec![crate::launch_sequence::TemplateReference::Name(name)],
                         crate::launch_sequence::QuickLaunchOrigin::TemplateList,
                     ));
                     restore = false;
                 }
-                None => {}
+                None
+                | Some(
+                    super::quick_switcher::SwitcherPick::QuickLaunch
+                    | super::quick_switcher::SwitcherPick::TemplateLaunch(_),
+                ) => {}
             }
             // Cancellation, refusal and the current session owe the opener
             // focus. An accepted handoff owns its next focus instead, but
@@ -4874,8 +5029,12 @@ pub(crate) fn ListView(
         if *quick_switcher_closing.peek() {
             return;
         }
-        opening_generation += 1;
-        quick_launch_pending.set(false);
+        // A submitted launcher stays mounted while navigation is free. Its
+        // response still owns this opening's draft and modal-return fence.
+        if !(show_create.peek().is_some() && ops.busy_now()) {
+            opening_generation += 1;
+            quick_launch_pending.set(false);
+        }
         quick_switcher_mode.set(mode);
         quick_switcher_open.set(true);
     });
@@ -4892,11 +5051,11 @@ pub(crate) fn ListView(
         button {
             class: "launch-sequence-trigger", "data-sequence-action": "begin",
             r#type: "button", hidden: true, tabindex: "-1",
-            disabled: (quick_launch_pending() && !show_create()) || templates_open() || busy,
+            disabled: (quick_launch_pending() && show_create().is_none()) || templates_open() || busy,
             onclick: move |_| {
-                if (!*quick_launch_pending.peek() || *show_create.peek())
+                if (!*quick_launch_pending.peek() || show_create.peek().is_some())
                     && !*templates_open.peek() && !ops.busy_now() {
-                    launch_sequence_in_launcher.set(*show_create.peek());
+                    launch_sequence_in_launcher.set(show_create.peek().is_some());
                     launch_sequence.set(Some(crate::launch_sequence::SequenceState::default()));
                     sequence_generation += 1;
                     let generation = *sequence_generation.peek();
@@ -4981,14 +5140,14 @@ pub(crate) fn ListView(
             class: "quick-launch-trigger", r#type: "button", hidden: true, tabindex: "-1",
             "data-opening-generation": "{opening_generation()}",
             "data-read-completed-generation": "{quick_read_completed()}",
-            disabled: (quick_launch_pending() && !show_create()) || templates_open() || busy,
+            disabled: (quick_launch_pending() && show_create().is_none()) || templates_open() || busy,
             onclick: move |_| quick_launch.call((vec![crate::launch_sequence::TemplateReference::Bolt], crate::launch_sequence::QuickLaunchOrigin::Bolt)),
         }
         for key in crate::launch_sequence::TEMPLATE_SHORTCUTS.number.keys.iter().map(|key| key.value) {
             button {
                 key: "number-{key}", class: "template-number-trigger", r#type: "button",
                 hidden: true, tabindex: "-1", "data-number-key": "{key}",
-                disabled: (quick_launch_pending() && !show_create()) || templates_open() || busy,
+                disabled: (quick_launch_pending() && show_create().is_none()) || templates_open() || busy,
                 onclick: move |_| quick_launch.call((vec![crate::launch_sequence::TemplateReference::Number(key.into())], crate::launch_sequence::QuickLaunchOrigin::Number)),
             }
         }
@@ -5253,7 +5412,16 @@ pub(crate) fn ListView(
                         "data-tooltip": preferences.0.read().quick_launch_template.as_ref().map_or_else(|| format!("Templates: mark one with ⚡ for quick launch ({})", crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop)), |name| format!("Templates: quick launch {} ({})", name.escaped(), crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop))),
                         aria_haspopup: "dialog",
                         disabled: busy,
-                        onclick: move |_| { opening_generation += 1; quick_launch_pending.set(false); auto_launch.set(false); initial_template.set(None); quick_launch_hint.set(false); number_shortcut_hint.set(false); templates_open.set(true); },
+                        onclick: move |_| {
+                            if ops.busy_now() { return; }
+                            opening_generation += 1;
+                            quick_launch_pending.set(false);
+                            auto_launch.set(false);
+                            initial_template.set(None);
+                            quick_launch_hint.set(false);
+                            number_shortcut_hint.set(false);
+                            templates_open.set(true);
+                        },
                         crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Templates }
                     }
                     button {
@@ -5277,7 +5445,7 @@ pub(crate) fn ListView(
                         if ops.busy_now() {
                             return;
                         }
-                        let opening = !show_create();
+                        let opening = show_create().is_none();
                         if opening {
                             open_new.call(None);
                             return;
@@ -5303,7 +5471,7 @@ pub(crate) fn ListView(
                             initial_create_action.set(None);
                             ordinary_new_cwd.set(None);
                         }
-                        show_create.set(false);
+                        show_create.set(None);
                     },
                         crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Add }
                     }
@@ -5327,7 +5495,7 @@ pub(crate) fn ListView(
             }
             // The form follows New in DOM order, so New stays above the draft
             // with its existing cancellation action.
-            if show_create() {
+            if show_create().is_some() {
                 CreateSessionForm {
                     hosts: host_options.clone(),
                     open_host: open_host.clone(),
@@ -5340,21 +5508,44 @@ pub(crate) fn ListView(
                     initial_cwd: ordinary_new_cwd(),
                     auto_launch,
                     opening_generation,
-                    on_replace_failed: move |_| failed_replace_listing(Trigger::Explicit),
+                    mounted_opening: show_create().expect("this form has a mounted owner"),
+                    initial_quick_baseline: initial_quick_baseline(),
+                    on_create_dispatch: move |_| {
+                        selection_intent.write().create_dispatched(selected.peek().as_deref());
+                    },
+                    on_retired: move |owner| {
+                        // This is settlement of a revoked draft, not Cancel.
+                        // Never focus, advance another opening, or release a
+                        // dialog handle that could now resolve to a newer one.
+                        if !retire_composer_opening(&mut show_create.write(), owner) { return; }
+                        auto_launch.set(false);
+                        chosen_host.set(None);
+                        clone_prefill.set(None);
+                        restart_bridge.set(None);
+                        initial_create_action.set(None);
+                        ordinary_new_cwd.set(None);
+                    },
+                    on_settled: move |_| {
+                        // Publish the reply boundary before a returned launcher
+                        // or naming dialog waits for admission elsewhere.
+                        listing_reads.write().fence();
+                        created_listing(Trigger::Explicit);
+                    },
                     initial_error: initial_create_error(),
                     prefill: clone_prefill(),
                     restart_bridge: restart_bridge(),
-                    on_restarted: move |_| {
+                    on_restarted: move |owner| {
                         // The view already refreshed and reattached. Closing
-                        // must not select a new session or rewrite defaults.
-                        COMPOSER_DIALOG.release();
+                        // must not select a new session or clear newer seeds.
+                        if *show_create.peek() != Some(owner) { return; }
+                        COMPOSER_DIALOG.for_generation("data-opening-generation", owner).release();
                         opening_generation += 1;
                         chosen_host.set(None);
                         clone_prefill.set(None);
                         restart_bridge.set(None);
                         initial_create_action.set(None);
                         ordinary_new_cwd.set(None);
-                        show_create.set(false);
+                        show_create.set(None);
                     },
                     // Clone/Replace owns its seed even if it supersedes a
                     // switcher opening before the launcher unmounts.
@@ -5392,7 +5583,7 @@ pub(crate) fn ListView(
                         clone_prefill.set(None);
                         initial_create_action.set(None);
                         ordinary_new_cwd.set(None);
-                        show_create.set(false);
+                        show_create.set(None);
                         // Release above must precede this immediate handback;
                         // the removed field would otherwise leave focus on body.
                         restart_bridge.set(None);
@@ -5410,26 +5601,31 @@ pub(crate) fn ListView(
                         clone_prefill.set(None);
                         initial_create_action.set(None);
                         ordinary_new_cwd.set(None);
-                        show_create.set(false);
+                        show_create.set(None);
                         initial_template.set(Some(template));
                         templates_open.set(true);
                     },
                     on_created: move |created: CreatedSession| {
-                        hosts_panel_open.set(false);
-                        let replaced_source = clone_prefill.peek().as_ref().and_then(|prefill| prefill.mode.replace_source().map(str::to_owned));
-                        let should_open = replaced_source.as_ref().is_none_or(|source| selected.peek().as_deref() == Some(source.as_str()));
                         let CreatedSession {
                             session,
                             submitted_launch,
                             new_was_never_shown,
+                            opening,
+                            press_baseline,
+                            press_current,
                         } = created;
+                        let mounted = *show_create.peek();
+                        let owns_draft = mounted == Some(opening);
+                        let replaced_source = owns_draft.then(|| clone_prefill.peek().as_ref().and_then(|prefill| prefill.mode.replace_source().map(str::to_owned))).flatten();
+                        let should_open = if let Some(source) = &replaced_source {
+                            replacement_is_current(mounted, opening, source, selected.peek().as_deref())
+                        } else {
+                            crate::launch_activity::launch_is_current(mounted, opening, press_baseline, press_current)
+                                && press_baseline == launch_activity.snapshot()
+                        };
                         if !hosts.peek().hosts().unwrap_or_default().iter().any(|host| Some(host.id) == session.host) {
                             created_hosts(Trigger::Explicit);
                         }
-                        // Reads begun before creation cannot prove this new
-                        // session absent. Invalidate them before its selection
-                        // can trigger reconciliation against a late old reply.
-                        listing_reads.write().fence();
                         // Creation is a user-initiated selection too.
                         if should_open { remember_selection(&created_base, preferences, session.id.raw()); }
                         // Mirror the structured launch THIS client submitted
@@ -5453,37 +5649,58 @@ pub(crate) fn ListView(
                         // next reload this client may then preselect a value
                         // the helm never stored — the rarer, reversible
                         // direction, and accepted rather than plumbed back.
-                        mirror_submitted_launch(
-                            &mut preferences.0.write(),
-                            submitted_launch.as_ref(),
-                        );
-                        show_create.set(false);
-                        // This component stays mounted after creation, so
-                        // clear the draft's host and clone seed just as the
-                        // explicit cancellation path does.
-                        chosen_host.set(None);
-                        clone_prefill.set(None);
-                        initial_create_action.set(None);
-                        ordinary_new_cwd.set(None);
+                        if owns_draft {
+                            mirror_submitted_launch(
+                                &mut preferences.0.write(),
+                                submitted_launch.as_ref(),
+                            );
+                            show_create.set(None);
+                            // A late reply may report success, but it cannot
+                            // clear seeds belonging to a newer mounted draft.
+                            chosen_host.set(None);
+                            clone_prefill.set(None);
+                            restart_bridge.set(None);
+                            initial_create_action.set(None);
+                            ordinary_new_cwd.set(None);
+                            initial_quick_baseline.set(None);
+                            auto_launch.set(false);
+                        }
                         let naming = (should_open && name_created_session(
                             new_was_never_shown,
                             preferences.0.peek().name_session_on_quick_launch,
                         )).then(|| (session.id.raw().to_owned(), session.title.raw().to_owned()));
-                        if should_open { on_open.call(session); }
+                        if should_open {
+                            hosts_panel_open.set(false);
+                            on_open.call(session);
+                        } else {
+                            started_report_generation += 1;
+                            let report = *started_report_generation.peek();
+                            started_report.set(Some((report, session.title.raw().to_owned())));
+                            spawn(async move {
+                                crate::reader::sleep_ms(4_000).await;
+                                // A newer success owns its full display time;
+                                // this expiry has no authority over its report.
+                                if started_report.peek().as_ref().is_some_and(|(current, _)| *current == report) {
+                                    started_report.set(None);
+                                }
+                            });
+                        }
                         if let Some((id, title)) = naming {
                             // Selection and the modal mount share this completion
                             // event. The accepted create has already released its
                             // token, and terminal reveal must see the modal before
                             // it can take focus or keystrokes.
                             on_rename_start.call((id, title, false, true));
-                        } else {
-                            FocusTarget::new(".marked-menu-toggle", Some(".new-session-button"), false).focus();
                         }
-                        // The fence needs a fresh authoritative successor even
-                        // when a healthy feed has no further notice to deliver.
-                        // Replace-with also needs this read to retire its source.
-                        created_listing(Trigger::Explicit);
                     },
+                }
+            }
+            if let Some((_, title)) = started_report() {
+                div { class: "launch-progress-pill launch-started-report", "data-modal-exempt": "", role: "status",
+                    crate::peer::PeerLine {
+                        class: "launch-progress".to_string(),
+                        parts: vec![crate::peer::DetailPart::text("Started “"), crate::peer::DetailPart::peer(title), crate::peer::DetailPart::text("”")],
+                    }
                 }
             }
         // Status remains available while a listing is loading or failed;
@@ -5621,6 +5838,7 @@ pub(crate) fn ListView(
                             error: replace_controller.error(question.key().source.id.raw()),
                             confirm_submits: false,
                             async_inline: true,
+                            press_baseline: question.key().press_baseline,
                             // Both answers continue the Replace the user
                             // confirmed, with the row snapshot and the
                             // nothing-alive answer that prompt carried, and
@@ -5734,12 +5952,13 @@ pub(crate) fn ListView(
                                         == Some(session.id.raw()),
                                     // A prefill WITHOUT its dialog (or a
                                     // blank New) is not a transfer: only
-                                    // the two together mean this row's
+                                    // the two, while visible, mean this row's
                                     // menu close handed focus to a
-                                    // composer that now owns it. See
+                                    // composer that now owns it. A pending
+                                    // hidden composer owns no keyboard. See
                                     // `RowState::composer_transfer_open`.
-                                    composer_transfer_open: *show_create.read()
-                                        && clone_prefill.read().is_some(),
+                                    composer_transfer_open: show_create.read().is_some()
+                                        && clone_prefill.read().is_some() && !busy,
                                     selected: selected.read().as_deref()
                                         == Some(session.id.raw()),
                                     locality: session_locality(session.host, local_host),
@@ -5936,6 +6155,18 @@ fn listed_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A late rejected return must not close a newer mounted draft. Only its
+    /// own settlement can authorize the parent to discard the current seeds.
+    #[farhelm_testtrace::test]
+    fn retired_composer_cannot_consume_a_newer_opening() {
+        let mut current = Some(42);
+        assert!(!retire_composer_opening(&mut current, 41));
+        assert_eq!(current, Some(42));
+        assert!(retire_composer_opening(&mut current, 42));
+        assert_eq!(current, None);
+        assert!(!retire_composer_opening(&mut current, 42));
+    }
 
     /// Give bridge acceptance tests explicit manual-order capability. These
     /// rows carry raw routing identities, independent of their visible title.

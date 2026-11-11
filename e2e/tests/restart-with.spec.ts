@@ -442,7 +442,7 @@ test("a YOLO restart-with requires confirmation inside the dialog", async ({ pag
 /**
  * Guarded answers change the visible draft and restart without YOLO consent.
  * Holding the guarded request establishes the busy boundary: the permission
- * row must already show guarded and focus must survive the question's removal.
+ * row must already hold guarded while the hidden composer releases modality.
  * No host setting is needed to take this safer path.
  */
 test("restart with can answer the YOLO question by restarting guarded", async ({ page }) => {
@@ -506,12 +506,14 @@ test("restart with can answer the YOLO question by restarting guarded", async ({
 
     await expect.poll(() => restarts.length).toBe(2);
     await expect(submit).toHaveAttribute("aria-disabled", "true");
+    await expect(dialog).toBeHidden();
+    await expect(dialog).not.toHaveAttribute("aria-modal", "true");
     await expect(confirmation).toHaveCount(0);
-    await expect(permissions.getByRole("button", { name: "Guarded", exact: true }))
+    await expect(permissions.getByRole("button", { name: "Guarded", exact: true, includeHidden: true }))
       .toHaveAttribute("aria-pressed", "true");
     await expect(permissions.locator(".launch-composer-changed-marker"))
       .toHaveText("● Changed · was agent's own setting");
-    await expect(submit).toBeFocused();
+    await expect(permissions.getByRole("button", { name: "Guarded", exact: true, includeHidden: true })).toBeDisabled();
     expect(restarts[1]).toEqual({
       stop_if_running: false,
       with: { harness: "codex", model: "gpt-6-astra", effort: "high", permissions: "guarded" },
@@ -523,6 +525,7 @@ test("restart with can answer the YOLO question by restarting guarded", async ({
     expect(marks).toHaveLength(0);
   } finally {
     gate.release();
+    await page.unrouteAll({ behavior: "wait" });
   }
 });
 
@@ -923,20 +926,14 @@ async function blurToBody(page: Page) {
 }
 
 /**
- * The modal keeps keyboard focus, and so keystrokes, away from the live agent.
- *
- * A pending request natively disables the dialog's controls, which used to let
- * focus fall out of the modal. A refused restart then reattaches the running
- * session's terminal behind the still-open dialog, and that reattachment's
- * reveal used to take focus from the dialog's button. Either way the next
- * keystroke aimed at the dialog reached the agent. This specifies both
- * boundaries against a real attached terminal: while the request is held, and
- * after the refusal's reattachment has revealed, focus stays on the dialog's
- * primary action, Tab and typing keep it inside the dialog, and the terminal
- * never receives focus. Enter and Space are never pressed: either would
- * re-activate the focused submit and send a second request.
+ * A submitted restart releases the page, then its refusal restores the modal.
+ * The returned dialog must keep keystrokes away from the live agent even when
+ * the refusal reattaches and reveals that agent underneath it. The held request
+ * establishes the non-modal boundary first; the focus spy is armed immediately
+ * before refusal, since the terminal may legitimately receive focus while held.
+ * Enter and Space are never pressed after return: either would submit again.
  */
-test("restart with keeps focus inside the dialog over a live terminal while pending and after refusal", async ({
+test("restart with releases the page while pending and restores modal focus after refusal", async ({
   page,
   request,
 }) => {
@@ -966,7 +963,6 @@ test("restart with keeps focus inside the dialog over a live terminal while pend
     const dialog = page.locator(".create-session-form[data-launcher-mode=restart]");
     await expect(dialog).toBeVisible();
     await expect(dialog.locator(".launch-composer-cancel")).toBeFocused();
-    await armTerminalFocusSpy(page);
 
     await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true })
       .click();
@@ -974,28 +970,24 @@ test("restart with keeps focus inside the dialog over a live terminal while pend
     await expect(submit).toBeEnabled();
     await submit.click();
 
-    // Held: the request reached the fixture and the dialog rendered busy.
+    // Held: request ownership survives hiding, but the page is no longer inert.
     await expect.poll(() => bodies.length).toBe(1);
     await expect(submit).toHaveAttribute("aria-disabled", "true");
     await expect(dialog.locator(".launch-composer-cancel")).toBeDisabled();
-    await expect(submit).toBeFocused();
-    for (const key of ["Tab", "Shift+Tab", "q", "w"]) {
-      await page.keyboard.press(key);
-      expect(await focusInsideDialog(page), `focus after ${key} while the request is held`).toBe(true);
-    }
+    await expect(dialog).toBeHidden();
+    await expect(dialog).not.toHaveAttribute("aria-modal", "true");
+    const open = page.locator(`.session-row[data-session-id="${id}"] .session-row-open`);
+    await expect(open).toBeEnabled();
+    await open.focus();
+    await expect(open).toBeFocused();
 
-    // Escape that reaches the page with focus outside the dialog still obeys
-    // the busy rule: the keydown net brings focus back but must not cancel a
-    // request already in flight.
+    // Escape outside a submitted launcher must not cancel its owned request
+    // or restore the hidden editor's focus trap.
     await blurToBody(page);
     await page.keyboard.press("Escape");
-    await expect(dialog).toBeVisible();
-    expect(await focusInsideDialog(page), "focus after Escape from the body while held").toBe(true);
-    // The net parks focus on the dialog container; put it back on the
-    // primary action, where a click-submitted request keeps it, so the
-    // refusal half below starts from the same place as before.
-    await submit.focus();
-    await expect(submit).toBeFocused();
+    await expect(dialog).toBeHidden();
+    expect(await focusInsideDialog(page), "the held launcher owns no focus trap").toBe(false);
+    await armTerminalFocusSpy(page);
 
     // Tag the attachment that predates the refusal, so the wait below can
     // tell the refusal's own reattachment apart from it.
@@ -1004,6 +996,8 @@ test("restart with keeps focus inside the dialog over a live terminal while pend
     });
     gate.release();
     await expect(dialog.locator(".launch-composer-refusal-alert")).toContainText(refusal);
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveAttribute("aria-modal", "true");
     await expect
       .poll(
         () =>
@@ -1028,6 +1022,7 @@ test("restart with keeps focus inside the dialog over a live terminal while pend
     expect(bodies, "keys pressed inside the dialog must not resend the restart").toHaveLength(1);
   } finally {
     gate.release();
+    await page.unrouteAll({ behavior: "wait" });
   }
 });
 
@@ -1636,7 +1631,9 @@ async function refuseEnterRestarts(page: Page): Promise<unknown[]> {
   return bodies;
 }
 
-/** Focus is a fixture premise; the new refusal identifies this attempt's completed primary action. */
+/** A numbered refusal identifies this attempt's return, not merely request dispatch.
+ * Wait for the restored modal before checking its primary-action focus; later
+ * choice edits must not borrow readiness from a previous completed attempt. */
 async function enterRestartChoice(dialog: Locator, control: Locator, bodies: unknown[]) {
   const before = bodies.length;
   const submit = dialog.locator(".create-session-submit");
@@ -1646,6 +1643,8 @@ async function enterRestartChoice(dialog: Locator, control: Locator, bodies: unk
   await expect(control).toBeFocused();
   await control.press("Enter");
   await expect(dialog.locator(".launch-composer-refusal-alert")).toContainText(`Enter fixture refused restart ${before + 1}`);
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
   await expect(dialog.locator(".create-session-submit")).not.toHaveAttribute("aria-disabled", "true");
   // A first choice can still see the unchanged render's disabled submit.
   // Either surviving target is valid; body or an agent control is not.
@@ -1814,9 +1813,9 @@ test("restart with command Enter validates and keeps the shown YOLO value", asyn
 });
 
 for (const controlKind of ["effort", "model"] as const) {
-  /** The first submission must hand focus off before busy disables its source
-   * control. Model Enter only chooses; the primary action then submits. */
-  test(`restart with first ${controlKind} edit keeps focus inside while the request is held`, async ({ page }) => {
+  /** The first edit submits exactly once and hides its busy editor. A refusal
+   * restores the primary action's focus; model Enter alone only chooses. */
+  test(`restart with first ${controlKind} edit hides while held and restores focus after refusal`, async ({ page }) => {
     await injectSession(page, BASELINE, "resume");
     await page.route("**/api/launch-catalog", async (route) => fulfillAsHelm(route, { json: [
       { id: BASELINE.model, harness: "codex", efforts: ["high", "low"] },
@@ -1833,8 +1832,8 @@ for (const controlKind of ["effort", "model"] as const) {
       const dialog = await openInjectedDialog(page);
       const submit = dialog.locator(".create-session-submit");
       const control = controlKind === "effort"
-        ? dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "Low", exact: true })
-        : dialog.getByRole("combobox", { name: "Model", exact: true });
+        ? dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "Low", exact: true, includeHidden: true })
+        : dialog.getByRole("combobox", { name: "Model", exact: true, includeHidden: true });
       if (controlKind === "model") {
         await control.fill("enter-model");
         await expect(dialog.getByRole("option", { name: "enter-model", exact: true })).toBeVisible();
@@ -1853,17 +1852,19 @@ for (const controlKind of ["effort", "model"] as const) {
       }
       await expect(submit).toHaveAttribute("aria-disabled", "true");
       await expect(control, "busy must disable the control that held focus before Enter").toBeDisabled();
-      // The shared primary stays focusable through aria-disabled; it owns
-      // input before busy disables the choice that initiated this request.
-      await expect(submit, "the surviving action owns focus before any recovery key").toBeFocused();
+      await expect(dialog).toBeHidden();
+      await expect(dialog).not.toHaveAttribute("aria-modal", "true");
       await expect.poll(() => bodies.length, { message: "the held restart route must capture this request" }).toBe(1);
       await expect(dialog.locator(".launch-composer-refusal-alert"), "an in-flight request is progress").toHaveCount(0);
       expect(bodies[0]).toMatchObject({ with: controlKind === "effort" ? { effort: "low" } : { model: "enter-model" } });
       gate.release();
       await expect(dialog.locator(".launch-composer-refusal-alert")).toContainText("held Enter restart refused");
+      await expect(dialog).toBeVisible();
+      await expect(dialog).toHaveAttribute("aria-modal", "true");
       await expect(submit).toBeFocused();
     } finally {
       gate.release();
+      await page.unrouteAll({ behavior: "wait" });
     }
   });
 }

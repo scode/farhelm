@@ -1968,8 +1968,8 @@ test("create dialog surfaces a precondition failure, preserves the form, and cre
 // window reliably, so this holds the POST until the assertions finish.
 // Only POST is held; the list's reads keep flowing. Also covers the
 // other control the submission guard locks: the "new session" toggle,
-// which would otherwise unmount the form mid-POST. Row Open remains enabled;
-// the composer's modal isolation still governs pointer access in this phase.
+// which would otherwise unmount the form mid-POST. The submitted form stays
+// mounted but hidden, with row Open still available for navigation.
 test("create dialog disables the submit control while a create is in flight", async ({
   page,
   request,
@@ -2016,8 +2016,8 @@ test("create dialog disables the submit control while a create is in flight", as
     // response with nothing left to act on it (see CreateSessionForm's
     // lifecycle contract in list/create_form.rs).
     await expect(page.locator(".new-session-button")).toBeDisabled();
-    // Row navigation does not consult the submission token. This checks the
-    // control's enabled state; modal isolation still prevents a pointer click.
+    // Row navigation does not consult the submission token. The dedicated
+    // nonblocking-launch cases also drive real clicks and terminal input.
     await expect(
       sharedSessionRow(page).locator(".session-row-open"),
     ).toBeEnabled();
@@ -4361,11 +4361,17 @@ test("an idle session already seen uses its row's status foreground with the pla
   await expect(badge).toHaveText("Idle");
   // Seen idle uses the muted ordinary role; selection inverts the mark.
   // Checking the named role catches a swap to another quiet foreground
-  // without pinning this test to one palette's numeric value.
-  const seenRole = await row.getAttribute("data-session-selected") === "true" ? "--on-fill" : "--fg-1";
-  expect(
-    await badge.locator(".status-dot").evaluate((element) => getComputedStyle(element).color),
-  ).toBe(await resolveToken(page, seenRole));
+  // without pinning this test to one palette's numeric value. Selection and
+  // colour are read in one evaluation, since the page can select this only
+  // session automatically between two separate reads.
+  const { selected, color } = await row.evaluate((element) => {
+    const dot = element.querySelector(".status-badge.idle .status-dot");
+    return {
+      selected: element.getAttribute("data-session-selected") === "true",
+      color: dot ? getComputedStyle(dot).color : "no idle status dot",
+    };
+  });
+  expect(color).toBe(await resolveToken(page, selected ? "--on-fill" : "--fg-1"));
 });
 
 test("an idle session with unseen output uses its row's new-output foreground and accessible words", async ({
@@ -4398,10 +4404,17 @@ test("an idle session with unseen output uses its row's new-output foreground an
   await expect(row.locator(".session-row-open")).toHaveAccessibleName(/Idle — new output/);
   // New output uses the info role on ordinary rows and an inverse diamond
   // on selection. The accessible words above preserve its meaning there.
-  const unseenRole = await row.getAttribute("data-session-selected") === "true" ? "--on-fill" : "--info";
-  expect(
-    await badge.locator(".status-dot").evaluate((element) => getComputedStyle(element).color),
-  ).toBe(await resolveToken(page, unseenRole));
+  // Selection and colour are read in one evaluation: the page can select this
+  // only session automatically between two separate reads, which once paired
+  // an unselected reading with the selected row's colour.
+  const { selected, color } = await row.evaluate((element) => {
+    const dot = element.querySelector(".status-badge.idle.unseen .status-dot");
+    return {
+      selected: element.getAttribute("data-session-selected") === "true",
+      color: dot ? getComputedStyle(dot).color : "no unseen status dot",
+    };
+  });
+  expect(color).toBe(await resolveToken(page, selected ? "--on-fill" : "--info"));
 });
 
 // The pulse is a claim about RIGHT NOW, and a stale session cannot make it.

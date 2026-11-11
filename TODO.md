@@ -292,9 +292,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the local Mac's supervisor from being started detached by the desktop app to the same per-user launchd job, so every
   Mac uses one consistent mechanism. Related: "Let the Mac's supervisor outlive the desktop app" under Maybe later.
 
-- **Closing or starting terminals must not block other actions.** Closing a terminal or starting new ones should not
-  disable doing other things, like switching to other sessions. Plan: `plans/queue/nonblocking-session-actions.md`.
-
 - **Decide how terminal snapshots are supposed to work.** Every checkpoint of a terminal in a terminal host encodes the
   whole terminal (screen, up to 12,000 lines of scrollback, modes) into one self-contained blob, even though most of the
   scrollback has not changed since the previous snapshot. That repeated work is what makes typing pause during a
@@ -618,7 +615,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   in 58 seconds in `9ebdc54c-8229-4787-a96b-19c2836e083e`. The new-terminal-button report records the same case timing
   out twice and passing unchanged in 58.7 seconds. Cause unknown; the narrow timing margin is a hypothesis, not a
   diagnosed fix. On 2026-11-05 it passed five attempts per engine; WebKit took 45.9–56.6 seconds across those runs. The
-  deadline and exclusion remain unchanged; see the bounded-attempt follow-up in FLAKES.md.
+  deadline and exclusion remain unchanged; see the bounded-attempt follow-up in FLAKES.md. On 2026-11-10 it exhausted
+  the same deadline during the final geometry loop in full-browser run `896bd5a1-3017-4c84-b942-687f9676e056`, then
+  passed one exact unchanged WebKit retry in 32.7 seconds (`1a116c2c-a008-4774-b590-e9d3bd5fcc6f`); this does not
+  establish a fix.
 
 - **Trash dialog's PageDown check on Chromium.** `trash header and global confirmation remain reachable` (both widths)
   in `e2e/tests/trash-dialog.spec.ts` sometimes leaves the Delete all confirmation's scroll area at the top after
@@ -651,6 +651,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   read failure during an update recovers on retry demand alone", failed the same way on Chromium in run
   `88d8738b-6a0d-43a7-a9e6-d455a1b7775f` (FLAKES.md, 2026-11-07). A sixth, "changed-host advice while following:
   destination", failed the same way on Chromium in run `29358e1b-1c83-4089-a665-b589f9ada509` (FLAKES.md, 2026-11-07).
+  On 2026-11-10 the incarnation-churn test exposed a separate response-barrier race in full-browser run
+  `896bd5a1-3017-4c84-b942-687f9676e056`: its wait accepted an earlier unmarked host-list response, while the trace's
+  next response carried the requested reconnect marker; three exact unchanged WebKit repetitions passed in
+  `d600f92e-e638-4260-83d0-99d8e35f80e6`, and this distinct race remains open under the existing exclusion.
 
 - **Quick launch's focus does not return to the page body on Chromium.** Two tests in `e2e/tests/quick-launch.spec.ts`
   poll for the body to hold focus after a blur and sometimes never see it (runs `2d338903-2d70-4c8c-99c4-3d4044d78670`,

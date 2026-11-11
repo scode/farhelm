@@ -308,8 +308,9 @@ test("header progress keeps controls inside a 650px pane with a long host", asyn
   }
 });
 
-/** The editable launcher also waits on a keyless Restart. Its timeout must
- * keep the draft visible and offer checking the session, never deduplication. */
+/** The editable launcher also waits on a keyless Restart. Switching away must
+ * not drop its request or draft; a deadline restores that same draft as a modal
+ * and offers checking the session, never deduplication. */
 test("Restart with keeps its draft and avoids a safe-retry promise after a deadline", async ({ page, request }) => {
   await openSource(page, request, { launch: {
     ...agentLaunchRow({ harness: "codex", model: null, effort: null, permissions: "guarded" }),
@@ -324,14 +325,36 @@ test("Restart with keeps its draft and avoids a safe-retry promise after a deadl
     await freezeForRequest(page);
     await form.locator(".create-session-submit").click();
     await expect.poll(() => bodies.length, { message: "the edited Restart POST is held" }).toBe(1);
+    await expect(form).toHaveCount(1);
+    await expect(form).toBeHidden();
+    await expect(form).not.toHaveAttribute("aria-modal", "true");
+    await page.keyboard.press("Control+Shift+k");
+    const switcher = page.getByRole("dialog", { name: "Quick switcher", exact: true });
+    await expect(switcher).toBeVisible();
+    // The stack's startup session is real and distinct from this fabricated
+    // source, so accepting it exercises the keyed source view's teardown.
+    const other = switcher.locator(".quick-switcher-results").getByRole("option").filter({ hasNotText: SOURCE_TITLE }).first();
+    await expect(other).toBeVisible();
+    await other.click();
+    await expect(switcher).toHaveCount(0);
+    await expect(page.locator(`[data-session-id="${SOURCE_ID}"]`)).not.toHaveAttribute("data-session-selected", "true");
+    expect(bodies).toHaveLength(1);
     await page.clock.runFor(2_200);
-    await expect(form.locator(".launch-progress")).toContainText(`Restarting on ${HOST_NAME}`);
+    await expect(page.locator(".launch-progress-pill")).toContainText(`Restarting on ${HOST_NAME}`);
     await page.clock.runFor(57_900);
+    await expect(form).toBeVisible();
+    await expect(form).toHaveAttribute("aria-modal", "true");
+    await expect(form.locator(".named-conversation")).toHaveValue("progress-fixture-conversation");
     const alert = form.getByRole("alert");
     await expect(alert).toContainText(`Still waiting on ${HOST_NAME}.`);
     await expect(alert).toContainText("Check the session before restarting again.");
     await expect(alert).not.toContainText("second copy");
     await expect(alert).not.toContainText("Restart error.");
+    // The deadline can render this modal after the last simulated frame.
+    // Advance its queued reveal paint before measuring restored focus.
+    await page.clock.runFor(20);
+    await expect.poll(() => form.evaluate(node => node.contains(document.activeElement)),
+      { message: "the resumed draft regains keyboard ownership after its deadline" }).toBe(true);
     expect(bodies[0]).not.toHaveProperty("intent_key");
   } finally {
     gate.release();

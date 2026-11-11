@@ -12,7 +12,9 @@
 //! Restart holds source identity and placement, while the draft and shared
 //! controls still own its edits, templates, validation and YOLO question. Its
 //! local confirmation identity never travels as a create retry key; a narrow
-//! bridge leaves terminal reattachment with the originating session view.
+//! bridge leaves terminal reattachment with the persistent session owner.
+//! Submitted waits hide this mounted form and release its modal boundary;
+//! replies retain the same draft and restore that boundary when input is needed.
 
 mod draft;
 use draft::{ModelTargets, PermissionUndo, RecoveryTargets, SearchInputs, SearchTargets};
@@ -33,15 +35,17 @@ use crate::github_checkout::{
     DestinationDraft, GithubAttempt, GithubCheckoutRequest, GithubRepo, PreviewAuthority,
     PreviewState, RepositoryAuthority, repository_choices,
 };
+use crate::launch_activity::{LaunchActivity, launch_is_current};
 use crate::launch_controls::{DestinationTypeControl, LaunchControls, enter_choice};
 use crate::launch_progress::{LaunchAction, LaunchProgress, PendingLaunch};
 use crate::modal_dialog::{
     DialogActions, DialogFocus, DialogFooter, DialogHandle, DialogHeader, DialogRoot, FocusTarget,
     InitialFocus, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
 };
-use crate::ops::{ConfirmSlot, ConfirmToken, OpLock, use_confirm_slot};
+use crate::ops::{ConfirmSlot, ConfirmToken, OpGuard, OpLock, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, PeerText, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read};
+use crate::session_ops::{SessionGuard, SessionOps};
 use crate::{
     ApiBase, CommandLaunch, HostId, LaunchHarness, LaunchPermission, LaunchSelection, Session,
     SessionStatus,
@@ -377,9 +381,17 @@ fn repository_field(destination: &DestinationDraft) -> (String, bool) {
 pub(crate) struct CreatedSession {
     pub(crate) session: Session,
     pub(crate) submitted_launch: Option<LaunchSelection>,
-    /// True only when this opening stayed hidden through successful creation.
-    /// A quick launch revealed for review has already offered its name field.
+    /// Naming is eligible only for a hidden quick opening the user still awaits.
+    /// A revealed form already offered its name field; intervening page input
+    /// or a retired naming admission also suppresses that follow-up dialog.
     pub(crate) new_was_never_shown: bool,
+    /// The mounted draft this reply belongs to, independent of later modal epochs.
+    pub(crate) opening: u64,
+    /// One accepted user answer travels through wake, preview and retries unchanged.
+    pub(crate) press_baseline: Option<u64>,
+    /// Read at completion, and again after any naming admission wait. A retired
+    /// opening/admission supplies no navigation authority even if a count was read.
+    pub(crate) press_current: Option<u64>,
 }
 
 /// A source host absent from the registry might be a just-created sandbox.
@@ -1036,6 +1048,41 @@ struct GuardedSubmitStamp {
     prompt: Option<String>,
     conversation: String,
     replace_guard: crate::DeleteGuard,
+    /// Internal preparation is not another answer and must not forget page input.
+    press_baseline: Option<u64>,
+}
+
+/// One admitted submission keeps both exclusion owners through hidden preparation.
+/// Replace's source claim settles before a returned dialog, while the launch
+/// token retains that owed draft until admission. Keeping the optional source
+/// with the existing continuation prevents a release/reclaim gap during wake.
+struct SubmitGuards {
+    launch: OpGuard,
+    source: Option<(String, SessionGuard)>,
+}
+
+/// Preparation is over for the source even when its launcher cannot return yet.
+/// Only real failures belong on the row; a question or a revoked empty draft can
+/// release its claim without inventing one. The list refresh uses its ordinary
+/// owner after the claim is dropped, independently of modal admission.
+fn settle_prepared_source(
+    source: &mut Option<(String, SessionGuard)>,
+    reason: Option<&str>,
+    mut operations: SessionOps,
+    mut progress: crate::replace::ReplaceProgress,
+    on_settled: EventHandler<()>,
+) {
+    if let Some((id, guard)) = source.take() {
+        progress.0.write().remove(&id);
+        if let Some(reason) = reason {
+            operations
+                .errors
+                .write()
+                .insert(id, format!("Replace: {reason}"));
+        }
+        drop(guard);
+        on_settled.call(());
+    }
 }
 
 impl GuardedSubmitStamp {
@@ -1048,6 +1095,7 @@ impl GuardedSubmitStamp {
         prompt: Option<String>,
         conversation: String,
         replace_guard: crate::DeleteGuard,
+        press_baseline: Option<u64>,
     ) -> Self {
         authority.generation = 0;
         Self {
@@ -1058,6 +1106,7 @@ impl GuardedSubmitStamp {
             prompt,
             conversation,
             replace_guard,
+            press_baseline,
         }
     }
 
@@ -1854,6 +1903,176 @@ fn request_directory_browse(
 pub(super) const COMPOSER_DIALOG: DialogHandle =
     DialogHandle::new(".create-session-form[role=\"dialog\"]");
 
+/// Escape belongs to the inline template panel while it is open. Its disabled
+/// Cancel also keeps a pending save uncancellable; document order alone would
+/// otherwise select the outer launcher's Cancel first.
+const COMPOSER_ESCAPE_TARGET: &str = ".save-template-cancel, .launch-composer-cancel:not([data-template-panel-open]), .launch-composer-loading-cancel";
+
+/// Give page input back before hiding this submitted opening's focused control.
+/// The form and its request future stay mounted; only modal isolation retires.
+/// Arm restoration even if a fast reply settles before the hidden render commits.
+fn release_submitted_composer(opening: u64, mut previous_presentation: Signal<(bool, bool)>) {
+    previous_presentation.set((true, true));
+    COMPOSER_DIALOG
+        .for_generation("data-opening-generation", opening)
+        .release();
+}
+
+/// Hand the keyboard to the page once a hidden launcher has stopped rendering.
+///
+/// Chromium moves focus off a control that stops rendering; WebKit sometimes
+/// leaves it on the hidden Launch button (or the form root), so later keys go
+/// to a control nobody can see and the two engines disagree about where a
+/// repeated Enter lands. The presentation effect calls this after the hidden
+/// render is in the DOM. Blurring any earlier, while the form still shows,
+/// would let a quick second Enter reach the page before `launch-activity.js`
+/// can recognize it as the same submit repeated. A focused control that still
+/// renders keeps its focus, so repeated calls while hidden change nothing.
+fn blur_hidden_composer(opening: u64) {
+    document::eval(&format!(
+        r#"(() => {{
+            const form = document.querySelector('.create-session-form[data-opening-generation="{opening}"]');
+            const active = document.activeElement;
+            if (form && active && form.contains(active) && !active.getClientRects().length) active.blur();
+        }})();"#
+    ));
+}
+
+/// Keep the submitted owner until its returning dialog can claim page input.
+/// Navigation can open another modal during a request. Neither dialog may
+/// isolate the other, so the existing request state and guard stay held until
+/// that modal leaves. The captured root and opening fence retire the observer
+/// on cancellation instead of admitting a replacement launcher. Claiming the
+/// ordinary modal marker before returning closes the eval-to-render gap, also
+/// against a host result that reserved admission before rendering its dialog.
+/// Naming alone supplies a known press baseline: the same script rejects changed
+/// input before reserving modality, and the existing ordered relay can abandon a
+/// blocked naming wait. Failure/question Returns remain owed regardless of input.
+async fn admit_composer_return(opening: u64, naming_baseline: Option<u64>) -> bool {
+    let baseline = serde_json::to_string(&naming_baseline).expect("an optional count serializes");
+    let result = document::eval(&format!(
+        r#"return await new Promise(resolve => {{
+            const dialog = document.querySelector('.create-session-form[role="dialog"]');
+            const baseline = {baseline};
+            const observer = new MutationObserver(admit);
+            function finish(accepted) {{
+                observer.disconnect();
+                document.removeEventListener('input', observeActivity, true);
+                resolve(accepted);
+            }}
+            function observeActivity(event) {{
+                if (event.target?.matches?.('input[data-launch-activity]')) admit();
+            }}
+            function admit() {{
+                if (!dialog?.isConnected ||
+                    dialog.getAttribute('data-opening-generation') !== '{opening}') {{
+                    finish(false); return;
+                }}
+                // Count publication precedes its relay event. A naming wait
+                // loses authority on input before it reserves any modal marker.
+                if (baseline !== null && window.__farhelmLaunchActivity?.() !== baseline) {{
+                    finish(false); return;
+                }}
+                const blocked = Array.from(document.querySelectorAll(
+                    '[role="dialog"][aria-modal="true"], [data-host-modal-admitted]'
+                )).some(node => node !== dialog);
+                if (blocked) return;
+                dialog.setAttribute('aria-modal', 'true');
+                finish(true);
+            }}
+            observer.observe(document.body, {{ childList: true, subtree: true,
+                attributes: true, attributeFilter: ['aria-modal', 'data-host-modal-admitted', 'data-opening-generation'] }});
+            if (baseline !== null) document.addEventListener('input', observeActivity, true);
+            admit();
+        }});"#
+    ))
+    .join::<bool>()
+    .await;
+    // A failed eval must not discard an error/question result. Naming has no
+    // such obligation: failed admission evidence cannot authorize that dialog.
+    if naming_baseline.is_some() {
+        matches!(result, Ok(true))
+    } else {
+        !matches!(result, Ok(false))
+    }
+}
+
+/// A failed hidden preparation retains its draft and token until Return is admitted.
+/// Wake and preview can finish before any create exists. Their failure is still
+/// owed back to this opening, and releasing the token first would let New replace
+/// it while another dialog owns input. A retired opening releases only its own seed.
+async fn return_prepared_composer(
+    opening: u64,
+    mut resuming_host: Signal<Option<HostResumePreparation>>,
+    on_retired: EventHandler<u64>,
+    _guard: OpGuard,
+) {
+    let admitted = admit_composer_return(opening, None).await;
+    resuming_host.set(None);
+    if !admitted {
+        on_retired.call(opening);
+    }
+}
+
+/// Naming belongs only to the accepted launch answer the user is still awaiting.
+/// The page count is read at the reply and after an admitted naming wait: input
+/// during either preparation or another modal must skip that extra dialog. A
+/// retired owner still reports successful creation to the list, without naming.
+async fn completed_launch_input(
+    opening: u64,
+    generation: Signal<u64>,
+    baseline: Option<u64>,
+    activity: LaunchActivity,
+    may_name: bool,
+) -> (Option<u64>, bool) {
+    let mut current = activity.current().await;
+    let still_awaited = |current| {
+        launch_is_current(Some(*generation.peek()), opening, baseline, current)
+            && baseline == activity.snapshot()
+    };
+    let mut naming_allowed = still_awaited(current);
+    if may_name && naming_allowed {
+        let admitted = admit_composer_return(opening, baseline).await;
+        current = activity.current().await;
+        naming_allowed = admitted && still_awaited(current);
+        if !admitted {
+            // The result is still reported, but a retired naming admission
+            // cannot carry navigation authority into the parent's callback.
+            current = None;
+        }
+    }
+    if *generation.peek() != opening {
+        current = None;
+    }
+    (current, naming_allowed)
+}
+
+/// Restore modality when a submitted wait returns to preparation or user input.
+/// Hidden quick preparation regains isolation without focusing hidden fields.
+/// A new opening or another submit must not receive stale frame work. Existing
+/// question focus takes priority when a refusal reveals YOLO. Ordinary launches
+/// return to search; Restart returns to its primary action after a refusal.
+fn restore_composer_modal(opening: u64, focus_surface: bool, target: FocusTarget) {
+    let isolate = COMPOSER_DIALOG
+        .for_generation("data-opening-generation", opening)
+        .isolation_script(Some(COMPOSER_ESCAPE_TARGET));
+    let focus = target.surface_script();
+    document::eval(&format!(
+        r#"requestAnimationFrame(() => {{
+            const dialog = document.querySelector('.create-session-form[role="dialog"]');
+            if (!dialog?.isConnected ||
+                dialog.getAttribute('data-opening-generation') !== '{opening}' ||
+                dialog.getAttribute('aria-modal') !== 'true') return;
+            const active = document.activeElement;
+            const ownsFocus = active && active !== dialog && dialog.contains(active) &&
+                active.getClientRects().length && !active.closest('[inert]') &&
+                !active.matches(':disabled, [aria-disabled="true"]');
+            if ({focus_surface} && dialog.getClientRects().length && !ownsFocus) {{ {focus} }}
+            {isolate}
+        }})"#
+    ));
+}
+
 /// Search is the shared target; loading keeps Cancel as a keyboard exit.
 /// The shell supplies the visible-root check and final container fallback.
 fn composer_surface_target() -> FocusTarget {
@@ -1866,33 +2085,12 @@ fn composer_surface_target() -> FocusTarget {
 
 /// Give the shared composer search focus at an explicit interaction boundary.
 ///
-/// Callers invoke this only when the dialog mounts, a mode button is pressed,
-/// or a search result is accepted. Ordinary rerenders must never reclaim focus
-/// from a field the user deliberately entered. A revealed readiness failure
-/// may still have only Cancel mounted; that remains a keyboard exit. Only reveal
-/// defers to a frame, since its effect can precede the DOM update. Ordinary
-/// interactions focus immediately so a queued handoff cannot steal later input.
-/// The deferred handoff also preserves a surviving enabled control: retiring
-/// a question after a template shortcut is not another reveal of the dialog.
-fn focus_composer_surface(defer_for_reveal: bool) {
-    if defer_for_reveal {
-        // Question retirement can trigger this same deferred reveal handoff.
-        // Preserve its editor-ownership guard before using the shared target.
-        let focus = composer_surface_target().surface_script();
-        document::eval(&format!(
-            r#"requestAnimationFrame(() => {{
-                const dialog = document.querySelector('.create-session-form[role="dialog"]');
-                if (!dialog || !dialog.getClientRects().length) return;
-                const active = document.activeElement;
-                if (active && active !== dialog && dialog.contains(active) &&
-                    active.getClientRects().length && !active.closest('[inert]') &&
-                    !active.matches(':disabled, [aria-disabled="true"]')) return;
-                {focus}
-            }})"#
-        ));
-    } else {
-        COMPOSER_DIALOG.focus_surface(&composer_surface_target(), false);
-    }
+/// Mode changes and accepted search results focus immediately so queued frame
+/// work cannot steal later input. Reveal uses `restore_composer_modal` instead;
+/// ordinary rerenders never reclaim a field the user deliberately entered.
+/// Loading may still have only Cancel mounted, which remains a keyboard exit.
+fn focus_composer_surface() {
+    COMPOSER_DIALOG.focus_surface(&composer_surface_target(), false);
 }
 
 /// Restore a launcher focus target only when a shortcut removed its control.
@@ -2651,8 +2849,8 @@ fn effective_title(
 /// Arbitrary commands remain available through the legacy surface, but
 /// cannot contribute hidden values to a structured request.
 ///
-/// The page-owned operation token keeps the caller's navigation and host
-/// mutations out while a submit is in flight. This form owns its guard:
+/// The page-owned operation token keeps new launches and host mutations out
+/// while a submit is in flight; session navigation remains available. This form owns its guard:
 /// cancellation releases the token, but cannot recover an uncertain create
 /// reply or run the success callback after the form is gone. Ordinary close
 /// controls therefore refuse to unmount a submitting form.
@@ -2660,9 +2858,9 @@ fn effective_title(
 /// `on_created` fires only on a successful POST, with the newly created
 /// `Session` from the response body and the launch this form submitted
 /// ([`CreatedSession`]); `ListView` uses that to close the
-/// form and select the new session in the adjacent pane, whose terminal
-/// mounts immediately (SPEC.md: "creation launches the agent; you type
-/// your first prompt into its terminal") — the sidebar itself stays
+/// form and decide whether its accepted answer still permits opening the new
+/// session in the adjacent pane. Page input since that answer leaves the user
+/// where they moved; the sidebar itself stays
 /// mounted throughout. On failure the form stays mounted with its values
 /// untouched and the refusal rendered beside Launch — the draft remains local
 /// to this component rather than being reset or lifted into
@@ -2844,9 +3042,9 @@ pub(super) fn CreateSessionForm(
     /// The installation currently selected for the create, for host safety
     /// checks.
     create_target: Signal<Option<CreateTarget>>,
-    /// The page's live-operation token. Claimed at submit, released when the
-    /// request completes — the exclusion against every host mutation, and
-    /// against a second submit of this form (see `ops`).
+    /// The page's live-operation token excludes host changes and another launch.
+    /// A hidden request keeps it through an owed Return admission, independently
+    /// of the acted-on session's earlier reply/claim settlement (see `ops`).
     mut ops: OpLock,
     /// Directory copied from the currently selected session for an ordinary
     /// New action. `None` preserves the portable target-home default.
@@ -2881,9 +3079,21 @@ pub(super) fn CreateSessionForm(
     /// Shared with the parent's read admission and ordinary opening actions.
     /// A superseding opening revokes even an already queued DOM submission.
     opening_generation: Signal<u64>,
-    /// A failed Replace with may have removed its source before replying.
-    /// The persistent list refreshes ordinary authoritative absence evidence.
-    on_replace_failed: EventHandler<()>,
+    /// The list's mounted draft owner, which a modal epoch alone cannot identify.
+    mounted_opening: u64,
+    /// Captured before an accepted quick launch starts its asynchronous preparation.
+    /// Its automatic form submit continues that answer instead of resetting it.
+    #[props(default)]
+    initial_quick_baseline: Option<u64>,
+    /// A denied return settles its request, then retires only its mounted
+    /// draft owner. This is not Cancel and must not close a newer opening.
+    on_retired: EventHandler<u64>,
+    /// Every create reply refreshes the persistent list before any Return wait.
+    /// A replacement may have removed its source even when its reply is refused.
+    on_settled: EventHandler<()>,
+    /// Retire only the list's unused startup pick before this client's new
+    /// session can appear in a feed. Replace keeps its source-selection rule.
+    on_create_dispatch: EventHandler<()>,
     /// A failed quick-launch preparation is visible without losing New's defaults.
     #[props(default)]
     initial_error: Option<String>,
@@ -2904,7 +3114,10 @@ pub(super) fn CreateSessionForm(
     /// keyed view disappears; its source slot follows current listing evidence.
     #[props(default)]
     restart_bridge: Option<crate::list::RestartBridge>,
-    #[props(default)] on_restarted: EventHandler<()>,
+    /// Successful Restart retires only the submitted mounted opening's seeds.
+    /// Shared terminal and claim settlement already happened through the bridge.
+    #[props(default)]
+    on_restarted: EventHandler<u64>,
     /// Discard this draft without creating a session.
     on_cancel: EventHandler<()>,
     on_created: EventHandler<CreatedSession>,
@@ -2912,6 +3125,7 @@ pub(super) fn CreateSessionForm(
     on_template_saved: EventHandler<farhelm_proto::launcher::LaunchTemplate>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    let launch_activity = use_context::<LaunchActivity>();
     let mut session_operations = use_context::<crate::session_ops::SessionOps>();
     let mut shared_replace_progress = use_context::<crate::replace::ReplaceProgress>();
     let sandbox_base = base.clone();
@@ -3106,6 +3320,10 @@ pub(super) fn CreateSessionForm(
     let quick_origin = use_hook(|| *auto_launch.peek());
     let mut quick_launch_hidden = use_signal(move || *auto_launch.peek());
     let mut auto_launch_pending = use_signal(move || *auto_launch.peek());
+    let quick_press_baseline = use_hook(|| initial_quick_baseline);
+    // Nested Option distinguishes an automatic submit with unknown evidence
+    // from a later explicit answer, which snapshots the current mirrored count.
+    let mut automatic_submit_baseline = use_signal(|| None::<Option<u64>>);
     use_effect(move || {
         if !auto_launch() && quick_launch_hidden() {
             auto_launch_pending.set(false);
@@ -3154,6 +3372,15 @@ pub(super) fn CreateSessionForm(
     // Form unmount cancels the future and retires this signal with its owner.
     let mut resuming_host = use_signal(|| None::<HostResumePreparation>);
     let mut resume_display_handoff = use_signal(|| None::<ResumeDisplayHandoff>);
+    // Submission changes presentation without changing quick-launch provenance:
+    // that separate flag decides whether success should open session naming.
+    // Preparation, billing and intent-key minting retain the ordinary modal.
+    let submitted_wait = use_memo(move || pending_launch().is_some() || resuming_host().is_some());
+    let composer_hidden = use_memo(move || quick_launch_hidden() || submitted_wait());
+    // Retain both boundaries: a resumed quick launch may return to modal
+    // preparation while remaining hidden. Dispatch arms this before rendering
+    // too, so a fast reply cannot skip the isolation restoration it owes.
+    let mut previous_presentation = use_signal(move || (*quick_launch_hidden.peek(), false));
     // A YOLO launch the helm refused because its host asks before YOLO launches, and the
     // user's confirmation of one (see `yolo_confirm`). Both are tied to the intent key the
     // refused request carried, not to "the next submit": the key is bound to the whole
@@ -3180,9 +3407,11 @@ pub(super) fn CreateSessionForm(
     let mut yolo_confirmed_key = use_signal(|| None::<String>);
     let mut yolo_stop_asking = use_signal(|| None::<ConfirmToken<LauncherYoloQuestion>>);
     let mut yolo_error = use_signal(|| None::<String>);
-    // One accepted guarded answer, revoked by another draft or opening.
-    // This never owns consent, a retained request body or an operation claim.
-    let mut guarded_submit_pending = use_signal(|| None::<GuardedSubmitStamp>);
+    // A visible guarded answer waits without a claim. Wake continuation keeps
+    // its original token and optional Replace source in this same slot, so
+    // neither exclusion opens during preview or internal submit reentry.
+    let mut guarded_submit_pending =
+        use_signal(|| None::<(GuardedSubmitStamp, Option<SubmitGuards>)>);
     // The intent key of the last attempt whose outcome stayed unknown (a
     // failure that kept the key for a safe retry). See
     // `LauncherYoloQuestion::uncertain`. It is never cleared: every attempt
@@ -4902,7 +5131,7 @@ pub(super) fn CreateSessionForm(
             if !from_shortcut {
                 composer_search.set(String::new());
                 composer_search_open.set(false);
-                focus_composer_surface(false);
+                focus_composer_surface();
             }
             true
         },
@@ -5087,14 +5316,14 @@ pub(super) fn CreateSessionForm(
                 return;
             };
             note_permission_switch.call((before, true));
-            focus_composer_surface(false);
+            focus_composer_surface();
         }
     });
     let choose_launch_tab = EventHandler::<LaunchTab>::new(move |tab| {
         if !draft.choose_launch_tab(tab, choice_targets) {
             return;
         }
-        focus_composer_surface(false);
+        focus_composer_surface();
     });
     // No timer guesses when a template or managed-checkout preview is ready.
     // Each boundary is the same one the ordinary Launch button consumes. Once
@@ -5198,6 +5427,7 @@ pub(super) fn CreateSessionForm(
                 quick_launch_hidden.set(false);
                 return;
             }
+            automatic_submit_baseline.set(Some(quick_press_baseline));
             resubmit_quick_composer(*opening_generation.peek());
         },
     ));
@@ -5211,11 +5441,35 @@ pub(super) fn CreateSessionForm(
             quick_launch_hidden.set(false);
         }
     });
-    // Focus only at the reveal boundary. A pending YOLO question mounts after
-    // reveal and owns its Cancel focus; ordinary rerenders never reclaim input.
+    // Restore isolation after a submitted wait even if quick preparation stays
+    // hidden; only an actual reveal can receive field focus. Ordinary rerenders
+    // and later draft/refusal changes never reclaim the user's chosen control.
     use_effect(move || {
-        if !quick_launch_hidden() && quick_origin && !yolo_refusal.is_open() {
-            focus_composer_surface(true);
+        let hidden = composer_hidden();
+        let submitted = submitted_wait();
+        let (was_hidden, was_submitted) = previous_presentation();
+        if (hidden, submitted) != (was_hidden, was_submitted) {
+            previous_presentation.set((hidden, submitted));
+        }
+        // Not keyed to a hidden transition: `release_submitted_composer` records
+        // the hidden presentation before this render, so none would be seen.
+        if hidden {
+            blur_hidden_composer(mounted_opening);
+        }
+        if !submitted && (was_submitted || (was_hidden && !hidden)) {
+            restore_composer_modal(
+                mounted_opening,
+                !hidden && !yolo_refusal.is_open(),
+                if restart_mode {
+                    FocusTarget::new(
+                        ".create-session-submit:not([disabled]):not([aria-disabled=\"true\"])",
+                        Some(".launch-composer-cancel:not([disabled])"),
+                        false,
+                    )
+                } else {
+                    composer_surface_target()
+                },
+            );
         }
     });
     // HostPicker owns transient browsing. The concrete owner operation retains
@@ -5351,985 +5605,155 @@ pub(super) fn CreateSessionForm(
     // The destructive consent belongs to the render that drew the action,
     // including deferred YOLO answers. It is never widened after an await.
     let submit_consent = (replace_guard, restart_stop_first, opening_generation());
-    let submit_composer = Callback::<(crate::DeleteGuard, bool, u64)>::new({
+    let submit_composer = Callback::<(
+        crate::DeleteGuard,
+        bool,
+        u64,
+        Option<u64>,
+        Option<SubmitGuards>,
+    )>::new({
         let hosts = hosts.clone();
         let open_host = open_host.clone();
         let prefill_for_submit = prefill_for_submit.clone();
         let base = base.clone();
         let catalog_for_submit = catalog_for_submit.clone();
-        move |(replace_guard, restart_stop_first, rendered_opening): (
+        move |(
+            replace_guard,
+            restart_stop_first,
+            rendered_opening,
+            press_baseline,
+            inherited_guard,
+        ): (
             crate::DeleteGuard,
             bool,
             u64,
+            Option<u64>,
+            Option<SubmitGuards>,
         )| {
-            if rendered_opening != *opening_generation.peek() {
-                return;
-            }
-            // Any ordinary submit supersedes an accepted press still waiting
-            // for preview, including a submit refused before a request exists.
-            guarded_submit_pending.set(None);
-            // A queued submit can outlive the render that exposed Launch.
-            // Check replay state live before clearing its loading reason or
-            // taking a mutation claim for an incomplete initial setup.
-            if pending_initial_action.peek().is_some()
-                || !pending_initial_templates.peek().is_empty()
-            {
-                return;
-            }
-            // Parent actions revoke this before the render updates the
-            // generation attribute. An old queued auto-submit cannot use
-            // a newly supplied Clone/Replace draft in that gap.
-            if *quick_launch_hidden.peek() && !*auto_launch.peek() {
-                auto_launch_pending.set(false);
-                quick_launch_hidden.set(false);
-                return;
-            }
-            launch_attempted.set(LaunchAttempt::Refused);
-            error.set(None);
-            preparation_error.set(None);
-            if template_panel().is_some() || template_saving() {
-                return;
-            }
-            // The claim is the guard, and it is synchronous: it covers a
-            // second submit of THIS form (a double-click, a stray repeat
-            // event) and every host mutation at once, with no render in
-            // between for a stale boolean to be read from.
-            //
-            // The OTHER half of double-submission — a retry after an
-            // ambiguous transport failure (request sent, response lost)
-            // reaching the supervisor a second time — is what
-            // `intent_key` closes, and it cannot be closed here: only
-            // the server knows whether the lost reply belonged to a
-            // session that actually exists. This handler's job is merely
-            // to send the SAME key for every retry of one intent.
-            // Taken before anything can refuse this submit, so a request
-            // to stop asking lives exactly as long as the one submit its
-            // button started.
-            let stop_asking_for = yolo_stop_asking.write().take();
-            let Some(op_guard) = ops.claim_guard() else {
-                return;
-            };
-            // The confirmation, if any, is matched against the key this
-            // submit ends up using, below; the question itself is
-            // answered either way. An answer already took it; a Launch
-            // pressed while it is open supersedes it, which is
-            // reconciliation rather than an answer, hence `clear`.
-            yolo_refusal.clear();
-            yolo_error.set(None);
-            // Frozen HERE, from the live owner, and not touched again:
-            // the minting await below can span further edits, and
-            // re-reading across it would let the request's MODE differ
-            // from the one the button was pressed on.
-            let current = draft.snapshot();
-            // Read the live choice, including a queued submit predating the
-            // first registry observation of a newly created sandbox host.
-            if unresolved_creation_origin(
-                (!host_fixed)
-                    .then(|| {
-                        prefill_for_submit
-                            .as_ref()
-                            .and_then(|source| source.host)
-                            .or_else(|| open_host.as_ref().map(|host| host.id))
-                    })
-                    .flatten(),
-                &hosts,
-                *chosen_host.peek(),
-                current.recipe().as_deref(),
-            ) {
-                error.set(Some("The source host's placement is unavailable; wait for Hosts to refresh or choose a target explicitly".into()));
-                drop(op_guard);
-                return;
-            }
-            let launch = if current.tab() == LaunchTab::Agent {
-                if let Some(reason) = current.container_refusal(
-                    (current.recipe().is_some() && current.destination().is_managed())
-                        || container_destination_available(
-                            &current,
-                            prefill_for_submit.as_ref(),
-                            &hosts,
-                            effective_create_host(&hosts, *chosen_host.peek(), open_host.as_ref()),
-                        )
-                        || container_recent_destination_available(
-                            &current,
-                            offered_history.peek().as_ref(),
-                            live_destination.peek().as_ref(),
-                        ),
-                ) {
-                    error.set(Some(reason));
-                    drop(op_guard);
+            let continued = inherited_guard.is_some();
+            let mut held = inherited_guard;
+            // Validation still captures the live draft synchronously. Its
+            // early returns leave an inherited wake token here, so a refused
+            // internal reentry can admit Return before releasing that token.
+            // A branch takes it only when its actual future owns the next step.
+            (|| {
+                if rendered_opening != *opening_generation.peek() {
                     return;
                 }
-                if current.harness().is_none() {
-                    drop(op_guard);
+                // A queued duplicate cannot clear a completed error or
+                // question while its first request still owes Return.
+                if !continued && ops.busy_now() {
                     return;
                 }
-                if current.permissions() == Some(LaunchPermission::Custom)
-                    && farhelm_proto::split_permission_flags(&structured_permission_flags())
-                        .is_err()
-                {
-                    error.set(Some(CUSTOM_PERMISSION_FLAGS_REFUSAL.into()));
-                    return;
-                }
-                match wrapper_words(&structured_wrapper()) {
-                    Ok(_) => {}
-                    Err(reason) => {
-                        error.set(Some(reason));
-                        drop(op_guard);
-                        return;
-                    }
-                }
-                // The flags read was unconditional in the old snapshot
-                // builder, including synchronous guarded-preview submission.
-                let _ = structured_permission_flags();
-                current
-                    .launch_intent()
-                    .expect("the live harness was checked above")
-            } else {
-                // The RAW bytes while untouched, not the escaped display
-                // the field shows — see [`submitted_field`]
-                // (item2-review2.md F5).
-                // Replacing browser required-field validation keeps its
-                // empty-command refusal visible at Launch. Accepted fresh
-                // retries keep their existing exemption from this check.
-                if command_requires_text && current.invocation().is_empty() {
-                    error.set(Some("Enter an agent command before launching".to_string()));
-                    return;
-                }
-                let Some(launch) = current.launch_intent() else {
-                    error.set(Some(
-                        "Say whether this command runs in YOLO mode (YOLO) before \
-                         launching"
-                            .to_string(),
-                    ));
-                    drop(op_guard);
-                    return;
-                };
-                launch
-            };
-            if let Some(recipe_name) = current.recipe() {
-                if host_fixed {
-                    error.set(Some("Restart and Replace keep the existing sandbox".into()));
-                    return;
-                }
-                let catalog = sandbox_catalog.peek();
-                let ready = catalog
-                    .as_ref()
-                    .and_then(|answer| answer.as_ref().ok())
-                    .and_then(|(recipes, settings)| {
-                        recipes
-                            .iter()
-                            .find(|recipe| recipe.name == recipe_name)
-                            .map(|recipe| crate::sandbox_sessions::recipe_refusal(recipe, settings))
-                    });
-                match ready {
-                    Some(None) => {}
-                    Some(Some(reason)) => {
-                        error.set(Some(reason));
-                        return;
-                    }
-                    None => {
-                        error.set(Some(
-                            "The selected recipe is unavailable; check Settings → Tensorlake"
-                                .into(),
-                        ));
-                        return;
-                    }
-                }
-                let confirmed = sandbox_consent.peek().as_ref() == Some(&current);
-                sandbox_consent.set(None);
-                let base = base.clone();
-                let snapshot = current.clone();
-                let naming = current.checkout_naming();
-                let name_kind = naming.template_name().map(|(_, kind)| kind).or_else(|| {
-                    matches!(naming.source, Some(CheckoutNameSource::Clone(_)))
-                        .then_some(farhelm_proto::launcher::TemplateNameKind::Base)
-                });
-                let title = naming
-                    .template_name()
-                    .map(|(name, _)| name.to_string())
-                    .or_else(|| {
-                        naming.default_title(
-                            current.title_edited(),
-                            current.title_raw_seed().as_deref(),
-                            current.destination().repo(),
-                        )
-                    })
-                    .unwrap_or_else(|| current.effective_title());
-                let repo = match current.destination() {
-                    DestinationDraft::Existing { .. } => None,
-                    DestinationDraft::Github { repo } => Some(repo.identifier()),
-                    DestinationDraft::GithubInput { .. } => {
-                        error.set(Some("Select a GitHub repository before launching".into()));
-                        return;
-                    }
-                };
-                spawn(async move {
-                    let skip_billing = api::fetch_tensorlake_settings(&base)
-                        .await
-                        .is_ok_and(|settings| settings.create_without_asking);
-                    if !confirmed && !skip_billing {
-                        sandbox_question.set(Some(snapshot));
-                        quick_launch_hidden.set(false);
-                        drop(op_guard);
-                        return;
-                    }
-                    let key = match mint_intent_key().await {
-                        Ok(key) => key,
-                        Err(reason) => {
-                            error.set(Some(reason));
-                            return;
-                        }
-                    };
-                    let conversation = current.conversation();
-                    let prompt = current.prompt();
-                    let agent = match &launch {
-                        LaunchIntent::Structured(selection) => api::CreateAgent::Structured {
-                            selection,
-                            conversation: (!conversation.is_empty())
-                                .then_some(conversation.as_str()),
-                            prompt: prompt.as_deref(),
-                        },
-                        LaunchIntent::Command(command) => api::CreateAgent::Command(command),
-                    };
-                    let mut request = api::sandbox_launch_body("~", agent, &title, &key);
-                    if let Some(repo) = repo {
-                        request["github_checkout"] = serde_json::json!({
-                            "repo": repo, "title": api::optional_create_title(&title), "preview": null,
-                        });
-                        request["cwd"] = serde_json::json!("");
-                    }
-                    launch_attempted.set(LaunchAttempt::None);
-                    pending_launch.set(Some(PendingLaunch::new(
-                        LaunchAction::Launch,
-                        format!("{recipe_name} sandbox"),
-                        Some(title),
-                    )));
-                    let result = api::create_sandbox_session(
-                        &base,
-                        &recipe_name,
-                        confirmed,
-                        name_kind,
-                        request,
-                        move |host, run| sandbox_run.set(Some((host, run))),
-                    )
-                    .await;
-                    sandbox_run.set(None);
-                    pending_launch.set(None);
-                    match result {
-                        Ok(session) => {
-                            let submitted_launch = match launch {
-                                LaunchIntent::Structured(selection) => Some(selection),
-                                _ => None,
-                            };
-                            drop(op_guard);
-                            COMPOSER_DIALOG.release();
-                            on_created.call(CreatedSession {
-                                session,
-                                submitted_launch,
-                                new_was_never_shown: new_was_never_shown(
-                                    quick_origin,
-                                    *quick_launch_hidden.peek(),
-                                ),
-                            });
-                        }
-                        Err(reason) => {
-                            quick_launch_hidden.set(false);
-                            launch_attempted.set(if reason.is_unknown() {
-                                LaunchAttempt::Unknown
-                            } else {
-                                LaunchAttempt::Refused
-                            });
-                            error.set(Some(reason.to_string()));
-                        }
-                    }
-                });
-                return;
-            }
-            // The HOST is derived here too, from the live signal — never
-            // from what the last render computed. The same one-turn window
-            // the agent has: changing the selector and pressing create in
-            // one turn reaches this handler before any re-render, and a
-            // captured host would send the create to the PREVIOUS machine
-            // while the selector on screen names another.
-            let target_now = create_target.peek().clone();
-            let selected_now = if restart_mode {
-                prefill_for_submit.as_ref().and_then(|prefill| prefill.host)
-            } else {
-                effective_create_host(&hosts, chosen_host.peek().to_owned(), open_host.as_ref())
-            };
-            if !restart_host_confirmed {
-                error.set(Some("Restart keeps the source session's host, but its installation cannot be confirmed; close and reopen restart with once that host is back".into()));
-                return;
-            }
-            if !remembered_destination_matches(
-                remembered_destination.peek().as_ref(),
-                live_destination.peek().as_ref(),
-            ) {
-                return;
-            }
-            // A folder nobody chose must be this host's default before it is
-            // sent, or a host switch would launch the previous host's folder.
-            if !restart_mode && folder_default.peek().pending {
-                let snapshot = draft.snapshot();
-                if !snapshot.folder_is_explicit()
-                    && matches!(snapshot.destination(), DestinationDraft::Existing { .. })
+                if !continued
+                    && guarded_submit_pending
+                        .peek()
+                        .as_ref()
+                        .is_some_and(|(_, guard)| guard.is_some())
                 {
                     return;
                 }
-            }
-            // The host target must have caught up with the selector before
-            // the request can bind its idempotency and connection claims.
-            if !target_matches_selection(selected_now, &hosts, target_now.as_ref()) {
-                error.set(Some(
-                    "The target host changed while preparing this request, so nothing was sent — check the target and try again"
-                        .to_string(),
-                ));
-                drop(op_guard);
-                return;
-            }
-            if !selected_now.is_some_and(|id| {
-                hosts
-                    .iter()
-                    .find(|host| host.id == id)
-                    .is_some_and(|host| host.available_for_launch(None))
-            }) {
-                drop(op_guard);
-                return;
-            }
-            if selected_now
-                .is_some_and(|id| hosts.iter().any(|host| host.id == id && host.suspended))
-                && matches!(
-                    draft.snapshot().destination(),
-                    DestinationDraft::Github { .. }
-                )
-            {
-                let host = selected_now.expect("the suspended host was found");
-                let base = base.clone();
-                let current = draft.snapshot();
-                let Some(authority) = hosts.iter().find(|row| row.id == host).and_then(|host| {
-                    checkout_preview_authority(
-                        host,
-                        &current,
-                        observed_checkout_revision(),
-                        preview_agent_now(),
-                    )
-                }) else {
+                // Any ordinary submit supersedes an accepted press still waiting
+                // for preview, including a submit refused before a request exists.
+                guarded_submit_pending.set(None);
+                // A queued submit can outlive the render that exposed Launch.
+                // Check replay state live before clearing its loading reason or
+                // taking a mutation claim for an incomplete initial setup.
+                if pending_initial_action.peek().is_some()
+                    || !pending_initial_templates.peek().is_empty()
+                {
                     return;
-                };
-                let naming = current.checkout_naming();
-                let automatic_name = naming
-                    .default_title(
-                        current.title_edited(),
-                        current.title_raw_seed().as_deref(),
-                        current.destination().repo(),
-                    )
-                    .and(naming.source);
-                let pending = GuardedSubmitStamp::new(
-                    rendered_opening,
-                    authority,
-                    current.prompt(),
-                    current.conversation(),
-                    replace_guard,
-                );
-                resume_display_handoff.set(None);
-                resuming_host.set(Some(HostResumePreparation {
-                    host,
-                    name: hosts
-                        .iter()
-                        .find(|row| row.id == host)
-                        .map(HostOption::display_name)
-                        .unwrap_or_else(|| "host".into()),
-                }));
-                launch_attempted.set(LaunchAttempt::None);
+                }
+                // Parent actions revoke this before the render updates the
+                // generation attribute. An old queued auto-submit cannot use
+                // a newly supplied Clone/Replace draft in that gap.
+                if *quick_launch_hidden.peek() && !*auto_launch.peek() {
+                    auto_launch_pending.set(false);
+                    quick_launch_hidden.set(false);
+                    return;
+                }
+                launch_attempted.set(LaunchAttempt::Refused);
                 error.set(None);
-                spawn(async move {
-                    let result = api::resume_host_connected(&base, host).await;
-                    let handoff = result.as_ref().ok().and_then(|fresh| {
-                        completed_resume_display_handoff(
-                            target_now.as_ref(),
-                            live_resume_display.peek().as_ref(),
-                            &super::shared::host_options(fresh),
-                        )
+                preparation_error.set(None);
+                if template_panel().is_some() || template_saving() {
+                    return;
+                }
+                // The claim is the guard, and it is synchronous: it covers a
+                // second submit of THIS form (a double-click, a stray repeat
+                // event) and every host mutation at once, with no render in
+                // between for a stale boolean to be read from.
+                //
+                // The OTHER half of double-submission — a retry after an
+                // ambiguous transport failure (request sent, response lost)
+                // reaching the supervisor a second time — is what
+                // `intent_key` closes, and it cannot be closed here: only
+                // the server knows whether the lost reply belonged to a
+                // session that actually exists. This handler's job is merely
+                // to send the SAME key for every retry of one intent.
+                // Taken before anything can refuse this submit, so a request
+                // to stop asking lives exactly as long as the one submit its
+                // button started.
+                let stop_asking_for = yolo_stop_asking.write().take();
+                if held.is_none() {
+                    held = ops.claim_guard().map(|launch| SubmitGuards {
+                        launch,
+                        source: None,
                     });
-                    resume_display_handoff.set(handoff);
-                    resuming_host.set(None);
-                    error.set(match result {
-                        Ok(fresh) => {
-                            let connection = super::shared::host_options(&fresh).into_iter().find(|row| {
-                                row.id == host && Some(CreateTarget::new(row.id, row.incarnation.clone())) == target_now
-                            }).map(|row| row.connection);
-                            if let Some(connection) = connection {
-                                guarded_submit_pending.set(Some(pending.after_resume(connection, automatic_name)));
-                                None
-                            } else {
-                                launch_attempted.set(LaunchAttempt::Refused);
-                                Some("The target host changed while resuming; check the target and launch again".into())
-                            }
-                        },
-                        Err(reason) => {
-                            launch_attempted.set(LaunchAttempt::Refused);
-                            Some(format!("Resuming the host failed: {reason}"))
-                        },
-                    });
-                    drop(op_guard);
-                });
-                return;
-            }
-            // "Replace with" keeps the source's own host (SPEC.md's
-            // replace-with bullet; clone is the way to a different
-            // host). A `prefill` with no recorded host (a helm old
-            // enough to omit `Session::host`) has nothing to compare
-            // against and is let through — the helm's own same-host
-            // refusal (`ReplaceReq::with`'s doc) is the backstop for
-            // that rare case, exactly the way this whole check mirrors
-            // that refusal for the ordinary case, so the user sees the
-            // words here instead of waiting on a round trip to see
-            // them.
-            let replace_source = prefill_for_submit
-                .as_ref()
-                .and_then(|prefill| prefill.mode.replace_source())
-                .map(str::to_owned);
-            if replace_source.is_some()
-                && prefill_for_submit
+                    if held.is_none() {
+                        return;
+                    }
+                }
+                // The source belongs to this accepted submission before
+                // any hidden wake/preview branch. Internal reentry carries
+                // this exact owner instead of briefly releasing/reclaiming.
+                if let Some(source) = prefill_for_submit
                     .as_ref()
-                    .is_some_and(|prefill| prefill.host.is_some() && prefill.host != selected_now)
-            {
-                // Two ways to get here that deserve different words: the
-                // user picked another host in the selector (say so, and
-                // point at clone), or the reseed effect never bound the
-                // source's host because its install identity no longer
-                // matched (`CloneHostState::Unconfirmable`) and the
-                // selector fell back to the default host — blaming the
-                // user for a host change they never made would be wrong.
-                let unconfirmable =
-                    matches!(*clone_host_state.peek(), CloneHostState::Unconfirmable);
-                error.set(Some(
-                    if unconfirmable {
-                        "Replace with keeps the source session's own host, but that host \
-                         could not be confirmed (the source reports a different installation \
-                         now), so this create was not sent — replace with cannot proceed \
-                         until the source's host is back; clone is the way to start a session \
-                         elsewhere"
-                    } else {
-                        "Replace with keeps the source session's own host, so this create was \
-                         not sent — clone is the way to start a session on a different host"
-                    }
-                    .to_string(),
-                ));
-                drop(op_guard);
-                return;
-            }
-            // No host, no create. The helm would default a hostless body
-            // to its local row — usually the right answer, and not one
-            // this form may reach by omission while its own selector is
-            // still blank. Saying so beats creating on a machine the
-            // user was never shown.
-            let _ = (cwd(), cwd_edited());
-            observe_title_fields();
-            let current = draft.snapshot();
-            let Some(mut binding) = current.request(RequestContext {
-                host: hosts
-                    .iter()
-                    .find(|host| Some(host.id) == selected_now)
-                    .map(|host| (host.id, host.incarnation.as_str())),
-                launch,
-                replace_source: replace_source.as_deref(),
-                checkout: None,
-            }) else {
-                error.set(Some(if hosts_loaded {
-                    "This helm reported no hosts at all, so this request cannot be sent".to_string()
-                } else {
-                    "The host list has not loaded yet, so this request was not sent — it \
-                         would have gone to whichever host the helm picked rather than one \
-                         you chose"
-                        .to_string()
-                }));
-                drop(op_guard);
-                return;
-            };
-            // A guarded-preview effect can call submit synchronously. Keep
-            // its old conditional subscriptions while request() alone supplies
-            // the projected values used by the ordered validations below.
-            if matches!(binding.agent, LaunchIntent::Structured(_)) {
-                let _ = conversation();
-                if binding.conversation.is_some() {
-                    let _ = conversation();
-                }
-                let _ = prompt();
-            }
-            if let Some(message) = &binding.prompt {
-                let refusal = farhelm_proto::launcher::check_initial_prompt(message).err()
-                    .map(crate::local_validation_notice)
-                    .or_else(|| match &binding.agent {
-                        LaunchIntent::Structured(selection) if !selection.harness.supports_initial_prompt(binding.conversation.is_some()) => Some("This agent cannot combine an initial prompt with a named conversation".into()),
-                        _ => None,
-                    });
-                if let Some(refusal) = refusal {
-                    error.set(Some(refusal));
-                    return;
-                }
-            }
-            if binding.conversation.is_some() && {
-                let _ = destination_draft();
-                draft.snapshot().destination().repo().is_some()
-            } {
-                error.set(Some("Named conversations cannot start in a new managed checkout; choose an existing folder".into()));
-                drop(op_guard);
-                return;
-            }
-            if crate::launch_composer::scoped_query(&composer_search()).0
-                == crate::launch_composer::SearchScope::Github
-            {
-                return;
-            }
-            if let Some(CreatePrefill {
-                mode:
-                    LauncherMode::Restart {
-                        source,
-                        baseline,
-                        opened_launch,
-                        conversation_required,
-                    },
-                ..
-            }) = prefill_for_submit.as_ref()
-            {
-                let edit = current
-                    .restart_edit()
-                    .expect("restart has a complete launch");
-                if &edit == baseline {
-                    return;
-                }
-                if *conversation_required && current.conversation().is_empty() {
-                    error.set(Some("Enter a conversation to restart".into()));
-                    return;
-                }
-                if model_open() && !model_draft().is_empty() || model_draft_error().is_some() {
-                    error.set(Some("Choose a model before restarting".into()));
-                    return;
-                }
-                match &edit {
-                    api::RestartEdit::Agent(selection)
-                    | api::RestartEdit::NamedAgent(selection, _) => {
-                        if !crate::launch_composer::selection_fits_catalog(
-                            selection,
-                            catalog_for_submit.as_deref(),
-                        ) {
+                    .and_then(|prefill| prefill.mode.replace_source())
+                {
+                    let guards = held.as_mut().expect("submission owns its launch token");
+                    if guards.source.is_none() {
+                        let Some(claim) = session_operations.claim(source) else {
+                            error.set(Some("Another action on this session is in progress".into()));
                             return;
-                        }
-                    }
-                    api::RestartEdit::Command(command) => {
-                        if let Err(reason) = command.validate() {
-                            error.set(Some(crate::local_validation_notice(reason)));
-                            return;
-                        }
+                        };
+                        session_operations.pending.write().insert(source.to_owned());
+                        guards.source = Some((source.to_owned(), claim));
                     }
                 }
-                let Some(bridge) = restart_bridge else {
-                    return;
-                };
-                let source = source.clone();
-                let opened_launch = opened_launch.clone();
-                let base = base.clone();
-                let bound = binding.clone();
-                let host_name = host_label_for_restart.clone();
-                // The key only names the shared confirmation's draft. Restart
-                // sends no retry key and never enters ambiguous-create recovery.
-                document::eval(
-                    "(() => { const dialog = document.querySelector('.create-session-form'); const submit = dialog?.querySelector('.create-session-submit'); (submit && !submit.disabled ? submit : dialog)?.focus({preventScroll:true}); })()",
-                );
-                // An admitted restart is progress. The shared busy refusal
-                // must not become an announced error while its POST or host
-                // preference write is still running.
-                launch_attempted.set(LaunchAttempt::None);
-                error.set(None);
-                spawn(async move {
-                    let held = intent_key.peek().clone().filter(|(_, held)| held == &bound);
-                    let key = match held {
-                        Some((key, _)) => key,
-                        None => match mint_intent_key().await {
-                            Ok(key) => {
-                                intent_key.set(Some((key.clone(), bound.clone())));
-                                key
-                            }
-                            Err(reason) => {
-                                launch_attempted.set(LaunchAttempt::Refused);
-                                error.set(Some(reason));
-                                return;
-                            }
-                        },
-                    };
-                    let allow_yolo = yolo_confirmed_key.peek().as_deref() == Some(key.as_str());
-                    if let Some(answered) =
-                        stop_asking_for.filter(|answer| answer.key().refused_key == key)
-                        && allow_yolo
-                        && let Err(reason) =
-                            crate::yolo_confirm::stop_asking(&base, bound.host, &host_name).await
-                    {
-                        yolo_confirmed_key.set(None);
-                        yolo_error.set(Some(reason));
-                        open_yolo_question(key, answered.key().ask.clone());
-                        return;
-                    }
-                    if rendered_opening != *opening_generation.peek() {
-                        return;
-                    }
-                    if create_target.peek().as_ref() != target_now.as_ref() {
-                        launch_attempted.set(LaunchAttempt::Refused);
-                        error.set(Some("The source host changed while preparing restart; close and reopen restart with".into()));
-                        return;
-                    }
-                    let same_launch = bridge.current.try_read().is_ok_and(|shown| {
-                        shown
-                            .as_ref()
-                            .is_some_and(|shown| shown.launch.as_ref() == opened_launch.as_deref())
-                    });
-                    if !same_launch {
-                        launch_attempted.set(LaunchAttempt::Refused);
-                        error.set(Some(
-                            "This session's launch settings changed; close and reopen restart with"
-                                .into(),
-                        ));
-                        return;
-                    }
-                    if let Err(reason) = bridge.begin(edit.clone()) {
-                        launch_attempted.set(LaunchAttempt::Refused);
-                        error.set(Some(reason));
-                        return;
-                    }
-                    let pending =
-                        PendingLaunch::new(LaunchAction::Restart, host_name.clone(), None);
-                    pending_launch.set(Some(pending.clone()));
-                    let result = api::restart_session(
-                        &base,
-                        &source,
-                        restart_stop_first,
-                        Some(&edit),
-                        allow_yolo,
-                    )
-                    .await;
-                    pending_launch.set(None);
-                    if let Err(refusal) = &result {
-                        bridge.error.call(if refusal.deadline_expired {
-                            pending.unknown_outcome(false)
-                        } else {
-                            refusal.text.clone()
-                        });
-                    }
-                    bridge.finish(crate::list::RestartOutcome::of(&result));
-                    match result {
-                        Ok(_) => {
-                            drop(op_guard);
-                            COMPOSER_DIALOG.release();
-                            on_restarted.call(());
-                        }
-                        Err(refusal) if refusal.outcome.requires_yolo() => {
-                            open_yolo_question(
-                                key,
-                                crate::yolo_confirm::YoloAsk {
-                                    host: Some(bound.host),
-                                    host_name,
-                                    reason: crate::yolo_confirm::YoloReason::of_launch(
-                                        match &bound.agent {
-                                            LaunchIntent::Structured(selection) => Some(selection),
-                                            LaunchIntent::Command(_) => None,
-                                        },
-                                    ),
-                                },
-                            );
-                        }
-                        Err(refusal) => {
-                            launch_attempted.set(if refusal.deadline_expired {
-                                LaunchAttempt::Unknown
-                            } else {
-                                LaunchAttempt::Refused
-                            });
-                            error.set(Some(if refusal.deadline_expired {
-                                pending.unknown_outcome(false)
-                            } else {
-                                refusal.text
-                            }));
-                        }
-                    }
-                });
-                return;
-            }
-            let fresh_draft_snapshot = move || {
+                // The confirmation, if any, is matched against the key this
+                // submit ends up using, below; the question itself is
+                // answered either way. An answer already took it; a Launch
+                // pressed while it is open supersedes it, which is
+                // reconciliation rather than an answer, hence `clear`.
+                yolo_refusal.clear();
+                yolo_error.set(None);
+                // Frozen HERE, from the live owner, and not touched again:
+                // the minting await below can span further edits, and
+                // re-reading across it would let the request's MODE differ
+                // from the one the button was pressed on.
                 let current = draft.snapshot();
-                (
-                    current.destination().repo().cloned(),
-                    current.tab(),
-                    current.harness(),
-                    current.model(),
-                    current.effort(),
-                    current.permissions(),
-                    submitted_field(
-                        &current.invocation(),
-                        current.invocation_edited(),
-                        current.invocation_raw_seed().as_deref(),
-                    ),
-                    (
-                        current.command_yolo(),
-                        current.command_agent(),
-                        current.command_resume_on(),
-                        submitted_field(
-                            &current.command_resume(),
-                            current.command_resume_edited(),
-                            current.command_resume_raw_seed().as_deref(),
-                        ),
-                    ),
-                    title_for_launch(),
+                // Read the live choice, including a queued submit predating the
+                // first registry observation of a newly created sandbox host.
+                if unresolved_creation_origin(
+                    (!host_fixed)
+                        .then(|| {
+                            prefill_for_submit
+                                .as_ref()
+                                .and_then(|source| source.host)
+                                .or_else(|| open_host.as_ref().map(|host| host.id))
+                        })
+                        .flatten(),
+                    &hosts,
                     *chosen_host.peek(),
-                    current.prompt(),
-                )
-            };
-            let fresh_snapshot = fresh_draft_snapshot();
-            let mut replaying_fresh = false;
-            match draft.snapshot().destination() {
-                DestinationDraft::Existing { .. } => {}
-                DestinationDraft::GithubInput { .. } => {
-                    error.set(Some("Select a GitHub repository before launching".into()));
+                    current.recipe().as_deref(),
+                ) {
+                    error.set(Some("The source host's placement is unavailable; wait for Hosts to refresh or choose a target explicitly".into()));
                     return;
                 }
-                DestinationDraft::Github { repo } => {
-                    let installation = hosts
-                        .iter()
-                        .find(|host| host.id == binding.host)
-                        .and_then(|host| host.identity.as_deref());
-                    let Some(installation) = installation else {
-                        error.set(Some(
-                            "The host installation is not verified; a checkout cannot be created"
-                                .into(),
-                        ));
-                        return;
-                    };
-                    let held = github_attempt.peek().clone();
-                    if let Some((original, attempt)) = held.filter(|(original, _)| {
-                        same_fresh_intent(original, &binding, &repo, installation)
-                    }) {
-                        binding = original;
-                        intent_key.set(Some((attempt.key, binding.clone())));
-                        replaying_fresh = true;
-                    } else if let PreviewState::Ready { authority, preview } =
-                        preview_state.peek().clone()
-                        && live_preview_authority
-                            .peek()
-                            .as_ref()
-                            .is_some_and(|live| authority.accepts(live, &preview))
-                        && preview.installation_identity.raw() == installation
-                        && preview.host == binding.host.to_string()
-                        && Some(preview.incarnation) == connection_claim(&hosts, binding.host)
-                        && authority.title.as_deref() == Some(binding.title.as_str())
-                        && authority.agent == preview_agent_now()
-                        && *preview_revision.peek() == *applied_preview_revision.peek()
-                    {
-                        // No await separates the preliminary binding and this
-                        // admitted preview: reuse its draft snapshot and frozen
-                        // launch rather than reading a different checkout title.
-                        binding = current
-                            .request(RequestContext {
-                                host: Some((binding.host, &binding.incarnation)),
-                                launch: binding.agent.clone(),
-                                replace_source: binding.replace_source.as_deref(),
-                                checkout: Some(CheckoutInput::Preview {
-                                    repo: &repo,
-                                    preview: &preview,
-                                }),
-                            })
-                            .expect("the preliminary binding already resolved its host");
-                    } else {
-                        error.set(Some(
-                            "Wait for a current checkout preview before launching".into(),
-                        ));
-                        return;
-                    }
-                }
-            }
-            let fresh_authority = live_preview_authority.peek().clone();
-            // An accepted request replays its recorded launch snapshot.
-            // New requests still validate against today's catalog.
-            if !replaying_fresh
-                && let LaunchIntent::Structured(selection) = &binding.agent
-                && !crate::launch_composer::selection_fits_catalog(
-                    selection,
-                    catalog_for_submit.as_deref(),
-                )
-            {
-                return;
-            }
-            let base = base.clone();
-            // The target row's install identity as this form knew it at
-            // submit — resolved here, outside the spawn, because
-            // `binding.host` is frozen (the mint loop re-reads text
-            // fields only) and the reply below carries no host facts to
-            // resolve it from. It backfills the created `Session` so
-            // the selection this create becomes carries the same
-            // install claim a listing row would have carried.
-            let created_host_identity = hosts
-                .iter()
-                .find(|host| host.id == binding.host)
-                .map(|host| host.identity.clone());
-            // The connection this create is prepared against, read from
-            // the same hosts snapshot the target match above just
-            // vouched for: the helm refuses the create if the host has
-            // been retargeted or adopted onto another install by the
-            // time it routes, which keeps any launch intent from reaching
-            // a successor installation the form never selected. `None` —
-            // a vanished row, or one that has
-            // never connected — means no claim (see `connection_claim`).
-            let expected_incarnation = connection_claim(&hosts, binding.host);
-            // The name the YOLO confirmation and the pending-launch status
-            // show for this create's host, from the same snapshot. Phase-free:
-            // a suspended host is resumed before the create is sent.
-            let yolo_host_name = hosts
-                .iter()
-                .find(|host| host.id == binding.host)
-                .map(HostOption::display_name)
-                .unwrap_or_else(|| "This host".to_string());
-            // An admitted attempt is progress, not a refusal. Do not show
-            // the busy prerequisite merely because its request is running.
-            launch_attempted.set(LaunchAttempt::None);
-            error.set(None);
-            folder_refusal.set(None);
-            let catalog_for_recheck = catalog_for_submit.clone();
-            let hosts = hosts.clone();
-            let open_host = open_host.clone();
-            let prefill_for_submit = prefill_for_submit.clone();
-            let session_claim = if let Some(source) = &binding.replace_source {
-                let Some(claim) = session_operations.claim(source) else {
-                    error.set(Some("Another action on this session is in progress".into()));
-                    return;
-                };
-                session_operations.pending.write().insert(source.clone());
-                Some(claim)
-            } else {
-                None
-            };
-            spawn(async move {
-                let _session_claim = session_claim;
-                // This future owns op_guard through every await. Explicit
-                // drops preserve early-release points; cancellation drops
-                // the same owner if the form disappears first.
-                // Mint until the key and the binding agree.
-                //
-                // Minting is an `await` (the wasm renderer asks the
-                // browser for a UUID), and the `disabled` attributes that
-                // make this form inert land one render AFTER the submit —
-                // so a keystroke already queued when it fired can still
-                // change a field while the key is being made. The
-                // re-read below is what closes that, not the attribute. Publishing that key
-                // would bind it to values the user has since edited,
-                // which is the same wrong-intent failure a changed host
-                // causes, arriving through a narrower window. Re-reading
-                // the binding after the await and minting again on a
-                // mismatch is what closes it.
-                //
-                // Bounded rather than a `loop`: a form whose values keep
-                // changing every time a key is minted is not a create
-                // anybody is waiting on, and spinning would be worse
-                // than saying so.
-                let mut binding = binding;
-                // Suspension deliberately invalidates the connection token.
-                // Resume first, then bind both minting and the create to the
-                // new connection, preserving the selected installation.
-                let (hosts, expected_incarnation, created_host_identity) = if hosts
-                    .iter()
-                    .any(|host| host.id == binding.host && host.suspended)
-                {
-                    // Both failures below happen before any create is sent, so
-                    // the launch is Refused, never Unknown: whatever the
-                    // resume did, no session can have started from it.
-                    resume_display_handoff.set(None);
-                    resuming_host.set(Some(HostResumePreparation {
-                        host: binding.host,
-                        name: yolo_host_name.clone(),
-                    }));
-                    let result = api::resume_host_connected(&base, binding.host).await;
-                    let fresh = match result {
-                        Ok(hosts) => super::shared::host_options(&hosts),
-                        Err(reason) => {
-                            resume_display_handoff.set(None);
-                            resuming_host.set(None);
-                            launch_attempted.set(LaunchAttempt::Refused);
-                            error.set(Some(format!("Resuming the host failed: {reason}")));
-                            drop(op_guard);
-                            return;
-                        }
-                    };
-                    let current = fresh.iter().find(|host| host.id == binding.host);
-                    if current.map(|host| &host.incarnation) != Some(&binding.incarnation) {
-                        resume_display_handoff.set(None);
-                        resuming_host.set(None);
-                        launch_attempted.set(LaunchAttempt::Refused);
-                        error.set(Some("The host installation changed while resuming; review the target and launch again".into()));
-                        drop(op_guard);
-                        return;
-                    }
-                    resume_display_handoff.set(completed_resume_display_handoff(
-                        target_now.as_ref(),
-                        live_resume_display.peek().as_ref(),
-                        &fresh,
-                    ));
-                    resuming_host.set(None);
-                    let connection = connection_claim(&fresh, binding.host);
-                    let identity = current.map(|host| host.identity.clone());
-                    (fresh, connection, identity)
-                } else {
-                    (hosts, expected_incarnation, created_host_identity)
-                };
-                let mut attempts = 0;
-                let (key, bound) = loop {
-                    let held = intent_key.peek().clone();
-                    if let Some((key, held_binding)) = held
-                        && held_binding == binding
-                    {
-                        break (key, held_binding);
-                    }
-                    if attempts >= MINT_ATTEMPTS {
-                        launch_attempted.set(LaunchAttempt::Refused);
-                        error.set(Some(
-                            "The form kept changing while an idempotency key was being \
-                             generated, so this create was not sent; try again"
-                                .to_string(),
-                        ));
-                        drop(op_guard);
-                        return;
-                    }
-                    attempts += 1;
-                    match mint_intent_key().await {
-                        Ok(key) => intent_key.set(Some((key, binding.clone()))),
-                        Err(reason) => {
-                            // No key, no create: see this component's
-                            // docs on why an unkeyed create is not an
-                            // acceptable degradation. The message says
-                            // what failed rather than blaming the
-                            // request, since nothing the user typed
-                            // caused it.
-                            launch_attempted.set(LaunchAttempt::Refused);
-                            error.set(Some(format!(
-                                "Could not generate an idempotency key for this create, so \
-                                 it was not sent (a retry could otherwise create a second \
-                                 session): {reason}"
-                            )));
-                            drop(op_guard);
-                            return;
-                        }
-                    }
-                    // What the form's TEXT says now. Identical on the
-                    // ordinary path; different exactly when a queued edit
-                    // landed during the mint.
-                    //
-                    // A catalog refresh is not a new user choice, so it
-                    // is frozen at the press. Structured controls are
-                    // different. Every
-                    // visible harness/model/effort/permission click is a
-                    // deliberate edit, and it may have been queued ahead
-                    // of the render that disables controls. Re-read that
-                    // complete declarative intent so the next key binds
-                    // exactly what the person now sees.
-                    let launch = if matches!(binding.agent, LaunchIntent::Structured(_)) {
-                        let current = draft.snapshot();
-                        if let Some(reason) = current.container_refusal(
-                            container_destination_available(
+                let launch = if current.tab() == LaunchTab::Agent {
+                    if let Some(reason) = current.container_refusal(
+                        (current.recipe().is_some() && current.destination().is_managed())
+                            || container_destination_available(
                                 &current,
                                 prefill_for_submit.as_ref(),
                                 &hosts,
@@ -6338,355 +5762,679 @@ pub(super) fn CreateSessionForm(
                                     *chosen_host.peek(),
                                     open_host.as_ref(),
                                 ),
-                            ) || container_recent_destination_available(
+                            )
+                            || container_recent_destination_available(
                                 &current,
                                 offered_history.peek().as_ref(),
                                 live_destination.peek().as_ref(),
                             ),
-                        ) {
-                            launch_attempted.set(LaunchAttempt::Refused);
+                    ) {
+                        error.set(Some(reason));
+                        return;
+                    }
+                    if current.harness().is_none() {
+                        return;
+                    }
+                    if current.permissions() == Some(LaunchPermission::Custom)
+                        && farhelm_proto::split_permission_flags(&structured_permission_flags())
+                            .is_err()
+                    {
+                        error.set(Some(CUSTOM_PERMISSION_FLAGS_REFUSAL.into()));
+                        return;
+                    }
+                    match wrapper_words(&structured_wrapper()) {
+                        Ok(_) => {}
+                        Err(reason) => {
                             error.set(Some(reason));
-                            drop(op_guard);
                             return;
                         }
-                        if current.harness().is_none() {
-                            launch_attempted.set(LaunchAttempt::Refused);
+                    }
+                    // The flags read was unconditional in the old snapshot
+                    // builder, including synchronous guarded-preview submission.
+                    let _ = structured_permission_flags();
+                    current
+                        .launch_intent()
+                        .expect("the live harness was checked above")
+                } else {
+                    // The RAW bytes while untouched, not the escaped display
+                    // the field shows — see [`submitted_field`]
+                    // (item2-review2.md F5).
+                    // Replacing browser required-field validation keeps its
+                    // empty-command refusal visible at Launch. Accepted fresh
+                    // retries keep their existing exemption from this check.
+                    if command_requires_text && current.invocation().is_empty() {
+                        error.set(Some("Enter an agent command before launching".to_string()));
+                        return;
+                    }
+                    let Some(launch) = current.launch_intent() else {
+                        error.set(Some(
+                            "Say whether this command runs in YOLO mode (YOLO) before \
+                         launching"
+                                .to_string(),
+                        ));
+                        return;
+                    };
+                    launch
+                };
+                if let Some(recipe_name) = current.recipe() {
+                    if host_fixed {
+                        error.set(Some("Restart and Replace keep the existing sandbox".into()));
+                        return;
+                    }
+                    let catalog = sandbox_catalog.peek();
+                    let ready = catalog
+                        .as_ref()
+                        .and_then(|answer| answer.as_ref().ok())
+                        .and_then(|(recipes, settings)| {
+                            recipes
+                                .iter()
+                                .find(|recipe| recipe.name == recipe_name)
+                                .map(|recipe| {
+                                    crate::sandbox_sessions::recipe_refusal(recipe, settings)
+                                })
+                        });
+                    match ready {
+                        Some(None) => {}
+                        Some(Some(reason)) => {
+                            error.set(Some(reason));
+                            return;
+                        }
+                        None => {
                             error.set(Some(
-                                "The structured launch choice changed while its idempotency key was being generated; choose a harness and press Launch again".to_string(),
+                                "The selected recipe is unavailable; check Settings → Tensorlake"
+                                    .into(),
                             ));
+                            return;
+                        }
+                    }
+                    let confirmed = sandbox_consent.peek().as_ref() == Some(&current);
+                    sandbox_consent.set(None);
+                    let base = base.clone();
+                    let snapshot = current.clone();
+                    let naming = current.checkout_naming();
+                    let name_kind = naming.template_name().map(|(_, kind)| kind).or_else(|| {
+                        matches!(naming.source, Some(CheckoutNameSource::Clone(_)))
+                            .then_some(farhelm_proto::launcher::TemplateNameKind::Base)
+                    });
+                    let title = naming
+                        .template_name()
+                        .map(|(name, _)| name.to_string())
+                        .or_else(|| {
+                            naming.default_title(
+                                current.title_edited(),
+                                current.title_raw_seed().as_deref(),
+                                current.destination().repo(),
+                            )
+                        })
+                        .unwrap_or_else(|| current.effective_title());
+                    let repo = match current.destination() {
+                        DestinationDraft::Existing { .. } => None,
+                        DestinationDraft::Github { repo } => Some(repo.identifier()),
+                        DestinationDraft::GithubInput { .. } => {
+                            error.set(Some("Select a GitHub repository before launching".into()));
+                            return;
+                        }
+                    };
+                    let SubmitGuards {
+                        launch: op_guard,
+                        source: unused_source_claim,
+                    } = held
+                        .take()
+                        .expect("this accepted submission owns its token");
+                    drop(unused_source_claim);
+                    spawn(async move {
+                        let skip_billing = api::fetch_tensorlake_settings(&base)
+                            .await
+                            .is_ok_and(|settings| settings.create_without_asking);
+                        if !confirmed && !skip_billing {
+                            sandbox_question.set(Some(snapshot));
+                            quick_launch_hidden.set(false);
                             drop(op_guard);
                             return;
                         }
-                        match wrapper_words(&structured_wrapper()) {
-                            Ok(_) => {}
+                        let key = match mint_intent_key().await {
+                            Ok(key) => key,
                             Err(reason) => {
-                                launch_attempted.set(LaunchAttempt::Refused);
                                 error.set(Some(reason));
-                                drop(op_guard);
                                 return;
                             }
+                        };
+                        let conversation = current.conversation();
+                        let prompt = current.prompt();
+                        let agent = match &launch {
+                            LaunchIntent::Structured(selection) => api::CreateAgent::Structured {
+                                selection,
+                                conversation: (!conversation.is_empty())
+                                    .then_some(conversation.as_str()),
+                                prompt: prompt.as_deref(),
+                            },
+                            LaunchIntent::Command(command) => api::CreateAgent::Command(command),
+                        };
+                        let mut request = api::sandbox_launch_body("~", agent, &title, &key);
+                        if let Some(repo) = repo {
+                            request["github_checkout"] = serde_json::json!({
+                                "repo": repo, "title": api::optional_create_title(&title), "preview": null,
+                            });
+                            request["cwd"] = serde_json::json!("");
                         }
-                        let _ = structured_permission_flags();
-                        let selection = current
-                            .structured_selection()
-                            .expect("the live harness was checked above");
-                        if current.tab() != LaunchTab::Agent
-                            || !crate::launch_composer::selection_fits_catalog(
-                                &selection,
-                                catalog_for_recheck.as_deref(),
+                        launch_attempted.set(LaunchAttempt::None);
+                        release_submitted_composer(mounted_opening, previous_presentation);
+                        pending_launch.set(Some(PendingLaunch::new(
+                            LaunchAction::Launch,
+                            format!("{recipe_name} sandbox"),
+                            Some(title),
+                        )));
+                        on_create_dispatch.call(());
+                        let result = api::create_sandbox_session(
+                            &base,
+                            &recipe_name,
+                            confirmed,
+                            name_kind,
+                            request,
+                            move |host, run| sandbox_run.set(Some((host, run))),
+                        )
+                        .await;
+                        sandbox_run.set(None);
+                        on_settled.call(());
+                        let never_shown =
+                            new_was_never_shown(quick_origin, *quick_launch_hidden.peek());
+                        let (press_current, naming_allowed) = if result.is_ok() {
+                            completed_launch_input(
+                                mounted_opening,
+                                opening_generation,
+                                press_baseline,
+                                launch_activity,
+                                never_shown
+                                    && preferences.0.peek().name_session_on_quick_launch
+                                        != Some(false),
                             )
-                        {
-                            launch_attempted.set(LaunchAttempt::Refused);
-                            error.set(Some(
-                                "The structured launch choice changed while its idempotency key was being generated; review it and press Launch again".to_string(),
-                            ));
-                            drop(op_guard);
+                            .await
+                        } else {
+                            (None, false)
+                        };
+                        let admitted =
+                            result.is_ok() || admit_composer_return(mounted_opening, None).await;
+                        // Admission protects presentation, not settlement. A
+                        // retired opening must not keep its progress pill alive.
+                        pending_launch.set(None);
+                        if !admitted {
+                            on_retired.call(mounted_opening);
                             return;
                         }
-                        LaunchIntent::Structured(selection)
-                    } else {
-                        binding.agent.clone()
-                    };
-                    let current = draft.snapshot();
-                    observe_title_fields();
-                    // A managed path/checkout stays the accepted snapshot.
-                    // The binding's host facts also stay frozen, including an
-                    // older retained attempt's incarnation after reconnect.
-                    let checkout =
-                        binding
-                            .github_checkout
-                            .as_ref()
-                            .map(|request| CheckoutInput::Accepted {
-                                cwd: &binding.cwd,
-                                request,
-                            });
-                    binding = current
-                        .request(RequestContext {
-                            host: Some((binding.host, &binding.incarnation)),
-                            launch,
-                            replace_source: binding.replace_source.as_deref(),
-                            checkout,
-                        })
-                        .expect("an accepted binding retains its host");
+                        match result {
+                            Ok(session) => {
+                                let submitted_launch = match launch {
+                                    LaunchIntent::Structured(selection) => Some(selection),
+                                    _ => None,
+                                };
+                                drop(op_guard);
+                                COMPOSER_DIALOG
+                                    .for_generation("data-opening-generation", mounted_opening)
+                                    .release();
+                                on_created.call(CreatedSession {
+                                    session,
+                                    submitted_launch,
+                                    new_was_never_shown: never_shown && naming_allowed,
+                                    opening: mounted_opening,
+                                    press_baseline,
+                                    press_current,
+                                });
+                            }
+                            Err(reason) => {
+                                quick_launch_hidden.set(false);
+                                launch_attempted.set(if reason.is_unknown() {
+                                    LaunchAttempt::Unknown
+                                } else {
+                                    LaunchAttempt::Refused
+                                });
+                                error.set(Some(reason.to_string()));
+                            }
+                        }
+                    });
+                    return;
+                }
+                // The HOST is derived here too, from the live signal — never
+                // from what the last render computed. The same one-turn window
+                // the agent has: changing the selector and pressing create in
+                // one turn reaches this handler before any re-render, and a
+                // captured host would send the create to the PREVIOUS machine
+                // while the selector on screen names another.
+                let target_now = create_target.peek().clone();
+                let selected_now = if restart_mode {
+                    prefill_for_submit.as_ref().and_then(|prefill| prefill.host)
+                } else {
+                    effective_create_host(&hosts, chosen_host.peek().to_owned(), open_host.as_ref())
                 };
-                // Key, fields, host AND creation mode all travel from ONE
-                // value, so there is no arrangement of edits or reads in
-                // which the body describes a different intent than the
-                // key claims — including the mode itself, which the
-                // supervisor folds into its own idempotency fingerprint
-                // precisely so a retried create cannot flip it.
-                // Recheck after key minting, including retries that already
-                // had a key. A new target must not legitimize an old path.
+                if !restart_host_confirmed {
+                    error.set(Some("Restart keeps the source session's host, but its installation cannot be confirmed; close and reopen restart with once that host is back".into()));
+                    return;
+                }
                 if !remembered_destination_matches(
                     remembered_destination.peek().as_ref(),
                     live_destination.peek().as_ref(),
                 ) {
-                    launch_attempted.set(LaunchAttempt::Refused);
-                    error.set(Some(REMEMBERED_DESTINATION_CHANGED.to_string()));
-                    intent_key.set(None);
                     return;
                 }
-                if bound.github_checkout.is_some()
-                    && (fresh_draft_snapshot() != fresh_snapshot
-                        || live_destination.peek().as_ref() != target_now.as_ref()
-                        || (!replaying_fresh && *live_preview_authority.peek() != fresh_authority))
-                {
-                    launch_attempted.set(LaunchAttempt::Refused);
-                    error.set(Some("The checkout draft changed while preparing the request; review the preview and press Launch again".into()));
-                    return;
-                }
-                // Only a confirmation given for THIS key counts; see
-                // `yolo_confirmed_key`.
-                let allow_yolo = yolo_confirmed_key.peek().as_deref() == Some(key.as_str());
-                // "Don't ask again": mark the host safe before anything
-                // is sent, and send nothing if that fails. The override
-                // is withdrawn on failure too, so a later plain Launch
-                // asks again rather than riding on this confirmation.
-                if let Some(answered) =
-                    stop_asking_for.filter(|answered| answered.key().refused_key == key)
-                    && allow_yolo
-                    && let Err(reason) =
-                        crate::yolo_confirm::stop_asking(&base, bound.host, &yolo_host_name).await
-                {
-                    // The answer took the question down; it comes back,
-                    // as a new opening, with the reason, so the user can
-                    // pick another answer.
-                    yolo_confirmed_key.set(None);
-                    yolo_error.set(Some(reason));
-                    let LauncherYoloQuestion {
-                        refused_key, ask, ..
-                    } = answered.key().clone();
-                    open_yolo_question(refused_key, ask);
-                    drop(op_guard);
-                    return;
-                }
-                let agent = match &bound.agent {
-                    LaunchIntent::Command(command) => CreateAgent::Command(command),
-                    LaunchIntent::Structured(selection) => CreateAgent::Structured {
-                        selection,
-                        conversation: bound.conversation.as_deref(),
-                        prompt: bound.prompt.as_deref(),
-                    },
-                };
-                // The one branch point between the two verbs this form
-                // shares: an ordinary create and a "replace with" send
-                // the SAME body fields (cwd, agent, title, intent key,
-                // host, expected incarnation — see `create_body`, the
-                // single builder both calls share), differing only in
-                // which endpoint receives them and in the source id a
-                // replace-with also names. Everything above this point
-                // — resolution, guards, key minting — has already run
-                // identically for both; only the network call itself
-                // forks.
-                let pending = PendingLaunch::new(
-                    if bound.replace_source.is_some() {
-                        LaunchAction::Replace
-                    } else {
-                        LaunchAction::Launch
-                    },
-                    yolo_host_name.clone(),
-                    quick_launch_hidden().then(|| bound.title.clone()),
-                );
-                pending_launch.set(Some(pending.clone()));
-                if let Some(source) = &bound.replace_source {
-                    shared_replace_progress
-                        .0
-                        .write()
-                        .insert(source.clone(), pending.clone());
-                }
-                let create_result = if let Some(checkout) = &bound.github_checkout {
-                    let attempt = github_attempt
-                        .peek()
-                        .as_ref()
-                        .filter(|(original, attempt)| original == &bound && attempt.key == key)
-                        .map(|(_, attempt)| attempt.clone())
-                        .unwrap_or_else(|| {
-                            GithubAttempt::new(
-                                key.clone(),
-                                api::fresh_create_body(agent, &key, bound.host, checkout),
-                                checkout.preview.installation_identity.raw().to_owned(),
-                            )
-                        });
-                    let mut attempt = attempt;
-                    if allow_yolo {
-                        api::confirm_yolo(&mut attempt.body);
-                    }
-                    // Publish before dispatch. A lost response must leave
-                    // the exact payload available to the next explicit retry.
-                    github_attempt.set(Some((bound.clone(), attempt.clone())));
-                    // The body is the retained original; the source
-                    // delete's precondition is the one this submit was
-                    // given: the warning the press or answer it acts for saw
-                    // (see `submit_fresh_create` and `GuardedSubmitStamp`).
-                    match api::submit_fresh_create(
-                        &base,
-                        bound.replace_source.as_deref(),
-                        replace_guard,
-                        &attempt.body,
-                    )
-                    .await
+                // A folder nobody chose must be this host's default before it is
+                // sent, or a host switch would launch the previous host's folder.
+                if !restart_mode && folder_default.peek().pending {
+                    let snapshot = draft.snapshot();
+                    if !snapshot.folder_is_explicit()
+                        && matches!(snapshot.destination(), DestinationDraft::Existing { .. })
                     {
-                        Ok((session, notice)) => {
-                            github_attempt.set(None);
-                            delete_notice.publish(notice);
-                            Ok(session)
-                        }
-                        Err(crate::github_checkout::FreshCreateError::YoloConfirmation(text)) => {
-                            // Refused before anything was dispatched. The
-                            // attempt and its key stay, so the confirmed
-                            // retry is the same request with the override.
-                            github_attempt.set(Some((bound.clone(), attempt)));
-                            Err(api::CreateRefusal {
-                                outcome: api::RefusalOutcome::NeedsYoloConfirmation,
-                                text,
-                                deadline_expired: false,
-                            })
-                        }
-                        Err(failure) => {
-                            let retired = attempt.may_retire_after(&failure);
-                            if retired {
-                                github_attempt.set(None);
-                                intent_key.set(None);
-                                preview_revision.with_mut(|revision| {
-                                    *revision =
-                                        revision.checked_add(1).expect("preview revision exhausted")
-                                });
-                            } else {
-                                github_attempt.set(Some((bound.clone(), attempt)));
-                            }
-                            let deadline_expired = matches!(
-                                &failure,
-                                crate::github_checkout::FreshCreateError::DeadlineExpired(_)
-                            );
-                            let mut refusal = api::CreateRefusal::from(format!(
-                                "{}; {}",
-                                failure.message(),
-                                if retired {
-                                    "nothing was accepted; review the refreshed preview and press Launch again"
-                                } else {
-                                    "the original request is retained; retry reconciles that request without allocating a different checkout"
-                                }
-                            ));
-                            refusal.deadline_expired = deadline_expired;
-                            Err(refusal)
-                        }
+                        return;
                     }
-                } else {
-                    match &bound.replace_source {
-                        Some(source) => api::replace_session_with(
-                            &base,
-                            source,
-                            replace_guard,
-                            &bound.cwd,
-                            agent,
-                            &bound.title,
-                            &key,
-                            Some(bound.host),
-                            expected_incarnation,
-                            allow_yolo,
-                        )
-                        .await
-                        .map(|(session, notice)| {
-                            delete_notice.publish(notice);
-                            session
-                        }),
-                        None => {
-                            create_session(
-                                &base,
-                                &bound.cwd,
-                                agent,
-                                &bound.title,
-                                &key,
-                                Some(bound.host),
-                                expected_incarnation,
-                                allow_yolo,
+                }
+                // The host target must have caught up with the selector before
+                // the request can bind its idempotency and connection claims.
+                if !target_matches_selection(selected_now, &hosts, target_now.as_ref()) {
+                    error.set(Some(
+                    "The target host changed while preparing this request, so nothing was sent — check the target and try again"
+                        .to_string(),
+                ));
+                    return;
+                }
+                if !selected_now.is_some_and(|id| {
+                    hosts
+                        .iter()
+                        .find(|host| host.id == id)
+                        .is_some_and(|host| host.available_for_launch(None))
+                }) {
+                    return;
+                }
+                if selected_now
+                    .is_some_and(|id| hosts.iter().any(|host| host.id == id && host.suspended))
+                    && matches!(
+                        draft.snapshot().destination(),
+                        DestinationDraft::Github { .. }
+                    )
+                {
+                    let host = selected_now.expect("the suspended host was found");
+                    let base = base.clone();
+                    let current = draft.snapshot();
+                    let Some(authority) =
+                        hosts.iter().find(|row| row.id == host).and_then(|host| {
+                            checkout_preview_authority(
+                                host,
+                                &current,
+                                observed_checkout_revision(),
+                                preview_agent_now(),
                             )
-                            .await
-                        }
-                    }
-                };
-                pending_launch.set(None);
-                if let Some(source) = &bound.replace_source {
-                    shared_replace_progress.0.write().remove(source);
-                    if let Err(refusal) = &create_result {
-                        let reason = if refusal.deadline_expired {
-                            pending.unknown_outcome(false)
-                        } else {
-                            refusal.text.clone()
-                        };
-                        session_operations
-                            .errors
-                            .write()
-                            .insert(source.clone(), format!("Replace: {reason}"));
-                    } else {
+                        })
+                    else {
+                        return;
+                    };
+                    let naming = current.checkout_naming();
+                    let automatic_name = naming
+                        .default_title(
+                            current.title_edited(),
+                            current.title_raw_seed().as_deref(),
+                            current.destination().repo(),
+                        )
+                        .and(naming.source);
+                    let pending = GuardedSubmitStamp::new(
+                        rendered_opening,
+                        authority,
+                        current.prompt(),
+                        current.conversation(),
+                        replace_guard,
+                        press_baseline,
+                    );
+                    resume_display_handoff.set(None);
+                    draft.pin_submitted_host(host);
+                    // Local validation owns the source without replacing its
+                    // previous outcome. An actual wake starts new work on it.
+                    if let Some((source, _)) =
+                        held.as_ref().and_then(|guards| guards.source.as_ref())
+                    {
                         session_operations.errors.write().remove(source);
                     }
-                    if create_result.is_err() {
-                        on_replace_failed.call(());
+                    release_submitted_composer(mounted_opening, previous_presentation);
+                    resuming_host.set(Some(HostResumePreparation {
+                        host,
+                        name: hosts
+                            .iter()
+                            .find(|row| row.id == host)
+                            .map(HostOption::display_name)
+                            .unwrap_or_else(|| "host".into()),
+                    }));
+                    launch_attempted.set(LaunchAttempt::None);
+                    error.set(None);
+                    let mut guards = held
+                        .take()
+                        .expect("this accepted submission owns its token");
+                    spawn(async move {
+                        let result = api::resume_host_connected(&base, host).await;
+                        let handoff = result.as_ref().ok().and_then(|fresh| {
+                            completed_resume_display_handoff(
+                                target_now.as_ref(),
+                                live_resume_display.peek().as_ref(),
+                                &super::shared::host_options(fresh),
+                            )
+                        });
+                        resume_display_handoff.set(handoff);
+                        let reason = match result {
+                            Ok(fresh) => {
+                                let connection = super::shared::host_options(&fresh)
+                                    .into_iter()
+                                    .find(|row| {
+                                        row.id == host
+                                            && Some(CreateTarget::new(
+                                                row.id,
+                                                row.incarnation.clone(),
+                                            )) == target_now
+                                    })
+                                    .map(|row| row.connection);
+                                if let Some(connection) = connection {
+                                    // Successful wake continues hidden through
+                                    // preview. The existing slot owns the same
+                                    // token until its internal submit takes it.
+                                    guarded_submit_pending.set(Some((
+                                        pending.after_resume(connection, automatic_name),
+                                        Some(guards),
+                                    )));
+                                    return;
+                                } else {
+                                    "The target host changed while resuming; check the target and launch again".into()
+                                }
+                            }
+                            Err(reason) => {
+                                format!("Resuming the host failed: {reason}")
+                            }
+                        };
+                        resume_display_handoff.set(None);
+                        launch_attempted.set(LaunchAttempt::Refused);
+                        settle_prepared_source(
+                            &mut guards.source,
+                            Some(&reason),
+                            session_operations,
+                            shared_replace_progress,
+                            on_settled,
+                        );
+                        error.set(Some(reason));
+                        return_prepared_composer(
+                            mounted_opening,
+                            resuming_host,
+                            on_retired,
+                            guards.launch,
+                        )
+                        .await;
+                    });
+                    return;
+                }
+                // "Replace with" keeps the source's own host (SPEC.md's
+                // replace-with bullet; clone is the way to a different
+                // host). A `prefill` with no recorded host (a helm old
+                // enough to omit `Session::host`) has nothing to compare
+                // against and is let through — the helm's own same-host
+                // refusal (`ReplaceReq::with`'s doc) is the backstop for
+                // that rare case, exactly the way this whole check mirrors
+                // that refusal for the ordinary case, so the user sees the
+                // words here instead of waiting on a round trip to see
+                // them.
+                let replace_source = prefill_for_submit
+                    .as_ref()
+                    .and_then(|prefill| prefill.mode.replace_source())
+                    .map(str::to_owned);
+                if replace_source.is_some()
+                    && prefill_for_submit.as_ref().is_some_and(|prefill| {
+                        prefill.host.is_some() && prefill.host != selected_now
+                    })
+                {
+                    // Two ways to get here that deserve different words: the
+                    // user picked another host in the selector (say so, and
+                    // point at clone), or the reseed effect never bound the
+                    // source's host because its install identity no longer
+                    // matched (`CloneHostState::Unconfirmable`) and the
+                    // selector fell back to the default host — blaming the
+                    // user for a host change they never made would be wrong.
+                    let unconfirmable =
+                        matches!(*clone_host_state.peek(), CloneHostState::Unconfirmable);
+                    error.set(Some(
+                        if unconfirmable {
+                            "Replace with keeps the source session's own host, but that host \
+                         could not be confirmed (the source reports a different installation \
+                         now), so this create was not sent — replace with cannot proceed \
+                         until the source's host is back; clone is the way to start a session \
+                         elsewhere"
+                        } else {
+                            "Replace with keeps the source session's own host, so this create was \
+                         not sent — clone is the way to start a session on a different host"
+                        }
+                        .to_string(),
+                    ));
+                    return;
+                }
+                // No host, no create. The helm would default a hostless body
+                // to its local row — usually the right answer, and not one
+                // this form may reach by omission while its own selector is
+                // still blank. Saying so beats creating on a machine the
+                // user was never shown.
+                let _ = (cwd(), cwd_edited());
+                observe_title_fields();
+                let current = draft.snapshot();
+                let Some(mut binding) = current.request(RequestContext {
+                    host: hosts
+                        .iter()
+                        .find(|host| Some(host.id) == selected_now)
+                        .map(|host| (host.id, host.incarnation.as_str())),
+                    launch,
+                    replace_source: replace_source.as_deref(),
+                    checkout: None,
+                }) else {
+                    error.set(Some(if hosts_loaded {
+                        "This helm reported no hosts at all, so this request cannot be sent"
+                            .to_string()
+                    } else {
+                        "The host list has not loaded yet, so this request was not sent — it \
+                         would have gone to whichever host the helm picked rather than one \
+                         you chose"
+                            .to_string()
+                    }));
+                    return;
+                };
+                // A guarded-preview effect can call submit synchronously. Keep
+                // its old conditional subscriptions while request() alone supplies
+                // the projected values used by the ordered validations below.
+                if matches!(binding.agent, LaunchIntent::Structured(_)) {
+                    let _ = conversation();
+                    if binding.conversation.is_some() {
+                        let _ = conversation();
+                    }
+                    let _ = prompt();
+                }
+                if let Some(message) = &binding.prompt {
+                    let refusal = farhelm_proto::launcher::check_initial_prompt(message).err()
+                    .map(crate::local_validation_notice)
+                    .or_else(|| match &binding.agent {
+                        LaunchIntent::Structured(selection) if !selection.harness.supports_initial_prompt(binding.conversation.is_some()) => Some("This agent cannot combine an initial prompt with a named conversation".into()),
+                        _ => None,
+                    });
+                    if let Some(refusal) = refusal {
+                        error.set(Some(refusal));
+                        return;
                     }
                 }
-                match create_result {
-                    Ok(session) => {
-                        // The callback may open quick-launch naming, which
-                        // checks this token synchronously. Release before
-                        // that handoff, rather than at the future's end.
-                        drop(op_guard);
-                        let submitted_launch = match &bound.agent {
-                            LaunchIntent::Structured(selection) => Some(selection.clone()),
-                            LaunchIntent::Command(_) => None,
-                        };
-                        COMPOSER_DIALOG.release();
-                        on_created.call(CreatedSession {
-                            session: enrich_created_session(
-                                session,
-                                bound.host,
-                                created_host_identity,
-                            ),
-                            submitted_launch,
-                            new_was_never_shown: new_was_never_shown(
-                                quick_origin,
-                                *quick_launch_hidden.peek(),
-                            ),
-                        });
+                if binding.conversation.is_some() && {
+                    let _ = destination_draft();
+                    draft.snapshot().destination().repo().is_some()
+                } {
+                    error.set(Some("Named conversations cannot start in a new managed checkout; choose an existing folder".into()));
+                    return;
+                }
+                if crate::launch_composer::scoped_query(&composer_search()).0
+                    == crate::launch_composer::SearchScope::Github
+                {
+                    return;
+                }
+                if let Some(CreatePrefill {
+                    mode:
+                        LauncherMode::Restart {
+                            source,
+                            baseline,
+                            opened_launch,
+                            conversation_required,
+                        },
+                    ..
+                }) = prefill_for_submit.as_ref()
+                {
+                    let edit = current
+                        .restart_edit()
+                        .expect("restart has a complete launch");
+                    if &edit == baseline {
+                        return;
                     }
-                    Err(e) => {
-                        // Every unsuccessful quick request ends hidden
-                        // preparation, even if its old target no longer owns
-                        // the refusal. Keep that refusal fenced below.
-                        quick_launch_hidden.set(false);
-                        // Marked whatever the form now shows: the key stays
-                        // bound to this setup even when the refusal text is
-                        // fenced off below, and a return to the setup reuses
-                        // it, so its YOLO question must still know.
-                        if !e.outcome.requires_yolo() && !e.outcome.retires_retry() {
-                            uncertain_key.set(Some(key.clone()));
+                    if *conversation_required && current.conversation().is_empty() {
+                        error.set(Some("Enter a conversation to restart".into()));
+                        return;
+                    }
+                    if model_open() && !model_draft().is_empty() || model_draft_error().is_some() {
+                        error.set(Some("Choose a model before restarting".into()));
+                        return;
+                    }
+                    match &edit {
+                        api::RestartEdit::Agent(selection)
+                        | api::RestartEdit::NamedAgent(selection, _) => {
+                            if !crate::launch_composer::selection_fits_catalog(
+                                selection,
+                                catalog_for_submit.as_deref(),
+                            ) {
+                                return;
+                            }
                         }
-                        // Gated on the target this request was DISPATCHED
-                        // for still being the one on screen: a refusal
-                        // naming host A must not land under a form that
-                        // has since been re-pointed at host B, where it
-                        // would describe a machine the user is not looking
-                        // at and may not even be true.
-                        if create_target.peek().as_ref() == target_now.as_ref() {
-                            let api::CreateRefusal {
-                                outcome,
-                                text: prose,
-                                deadline_expired,
-                            } = e;
-                            if outcome.requires_yolo() {
-                                // The key deliberately survives: this
-                                // attempt was refused before dispatch, but
-                                // an EARLIER attempt under the same key may
-                                // have been accepted with its reply lost,
-                                // and the confirmed retry must still
-                                // reconcile with it rather than start a
-                                // second session. The loud confirmation
-                                // replaces the ordinary error line.
+                        api::RestartEdit::Command(command) => {
+                            if let Err(reason) = command.validate() {
+                                error.set(Some(crate::local_validation_notice(reason)));
+                                return;
+                            }
+                        }
+                    }
+                    let Some(bridge) = restart_bridge else {
+                        return;
+                    };
+                    let source = source.clone();
+                    let opened_launch = opened_launch.clone();
+                    let base = base.clone();
+                    let bound = binding.clone();
+                    let host_name = host_label_for_restart.clone();
+                    // The key only names the shared confirmation's draft. Restart
+                    // sends no retry key and never enters ambiguous-create recovery.
+                    document::eval(
+                        "(() => { const dialog = document.querySelector('.create-session-form'); const submit = dialog?.querySelector('.create-session-submit'); (submit && !submit.disabled ? submit : dialog)?.focus({preventScroll:true}); })()",
+                    );
+                    // An admitted restart is progress. The shared busy refusal
+                    // must not become an announced error while its POST or host
+                    // preference write is still running.
+                    launch_attempted.set(LaunchAttempt::None);
+                    error.set(None);
+                    let SubmitGuards {
+                        launch: op_guard,
+                        source: unused_source_claim,
+                    } = held
+                        .take()
+                        .expect("this accepted submission owns its token");
+                    drop(unused_source_claim);
+                    spawn(async move {
+                        let held = intent_key.peek().clone().filter(|(_, held)| held == &bound);
+                        let key = match held {
+                            Some((key, _)) => key,
+                            None => match mint_intent_key().await {
+                                Ok(key) => {
+                                    intent_key.set(Some((key.clone(), bound.clone())));
+                                    key
+                                }
+                                Err(reason) => {
+                                    launch_attempted.set(LaunchAttempt::Refused);
+                                    error.set(Some(reason));
+                                    return;
+                                }
+                            },
+                        };
+                        let allow_yolo = yolo_confirmed_key.peek().as_deref() == Some(key.as_str());
+                        if let Some(answered) =
+                            stop_asking_for.filter(|answer| answer.key().refused_key == key)
+                            && allow_yolo
+                            && let Err(reason) =
+                                crate::yolo_confirm::stop_asking(&base, bound.host, &host_name)
+                                    .await
+                        {
+                            yolo_confirmed_key.set(None);
+                            yolo_error.set(Some(reason));
+                            open_yolo_question(key, answered.key().ask.clone());
+                            return;
+                        }
+                        if rendered_opening != *opening_generation.peek() {
+                            return;
+                        }
+                        if create_target.peek().as_ref() != target_now.as_ref() {
+                            launch_attempted.set(LaunchAttempt::Refused);
+                            error.set(Some("The source host changed while preparing restart; close and reopen restart with".into()));
+                            return;
+                        }
+                        let same_launch = bridge.current.try_read().is_ok_and(|shown| {
+                            shown.as_ref().is_some_and(|shown| {
+                                shown.launch.as_ref() == opened_launch.as_deref()
+                            })
+                        });
+                        if !same_launch {
+                            launch_attempted.set(LaunchAttempt::Refused);
+                            error.set(Some(
+                            "This session's launch settings changed; close and reopen restart with"
+                                .into(),
+                        ));
+                            return;
+                        }
+                        if let Err(reason) = bridge.begin(edit.clone()) {
+                            launch_attempted.set(LaunchAttempt::Refused);
+                            error.set(Some(reason));
+                            return;
+                        }
+                        let pending =
+                            PendingLaunch::new(LaunchAction::Restart, host_name.clone(), None);
+                        release_submitted_composer(mounted_opening, previous_presentation);
+                        pending_launch.set(Some(pending.clone()));
+                        let result = api::restart_session(
+                            &base,
+                            &source,
+                            restart_stop_first,
+                            Some(&edit),
+                            allow_yolo,
+                        )
+                        .await;
+                        // The source claim and detail-read boundary outlive this
+                        // dialog. Settle before waiting for another modal; only
+                        // the form's own progress/question/error needs admission.
+                        if let Err(refusal) = &result
+                            && !refusal.outcome.requires_yolo()
+                        {
+                            bridge.error.call(if refusal.deadline_expired {
+                                pending.unknown_outcome(false)
+                            } else {
+                                refusal.text.clone()
+                            });
+                        }
+                        bridge.finish(crate::list::RestartOutcome::of(&result));
+                        let admitted =
+                            result.is_ok() || admit_composer_return(mounted_opening, None).await;
+                        pending_launch.set(None);
+                        if !admitted {
+                            on_retired.call(mounted_opening);
+                            return;
+                        }
+                        match result {
+                            Ok(_) => {
+                                drop(op_guard);
+                                COMPOSER_DIALOG
+                                    .for_generation("data-opening-generation", mounted_opening)
+                                    .release();
+                                on_restarted.call(mounted_opening);
+                            }
+                            Err(refusal) if refusal.outcome.requires_yolo() => {
                                 open_yolo_question(
-                                    key.clone(),
+                                    key,
                                     crate::yolo_confirm::YoloAsk {
                                         host: Some(bound.host),
-                                        host_name: yolo_host_name.clone(),
+                                        host_name,
                                         reason: crate::yolo_confirm::YoloReason::of_launch(
                                             match &bound.agent {
                                                 LaunchIntent::Structured(selection) => {
@@ -6697,69 +6445,811 @@ pub(super) fn CreateSessionForm(
                                         ),
                                     },
                                 );
-                                drop(op_guard);
-                                return;
                             }
-                            if outcome.retires_retry() {
-                                // A settled refusal or changed target incarnation
-                                // needs a new attempt. Unknown outcomes keep the
-                                // old key so a retry cannot create a second session.
-                                intent_key.set(None);
-                            }
-                            // The key otherwise deliberately SURVIVES a
-                            // failure: a failure whose cause was an
-                            // ambiguous transport error may have created
-                            // a session the user cannot see, and
-                            // resubmitting unchanged must reach that same
-                            // session rather than launch a second agent.
-                            // A user who instead fixes the form gets a new
-                            // key, because the binding no longer matches.
-                            if let (Some(target), Some(problem)) =
-                                (target_now.clone(), FolderProblem::recognize(&prose))
-                            {
-                                folder_refusal.set(Some(FolderRefusal {
-                                    target,
-                                    connection: expected_incarnation,
-                                    cwd: bound.cwd.clone(),
-                                    host: yolo_host_name.clone(),
-                                    problem,
+                            Err(refusal) => {
+                                launch_attempted.set(if refusal.deadline_expired {
+                                    LaunchAttempt::Unknown
+                                } else {
+                                    LaunchAttempt::Refused
+                                });
+                                error.set(Some(if refusal.deadline_expired {
+                                    pending.unknown_outcome(false)
+                                } else {
+                                    refusal.text
                                 }));
                             }
-                            // Dispatch cleared the attempt mark so the busy
-                            // prerequisite would not show while the request
-                            // ran; a refusal is a finished attempt again, and
-                            // only a genuine refusal is labelled "Not launched.".
-                            launch_attempted.set(if deadline_expired {
-                                LaunchAttempt::Unknown
-                            } else {
-                                LaunchAttempt::Refused
-                            });
-                            error.set(Some(if deadline_expired {
-                                pending.unknown_outcome(true)
-                            } else {
-                                prose
-                            }));
-                        } else {
-                            // The old request still ended unsuccessfully.
-                            // Say so without leaking its host-specific prose
-                            // or retiring the new target's retry identity.
-                            launch_attempted.set(if e.deadline_expired {
-                                LaunchAttempt::Unknown
-                            } else {
-                                LaunchAttempt::Refused
-                            });
-                            error.set(Some(if e.deadline_expired {
-                                "A launch for an earlier setup timed out; its outcome is unknown"
-                                    .into()
-                            } else {
-                                "A launch for an earlier setup was refused".into()
-                            }));
                         }
-                        drop(op_guard);
+                    });
+                    return;
+                }
+                let fresh_draft_snapshot = move || {
+                    let current = draft.snapshot();
+                    (
+                        current.destination().repo().cloned(),
+                        current.tab(),
+                        current.harness(),
+                        current.model(),
+                        current.effort(),
+                        current.permissions(),
+                        submitted_field(
+                            &current.invocation(),
+                            current.invocation_edited(),
+                            current.invocation_raw_seed().as_deref(),
+                        ),
+                        (
+                            current.command_yolo(),
+                            current.command_agent(),
+                            current.command_resume_on(),
+                            submitted_field(
+                                &current.command_resume(),
+                                current.command_resume_edited(),
+                                current.command_resume_raw_seed().as_deref(),
+                            ),
+                        ),
+                        title_for_launch(),
+                        *chosen_host.peek(),
+                        current.prompt(),
+                    )
+                };
+                let fresh_snapshot = fresh_draft_snapshot();
+                let mut replaying_fresh = false;
+                match draft.snapshot().destination() {
+                    DestinationDraft::Existing { .. } => {}
+                    DestinationDraft::GithubInput { .. } => {
+                        error.set(Some("Select a GitHub repository before launching".into()));
+                        return;
+                    }
+                    DestinationDraft::Github { repo } => {
+                        let installation = hosts
+                            .iter()
+                            .find(|host| host.id == binding.host)
+                            .and_then(|host| host.identity.as_deref());
+                        let Some(installation) = installation else {
+                            error.set(Some(
+                            "The host installation is not verified; a checkout cannot be created"
+                                .into(),
+                        ));
+                            return;
+                        };
+                        let held = github_attempt.peek().clone();
+                        if let Some((original, attempt)) = held.filter(|(original, _)| {
+                            same_fresh_intent(original, &binding, &repo, installation)
+                        }) {
+                            binding = original;
+                            intent_key.set(Some((attempt.key, binding.clone())));
+                            replaying_fresh = true;
+                        } else if let PreviewState::Ready { authority, preview } =
+                            preview_state.peek().clone()
+                            && live_preview_authority
+                                .peek()
+                                .as_ref()
+                                .is_some_and(|live| authority.accepts(live, &preview))
+                            && preview.installation_identity.raw() == installation
+                            && preview.host == binding.host.to_string()
+                            && Some(preview.incarnation) == connection_claim(&hosts, binding.host)
+                            && authority.title.as_deref() == Some(binding.title.as_str())
+                            && authority.agent == preview_agent_now()
+                            && *preview_revision.peek() == *applied_preview_revision.peek()
+                        {
+                            // No await separates the preliminary binding and this
+                            // admitted preview: reuse its draft snapshot and frozen
+                            // launch rather than reading a different checkout title.
+                            binding = current
+                                .request(RequestContext {
+                                    host: Some((binding.host, &binding.incarnation)),
+                                    launch: binding.agent.clone(),
+                                    replace_source: binding.replace_source.as_deref(),
+                                    checkout: Some(CheckoutInput::Preview {
+                                        repo: &repo,
+                                        preview: &preview,
+                                    }),
+                                })
+                                .expect("the preliminary binding already resolved its host");
+                        } else {
+                            error.set(Some(
+                                "Wait for a current checkout preview before launching".into(),
+                            ));
+                            return;
+                        }
                     }
                 }
-            });
+                let fresh_authority = live_preview_authority.peek().clone();
+                // An accepted request replays its recorded launch snapshot.
+                // New requests still validate against today's catalog.
+                if !replaying_fresh
+                    && let LaunchIntent::Structured(selection) = &binding.agent
+                    && !crate::launch_composer::selection_fits_catalog(
+                        selection,
+                        catalog_for_submit.as_deref(),
+                    )
+                {
+                    return;
+                }
+                let base = base.clone();
+                // The target row's install identity as this form knew it at
+                // submit — resolved here, outside the spawn, because
+                // `binding.host` is frozen (the mint loop re-reads text
+                // fields only) and the reply below carries no host facts to
+                // resolve it from. It backfills the created `Session` so
+                // the selection this create becomes carries the same
+                // install claim a listing row would have carried.
+                let created_host_identity = hosts
+                    .iter()
+                    .find(|host| host.id == binding.host)
+                    .map(|host| host.identity.clone());
+                // The connection this create is prepared against, read from
+                // the same hosts snapshot the target match above just
+                // vouched for: the helm refuses the create if the host has
+                // been retargeted or adopted onto another install by the
+                // time it routes, which keeps any launch intent from reaching
+                // a successor installation the form never selected. `None` —
+                // a vanished row, or one that has
+                // never connected — means no claim (see `connection_claim`).
+                let expected_incarnation = connection_claim(&hosts, binding.host);
+                // The name the YOLO confirmation and the pending-launch status
+                // show for this create's host, from the same snapshot. Phase-free:
+                // a suspended host is resumed before the create is sent.
+                let yolo_host_name = hosts
+                    .iter()
+                    .find(|host| host.id == binding.host)
+                    .map(HostOption::display_name)
+                    .unwrap_or_else(|| "This host".to_string());
+                // An admitted attempt is progress, not a refusal. Do not show
+                // the busy prerequisite merely because its request is running.
+                launch_attempted.set(LaunchAttempt::None);
+                error.set(None);
+                folder_refusal.set(None);
+                let catalog_for_recheck = catalog_for_submit.clone();
+                let hosts = hosts.clone();
+                let open_host = open_host.clone();
+                let prefill_for_submit = prefill_for_submit.clone();
+                let SubmitGuards {
+                    launch: op_guard,
+                    source: session_claim,
+                } = held
+                    .take()
+                    .expect("this accepted submission owns its token");
+                spawn(async move {
+                    let mut source_claim = session_claim;
+                    let mut held = Some(op_guard);
+                    // Preparation failures return to one epilogue. It releases
+                    // the source claim immediately, but a hidden draft retains
+                    // the launch token until its error/question can be shown.
+                    async {
+                            // Mint until the key and the binding agree.
+                            //
+                            // Minting is an `await` (the wasm renderer asks the
+                            // browser for a UUID), and the `disabled` attributes that
+                            // make this form inert land one render AFTER the submit —
+                            // so a keystroke already queued when it fired can still
+                            // change a field while the key is being made. The
+                            // re-read below is what closes that, not the attribute. Publishing that key
+                            // would bind it to values the user has since edited,
+                            // which is the same wrong-intent failure a changed host
+                            // causes, arriving through a narrower window. Re-reading
+                            // the binding after the await and minting again on a
+                            // mismatch is what closes it.
+                            //
+                            // Bounded rather than a `loop`: a form whose values keep
+                            // changing every time a key is minted is not a create
+                            // anybody is waiting on, and spinning would be worse
+                            // than saying so.
+                            let mut binding = binding;
+                            // Suspension deliberately invalidates the connection token.
+                            // Resume first, then bind both minting and the create to the
+                            // new connection, preserving the selected installation.
+                            let (hosts, expected_incarnation, created_host_identity) = if hosts
+                                .iter()
+                                .any(|host| host.id == binding.host && host.suspended)
+                            {
+                                // Both failures below happen before any create is sent, so
+                                // the launch is Refused, never Unknown: whatever the
+                                // resume did, no session can have started from it.
+                                resume_display_handoff.set(None);
+                                draft.pin_submitted_host(binding.host);
+                                if let Some((source, _)) = source_claim.as_ref() {
+                                    session_operations.errors.write().remove(source);
+                                }
+                                release_submitted_composer(mounted_opening, previous_presentation);
+                                resuming_host.set(Some(HostResumePreparation {
+                                    host: binding.host,
+                                    name: yolo_host_name.clone(),
+                                }));
+                                let result = api::resume_host_connected(&base, binding.host).await;
+                                let fresh = match result {
+                                    Ok(hosts) => super::shared::host_options(&hosts),
+                                    Err(reason) => {
+                                        resume_display_handoff.set(None);
+                                        launch_attempted.set(LaunchAttempt::Refused);
+                                        error.set(Some(format!("Resuming the host failed: {reason}")));
+                                        return;
+                                    }
+                                };
+                                let current = fresh.iter().find(|host| host.id == binding.host);
+                                if current.map(|host| &host.incarnation) != Some(&binding.incarnation) {
+                                    resume_display_handoff.set(None);
+                                    launch_attempted.set(LaunchAttempt::Refused);
+                                    error.set(Some("The host installation changed while resuming; review the target and launch again".into()));
+                                    return;
+                                }
+                                resume_display_handoff.set(completed_resume_display_handoff(
+                                    target_now.as_ref(),
+                                    live_resume_display.peek().as_ref(),
+                                    &fresh,
+                                ));
+                                let connection = connection_claim(&fresh, binding.host);
+                                let identity = current.map(|host| host.identity.clone());
+                                (fresh, connection, identity)
+                            } else {
+                                (hosts, expected_incarnation, created_host_identity)
+                            };
+                            let mut attempts = 0;
+                            let (key, bound) = loop {
+                                let held = intent_key.peek().clone();
+                                if let Some((key, held_binding)) = held
+                                    && held_binding == binding
+                                {
+                                    break (key, held_binding);
+                                }
+                                if attempts >= MINT_ATTEMPTS {
+                                    launch_attempted.set(LaunchAttempt::Refused);
+                                    error.set(Some(
+                                        "The form kept changing while an idempotency key was being \
+                                         generated, so this create was not sent; try again"
+                                            .to_string(),
+                                    ));
+                                    return;
+                                }
+                                attempts += 1;
+                                match mint_intent_key().await {
+                                    Ok(key) => intent_key.set(Some((key, binding.clone()))),
+                                    Err(reason) => {
+                                        // No key, no create: see this component's
+                                        // docs on why an unkeyed create is not an
+                                        // acceptable degradation. The message says
+                                        // what failed rather than blaming the
+                                        // request, since nothing the user typed
+                                        // caused it.
+                                        launch_attempted.set(LaunchAttempt::Refused);
+                                        error.set(Some(format!(
+                                            "Could not generate an idempotency key for this create, so \
+                                             it was not sent (a retry could otherwise create a second \
+                                             session): {reason}"
+                                        )));
+                                        return;
+                                    }
+                                }
+                                // What the form's TEXT says now. Identical on the
+                                // ordinary path; different exactly when a queued edit
+                                // landed during the mint.
+                                //
+                                // A catalog refresh is not a new user choice, so it
+                                // is frozen at the press. Structured controls are
+                                // different. Every
+                                // visible harness/model/effort/permission click is a
+                                // deliberate edit, and it may have been queued ahead
+                                // of the render that disables controls. Re-read that
+                                // complete declarative intent so the next key binds
+                                // exactly what the person now sees.
+                                let launch = if matches!(binding.agent, LaunchIntent::Structured(_)) {
+                                    let current = draft.snapshot();
+                                    if let Some(reason) = current.container_refusal(
+                                        container_destination_available(
+                                            &current,
+                                            prefill_for_submit.as_ref(),
+                                            &hosts,
+                                            effective_create_host(
+                                                &hosts,
+                                                *chosen_host.peek(),
+                                                open_host.as_ref(),
+                                            ),
+                                        ) || container_recent_destination_available(
+                                            &current,
+                                            offered_history.peek().as_ref(),
+                                            live_destination.peek().as_ref(),
+                                        ),
+                                    ) {
+                                        launch_attempted.set(LaunchAttempt::Refused);
+                                        error.set(Some(reason));
+                                        return;
+                                    }
+                                    if current.harness().is_none() {
+                                        launch_attempted.set(LaunchAttempt::Refused);
+                                        error.set(Some(
+                                            "The structured launch choice changed while its idempotency key was being generated; choose a harness and press Launch again".to_string(),
+                                        ));
+                                        return;
+                                    }
+                                    match wrapper_words(&structured_wrapper()) {
+                                        Ok(_) => {}
+                                        Err(reason) => {
+                                            launch_attempted.set(LaunchAttempt::Refused);
+                                            error.set(Some(reason));
+                                            return;
+                                        }
+                                    }
+                                    let _ = structured_permission_flags();
+                                    let selection = current
+                                        .structured_selection()
+                                        .expect("the live harness was checked above");
+                                    if current.tab() != LaunchTab::Agent
+                                        || !crate::launch_composer::selection_fits_catalog(
+                                            &selection,
+                                            catalog_for_recheck.as_deref(),
+                                        )
+                                    {
+                                        launch_attempted.set(LaunchAttempt::Refused);
+                                        error.set(Some(
+                                            "The structured launch choice changed while its idempotency key was being generated; review it and press Launch again".to_string(),
+                                        ));
+                                        return;
+                                    }
+                                    LaunchIntent::Structured(selection)
+                                } else {
+                                    binding.agent.clone()
+                                };
+                                let current = draft.snapshot();
+                                observe_title_fields();
+                                // A managed path/checkout stays the accepted snapshot.
+                                // The binding's host facts also stay frozen, including an
+                                // older retained attempt's incarnation after reconnect.
+                                let checkout =
+                                    binding
+                                        .github_checkout
+                                        .as_ref()
+                                        .map(|request| CheckoutInput::Accepted {
+                                            cwd: &binding.cwd,
+                                            request,
+                                        });
+                                binding = current
+                                    .request(RequestContext {
+                                        host: Some((binding.host, &binding.incarnation)),
+                                        launch,
+                                        replace_source: binding.replace_source.as_deref(),
+                                        checkout,
+                                    })
+                                    .expect("an accepted binding retains its host");
+                            };
+                            // Key, fields, host AND creation mode all travel from ONE
+                            // value, so there is no arrangement of edits or reads in
+                            // which the body describes a different intent than the
+                            // key claims — including the mode itself, which the
+                            // supervisor folds into its own idempotency fingerprint
+                            // precisely so a retried create cannot flip it.
+                            // Recheck after key minting, including retries that already
+                            // had a key. A new target must not legitimize an old path.
+                            if !remembered_destination_matches(
+                                remembered_destination.peek().as_ref(),
+                                live_destination.peek().as_ref(),
+                            ) {
+                                launch_attempted.set(LaunchAttempt::Refused);
+                                error.set(Some(REMEMBERED_DESTINATION_CHANGED.to_string()));
+                                intent_key.set(None);
+                                return;
+                            }
+                            if bound.github_checkout.is_some()
+                                && (fresh_draft_snapshot() != fresh_snapshot
+                                    || live_destination.peek().as_ref() != target_now.as_ref()
+                                    || (!replaying_fresh && *live_preview_authority.peek() != fresh_authority))
+                            {
+                                launch_attempted.set(LaunchAttempt::Refused);
+                                error.set(Some("The checkout draft changed while preparing the request; review the preview and press Launch again".into()));
+                                return;
+                            }
+                            // Only a confirmation given for THIS key counts; see
+                            // `yolo_confirmed_key`.
+                            let allow_yolo = yolo_confirmed_key.peek().as_deref() == Some(key.as_str());
+                            // "Don't ask again": mark the host safe before anything
+                            // is sent, and send nothing if that fails. The override
+                            // is withdrawn on failure too, so a later plain Launch
+                            // asks again rather than riding on this confirmation.
+                            if let Some(answered) =
+                                stop_asking_for.filter(|answered| answered.key().refused_key == key)
+                                && allow_yolo
+                                && let Err(reason) =
+                                    crate::yolo_confirm::stop_asking(&base, bound.host, &yolo_host_name).await
+                            {
+                                // The answer took the question down; it comes back,
+                                // as a new opening, with the reason, so the user can
+                                // pick another answer.
+                                yolo_confirmed_key.set(None);
+                                yolo_error.set(Some(reason));
+                                let LauncherYoloQuestion {
+                                    refused_key, ask, ..
+                                } = answered.key().clone();
+                                open_yolo_question(refused_key, ask);
+                                return;
+                            }
+                            let agent = match &bound.agent {
+                                LaunchIntent::Command(command) => CreateAgent::Command(command),
+                                LaunchIntent::Structured(selection) => CreateAgent::Structured {
+                                    selection,
+                                    conversation: bound.conversation.as_deref(),
+                                    prompt: bound.prompt.as_deref(),
+                                },
+                            };
+                            // The one branch point between the two verbs this form
+                            // shares: an ordinary create and a "replace with" send
+                            // the SAME body fields (cwd, agent, title, intent key,
+                            // host, expected incarnation — see `create_body`, the
+                            // single builder both calls share), differing only in
+                            // which endpoint receives them and in the source id a
+                            // replace-with also names. Everything above this point
+                            // — resolution, guards, key minting — has already run
+                            // identically for both; only the network call itself
+                            // forks.
+                            let pending = PendingLaunch::new(
+                                if bound.replace_source.is_some() {
+                                    LaunchAction::Replace
+                                } else {
+                                    LaunchAction::Launch
+                                },
+                                yolo_host_name.clone(),
+                                Some(bound.title.clone()),
+                            );
+                            draft.pin_submitted_host(bound.host);
+                            if let Some(source) = &bound.replace_source {
+                                session_operations.errors.write().remove(source);
+                            }
+                            release_submitted_composer(mounted_opening, previous_presentation);
+                            pending_launch.set(Some(pending.clone()));
+                            // Publish the create wait before ending wake preparation, so
+                            // no render can restore modality between these owned steps.
+                            resuming_host.set(None);
+                            if let Some(source) = &bound.replace_source {
+                                shared_replace_progress
+                                    .0
+                                    .write()
+                                    .insert(source.clone(), pending.clone());
+                            }
+                            let create_result = if let Some(checkout) = &bound.github_checkout {
+                                let attempt = github_attempt
+                                    .peek()
+                                    .as_ref()
+                                    .filter(|(original, attempt)| original == &bound && attempt.key == key)
+                                    .map(|(_, attempt)| attempt.clone())
+                                    .unwrap_or_else(|| {
+                                        GithubAttempt::new(
+                                            key.clone(),
+                                            api::fresh_create_body(agent, &key, bound.host, checkout),
+                                            checkout.preview.installation_identity.raw().to_owned(),
+                                        )
+                                    });
+                                let mut attempt = attempt;
+                                if allow_yolo {
+                                    api::confirm_yolo(&mut attempt.body);
+                                }
+                                // Publish before dispatch. A lost response must leave
+                                // the exact payload available to the next explicit retry.
+                                github_attempt.set(Some((bound.clone(), attempt.clone())));
+                                // The body is the retained original; the source
+                                // delete's precondition is the one this submit was
+                                // given: the warning the press or answer it acts for saw
+                                // (see `submit_fresh_create` and `GuardedSubmitStamp`).
+                                if bound.replace_source.is_none() {
+                                    on_create_dispatch.call(());
+                                }
+                                match api::submit_fresh_create(
+                                    &base,
+                                    bound.replace_source.as_deref(),
+                                    replace_guard,
+                                    &attempt.body,
+                                )
+                                .await
+                                {
+                                    Ok((session, notice)) => {
+                                        github_attempt.set(None);
+                                        delete_notice.publish(notice);
+                                        Ok(session)
+                                    }
+                                    Err(crate::github_checkout::FreshCreateError::YoloConfirmation(text)) => {
+                                        // Refused before anything was dispatched. The
+                                        // attempt and its key stay, so the confirmed
+                                        // retry is the same request with the override.
+                                        github_attempt.set(Some((bound.clone(), attempt)));
+                                        Err(api::CreateRefusal {
+                                            outcome: api::RefusalOutcome::NeedsYoloConfirmation,
+                                            text,
+                                            deadline_expired: false,
+                                        })
+                                    }
+                                    Err(failure) => {
+                                        let retired = attempt.may_retire_after(&failure);
+                                        if retired {
+                                            github_attempt.set(None);
+                                            intent_key.set(None);
+                                            preview_revision.with_mut(|revision| {
+                                                *revision =
+                                                    revision.checked_add(1).expect("preview revision exhausted")
+                                            });
+                                        } else {
+                                            github_attempt.set(Some((bound.clone(), attempt)));
+                                        }
+                                        let deadline_expired = matches!(
+                                            &failure,
+                                            crate::github_checkout::FreshCreateError::DeadlineExpired(_)
+                                        );
+                                        let mut refusal = api::CreateRefusal::from(format!(
+                                            "{}; {}",
+                                            failure.message(),
+                                            if retired {
+                                                "nothing was accepted; review the refreshed preview and press Launch again"
+                                            } else {
+                                                "the original request is retained; retry reconciles that request without allocating a different checkout"
+                                            }
+                                        ));
+                                        refusal.deadline_expired = deadline_expired;
+                                        Err(refusal)
+                                    }
+                                }
+                            } else {
+                                match &bound.replace_source {
+                                    Some(source) => api::replace_session_with(
+                                        &base,
+                                        source,
+                                        replace_guard,
+                                        &bound.cwd,
+                                        agent,
+                                        &bound.title,
+                                        &key,
+                                        Some(bound.host),
+                                        expected_incarnation,
+                                        allow_yolo,
+                                    )
+                                    .await
+                                    .map(|(session, notice)| {
+                                        delete_notice.publish(notice);
+                                        session
+                                    }),
+                                    None => {
+                                        on_create_dispatch.call(());
+                                        create_session(
+                                            &base,
+                                            &bound.cwd,
+                                            agent,
+                                            &bound.title,
+                                            &key,
+                                            Some(bound.host),
+                                            expected_incarnation,
+                                            allow_yolo,
+                                        )
+                                        .await
+                                    }
+                                }
+                            };
+                            // Shared source progress/errors must settle independently of
+                            // Return admission. Only the local pill, draft and launch
+                            // token wait behind another modal; the source is usable now.
+                            if let Some(source) = &bound.replace_source {
+                                shared_replace_progress.0.write().remove(source);
+                                if let Err(refusal) = &create_result
+                                    && !refusal.outcome.requires_yolo()
+                                {
+                                    let reason = if refusal.deadline_expired {
+                                        pending.unknown_outcome(false)
+                                    } else {
+                                        refusal.text.clone()
+                                    };
+                                    session_operations
+                                        .errors
+                                        .write()
+                                        .insert(source.clone(), format!("Replace: {reason}"));
+                                } else {
+                                    session_operations.errors.write().remove(source);
+                                }
+                            }
+                            drop(source_claim.take());
+                            on_settled.call(());
+                            let never_shown = new_was_never_shown(quick_origin, *quick_launch_hidden.peek());
+                            // Replace follows its still-selected source, not
+                            // New/Clone's input rule. Keep that handoff in this
+                            // reply turn: its requested refresh may already
+                            // prove the removed source absent after any await.
+                            let (press_current, naming_allowed) = if create_result.is_ok() && bound.replace_source.is_none() {
+                                completed_launch_input(
+                                    mounted_opening, opening_generation, press_baseline, launch_activity,
+                                    never_shown && preferences.0.peek().name_session_on_quick_launch != Some(false),
+                                ).await
+                            } else {
+                                (None, false)
+                            };
+                            let admitted = create_result.is_ok() || admit_composer_return(mounted_opening, None).await;
+                            pending_launch.set(None);
+                            if !admitted {
+                                on_retired.call(mounted_opening);
+                                return;
+                            }
+                            match create_result {
+                                Ok(session) => {
+                                    // The callback may open quick-launch naming, which
+                                    // checks this token synchronously. Release before
+                                    // that handoff, rather than at the future's end.
+                                    drop(held.take());
+                                    let submitted_launch = match &bound.agent {
+                                        LaunchIntent::Structured(selection) => Some(selection.clone()),
+                                        LaunchIntent::Command(_) => None,
+                                    };
+                                    COMPOSER_DIALOG.for_generation("data-opening-generation", mounted_opening).release();
+                                    on_created.call(CreatedSession {
+                                        session: enrich_created_session(
+                                            session,
+                                            bound.host,
+                                            created_host_identity,
+                                        ),
+                                        submitted_launch,
+                                        new_was_never_shown: never_shown && naming_allowed,
+                                        opening: mounted_opening,
+                                        press_baseline,
+                                        press_current,
+                                    });
+                                }
+                                Err(e) => {
+                                    // Every unsuccessful quick request ends hidden
+                                    // preparation, even if its old target no longer owns
+                                    // the refusal. Keep that refusal fenced below.
+                                    quick_launch_hidden.set(false);
+                                    // Marked whatever the form now shows: the key stays
+                                    // bound to this setup even when the refusal text is
+                                    // fenced off below, and a return to the setup reuses
+                                    // it, so its YOLO question must still know.
+                                    if !e.outcome.requires_yolo() && !e.outcome.retires_retry() {
+                                        uncertain_key.set(Some(key.clone()));
+                                    }
+                                    // Gated on the target this request was DISPATCHED
+                                    // for still being the one on screen: a refusal
+                                    // naming host A must not land under a form that
+                                    // has since been re-pointed at host B, where it
+                                    // would describe a machine the user is not looking
+                                    // at and may not even be true.
+                                    if create_target.peek().as_ref() == target_now.as_ref() {
+                                        let api::CreateRefusal {
+                                            outcome,
+                                            text: prose,
+                                            deadline_expired,
+                                        } = e;
+                                        if outcome.requires_yolo() {
+                                            // The key deliberately survives: this
+                                            // attempt was refused before dispatch, but
+                                            // an EARLIER attempt under the same key may
+                                            // have been accepted with its reply lost,
+                                            // and the confirmed retry must still
+                                            // reconcile with it rather than start a
+                                            // second session. The loud confirmation
+                                            // replaces the ordinary error line.
+                                            open_yolo_question(
+                                                key.clone(),
+                                                crate::yolo_confirm::YoloAsk {
+                                                    host: Some(bound.host),
+                                                    host_name: yolo_host_name.clone(),
+                                                    reason: crate::yolo_confirm::YoloReason::of_launch(
+                                                        match &bound.agent {
+                                                            LaunchIntent::Structured(selection) => {
+                                                                Some(selection)
+                                                            }
+                                                            LaunchIntent::Command(_) => None,
+                                                        },
+                                                    ),
+                                                },
+                                            );
+                                            drop(held.take());
+                                            return;
+                                        }
+                                        if outcome.retires_retry() {
+                                            // A settled refusal or changed target incarnation
+                                            // needs a new attempt. Unknown outcomes keep the
+                                            // old key so a retry cannot create a second session.
+                                            intent_key.set(None);
+                                        }
+                                        // The key otherwise deliberately SURVIVES a
+                                        // failure: a failure whose cause was an
+                                        // ambiguous transport error may have created
+                                        // a session the user cannot see, and
+                                        // resubmitting unchanged must reach that same
+                                        // session rather than launch a second agent.
+                                        // A user who instead fixes the form gets a new
+                                        // key, because the binding no longer matches.
+                                        if let (Some(target), Some(problem)) =
+                                            (target_now.clone(), FolderProblem::recognize(&prose))
+                                        {
+                                            folder_refusal.set(Some(FolderRefusal {
+                                                target,
+                                                connection: expected_incarnation,
+                                                cwd: bound.cwd.clone(),
+                                                host: yolo_host_name.clone(),
+                                                problem,
+                                            }));
+                                        }
+                                        // Dispatch cleared the attempt mark so the busy
+                                        // prerequisite would not show while the request
+                                        // ran; a refusal is a finished attempt again, and
+                                        // only a genuine refusal is labelled "Not launched.".
+                                        launch_attempted.set(if deadline_expired {
+                                            LaunchAttempt::Unknown
+                                        } else {
+                                            LaunchAttempt::Refused
+                                        });
+                                        error.set(Some(if deadline_expired {
+                                            pending.unknown_outcome(true)
+                                        } else {
+                                            prose
+                                        }));
+                                    } else {
+                                        // The old request still ended unsuccessfully.
+                                        // Say so without leaking its host-specific prose
+                                        // or retiring the new target's retry identity.
+                                        launch_attempted.set(if e.deadline_expired {
+                                            LaunchAttempt::Unknown
+                                        } else {
+                                            LaunchAttempt::Refused
+                                        });
+                                        error.set(Some(if e.deadline_expired {
+                                            "A launch for an earlier setup timed out; its outcome is unknown"
+                                                .into()
+                                        } else {
+                                            "A launch for an earlier setup was refused".into()
+                                        }));
+                                    }
+                                    drop(held.take());
+                                }
+                            }
+                        }.await;
+                    // A failed wake or preparation never dispatched a create,
+                    // but its source claim is no longer pending. Keep only the
+                    // local token and hidden presentation through the owed Return.
+                    // A mint/validation refusal before any wake/create is local
+                    // to the draft, so it cannot replace an earlier row outcome.
+                    let preparation_reason = resuming_host
+                        .peek()
+                        .is_some()
+                        .then(|| error.peek().clone())
+                        .flatten();
+                    settle_prepared_source(
+                        &mut source_claim,
+                        preparation_reason.as_deref(),
+                        session_operations,
+                        shared_replace_progress,
+                        on_settled,
+                    );
+                    if resuming_host.peek().is_some() {
+                        resume_display_handoff.set(None);
+                        if let Some(op_guard) = held.take() {
+                            return_prepared_composer(
+                                mounted_opening,
+                                resuming_host,
+                                on_retired,
+                                op_guard,
+                            )
+                            .await;
+                        }
+                    }
+                });
+            })();
+            if let Some(mut guards) = held {
+                if continued {
+                    let reason = error.peek().clone();
+                    settle_prepared_source(
+                        &mut guards.source,
+                        reason.as_deref(),
+                        session_operations,
+                        shared_replace_progress,
+                        on_settled,
+                    );
+                    spawn(return_prepared_composer(
+                        mounted_opening,
+                        resuming_host,
+                        on_retired,
+                        guards.launch,
+                    ));
+                } else {
+                    drop(guards);
+                }
+            }
         }
+    });
+    // Capture the ordered page count in the user's original Rust handler;
+    // internal preview reentry instead passes the count its stamp already owns.
+    let submit_answer = Callback::new(move |(guard, stop_first, opening)| {
+        submit_composer.call((guard, stop_first, opening, launch_activity.snapshot(), None));
     });
     // Enter on a choice (a tab, harness, effort or permission segment, the
     // closed host picker, a command-mode control) applies that choice and
@@ -6777,7 +7267,7 @@ pub(super) fn CreateSessionForm(
     // `submit_composer` reads the live draft and host, and refuses a checkout
     // preview the choice made stale (`preview_revision`, preview agent); and
     // the form is `novalidate`, so the browser validated nothing on the way.
-    let launch_from_choice = EventHandler::new(move |_| submit_composer.call(submit_consent));
+    let launch_from_choice = EventHandler::new(move |_| submit_answer.call(submit_consent));
     let host_select = rsx! {
         super::host_picker::HostPicker {
             hosts: hosts.clone(), selected, busy,
@@ -6795,11 +7285,50 @@ pub(super) fn CreateSessionForm(
             on_pick: choose_host, on_enter: launch_from_choice,
         }
     };
-    // Waiting never owns an operation claim. An unchanged accepted answer is
-    // spent before reaching ordinary submit, so a refusal or ambiguous reply
-    // cannot turn preview updates into automatic retries.
+    // A visible guarded answer can be discarded directly. A wake continuation
+    // owns a hidden draft and token, so cancellation/failure owes Return before
+    // releasing either. Take the pair once rather than clearing a guard-bearing
+    // slot and allowing a new launch to replace its still-unreported refusal.
+    let discard_guarded_preparation = use_callback(move |reason: Option<String>| {
+        let pending = guarded_submit_pending.write().take();
+        let Some((pending, guard)) = pending else {
+            return;
+        };
+        if let Some(mut guards) = guard {
+            launch_attempted.set(LaunchAttempt::Refused);
+            let reason = reason.unwrap_or_else(|| {
+                "The launch setup changed while the host was waking; review it and launch again"
+                    .into()
+            });
+            settle_prepared_source(
+                &mut guards.source,
+                Some(&reason),
+                session_operations,
+                shared_replace_progress,
+                on_settled,
+            );
+            error.set(Some(reason));
+            resume_display_handoff.set(None);
+            spawn(return_prepared_composer(
+                pending.opening,
+                resuming_host,
+                on_retired,
+                guards.launch,
+            ));
+        } else if let Some(reason) = reason {
+            launch_attempted.set(LaunchAttempt::Refused);
+            error.set(Some(reason));
+        }
+    });
+    // An unchanged accepted answer is spent before ordinary submit. Only a
+    // resumed opening retains a claim here; its next step transfers that same
+    // owner, while a visible guarded answer claims normally at dispatch.
     use_effect(move || {
-        let Some(pending) = guarded_submit_pending() else {
+        let pending = guarded_submit_pending
+            .read()
+            .as_ref()
+            .map(|(pending, guard)| (pending.clone(), guard.is_some()));
+        let Some((pending, retained_guard)) = pending else {
             return;
         };
         let answered_guard = live_preview_authority().and_then(|mut authority| {
@@ -6813,7 +7342,7 @@ pub(super) fn CreateSessionForm(
             )
         });
         let Some(answered_guard) = answered_guard else {
-            guarded_submit_pending.set(None);
+            discard_guarded_preparation.call(None);
             return;
         };
         if live_preview_authority()
@@ -6827,12 +7356,13 @@ pub(super) fn CreateSessionForm(
         if pending.resuming_from.is_some() && live_resume_display().is_some() {
             return;
         }
-        if ops.busy() || ops.busy_now() {
+        let busy = ops.busy();
+        if !retained_guard && (busy || ops.busy_now()) {
             return;
         }
         let _ = destination_draft();
         let DestinationDraft::Github { .. } = draft.snapshot().destination() else {
-            guarded_submit_pending.set(None);
+            discard_guarded_preparation.call(None);
             return;
         };
         match preview_state() {
@@ -6843,18 +7373,22 @@ pub(super) fn CreateSessionForm(
                     .as_ref()
                     .is_some_and(|live| authority.accepts(live, &preview)) =>
             {
-                guarded_submit_pending.set(None);
-                submit_composer.call((answered_guard, false, pending.opening));
+                let continuing = guarded_submit_pending.write().take();
+                if let Some((pending, guard)) = continuing {
+                    submit_composer.call((
+                        answered_guard,
+                        false,
+                        pending.opening,
+                        pending.press_baseline,
+                        guard,
+                    ));
+                }
             }
             PreviewState::Failed { message, .. } => {
-                guarded_submit_pending.set(None);
-                launch_attempted.set(LaunchAttempt::Refused);
-                error.set(Some(message));
+                discard_guarded_preparation.call(Some(message));
             }
             PreviewState::Ready { .. } => {
-                guarded_submit_pending.set(None);
-                launch_attempted.set(LaunchAttempt::Refused);
-                error.set(Some(
+                discard_guarded_preparation.call(Some(
                     "Wait for a current checkout preview before launching".into(),
                 ));
             }
@@ -6863,7 +7397,11 @@ pub(super) fn CreateSessionForm(
     // A scope-owned callback allocated during every render would accumulate
     // until this launcher closes. Keep one handle while still reading hidden
     // state at the actual mount boundary, after trap setup is submitted.
-    let composer_hidden_now = use_callback(move |_| quick_launch_hidden());
+    let composer_hidden_now = use_callback(move |_| composer_hidden());
+    // Body recovery and submitted-return restoration must choose the same
+    // target, whichever deferred frame runs first. Initial Restart stays on
+    // Cancel; an attempted refusal recovers to its primary action instead.
+    let attempted_restart = restart_mode && launch_attempted().was_attempted();
     let loading_setup =
         pending_initial_action().is_some() || !pending_initial_templates.read().is_empty();
     let submit_label = if restart_mode {
@@ -6905,7 +7443,7 @@ pub(super) fn CreateSessionForm(
         || (is_replace_with && replace_warning.is_some())
         || (yolo_refusal
             .current()
-            .filter(|_| !quick_launch_hidden())
+            .filter(|_| !composer_hidden())
             .is_some_and(|question| {
                 intent_key
                     .read()
@@ -6914,7 +7452,7 @@ pub(super) fn CreateSessionForm(
             }));
     rsx! {
         div {
-            class: if quick_launch_hidden() { "launch-composer-backdrop quick-launch-pending" } else { "launch-composer-backdrop" },
+            class: if submitted_wait() { "launch-composer-backdrop launch-request-pending" } else if quick_launch_hidden() { "launch-composer-backdrop quick-launch-pending" } else { "launch-composer-backdrop" },
             role: "presentation",
             onclick: move |_| {
                 // This is a handler-time decision. The rendered `busy` value
@@ -6923,11 +7461,11 @@ pub(super) fn CreateSessionForm(
                 // reconcile the reply or run its success callback.
                 // Restart's editor keeps its draft on backdrop clicks. The
                 // same modal trap recovers sequential focus from the backdrop.
-                if !restart_mode && !quick_launch_hidden() && !ops.busy_now() && !template_saving() {
+                if !restart_mode && !composer_hidden() && !ops.busy_now() && !template_saving() {
                     on_cancel.call(());
                 }
             },
-            if quick_launch_hidden() {
+            if composer_hidden() {
                 if let Some(preparation) = resuming_host() {
                     div { class: "launch-progress-pill", "data-modal-exempt": "",
                         HostResumeProgress { preparation }
@@ -6948,10 +7486,7 @@ pub(super) fn CreateSessionForm(
                     // preparation isolates without taking a field's focus.
                     hidden_now: composer_hidden_now,
                 },
-                // querySelector uses document order, not selector order: omit
-                // the outer Cancel while the inline panel owns Escape. Its
-                // disabled Cancel also keeps a pending save uncancellable.
-                escape_target: Some(".save-template-cancel, .launch-composer-cancel:not([data-template-panel-open]), .launch-composer-loading-cancel".into()),
+                escape_target: Some(COMPOSER_ESCAPE_TARGET.into()),
                 // Loading has no Launch button: the shared container Enter
                 // action must resolve the live control rather than submit early.
                 main_action: Some(".create-session-submit".into()),
@@ -6961,8 +7496,8 @@ pub(super) fn CreateSessionForm(
             "data-launcher-mode": if restart_mode { "restart" } else if is_replace_with { "replace" } else { "create" },
             "data-permission-escalation": permission_escalation.read().as_ref().map(|notice| if notice.generation % 2 == 0 { "even" } else { "odd" }),
             tabindex: "-1",
-            hidden: quick_launch_hidden(),
-            "data-opening-generation": "{opening_generation()}",
+            hidden: composer_hidden(),
+            "data-opening-generation": "{mounted_opening}",
             "data-create-target-fingerprint": create_target.read().as_ref().map(|target| target.fingerprint.clone()).unwrap_or_default(),
             // These are diagnostic state, not an authority channel. Keeping
             // the live connection and activation count on the mounted form
@@ -6983,7 +7518,10 @@ pub(super) fn CreateSessionForm(
             // Browser validity bubbles cannot explain a refusal beside Launch.
             // Submit and the helm keep their ordinary validation authority.
             novalidate: true,
-            aria_modal: "true",
+            // Terminal focus, shortcuts and host-result admission inspect this
+            // DOM marker independently of inert. A submitted wait owns no modal;
+            // hidden quick-launch preparation still does.
+            aria_modal: (!submitted_wait()).then_some("true"),
             aria_label: if restart_mode { "Restart a session" } else { "Launch a session" },
             onclick: move |evt: MouseEvent| {
                 // A click that leaves the search surface must make its
@@ -7018,7 +7556,9 @@ pub(super) fn CreateSessionForm(
                 // engine blurring the folder when the request makes it busy.
                 folder_open.set(false);
                 folder_active.set(None);
-                submit_composer.call(submit_consent);
+                let baseline = automatic_submit_baseline.write().take()
+                    .unwrap_or_else(|| launch_activity.snapshot());
+                submit_composer.call((submit_consent.0, submit_consent.1, submit_consent.2, baseline, None));
             },
             DialogHeader {
                 title: rsx! { if restart_mode { "Restart session" } else if is_replace_with { "Replace session" } else { "New session" } },
@@ -7043,8 +7583,11 @@ pub(super) fn CreateSessionForm(
                     // A temporarily disabled template name must not let this
                     // body invent a search-focus choice ahead of panel recovery.
                     if template_panel().is_some() { ".save-template-name" }
+                    else if attempted_restart { ".create-session-submit" }
                     else if restart_mode { ".launch-composer-cancel" } else { ".launch-composer-search input" },
-                    if template_panel().is_some() { None } else { Some(".create-session-submit") },
+                    if template_panel().is_some() { None }
+                    else if attempted_restart { Some(".launch-composer-cancel") }
+                    else { Some(".create-session-submit") },
                     true, RecoveryDelay::OneFrame,
                 ),
             if partial_template_hint() && pending_initial_templates.read().is_empty() {
@@ -7094,7 +7637,7 @@ pub(super) fn CreateSessionForm(
                                 {
                                     restoring_default.set(Some(captured.clone()));
                                 }
-                                focus_composer_surface(false);
+                                focus_composer_surface();
                             }
                         },
                         "Undo"
@@ -7105,7 +7648,7 @@ pub(super) fn CreateSessionForm(
                         onclick: move |_| {
                             if permission_escalation.peek().as_ref().is_some_and(|current| current.generation == notice.generation) {
                                 permission_escalation.set(None);
-                                focus_composer_surface(false);
+                                focus_composer_surface();
                             }
                         },
                         "Dismiss"
@@ -7525,7 +8068,7 @@ pub(super) fn CreateSessionForm(
                                             // carries this render's precondition;
                                             // see `launch_from_choice` for why it
                                             // submits directly.
-                                            submit_composer.call(submit_consent);
+                                            submit_answer.call(submit_consent);
                                         }
                                     },
                                     // The row is a grid so that harness, folder,
@@ -8049,9 +8592,12 @@ pub(super) fn CreateSessionForm(
                                         }
                                         // After the render that moves the
                                         // tab stop, so focus lands on the tab
-                                        // now selected.
+                                        // now selected. Only while focus is
+                                        // still on a tab: a user who moved on
+                                        // before that frame (Home, then Tab or
+                                        // a click on Launch) keeps their control.
                                         document::eval(
-                                            "requestAnimationFrame(() => document.querySelector('.create-session-form .launch-kind-tab.selected')?.focus())",
+                                            "requestAnimationFrame(() => { if (!document.activeElement?.matches('.create-session-form .launch-kind-tab')) return; document.querySelector('.create-session-form .launch-kind-tab.selected')?.focus(); })",
                                         );
                                     },
                                     onclick: move |_| choose_launch_tab.call(tab),
@@ -8447,7 +8993,7 @@ pub(super) fn CreateSessionForm(
                         // focus must also reveal it, without changing shared
                         // quiet-focus behavior in other modal handoffs.
                         document::eval("document.querySelector('.create-session-form[role=\"dialog\"] .launch-composer-body')?.scrollTo({top: 0, behavior: 'instant'});");
-                        focus_composer_surface(false);
+                        focus_composer_surface();
                     },
                     on_saved: on_template_saved,
                 }
@@ -8490,7 +9036,7 @@ pub(super) fn CreateSessionForm(
             }
 
                         }
-                        if !quick_launch_hidden() {
+                        if !composer_hidden() {
                             if let Some(pending) = pending_launch() {
                                 LaunchProgress { pending }
                             }
@@ -8518,7 +9064,7 @@ pub(super) fn CreateSessionForm(
                                     onclick: move |_| {
                                         sandbox_consent.set(Some(snapshot.clone()));
                                         sandbox_question.set(None);
-                                        submit_composer.call(submit_consent);
+                                        submit_answer.call(submit_consent);
                                     }, "Create and launch" }
                             }
                         }
@@ -8666,7 +9212,7 @@ pub(super) fn CreateSessionForm(
             // and with it a question that no longer describes the draft.
             // Templates retain the whole pair for submit's comparison, so
             // their completed acceptance separately cancels a changed question.
-            if let Some(question) = yolo_refusal.current().filter(|_| !quick_launch_hidden())
+            if let Some(question) = yolo_refusal.current().filter(|_| !composer_hidden())
                 && let Some((_, refused_binding)) = intent_key.read().clone().filter(|(key, _)| *key == question.key().refused_key)
             {
                 crate::yolo_confirm::YoloConfirmation {
@@ -8705,6 +9251,7 @@ pub(super) fn CreateSessionForm(
                                 rendered_opening, *opening_generation.peek(),
                                 &refused_binding, current.as_ref(),
                             ) { return; }
+                            let press_baseline = launch_activity.snapshot();
                             yolo_error.set(None);
                             yolo_confirmed_key.set(None);
                             yolo_stop_asking.set(None);
@@ -8717,14 +9264,15 @@ pub(super) fn CreateSessionForm(
                                 // preview or the refused YOLO request body.
                                 if let Some(mut authority) = live_preview_authority.peek().clone() {
                                     authority.agent = preview_agent_now();
-                                    guarded_submit_pending.set(Some(GuardedSubmitStamp::new(
+                                    guarded_submit_pending.set(Some((GuardedSubmitStamp::new(
                                         rendered_opening, authority,
                                         draft.snapshot().prompt(), draft.snapshot().conversation(),
                                         replace_guard,
-                                    )));
+                                        press_baseline,
+                                    ), None)));
                                 }
                             } else {
-                                submit_composer.call(submit_consent);
+                                submit_composer.call((submit_consent.0, submit_consent.1, submit_consent.2, press_baseline, None));
                             }
                         }))
                     },
@@ -8762,7 +9310,7 @@ pub(super) fn CreateSessionForm(
                                 &mut yolo_confirmed_key.write(),
                                 &mut yolo_stop_asking.write(),
                             ) {
-                                submit_composer.call(submit_consent);
+                                submit_answer.call(submit_consent);
                             }
                         }
                     },
@@ -8779,7 +9327,7 @@ pub(super) fn CreateSessionForm(
                                 &mut yolo_confirmed_key.write(),
                                 &mut yolo_stop_asking.write(),
                             ) {
-                                submit_composer.call(submit_consent);
+                                submit_answer.call(submit_consent);
                             }
                         }
                     },
@@ -8788,6 +9336,9 @@ pub(super) fn CreateSessionForm(
                         // question leaves a later one (and its error) alone.
                         if yolo_refusal.take(&question).is_some() {
                             if restart_mode { document::eval("document.querySelector('.create-session-form .launch-composer-cancel')?.focus({preventScroll:true})"); }
+                            // Explicit Cancel owes a focus handoff. Template
+                            // edits that retire a question keep their own caret.
+                            else { focus_composer_surface(); }
                             yolo_error.set(None);
                         }
                     },
@@ -11542,6 +12093,7 @@ mod tests {
             prompt.clone(),
             "conversation".into(),
             crate::DeleteGuard::NothingAlive,
+            Some(8),
         );
         // The live source may now imply `Unconditional`; the stamp's answer
         // to "what does the submit send" is still what the user saw.
@@ -11596,8 +12148,14 @@ mod tests {
             None,
             String::new(),
             crate::DeleteGuard::NothingAlive,
+            Some(8),
         )
         .after_resume(4, None);
+        assert_eq!(
+            stamp.press_baseline,
+            Some(8),
+            "wake is preparation, not a new answer"
+        );
         assert!(stamp.waiting_for_connection(&authority));
         assert!(
             stamp
@@ -11662,6 +12220,7 @@ mod tests {
             None,
             String::new(),
             crate::DeleteGuard::NothingAlive,
+            Some(8),
         )
         .after_resume(4, Some(naming.clone()));
         edited.incarnation = 4;

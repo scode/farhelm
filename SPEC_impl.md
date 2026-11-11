@@ -206,6 +206,22 @@ reqwest installs its abort timer. The caller owns that callback through body dec
 aborting, retrying or settling work. Native requests use reqwest's typed timeout. Neither error prose nor elapsed-time
 inference supplies deadline evidence; request deadlines and the helm's work stay unchanged.
 
+The submitted launcher stays mounted so its request, draft and retry identity outlive session navigation. Pending
+mutation and submitted host-resume state hide its presentation independently of quick-launch provenance. The hidden
+pending root releases its existing dialog isolation, drops `aria-modal` and leaves no backdrop hit area; the progress
+pill takes no input. Preparation and unanswered confirmations keep their isolation. Revealing an outcome or question
+restores isolation and focus through the same dialog handle and opening generation. A return that needs a modal waits
+inside the same request task until other modal roots and admitted host results leave. It retains its pending state and
+operation guard through that handoff, then reserves the captured root before revealing it. Opening Rename or the
+switcher during this wait preserves the composer's opening identity. A retired opening still settles the request's
+pending state and shared Restart or Replace outcome without revealing its old draft. The mounted form's opening id is
+separate from that revocation counter: denied admission removes only the matching form owner, without cancelling a newer
+draft or restoring focus. This is a presentation transition, not a second owner or another launch queue; the existing
+operation token continues to exclude competing composer openings and host mutations. An admitted launch pins its
+resolved host into the existing host choice before releasing the page. This keeps navigation from changing an implicit
+target or retiring its retry binding, including after a returned refusal. It is owner bookkeeping rather than a
+placement edit; genuine registry changes still reconcile that host's installation.
+
 Motivation: the project's standing constraints — recorded here, because SPEC.md deliberately stays
 implementation-neutral and does not contain them: as much Rust as possible, one implementation for web and native, and a
 GUI that agents can test visually without a human in the loop. Those force a DOM-based Rust framework. Canvas-rendering
@@ -375,14 +391,21 @@ request shape for that corner.
 One pure chooser serves startup and removal: first listed history entry, else that newest-created fallback. When stored
 history is empty, the retained last selection is one effective visit under the same eligibility and exclusion rules; it
 is never appended behind nonempty history. This preserves the known choice after the empty-history migration, and the
-ordinary automatic save establishes stored history. The list retains its most recent actually-open reference as a
-transient exclusion when the pane clears, because a successful local delete can precede the listing refresh. The
-exclusion applies to both history and fallback. One in-flight guard holds the pre-pick preference read; completion
-checks the current selection, operation gates and latest admitted rows, so a manual selection during the read wins. No
-eligible rows means no read and no pick. Automatic selections use the same selection writer as manual ones, so reload
-remembers the resulting visit. This listed-only rule replaces the old direct restoration of a remembered session beyond
-a truncated listing; absence still cannot retire an already-open session without the separate complete/unfiltered
-disappearance gate.
+ordinary automatic save establishes stored history. The list's `SelectionIntent` distinguishes an unspent startup
+choice, an actually opened reference whose removal needs a successor, and an intentionally retained empty pane. Every
+actual open records its reference synchronously. That reference remains excluded when the pane clears, because a
+successful local Delete can precede the listing refresh; the exclusion applies to both history and fallback. Immediately
+before a New, Clone or quick launch sends its first create, it takes over only an empty startup opportunity. A feed may
+publish its row before its HTTP reply, so a completion-time handoff would let automatic selection bypass the launch's
+input check. Refusal and unknown outcomes do not rearm obsolete startup intent; a later row created by another client
+does not revive it, while manual opening remains available. Actual selected-session removal keeps its normal successor
+choice, including while another launch is pending, after the admitted Delete set drains. No additional session-exclusion
+set or page-wide busy gate is involved. One in-flight guard holds the pre-pick preference read; completion checks the
+same selector reason, current selection, operation gates and latest admitted rows, so a manual selection or retired
+startup intent during the read wins. No eligible rows means no read and no pick. Automatic selections use the same
+selection writer as manual ones, so reload remembers the resulting visit. This listed-only rule replaces the old direct
+restoration of a remembered session beyond a truncated listing; absence still cannot retire an already-open session
+without the separate complete/unfiltered disappearance gate.
 
 The sidebar uses an identity line and, outside compact mode, a host/directory line plus a detail line when there is
 ended status or a stale qualifier to explain. Its identity line is status, locality, title, a one- or two-glyph agent
@@ -1121,21 +1144,43 @@ launch-versus-host-mutation exclusion, independent of session claims. Header com
 before publishing their prefill, and the list rechecks before consuming it. Releasing a claim between the click and that
 effect cannot revive a refused opening. Only the admitted list opening retires an earlier Replace retry identity.
 
-Session-action completions have three responsibilities: settle, return and leave alone. A pending action no longer owns
-the page, so its reply cannot assume the user is still where it started. Settlement clears progress and the session
+Session-action and launch completions have three responsibilities: settle, return and leave alone. These rules cover
+New, Clone, quick launch, Restart with, Replace with, and Stop, Restart, Replace and Delete from rows, headers,
+interrupted cards and the bulk bar, including reactive effects their settlement triggers. A pending action no longer
+owns the page, so its reply cannot assume the user is still where it started. Settlement clears progress and the session
 claim, records failures, unknown outcomes or partial results, reattaches the terminal when required and requests the
 listing refresh before waiting for any returning dialog. A dialog still owed to the user returns through its ordinary
 modal admission and opening focus. Everything else stays as the user left it: focus, panels, menus, dialogs and selected
-session, apart from Replace's source-selected rule and automatic selection after Delete.
+session, apart from the launch navigation rules, Replace's source-selected rule and automatic selection after Delete.
+While a dialog is owed back, its local pill, draft and composer operation guard remain until admission. A successful
+wake continues hidden through preview, key preparation and create; it is not a Return. Shared Restart/Replace source
+state and claims settle before that wait, independently of the local composer guard. Retirement clears seeds only for
+the submitted mounted opening, so a newer draft retains its choices.
 
 Asynchronous focus in those paths uses `FocusTarget::async_script`: one evaluated script admits only focus on the
 document body or document element, or inside the surface being left, and then performs the target's ordinary focus
-action, preserving quiet tooltip behavior. It does not infer navigation intent from document focus. Explicit
-user-handler handoffs, including their deferred frames, and a returning modal's own opening focus keep their existing
-policies. Effects that close, open, focus, scroll or select something when settlement changes state must observe an
-actual visible layout or ownership change, rather than treating completion itself as permission. Other asynchronous GUI
-paths predate these rules; the TODO entry “Stop asynchronous completions from moving focus or closing things the user
-has moved on from, across the whole UI” covers them.
+action, preserving quiet tooltip behavior. It does not infer navigation intent from document focus. One exception: a
+plain Replace's inline YOLO question focuses Cancel outright while the page's press count still equals the count read
+when the user's Replace answer started the request, because WebKit leaves focus in the session's terminal after a header
+button click, where the guard alone would deny the safe answer its focus. Any later press, or an unknown count, keeps
+the guard. Explicit user-handler handoffs, including their deferred frames, and a returning modal's own opening focus
+keep their existing policies. Effects that close, open, focus, scroll or select something when settlement changes state
+must observe an actual visible layout or ownership change, rather than treating completion itself as permission. Other
+asynchronous GUI paths predate these rules; the TODO entry “Stop asynchronous completions from moving focus or closing
+things the user has moved on from, across the whole UI” covers them.
+
+`launch_activity::LaunchActivity` observes one window-owned key/pointer press count installed before page shortcuts. Its
+capture listener publishes a scalar through an ordered hidden-input relay before the original event reaches Rust;
+user-answer handlers synchronously peek that signal. A quick dispatch captures its baseline before fresh reads or host
+wake, and internal preview/resume submission carries it unchanged alongside its existing consent stamp. Completions read
+the window counter again, including after waiting for naming admission. `launch_is_current` requires the same mounted
+opening and known equal counts; a missing bridge result cannot establish that the user stayed. Replace keeps its
+source-selected decision and Restart with never navigates; a plain Replace uses the count only for its YOLO question's
+focus, as above. A submitted launcher that hides blurs its focused control once that control stops rendering, because
+WebKit can otherwise keep focus on the hidden Launch button. An allowed launch uses ordinary selection and terminal
+reveal without focusing New. Otherwise the list owns the brief Started report outside the form, with expiry tied to that
+report's identity; it holds no operation guard or draft seeds. Hidden launcher retirement does not move menu anchors and
+is not a menu-closing effect dependency.
 
 The combined `ConfirmSlot` freezes original identities and consequence-bearing displayed facts, including the status
 annotation and displayed rename overlay. Reconciliation does not reset consent for unrelated activity or notification

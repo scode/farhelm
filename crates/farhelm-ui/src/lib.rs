@@ -165,6 +165,7 @@ mod github_checkout;
 mod hosts;
 mod icons;
 mod keyboard_shortcuts;
+mod launch_activity;
 mod launch_composer;
 mod launch_controls;
 mod launch_progress;
@@ -1888,6 +1889,12 @@ fn AppBody() -> Element {
     // This must precede every page shortcut: capture listeners on the same
     // window run in registration order, before Dioxus's root event listener.
     use_hook(install_composition_guard);
+    // Capture the physical press before a shortcut can convert it into a
+    // launcher relay click. Publish before the original Rust event too, so
+    // an accepted answer never borrows input made after that answer.
+    let launch_activity =
+        use_context_provider(|| launch_activity::LaunchActivity(Signal::new(None)));
+    use_hook(launch_activity::install);
     // First-open arrows can arrive before the desktop's opening focus eval.
     // Install their observer with the application, before rendering any menu.
     use_hook(menu_panel::install_menu_focus);
@@ -1990,6 +1997,12 @@ fn AppBody() -> Element {
     let token_required = *auth::TOKEN_REQUIRED.read();
 
     rsx! {
+        // The page listener survives authentication remounts. Resynchronize
+        // this new Rust owner without resetting the retained page counter.
+        input { r#type: "hidden", "data-launch-activity": "",
+            onmounted: move |_| { document::eval("window.__farhelmLaunchActivitySync?.();"); },
+            oninput: move |event| { launch_activity.receive(&event.value()); },
+        }
         // Capture-phase focus publishes this input before the original focus
         // event reaches Rust. Mount it before any menu and sync early page focus.
         input { r#type: "hidden", "data-menu-focus-epoch": "",

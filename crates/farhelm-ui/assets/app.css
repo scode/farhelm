@@ -6570,13 +6570,19 @@ a:any-link,
   overflow: auto;
   background: var(--scrim-dialog);
 }
-/* Keep the ordinary modal boundary while quick launch prepares/submits. The
+/* Keep the ordinary modal boundary while quick launch prepares. The
    transparent backdrop blocks stale page clicks; no launcher fields are shown. */
 .launch-composer-backdrop.quick-launch-pending { background: transparent; }
+/* A submitted request keeps its mounted owner and draft, but no page input
+   barrier. Only the display-only progress pill remains visible. */
+.launch-composer-backdrop.launch-request-pending {
+  background: transparent;
+  pointer-events: none;
+}
 .launch-composer-backdrop .create-session-form[hidden] { display: none; }
 
-/* The hidden launch already owns this backdrop. Its wait indicator adds no
-   input layer and cannot receive clicks intended for the pending launcher. */
+/* Progress and brief started reports are display-only, including when the
+   submitted launcher has already unmounted and released its operation token. */
 .launch-progress-pill {
   position: fixed;
   bottom: 20px;
@@ -6593,6 +6599,7 @@ a:any-link,
   background: var(--bg-2);
   box-shadow: var(--shadow-dialog);
 }
+.launch-started-report { z-index: 40; }
 .launch-progress {
   min-width: 0;
   max-width: 100%;

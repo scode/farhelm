@@ -8076,7 +8076,7 @@ test("composer reserves no space for recents when launch history is empty", asyn
  * A create claim is a lifetime boundary, not merely a disabled paint state.
  *
  * Holding the real POST after dispatch establishes that the first structured
- * create owns the page operation. Directly dispatching events against the
+ * create owns the launcher and its retry binding. Directly dispatching events against the
  * now-disabled controls is deliberate adversarial input: browser hit testing
  * normally blocks it, but a click already queued before the next render can
  * still reach the Dioxus handler. The test therefore proves the handler-time
@@ -8089,23 +8089,16 @@ test("composer busy guard preserves one structured create through queued edits a
 }) => {
   const title = `composer-busy-${Date.now()}`;
   const bodies: any[] = [];
-  let releasePost: (() => void) | undefined;
-  const heldPost = new Promise<void>((resolve) => {
-    releasePost = resolve;
-  });
-  let requestDispatched: (() => void) | undefined;
-  const dispatched = new Promise<void>((resolve) => {
-    requestDispatched = resolve;
-  });
-  await page.route("**/api/sessions", async (route) => {
+  const heldPost = routeGate();
+  const stopRoute = await drainedRoute(page, "**/api/sessions", async (route) => {
     if (route.request().method() !== "POST") {
       await route.continue();
       return;
     }
     bodies.push(JSON.parse(route.request().postData() ?? "{}"));
-    requestDispatched?.();
-    await heldPost;
-    await route.continue();
+    await heldPost.wait();
+    const response = await route.fetch();
+    await route.fulfill({ response });
   });
 
   try {
@@ -8124,27 +8117,32 @@ test("composer busy guard preserves one structured create through queued edits a
     await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }).click();
 
     await form.locator('button[type="submit"]').click();
-    await dispatched;
-    const yolo = form.getByRole("button", { name: "YOLO", exact: true });
+    await expect.poll(() => bodies.length, { message: "the first structured create remains held after dispatch" }).toBe(1);
+    const yolo = form.getByRole("button", { name: "YOLO", exact: true, includeHidden: true });
     await expect(yolo).toBeDisabled();
+    await expect(form).toHaveCount(1);
+    await expect(form).toBeHidden();
+    await expect(form).not.toHaveAttribute("aria-modal", "true");
     expect(bodies).toHaveLength(1);
     expect(bodies[0].intent_key).toBeTruthy();
     expect(bodies[0].launch).toMatchObject({ harness: "codex" });
     expect(bodies[0].launch.permissions).toBe("guarded");
 
     // These events model controls queued before disabled feedback painted.
-    // Their visible state and the already-dispatched request must both stay
+    // Their draft state and the already-dispatched request must both stay
     // unchanged while the controlled response remains held.
     await yolo.dispatchEvent("click");
-    await expect(form, "a queued choice click must not dismiss the owned create").toBeVisible();
+    await expect(form, "a queued choice click must not dismiss the owned create").toHaveCount(1);
+    await expect(form).toBeHidden();
     await form.dispatchEvent("submit");
-    await expect(form, "a refused second submit must leave the first create mounted").toBeVisible();
-    await form.getByRole("button", { name: "Cancel", exact: true }).dispatchEvent("click");
-    await expect(form, "queued Cancel must not unmount an owned create").toBeVisible();
+    await expect(form, "a refused second submit must leave the first create mounted").toHaveCount(1);
+    await form.locator(".launch-composer-cancel").dispatchEvent("click");
+    await expect(form, "queued Cancel must not unmount an owned create").toHaveCount(1);
+    await expect(form).toBeHidden();
     await expect(yolo).toHaveAttribute("aria-pressed", "false");
     expect(bodies).toHaveLength(1);
 
-    releasePost?.();
+    heldPost.release();
     await expect
       .poll(
         async () => {
@@ -8156,7 +8154,8 @@ test("composer busy guard preserves one structured create through queued edits a
       .toBe(1);
     await expect(form).toHaveCount(0);
   } finally {
-    releasePost?.();
+    heldPost.release();
+    await stopRoute();
     const listing = await (await request.get("/api/sessions")).json();
     for (const session of listing.sessions.filter((entry: any) => entry.title === title)) {
       await cleanupSession(request, session.id);

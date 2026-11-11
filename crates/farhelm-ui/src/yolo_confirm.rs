@@ -34,7 +34,9 @@
 //! checkbox), then starts the same way; the flow that owns the launch does both, in that order, and
 //! launches nothing if the first step fails. Cancel has the initial focus in
 //! a returned launcher. An inline Replace question arriving after a reply
-//! yields focus and scrolling to any control the user has moved to meanwhile.
+//! takes it too unless the user has pressed a key or pointer button since
+//! answering Replace; then it yields focus and scrolling to any control that
+//! holds focus.
 //! The one-off keeps the filled danger style and the permanent choice is only
 //! outlined: a filled button draws the reflex click, and the choice that
 //! turns the question off for good should not be the reflex target.
@@ -209,7 +211,19 @@ fn scroll_into_view(instance: u64) {
 /// Reveal the answer itself: a bounded notice region can clip Cancel even
 /// after the larger question block has scrolled into view. Inline reveal
 /// follows focus admission, so a denied handoff cannot scroll another surface.
-fn focus_cancel(instance: u64, only_if_lost: bool, async_inline: bool) {
+///
+/// `press_baseline` is the page's press count at the answer that started the
+/// refused request. While the count is still that, the user has not moved on,
+/// and the first handoff takes focus outright, whatever holds it: in WebKit a
+/// clicked header button never takes focus, so the session's terminal still
+/// holds it and the guard alone would leave Cancel unfocused. Any later press,
+/// an unknown count, or a refocus after a busy answer keeps the guard.
+fn focus_cancel(
+    instance: u64,
+    only_if_lost: bool,
+    async_inline: bool,
+    press_baseline: Option<u64>,
+) {
     let selector = instance_selector(instance);
     let target = FocusTarget::new(
         format!(r#"[data-yolo-confirm-id="{instance}"] .yolo-cancel"#),
@@ -217,7 +231,14 @@ fn focus_cancel(instance: u64, only_if_lost: bool, async_inline: bool) {
         false,
     );
     let focus = if async_inline {
-        target.async_script(None)
+        let guarded = target.async_script(None);
+        match press_baseline.filter(|_| !only_if_lost) {
+            Some(baseline) => format!(
+                "if (window.__farhelmLaunchActivity?.() === {baseline}) {{ {} }} else {{ {guarded} }}",
+                target.script()
+            ),
+            None => guarded,
+        }
     } else {
         target.script()
     };
@@ -243,8 +264,9 @@ fn focus_cancel(instance: u64, only_if_lost: bool, async_inline: bool) {
 /// `may_have_started` is for a refused retry of an attempt whose outcome is
 /// unknown: the question then cannot say that nothing has been started.
 /// `async_inline` is for a plain Replace refusal outside a modal: it may reveal
-/// Cancel only when no other control holds focus. Launcher questions retain
-/// their modal opening's ordinary focus and scroll behavior.
+/// Cancel only when no other control holds focus, unless `press_baseline`
+/// shows the user has pressed nothing since their Replace answer. Launcher
+/// questions retain their modal opening's ordinary focus and scroll behavior.
 /// Answers follow native reading order: Cancel, optional guarded start,
 /// permanent YOLO, then one-time YOLO. This stays inline; the shared action
 /// row adds no modal boundary or additional close target.
@@ -253,6 +275,7 @@ pub(crate) fn YoloConfirmation(
     ask: YoloAsk,
     #[props(default)] may_have_started: bool,
     #[props(default)] async_inline: bool,
+    #[props(default)] press_baseline: Option<u64>,
     busy: bool,
     error: Option<String>,
     confirm_submits: bool,
@@ -285,9 +308,9 @@ pub(crate) fn YoloConfirmation(
         }
         if !*focused_once.peek() {
             focused_once.set(true);
-            focus_cancel(instance, false, async_inline);
+            focus_cancel(instance, false, async_inline, press_baseline);
         } else if was_busy {
-            focus_cancel(instance, true, async_inline);
+            focus_cancel(instance, true, async_inline, press_baseline);
         }
     }));
     rsx! {

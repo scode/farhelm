@@ -1185,29 +1185,32 @@ agent choice is independent of that destination:
   visible dialogs keep the keyboard. A hidden quick-launch launcher still consumes the chord without applying it.
   Applying it on the page uses exactly New's defaults and ordinary launch path: the open session's host, else this
   machine, and New's default folder for that host (Working directory above), with the template overriding only its own
-  fields. Success selects the created session. When New was never shown, the rename dialog opens over it while its agent
-  is already starting, unless Settings' on-by-default **Name sessions on quick launch** choice is off. This applies to
-  the bolt shortcut, number shortcuts, composed sequences, the quick-switcher row and the Cmd+J template list, even when
-  a template supplied the name. The actual created name is focused and fully selected. Enter with the name unchanged or
-  Escape keeps it without sending a rename; a changed name uses ordinary rename. Closing returns to the new terminal,
-  which takes no input while the dialog is open. A launch that revealed New gets no naming dialog, even if a later
-  submission succeeds. A held chord starts only once; the chord never reaches the terminal and visible modals other than
-  the launcher keep the keyboard. With no usable mark on the page it opens Templates with an explanation. An edited
-  marked template that no longer supplies what its active launch kind needs opens New with it applied and a prominent
-  banner saying it needs more choices before it can launch. The same banner accompanies an incomplete Cmd+J or
-  quick-switcher pick, without recommending the sequence prefix. A launch refusal or YOLO question reveals New with the
-  same draft, error or confirmation; nothing bypasses host admission, and the shortcut never retries itself. The mark is
-  a nullable template name on the helm's shared preferences, independent of the template fields. Clicking another bolt
-  moves it; clicking the lit bolt clears it. An agent-launch template needs an agent to be marked; a command-launch
-  template needs a nonblank command. With no launch kind, it is judged as an agent launch. The same rule decides whether
-  a template or combined sequence can launch directly. A marked template that no longer qualifies can still be unmarked.
-  Renaming repoints the mark before deleting the old name; deleting that name clears its mark through the shared delete
-  path, and Undo never restores the mark. The editor says whether its saved template is marked. The shortcut reads the
-  mark and templates fresh on each use, so another window's change takes effect without reloading. Templates' hover and
-  a separate quick-switcher row advertise the chord and marked name. A browser that reserves the chord keeps its
-  behavior; the quick-switcher row remains available. An agent may set or clear the mark through
-  `farhelm agent template create` or `edit`, behind a template approval card. The helm applies the same eligibility rule
-  to an agent's write as the Templates editor does.
+  fields. Success selects the created session only if the user has pressed no key or pointer button since dispatch or
+  their last answer to the launcher, under the launch-completion rules below. When New was never shown and success
+  selects its session, the rename dialog opens over it while its agent is already starting, unless Settings'
+  on-by-default **Name sessions on quick launch** choice is off. This applies to the bolt shortcut, number shortcuts,
+  composed sequences, the quick-switcher row and the Cmd+J template list, even when a template supplied the name. The
+  actual created name is focused and fully selected. Enter with the name unchanged or Escape keeps it without sending a
+  rename; a changed name uses ordinary rename. Closing returns to the new terminal, which takes no input while the
+  dialog is open. A launch that revealed New gets no naming dialog, even if a later submission succeeds. A quick launch
+  the user moved on from keeps its generated name without opening the naming dialog; it can be renamed from its row. A
+  held chord starts only once; the chord never reaches the terminal and visible modals other than the launcher keep the
+  keyboard. With no usable mark on the page it opens Templates with an explanation. An edited marked template that no
+  longer supplies what its active launch kind needs opens New with it applied and a prominent banner saying it needs
+  more choices before it can launch. The same banner accompanies an incomplete Cmd+J or quick-switcher pick, without
+  recommending the sequence prefix. A launch refusal or YOLO question reveals New with the same draft, error or
+  confirmation; nothing bypasses host admission, and the shortcut never retries itself. The mark is a nullable template
+  name on the helm's shared preferences, independent of the template fields. Clicking another bolt moves it; clicking
+  the lit bolt clears it. An agent-launch template needs an agent to be marked; a command-launch template needs a
+  nonblank command. With no launch kind, it is judged as an agent launch. The same rule decides whether a template or
+  combined sequence can launch directly. A marked template that no longer qualifies can still be unmarked. Renaming
+  repoints the mark before deleting the old name; deleting that name clears its mark through the shared delete path, and
+  Undo never restores the mark. The editor says whether its saved template is marked. The shortcut reads the mark and
+  templates fresh on each use, so another window's change takes effect without reloading. Templates' hover and a
+  separate quick-switcher row advertise the chord and marked name. A browser that reserves the chord keeps its behavior;
+  the quick-switcher row remains available. An agent may set or clear the mark through `farhelm agent template create`
+  or `edit`, behind a template approval card. The helm applies the same eligibility rule to an agent's write as the
+  Templates editor does.
 - Template number shortcuts: a template may hold one of ten shared keys, 1–9 then 0, independently of ⚡. Cmd+digit in
   the Mac desktop app, or Ctrl+Shift+digit everywhere else (including a Mac browser), starts its template through the
   same direct launch path as quick launch on the page, and applies it to an open session launcher draft under the same
@@ -1316,12 +1319,34 @@ adjacent to the actions in a bounded scroll region, so long content cannot displ
 panel remains inline in the scrolling body. Project registration (associating metadata with a directory) is optional
 convenience and never a prerequisite.
 
-Once a launch request has waited about two seconds, its footer shows a spinner and a status beside the disabled actions:
-Launching, Restarting or Replacing, the captured host's name and elapsed seconds, updated about once a second. A hidden
-quick launch or template shortcut shows the same status in a small pill at the bottom of the window, including the
-session name when supplied. Neither adds a control or blocks anything beyond the launch's existing in-flight guard. The
-status disappears on the reply; replies within the threshold leave the usual appearance unchanged. Assistive technology
-gets one polite announcement when the status appears, not one for each elapsed second.
+After submitting a launch, including Restart with or Replace with, the launcher hides while the request is pending. The
+user can switch sessions, type in their terminals and act on other sessions. The same launcher remains busy and cannot
+accept a second launch or be replaced with another draft. Launches and changes to the host registry still exclude each
+other. Preparation and required confirmations remain modal until the launch is submitted. A failure, unknown outcome or
+follow-up question restores the same launcher with its draft and ordinary retry rules. Switching to a session on another
+host does not change the submitted launch's destination or retry identity. If another dialog is open when the launcher
+needs to return, it waits for that dialog to close. The acted-on session's progress, actions, terminal attachment and
+row outcome settle as soon as the reply arrives; only the returning launcher waits. Successfully waking a suspended
+sandbox continues to create without revealing the launcher, restoring its page isolation or waiting for another dialog.
+
+Once the request has waited about two seconds, a small pill at the bottom of the window shows a spinner and a status:
+Launching, Restarting or Replacing, the captured host's name and elapsed seconds, updated about once a second, including
+the session name when supplied. The pill takes neither focus nor pointer input. It disappears when the launcher returns
+or closes; replies handled within the threshold show no pill. Assistive technology gets one polite announcement when the
+status appears, not one for each elapsed second. A successful New or Clone opens its session only while the submitted
+launcher opening is still current and the user has pressed no key or pointer button anywhere in the page since their
+last answer to it. Quick launches use their dispatch as that answer until a later launcher answer. Auto-repeat, a lone
+modifier and an accidental double-click or repeated Enter on the launcher's own submit do not count. Waking the host,
+preparing the create and automatic selection after Delete do not reset or advance the count. A naming dialog waiting
+behind another dialog checks again before opening.
+
+When the launch opens its session, ordinary sidebar selection applies, including closing Hosts, and terminal reveal
+decides focus. Otherwise the session appears in the sidebar, the selected session and its remembered selection stay as
+they were, and focus, panels, menus and dialogs stay as the user left them. Any quick-launch naming dialog is skipped. A
+display-only pill says **Started “name”** for about four seconds whenever nothing navigates, including when a filter or
+Hosts hides the new row. This brief report does not keep the launcher or its draft busy; New and shortcuts can start a
+fresh launch immediately. Replace and Replace with open their replacement only while their source remains selected;
+Restart with never navigates.
 
 Creation guards against accidental double submission (a double-click, a retry after a timeout): one intended create
 yields one session or a clear error, never two silently. Deliberately creating several sessions with identical
@@ -1364,11 +1389,13 @@ may already have started instead. The `farhelm` command line has no override: a 
 agent's, and agents follow their own rule under Agent-spawned sessions, whatever the request claims. A plain restart
 relaunches the session's own stored launch and needs no YOLO confirmation again. The question stays inline and has no
 header Close: its answers read Cancel, the guarded option when offered, the outlined permanent YOLO answer, then the
-filled one-time YOLO answer. Tab follows that same order; Cancel keeps initial focus. Plain Replace, agent clone and
-inherited spawn also copy the stored command; pre-upgrade no-flag sessions therefore remain own-setting, with plain
-Replace asking on hosts that ask before YOLO launches and agent copies refused there. Clone, Replace with and Restart
-with compile new choices and get the guarded flags. Remote hosts must be updated after this protocol change before
-launches resume; older releases cannot read launches stored as guarded.
+filled one-time YOLO answer. Tab follows that same order; Cancel keeps initial focus, except that a plain Replace's
+question, which arrives after its reply, leaves focus where it is if the user has pressed a key or pointer button since
+answering Replace and some control now holds focus. Plain Replace, agent clone and inherited spawn also copy the stored
+command; pre-upgrade no-flag sessions therefore remain own-setting, with plain Replace asking on hosts that ask before
+YOLO launches and agent copies refused there. Clone, Replace with and Restart with compile new choices and get the
+guarded flags. Remote hosts must be updated after this protocol change before launches resume; older releases cannot
+read launches stored as guarded.
 
 Failures split cleanly in two: precondition failures (nonexistent directory, unknown template, unreachable host) fail
 the create with a visible error and no session; launch failures of a session that was successfully created surface on
@@ -1978,7 +2005,9 @@ to the terminal. The YOLO confirmation and Restart with launcher still start on 
 
 Every modal dialog keeps Tab and Shift+Tab within its visible, enabled controls and keyboard scroll regions. The page
 behind it cannot receive focus or clicks, while independent agent approval cards remain usable. Hidden quick-launch
-preparation blocks page input without focusing its hidden fields; revealing the launcher supplies its normal focus.
+preparation blocks page input without focusing its hidden fields; revealing the launcher supplies its normal focus. Once
+a submitted launch is pending, its hidden launcher releases that isolation until it needs to show an outcome or
+question.
 
 A primary click on empty space keeps focus on the control in use in the session launcher, Restart with, the dialogs that
 share the host and Settings installer, and the session row and header Stop, Restart, Replace and Delete questions; text
@@ -2156,16 +2185,17 @@ apply to every marked row displayed at acceptance. **Pin** applies only to unpin
 pinned ones. **Mark read** and **Mark unread** apply only to marked rows whose own menus offer that action. Metadata
 choices reuse the ordinary writes and row-local errors, and clear marks once their eligible writes have been dispatched.
 
-Bulk Stop and Delete run one request at a time on each host, with different hosts progressing independently. Accepted
-queued rows remain pending until their completions finish; filtering or a listing failure does not cancel accepted work
-or add new targets. A failure remains on its own row without undoing successful siblings. Each refused row gets the
-ordinary action-specific not-started message, including a row engaged by its own question or rename. An accepted batch
-clears its own targets when every completion has finished, including when some rows failed or were refused, only if the
-user has made no newer marking choice or opened a marked-actions menu or bulk question. Otherwise it leaves the current
-marks alone, including its original targets, even if that newer menu or question was then cancelled. Pending rows do not
-prevent opening sessions, marking other rows, Clear or actions on other rows. Automatic selection after Delete waits
-until every admitted Delete has settled, queued rows and other hosts included, and never opens a session that is still
-being deleted. Pending Stop batches do not delay automatic selection.
+Each bulk Stop or Delete batch runs one request at a time on each host, with different hosts progressing independently;
+a second batch started while the first is still running has its own pace, so it can send to a host the first batch is
+also working on. Accepted queued rows remain pending until their completions finish; filtering or a listing failure does
+not cancel accepted work or add new targets. A failure remains on its own row without undoing successful siblings. Each
+refused row gets the ordinary action-specific not-started message, including a row engaged by its own question or
+rename. An accepted batch clears its own targets when every completion has finished, including when some rows failed or
+were refused, only if the user has made no newer marking choice or opened a marked-actions menu or bulk question.
+Otherwise it leaves the current marks alone, including its original targets, even if that newer menu or question was
+then cancelled. Pending rows do not prevent opening sessions, marking other rows, Clear or actions on other rows.
+Automatic selection after Delete waits until every admitted Delete has settled, queued rows and other hosts included,
+and never opens a session that is still being deleted. Pending Stop batches do not delay automatic selection.
 
 Bulk Stop and Delete ask once when any target would need its ordinary confirmation, unless **Skip session
 confirmations** is on; a batch containing a sandbox Delete always asks. Their structured modal lists one row per target:
@@ -2178,8 +2208,9 @@ disappearance can remove it, while a filtered, partial, failed or non-authoritat
 cannot authorize a replacement question, and answer-time admission may only remove targets no longer displayed or
 marked. Changed facts or confirmation preferences never dispatch a destructive action by themselves. Cancel, Close and
 Escape dismiss their current question without clearing marks. After confirmation closes the question, keyboard focus
-returns to the marked count, which remains programmatically focusable while the action buttons are locked. Completion
-and failures use the ordinary rows and open-session surfaces.
+returns to the marked count, which remains programmatically focusable. Pending launches and actions on other sessions do
+not lock the bulk buttons; each action still refuses its own busy targets. Completion and failures use the ordinary rows
+and open-session surfaces.
 
 Escape clears marks only from the session list, without preventing default handling, and yields to a menu, dialog or
 terminal that owns the key. Quick switching and shortcuts keep their existing meaning: session shortcuts act only on the
@@ -2911,16 +2942,17 @@ whatever the agent renders is what you see. There is no composer, no message abs
   in-memory copy on failure, and remembers the result. Removing an unselected session leaves the pane alone; removing
   the last session leaves it empty. Existing removal detection still needs a complete, unfiltered fleet reply to infer
   an external deletion or host removal; filtering or a capped reply does not unselect an already-open session. Replace
-  keeps selecting its replacement, and closing a terminal tab is not a session removal. Launching the app is itself the
-  deliberate act the attach semantics below key off. Opening a second client therefore takes over its chosen session
-  exactly as clicking that session there would. The attached client owns input and terminal dimensions: the PTY resizes
-  to that client, and the last size sticks when nothing is attached. Reconnecting replays the terminal so the session
-  looks as it would have had the client stayed attached, modulo redraws caused by dimension changes. The floor: the
-  host-side terminal retains, and replay covers, at least the current screen plus 10,000 lines of scrollback. The
-  sidebar visibly marks the selected session's row whenever that session is listed, so which session the main pane is
-  interacting with is readable at a glance rather than only from the bottom bar's session name. A filter that excludes
-  the selected session leaves no row to mark — the bottom bar's session name remains the identifier in that state, and
-  the main pane deliberately stays put (filtering the list is not deselecting).
+  selects its replacement if its source is still selected when it finishes, and closing a terminal tab is not a session
+  removal. Launching the app is itself the deliberate act the attach semantics below key off. Opening a second client
+  therefore takes over its chosen session exactly as clicking that session there would. The attached client owns input
+  and terminal dimensions: the PTY resizes to that client, and the last size sticks when nothing is attached.
+  Reconnecting replays the terminal so the session looks as it would have had the client stayed attached, modulo redraws
+  caused by dimension changes. The floor: the host-side terminal retains, and replay covers, at least the current screen
+  plus 10,000 lines of scrollback. The sidebar visibly marks the selected session's row whenever that session is listed,
+  so which session the main pane is interacting with is readable at a glance rather than only from the bottom bar's
+  session name. A filter that excludes the selected session leaves no row to mark — the bottom bar's session name
+  remains the identifier in that state, and the main pane deliberately stays put (filtering the list is not
+  deselecting).
 - The typical session view has one top row, with terminal tabs and the desktop tunnel pill on the left and text size
   (zoom out, size in points, zoom in), Stop, Restart ▾, Replace ▾, Clone and Delete on the right, followed by the
   terminal and a slim details bar below it. Restart and Replace are split buttons: the main part performs the ordinary
@@ -3225,17 +3257,17 @@ Text fields outside the session launcher keep their normal Cut or text-direction
 prefix. In the launcher's own fields, selected text keeps that normal action and an unselected field accepts the prefix.
 
 Cmd+K on macOS, Ctrl+Shift+K elsewhere, opens a quick switcher in the web UI and desktop app, including from a focused
-terminal. It does nothing while another modal is open or before sign-in and preferences loading finish. Type a
-case-insensitive subsequence to find sessions across all hosts, independent of the sidebar's host selector: title
-matches come before matches only in host name or directory, with most recent activity first within each group. With
-nothing typed, sessions appear in most recent activity order. Every match is reachable by scrolling; if the helm's
-listing cap cut the snapshot, the switcher says only the most recently active sessions were searched. Rows show status,
-agent, host (with its chosen mark) and directory, with matching characters marked. Arrow keys choose and Enter opens the
-selected session, including while a session action is pending; the first match is initially selected. Opening a session
-hidden by the host choice or status filter resets both to All after the open is accepted; a refused pick keeps both
-choices. A pick already visible through both leaves them in place. Escape or a click outside closes and restores the
-previous focus. A loading list says loading, rather than no matches, and Enter picks nothing until a reply arrives; a
-failed read says so.
+terminal. It works during a pending launch, whose hidden launcher is no longer modal. It does nothing while another
+modal is open or before sign-in and preferences loading finish. Type a case-insensitive subsequence to find sessions
+across all hosts, independent of the sidebar's host selector: title matches come before matches only in host name or
+directory, with most recent activity first within each group. With nothing typed, sessions appear in most recent
+activity order. Every match is reachable by scrolling; if the helm's listing cap cut the snapshot, the switcher says
+only the most recently active sessions were searched. Rows show status, agent, host (with its chosen mark) and
+directory, with matching characters marked. Arrow keys choose and Enter opens the selected session, including while a
+session action is pending; the first match is initially selected. Opening a session hidden by the host choice or status
+filter resets both to All after the open is accepted; a refused pick keeps both choices. A pick already visible through
+both leaves them in place. Escape or a click outside closes and restores the previous focus. A loading list says
+loading, rather than no matches, and Enter picks nothing until a reply arrives; a failed read says so.
 
 While text is typed, a pinned row below the scrolling session matches offers "New session named X". It follows the
 sessions in arrow-key order and is selected when no session matches, except while the session list is still loading,

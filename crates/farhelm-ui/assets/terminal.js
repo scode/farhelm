@@ -1036,8 +1036,9 @@
   // when a sidebar row or tab was last clicked. A reveal may take focus only
   // from there (see `takesFocus`). It is recorded when the first `sync()`
   // names the terminal, which is after the session view's lease arrives, not
-  // at the click itself; a new launch relies on that, since the launcher
-  // hands focus to the "new" button before the new view first syncs.
+  // at the click itself. A new launch allowed to select its session releases
+  // the launcher without another focus handoff; reveal uses these same
+  // selection rules. A launch the user moved on from changes no selection.
   let focusOrigin = null;
   // A click on a sidebar row or a tab is a selection even when it selects
   // what is already showing: a reload auto-selects a session before the
