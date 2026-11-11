@@ -155,6 +155,8 @@ mod tests {
             icon: Default::default(),
             color: Default::default(),
             tensorlake: None,
+
+            environment: None,
         }
     }
 

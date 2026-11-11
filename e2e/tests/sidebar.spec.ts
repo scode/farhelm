@@ -7744,8 +7744,27 @@ test("composer focus-trap wraps reveal their targets at narrow width", async ({ 
  */
 test("composer menu-closed Tab order follows the displayed launch groups", async ({ page, request }) => {
   const folder = "/tab-order/fixture";
+  const local = await localHostId(request);
+  const accountResponse = await request.get("/api/tensorlake");
+  expect(accountResponse.ok()).toBe(true);
+  const build = requireHelmBuild(accountResponse, "placement Tab order");
+  const account = await accountResponse.json();
+  // Placement is part of the destination group's native reading order. Pin
+  // availability so the traversal does not depend on this machine's Podman
+  // installation or credentials left by another spec on the shared stack.
+  await page.route("**/api/tensorlake", async (route) => route.fulfill({
+    status: 200, headers: { "x-farhelm-build": build }, json: { ...account, api_key_set: true },
+  }));
+  await page.route("**/api/environment-places", async (route) => route.fulfill({
+    status: 200, headers: { "x-farhelm-build": build }, json: [{
+      place: { kind: "podman_host", host: local }, name: "Tab-order host", reason: null, refreshing: false,
+    }],
+  }));
+  await page.route(`**/api/hosts/${local}/podman-probe`, async (route) => route.fulfill({
+    status: 202, headers: { "x-farhelm-build": build },
+  }));
   const launches = [{
-    host: 1,
+    host: local,
     canonical_cwd: folder,
     cwd: folder,
     selection: { harness: "codex", model: null, effort: null, permissions: null },
@@ -7753,7 +7772,7 @@ test("composer menu-closed Tab order follows the displayed launch groups", async
     creation_seq: 1,
   }];
   await installComposerChoices(page, request, launches, [{ id: "tab-order-model", harness: "codex", efforts: ["high"] }], [{
-    host: 1,
+    host: local,
     canonical_cwd: folder,
     display_cwd: folder,
     canonical_proven: true,
@@ -7778,6 +7797,9 @@ test("composer menu-closed Tab order follows the displayed launch groups", async
     // The destination kind's segmented control: two buttons, so two stops.
     form.getByRole("button", { name: "Folder", exact: true }),
     form.getByRole("button", { name: "Managed checkout", exact: true }),
+    form.getByRole("button", { name: "Existing host", exact: true }),
+    form.getByRole("button", { name: "New container", exact: true }),
+    form.getByRole("button", { name: "New sandbox", exact: true }),
     form.getByRole("combobox", { name: "Host", exact: true }),
     browseButton,
     form.getByLabel("Folder", { exact: true }),
@@ -7791,6 +7813,9 @@ test("composer menu-closed Tab order follows the displayed launch groups", async
   await expect(recentSlot, "the controlled recent must establish the history traversal premise").toBeVisible();
   await expect(browseButton, "the destination group must expose its browse action").toBeVisible();
   await expect(harnessChoice, "the structured fixture must expose the Harness group").toBeVisible();
+  await expect(form.getByRole("button", { name: "Existing host", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.getByRole("button", { name: "New container", exact: true })).toBeEnabled();
+  await expect(form.getByRole("button", { name: "New sandbox", exact: true })).toBeEnabled();
   // Keep a complete agent choice for the footer traversal, independently of
   // the empty draft's reachable-but-unavailable primary action.
   await harnessChoice.click();

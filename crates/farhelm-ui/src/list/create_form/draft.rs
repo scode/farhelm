@@ -70,7 +70,7 @@ pub(super) enum CheckoutInput<'a> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct LaunchDraft {
     /// A missing recipe remains selected; reconciliation must never retarget it.
-    recipe: Option<String>,
+    target: Option<farhelm_proto::LaunchTarget>,
     /// Restart compares against stored choices; it must never acquire create's
     /// permission defaults or permit a search action to replace held context.
     restart_baseline: Option<api::RestartEdit>,
@@ -137,7 +137,7 @@ impl LaunchDraft {
     /// Seed only remembered permissions; New never guesses an agent or model.
     pub(super) fn new(remembered_permission: Option<LaunchPermission>) -> Self {
         Self {
-            recipe: None,
+            target: None,
             restart_baseline: None,
             harness: None,
             model: None,
@@ -302,16 +302,34 @@ impl LaunchDraft {
     // the editor triple survives managed mode for an explicit return to Folder.
     // All folder transitions keep those roles linked without caching previews.
 
+    /// The complete fresh-machine placement, independent of host connection claims.
+    pub(super) fn target(&self) -> Option<farhelm_proto::LaunchTarget> {
+        self.target.clone()
+    }
+
     /// A fresh resource target, never an installed-host identity.
     pub(super) fn recipe(&self) -> Option<String> {
-        self.recipe.clone()
+        self.target
+            .as_ref()
+            .map(|target| target.recipe().to_string())
     }
 
     /// New resources have no previous filesystem; repository intent survives
     /// placement changes and is allocated only after the new host connects.
     fn select_recipe(&mut self, recipe: Option<String>) {
-        self.recipe = recipe;
-        if self.recipe.is_some() {
+        self.select_target(
+            recipe.map(|recipe| farhelm_proto::LaunchTarget::Environment {
+                recipe,
+                place: farhelm_proto::Place::TensorlakeAccount,
+            }),
+        );
+    }
+
+    /// Recipe and place change as one value; a queued path edit never inherits
+    /// authority from the disposable machine that previously held this draft.
+    fn select_target(&mut self, target: Option<farhelm_proto::LaunchTarget>) {
+        self.target = target;
+        if self.target.is_some() {
             if matches!(self.destination, DestinationDraft::Existing { .. }) {
                 self.edit_folder("~".into());
             }
@@ -379,7 +397,7 @@ impl LaunchDraft {
     /// A typed folder exits managed mode and deliberately owns its spelling.
     /// Report operational path change, independently of editor ownership bits.
     pub(super) fn edit_folder(&mut self, text: String) -> bool {
-        if self.recipe.is_some() && !matches!(text.as_str(), "" | "~") {
+        if self.target.is_some() && !matches!(text.as_str(), "" | "~") {
             return false;
         }
         let changed =
@@ -394,7 +412,7 @@ impl LaunchDraft {
     /// Equality concerns the semantic destination, not raw/edited ownership;
     /// callers separately account for invalid remembered-destination correction.
     pub(super) fn choose_existing_folder(&mut self, raw: &str) -> bool {
-        if self.recipe.is_some() && !matches!(raw, "" | "~") {
+        if self.target.is_some() && !matches!(raw, "" | "~") {
             return false;
         }
         let changed =
@@ -1184,6 +1202,7 @@ fn joined(words: Option<&Vec<String>>) -> String {
 #[derive(Clone, Copy)]
 pub(super) struct DraftFields {
     pub(super) recipe: Memo<Option<String>>,
+    pub(super) environment_target: Memo<Option<farhelm_proto::LaunchTarget>>,
     pub(super) cwd: Memo<String>,
     pub(super) cwd_edited: Memo<bool>,
     pub(super) title: Memo<String>,
@@ -1218,16 +1237,20 @@ pub(super) struct DraftFields {
 /// History promotion deliberately keeps its tracked target/fetched reads: an
 /// opening effect that invokes a choice must retain those dependencies. These
 /// are aliases to UI/history state, not another copy of accepted launch fields.
+/// Ordinary history remains installation-scoped; environment offers keep their
+/// helm-wide identity and never establish an ordinary default-folder response.
 #[derive(Clone, Copy)]
 pub(super) struct ChoiceTargets {
     pub(super) partial_template_hint: Signal<bool>,
     pub(super) offered_history: Signal<Option<(CreateTarget, api::LaunchHistory)>>,
     pub(super) create_target: Signal<Option<CreateTarget>>,
     pub(super) fetched_history: Signal<Option<(CreateTarget, api::LaunchHistory)>>,
+    pub(super) offered_environment_history: Signal<Option<Vec<api::LaunchHistoryEntry>>>,
+    pub(super) fetched_environment_history: Signal<Option<Vec<api::LaunchHistoryEntry>>>,
 }
 
 impl ChoiceTargets {
-    /// A deliberate choice may reveal refreshed history for its current install.
+    /// A deliberate choice may reveal refreshed ordinary and environment offers.
     /// Keep the shared helper's tracked reads inside the admitted interaction.
     fn promote_history(self) {
         super::promote_fetched_history_snapshot(
@@ -1235,6 +1258,17 @@ impl ChoiceTargets {
             self.create_target,
             self.fetched_history,
         );
+        self.promote_environment_history();
+    }
+
+    /// A deliberate choice promotes helm-wide environment intent independently
+    /// of ordinary target identity. Call only after that interaction is admitted;
+    /// its tracked fetched read must not subscribe a refused busy/stale action.
+    pub(super) fn promote_environment_history(self) {
+        if let Some(entries) = (self.fetched_environment_history)() {
+            let mut offered = self.offered_environment_history;
+            offered.set(Some(entries));
+        }
     }
 }
 
@@ -1428,11 +1462,16 @@ pub(super) struct LaunchDraftState {
 }
 
 impl LaunchDraftState {
-    /// Recipe picks retain the ordinary busy gate and retire host-bound retries.
-    pub(super) fn choose_recipe(self, recipe: String) -> bool {
+    /// Complete placement uses the existing busy/edit ownership and retry rules.
+    /// Leaving an environment releases the dormant installed-host choice. An
+    /// equal Existing host request keeps the explicit host selected by its picker.
+    pub(super) fn choose_target(mut self, target: Option<farhelm_proto::LaunchTarget>) -> bool {
         self.apply_edit(EditRule::Ordinary, |draft| {
-            let changed = draft.recipe.as_ref() != Some(&recipe);
-            draft.select_recipe(Some(recipe));
+            let changed = draft.target != target;
+            if draft.target.is_some() && target.is_none() {
+                self.chosen_host.set(None);
+            }
+            draft.select_target(target);
             (
                 (),
                 EditFacts {
@@ -1666,7 +1705,7 @@ impl LaunchDraftState {
     /// took the default, which is true even when the folder already matched.
     pub(super) fn seed_default_folder(self, raw: &str) -> bool {
         self.apply_edit(EditRule::SourceReconciliation, |draft| {
-            let accepted = draft.recipe.is_none()
+            let accepted = draft.target.is_none()
                 && !draft.folder_is_explicit()
                 && matches!(draft.destination(), DestinationDraft::Existing { .. });
             let changed = accepted && draft.submitted_cwd() != raw;
@@ -1933,7 +1972,7 @@ impl LaunchDraftState {
         reason = "captured history and existing UI lifetimes are independent inputs"
     )]
     pub(super) fn accept_recent(
-        self,
+        mut self,
         entry: api::LaunchHistoryEntry,
         catalog: &[api::LaunchCatalogModel],
         captured_target: Option<CreateTarget>,
@@ -1952,12 +1991,14 @@ impl LaunchDraftState {
         self.apply_edit(EditRule::Ordinary, |draft| {
             let tab_changed = draft.tab() != LaunchTab::Agent;
             let correcting_invalid = targets.correcting_invalid();
-            if !admit_history_destination(
-                captured_target,
-                targets.live_destination,
-                targets.remembered_destination,
-                targets.history_activation_attempts,
-            ) {
+            if entry.target.is_none()
+                && !admit_history_destination(
+                    captured_target,
+                    targets.live_destination,
+                    targets.remembered_destination,
+                    targets.history_activation_attempts,
+                )
+            {
                 return (
                     false,
                     EditFacts {
@@ -1971,7 +2012,13 @@ impl LaunchDraftState {
                 (targets.choices.create_target)(),
                 history,
             );
+            targets.choices.promote_environment_history();
             targets.choices.partial_template_hint.set(false);
+            let placement_changed = draft.target != entry.target;
+            if draft.target.is_some() && entry.target.is_none() {
+                self.chosen_host.set(None);
+            }
+            draft.select_target(entry.target.clone());
             let mut selection = crate::launch_composer::select_recent(&entry);
             selection.permissions = crate::launch_composer::normalized_permissions(
                 selection.harness,
@@ -1983,6 +2030,8 @@ impl LaunchDraftState {
             let owner = crate::launch_composer::custom_model_owner(&entry.selection, catalog);
             let selection_changed = draft.restore_launch(&selection, owner);
             targets.invalidate_browse();
+            // Apply every part of the Recent before combining change facts. A
+            // placement change must not short-circuit its destination mutation.
             let destination_changed = if let Some(repo) = entry.github_repo {
                 targets.remembered_destination.set(None);
                 draft.select_repository(repo);
@@ -2000,6 +2049,7 @@ impl LaunchDraftState {
                 EditFacts {
                     publish: true,
                     changed: tab_changed
+                        || placement_changed
                         || selection_changed
                         || destination_changed
                         || correcting_invalid,
@@ -2523,7 +2573,9 @@ impl LaunchDraftState {
                 targets,
             );
         }
-        if let Some(recipe) = fields.recipe {
+        if let Some(target) = fields.target {
+            draft.select_target(Some(target));
+        } else if let Some(recipe) = fields.recipe {
             draft.select_recipe(Some(recipe));
         }
         match (fields.destination, repository) {
@@ -2620,12 +2672,14 @@ impl LaunchDraftState {
         if matches!(
             &result,
             ComposerSearchResult::Folder(_) | ComposerSearchResult::Recent(_)
-        ) && !admit_history_destination(
-            history_target,
-            live_destination,
-            remembered_destination,
-            history_activation_attempts,
-        ) {
+        ) && !matches!(&result, ComposerSearchResult::Recent(entry) if entry.target.is_some())
+            && !admit_history_destination(
+                history_target,
+                live_destination,
+                remembered_destination,
+                history_activation_attempts,
+            )
+        {
             // A retained result can outlive its installation. Keep the existing
             // admission fence, but explain the rejected activation where other
             // search/template failures already appear.
@@ -2677,7 +2731,7 @@ impl LaunchDraftState {
             }
             crate::launch_composer::ComposerSearchResult::UsePath(folder)
             | crate::launch_composer::ComposerSearchResult::Folder(folder) => {
-                if draft.recipe.is_some() && !matches!(folder.as_str(), "" | "~") {
+                if draft.target.is_some() && !matches!(folder.as_str(), "" | "~") {
                     action_error.set(Some(
                         "A new sandbox's Folder is fixed to its home directory".into(),
                     ));
@@ -2686,7 +2740,7 @@ impl LaunchDraftState {
                 changed = draft.choose_existing_folder(&folder) || correcting_invalid;
             }
             crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => {
-                if draft.recipe.is_some() {
+                if draft.target.is_some() {
                     action_error.set(Some(
                         "A new sandbox cannot be browsed before it exists".into(),
                     ));
@@ -2770,6 +2824,11 @@ impl LaunchDraftState {
                 }
             }
             crate::launch_composer::ComposerSearchResult::Recent(entry) => {
+                let placement_changed = draft.target != entry.target;
+                if draft.target.is_some() && entry.target.is_none() {
+                    chosen_host.set(None);
+                }
+                draft.select_target(entry.target.clone());
                 let tab_changed = draft.tab() != LaunchTab::Agent;
                 draft.choose_tab(LaunchTab::Agent);
                 composer_reset_reason.set(None);
@@ -2788,7 +2847,12 @@ impl LaunchDraftState {
                         *value = value.checked_add(1).expect("preview revision exhausted")
                     });
                 } else {
-                    changed = draft.choose_existing_folder(entry.cwd.raw())
+                    // Mutation is unconditional; only the returned change facts
+                    // may short-circuit. Leaving an environment must restore the
+                    // recent folder instead of retaining that environment's home.
+                    let destination_changed = draft.choose_existing_folder(entry.cwd.raw());
+                    changed = placement_changed
+                        || destination_changed
                         || selection_changed
                         || tab_changed
                         || correcting_invalid;
@@ -2872,13 +2936,13 @@ impl LaunchDraftState {
                 }
                 // Clone inherits repository/launch intent, never the old
                 // machine's directory. Restart and Replace retain their host.
-                draft.select_recipe(if prefill.mode.holds_host() {
+                draft.select_target(if prefill.mode.holds_host() {
                     None
                 } else {
                     hosts
                         .iter()
                         .find(|host| Some(host.id) == prefill.host && host.session_owned)
-                        .map(|host| host.recipe.clone().unwrap_or_default())
+                        .and_then(|host| host.environment_target.clone())
                 });
                 (
                     (),
@@ -2920,7 +2984,7 @@ impl LaunchDraftState {
                             .iter()
                             .find(|host| host.id == target.host && host.session_owned)
                     {
-                        self.choose_recipe(host.recipe.clone().unwrap_or_default());
+                        self.choose_target(host.environment_target.clone());
                     }
                 }
                 CloneHostAction::Withdraw => self.chosen_host.set(None),
@@ -3024,6 +3088,7 @@ pub(super) fn use_launch_draft(
     });
     let fields = DraftFields {
         recipe: use_memo(move || value.read().recipe()),
+        environment_target: use_memo(move || value.read().target()),
         cwd: use_memo(move || value.read().cwd()),
         cwd_edited: use_memo(move || value.read().cwd_edited()),
         title: use_memo(move || value.read().title()),
@@ -3083,9 +3148,26 @@ mod tests {
     use super::super::LauncherMode;
     use super::*;
 
-    /// A recipe has no old filesystem. Folder edits queued before its read-only
-    /// render cannot replace home, while switching back to a host restores the
-    /// ordinary editable destination contract.
+    /// Restoring a container target keeps both coordinates and discards a path
+    /// from a prior machine; switching providers cannot revive that authority.
+    #[test]
+    fn environment_target_is_atomic_and_uses_the_new_home() {
+        let mut draft = LaunchDraft::new(None);
+        draft.edit_folder("/previous/machine".into());
+        draft.select_target(Some(farhelm_proto::LaunchTarget::Environment {
+            recipe: "dev".into(),
+            place: farhelm_proto::Place::PodmanHost(7),
+        }));
+        assert_eq!(
+            draft.target().unwrap().place(),
+            farhelm_proto::Place::PodmanHost(7)
+        );
+        assert_eq!(draft.recipe().as_deref(), Some("dev"));
+        assert_eq!(draft.cwd(), "~");
+    }
+
+    /// A recipe has no old filesystem. Queued folder edits cannot replace home;
+    /// switching back to an existing host restores the editable-folder contract.
     #[farhelm_testtrace::test]
     fn recipe_placement_retires_the_old_folder_and_rejects_queued_path_edits() {
         let mut draft = LaunchDraft::new(None);
@@ -3657,6 +3739,8 @@ mod tests {
         let target = CreateTarget::new(1, "install-a".into());
         ChoiceTargets {
             partial_template_hint: use_signal(|| true),
+            offered_environment_history: use_signal(|| None),
+            fetched_environment_history: use_signal(|| None),
             offered_history: use_signal({
                 let target = target.clone();
                 move || {
@@ -4775,6 +4859,7 @@ mod tests {
             ChoiceOrigin::Control,
         );
         api::LaunchHistoryEntry {
+            target: None,
             host: 1,
             github_repo: None,
             canonical_cwd: None,
@@ -4794,6 +4879,140 @@ mod tests {
         assert!(owner.choose_command_yolo(true));
         assert!(owner.edit_prompt("keep prompt".into()));
         assert!(owner.edit_conversation("keep conversation".into()));
+    }
+
+    /// An equal Existing host request preserves the picker's explicit choice.
+    /// Only a real environment exit releases it, and busy admission protects
+    /// that release through the same owner operation used by the launcher.
+    #[farhelm_testtrace::test]
+    fn placement_owner_clears_installed_host_only_when_leaving_an_environment() {
+        let mut dom = VirtualDom::new(placement_fixture);
+        dom.rebuild_in_place();
+        dom.process_events();
+        let f = PLACEMENT_FIXTURE.with(std::cell::Cell::get).unwrap();
+        let owner = f.system.ordinary.owner;
+        let environment = farhelm_proto::LaunchTarget::Environment {
+            recipe: "chosen-recipe".into(),
+            place: farhelm_proto::Place::PodmanHost(7),
+        };
+        dom.in_runtime(|| {
+            seed_placement_command(f);
+            assert!(owner.choose_host(9, &[], f.targets));
+            assert_eq!(owner.snapshot().target(), None);
+            assert_eq!(*owner.chosen_host.peek(), Some(9));
+            let before = owner.snapshot();
+            assert!(owner.choose_target(None));
+            assert_eq!(owner.snapshot(), before);
+            assert_eq!(*owner.chosen_host.peek(), Some(9));
+
+            assert!(owner.choose_target(Some(environment.clone())));
+            assert_eq!(owner.snapshot().target(), Some(environment.clone()));
+            assert_eq!(*owner.chosen_host.peek(), Some(9));
+        });
+        let mut ops = owner.ops;
+        let guard = dom.in_runtime(|| ops.claim_guard().expect("the placement owner is idle"));
+        dom.in_runtime(|| {
+            assert!(!owner.choose_target(None));
+            assert_eq!(owner.snapshot().target(), Some(environment));
+            assert_eq!(*owner.chosen_host.peek(), Some(9));
+            drop(guard);
+            assert!(owner.choose_target(None));
+            assert_eq!(owner.snapshot().target(), None);
+            assert_eq!(*owner.chosen_host.peek(), None);
+        });
+        PLACEMENT_FIXTURE.with(|slot| slot.set(None));
+    }
+
+    /// Recent activation replaces placement, destination and selection together.
+    /// Search previously skipped the folder write when leaving an environment;
+    /// exercise both actual owner entry points instead of only grouping helpers.
+    #[farhelm_testtrace::test]
+    fn recent_activation_restores_folder_and_environment_home_across_placements() {
+        for from_search in [false, true] {
+            let mut dom = VirtualDom::new(placement_fixture);
+            dom.rebuild_in_place();
+            dom.process_events();
+            let f = PLACEMENT_FIXTURE.with(std::cell::Cell::get).unwrap();
+            let c = FINAL_CONTEXT.with(std::cell::Cell::get).unwrap();
+            let owner = f.system.ordinary.owner;
+            let environment = farhelm_proto::LaunchTarget::Environment {
+                recipe: "dev".into(),
+                place: farhelm_proto::Place::PodmanHost(7),
+            };
+            dom.in_runtime(|| {
+                choose_fixture_harness(owner, LaunchHarness::Claude);
+                assert!(owner.choose_target(Some(environment.clone())));
+                assert_eq!(owner.snapshot().target(), Some(environment.clone()));
+                assert_eq!(owner.snapshot().submitted_cwd(), "~");
+                let activate = |entry: api::LaunchHistoryEntry| {
+                    if from_search {
+                        let accepted = owner
+                            .accept_search_result(
+                                crate::launch_composer::ComposerSearchResult::Recent(Box::new(
+                                    entry,
+                                )),
+                                None,
+                                false,
+                                SearchInputs {
+                                    recipes: &[],
+                                    templates: &[],
+                                    hosts: &[],
+                                    catalog: Some(&[]),
+                                    host_fixed: false,
+                                    history_target: Some(CreateTarget::new(1, "install-a".into())),
+                                    preferences: c.preferences,
+                                },
+                                c.search,
+                            )
+                            .expect("the current history callback is admitted");
+                        assert!(accepted.browse_path.is_none());
+                        assert!(c.search.template_error.peek().is_none());
+                    } else {
+                        assert!(owner.accept_recent(
+                            entry,
+                            &[],
+                            Some(CreateTarget::new(1, "install-a".into())),
+                            None,
+                            f.targets,
+                            f.system.source.permission_escalation,
+                            f.system.source.composer_reset_reason
+                        ));
+                    }
+                };
+                let mut ordinary = placement_recent("/wanted");
+                ordinary.selection.model = Some("recent-model".into());
+                ordinary.selection.effort = Some(LaunchEffort::High);
+                ordinary.selection.permissions = Some(LaunchPermission::Guarded);
+                let ordinary_selection = ordinary.selection.clone();
+                assert_ne!(owner.snapshot().harness(), Some(ordinary_selection.harness));
+                activate(ordinary);
+                let restored = owner.snapshot();
+                assert_eq!(restored.target(), None);
+                assert_eq!(restored.submitted_cwd(), "/wanted");
+                assert_eq!(
+                    restored.destination(),
+                    DestinationDraft::Existing {
+                        cwd: "/wanted".into()
+                    }
+                );
+                assert_eq!(restored.structured_selection(), Some(ordinary_selection));
+
+                let mut fresh = placement_recent("~");
+                fresh.target = Some(environment.clone());
+                fresh.selection.permissions = Some(LaunchPermission::Yolo);
+                let fresh_selection = fresh.selection.clone();
+                activate(fresh);
+                let restored = owner.snapshot();
+                assert_eq!(restored.target(), Some(environment));
+                assert_eq!(restored.submitted_cwd(), "~");
+                assert_eq!(
+                    restored.destination(),
+                    DestinationDraft::Existing { cwd: "~".into() }
+                );
+                assert_eq!(restored.structured_selection(), Some(fresh_selection));
+            });
+            PLACEMENT_FIXTURE.with(|slot| slot.set(None));
+        }
     }
 
     /// Live locking precedes every new operation's reads and ancillary writes.
@@ -5081,6 +5300,14 @@ mod tests {
                 },
             ));
             let before_counter = *f.targets.history_activation_attempts.peek();
+            let mut environment = placement_recent("~");
+            environment.target = Some(farhelm_proto::LaunchTarget::Environment {
+                recipe: "latest-environment".into(),
+                place: farhelm_proto::Place::PodmanHost(9),
+            });
+            let environment = vec![environment];
+            let mut fetched_environment = f.targets.choices.fetched_environment_history;
+            fetched_environment.set(Some(environment.clone()));
             assert!(owner.accept_recent(
                 entry.clone(),
                 &[],
@@ -5100,6 +5327,8 @@ mod tests {
                 captured,
                 "direct Recent promotes its captured history"
             );
+            assert_eq!(*f.targets.choices.offered_environment_history.peek(), Some(environment),
+                "direct Recent also promotes the latest environment offer through its admitted bypass");
             assert_eq!(
                 owner.snapshot().invocation_raw_seed().as_deref(),
                 Some("source-command\u{1b}")
@@ -6279,6 +6508,9 @@ mod tests {
             assert!(*choices.partial_template_hint.peek());
             choices.fetched_history.set(None);
             choices.create_target.set(None);
+            choices
+                .fetched_environment_history
+                .set(Some(vec![placement_recent("~")]));
         });
         dom.process_events();
         assert_eq!(
@@ -6286,6 +6518,12 @@ mod tests {
             1,
             "busy admission acquired no history subscriptions"
         );
+        dom.in_runtime(|| {
+            assert!(
+                choices.offered_environment_history.peek().is_none(),
+                "a rejected choice cannot reveal freshly fetched environment intent"
+            )
+        });
         dom.in_runtime(|| {
             claim.set(None);
             assert!(!owner.ops.busy_now());
@@ -6333,6 +6571,20 @@ mod tests {
             4,
             "history choice has no whole-owner subscription"
         );
+        dom.in_runtime(|| choices.fetched_environment_history.set(Some(Vec::new())));
+        dom.process_events();
+        assert_eq!(
+            RUNS.with(Cell::get),
+            5,
+            "admitted choices track environment history too"
+        );
+        dom.in_runtime(|| {
+            assert_eq!(
+                *choices.offered_environment_history.peek(),
+                Some(Vec::new()),
+                "a successful empty history is promoted, not treated as an unread response"
+            );
+        });
         FIXTURE.with(|slot| slot.set(None));
     }
 

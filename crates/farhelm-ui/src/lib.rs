@@ -155,10 +155,12 @@ mod notices;
 
 // The native menu's description is renderer-free. Compile its shortcut guard
 // in ordinary UI tests too, so Linux does not need AppKit or a display server.
+mod containers_settings;
 #[cfg(all(test, not(native_desktop)))]
 #[path = "desktop/menu.rs"]
 mod desktop_menu_tests;
 mod dialog_focus;
+mod environment_ui;
 mod feed;
 mod feedback;
 mod github_checkout;
@@ -856,6 +858,9 @@ pub struct Host {
     /// other host (the helm leaves the key out), and from older helms.
     #[serde(default)]
     pub tensorlake: Option<TensorlakeHost>,
+    /// New environments publish a complete reusable placement, even while offline.
+    #[serde(default)]
+    pub environment: Option<farhelm_proto::EnvironmentHostView>,
 }
 
 /// A Tensorlake host's sandbox as the helm lists it (farhelm-helm's
@@ -938,6 +943,14 @@ pub enum HostKind {
 /// a comparison defaults to.
 #[warn(clippy::wildcard_enum_match_arm)]
 impl HostKind {
+    /// Provider facts are explicit for every host kind, including future ones.
+    pub(crate) fn environment_provider(self) -> Option<farhelm_proto::ProviderKind> {
+        match self {
+            Self::Tensorlake => Some(farhelm_proto::ProviderKind::Tensorlake),
+            Self::Podman => Some(farhelm_proto::ProviderKind::Podman),
+            Self::Local | Self::Ssh | Self::Unrecognized => None,
+        }
+    }
     /// Disposable environments have a machine lifecycle owned by Farhelm.
     pub(crate) fn suspends(self) -> bool {
         match self {
@@ -1197,6 +1210,9 @@ pub enum HostPhase {
     /// is unix ms; after Resume completes, ordinary Connecting covers SSH recovery.
     #[serde(rename = "tensorlake-changing")]
     TensorlakeChanging {
+        /// True only while the provider is starting a stopped container.
+        #[serde(default)]
+        starting: bool,
         direction: farhelm_proto::tensorlake::LifecycleDirection,
         requested_at: i64,
     },
@@ -1212,6 +1228,13 @@ pub enum HostPhase {
         observed_at: i64,
         suspended_by_farhelm_at: Option<i64>,
         resume_failed: Option<PeerText>,
+    },
+    /// A stopped environment keeps files but has no preserved running process.
+    /// A failed automatic start requires explicit Resume; waiting names its place.
+    #[serde(rename = "stopped")]
+    Stopped {
+        start_failed: Option<PeerText>,
+        waiting_for_place: bool,
     },
     /// No connection actor is running for this row. Reported rather than
     /// hidden, because an operation refused against it has to have something
@@ -3181,9 +3204,36 @@ mod tests {
                 HostPhase::TensorlakeChanging {
                     direction,
                     requested_at: 1_700_000_000_123,
+                    starting: false,
                 }
             );
         }
+    }
+
+    /// Stopped containers keep files without claiming a paused process exists.
+    /// The start attempt's diagnosis and place wait survive the public decoder;
+    /// a real starting transition stays separate from ordinary unpause.
+    #[farhelm_testtrace::test]
+    fn stopped_container_and_starting_phase_preserve_runtime_evidence() {
+        let stopped: HostPhase = serde_json::from_value(serde_json::json!({
+            "phase":"stopped","start_failed":"start refused","waiting_for_place":true,
+        }))
+        .unwrap();
+        assert!(
+            matches!(stopped,HostPhase::Stopped {start_failed:Some(reason),waiting_for_place:true} if reason.raw()=="start refused")
+        );
+        let starting: HostPhase = serde_json::from_value(serde_json::json!({
+            "phase":"tensorlake-changing","starting":true,"direction":"resuming","requested_at":123,
+        }))
+        .unwrap();
+        assert!(matches!(
+            starting,
+            HostPhase::TensorlakeChanging {
+                starting: true,
+                requested_at: 123,
+                ..
+            }
+        ));
     }
 
     /// A phase (or refresh status) this build has never heard of must cost

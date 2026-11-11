@@ -1335,6 +1335,11 @@ export async function openHostsPanel(page: Page): Promise<void> {
  * when about to open it, too — an already-open menu has no reason to be
  * re-hovered, and its toggle may itself now sit under its own panel
  * depending on placement.
+ *
+ * A caller retrying an open-and-read while row geometry changes can bound each
+ * wait with `options.timeout`. A vanished panel must release that attempt's
+ * budget, including when it vanishes between visibility and evaluation. Without
+ * an override, every operation keeps its ordinary Playwright timeout.
  */
 async function openMenuPanel(
   row: Locator,
@@ -1342,11 +1347,12 @@ async function openMenuPanel(
   panelSelector: string,
   waitMessage: string,
   measuredMarker: string,
+  options: { timeout?: number } = {},
 ): Promise<void> {
   const menu = row.locator(toggleSelector);
-  if ((await menu.getAttribute("aria-expanded")) !== "true") {
-    await menu.hover();
-    await menu.click();
+  if ((await menu.getAttribute("aria-expanded", options)) !== "true") {
+    await menu.hover(options);
+    await menu.click(options);
   }
   // Await the floating surface itself, not just the click: the toggle's signal write
   // and the panel's mount land on a LATER render, and several callers go
@@ -1354,7 +1360,7 @@ async function openMenuPanel(
   // actionability-bypass tests), where a not-yet-mounted button turns
   // into a silent no-op via `?.click()` rather than a visible failure.
   const panel = row.locator(panelSelector);
-  await expect(panel).toBeVisible();
+  await expect(panel).toBeVisible(options);
   // `toBeVisible()` alone is not the MEASURED state: the surface mounts the
   // instant the toggle opens, at `opacity: 0; pointer-events: none` —
   // genuinely present and painted-nothing (`PanelPlacement::Unmeasured` in
@@ -1380,13 +1386,17 @@ async function openMenuPanel(
   await expect
     .poll(
       async () => {
-        const info = await panel.evaluate((el) => ({
-          opacity: getComputedStyle(el).opacity,
-          style: el.getAttribute("style") ?? "",
-        }));
+        const info = await panel.evaluate(
+          (el) => ({
+            opacity: getComputedStyle(el).opacity,
+            style: el.getAttribute("style") ?? "",
+          }),
+          undefined,
+          options,
+        );
         return info.opacity === "1" && info.style.includes(measuredMarker);
       },
-      { message: waitMessage },
+      { message: waitMessage, ...options },
     )
     .toBe(true);
 }
@@ -1427,8 +1437,10 @@ export async function openRowMenu(row: Locator): Promise<void> {
  * every spec that clicks or asserts on a host row's management verbs now
  * has to open this menu first — exactly the discipline `openRowMenu`
  * already imposes for the session row.
+ * A caller with its own retry budget can pass a shorter per-operation timeout;
+ * the measured, interactable panel remains the readiness boundary either way.
  */
-export async function openHostMenu(row: Locator): Promise<void> {
+export async function openHostMenu(row: Locator, options: { timeout?: number } = {}): Promise<void> {
   await showHostsPanel(row.page());
   await openMenuPanel(
     row,
@@ -1436,6 +1448,7 @@ export async function openHostMenu(row: Locator): Promise<void> {
     ".host-row-menu-flyout",
     "waiting for the host actions panel to finish measuring against its own toggle",
     "left: var(--menu-left)",
+    options,
   );
 }
 

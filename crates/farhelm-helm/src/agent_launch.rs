@@ -168,6 +168,7 @@ pub(crate) fn resolve(
         catalog: &catalog,
         known_hosts,
         known_recipes: &[],
+        known_places: &[],
         host_fixed: spawn,
     };
     let state =

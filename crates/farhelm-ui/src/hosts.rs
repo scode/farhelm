@@ -372,6 +372,7 @@ pub(crate) fn phase_label(state: &HostPhase) -> &'static str {
         HostPhase::Duplicate { .. } => "duplicate",
         HostPhase::TensorlakeChanging { .. } => "tensorlake-changing",
         HostPhase::Suspended { .. } => "suspended",
+        HostPhase::Stopped { .. } => "stopped",
         HostPhase::Retired { .. } => "retired",
         HostPhase::Unrecognized => "unrecognized",
     }
@@ -400,8 +401,10 @@ pub(crate) fn phase_display_label(state: &HostPhase) -> &'static str {
         HostPhase::IdentityMismatch { .. } => "Identity mismatch",
         HostPhase::IdentityUnverified { .. } => "Identity unverified",
         HostPhase::Duplicate { .. } => "Duplicate",
+        HostPhase::TensorlakeChanging { starting: true, .. } => "Starting…",
         HostPhase::TensorlakeChanging { direction, .. } => lifecycle_label(*direction),
         HostPhase::Suspended { .. } => "Suspended",
+        HostPhase::Stopped { .. } => "Stopped",
         HostPhase::Retired { .. } => "Retired",
         HostPhase::Unrecognized => "Unrecognized",
     }
@@ -630,6 +633,7 @@ pub(crate) fn phase_class(state: &HostPhase) -> &'static str {
         | HostPhase::IdentityUnverified { .. }
         | HostPhase::Duplicate { .. }
         | HostPhase::Retired { .. }
+        | HostPhase::Stopped { .. }
         | HostPhase::Unrecognized => "needs-attention",
     }
 }
@@ -711,9 +715,13 @@ pub(crate) fn rail_identity(name: &str, destination: Option<&str>, local: bool) 
 /// Delivery can fail during setup or while the supervisor is usable. Keep the
 /// same warning predicate for rail color, host status and attention grouping.
 fn credential_delivery_failed(host: &Host) -> bool {
-    host.tensorlake
+    host.environment
         .as_ref()
-        .is_some_and(|sandbox| sandbox.credential_warning.is_some())
+        .is_some_and(|environment| environment.credential_warning.is_some())
+        || host
+            .tensorlake
+            .as_ref()
+            .is_some_and(|sandbox| sandbox.credential_warning.is_some())
 }
 
 /// One native rail button owns its mounted trigger; actions stay in HostRow.
@@ -1126,55 +1134,97 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
         HostPhase::TensorlakeChanging {
             direction,
             requested_at,
+            ..
         } => vec![DetailPart::text(format!(
-            "Asked Tensorlake to {} at {}; waiting for confirmation",
-            match direction {
-                LifecycleDirection::Suspending => "suspend",
-                LifecycleDirection::Resuming => "resume",
-            },
+            "Asked the environment provider to {} at {}; waiting for confirmation",
+            lifecycle_verb(*direction),
             crate::activity::utc_stamp(*requested_at / 1000)
         ))],
+        HostPhase::Stopped {
+            start_failed,
+            waiting_for_place,
+        } => {
+            let mut detail = vec![DetailPart::text(if *waiting_for_place {
+                "The environment is stopped; waiting for its container host to reconnect."
+            } else {
+                "The environment is stopped. Resume starts it again; its files remain."
+            })];
+            if let Some(reason) = start_failed {
+                detail.extend([
+                    DetailPart::text(" Start failed: "),
+                    DetailPart::peer(reason),
+                ]);
+            }
+            detail
+        }
         HostPhase::Unrecognized => vec![DetailPart::text(
             "This build does not know the state the helm is reporting for this host",
         )],
     }
 }
 
-/// The evidence behind a suspended Tensorlake host: since when, and who
-/// suspended it. A failed resume leads with Tensorlake's diagnosis, since
-/// that is what the user has to act on.
-///
-/// Farhelm's own suspend time comes from the host row; without one,
-/// something other than Farhelm suspended the sandbox, which in practice is
-/// Tensorlake's idle timeout, so the detail says what that is (goal 3.1).
-/// Times are UTC, like the session list's absolute stamps
-/// ([`crate::activity::utc_stamp`]), because this crate keeps no timezone
-/// database.
+/// State-only diagnostics cannot claim a provider's billing or idle policy.
+/// Host-aware rendering adds those facts through the exhaustive UI module.
 fn suspended_detail(
     observed_at: i64,
     suspended_by_farhelm_at: Option<i64>,
     resume_failed: Option<&crate::peer::PeerText>,
 ) -> Vec<DetailPart> {
-    let mut parts = Vec::new();
-    if let Some(details) = resume_failed {
-        parts.push(DetailPart::text(
-            "Tensorlake could not resume the sandbox: ",
-        ));
-        parts.push(DetailPart::peer(details));
-        parts.push(DetailPart::text(". "));
+    let mut parts = vec![DetailPart::text(format!(
+        "Suspension {} at {}",
+        if suspended_by_farhelm_at.is_some() {
+            "completed from Farhelm"
+        } else {
+            "noticed"
+        },
+        crate::activity::utc_stamp(suspended_by_farhelm_at.unwrap_or(observed_at) / 1000)
+    ))];
+    if let Some(reason) = resume_failed {
+        parts.extend([
+            DetailPart::text(". Resume failed: "),
+            DetailPart::peer(reason),
+        ]);
     }
-    parts.push(DetailPart::text(match suspended_by_farhelm_at {
-        Some(at) => format!(
-            "Suspended from Farhelm at {}",
-            crate::activity::utc_stamp(at / 1000)
-        ),
-        None => format!(
-            "Suspended outside Farhelm, noticed at {}. On Usage Credits, Tensorlake suspends a \
-             sandbox after 24 hours without a connection",
-            crate::activity::utc_stamp(observed_at / 1000)
-        ),
-    }));
     parts
+}
+
+/// Keep ordinary diagnostic rendering while adding the resource's own semantics.
+fn host_state_detail(host: &Host) -> Vec<DetailPart> {
+    match (host.kind.environment_provider(), &host.state) {
+        (
+            Some(provider),
+            HostPhase::Suspended {
+                observed_at,
+                suspended_by_farhelm_at,
+                resume_failed,
+            },
+        ) => crate::environment_ui::ProviderUi(provider).suspended_detail(
+            *observed_at,
+            *suspended_by_farhelm_at,
+            resume_failed.as_ref(),
+            host.is_session_owned,
+        ),
+        (
+            Some(provider),
+            HostPhase::TensorlakeChanging {
+                direction,
+                requested_at,
+                ..
+            },
+        ) => vec![DetailPart::text(
+            crate::environment_ui::ProviderUi(provider)
+                .lifecycle_request_detail(lifecycle_verb(*direction), *requested_at),
+        )],
+        _ => state_detail(&host.state),
+    }
+}
+
+/// The verb a pending suspend or resume request is reported with.
+fn lifecycle_verb(direction: LifecycleDirection) -> &'static str {
+    match direction {
+        LifecycleDirection::Suspending => "suspend",
+        LifecycleDirection::Resuming => "resume",
+    }
 }
 
 /// How a connected host's last cache refresh went, as the tail of
@@ -1257,6 +1307,7 @@ pub(crate) fn state_remedy(state: &HostPhase) -> Option<Vec<DetailPart>> {
         | HostPhase::Connecting { .. }
         | HostPhase::Connected { .. }
         | HostPhase::Suspended { .. }
+        | HostPhase::Stopped { .. }
         | HostPhase::TensorlakeChanging { .. }
         | HostPhase::Unrecognized => None,
         HostPhase::VersionSkew { remediation, .. } => {
@@ -1330,7 +1381,7 @@ fn host_row_lines(host: &Host, details_open: bool, local_setup: bool) -> HostRow
                     .map(destination_detail_parts)
             })
             .flatten(),
-        detail: details_open.then(|| state_detail(&host.state)),
+        detail: details_open.then(|| host_state_detail(host)),
         remedy: (details_open && !local_setup)
             .then(|| state_remedy(&host.state))
             .flatten(),
@@ -1580,6 +1631,7 @@ pub(crate) fn session_unavailable_cause(lookup: HostLookup<'_>) -> &'static str 
             HostPhase::IdentityUnverified { .. } => "Host identity unverified",
             HostPhase::Duplicate { .. } => "Duplicate host",
             HostPhase::Suspended { .. } => "Host suspended",
+            HostPhase::Stopped { .. } => "Environment stopped",
             HostPhase::TensorlakeChanging { direction, .. } => match direction {
                 LifecycleDirection::Suspending => "Host suspending",
                 LifecycleDirection::Resuming => "Host resuming",
@@ -1623,7 +1675,16 @@ pub(crate) fn stale_session_notice(
         vec![DetailPart::peer(host_name)]
     };
     let resume_host = match &lookup {
-        HostLookup::Known(host) if matches!(host.state, HostPhase::Suspended { .. }) => {
+        HostLookup::Known(host)
+            if matches!(
+                host.state,
+                HostPhase::Suspended { .. }
+                    | HostPhase::Stopped {
+                        waiting_for_place: false,
+                        ..
+                    }
+            ) =>
+        {
             Some(host.id)
         }
         _ => None,
@@ -1643,8 +1704,11 @@ pub(crate) fn stale_session_notice(
             ));
             let mut detail = name;
             detail.push(DetailPart::text(": "));
-            detail.extend(state_detail(&host.state));
+            detail.extend(host_state_detail(host));
             (explanation, detail)
+        }
+        HostLookup::Known(host) if matches!(host.state, HostPhase::Stopped { .. }) => {
+            (host_state_detail(host), vec![])
         }
         HostLookup::Known(host) if matches!(host.state, HostPhase::TensorlakeChanging { .. }) => {
             let mut explanation = name.clone();
@@ -1657,7 +1721,7 @@ pub(crate) fn stale_session_notice(
             }));
             let mut detail = name;
             detail.push(DetailPart::text(": "));
-            detail.extend(state_detail(&host.state));
+            detail.extend(host_state_detail(host));
             (explanation, detail)
         }
         HostLookup::Known(host) => {
@@ -1670,7 +1734,7 @@ pub(crate) fn stale_session_notice(
             });
             let mut detail = name;
             detail.push(DetailPart::text(": "));
-            detail.extend(state_detail(&host.state));
+            detail.extend(host_state_detail(host));
             (explanation, detail)
         }
         HostLookup::Pending => {
@@ -3653,21 +3717,17 @@ fn skips_remove_question(kind: HostKind, skip_preference: Option<bool>) -> bool 
 
 /// The host menu's removal item: "Delete sandbox" for a host whose removal
 /// deletes its machine, "Remove" for one that is only forgotten.
-fn remove_label(deletes_machine: bool) -> &'static str {
-    if deletes_machine {
-        "Delete sandbox"
-    } else {
-        "Remove"
-    }
+fn remove_label(kind: HostKind) -> &'static str {
+    kind.environment_provider()
+        .map(|provider| crate::environment_ui::ProviderUi(provider).host_delete_label())
+        .unwrap_or("Remove")
 }
 
 /// The removal item's description line, matching [`remove_label`].
-fn remove_description(deletes_machine: bool) -> &'static str {
-    if deletes_machine {
-        "Terminate this Tensorlake sandbox and delete its snapshots"
-    } else {
-        "Forget this host"
-    }
+fn remove_description(kind: HostKind) -> &'static str {
+    kind.environment_provider()
+        .map(|provider| crate::environment_ui::ProviderUi(provider).host_delete_help())
+        .unwrap_or("Forget this host")
 }
 
 /// Builds this render's host-menu item list from the row's own state: the
@@ -4020,7 +4080,7 @@ pub(crate) fn HostProgressCardSource(
 #[component]
 fn HostProgressCard(host: Host, summary: UpdateProgressSummary, elapsed: String) -> Element {
     let connection = (!is_connected(&host.state)).then(|| {
-        state_detail(&host.state)
+        host_state_detail(&host)
             .into_iter()
             .map(|part| match part {
                 DetailPart::Peer(value) => DetailPart::MonoPeer(value),
@@ -4306,7 +4366,6 @@ fn HostRow(
     // present, never registered, never removed. An unrecognized kind is not
     // management surface either — see this component's docs.
     let manageable = host.kind.is_removable();
-    let deletes_machine = host.kind.removal_deletes_machine();
     let kind_attribute = match host.kind {
         HostKind::Local => "local",
         HostKind::Ssh => "ssh",
@@ -4332,7 +4391,14 @@ fn HostRow(
     // below has to notice an item withdrawn (a poll turning `adoptable` off)
     // even while a menu built against the wider list is still up.
     let adoptable_now = adopt_identity.is_some();
-    let suspended = matches!(host.state, HostPhase::Suspended { .. });
+    let suspended = matches!(
+        host.state,
+        HostPhase::Suspended { .. }
+            | HostPhase::Stopped {
+                waiting_for_place: false,
+                ..
+            }
+    );
     let lifecycle_changing = matches!(host.state, HostPhase::TensorlakeChanging { .. });
     let offers_resume = suspended || lifecycle_changing;
     let lifecycle_action = if host.kind.suspends() {
@@ -4692,7 +4758,7 @@ fn HostRow(
                             span {
                                 class: "host-status-label",
                                 "data-tooltip": too_new_title(&host.state).unwrap_or_else(|| phase_display_label(&host.state).to_string()),
-                                if let HostPhase::TensorlakeChanging { direction, requested_at } = &host.state {
+                                if let HostPhase::TensorlakeChanging { direction, requested_at, .. } = &host.state {
                                     TensorlakeChangingStatus { key: "{requested_at}-{direction:?}", direction: *direction, requested_at: *requested_at }
                                 } else if is_connected(&host.state) && inline_update.is_none()
                                     && !matches!(&host.state, HostPhase::Connected { old_version: true, .. })
@@ -5194,9 +5260,9 @@ fn HostRow(
                                         },
                                         HostMenuActionIcon { action: HostMenuAction::Remove }
                                         menu_panel::MenuItemCopy {
-                                            label: rsx! { "{remove_label(deletes_machine)}" },
+                                            label: rsx! { "{remove_label(host.kind)}" },
                                             description_id: "host-menu-remove-description",
-                                            description: rsx! { "{remove_description(deletes_machine)}" },
+                                            description: rsx! { "{remove_description(host.kind)}" },
                                         }
                                     }
                                 }
@@ -5208,8 +5274,18 @@ fn HostRow(
             // contribution. Keep the PeerLine containers independent:
             // their displayed text can exchange rows without moving a prefix.
             div { class: "host-row-details", hidden: !panel_visible,
+            if let Some(environment)=host.environment.as_ref().filter(|_|details_open) {
+                PeerLine {class:"host-detail host-environment-detail",parts:{
+                    let mut parts=vec![DetailPart::text(format!("{}: ",crate::sandbox_sessions::provider_ui(&host).locality_label())),DetailPart::peer(environment.name.as_str()),DetailPart::text(" · Recipe: "),DetailPart::peer(environment.target.recipe())];
+                    if let Some(name)=&environment.place_name {parts.extend([DetailPart::text(" · Container host: "),DetailPart::peer(name.as_str())]);}
+                    if let Some(size)=host.tensorlake.as_ref().and_then(|sandbox|sandbox.size) {parts.push(DetailPart::text(format!(" · {} CPUs · {} GB memory",size.cpus,size.memory_gb)));}
+                    parts
+                }}
+                if let Some(view)=environment.tunnels.clone() {crate::tensorlake::tunnels::TunnelDetails {view}}
+                if let Some(reason)=&environment.credential_warning {p {class:"host-detail credential-delivery-warning",role:"status","Credentials not delivered: {display_peer(reason)}"}}
+            }
             if let Some(sandbox) = host.tensorlake.as_ref().filter(|_| details_open) {
-                PeerLine {
+                if host.environment.is_none() { PeerLine {
                     class: "host-detail host-tensorlake-detail",
                     parts: {
                         let mut parts = vec![
@@ -5225,12 +5301,14 @@ fn HostRow(
                         }
                         parts
                     },
-                }
+                } }
+                if host.environment.is_none() {
                 if let Some(view) = sandbox.tunnels.clone() {
                     crate::tensorlake::tunnels::TunnelDetails { view }
                 }
                 if let Some(reason) = &sandbox.credential_warning {
                     p { class: "host-detail credential-delivery-warning", role: "status", "Credentials not delivered: {reason.escaped()}" }
+                }
                 }
             }
             if let Some(destination) = lines.destination {
@@ -6340,6 +6418,8 @@ mod tests {
             icon: Default::default(),
             color: Default::default(),
             tensorlake: None,
+
+            environment: None,
         }
     }
 
@@ -6964,6 +7044,7 @@ mod tests {
             HostPhase::TensorlakeChanging {
                 direction: LifecycleDirection::Suspending,
                 requested_at: 1_700_000_200_000,
+                starting: false,
             },
         ]
     }
@@ -7241,7 +7322,7 @@ mod tests {
                 notice.detail[..2],
                 [DetailPart::peer("remote"), DetailPart::text(": ")]
             );
-            assert_eq!(notice.detail[2..], state_detail(&host.state));
+            assert_eq!(notice.detail[2..], host_state_detail(&host));
         }
     }
 
@@ -7971,7 +8052,7 @@ mod tests {
                     notice.detail.first(),
                     Some(&DetailPart::peer("<peer>\u{202e}"))
                 );
-                assert_eq!(notice.detail[2..], state_detail(&host.state));
+                assert_eq!(notice.detail[2..], host_state_detail(&host));
             }
         }
         let local = host(HostPhase::Unreachable {
@@ -8005,6 +8086,7 @@ mod tests {
             let mut host = host(HostPhase::TensorlakeChanging {
                 direction,
                 requested_at: 1_700_000_000_000,
+                starting: false,
             });
             host.kind = HostKind::Tensorlake;
             assert_eq!(phase_display_label(&host.state), words);
@@ -8017,6 +8099,10 @@ mod tests {
             let details = detail_text(&notice.detail);
             assert!(details.contains("waiting for confirmation"));
             assert!(!details.contains("Suspended outside Farhelm"));
+            // A Tensorlake host row names Tensorlake as the party asked, as
+            // it did before container hosts shared these rows.
+            let row = detail_text(&host_state_detail(&host));
+            assert!(row.starts_with("Asked Tensorlake to "), "{row}");
             assert!(!remote_update_available(
                 &host,
                 Some(&ProvisioningMenuState {
@@ -8047,7 +8133,7 @@ mod tests {
         assert_eq!(
             detail_text(&by_farhelm),
             format!(
-                "Suspended from Farhelm at {}",
+                "Suspension completed from Farhelm at {}",
                 crate::activity::utc_stamp(1_700_000_000)
             )
         );
@@ -8058,22 +8144,19 @@ mod tests {
         }));
         assert!(
             outside.starts_with(&format!(
-                "Suspended outside Farhelm, noticed at {}",
+                "Suspension noticed at {}",
                 crate::activity::utc_stamp(1_700_000_100)
             )),
             "{outside}"
         );
-        assert!(
-            outside.contains("24 hours without a connection"),
-            "{outside}"
-        );
+        assert!(!outside.contains("Tensorlake"), "{outside}");
         let failed = state_detail(&HostPhase::Suspended {
             observed_at: 1_700_000_100_000,
             suspended_by_farhelm_at: None,
             resume_failed: Some("snapshot \u{202e}lost".into()),
         });
-        assert_eq!(failed[1], DetailPart::peer("snapshot \u{202e}lost"));
-        assert!(detail_text(&failed).starts_with("Tensorlake could not resume the sandbox: "));
+        assert_eq!(failed[2], DetailPart::peer("snapshot \u{202e}lost"));
+        assert!(detail_text(&failed).contains("Resume failed: "));
 
         let host = host(HostPhase::Suspended {
             observed_at: 1_700_000_100_000,
@@ -8101,14 +8184,8 @@ mod tests {
     /// forget the row and leave the sandbox billing.
     #[farhelm_testtrace::test]
     fn a_tensorlake_host_is_deleted_not_removed() {
-        assert_eq!(
-            remove_label(HostKind::Tensorlake.removal_deletes_machine()),
-            "Delete sandbox"
-        );
-        assert_eq!(
-            remove_label(HostKind::Ssh.removal_deletes_machine()),
-            "Remove"
-        );
+        assert_eq!(remove_label(HostKind::Tensorlake), "Delete sandbox");
+        assert_eq!(remove_label(HostKind::Ssh), "Remove");
         assert!(!skips_remove_question(HostKind::Tensorlake, Some(true)));
         assert!(skips_remove_question(HostKind::Ssh, Some(true)));
         assert!(!skips_remove_question(HostKind::Ssh, None));
@@ -8137,8 +8214,9 @@ mod tests {
         assert!(copy.explanation.contains("farhelm-host-k7q2-gpu-dev-m3x9"));
         assert!(
             copy.explanation
-                .contains("files and the sessions on it will be gone")
+                .contains("Every session, running process, file")
         );
+        assert!(copy.explanation.contains("will be permanently removed"));
         let ordinary = settings_dialog::RemoveCopy::for_host(&host(HostPhase::Unrecognized));
         assert_eq!(ordinary.confirm_label, "Remove");
         assert!(ordinary.offers_dont_ask);
@@ -8515,6 +8593,8 @@ mod tests {
             icon: Default::default(),
             color: Default::default(),
             tensorlake: None,
+
+            environment: None,
         }
     }
 

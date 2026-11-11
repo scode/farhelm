@@ -1943,6 +1943,18 @@ pub(crate) fn SessionView(
     )
     .cloned();
     let sandbox = sandbox_host.as_ref().map(|host| host.id);
+    let environment_ui = sandbox_host
+        .as_ref()
+        .map(crate::sandbox_sessions::provider_ui);
+    let environment_stop_help = environment_ui
+        .map(crate::environment_ui::ProviderUi::stop_help)
+        .unwrap_or("");
+    let environment_delete_consequence = environment_ui
+        .map(crate::environment_ui::ProviderUi::delete_consequence)
+        .unwrap_or("");
+    let environment_delete_label = environment_ui
+        .map(crate::environment_ui::ProviderUi::delete_label)
+        .unwrap_or("Delete");
     let sandbox_frozen = sandbox_host
         .as_ref()
         .is_some_and(crate::sandbox_sessions::frozen);
@@ -2351,7 +2363,7 @@ pub(crate) fn SessionView(
                         }
                         button {
                             r#type: "button", class: "btn btn-neutral header-stop",
-                            "data-tooltip": if sandbox.is_some() { "Stop the agent and close its terminal tabs; the sandbox keeps running and billing" } else { "Stop the agent and close its terminal tabs" },
+                            "data-tooltip": if sandbox.is_some() { environment_stop_help } else { "Stop the agent and close its terminal tabs" },
                             "aria-expanded": "{confirming_stop.is_open()}",
                             "aria-controls": "stop-confirm-panel",
                             disabled: lifecycle.busy() || shown.stale || sandbox_frozen,
@@ -2382,7 +2394,7 @@ pub(crate) fn SessionView(
                                 onmounted: move |_| { document::eval(&crate::dialog_focus::install_js(".header-stop-confirm", crate::dialog_focus::ContainerEnter::None)); },
                                 span { class: "confirm-consequence",
                                     "{crate::status::stop_consequence(&shown.status, tabs.len())}"
-                                    if sandbox.is_some() { " {crate::sandbox_sessions::STOP_BILLING} Stop and suspend freezes the remaining processes; they continue on Resume. The stopped agent and closed tabs do not continue." }
+                                    if sandbox.is_some() { " {environment_stop_help} Stop and suspend freezes the remaining processes; they continue on Resume. The stopped agent and closed tabs do not continue." }
                                 }
                                 button {
                                     r#type: "button", class: "btn btn-danger header-stop-confirm-submit",
@@ -2405,7 +2417,7 @@ pub(crate) fn SessionView(
                                 }
                                 if sandbox.is_some() {
                                     button { r#type: "button", class: "btn btn-danger", disabled: stopping() || sandbox_frozen || composer_ops.busy(),
-                                        "data-tooltip": "Stop this session's agent and close its terminal tabs, then suspend the whole sandbox",
+                                        "data-tooltip": "Stop this session's agent and close its terminal tabs, then suspend the whole environment",
                                         onkeydown: crate::guard_confirmation_enter,
                                         onclick: {
                                             let token = shown_stop.clone();
@@ -2677,11 +2689,11 @@ pub(crate) fn SessionView(
                                 // the two entry points warn about exactly the
                                 // same things (a live agent, open tabs).
                                 span { class: "confirm-consequence",
-                                    if sandbox.is_some() { "{crate::sandbox_sessions::DELETE_CONSEQUENCE}" }
+                                    if sandbox.is_some() { "{environment_delete_consequence}" }
                                     else { "{crate::status::confirm_consequence(&shown.status, shown.tabs.len())}" }
-                                    if let Some(host) = &sandbox_host && let Some(binding) = &host.tensorlake {
-                                        " Sandbox: {binding.sandbox.escaped()}"
-                                    }
+                                    if let Some(host) = &sandbox_host && let Some(name) = crate::sandbox_sessions::resource_name(host) {
+                                     "{crate::sandbox_sessions::provider_ui(host).resource_label(name)}"
+                                 }
                                 }
                                 if sandbox.is_none() && shown.working_copy.is_some() {
                                     span { class: "confirm-consequence confirm-checkout-consequence",
@@ -2706,7 +2718,7 @@ pub(crate) fn SessionView(
                                             operations.send(HeaderAction::Delete(id.clone(), header_delete_guard, sandbox, claim));
                                         }
                                     },
-                                    if sandbox.is_some() { "Delete session and sandbox" } else { "Delete" }
+                                    if sandbox.is_some() { {environment_delete_label} } else { "Delete" }
                                 }
                                 button {
                                     r#type: "button",
@@ -3214,8 +3226,8 @@ pub(crate) fn SessionView(
                 if let Some(name) = &shown.host_name {
                     span { class: "session-details-host",
                         if let Some(host) = &sandbox_host {
-                            crate::icons::SandboxMark {}
-                            span { class: "visually-hidden", "Sandbox" }
+                            {environment_ui.map(|ui| ui.mark(false)).unwrap_or_else(|| rsx! {})}
+                            span { class: "visually-hidden", "{environment_ui.map(crate::environment_ui::ProviderUi::locality_label).unwrap_or_default()}" }
                             span { "{crate::peer::display_peer(&crate::sandbox_sessions::label(host))}" }
                         } else {
                             crate::list::SessionHostIcon { locality, icon: host_icon, color: host_color }
@@ -3227,7 +3239,7 @@ pub(crate) fn SessionView(
                 // `activity_destination` for why an absent badge must not
                 // take the age with it.
                 if sandbox_suspended {
-                    span { "data-tooltip": "Suspended: this session's sandbox is frozen; Resume continues its processes",
+                    span { "data-tooltip": "Suspended: this session's environment is frozen; Resume continues its processes",
                         crate::icons::SandboxPause {} "Suspended"
                     }
                 }

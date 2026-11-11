@@ -59,10 +59,12 @@ pub(crate) const RETURN_FOCUS: &str =
 
 /// Stable panel keys preserve draft and focus ownership; labels are presentation.
 /// The App entry still follows updater availability rather than platform alone.
-const SETTINGS_SECTIONS: [(&str, &str); 10] = [
+const SETTINGS_SECTIONS: [(&str, &str); 12] = [
     ("sessions", "Sessions"),
     ("appearance", "Appearance"),
     ("hosts", "Hosts"),
+    ("recipes", "Recipes"),
+    ("containers", "Containers"),
     ("tensorlake", "Tensorlake"),
     ("credentials", "Credentials"),
     ("terminal", "Terminal"),
@@ -81,6 +83,8 @@ fn settings_section_icon(section: &str) -> Element {
         "sessions" => rsx! { ActionIcon { glyph: ActionGlyph::Sessions } },
         "appearance" => rsx! { ActionIcon { glyph: ActionGlyph::Appearance } },
         "hosts" => rsx! { ActionIcon { glyph: ActionGlyph::Hosts } },
+        "recipes" => rsx! { FolderIcon {} },
+        "containers" => rsx! { ActionIcon {glyph:ActionGlyph::Hosts} },
         "tensorlake" => rsx! { ActionIcon { glyph: ActionGlyph::Key } },
         "credentials" => rsx! { ActionIcon { glyph: ActionGlyph::Lock } },
         "terminal" => rsx! { ActionIcon { glyph: ActionGlyph::Terminal } },
@@ -311,11 +315,11 @@ pub(crate) fn SettingsDialog(
     let has_updater = updater.is_some();
     // Escape and both close controls go through this, so an open recipe
     // editor with unsaved changes can ask first. When it holds the close, its
-    // question is in the Tensorlake panel, so that panel is shown.
+    // question is in the Recipes panel, so that panel is shown.
     let close_guard = crate::tensorlake::recipe_editor::DialogCloseGuard::provide();
     let mut request_close = move || {
         if close_guard.request(on_close) {
-            selected.set("tensorlake");
+            selected.set("recipes");
             sections_open.set(false);
         }
     };
@@ -621,6 +625,14 @@ pub(crate) fn SettingsDialog(
                                     }
                                 }
                             }
+                        }
+                        section { id:"settings-recipes",class:"host-settings-section app-settings-panel",aria_label:"Recipes",hidden:selected()!="recipes",
+                            h3 {class:"host-settings-section-title",tabindex:"-1","Recipes"}
+                            crate::tensorlake_settings::RecipesSettings {}
+                        }
+                        section { id:"settings-containers",class:"host-settings-section app-settings-panel",aria_label:"Containers",hidden:selected()!="containers",
+                            h3 {class:"host-settings-section-title",tabindex:"-1","Containers"}
+                            crate::containers_settings::ContainersSettings {}
                         }
                         section {
                             id: "settings-tensorlake",

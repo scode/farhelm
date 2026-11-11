@@ -3772,12 +3772,13 @@ test("two provisioning-busy rows reconcile independently", async ({
   // panel; a menu opened just before such a change can close before its
   // item is read. The page's own setup status is the premise for each
   // phase, and each open-and-check is retried as one unit, well inside the
-  // backend's 30 s action hold. A Settings item in the wrong state fails
-  // every attempt.
+  // backend's 30 s action hold. Each menu wait is bounded to one second so a
+  // closed flyout releases the attempt instead of consuming the retry budget.
+  // A Settings item in the wrong state fails every attempt.
   const running = (row: Locator) => row.locator('[data-provisioning-status="running"]');
   const settingsReads = async (row: Locator, enabled: boolean) => {
     await expect(async () => {
-      await openHostMenu(row);
+      await openHostMenu(row, { timeout: 1_000 });
       const settings = row.locator(".host-settings");
       if (enabled) await expect(settings).toBeEnabled({ timeout: 1_000 });
       else await expect(settings).toBeDisabled({ timeout: 1_000 });

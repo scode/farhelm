@@ -260,3 +260,22 @@ fn codex_modes_keep_drafts_and_submit_exclusive_selections() {
         view.codex_login_credential
     );
 }
+
+/// A new recipe may select and edit its container base; reopening support alone
+/// would leave the new provider impossible to configure through Settings.
+#[test]
+fn a_new_container_recipe_saves_edited_reference_and_user() {
+    let mut draft = Draft::new_recipe();
+    draft.name = "container-dev".into();
+    draft.base = Base::ContainerImage;
+    draft.container_reference = "registry.example.test/team/dev:stable".into();
+    draft.container_user = "developer".into();
+    let save = draft.to_save().unwrap();
+    assert_eq!(
+        save.base,
+        RecipeBase::ContainerImage {
+            reference: draft.container_reference,
+            user: draft.container_user
+        }
+    );
+}

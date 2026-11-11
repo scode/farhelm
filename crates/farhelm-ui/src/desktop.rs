@@ -2154,6 +2154,8 @@ mod tests {
             id: 1,
             kind,
             tensorlake: None,
+
+            environment: None,
             color: Default::default(),
             icon: Default::default(),
             destination: None,
@@ -2300,6 +2302,8 @@ mod tests {
             id: 1,
             kind: crate::HostKind::Local,
             tensorlake: None,
+
+            environment: None,
             color: Default::default(),
             icon: Default::default(),
             destination: None,

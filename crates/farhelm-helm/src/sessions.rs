@@ -3927,11 +3927,11 @@ pub(crate) async fn do_replace_session(
             if let Some(binding) = row
                 .as_ref()
                 .filter(|row| row.is_session_owned())
-                .and_then(|row| row.tensorlake.as_ref())
+                .and_then(|row| row.kind.environment_view(row))
             {
                 Err(error.context(format!(
-                    "Replace did not finish. Sandbox {} and its files were retained. User-confirmed Delete destroys the whole sandbox",
-                    binding.sandbox
+                    "Replace did not finish. Environment {} and its files were retained. User-confirmed Delete destroys the whole environment",
+                    binding.name
                 )))
             } else {
                 Err(error)

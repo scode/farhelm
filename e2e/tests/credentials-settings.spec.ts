@@ -170,7 +170,8 @@ test("recipe references refresh deletion guards and preserve unavailable picker 
     const catalog = await (await request.get("/api/credentials")).json() as { name: string; revision: number }[];
     expect(catalog.find((row) => row.name === endpoint)?.revision).toBe(1);
 
-    await selectSettingsSection(page, "tensorlake");
+    // Recipes has its own pane; the Tensorlake pane owns account settings.
+    await selectSettingsSection(page, "recipes");
     await dialog.getByRole("button", { name: `Edit ${recipeName}`, exact: true }).click();
     const recipeEditor = dialog.getByRole("region", { name: `Recipe: ${recipeName}`, exact: true });
     const picker = recipeEditor.getByLabel("Claude Code endpoint token", { exact: true });
