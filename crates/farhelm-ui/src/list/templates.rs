@@ -594,7 +594,7 @@ impl Field {
             Self::Command => f.command.is_some(),
             Self::Yolo => f.yolo.is_some(),
             Self::Resume => f.resume_command.is_some(),
-            Self::Host => f.host.is_some() || f.recipe.is_some(),
+            Self::Host => f.host.is_some() || f.launch_target().is_some(),
             Self::Destination => f.destination.is_some(),
             Self::Name => f.name.is_some(),
         }
@@ -683,6 +683,7 @@ impl Field {
             Self::Host => {
                 f.host = None;
                 f.recipe = None;
+                f.target = None;
             }
             Self::Destination => f.destination = None,
             Self::Name => {
@@ -1075,6 +1076,12 @@ fn template_summary_parts(fields: &TemplateFields) -> Vec<DetailPart> {
             "Resume default"
         })]);
     }
+    if let Some(target) = &fields.target {
+        push(vec![
+            DetailPart::text("New "),
+            DetailPart::peer(crate::environment_ui::target_label(target, &[])),
+        ]);
+    }
     if let Some(recipe) = &fields.recipe {
         push(vec![
             DetailPart::text("New sandbox · "),
@@ -1213,7 +1220,10 @@ fn FieldEditor(
     field: Field,
     mut draft: Signal<Draft>,
     hosts: Vec<HostOption>,
-    #[props(default)] recipes: Vec<String>,
+    #[props(default)] recipe_views: Vec<farhelm_proto::recipes::RecipeView>,
+    #[props(default)] environment_places: Vec<farhelm_proto::EnvironmentPlaceView>,
+    #[props(default)] environment_builds: Vec<farhelm_proto::RecipePlaceView>,
+    #[props(default)] environment_settings: Option<farhelm_proto::tensorlake::Settings>,
     catalog: Option<Vec<LaunchCatalogModel>>,
     disabled: bool,
 ) -> Element {
@@ -1403,53 +1413,36 @@ fn FieldEditor(
             span { class: "templates-hint", "An empty input sets the default. Placeholders: {{cwd}}, {{farhelm_args}}, {{conversation}}; each must be a whole argument." }
         },
         Field::Host => {
-            // This select's prefix is presentation only. Recipe names and
-            // opaque installation identities stay separate in stored templates;
-            // a catalog failure must not clear a retained unavailable target.
-            let value = current
-                .recipe
-                .as_ref()
-                .map(|name| format!("recipe:{name}"))
-                .unwrap_or_else(|| format!("host:{}", current.host.as_deref().unwrap_or_default()));
+            let target = current.launch_target();
+            let value = current.host.clone().unwrap_or_default();
             let options: Vec<_> = hosts
                 .into_iter()
                 .filter(|host| !host.session_owned)
-                .filter_map(|h| {
-                    h.identity
-                        .map(|id| (format!("host:{id}"), display_peer(&h.name)))
-                })
+                .filter_map(|host| host.identity.map(|identity| (identity, host.name)))
                 .collect();
-            let missing = if let Some(recipe) = &current.recipe {
-                !recipes.contains(recipe)
-            } else {
-                !options.iter().any(|(id, _)| id == &value)
-            };
-            let empty =
-                current.recipe.is_none() && current.host.as_deref().unwrap_or_default().is_empty();
-            rsx! { label { class: "templates-field",
-                span { "{label}" }
-                // Same hover text `Choice` gave this field before recipes
-                // needed their own option groups.
-                select { value: value.clone(), disabled, aria_label: "Host",
-                    "data-tooltip": "{label}: the value this template applies",
-                    onchange: move |event| draft.with_mut(|draft| {
-                        let value = event.value();
-                        if let Some(recipe) = value.strip_prefix("recipe:") {
-                            draft.fields.recipe = Some(recipe.to_string()); draft.fields.host = None;
-                        } else if let Some(host) = value.strip_prefix("host:") {
-                            draft.fields.host = Some(host.to_string()); draft.fields.recipe = None;
-                        }
+            rsx! {
+                crate::environment_ui::PlacementPicker {
+                    target, recipes: recipe_views, places: environment_places, builds: environment_builds, settings: environment_settings, disabled, authoring:true,
+                    // An empty Host value keeps this editor present until a host is chosen.
+                    // Field removal belongs to the existing Remove field action.
+                    on_target: move |target: Option<farhelm_proto::LaunchTarget>| draft.with_mut(|draft| {
+                        draft.fields.host = target.is_none().then(String::new);
+                        draft.fields.target = target;
+                        draft.fields.recipe = None;
                     }),
-                    if empty { option { value: "host:", selected: true, "Choose a host" } }
-                    else if missing { option { value: value.clone(), selected: true, "Unavailable target (retained)" } }
-                    optgroup { label: "Hosts", for (id, name) in options {
-                        option { value: id.clone(), selected: id == value, "{name}" }
-                    } }
-                    optgroup { label: "New sandbox for each session", for name in recipes {
-                        option { value: "recipe:{name}", selected: value == format!("recipe:{name}"), "New sandbox · {display_peer(&name)}" }
-                    } }
+                    label { class: "templates-field", span { "Host" }
+                        select { value: value.clone(), disabled, aria_label: "Host",
+                            "data-tooltip": "Host: the installed machine this template applies",
+                            onchange: move |event| draft.with_mut(|draft| {draft.fields.host=Some(event.value());draft.fields.recipe=None;draft.fields.target=None;}),
+                            // The empty Host field stays empty after leaving an environment.
+                            // Bind each option so the browser follows the draft through that change.
+                            if value.is_empty() {option {value:"", selected:true, "Choose a host"}}
+                            else if !options.iter().any(|(identity,_)| identity==&value) { option {value:value.clone(), selected:true, "Unavailable host (retained)"} }
+                            for (identity,name) in options { option {value:"{identity}", selected:identity==value, "{display_peer(&name)}"} }
+                        }
+                    }
                 }
-            } }
+            }
         }
         Field::Name => rsx! {
             div { class: "templates-field",
@@ -1837,16 +1830,26 @@ pub(super) fn TemplatesDialog(
         let base = recipe_base.clone();
         async move { crate::api::fetch_recipes(&base).await }
     });
-    let recipe_names = recipe_catalog
+    let (place_catalog, _refresh_places) = crate::environment_ui::use_environment_places();
+    let placement_base = base.clone();
+    let placement_catalog = use_resource(move || {
+        let base = placement_base.clone();
+        async move {
+            let settings = crate::api::fetch_tensorlake_settings(&base).await?;
+            let builds = crate::api::fetch_recipe_places(&base).await?;
+            Ok::<_, String>((settings, builds))
+        }
+    });
+    let placement_answer = placement_catalog
         .read()
         .as_ref()
         .and_then(|answer| answer.as_ref().ok())
-        .map(|recipes| {
-            recipes
-                .iter()
-                .map(|recipe| recipe.name.clone())
-                .collect::<Vec<_>>()
-        })
+        .cloned();
+    let recipe_views = recipe_catalog
+        .read()
+        .as_ref()
+        .and_then(|answer| answer.as_ref().ok())
+        .cloned()
         .unwrap_or_default();
     let mut dialog_epoch = use_signal(|| 0_u64);
     let number_launch_chord = TEMPLATE_SHORTCUTS.number_chord("number");
@@ -2533,7 +2536,7 @@ pub(super) fn TemplatesDialog(
                             if inferred { p { class: "templates-hint templates-inferred", "This stored template does not switch the launcher yet. Saving will store the switch inferred from its fields." } }
                             h4 { class: "templates-sets-heading", "Sets" }
                             for field in Field::ALL.into_iter().filter(|f| f.is_set(&current.fields)) {
-                                FieldEditor { key: "{editor_source}-{field.key()}", field, draft, hosts: hosts.clone(), recipes: recipe_names.clone(), catalog: catalog_rows.clone(), disabled }
+                                FieldEditor { key: "{editor_source}-{field.key()}", field, draft, hosts: hosts.clone(), recipe_views: recipe_views.clone(), environment_places: place_catalog.read().as_ref().and_then(|answer|answer.as_ref().ok()).cloned().unwrap_or_default(), environment_settings: placement_answer.as_ref().map(|(settings,_)|settings.clone()), environment_builds: placement_answer.as_ref().map(|(_,builds)|builds.clone()).unwrap_or_default(), catalog: catalog_rows.clone(), disabled }
                             }
                             div { class: "templates-add-area",
                                 button { r#type: "button", class: "btn btn-neutral templates-add", disabled, aria_expanded: add_open(), "data-tooltip": "Add a field this template will set; fields not shown are left as is", onclick: move |_| add_open.toggle(), "+ Add field" }

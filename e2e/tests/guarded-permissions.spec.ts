@@ -12,6 +12,11 @@ installTerminalSuiteHooks();
 
 /** Every offered guarded chip names its vendor mode and the exact forcing flags. */
 test("guarded choices explain each agent and Cursor keeps its own setting", async ({ page }, testInfo) => {
+  // This case inspects ordinary-host help, not background container discovery.
+  // A late usable Podman probe adds Runs on and scrolls the form through browser
+  // anchoring; that scroll correctly dismisses even a pending tooltip. Fix the
+  // catalog for this fixture so discovery cannot race the native hover below.
+  await page.route("**/api/environment-places", route => fulfillAsHelm(route, { json: [] }));
   await page.goto("/");
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
@@ -28,6 +33,7 @@ test("guarded choices explain each agent and Cursor keeps its own setting", asyn
     await expect(guarded, `${agent} must actually offer the mode before its help is inspected`).toBeVisible();
     await expect(guarded).toHaveAccessibleDescription(new RegExp(mode));
     await expect(guarded).toHaveAccessibleDescription(/Flags:[\s\S]*can't guarantee how it behaves/);
+    await expect(form.getByRole("group", { name: "Runs on", exact: true })).toHaveCount(0);
     await guarded.click();
     await expect(guarded).toHaveAttribute("aria-pressed", "true");
     // A press intentionally dismisses help until the pointer leaves the chip;

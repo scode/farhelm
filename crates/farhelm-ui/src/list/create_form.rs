@@ -650,7 +650,8 @@ fn launcher_snapshot(
         LaunchTab::Command => LauncherKind::Command,
     };
     LauncherState {
-        recipe: draft.recipe(),
+        recipe: None,
+        target: draft.target(),
         prompt: active_prompt(kind_now, draft.harness(), &draft.prompt()),
         kind: Some(kind_now),
         harness: draft.harness(),
@@ -837,6 +838,12 @@ fn validated_template_batch_known(
         catalog,
         known_hosts: &known_hosts,
         known_recipes: recipes,
+        known_places: &hosts
+            .iter()
+            .filter(|host| !host.session_owned)
+            .map(|host| farhelm_proto::Place::PodmanHost(host.id))
+            .chain(std::iter::once(farhelm_proto::Place::TensorlakeAccount))
+            .collect::<Vec<_>>(),
         host_fixed,
     };
     let normalized = templates
@@ -1437,6 +1444,73 @@ fn history_target(hosts: &[HostOption], selected: Option<HostId>) -> Option<Crea
             .find(|host| host.id == id)
             .map(|host| CreateTarget::new(host.id, host.incarnation.clone()))
     })
+}
+
+/// Interleave bounded histories without changing either source's relative order.
+/// Ordinary entries retain the supervisor's sequence ordering, even across a
+/// backward wall-clock jump. Environment entries retain helm admission order.
+/// Timestamps choose only between the current heads; a tie favors ordinary
+/// history, and neither source's independent sequence is compared to the other.
+fn merge_recent_launches(
+    ordinary: Vec<api::LaunchHistoryEntry>,
+    environment: &[api::LaunchHistoryEntry],
+) -> Vec<api::LaunchHistoryEntry> {
+    let mut merged = Vec::with_capacity(ordinary.len() + environment.len());
+    let mut ordinary = ordinary.into_iter().peekable();
+    let mut environment = environment.iter().cloned().peekable();
+    while let (Some(ordinary_head), Some(environment_head)) = (ordinary.peek(), environment.peek())
+    {
+        if environment_head.created_at > ordinary_head.created_at {
+            merged.push(environment.next().expect("environment head was observed"));
+        } else {
+            merged.push(ordinary.next().expect("ordinary head was observed"));
+        }
+    }
+    merged.extend(ordinary);
+    merged.extend(environment);
+    merged
+}
+
+/// Project suggestions without granting environment history ordinary-folder
+/// authority. Ordinary offers need both live installation checks; helm-wide
+/// environment intent remains available even when no ordinary target exists.
+/// Search's immediate active-index calculation must use this same projection.
+fn offered_recent_history(
+    ordinary: Option<&(CreateTarget, api::LaunchHistory)>,
+    current: Option<&CreateTarget>,
+    destination: Option<&CreateTarget>,
+    environment: &[api::LaunchHistoryEntry],
+) -> api::LaunchHistory {
+    let mut history = ordinary
+        .and_then(|(target, history)| {
+            (Some(target) == current && Some(target) == destination).then(|| history.clone())
+        })
+        .unwrap_or_default();
+    history.launches = merge_recent_launches(history.launches, environment);
+    history
+}
+
+/// Hand successful environment observations to deliberate history promotion.
+/// Pending or failed reads retain the last success, and a successful empty
+/// first offer stays frozen just like a nonempty one. This establishes no
+/// authority for an ordinary host's folder or checkout configuration.
+fn observe_environment_history(
+    answer: Option<&Result<Vec<api::LaunchHistoryEntry>, String>>,
+    mut fetched: Signal<Option<Vec<api::LaunchHistoryEntry>>>,
+    mut offered: Signal<Option<Vec<api::LaunchHistoryEntry>>>,
+    mut revision: Signal<u64>,
+) {
+    if let Some(Ok(entries)) = answer
+        && fetched.peek().as_ref() != Some(entries)
+    {
+        fetched.set(Some(entries.clone()));
+        revision.with_mut(|revision| *revision = revision.wrapping_add(1));
+    }
+    if offered.peek().is_none()
+        && let Some(entries) = fetched.peek().as_ref()
+    {
+        offered.set(Some(entries.clone()));
+    }
 }
 
 /// Where a launcher draft stands on its default folder (SPEC.md, "Working
@@ -3128,14 +3202,57 @@ pub(super) fn CreateSessionForm(
     let launch_activity = use_context::<LaunchActivity>();
     let mut session_operations = use_context::<crate::session_ops::SessionOps>();
     let mut shared_replace_progress = use_context::<crate::replace::ReplaceProgress>();
+    // Catalog reads retain complete targets while the existing draft owner
+    // controls edits and launch admission. History joins only reusable intent.
+    let (environment_catalog, _refresh_environment_places) =
+        crate::environment_ui::use_environment_places();
+    let environment_places = environment_catalog
+        .read()
+        .as_ref()
+        .and_then(|answer| answer.as_ref().ok())
+        .cloned()
+        .unwrap_or_default();
+    // Build projections include cached place refusals. A completed probe changes
+    // this successful observation without a fleet notice; reread the projection,
+    // while equal cached answers leave it alone and never force another probe.
+    let observed_places = use_memo(move || {
+        environment_catalog
+            .read()
+            .as_ref()
+            .and_then(|answer| answer.as_ref().ok())
+            .cloned()
+    });
+    let build_status_base = base.clone();
+    let mut build_status = use_resource(move || {
+        let _places = observed_places();
+        let base = build_status_base.clone();
+        async move { api::fetch_recipe_places(&base).await }
+    });
+    let environment_history_base = base.clone();
+    let mut environment_history = use_resource(move || {
+        let base = environment_history_base.clone();
+        async move { api::fetch_environment_history(&base).await }
+    });
     let sandbox_base = base.clone();
-    let sandbox_catalog = use_resource(move || {
+    let mut sandbox_catalog = use_resource(move || {
         let base = sandbox_base.clone();
         async move {
             let recipes = api::fetch_recipes(&base).await?;
             let settings = api::fetch_tensorlake_settings(&base).await?;
             Ok::<_, String>((recipes, settings))
         }
+    });
+    use_feed_reader(move || {
+        build_status.restart();
+        environment_history.restart();
+        sandbox_catalog.restart();
+    });
+    // A saved container place needs its first cached answer before replay or
+    // automatic submit can classify it. Read errors settle this wait and keep
+    // the ordinary refusal path in charge. This read never forces a probe.
+    let place_catalog_pending = use_callback(move |target: Option<farhelm_proto::LaunchTarget>| {
+        target.is_some_and(|target| target.place().container_host().is_some())
+            && environment_catalog.read().is_none()
     });
     let sandbox_answer = sandbox_catalog.read().as_ref().cloned();
     let recipe_names = sandbox_answer
@@ -3242,6 +3359,7 @@ pub(super) fn CreateSessionForm(
     // whose cached value can lag an earlier edit in the same event turn.
     let DraftFields {
         recipe,
+        environment_target,
         cwd,
         cwd_edited,
         title,
@@ -3832,6 +3950,14 @@ pub(super) fn CreateSessionForm(
     // Feed replies update this handoff immediately, while `offered_history`
     // remains stable until a deliberate choice calls the shared promoter.
     let mut fetched_history = use_signal(|| None::<(CreateTarget, api::LaunchHistory)>);
+    // Environment history is helm-wide reusable intent, not evidence about
+    // the selected installation's default folder. It shares the promotion
+    // boundary while retaining its own initial/pending/failed-read semantics.
+    let fetched_environment_history = use_signal(|| None::<Vec<api::LaunchHistoryEntry>>);
+    let offered_environment_history = use_signal(|| None::<Vec<api::LaunchHistoryEntry>>);
+    // Independent read completion must be observable without mistaking a
+    // simultaneous ordinary-history reply for consumption of environment data.
+    let fetched_environment_history_revision = use_signal(|| 0_u64);
     // This revision is deliberately exposed on the mounted dialog for the
     // browser contract tests. Offered history must remain unchanged when this
     // advances; the attribute lets those tests prove the component consumed a
@@ -3841,6 +3967,12 @@ pub(super) fn CreateSessionForm(
         fetched_history.set(history_for_offer.clone());
         fetched_history_revision.with_mut(|revision| *revision = revision.wrapping_add(1));
     }
+    observe_environment_history(
+        environment_history.read().as_ref(),
+        fetched_environment_history,
+        offered_environment_history,
+        fetched_environment_history_revision,
+    );
     // Event handlers are independently owned `FnMut` closures. Give each
     // deliberate-promotion boundary its own snapshot handle rather than
     // letting a search handler consume the value an ordinary recent needs.
@@ -3888,7 +4020,7 @@ pub(super) fn CreateSessionForm(
             hosts
                 .iter()
                 .find(|host| host.id == id && host.session_owned)
-                .map(|host| host.recipe.clone().unwrap_or_default())
+                .and_then(|host| host.environment_target.clone())
         })
         .flatten();
     let mut sandbox_seeded = use_signal(|| None::<u64>);
@@ -3911,7 +4043,7 @@ pub(super) fn CreateSessionForm(
                     && chosen_host.peek().is_none()
                     && let Some(recipe) = &inherited_sandbox
                 {
-                    draft.choose_recipe(recipe.clone());
+                    draft.choose_target(Some(recipe.clone()));
                 }
                 sandbox_seeded.set(Some(source_generation));
             }
@@ -3999,6 +4131,8 @@ pub(super) fn CreateSessionForm(
         offered_history,
         create_target,
         fetched_history,
+        offered_environment_history,
+        fetched_environment_history,
     };
     // Handles only: each concrete operation earns its existing tracked reads
     // after live admission, rather than capturing authority at render time.
@@ -4210,16 +4344,15 @@ pub(super) fn CreateSessionForm(
         .and_then(|result| result.as_ref().err())
         .cloned();
     let current_history_target = create_target();
-    let recent_history = offered_history
-        .read()
-        .as_ref()
-        .and_then(|(target, history)| {
-            (Some(target) == current_history_target.as_ref()
-                && Some(target) == destination_now.as_ref())
-            .then_some(history)
-        })
-        .cloned()
-        .unwrap_or_default();
+    let recent_history = offered_recent_history(
+        offered_history.read().as_ref(),
+        current_history_target.as_ref(),
+        destination_now.as_ref(),
+        offered_environment_history
+            .read()
+            .as_deref()
+            .unwrap_or_default(),
+    );
     let folder_recents = folder_suggestions(&recent_history.folders, &cwd(), cwd_edited())
         .into_iter()
         .cloned()
@@ -4259,8 +4392,13 @@ pub(super) fn CreateSessionForm(
     .into_iter()
     .cloned()
     .collect::<Vec<_>>();
-    let selected_host_label = recipe()
-        .map(|name| format!("New sandbox · {name}"))
+    let selected_host_label = environment_target()
+        .map(|target| {
+            format!(
+                "new {}",
+                crate::environment_ui::target_label(&target, &environment_places)
+            )
+        })
         .unwrap_or_else(|| {
             selected
                 .and_then(|id| hosts.iter().find(|host| host.id == id))
@@ -4484,28 +4622,45 @@ pub(super) fn CreateSessionForm(
         invalid_wrapper: launch_tab() == LaunchTab::Agent
             && wrapper_words(&structured_wrapper()).is_err(),
     };
-    let container_available = (recipe().is_some() && draft.snapshot().destination().is_managed())
-        || container_destination_available(
+    let container_available = recipe().is_none()
+        && (container_destination_available(
             &draft.snapshot(),
             prefill_for_submit.as_ref(),
             &hosts,
             selected,
-        )
-        || container_recent_destination_available(
+        ) || container_recent_destination_available(
             &draft.snapshot(),
             offered_history.peek().as_ref(),
             live_destination.peek().as_ref(),
-        );
+        ));
     let container_refusal = draft.snapshot().container_refusal(container_available);
-    let sandbox_reason = recipe().and_then(|name| match &sandbox_answer {
-        None => Some("Loading Tensorlake recipes…".into()),
-        Some(Err(error)) => Some(error.clone()),
-        Some(Ok((recipes, settings))) => recipes
-            .iter()
-            .find(|recipe| recipe.name == name)
-            .map(|recipe| crate::sandbox_sessions::recipe_refusal(recipe, settings))
-            .unwrap_or_else(|| Some(format!("Recipe {name:?} is unavailable"))),
-    });
+    let sandbox_reason = environment_target()
+        .and_then(|target| {
+            let name = target.recipe().to_string();
+            match &sandbox_answer {
+                None => Some("Loading recipes…".into()),
+                Some(Err(error)) => Some(error.clone()),
+                Some(Ok((recipes, settings))) => recipes
+                    .iter()
+                    .find(|recipe| recipe.name == name)
+                    .map(|recipe| {
+                        crate::environment_ui::ProviderUi(target.provider())
+                            .recipe_refusal(recipe, settings)
+                    })
+                    .unwrap_or_else(|| Some(format!("Recipe {name:?} is unavailable"))),
+            }
+        })
+        .or_else(|| {
+            environment_target().and_then(|target| {
+                target.place().host().and_then(|_| {
+                    environment_places
+                        .iter()
+                        .find(|place| place.place == target.place())
+                        .map(|place| place.reason.clone())
+                        .unwrap_or_else(|| Some("The container host is unavailable".into()))
+                })
+            })
+        });
     let launch_refusal = if origin_unresolved {
         Some("The source host's placement is unavailable; wait for Hosts to refresh or choose a target explicitly")
     } else if restart_mode && !restart_host_confirmed {
@@ -4934,8 +5089,7 @@ pub(super) fn CreateSessionForm(
         search_rows.retain(|row| {
             !matches!(
                 row,
-                crate::launch_composer::ComposerSearchResult::Recent(_)
-                    | crate::launch_composer::ComposerSearchResult::Folder(_)
+                crate::launch_composer::ComposerSearchResult::Folder(_)
                     | crate::launch_composer::ComposerSearchResult::BrowsePath(_)
             )
         });
@@ -5159,18 +5313,27 @@ pub(super) fn CreateSessionForm(
         if !mount_seeded() {
             return;
         }
+        let template_target = match captured.as_ref() {
+            Some(template) => template.fields.launch_target(),
+            None => launch_templates.read().as_ref().and_then(|answer| answer.as_ref().ok())
+                .and_then(|templates| templates.iter().find(|template| {
+                    matches!(&action, crate::launch_composer::ComposerSearchResult::Template(name) if name == &template.name)
+                }))
+                .and_then(|template| template.fields.launch_target()),
+        };
         if matches!(
             action,
             crate::launch_composer::ComposerSearchResult::Template(_)
         ) && (!hosts_loaded
             || (captured.is_none() && launch_templates.read().is_none())
             || launch_catalog.read().is_none()
-            || (captured.as_ref().is_some_and(|template| template.fields.recipe.is_some())
+            || place_catalog_pending.call(template_target)
+            || (captured.as_ref().is_some_and(|template| template.fields.launch_target().is_some())
                 || draft.snapshot().recipe().is_some()
                 || launch_templates.peek().as_ref().and_then(|answer| answer.as_ref().ok())
                     .is_some_and(|templates| templates.iter().any(|template| {
                         matches!(&action, crate::launch_composer::ComposerSearchResult::Template(name) if name == &template.name)
-                            && template.fields.recipe.is_some()
+                            && template.fields.launch_target().is_some()
                     }))) && sandbox_catalog.read().is_none())
         {
             return;
@@ -5231,11 +5394,16 @@ pub(super) fn CreateSessionForm(
             && (!hosts_loaded
                 || launch_catalog.read().is_none()
                 || launch_templates.read().is_none()
+                || place_catalog_pending.call(environment_target())
+                || request
+                    .templates
+                    .iter()
+                    .any(|template| place_catalog_pending.call(template.fields.launch_target()))
                 || (draft.snapshot().recipe().is_some()
                     || request
                         .templates
                         .iter()
-                        .any(|template| template.fields.recipe.is_some()))
+                        .any(|template| template.fields.launch_target().is_some()))
                     && sandbox_catalog.read().is_none())
         {
             return;
@@ -5338,6 +5506,7 @@ pub(super) fn CreateSessionForm(
     // The effect needs readiness, not a borrow of this render's owned refusal
     // text. Container validation can produce a fresh String on every render.
     let launch_has_refusal = launch_refusal.is_some();
+    let environment_place_pending = place_catalog_pending.call(environment_target());
     use_effect(use_reactive(
         (
             &hosts_loaded,
@@ -5347,6 +5516,7 @@ pub(super) fn CreateSessionForm(
             &selected_host_available,
             &host_read_error,
             &initial_setup_pending,
+            &environment_place_pending,
         ),
         move |(
             hosts_loaded,
@@ -5356,6 +5526,7 @@ pub(super) fn CreateSessionForm(
             host_available,
             host_error,
             setup_pending,
+            place_pending,
         )| {
             if auto_launch_pending()
                 && !hosts_loaded
@@ -5371,6 +5542,7 @@ pub(super) fn CreateSessionForm(
             if !auto_launch_pending()
                 || !mount_seeded()
                 || setup_pending
+                || place_pending
                 || pending_initial_action().is_some()
                 || !pending_initial_templates.read().is_empty()
                 || !hosts_loaded
@@ -5816,9 +5988,12 @@ pub(super) fn CreateSessionForm(
                     };
                     launch
                 };
-                if let Some(recipe_name) = current.recipe() {
+                if let Some(target) = current.target() {
+                    let recipe_name = target.recipe().to_string();
                     if host_fixed {
-                        error.set(Some("Restart and Replace keep the existing sandbox".into()));
+                        error.set(Some(
+                            "Restart and Replace keep the existing environment".into(),
+                        ));
                         return;
                     }
                     let catalog = sandbox_catalog.peek();
@@ -5830,7 +6005,8 @@ pub(super) fn CreateSessionForm(
                                 .iter()
                                 .find(|recipe| recipe.name == recipe_name)
                                 .map(|recipe| {
-                                    crate::sandbox_sessions::recipe_refusal(recipe, settings)
+                                    crate::environment_ui::ProviderUi(target.provider())
+                                        .recipe_refusal(recipe, settings)
                                 })
                         });
                     match ready {
@@ -5841,7 +6017,7 @@ pub(super) fn CreateSessionForm(
                         }
                         None => {
                             error.set(Some(
-                                "The selected recipe is unavailable; check Settings → Tensorlake"
+                                "The selected recipe is unavailable; check Settings → Recipes"
                                     .into(),
                             ));
                             return;
@@ -5883,9 +6059,10 @@ pub(super) fn CreateSessionForm(
                         .expect("this accepted submission owns its token");
                     drop(unused_source_claim);
                     spawn(async move {
-                        let skip_billing = api::fetch_tensorlake_settings(&base)
-                            .await
-                            .is_ok_and(|settings| settings.create_without_asking);
+                        let skip_billing = !target.provider().asks_before_creating()
+                            || api::fetch_tensorlake_settings(&base)
+                                .await
+                                .is_ok_and(|settings| settings.create_without_asking);
                         if !confirmed && !skip_billing {
                             sandbox_question.set(Some(snapshot));
                             quick_launch_hidden.set(false);
@@ -5921,13 +6098,13 @@ pub(super) fn CreateSessionForm(
                         release_submitted_composer(mounted_opening, previous_presentation);
                         pending_launch.set(Some(PendingLaunch::new(
                             LaunchAction::Launch,
-                            format!("{recipe_name} sandbox"),
+                            crate::environment_ui::target_label(&target, &[]),
                             Some(title),
                         )));
                         on_create_dispatch.call(());
-                        let result = api::create_sandbox_session(
+                        let result = api::create_environment_session(
                             &base,
-                            &recipe_name,
+                            &target,
                             confirmed,
                             name_kind,
                             request,
@@ -7269,20 +7446,23 @@ pub(super) fn CreateSessionForm(
     // the form is `novalidate`, so the browser validated nothing on the way.
     let launch_from_choice = EventHandler::new(move |_| submit_answer.call(submit_consent));
     let host_select = rsx! {
-        super::host_picker::HostPicker {
-            hosts: hosts.clone(), selected, busy,
-            recipe: recipe(),
-            recipes: sandbox_answer.as_ref().filter(|_| !host_fixed).and_then(|answer| answer.as_ref().ok())
-                .map(|(recipes, settings)| recipes.iter().map(|recipe| crate::sandbox_sessions::RecipeChoice {
-                    name: recipe.name.clone(),
-                    size: format!("{} CPU · {} GB", recipe.size.cpus, recipe.size.memory_gb),
-                    refusal: crate::sandbox_sessions::recipe_refusal(recipe, settings),
-                }).collect::<Vec<_>>()).unwrap_or_default(),
-            catalog_error: sandbox_answer.as_ref().and_then(|answer| answer.as_ref().err()).cloned(),
-            on_recipe: move |name| {
-                if draft.choose_recipe(name) { folder_open.set(false); folder_active.set(None); template_panel.set(None); }
-            },
-            on_pick: choose_host, on_enter: launch_from_choice,
+        crate::environment_ui::PlacementPicker {
+            target: environment_target(),
+            last_container_host: preferences.0.read().last_container_host,
+            places: environment_places.clone(),
+            builds: build_status.read().as_ref().and_then(|answer|answer.as_ref().ok()).cloned().unwrap_or_default(),
+            recipes: sandbox_answer.as_ref().and_then(|answer| answer.as_ref().ok()).map(|(recipes,_)| recipes.clone()).unwrap_or_default(),
+            settings: sandbox_answer.as_ref().and_then(|answer| answer.as_ref().ok()).map(|(_,settings)| settings.clone()),
+            disabled: busy || host_fixed,
+            on_target: move |target| { if draft.choose_target(target) { folder_open.set(false); folder_active.set(None); template_panel.set(None); } },
+        div { class: "launch-composer-row",
+            span { class: "launch-composer-row-label", "Host" }
+            super::host_picker::HostPicker {
+                hosts: hosts.clone(), selected, busy,
+                on_recipe: move |_| {},
+                on_pick: choose_host, on_enter: launch_from_choice,
+            }
+        }
         }
     };
     // A visible guarded answer can be discarded directly. A wake continuation
@@ -7504,7 +7684,12 @@ pub(super) fn CreateSessionForm(
             // gives browser tests a synchronous observation point for races
             // that deliberately keep the visible result unchanged.
             "data-initial-templates-ready": launch_templates.read().is_some(),
+            // A held place answer needs an observable completion boundary for
+            // the other template inputs before a browser can assert it still waits.
+            "data-template-catalogs-ready": hosts_loaded && launch_templates.read().is_some()
+                && launch_catalog.read().is_some() && sandbox_catalog.read().is_some(),
             "data-history-fetched-revision": "{fetched_history_revision}",
+            "data-environment-history-fetched-revision": "{fetched_environment_history_revision}",
             "data-composer-mode": if *launch_tab.read() == LaunchTab::Agent { "structured" } else { "command" },
             "data-browse-generation": "{browse_generation()}",
             "data-browse-live-connection": "{live_browse_connection().unwrap_or_default()}",
@@ -7714,33 +7899,23 @@ pub(super) fn CreateSessionForm(
                             promote_history_snapshot(
                                 offered_history, create_target(), history_for_search.clone(),
                             );
+                            choice_targets.promote_environment_history();
                             composer_search.set(evt.value());
                             composer_search_open.set(true);
                             // Preselect the exact-word match for THIS keystroke's
                             // results. Built from the history the promotion above
-                            // just installed (read live from `offered_history`, not
+                            // just installed (read live from both offered snapshots, not
                             // from a render-time clone that predates the promotion),
                             // so the index agrees with the list the next render
                             // draws from the same signal; the clamp at
                             // `composer_active_index` covers whatever still moves
                             // between this keystroke and a later render.
-                            let promoted_history = offered_history
-                                .peek()
-                                .as_ref()
-                                .and_then(|(target, history)| {
-                                    // The SAME two-part predicate the render body's
-                                    // `recent_history` applies: the offered target must
-                                    // match both the parent-derived `create_target` and
-                                    // the synchronously derived destination
-                                    // (`live_destination`), because during the
-                                    // one-render lag after a host change the former
-                                    // still names the old host while the render will
-                                    // already show nothing for it.
-                                    (Some(target) == create_target().as_ref()
-                                        && Some(target) == live_destination.peek().as_ref())
-                                    .then(|| history.clone())
-                                })
-                                .unwrap_or_default();
+                            let promoted_history = offered_recent_history(
+                                offered_history.peek().as_ref(),
+                                create_target().as_ref(),
+                                live_destination.peek().as_ref(),
+                                offered_environment_history.peek().as_deref().unwrap_or_default(),
+                            );
                             let active_harness = (draft.snapshot().tab()
                                 == LaunchTab::Agent)
                                 .then(&*structured_harness)
@@ -7901,7 +8076,7 @@ pub(super) fn CreateSessionForm(
                                             rsx! {
                                                 if matches!(result, crate::launch_composer::ComposerSearchResult::Permissions(crate::launch_composer::ComposerPermission::Guarded)) {
                                                     span { class: "visually-hidden", id: "launch-composer-search-option-{index}-help",
-                                                        {search_result_tooltip(&result, &selected_host_label, *structured_harness.read())}
+                                                        {search_result_tooltip(&result, &match &result {crate::launch_composer::ComposerSearchResult::Recent(entry)=>crate::launch_composer::recent_placement_label(entry,&selected_host_label,&environment_places),_=>selected_host_label.clone()}, *structured_harness.read())}
                                                     }
                                                 }
                                                 button {
@@ -7913,7 +8088,7 @@ pub(super) fn CreateSessionForm(
                                                     class: if matches!(result, crate::launch_composer::ComposerSearchResult::Recent(_)) {
                                                         if composer_active_index == index { "launch-composer-search-recent selected" } else { "launch-composer-search-recent" }
                                                     } else if composer_active_index == index { "selected" } else { "" },
-                                                    "data-tooltip": search_result_tooltip(&result, &selected_host_label, *structured_harness.read()),
+                                                    "data-tooltip": search_result_tooltip(&result, &match &result {crate::launch_composer::ComposerSearchResult::Recent(entry)=>crate::launch_composer::recent_placement_label(entry,&selected_host_label,&environment_places),_=>selected_host_label.clone()}, *structured_harness.read()),
                                                     "data-tooltip-paragraphs": if matches!(result, crate::launch_composer::ComposerSearchResult::Permissions(crate::launch_composer::ComposerPermission::Guarded)) { "true" } else { "false" },
                                                     aria_describedby: if matches!(result, crate::launch_composer::ComposerSearchResult::Permissions(crate::launch_composer::ComposerPermission::Guarded)) { format!("launch-composer-search-option-{index}-help") } else { String::new() },
                                                     // Search recents use two visual spans as ordinary
@@ -7923,7 +8098,7 @@ pub(super) fn CreateSessionForm(
                                                     aria_label: match &result {
                                                         crate::launch_composer::ComposerSearchResult::Recent(entry) => format!(
                                                             "Recent setup: {} · {} · {}",
-                                                                display_peer(&crate::launch_composer::recent_destination_label(entry)), selected_host_label,
+                                                                display_peer(&crate::launch_composer::recent_destination_label(entry)), crate::launch_composer::recent_placement_label(entry,&selected_host_label,&environment_places),
                                                             display_peer(&crate::launch_composer::selection_summary(&entry.selection)),
                                                         ),
                                                         _ => String::new(),
@@ -7973,7 +8148,7 @@ pub(super) fn CreateSessionForm(
                                                                 span { class: if entry.github_repo.is_none() { "font-mono" } else { "" },
                                                                     "{display_peer(&crate::launch_composer::recent_destination_label(&entry))}"
                                                                 }
-                                                                " · {selected_host_label}"
+                                                                " · {crate::launch_composer::recent_placement_label(entry,&selected_host_label,&environment_places)}"
                                                             }
                                                             // Keep the dangerous permission as a semantic span
                                                             // instead of flattening it into the shared summary
@@ -8007,7 +8182,7 @@ pub(super) fn CreateSessionForm(
                 // already there.
                 // A direct recent owns destination and agent fields. Restart
                 // holds those controls; search still explains a rejected recent.
-                if recipe().is_none() && !restart_mode && !recent_launches.is_empty() {
+                if !restart_mode && !recent_launches.is_empty() {
                     div { class: "launch-composer-recents",
                             span { class: "launch-composer-section-label", "Recent setups" }
                             div { class: "launch-composer-recent-slots",
@@ -8023,7 +8198,7 @@ pub(super) fn CreateSessionForm(
                                     r#type: "button",
                                     dir: "ltr",
                                     disabled: busy,
-                                    "data-tooltip": "{display_peer(&crate::launch_composer::recent_destination_label(&entry))} · {selected_host_label} · {display_peer(&summary)}",
+                                    "data-tooltip": "{display_peer(&crate::launch_composer::recent_destination_label(&entry))} · {crate::launch_composer::recent_placement_label(entry,&selected_host_label,&environment_places)} · {display_peer(&summary)}",
                                     // The visible row makes scanning cheaper, but
                                     // its tooltip and accessible name retain every
                                     // saved value that the one-line layout may
@@ -8036,7 +8211,7 @@ pub(super) fn CreateSessionForm(
                                     // leads with the verb as the button's own
                                     // name does; the row also points at the
                                     // same warning the replace button does.
-                                    aria_label: "{recent_name_prefix}{display_peer(&crate::launch_composer::recent_destination_label(&entry))} · {selected_host_label} · {display_peer(&summary)}",
+                                    aria_label: "{recent_name_prefix}{display_peer(&crate::launch_composer::recent_destination_label(&entry))} · {crate::launch_composer::recent_placement_label(entry,&selected_host_label,&environment_places)} · {display_peer(&summary)}",
                                     aria_describedby: replace_warning.as_ref().map(|_| REPLACE_WARNING_ID),
                                     onclick: {
                                         let entry = entry.clone();
@@ -8088,7 +8263,7 @@ pub(super) fn CreateSessionForm(
                                     span { class: "launch-composer-recent-destination", dir: "ltr",
                                         span { class: "launch-composer-recent-folder", "{display_peer(&crate::launch_composer::recent_destination_label(&entry))}" }
                                         span { class: "launch-composer-recent-separator", " · " }
-                                        span { class: "launch-composer-recent-host", "{selected_host_label}" }
+                                        span { class: "launch-composer-recent-host", "{crate::launch_composer::recent_placement_label(entry,&selected_host_label,&environment_places)}" }
                                     }
                                     // Only what this setup sets explicitly, so
                                     // the row that differs stands out; the title
@@ -8197,8 +8372,7 @@ pub(super) fn CreateSessionForm(
                                 },
                             }
                             }
-                            div { class: "launch-composer-row",
-                                span { class: "launch-composer-row-label", "Host" }
+                            div { class: "launch-composer-placement-row",
                             div { class: "launch-composer-destination-row",
                                 {host_select.clone()}
                                 if !checkout_mode && recipe().is_none() {
@@ -8223,11 +8397,12 @@ pub(super) fn CreateSessionForm(
                             }
                             }
                             {host_notes.clone()}
-                            if let Some(recipe) = recipe() {
+                            if recipe().is_some() {
                                 p { class: "launch-composer-checkout-explanation",
-                                    "A new Tensorlake sandbox from {display_peer(&recipe)}, for this session. It bills while running. Suspend stops CPU and memory billing; snapshot storage still bills. Delete removes the whole sandbox and its files. After Farhelm disconnects, Tensorlake suspends it after 30 minutes without activity."
+                                    {environment_target().map(|target| crate::environment_ui::ProviderUi(target.provider()).launch_help()).unwrap_or("")}
                                 }
-                                if let Some(Ok((_, settings))) = &sandbox_answer
+                                if environment_target().is_some_and(|target|target.provider().asks_before_creating())
+                                    && let Some(Ok((_, settings))) = &sandbox_answer
                                     && let farhelm_proto::tensorlake::SshKeyStatus::Ready { register_command, .. } = &settings.ssh_key {
                                     p { "Register Farhelm's SSH key with Tensorlake before launching. Farhelm cannot check account registration." }
                                     code { "{display_peer(register_command)}" }
@@ -8387,7 +8562,7 @@ pub(super) fn CreateSessionForm(
                                     }
                                 }
                                 p { class: "launch-composer-checkout-explanation",
-                                    if recipe().is_some() { "Farhelm clones the repository in the new sandbox. Delete permanently removes the whole sandbox, including the checkout and unpushed changes." }
+                                    if recipe().is_some() { "Farhelm clones the repository in the new environment. Delete permanently removes it, including the checkout and unpushed changes." }
                                     else { "Farhelm clones the repository into a new folder named after the session, under this host's checkout folder. When the last session using it is deleted, the folder moves to the trash." }
                                 }
                             }
@@ -9411,6 +9586,8 @@ mod tests {
             offered_history: use_signal(|| None),
             create_target: use_signal(|| None),
             fetched_history: use_signal(|| None),
+            offered_environment_history: use_signal(|| None),
+            fetched_environment_history: use_signal(|| None),
         };
         let clone_host_state = use_signal(|| CloneHostState::Unconfirmable);
         let remembered_destination = use_signal(|| None);
@@ -10106,6 +10283,7 @@ mod tests {
     #[test]
     fn the_remembered_permissions_word_seeds_only_a_mode_this_build_knows() {
         let with = |word: Option<&str>| super::api::Preferences {
+            last_container_host: None,
             auto_update_remote_hosts: None,
             visit_history: Vec::new(),
             open_extensions: None,
@@ -10591,6 +10769,7 @@ mod tests {
         let launches = rows
             .iter()
             .map(|(cwd, fresh)| api::LaunchHistoryEntry {
+                target: None,
                 host: 7,
                 github_repo: fresh
                     .then(|| crate::github_checkout::GithubRepo::parse("acme/repo").unwrap()),
@@ -10614,6 +10793,202 @@ mod tests {
             launches,
             ..Default::default()
         }
+    }
+
+    /// An empty environment response must leave peer sequence order intact.
+    /// A newer sequence may carry an earlier wall-clock time after a clock jump;
+    /// sorting the combined input would pick the wrong recent representative.
+    #[farhelm_testtrace::test]
+    fn recent_merge_preserves_peer_order_when_environment_history_is_empty() {
+        let mut ordinary =
+            folder_history(&[("/newer-sequence", false), ("/older-sequence", false)]).launches;
+        ordinary[0].created_at = 10;
+        ordinary[0].creation_seq = Some(2);
+        ordinary[1].created_at = 20;
+        ordinary[1].creation_seq = Some(1);
+        assert!(ordinary[0].creation_seq > ordinary[1].creation_seq);
+        assert!(ordinary[0].created_at < ordinary[1].created_at);
+        assert_eq!(merge_recent_launches(ordinary.clone(), &[]), ordinary);
+    }
+
+    /// Cross-source recency chooses between current heads only. Neither input
+    /// may be internally reordered, and a newer environment must not be hidden
+    /// behind every ordinary row merely because it came from another endpoint.
+    #[farhelm_testtrace::test]
+    fn recent_merge_interleaves_heads_and_preserves_both_source_orders() {
+        let mut ordinary = folder_history(&[
+            ("/ordinary-a", false),
+            ("/ordinary-b", false),
+            ("/ordinary-c", false),
+        ])
+        .launches;
+        for (index, at) in [10, 50, 5].into_iter().enumerate() {
+            ordinary[index].created_at = at;
+            ordinary[index].creation_seq = Some(9 - index as u64);
+        }
+        let mut environment = folder_history(&[
+            ("/environment-a", false),
+            ("/environment-b", false),
+            ("/environment-c", false),
+        ])
+        .launches;
+        for (index, at) in [30, 7, 40].into_iter().enumerate() {
+            environment[index].target = Some(farhelm_proto::LaunchTarget::Environment {
+                recipe: "dev".into(),
+                place: farhelm_proto::Place::PodmanHost(7),
+            });
+            environment[index].created_at = at;
+            environment[index].creation_seq = Some(100 - index as u64);
+        }
+        let merged = merge_recent_launches(ordinary.clone(), &environment);
+        assert_eq!(
+            merged
+                .iter()
+                .map(|entry| entry.cwd.raw())
+                .collect::<Vec<_>>(),
+            [
+                "/environment-a",
+                "/ordinary-a",
+                "/ordinary-b",
+                "/environment-b",
+                "/environment-c",
+                "/ordinary-c"
+            ]
+        );
+        assert_eq!(
+            merged
+                .iter()
+                .filter(|entry| entry.target.is_none())
+                .cloned()
+                .collect::<Vec<_>>(),
+            ordinary
+        );
+        assert_eq!(
+            merged
+                .iter()
+                .filter(|entry| entry.target.is_some())
+                .cloned()
+                .collect::<Vec<_>>(),
+            environment
+        );
+    }
+
+    /// Helm-wide environment intent survives the absence of an ordinary host
+    /// without becoming evidence for that host's remembered default folder.
+    #[farhelm_testtrace::test]
+    fn recent_projection_keeps_environment_and_default_folder_authority_separate() {
+        let ordinary = folder_history(&[("/ordinary-remembered", false)]);
+        let target = CreateTarget::new(7, "ordinary-install".into());
+        let offered = (target.clone(), ordinary.clone());
+        let mut environment = folder_history(&[("~", false)]).launches;
+        environment[0].target = Some(farhelm_proto::LaunchTarget::Environment {
+            recipe: "dev".into(),
+            place: farhelm_proto::Place::PodmanHost(8),
+        });
+        environment[0].created_at = 2;
+        let suggestions =
+            offered_recent_history(Some(&offered), Some(&target), Some(&target), &environment);
+        assert_eq!(suggestions.launches[0], environment[0]);
+        assert_eq!(remembered_folder(&offered.1), "/ordinary-remembered");
+        assert_eq!(
+            offered.1, ordinary,
+            "a suggestion projection cannot rewrite default-folder authority"
+        );
+        let independent = offered_recent_history(Some(&offered), None, None, &environment);
+        assert_eq!(independent.launches, environment);
+        assert!(independent.folders.is_empty());
+    }
+
+    /// Empty success is a frozen offer, while pending/failure retains the last
+    /// successful fetched data. The real ChoiceTargets promoter alone reveals
+    /// later entries or an empty replacement, even without an ordinary target.
+    #[farhelm_testtrace::test]
+    fn environment_history_retains_success_and_promotes_empty_deliberately() {
+        use super::*;
+        #[derive(Clone, Copy)]
+        struct Fixture {
+            choices: ChoiceTargets,
+            revision: Signal<u64>,
+        }
+        std::thread_local! {
+            static FIXTURE: std::cell::Cell<Option<Fixture>> = const { std::cell::Cell::new(None) };
+        }
+        /// Mount actual history handles without an ordinary installation or
+        /// reader; environment promotion must not depend on either existing.
+        fn fixture() -> Element {
+            let choices = ChoiceTargets {
+                partial_template_hint: use_signal(|| false),
+                offered_history: use_signal(|| None),
+                create_target: use_signal(|| None),
+                fetched_history: use_signal(|| None),
+                offered_environment_history: use_signal(|| None),
+                fetched_environment_history: use_signal(|| None),
+            };
+            let revision = use_signal(|| 0);
+            FIXTURE.with(|slot| slot.set(Some(Fixture { choices, revision })));
+            rsx! {}
+        }
+        let mut dom = VirtualDom::new(fixture);
+        dom.rebuild_in_place();
+        let f = FIXTURE.with(std::cell::Cell::get).unwrap();
+        dom.in_runtime(|| {
+            let observe = |answer: Option<&Result<Vec<api::LaunchHistoryEntry>, String>>| {
+                observe_environment_history(
+                    answer,
+                    f.choices.fetched_environment_history,
+                    f.choices.offered_environment_history,
+                    f.revision,
+                )
+            };
+            observe(None);
+            assert!(f.choices.offered_environment_history.peek().is_none());
+            observe(Some(&Err("initial read refused".into())));
+            assert!(f.choices.offered_environment_history.peek().is_none());
+            assert_eq!(*f.revision.peek(), 0);
+            observe(Some(&Ok(Vec::new())));
+            assert_eq!(
+                *f.choices.offered_environment_history.peek(),
+                Some(Vec::new())
+            );
+            let mut entries = folder_history(&[("~", false)]).launches;
+            entries[0].target = Some(farhelm_proto::LaunchTarget::Environment {
+                recipe: "dev".into(),
+                place: farhelm_proto::Place::PodmanHost(8),
+            });
+            observe(Some(&Ok(entries.clone())));
+            assert_eq!(
+                *f.choices.fetched_environment_history.peek(),
+                Some(entries.clone())
+            );
+            assert_eq!(
+                *f.choices.offered_environment_history.peek(),
+                Some(Vec::new())
+            );
+            observe(Some(&Err("read refused".into())));
+            observe(None);
+            assert_eq!(
+                *f.choices.fetched_environment_history.peek(),
+                Some(entries.clone())
+            );
+            assert_eq!(
+                *f.revision.peek(),
+                2,
+                "failure and pending reads do not invent a success"
+            );
+            f.choices.promote_environment_history();
+            assert_eq!(
+                *f.choices.offered_environment_history.peek(),
+                Some(entries.clone())
+            );
+            observe(Some(&Ok(Vec::new())));
+            assert_eq!(*f.choices.offered_environment_history.peek(), Some(entries));
+            f.choices.promote_environment_history();
+            assert_eq!(
+                *f.choices.offered_environment_history.peek(),
+                Some(Vec::new())
+            );
+        });
+        FIXTURE.with(|slot| slot.set(None));
     }
 
     /// The per-host last folder is the newest plain-folder launch, so a fresh
@@ -11560,6 +11935,7 @@ mod tests {
             target.clone(),
             api::LaunchHistory {
                 launches: vec![api::LaunchHistoryEntry {
+                    target: None,
                     host: 1,
                     github_repo: None,
                     canonical_cwd: Some("/work/project".into()),

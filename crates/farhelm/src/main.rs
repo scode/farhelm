@@ -1038,6 +1038,7 @@ impl LaunchFlags {
     ) -> farhelm_proto::launcher::TemplateFields {
         use farhelm_proto::launcher::{LauncherKind, TemplateDestination, TemplateFields};
         TemplateFields {
+            target: None,
             prompt: self.prompt.clone().or_else(|| self.prompt_file.clone()),
             permission_flags: None,
             kind: self.command.as_ref().map(|_| LauncherKind::Command),

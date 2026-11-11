@@ -8,9 +8,14 @@ use farhelm_proto::tensorlake::{TunnelState, TunnelView};
 pub(crate) fn failed(host: &crate::Host) -> bool {
     crate::hosts::is_connected(&host.state)
         && host
-            .tensorlake
+            .environment
             .as_ref()
-            .and_then(|host| host.tunnels.as_ref())
+            .and_then(|environment| environment.tunnels.as_ref())
+            .or_else(|| {
+                host.tensorlake
+                    .as_ref()
+                    .and_then(|sandbox| sandbox.tunnels.as_ref())
+            })
             .is_some_and(|view| {
                 matches!(
                     &view.state,

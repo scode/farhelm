@@ -2853,7 +2853,7 @@ async fn write_template_for_agent(
                 .to_string(),
         ));
     }
-    if fields.recipe.is_some() {
+    if fields.launch_target().is_some() {
         return Err(recipe_template_refusal());
     }
     if !create
@@ -3361,6 +3361,7 @@ fn merge_template_fields(
         resume_command,
         host,
         recipe,
+        target,
         destination,
         name,
         name_kind,
@@ -3387,6 +3388,7 @@ fn merge_template_fields(
         resume_command: resume_command.or(existing.resume_command),
         host: host.or(existing.host),
         recipe: recipe.or(existing.recipe),
+        target: target.or(existing.target),
         destination: destination.or(existing.destination),
         name: name.or(existing.name),
         // A title-only edit keeps a stored Fixed policy. Explicit Base is
@@ -3408,7 +3410,7 @@ async fn find_template(
         .find(|template| template.name == name);
     if template
         .as_ref()
-        .is_some_and(|template| template.fields.recipe.is_some())
+        .is_some_and(|template| template.fields.launch_target().is_some())
     {
         return Err(recipe_template_refusal());
     }
@@ -3479,7 +3481,7 @@ async fn template_listing(state: &AppState, caller_entry_uuid: &str) -> anyhow::
     Ok(AgentReply::Templates {
         templates: templates
             .iter()
-            .filter(|template| template.fields.recipe.is_none())
+            .filter(|template| template.fields.launch_target().is_none())
             .map(|template| {
                 let host_name = template.fields.host.as_deref().and_then(|identity| {
                     crate::agent_launch::template_host_row(&views, identity)
@@ -4553,11 +4555,11 @@ mod tests {
     /// of the registry while preserving a distinct identity for each host number.
     fn host_view(id: i64, name: &str, kind: &'static str, state: HostStateView) -> HostView {
         HostView {
-            environment: None,
             id,
             entry_uuid: format!("{id:08x}-0000-4000-8000-000000000000"),
             kind,
             tensorlake: None,
+            environment: None,
             name: name.to_string(),
             destination: None,
             alias: None,

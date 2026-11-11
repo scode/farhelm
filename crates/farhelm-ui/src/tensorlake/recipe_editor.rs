@@ -44,8 +44,7 @@ enum Base {
     TensorlakeUbuntu,
     Image,
     Snapshot,
-    /// Preserve a shared-catalog base while this Tensorlake editor is staged.
-    /// Its reference and user remain intact unless the user chooses a new base.
+    /// An existing OCI image and the login account prepared inside it.
     ContainerImage,
 }
 
@@ -579,10 +578,10 @@ pub(crate) fn RecipeEditor(
         .map(|view| view.name.clone())
         .unwrap_or_default();
     // A build may finish while this editor keeps its opening view. Warn about
-    // cleanup unconditionally, naming only the snapshots Farhelm built so a
-    // user-supplied base is never described as part of the deletion.
+    // cleanup across every place unconditionally. Only Farhelm-built artifacts
+    // belong to the recipe, and containers can still keep its images in use.
     let delete_question = format!(
-        "Delete recipe {shown_name}? Any running build is cancelled and the snapshots Farhelm built for it on Tensorlake are deleted."
+        "Delete recipe {shown_name}? Running builds are cancelled and Farhelm's images and snapshots for this recipe are deleted. Images in use must be released first."
     );
     let title = match &existing {
         None => "New recipe".to_string(),
@@ -603,7 +602,7 @@ pub(crate) fn RecipeEditor(
                 "{title}"
             }
         }
-            p { class: "host-settings-help", "How Farhelm creates Tensorlake sandboxes for this recipe." }
+            p { class: "host-settings-help", "Software and credentials for new container and sandbox sessions." }
 
             label { class: "checkout-root-label", span { "Name" }
                 input { r#type: "text", class: "recipe-name font-mono", value: "{draft.read().name}",
@@ -614,7 +613,7 @@ pub(crate) fn RecipeEditor(
             }
             p { class: "host-settings-help", "Can't be changed later. Hosts refer to their recipe by name. Lowercase letters, digits and hyphens." }
 
-            div { class: "checkout-root-label", span { "Size" }
+            div { class: "checkout-root-label", span { "Size (Tensorlake sandboxes only)" }
                 div { class: "recipe-size",
                     label { class: "checkout-root-label",
                         span { "CPUs" }
@@ -636,35 +635,33 @@ pub(crate) fn RecipeEditor(
                     }
                 }
             }
-            p { class: "host-settings-help", "Tensorlake decides what your plan allows when it creates a sandbox." }
+            p { class: "host-settings-help", "Tensorlake decides which sizes your plan allows." }
 
             div { class: "checkout-root-label", span { "Software" }
                 div { class: "recipe-source-cards", role: "group", aria_label: "Software",
                     button { r#type: "button", class: "recipe-source-card", disabled: locked,
                         aria_pressed: recipe_base == Base::TensorlakeUbuntu,
                         onclick: move |_| { draft.write().base = Base::TensorlakeUbuntu; error.set(None); },
-                        span { class: "recipe-source-card-title", "Tensorlake Ubuntu" }
-                        span { class: "recipe-source-card-help", "Tensorlake's Ubuntu image with systemd. Nothing else to prepare." }
+                        span { class: "recipe-source-card-title", "Managed Ubuntu" }
+                        span { class: "recipe-source-card-help", "Ubuntu with systemd, for Tensorlake sandboxes and Podman containers." }
                     }
                     button { r#type: "button", class: "recipe-source-card", disabled: locked,
                         aria_pressed: recipe_base == Base::Image,
                         onclick: move |_| { draft.write().base = Base::Image; error.set(None); },
                         span { class: "recipe-source-card-title", "Your image" }
-                        span { class: "recipe-source-card-help", "An image in your Tensorlake project, by name." }
+                        span { class: "recipe-source-card-help", "Tensorlake only: an image in your project, by name." }
                     }
                     button { r#type: "button", class: "recipe-source-card", disabled: locked,
                         aria_pressed: recipe_base == Base::Snapshot,
                         onclick: move |_| { draft.write().base = Base::Snapshot; error.set(None); },
                         span { class: "recipe-source-card-title", "Your snapshot" }
-                        span { class: "recipe-source-card-help", "A snapshot in your Tensorlake project, by ID." }
+                        span { class: "recipe-source-card-help", "Tensorlake only: a snapshot in your project, by ID." }
                     }
-                    if !draft.read().container_reference.is_empty() {
-                        button { r#type: "button", class: "recipe-source-card", disabled: locked,
+                    button { r#type: "button", class: "recipe-source-card", disabled: locked,
                             aria_pressed: recipe_base == Base::ContainerImage,
                             onclick: move |_| { draft.write().base = Base::ContainerImage; error.set(None); },
                             span { class: "recipe-source-card-title", "Container image" }
                             span { class: "recipe-source-card-help", "Runs on Podman hosts." }
-                        }
                     }
                 }
             }
@@ -685,10 +682,14 @@ pub(crate) fn RecipeEditor(
                     p { class: "host-settings-help", "A Tensorlake snapshot in your project; `tl sbx checkpoint ls` lists them." }
                 } else if recipe_base == Base::ContainerImage {
                     label { class: "checkout-root-label", span { "Container image" }
-                        input { r#type: "text", class: "font-mono", value: "{draft.read().container_reference}", readonly: true }
+                        input { r#type: "text", class: "font-mono", value: "{draft.read().container_reference}", readonly: locked,
+                            autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
+                            oninput: move |event| { draft.write().container_reference=event.value(); error.set(None); } }
                     }
                     label { class: "checkout-root-label", span { "Container login user" }
-                        input { r#type: "text", class: "font-mono", value: "{draft.read().container_user}", readonly: true }
+                        input { r#type: "text", class: "font-mono", value: "{draft.read().container_user}", readonly: locked,
+                            autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
+                            oninput: move |event| { draft.write().container_user=event.value(); error.set(None); } }
                     }
                 }
                 p { class: "host-settings-help recipe-base-requirements",
@@ -700,8 +701,16 @@ pub(crate) fn RecipeEditor(
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                     oninput: move |event| { draft.write().packages = event.value(); error.set(None); } }
             }
-            p { class: "host-settings-help", "Optional. Separated by spaces or new lines. Changes take effect at the next snapshot build." }
-            p { class: "host-settings-help", "Farhelm then adds Claude Code and Codex with their official installers and takes a snapshot." }
+            p { class: "host-settings-help", "Optional. Separated by spaces or new lines. Changes take effect at the next recipe build." }
+            // The shared catalog must explain both artifacts without implying
+            // that container builds create a billed Tensorlake snapshot.
+            p { class: "host-settings-help",
+                match recipe_base {
+                    Base::Image | Base::Snapshot => crate::environment_ui::ProviderUi(farhelm_proto::ProviderKind::Tensorlake).recipe_build_help(),
+                    Base::TensorlakeUbuntu => "Farhelm then adds Claude Code and Codex with their official installers. On Tensorlake it takes a snapshot; on a container host it saves an image for launches there.",
+                    Base::ContainerImage => crate::environment_ui::ProviderUi(farhelm_proto::ProviderKind::Podman).recipe_build_help(),
+                }
+            }
 
             div { class: "checkout-root-label", span { "Tunnels to your side" }
                 for (index, row) in tunnels.into_iter().enumerate() {
@@ -808,7 +817,7 @@ pub(crate) fn RecipeEditor(
 
             if !is_new {
                 p { class: "host-settings-help recipe-edit-note",
-                    "Size applies only to hosts created after you save. Base and package changes take effect at the next snapshot build and leave existing hosts unchanged. Tunnels, endpoints and credential selections are read when a host connects or is set up, so those changes reach existing hosts at their next connection."
+                    "Size applies to Tensorlake sandboxes created after you save. Base and package changes take effect at the next recipe build. Tunnels, endpoints and credential selections are read when a host connects or is set up, so those changes reach existing hosts at their next connection."
                 }
             }
 

@@ -429,7 +429,8 @@ pub(crate) enum ComposerSearchResult {
     Folder(String),
     /// Explicitly request a new checkout, preserving the agent selection.
     Github(crate::github_checkout::GithubRepo),
-    Recent(LaunchHistoryEntry),
+    /// Keep the saved launch's size out of the search result array.
+    Recent(Box<LaunchHistoryEntry>),
 }
 
 /// The permission choices exposed by launch-composer search.
@@ -1307,7 +1308,7 @@ pub(crate) fn search_results(
             )
             .to_ascii_lowercase();
             if query.is_empty() || haystack.contains(&folded_query) {
-                results.push(ComposerSearchResult::Recent(launch.clone()));
+                results.push(ComposerSearchResult::Recent(Box::new(launch.clone())));
             }
         }
     }
@@ -1466,7 +1467,9 @@ fn ranked_recents<'a>(
         .launches
         .iter()
         .filter(|entry| {
-            selected_destination.is_none_or(|destination| launch_destination(entry) == destination)
+            entry.target.is_some()
+                || selected_destination
+                    .is_none_or(|destination| launch_destination(entry) == destination)
         })
         .filter(|entry| matches_filter(&entry.selection, filter))
         .collect::<Vec<_>>();
@@ -1479,6 +1482,7 @@ fn ranked_recents<'a>(
             // frequency but do not get their own row.
             if candidates[..index].iter().any(|prior| {
                 normalized_selection(&prior.selection) == normalized_selection(&entry.selection)
+                    && prior.target == entry.target
                     && launch_destination(prior) == launch_destination(entry)
             }) {
                 None
@@ -1488,6 +1492,7 @@ fn ranked_recents<'a>(
                     .filter(|candidate| {
                         normalized_selection(&candidate.selection)
                             == normalized_selection(&entry.selection)
+                            && candidate.target == entry.target
                             && launch_destination(candidate) == launch_destination(entry)
                     })
                     .count();
@@ -1538,7 +1543,8 @@ pub(crate) fn destination_recents<'a>(
         .into_iter()
         .filter(|entry| match destination {
             DestinationDraft::Existing { cwd } => {
-                entry.github_repo.is_some()
+                entry.target.is_some()
+                    || entry.github_repo.is_some()
                     || launch_destination(entry)
                         == RecentDestination::Existing(canonical_destination(history, cwd))
             }
@@ -1589,6 +1595,22 @@ pub(crate) fn recent_destination_label(entry: &LaunchHistoryEntry) -> String {
         || entry.cwd.raw().to_owned(),
         |repo| format!("gh:{}", repo.identifier()),
     )
+}
+
+/// Recent rows show their own complete placement, rather than the launcher's
+/// current host. The ordinary fallback is already display-escaped by its owner.
+pub(crate) fn recent_placement_label(
+    entry: &LaunchHistoryEntry,
+    ordinary_label: &str,
+    places: &[farhelm_proto::EnvironmentPlaceView],
+) -> String {
+    entry
+        .target
+        .as_ref()
+        .map(|target| {
+            crate::peer::display_peer(&crate::environment_ui::target_label(target, places))
+        })
+        .unwrap_or_else(|| ordinary_label.to_string())
 }
 
 /// Fresh intent and an existing path remain different setups even when their
@@ -2424,12 +2446,50 @@ mod tests {
         }
     }
 
+    /// A place is reusable launch intent, not the identity of the disposable
+    /// supervisor that accepted the previous launch. Equal recipes at different
+    /// places must not collapse into one frequency-ranked setup.
+    #[test]
+    fn environment_recents_keep_place_in_the_grouping_key() {
+        let first = LaunchHistoryEntry {
+            target: Some(farhelm_proto::LaunchTarget::Environment {
+                recipe: "dev".into(),
+                place: farhelm_proto::Place::PodmanHost(7),
+            }),
+            host: 99,
+            github_repo: None,
+            canonical_cwd: None,
+            cwd: "~".into(),
+            selection: selection(LaunchHarness::Codex, None, None),
+            created_at: 2,
+            creation_seq: Some(2),
+        };
+        let second = LaunchHistoryEntry {
+            target: Some(farhelm_proto::LaunchTarget::Environment {
+                recipe: "dev".into(),
+                place: farhelm_proto::Place::PodmanHost(8),
+            }),
+            created_at: 1,
+            ..first.clone()
+        };
+        let history = LaunchHistory {
+            launches: vec![first.clone(), second],
+            ..Default::default()
+        };
+        assert_eq!(
+            matching_recents(&history, &ComposerFilter::default(), None).len(),
+            2
+        );
+        assert_eq!(recent_destination_label(&first), "~");
+    }
+
     /// Repeated fresh allocations are one reusable repo setup. An explicit
     /// existing launch into its old cwd and a different permission choice are
     /// separate setups, and cwd filtering must never select fresh intent.
     #[test]
     fn repo_recents_group_intent_instead_of_previous_allocation_paths() {
         let fresh = LaunchHistoryEntry {
+            target: None,
             host: HostId::default(),
             github_repo: Some(crate::github_checkout::GithubRepo::parse("acme/bar").unwrap()),
             canonical_cwd: Some("/work/bar-2".into()),
@@ -2439,6 +2499,7 @@ mod tests {
             creation_seq: Some(4),
         };
         let previous = LaunchHistoryEntry {
+            target: None,
             canonical_cwd: Some("/work/bar-1".into()),
             cwd: "/work/bar-1".into(),
             created_at: 1,
@@ -2446,6 +2507,7 @@ mod tests {
             ..fresh.clone()
         };
         let existing = LaunchHistoryEntry {
+            target: None,
             github_repo: None,
             created_at: 3,
             creation_seq: Some(3),
@@ -2531,6 +2593,7 @@ mod tests {
     #[test]
     fn recent_trust_is_ignored_for_grouping_display_and_application() {
         let mut entry = LaunchHistoryEntry {
+            target: None,
             host: HostId::default(),
             github_repo: None,
             cwd: "/work".into(),
@@ -2637,6 +2700,7 @@ mod tests {
         let history = LaunchHistory {
             checkout_config_revision: 0,
             launches: vec![LaunchHistoryEntry {
+                target: None,
                 host: HostId::default(),
                 github_repo: None,
                 canonical_cwd: None,
@@ -2670,6 +2734,7 @@ mod tests {
             checkout_config_revision: 0,
             launches: vec![
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: None,
@@ -2679,6 +2744,7 @@ mod tests {
                     creation_seq: Some(4),
                 },
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: None,
@@ -2688,6 +2754,7 @@ mod tests {
                     creation_seq: Some(3),
                 },
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: None,
@@ -2697,6 +2764,7 @@ mod tests {
                     creation_seq: Some(2),
                 },
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: None,
@@ -2728,6 +2796,7 @@ mod tests {
             checkout_config_revision: 0,
             launches: vec![
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: None,
@@ -2737,6 +2806,7 @@ mod tests {
                     creation_seq: Some(3),
                 },
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: None,
@@ -2746,6 +2816,7 @@ mod tests {
                     creation_seq: Some(2),
                 },
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: None,
@@ -2801,6 +2872,7 @@ mod tests {
             ],
             launches: vec![
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: Some("/one/project".into()),
@@ -2810,6 +2882,7 @@ mod tests {
                     creation_seq: Some(4),
                 },
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: Some("/one/project".into()),
@@ -2819,6 +2892,7 @@ mod tests {
                     creation_seq: Some(3),
                 },
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: Some("/two/project".into()),
@@ -3530,6 +3604,7 @@ mod tests {
     #[test]
     fn omitted_yolo_recents_group_and_filter_by_effective_mode() {
         let older = LaunchHistoryEntry {
+            target: None,
             host: HostId::default(),
             github_repo: None,
             canonical_cwd: None,
@@ -4026,6 +4101,7 @@ mod tests {
             checkout_config_revision: 0,
             launches: vec![
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: None,
@@ -4035,6 +4111,7 @@ mod tests {
                     creation_seq: Some(2),
                 },
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: None,
@@ -4173,6 +4250,7 @@ mod tests {
             launches: paths
                 .iter()
                 .map(|path| LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: Some((*path).into()),
@@ -4194,9 +4272,9 @@ mod tests {
             );
             assert_eq!(
                 search_results(false, &history, &[], &format!("recent:{query}"), None, None),
-                vec![ComposerSearchResult::Recent(
+                vec![ComposerSearchResult::Recent(Box::new(
                     history.launches[index].clone()
-                )]
+                ))]
             );
             assert_eq!(
                 recent_destination_label(&history.launches[index]),
@@ -4221,6 +4299,7 @@ mod tests {
                 creation_seq: Some(1),
             }],
             launches: vec![LaunchHistoryEntry {
+                target: None,
                 host: HostId::default(),
                 github_repo: None,
                 canonical_cwd: None,
@@ -4244,14 +4323,14 @@ mod tests {
                     id: "claude-fable-5".into(),
                     harness: LaunchHarness::Claude,
                 },
-                ComposerSearchResult::Recent(history.launches[0].clone()),
+                ComposerSearchResult::Recent(Box::new(history.launches[0].clone())),
             ]
         );
         assert_eq!(
             search_results(false, &history, &catalog, "helm", None, None),
             vec![
                 ComposerSearchResult::Folder("~/work/helm".into()),
-                ComposerSearchResult::Recent(history.launches[0].clone()),
+                ComposerSearchResult::Recent(Box::new(history.launches[0].clone())),
             ]
         );
     }
@@ -4333,6 +4412,7 @@ mod tests {
             ],
             launches: vec![
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: Some("/real/project".into()),
@@ -4342,6 +4422,7 @@ mod tests {
                     creation_seq: Some(2),
                 },
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: Some("/real/project".into()),
@@ -4384,6 +4465,7 @@ mod tests {
             folders: Vec::new(),
             launches: vec![
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: Some("/one".into()),
@@ -4393,6 +4475,7 @@ mod tests {
                     creation_seq: Some(6),
                 },
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: Some("/two".into()),
@@ -4402,6 +4485,7 @@ mod tests {
                     creation_seq: Some(5),
                 },
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: Some("/one".into()),
@@ -4411,6 +4495,7 @@ mod tests {
                     creation_seq: Some(4),
                 },
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: Some("/one".into()),
@@ -4420,6 +4505,7 @@ mod tests {
                     creation_seq: Some(3),
                 },
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: Some("/one".into()),
@@ -4429,6 +4515,7 @@ mod tests {
                     creation_seq: Some(2),
                 },
                 LaunchHistoryEntry {
+                    target: None,
                     host: HostId::default(),
                     github_repo: None,
                     canonical_cwd: Some("/three".into()),
@@ -4480,6 +4567,7 @@ mod tests {
                 creation_seq: Some(1),
             }],
             launches: vec![LaunchHistoryEntry {
+                target: None,
                 host: HostId::default(),
                 github_repo: None,
                 canonical_cwd: None,
@@ -4511,7 +4599,9 @@ mod tests {
                 ),
                 (
                     ComposerSearchGroup::RecentSetups,
-                    vec![ComposerSearchResult::Recent(history.launches[0].clone())],
+                    vec![ComposerSearchResult::Recent(Box::new(
+                        history.launches[0].clone()
+                    ))],
                 ),
             ],
             "a typed path is never an implicit filesystem search, but its two explicit actions and saved folder remain actionable in a stable order"
@@ -4527,6 +4617,7 @@ mod tests {
             checkout_config_revision: 0,
             folders: Vec::new(),
             launches: vec![LaunchHistoryEntry {
+                target: None,
                 host: HostId::default(),
                 github_repo: None,
                 canonical_cwd: None,
@@ -4585,6 +4676,7 @@ mod tests {
                 creation_seq: Some(1),
             }],
             launches: vec![LaunchHistoryEntry {
+                target: None,
                 host: HostId::default(),
                 canonical_cwd: None,
                 github_repo: None,
@@ -4646,7 +4738,9 @@ mod tests {
         )));
         let recents = search_results(false, &history, &catalog, "recent:", None, None);
         assert_eq!(recents.len(), 1);
-        assert!(recents.contains(&ComposerSearchResult::Recent(history.launches[0].clone())));
+        assert!(recents.contains(&ComposerSearchResult::Recent(Box::new(
+            history.launches[0].clone()
+        ))));
         assert!(
             recents
                 .iter()
@@ -4672,6 +4766,7 @@ mod tests {
                 creation_seq: Some(1),
             }],
             launches: vec![LaunchHistoryEntry {
+                target: None,
                 host: HostId::default(),
                 canonical_cwd: None,
                 github_repo: None,

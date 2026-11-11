@@ -378,7 +378,7 @@ pub(crate) fn TensorlakeSettings() -> Element {
             }
         }
         // Account, recipes and explicit cleanup share the saved API key.
-        crate::tensorlake::recipes::RecipeList { api_key_set: key_set }
+        // Shared recipes keep their drafts in their own Settings section.
         crate::tensorlake::orphans::OrphanList { api_key_set: key_set, key_revision: key_revision(), test_revision: test_revision() }
         section { class: "host-settings-section tensorlake-settings", aria_label: "Creating sandboxes",
             h4 { class: "host-settings-section-title", "Creating sandboxes" }
@@ -464,4 +464,17 @@ mod tests {
             "The key works. It can see 0 sandboxes."
         );
     }
+}
+
+/// The shared recipe editor stays mounted while Settings changes sections.
+/// It consumes the acknowledged account key state without owning another key form.
+#[component]
+pub(crate) fn RecipesSettings() -> Element {
+    let account = use_context::<AccountState>();
+    let key_set = account
+        .settings
+        .read()
+        .as_ref()
+        .is_some_and(|settings| settings.api_key_set);
+    rsx! { crate::tensorlake::recipes::RecipeList {api_key_set:key_set} }
 }

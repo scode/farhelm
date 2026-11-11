@@ -444,7 +444,7 @@ pub(crate) fn ManagedCheckoutMark(
         description.push_str(&format!(" Session folder: {}.", cwd.escaped()));
     }
     description.push_str(if sandbox {
-        " Delete permanently removes the whole sandbox, including this checkout and unpushed changes. Nothing moves to the trash."
+        " Delete permanently removes the whole environment, including this checkout and unpushed changes. Nothing moves to the trash."
     } else {
         " Farhelm made the checkout folder for its first session. When the last session using it is deleted, the checkout moves to the trash."
     });

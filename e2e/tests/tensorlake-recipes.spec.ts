@@ -33,10 +33,12 @@ async function removeRecipes(request: APIRequestContext, names: string[]) {
   }
 }
 
-/** Open Settings → Tensorlake and return its recipe list region. */
+/** Open the shared Recipes section and retain the existing editor guards. */
 async function openRecipes(page: Page): Promise<Locator> {
-  const dialog = await openSettings(page, "tensorlake");
+  const dialog = await openSettings(page, "recipes");
   const list = dialog.getByRole("region", { name: "Recipes", exact: true });
+  await expect(list).toHaveCount(1);
+  await expect(dialog.getByRole("heading", { name: "Recipes", exact: true })).toHaveCount(1);
   await expect(list.getByRole("button", { name: "New recipe", exact: true }))
     .toBeVisible();
   return list;
@@ -124,9 +126,9 @@ async function expectSettingsRecipeErrorVisible(error: Locator) {
   }).toBe("visible");
 }
 
-/** Settings keeps account content before the editor and other settings after
- * it. Sample its own top/middle/bottom, rather than the whole panel's bottom
- * where a correctly bounded sticky row has already left the viewport. */
+/** Sample the editor's top, middle and bottom inside Settings' scrollport.
+ * Its sticky answers belong to the editor, so each position follows that
+ * region as it replaces the recipe list. */
 async function scrollRecipeEditor(editor: Locator, fraction: number) {
   return editor.evaluate((element, fraction) => {
     const body = element.closest(".host-settings-body")!;
@@ -152,24 +154,32 @@ for (const palette of ["dark", "light"] as const) {
     async ({ page, request }, info) => {
       const existing = `e2e-sticky-${palette}`;
       const saved = `e2e-sticky-new-${palette}`;
+      // Six rows give the standalone Recipes section its own overflow. The
+      // geometry assertion below verifies that premise before opening the editor.
+      const seeded = [existing, ...Array.from({ length: 5 }, (_, index) =>
+        `e2e-sticky-scroll-${palette}-${index + 1}`)];
+      const owned = [...seeded, saved];
       const before = (await recipes(request)).map((row) => row.name);
-      expect(before, "fixture owns its recipe names").not.toContain(existing);
-      expect(before).not.toContain(saved);
-      const created = await request.post("/api/tensorlake/recipes", {
-        data: {
-          name: existing,
-          recipe: {
-            size: { cpus: 2, memory_gb: 4, disk_gb: 20 },
-            base: { kind: "tensorlake_ubuntu" },
-            packages: [],
-            claude: null,
-            codex: null,
-            tunnels: [],
-          },
-        },
-      });
-      expect(created.ok(), await created.text()).toBe(true);
+      for (const name of owned) {
+        expect(before, "fixture owns its recipe names").not.toContain(name);
+      }
       try {
+        for (const name of seeded) {
+          const created = await request.post("/api/tensorlake/recipes", {
+            data: {
+              name,
+              recipe: {
+                size: { cpus: 2, memory_gb: 4, disk_gb: 20 },
+                base: { kind: "tensorlake_ubuntu" },
+                packages: [],
+                claude: null,
+                codex: null,
+                tunnels: [],
+              },
+            },
+          });
+          expect(created.ok(), await created.text()).toBe(true);
+        }
         await page.emulateMedia({ colorScheme: palette });
         await page.setViewportSize({ width: 1280, height: 720 });
         await page.goto("/");
@@ -187,8 +197,15 @@ for (const palette of ["dark", "light"] as const) {
           name: "New recipe",
           exact: true,
         });
+        for (const name of seeded) {
+          await expect(list.getByRole("button", { name: `Edit ${name}`, exact: true })).toHaveCount(1);
+        }
         await expect(list.getByRole("listitem").filter({ hasText: existing }))
           .toBeVisible();
+        await page.evaluate(() => document.fonts.ready);
+        await expect.poll(() => body.evaluate((element) => element.scrollHeight - element.clientHeight), {
+          message: "premise: the complete recipe list overflows Settings' scrollport",
+        }).toBeGreaterThan(100);
         await newRecipe.scrollIntoViewIfNeeded();
         expect(
           (await newRecipe.boundingBox())!.width,
@@ -262,7 +279,7 @@ for (const palette of ["dark", "light"] as const) {
         ).toHaveCSS("font-size", "13px");
         const captions = editor.locator("div.checkout-root-label > span");
         await expect(captions).toHaveText([
-          "Size", "Software", "Tunnels to your side", "GitHub", "Agents",
+          "Size (Tensorlake sandboxes only)", "Software", "Tunnels to your side", "GitHub", "Agents",
         ]);
         for (const caption of await captions.all()) {
           await expect(caption).toHaveCSS("font-size", "14px");
@@ -480,7 +497,7 @@ for (const palette of ["dark", "light"] as const) {
         await close.click();
         await expect(dialog).toHaveCount(0);
       } finally {
-        await removeRecipes(request, [existing, saved]);
+        await removeRecipes(request, owned);
       }
     },
   );
@@ -626,7 +643,7 @@ test("a managed recipe is created, edited and deleted without exposing its token
       .toHaveValue("4");
     await expect(editor.getByRole("spinbutton", { name: /^Disk, GB/ }))
       .toHaveValue("20");
-    await expect(editor.getByRole("button", { name: /^Tensorlake Ubuntu/ }))
+    await expect(editor.getByRole("button", { name: /^Managed Ubuntu/ }))
       .toHaveAttribute("aria-pressed", "true");
     await editor.getByRole("textbox", { name: "Ubuntu packages", exact: true })
       .fill("git ripgrep\njq git");
@@ -735,7 +752,7 @@ test("a managed recipe is created, edited and deleted without exposing its token
     });
     await deleting.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(
-      deleting.getByText(`Delete recipe ${name}? Any running build is cancelled and the snapshots Farhelm built for it on Tensorlake are deleted.`, {
+      deleting.getByText(`Delete recipe ${name}? Running builds are cancelled and Farhelm's images and snapshots for this recipe are deleted. Images in use must be released first.`, {
         exact: true,
       }),
     ).toBeVisible();
@@ -769,7 +786,9 @@ test("a managed recipe is created, edited and deleted without exposing its token
  * Why: "New recipe" must never overwrite another recipe, refusals must leave
  * the draft editable, and leaving with unsaved changes must not lose them
  * silently. Base selection must not quietly discard packages or imply that
- * an image or snapshot will run without Farhelm building on it. */
+ * an image or snapshot will run without Farhelm building on it. Shared and
+ * container bases must explain their retained artifact without implying that
+ * a container build creates a Tensorlake snapshot. */
 test("the recipe editor refuses bad names, asks before leaving, and saves a custom base", async ({ page, request }) => {
   const existing = "e2e-existing";
   const custom = "e2e-custom-base";
@@ -845,9 +864,21 @@ test("the recipe editor refuses bad names, asks before leaving, and saves a cust
     await list.getByRole("button", { name: "New recipe", exact: true }).click();
     await nameField.fill(custom);
     const packages = editor.getByRole("textbox", { name: "Ubuntu packages", exact: true });
-    await expect(editor.getByRole("button", { name: /^Tensorlake Ubuntu/ }))
+    await expect(editor.getByRole("button", { name: /^Managed Ubuntu/ }))
       .toHaveAttribute("aria-pressed", "true");
+    await expect(editor.getByText(
+      "Farhelm then adds Claude Code and Codex with their official installers. On Tensorlake it takes a snapshot; on a container host it saves an image for launches there.",
+      { exact: true },
+    )).toBeVisible();
     await packages.fill("jq\nripgrep");
+    // The shared editor must describe a local image without promising a cloud
+    // snapshot, and changing the base must retain the common package draft.
+    await editor.getByRole("button", { name: /^Container image/ }).click();
+    await expect(editor.getByText(
+      "Farhelm then adds Claude Code and Codex with their official installers and saves an image on the container host for launches there.",
+      { exact: true },
+    )).toBeVisible();
+    await expect(packages).toHaveValue("jq\nripgrep");
     await editor.getByRole("button", { name: /^Your image/ }).click();
     await expect(editor.getByRole("button", { name: /^Your image/ }))
       .toHaveAttribute("aria-pressed", "true");
@@ -867,7 +898,7 @@ test("the recipe editor refuses bad names, asks before leaving, and saves a cust
       .fill("usersnapshot");
     await expect(packages).toHaveValue("jq\nripgrep");
     await expect(requirements).toBeVisible();
-    await editor.getByRole("button", { name: /^Tensorlake Ubuntu/ }).click();
+    await editor.getByRole("button", { name: /^Managed Ubuntu/ }).click();
     await expect(packages).toHaveValue("jq\nripgrep");
     await expect(requirements).toHaveCount(0);
     await editor.getByRole("button", { name: /^Your image/ }).click();
@@ -963,12 +994,21 @@ test("closing Settings with an unsaved recipe asks first and finishes the close"
     await expect(dialog).toHaveCount(0);
     expect((await recipes(request)).map((r) => r.name)).toContain(saved);
 
-    // The header's close control asks the same; an unchanged editor closes at once.
+    // A dirty editor remains mounted behind another section. Header Close
+    // must reveal Recipes and its question; Keep editing retains that draft.
     list = await openRecipes(page);
     await list.getByRole("button", { name: "New recipe", exact: true }).click();
     await nameField.fill("e2e-close-header");
-    await dialog.getByRole("button", { name: "Close settings", exact: true })
-      .click();
+    await selectSettingsSection(page, "tensorlake");
+    await expect(dialog.locator("#settings-tensorlake")).toBeVisible();
+    await expect(editor).toBeHidden();
+    await dialog.getByRole("button", { name: "Close settings", exact: true }).click();
+    await expect(dialog.locator("#settings-recipes")).toBeVisible();
+    await expect(question).toBeVisible();
+    await editor.getByRole("button", { name: "Keep editing", exact: true }).click();
+    await expect(question).toHaveCount(0);
+    await expect(nameField).toHaveValue("e2e-close-header");
+    await dialog.getByRole("button", { name: "Close settings", exact: true }).click();
     await expect(question).toBeVisible();
     await editor.getByRole("button", { name: "Discard", exact: true }).click();
     await expect(dialog).toHaveCount(0);
@@ -1568,7 +1608,7 @@ test("a recipe's snapshot builds, rebuilds, recovers from a failed step and goes
     await editor.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(
       editor.getByText(
-        `Delete recipe ${name}? Any running build is cancelled and the snapshots Farhelm built for it on Tensorlake are deleted.`,
+        `Delete recipe ${name}? Running builds are cancelled and Farhelm's images and snapshots for this recipe are deleted. Images in use must be released first.`,
         { exact: true },
       ),
     ).toBeVisible();

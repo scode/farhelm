@@ -296,11 +296,14 @@ pub struct TemplateFields {
     pub resume_command: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
-    /// A new disposable sandbox from this immutable recipe name, mutually
-    /// exclusive with an installed host. GUI recipe templates never travel
-    /// through agent catalogs, whose older decoders reject unknown fields.
+    /// Compatibility input for stored recipe-only sandbox templates. New GUI
+    /// choices carry a complete target; old names keep their account placement.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recipe: Option<String>,
+    /// Canonical fresh-machine placement. Legacy recipe-only fields remain
+    /// readable, but new GUI definitions store this complete recipe/place pair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<crate::LaunchTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub destination: Option<TemplateDestination>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -466,6 +469,13 @@ pub fn check_new_template_name(name: &str) -> Result<(), String> {
 /// of naming a template, even when percent-encoded.
 /// Whether fields apply is decided against the launcher when applied.
 pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
+    if (template.fields.host.is_some() && template.fields.launch_target().is_some())
+        || (template.fields.recipe.is_some() && template.fields.target.is_some())
+    {
+        return Err(
+            "choose one launch placement: an installed host or one recipe and place".into(),
+        );
+    }
     if template.fields.name_kind.is_some() && template.fields.name.is_none() {
         return Err("a session name kind needs a session name".into());
     }
@@ -568,6 +578,7 @@ pub struct LauncherState {
     /// Placement selects either an installed host or a fresh recipe sandbox.
     /// Applying either choice clears the other; an absent choice preserves it.
     pub recipe: Option<String>,
+    pub target: Option<crate::LaunchTarget>,
     pub destination: Option<TemplateDestination>,
     pub name: Option<String>,
     /// The source template's name policy, retained beside its unnumbered base.
@@ -588,6 +599,8 @@ pub struct TemplateContext<'a> {
     /// Saved recipe names the caller can launch. Agent callers supply no
     /// recipes; GUI callers use their current catalog rather than guessing.
     pub known_recipes: &'a [String],
+    /// Registered places, independent of transient provider availability.
+    pub known_places: &'a [crate::Place],
     /// Refuse any remaining host assignment when the caller holds it fixed.
     /// UI dialogs remove equal held assignments before calling this function;
     /// callers such as `farhelm spawn` retain the strict presence-based rule.
@@ -890,7 +903,9 @@ pub fn apply_template(
     }
 
     // 5. The destination and the session's name.
-    if fields.host.is_some() && fields.recipe.is_some() {
+    if (fields.host.is_some() && (fields.recipe.is_some() || fields.target.is_some()))
+        || (fields.recipe.is_some() && fields.target.is_some())
+    {
         return Err(refuse(
             "host",
             "cannot name both an installed host and a recipe".into(),
@@ -912,21 +927,39 @@ pub fn apply_template(
         }
         next.host = Some(host.clone());
         next.recipe = None;
+        next.target = None;
     }
-    if let Some(recipe) = &fields.recipe {
+    let target = fields.target.clone().or_else(|| {
+        fields
+            .recipe
+            .as_ref()
+            .map(|recipe| crate::LaunchTarget::Environment {
+                recipe: recipe.clone(),
+                place: crate::Place::TensorlakeAccount,
+            })
+    });
+    if let Some(target) = target {
+        let recipe = target.recipe();
         if context.host_fixed {
             return Err(refuse(
                 "host",
                 "cannot change here: this dialog keeps the session's host".into(),
             ));
         }
-        if !context.known_recipes.contains(recipe) {
+        if !context.known_recipes.iter().any(|name| name == recipe) {
             return Err(refuse(
                 "host",
                 "names a recipe that is unavailable here".into(),
             ));
         }
-        next.recipe = Some(recipe.clone());
+        if target.place().host().is_some() && !context.known_places.contains(&target.place()) {
+            return Err(refuse(
+                "host",
+                "names a place that is unavailable here".into(),
+            ));
+        }
+        next.recipe = Some(recipe.to_string());
+        next.target = Some(target);
         next.host = None;
         if !matches!(next.destination, Some(TemplateDestination::Github(_))) {
             next.destination = Some(TemplateDestination::Folder("~".into()));
@@ -935,14 +968,14 @@ pub fn apply_template(
     if let Some(destination) = &fields.destination {
         next.destination = Some(destination.clone());
     }
-    if next.recipe.is_some()
+    if (next.recipe.is_some() || next.target.is_some())
         && let Some(TemplateDestination::Folder(path)) = &next.destination
         && path != "~"
         && !path.is_empty()
     {
         return Err(refuse(
             "folder",
-            "a new sandbox starts in its home directory".into(),
+            "a new environment starts in its home directory".into(),
         ));
     }
     if let Some(name) = &fields.name {
@@ -978,6 +1011,7 @@ mod tests {
             catalog: &[],
             known_hosts: &["ordinary-install".into()],
             known_recipes: &["dev".into()],
+            known_places: &[],
             host_fixed: false,
         };
         let original = LauncherState {
@@ -1159,6 +1193,7 @@ mod tests {
             catalog: &[],
             known_hosts: &[],
             known_recipes: &[],
+            known_places: &[],
             host_fixed: false,
         };
         let base =
@@ -1246,6 +1281,7 @@ mod tests {
             catalog: &[],
             known_hosts: &[],
             known_recipes: &[],
+            known_places: &[],
             host_fixed: false,
         };
         let applied =
@@ -1316,6 +1352,7 @@ mod tests {
             catalog: &[],
             known_hosts: &[],
             known_recipes: &[],
+            known_places: &[],
             host_fixed: false,
         };
         let custom =
@@ -1488,6 +1525,7 @@ mod tests {
             catalog,
             known_hosts: hosts,
             known_recipes: &[],
+            known_places: &[],
             host_fixed,
         }
     }
@@ -2239,5 +2277,102 @@ mod tests {
         )
         .unwrap();
         assert_eq!(applied.command, "echo 'first\nsecond'");
+    }
+}
+
+impl TemplateFields {
+    /// Normalize old recipe-only templates without rewriting stored definitions
+    /// during a read. Applicability rejects conflicting placement fields first.
+    pub fn launch_target(&self) -> Option<crate::LaunchTarget> {
+        self.target.clone().or_else(|| {
+            self.recipe
+                .as_ref()
+                .map(|recipe| crate::LaunchTarget::Environment {
+                    recipe: recipe.clone(),
+                    place: crate::Place::TensorlakeAccount,
+                })
+        })
+    }
+}
+
+#[cfg(test)]
+mod environment_target_tests {
+    use super::*;
+    use crate::{LaunchTarget, Place};
+
+    /// Templates must retain the full place and refuse removed places atomically;
+    /// otherwise quick launch could create a machine on an unintended host.
+    #[test]
+    fn environment_templates_keep_place_and_reject_missing_place() {
+        let recipes = vec!["dev".to_string()];
+        let places = vec![Place::PodmanHost(7)];
+        let context = TemplateContext {
+            catalog: &[],
+            known_hosts: &[],
+            known_recipes: &recipes,
+            known_places: &places,
+            host_fixed: false,
+        };
+        let target = LaunchTarget::Environment {
+            recipe: "dev".into(),
+            place: Place::PodmanHost(7),
+        };
+        let template = LaunchTemplate {
+            name: "container".into(),
+            fields: TemplateFields {
+                target: Some(target.clone()),
+                ..Default::default()
+            },
+        };
+        let original = LauncherState::default();
+        let applied = apply_template(&original, &template, &context).unwrap();
+        assert_eq!(applied.target, Some(target));
+        assert_eq!(
+            applied.destination,
+            Some(TemplateDestination::Folder("~".into()))
+        );
+        assert!(
+            apply_template(
+                &original,
+                &template,
+                &TemplateContext {
+                    known_places: &[],
+                    ..context
+                }
+            )
+            .is_err()
+        );
+        assert_eq!(original.target, None);
+    }
+
+    /// Old stored definitions keep their cloud meaning; adding a container place
+    /// cannot reinterpret a recipe-only template as a container launch.
+    #[test]
+    fn legacy_recipe_is_tensorlake_and_conflicting_targets_refuse() {
+        let fields: TemplateFields =
+            serde_json::from_value(serde_json::json!({"recipe":"dev"})).unwrap();
+        assert_eq!(
+            fields.launch_target(),
+            Some(LaunchTarget::Environment {
+                recipe: "dev".into(),
+                place: Place::TensorlakeAccount
+            })
+        );
+        let recipes = vec!["dev".to_string()];
+        let context = TemplateContext {
+            catalog: &[],
+            known_hosts: &[],
+            known_recipes: &recipes,
+            known_places: &[],
+            host_fixed: false,
+        };
+        let template = LaunchTemplate {
+            name: "conflict".into(),
+            fields: TemplateFields {
+                host: Some("old-install".into()),
+                ..fields
+            },
+        };
+        assert!(apply_template(&LauncherState::default(), &template, &context).is_err());
     }
 }

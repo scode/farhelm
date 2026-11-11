@@ -10298,3 +10298,24 @@ a:any-link,
 @media (prefers-reduced-motion: reduce) {
   .host-attention-progress { animation: none; }
 }
+
+/* Placement keeps its label above the destination's Host row. Both launchers
+   share the wrapping segment well; narrow panels keep every choice reachable. */
+.launch-placement {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.launch-composer-placement-row,
+.launch-composer-placement-row > .launch-composer-destination-row {
+  display: block;
+  min-width: 0;
+}
+.launch-composer-placement-row .checkout-root-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}

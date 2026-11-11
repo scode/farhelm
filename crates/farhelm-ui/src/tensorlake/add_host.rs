@@ -327,8 +327,14 @@ pub(crate) fn TensorlakeAddDialog(
                                         select { class: "add-tensorlake-recipe", value: "{recipe}", disabled: locked,
                                             aria_describedby: "add-tensorlake-recipe-help",
                                             onchange: move |evt| { if evt.value() == "__new__" { error.set(None); editing.set(true); } else { recipe.set(evt.value()); } },
-                                            option { value: "", disabled: true, "Choose a recipe" }
-                                            for item in recipes { option { value: "{item.name}", "{item.name}" } }
+                                            // Back from the plan remounts these options after the
+                                            // select's value is applied. Keep the draft authoritative
+                                            // rather than accepting the browser's first-option fallback.
+                                            option { value: "", selected: recipe.read().is_empty(), disabled: true, "Choose a recipe" }
+                                            if !recipe.read().is_empty() && !recipes.iter().any(|item| item.name == recipe()) {
+                                                option { value: "{recipe}", selected: true, disabled: true, "{recipe} (unavailable)" }
+                                            }
+                                            for item in recipes { option { key: "{item.name}", value: "{item.name}", selected: item.name == recipe(), "{item.name}" } }
                                             option { value: "__new__", "New recipe…" }
                                         }
                                     }

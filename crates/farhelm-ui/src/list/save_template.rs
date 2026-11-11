@@ -669,6 +669,7 @@ mod tests {
             catalog: &[],
             known_hosts: &["host-install".into()],
             known_recipes: &[],
+            known_places: &[],
             host_fixed: false,
         };
         for state in [

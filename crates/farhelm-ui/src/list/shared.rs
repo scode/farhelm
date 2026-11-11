@@ -340,7 +340,9 @@ pub(super) struct HostOption {
     /// Keep owned rows available to Restart/Replace, but never offer them as
     /// unrelated new-session destinations.
     pub(super) session_owned: bool,
-    pub(super) recipe: Option<String>,
+    /// Clone copies recipe and place together; the created host ID is never
+    /// reusable placement for another disposable environment.
+    pub(super) environment_target: Option<farhelm_proto::LaunchTarget>,
     pub(super) id: HostId,
     /// The helm's own display name; selectors keep the full form even though
     /// sidebar rows use the registered host's separately derived short form.
@@ -547,6 +549,9 @@ impl OpenDestination {
 fn default_create_host(hosts: &[HostOption], open_host: Option<&OpenHost>) -> Option<HostId> {
     open_host
         .and_then(|open| matching_host_option(open, hosts))
+        // Disposable sources seed a fresh recipe target in the draft. Returning
+        // to Existing host must not turn that source into an ordinary destination.
+        .filter(|host| !host.session_owned)
         .map(|host| host.id)
         .or_else(|| hosts.iter().find(|host| host.local).map(|host| host.id))
 }
@@ -667,10 +672,18 @@ pub(super) fn host_options(hosts: &[Host]) -> Vec<HostOption> {
         .iter()
         .map(|host| HostOption {
             session_owned: host.is_session_owned,
-            recipe: host
-                .tensorlake
+            environment_target: host
+                .environment
                 .as_ref()
-                .map(|binding| binding.recipe.raw().to_string()),
+                .map(|environment| environment.target.clone())
+                .or_else(|| {
+                    host.tensorlake.as_ref().map(|binding| {
+                        farhelm_proto::LaunchTarget::Environment {
+                            recipe: binding.recipe.raw().to_string(),
+                            place: farhelm_proto::Place::TensorlakeAccount,
+                        }
+                    })
+                }),
             id: host.id,
             // HostOption owns raw matching input; its label applies the GUI spelling later.
             name: host.name.raw().to_owned(),
@@ -826,7 +839,7 @@ pub(super) mod tests {
     pub(in super::super) fn option(id: HostId, name: &str, local: bool) -> HostOption {
         HostOption {
             session_owned: false,
-            recipe: None,
+            environment_target: None,
             id,
             name: name.into(),
             local,
@@ -1114,6 +1127,8 @@ pub(super) mod tests {
             icon: Default::default(),
             color: Default::default(),
             tensorlake: None,
+
+            environment: None,
         }];
         let options = host_options(&catalog);
         assert_eq!(options[0].id, 7);
@@ -1258,6 +1273,8 @@ pub(super) mod tests {
             icon: Default::default(),
             color: Default::default(),
             tensorlake: None,
+
+            environment: None,
         }
     }
 
@@ -1273,6 +1290,7 @@ pub(super) mod tests {
             host.state = crate::HostPhase::TensorlakeChanging {
                 direction,
                 requested_at: 1,
+                starting: false,
             };
             let options = host_options(std::slice::from_ref(&host));
             assert!(!options[0].suspended);

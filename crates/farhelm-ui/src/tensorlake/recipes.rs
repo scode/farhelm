@@ -1,4 +1,5 @@
-//! The Tensorlake recipe list, for Settings → Tensorlake.
+//! The shared recipe catalog in Settings → Recipes. Tensorlake build controls
+//! retain their existing state while container builds are projected per place.
 //!
 //! One row per recipe: its name, a one-line summary of size, base, packages and
 //! tunnels, built and prepared snapshot status, and Edit. "New recipe" and Edit swap the list for
@@ -362,6 +363,26 @@ pub(crate) fn RecipeList(api_key_set: bool) -> Element {
     let base = use_context::<ApiBase>().0;
     let now = *crate::activity::ACTIVITY_NOW.read();
     let build_base = base.clone();
+    let (place_names, _refresh_places) = crate::environment_ui::use_environment_places();
+    // A background probe publishes to the place cache, not the fleet feed.
+    // Depend on changed successful observations (including refresh settling)
+    // without issuing another probe or rereading on identical cache polls.
+    let observed_places = use_memo(move || {
+        place_names
+            .read()
+            .as_ref()
+            .and_then(|answer| answer.as_ref().ok())
+            .cloned()
+    });
+    let places_base = base.clone();
+    let mut place_status = use_resource(move || {
+        let _places = observed_places();
+        let base = places_base.clone();
+        async move { crate::api::fetch_recipe_places(&base).await }
+    });
+    crate::feed::use_feed_reader(move || {
+        place_status.restart();
+    });
     // Per recipe: a build request in flight, and the helm's refusal of the
     // last one. A refusal stays until the next click or a re-read shows the
     // build running.
@@ -443,10 +464,9 @@ pub(crate) fn RecipeList(api_key_set: bool) -> Element {
 
     let listed = rows();
     rsx! {
-        section { class: "host-settings-section tensorlake-recipes", aria_label: "Recipes",
-            h4 { class: "host-settings-section-title", "Recipes" }
+        div { class: "host-settings-section tensorlake-recipes",
             p { class: "host-settings-help",
-                "A recipe describes the sandboxes Farhelm creates: their size, their software and the tunnels back to your side."
+                "A recipe describes a new sandbox or container: its software, credentials and tunnels back to your side. The base determines which providers can run it. Size applies to Tensorlake sandboxes."
             }
             match (&listed, read_error()) {
                 // The error and its Retry render below, rows or not.
@@ -462,6 +482,7 @@ pub(crate) fn RecipeList(api_key_set: bool) -> Element {
                                 div { class: "recipe-row-main",
                                     span { class: "recipe-row-name font-mono", "{recipe.name}" }
                                     span { class: "recipe-row-summary", "{recipe_summary(&recipe)}" }
+                                    crate::containers_settings::RecipePlaces {recipe:recipe.name.clone(),states:place_status.read().as_ref().cloned(),places:place_names.read().as_ref().and_then(|answer|answer.as_ref().ok()).cloned().unwrap_or_default(),on_refresh:move |_|place_status.restart()}
                                     {
                                         let status = snapshot_status(&recipe);
                                         let name = recipe.name.clone();

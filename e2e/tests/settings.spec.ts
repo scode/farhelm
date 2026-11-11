@@ -28,7 +28,7 @@ import {
 } from "./helpers/fleet";
 
 /** The web fixture has no updater, so its navigation omits the app pane. */
-const webSettingsSections: SettingsSection[] = ["sessions", "Appearance", "hosts", "tensorlake", "credentials", "terminal", "checkouts", "agent trust", "notifications"];
+const webSettingsSections: SettingsSection[] = ["sessions", "Appearance", "hosts", "recipes", "containers", "tensorlake", "credentials", "terminal", "checkouts", "agent trust", "notifications"];
 
 /** A checked switch's inverse outline must be drawn against its own fill.
  * Real native Tab focus and a supported gap click protect the failure premise:
@@ -247,6 +247,7 @@ for (const hint of [
     const firstRelease = routeGate();
     const latestReached = routeGate();
     const latestRelease = routeGate();
+    const latestCommitted = routeGate();
     let stopRead = async () => {};
     let stopWrite = async () => {};
     let latestRequest: Request | undefined;
@@ -282,7 +283,10 @@ for (const hint of [
           latestRequest = outgoing;
           latestReached.release();
           await latestRelease.wait();
-          await route.continue();
+          const response = await route.fetch();
+          expect(response.status(), "the newest choice receives its own real commit acknowledgment").toBe(204);
+          latestCommitted.release();
+          await route.fulfill({ response });
         }
       });
       await toggle.click();
@@ -305,8 +309,12 @@ for (const hint of [
       latestRelease.release();
       const saved = await latestRequest!.response();
       expect(saved, "the newest choice receives its own acknowledgment").not.toBeNull();
-      expect(saved!.ok()).toBe(true);
-      await saved!.finished();
+      expect(saved!.status()).toBe(204);
+      // The preference writer settles from the bodyless 204 status. Require
+      // the owned route's real backend acknowledgment, rather than the browser's
+      // body-drain notification: this PUT must commit even though its final
+      // value happens to equal the fixture's initial value.
+      await latestCommitted.wait();
       expect((await readPreferences(request))[hint.field]).toBe(false);
       readRelease.release();
       await stopRead();

@@ -1,13 +1,9 @@
-//! Session-owned sandboxes adapt existing host operations. Ownership is a
+//! Session-owned environments adapt existing host operations. Ownership is a
 //! resource fact, never a claim that the cache lists every session on it.
 
 use crate::{Host, HostId, HostPhase, Session};
 use dioxus::prelude::*;
 use farhelm_proto::tensorlake::{Settings, SshKeyStatus, recipes::RecipeView};
-
-pub(crate) const DELETE_CONSEQUENCE: &str = "Delete the whole sandbox? Every session, running process, file, checkout, unpushed change and snapshot in it will be permanently removed. This cannot be undone.";
-pub(crate) const STOP_BILLING: &str =
-    "The sandbox keeps running and billing until you suspend or delete it.";
 
 /// A recipe is authorable without these launch prerequisites. Registration
 /// cannot be checked by the saved API key and is deliberately absent here.
@@ -37,24 +33,69 @@ pub(crate) struct RecipeChoice {
 
 /// Resolve ownership only from host metadata, never a session title or name.
 pub(crate) fn owned_host<'a>(session: &Session, hosts: &'a [Host]) -> Option<&'a Host> {
-    hosts
-        .iter()
-        .find(|host| Some(host.id) == session.host && host.is_session_owned)
+    hosts.iter().find(|host| {
+        Some(host.id) == session.host
+            && host.is_session_owned
+            && host.kind.environment_provider().is_some()
+    })
 }
 
 /// A display name describes the recipe; operations still use the host ID.
 pub(crate) fn label(host: &Host) -> String {
+    if let Some(environment) = &host.environment {
+        let places = environment
+            .target
+            .place()
+            .host()
+            .map(|_| farhelm_proto::EnvironmentPlaceView {
+                place: environment.target.place(),
+                name: environment
+                    .place_name
+                    .clone()
+                    .unwrap_or_else(|| "unavailable host".into()),
+                reason: None,
+                refreshing: false,
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+        return crate::environment_ui::target_label(&environment.target, &places);
+    }
     host.tensorlake
         .as_ref()
         .map(|binding| format!("{} sandbox", binding.recipe.raw()))
         .unwrap_or_else(|| "Session sandbox".into())
 }
 
+/// Old public host replies keep the resource name in their Tensorlake field.
+/// Confirmation can preserve that identity while newer replies carry shared facts.
+pub(crate) fn resource_name(host: &Host) -> Option<&str> {
+    host.environment
+        .as_ref()
+        .map(|environment| environment.name.as_str())
+        .or_else(|| {
+            host.tensorlake
+                .as_ref()
+                .map(|binding| binding.sandbox.raw())
+        })
+}
+
+/// Only known environment kinds reach owned controls; unknown future kinds
+/// retain ordinary diagnostics without verbs this client cannot vouch for.
+pub(crate) fn provider_ui(host: &Host) -> crate::environment_ui::ProviderUi {
+    crate::environment_ui::ProviderUi(
+        host.kind
+            .environment_provider()
+            .expect("owned_host admitted a known environment kind"),
+    )
+}
+
 /// Both suspended and changing resources withhold supervisor lifecycle verbs.
 pub(crate) fn frozen(host: &Host) -> bool {
     matches!(
         host.state,
-        HostPhase::Suspended { .. } | HostPhase::TensorlakeChanging { .. }
+        HostPhase::Suspended { .. }
+            | HostPhase::Stopped { .. }
+            | HostPhase::TensorlakeChanging { .. }
     )
 }
 
@@ -71,25 +112,21 @@ pub(crate) fn unavailable_notice(host: &Host) -> crate::hosts::SessionUnavailabl
     } = &host.state
     {
         notice.cause = "Suspended";
-        notice.explanation = vec![DetailPart::text(
-            "This session's sandbox is suspended. Its processes are preserved, including the agent's running command, and continue when you resume it. Only snapshot storage bills while suspended.",
-        )];
-        notice.detail = vec![DetailPart::text(match suspended_by_farhelm_at {
-            Some(at) => format!(
-                "Suspended from Farhelm at {}",
-                crate::activity::utc_stamp(at / 1000)
-            ),
-            None => format!(
-                "Suspended outside Farhelm, noticed at {}. Tensorlake suspends this sandbox after 30 minutes without a connection from Farhelm.",
-                crate::activity::utc_stamp(observed_at / 1000)
-            ),
-        })];
-        if let Some(error) = resume_failed {
-            notice.detail.extend([
-                DetailPart::text(" Resume failed: "),
-                DetailPart::peer(error),
-            ]);
-        }
+        let presentation = provider_ui(host);
+        notice.explanation = vec![DetailPart::text(presentation.suspended_explanation())];
+        notice.detail = presentation.suspended_detail(
+            *observed_at,
+            *suspended_by_farhelm_at,
+            resume_failed.as_ref(),
+            true,
+        );
+    }
+    if matches!(
+        host.state,
+        HostPhase::TensorlakeChanging { starting: true, .. }
+    ) {
+        notice.cause = "Starting environment";
+        notice.explanation = vec![DetailPart::text(provider_ui(host).starting_help())];
     }
     notice
 }
@@ -190,9 +227,26 @@ pub(crate) fn Controls(
     let mut question = use_signal(|| None::<Operation>);
     let mut held = use_signal(|| None::<crate::session_ops::SessionGuard>);
     let operations = use_context::<crate::session_ops::SessionOps>();
-    let suspended = matches!(host.state, HostPhase::Suspended { .. });
-    let changing = matches!(host.state, HostPhase::TensorlakeChanging { .. });
+    let suspended = matches!(
+        host.state,
+        HostPhase::Suspended { .. }
+            | HostPhase::Stopped {
+                waiting_for_place: false,
+                ..
+            }
+    );
+    let changing = matches!(
+        host.state,
+        HostPhase::TensorlakeChanging { .. }
+            | HostPhase::Stopped {
+                waiting_for_place: true,
+                ..
+            }
+    );
+    let stopped = matches!(host.state, HostPhase::Stopped { .. });
+    let presentation = provider_ui(&host);
     let host_id = host.id;
+    let suspend_help = provider_ui(&host).suspend_help();
     let execute_session = session.clone();
     let execute = use_callback(move |operation: Operation| {
         question.set(None);
@@ -250,7 +304,7 @@ pub(crate) fn Controls(
         span { class: "sandbox-session-controls",
             if let Some(operation) = question() {
                 span { class: "sandbox-session-question header-confirm", role: "alertdialog", tabindex: "-1",
-                    aria_label: if operation == Operation::StopAndSuspend { "Stop and suspend sandbox?" } else { "Suspend sandbox?" },
+                    aria_label: presentation.suspend_title(operation == Operation::StopAndSuspend),
                     onmounted: move |_| {
                         if operation == Operation::StopAndSuspend {
                             // Activity is read asynchronously. This Stop question
@@ -271,18 +325,14 @@ pub(crate) fn Controls(
                         }
                     },
                 span { class: "confirm-consequence",
-                    if operation == Operation::StopAndSuspend {
-                        "Stop this session's agent and close its terminal tabs, then suspend the whole sandbox? Every other process freezes and continues on Resume. The stopped agent and closed tabs do not continue. "
-                    } else {
-                        "Suspend the whole sandbox? Every process in it freezes, including any other sessions, and continues on Resume. "
-                    }
-                    "Files remain; snapshot storage still bills."
+                    {presentation.suspend_question(operation == Operation::StopAndSuspend)}
+                    "{suspend_help}"
                 }
                 button { r#type: "button", class: "btn btn-neutral",
-                    "data-tooltip": if operation == Operation::StopAndSuspend { "Cancel: keep the agent, its terminal tabs and the sandbox running" } else { "Cancel: keep the sandbox running" },
+                    "data-tooltip": presentation.suspend_cancel(operation == Operation::StopAndSuspend),
                     onclick: move |_| { question.set(None); held.set(None); }, "Cancel" }
                 button { r#type: "button", class: "btn btn-danger", onkeydown: crate::guard_confirmation_enter,
-                    "data-tooltip": if operation == Operation::StopAndSuspend { "Stop this session's agent and close its terminal tabs, then suspend the whole sandbox now" } else { "Suspend the whole sandbox now, freezing every process in it until Resume" },
+                    "data-tooltip": presentation.suspend_action(operation == Operation::StopAndSuspend),
                     onclick: move |_| execute.call(operation), if operation == Operation::StopAndSuspend { "Stop and suspend" } else { "Suspend" } }
                 }
             } else if let Some(buttons) = buttons {
@@ -292,14 +342,14 @@ pub(crate) fn Controls(
             } else {
                 button { r#type: "button", class: if suspended { "btn btn-primary" } else { "btn btn-neutral" },
                     disabled: disabled || busy() || changing || ops.busy(),
-                    "data-tooltip": if suspended { "Resume: start this session's sandbox again; its frozen processes continue" } else { "Suspend: freeze every process in this session's sandbox until Resume; files remain and snapshot storage still bills" },
+                    "data-tooltip": if suspended { presentation.resume_help(stopped) } else { suspend_help },
                     onclick: move |_| start.call(false),
                     crate::icons::SandboxPause { resume: suspended }
                     if suspended { "Resume" } else { "Suspend" }
                 }
                 if stop_choice && !suspended {
                     button { r#type: "button", class: "btn btn-danger", disabled: disabled || busy() || changing || ops.busy(),
-                        "data-tooltip": "Stop and suspend: stop this session's agent and close its terminal tabs, then suspend the whole sandbox",
+                        "data-tooltip": presentation.suspend_action(true),
                         onclick: move |_| start.call(true), "Stop and suspend" }
                 }
             }

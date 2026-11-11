@@ -1,18 +1,18 @@
 //! Recipe admission returns ordinary host-progress headers, then one JSON result.
 //! The request owns its long transport budget through the body read. No retry or
-//! progress failure can turn an uncertain billed launch into a second launch.
+//! progress failure can turn an uncertain environment launch into a second launch.
 
 use super::*;
 
 /// A resource may exist after any transport or decoding failure. Always give
-/// the user the existing Hosts recovery surface before another billed attempt.
+/// the user the existing Hosts recovery surface before another creation attempt.
 fn uncertain(reason: impl std::fmt::Display) -> SandboxLaunchError {
     SandboxLaunchError::Unknown(format!(
-        "{reason}. Check Hosts for the sandbox before launching again."
+        "{reason}. Check Hosts for the environment before launching again."
     ))
 }
 
-/// A billed launch can outlive its transport. Keep uncertainty distinct from
+/// A environment launch can outlive its transport. Keep uncertainty distinct from
 /// a definite refusal so the composer never claims a running task did not launch.
 #[derive(Debug)]
 pub(crate) enum SandboxLaunchError {
@@ -21,7 +21,7 @@ pub(crate) enum SandboxLaunchError {
 }
 
 impl SandboxLaunchError {
-    /// Unknown results require checking Hosts before another billed attempt.
+    /// Unknown results require checking Hosts before another creation attempt.
     pub(crate) fn is_unknown(&self) -> bool {
         matches!(self, Self::Unknown(_))
     }
@@ -50,22 +50,23 @@ pub(crate) fn sandbox_launch_body(
     body
 }
 
-/// Submit a captured recipe launch without an installed-host selector. Admission
-/// callbacks only expose the existing provisioning run; the final body decides
-/// success even when cleanup already removed that progress record.
-pub(crate) async fn create_sandbox_session(
+/// Submit captured recipe/place intent without an installed-host selector.
+/// Admission exposes the existing provisioning run; the final body decides success.
+pub(crate) async fn create_environment_session(
     base: &str,
-    recipe: &str,
+    target: &farhelm_proto::LaunchTarget,
     confirmed: bool,
     name_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
     request: serde_json::Value,
     admitted: impl FnOnce(HostId, String),
 ) -> Result<Session, SandboxLaunchError> {
-    let url = format!("{base}/api/sandbox-sessions");
+    let recipe = target.recipe();
+    let place = target.place();
+    let url = format!("{base}/api/environment-sessions");
     let mut deadline = LaunchDeadline::default();
     let response = send_inner_marked(
         client().post(&url).json(&serde_json::json!({
-            "recipe": recipe, "confirmed": confirmed, "name_kind": name_kind, "request": request,
+            "recipe": recipe, "place": place, "confirmed": confirmed, "name_kind": name_kind, "request": request,
         })),
         std::time::Duration::from_secs(30 * 60),
         true,
@@ -80,13 +81,13 @@ pub(crate) async fn create_sandbox_session(
     }
     let host = response
         .headers()
-        .get("x-farhelm-sandbox-host")
+        .get("x-farhelm-environment-host")
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<HostId>().ok())
-        .ok_or_else(|| uncertain("The sandbox admission did not identify its host"))?;
+        .ok_or_else(|| uncertain("The environment admission did not identify its host"))?;
     let run = response
         .headers()
-        .get("x-farhelm-sandbox-run")
+        .get("x-farhelm-environment-run")
         .and_then(|value| value.to_str().ok())
         .filter(|value| {
             value.len() == 36
@@ -98,7 +99,7 @@ pub(crate) async fn create_sandbox_session(
                     }
                 })
         })
-        .ok_or_else(|| uncertain("The sandbox admission did not identify its setup run"))?
+        .ok_or_else(|| uncertain("The environment admission did not identify its setup run"))?
         .to_string();
     admitted(host, run);
     #[derive(Deserialize)]

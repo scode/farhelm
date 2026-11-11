@@ -113,13 +113,13 @@ test("recipe placement explains prerequisites and requires billing consent", asy
   const owned: string[] = [];
   let uncertainReply = false;
   let ordinaryCreates = 0;
-  stops.push(await drainedRoute(page, "**/api/sandbox-sessions", async (route) => {
+  stops.push(await drainedRoute(page, "**/api/environment-sessions", async (route) => {
     expect(route.request().method()).toBe("POST");
     bodies.push(route.request().postDataJSON());
     await held.wait();
     if (uncertainReply) return route.fulfill({ status: 200, headers: {
-      "x-farhelm-build": build, "x-farhelm-sandbox-host": "3",
-      "x-farhelm-sandbox-run": "1ddba07b-2a1a-46c6-945a-b09d87e741a8",
+      "x-farhelm-build": build, "x-farhelm-environment-host": "3",
+      "x-farhelm-environment-run": "1ddba07b-2a1a-46c6-945a-b09d87e741a8",
     }, body: "incomplete launch result" });
     await route.fulfill({ status: 409, headers: { "x-farhelm-build": build }, body: "recipe fixture refused launch" });
   }));
@@ -137,14 +137,16 @@ test("recipe placement explains prerequisites and requires billing consent", asy
     await page.locator(".new-session-button").click();
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
-    await form.getByRole("combobox", { name: "Host", exact: true }).click();
-    const recipes = form.getByRole("group", { name: "New sandbox for this session", exact: true });
+    await form.getByRole("button", { name: "New sandbox", exact: true }).click();
+    const recipes = form.getByRole("combobox", { name: "Recipe", exact: true });
     await expect(recipes).toBeVisible();
-    const unbuilt = recipes.getByRole("option").filter({ hasText: "session-unbuilt" });
-    await expect(unbuilt).toHaveAttribute("aria-disabled", "true");
+    const unbuilt = recipes.locator("option").filter({ hasText: "session-unbuilt" });
     await expect(unbuilt).toContainText("No snapshot yet");
-    await recipes.getByRole("option").filter({ hasText: "session-ready" }).click();
-    await expect(form.getByRole("combobox", { name: "Host", exact: true })).toContainText("New sandbox · session-ready");
+    // The option owns this restriction. Playwright retargets its disabled-state
+    // check through the wrapping label to the enabled recipe select.
+    await expect(unbuilt).toHaveJSProperty("disabled", true);
+    await recipes.selectOption("session-ready");
+    await expect(recipes).toHaveValue("session-ready");
     await form.getByRole("tab", { name: "Command", exact: true }).click();
     await form.getByLabel("Agent command", { exact: true }).fill("sleep 300");
     await answerYolo(form, true);
@@ -172,11 +174,11 @@ test("recipe placement explains prerequisites and requires billing consent", asy
     await expect(form).toBeVisible();
     await expect(form).toHaveAttribute("aria-modal", "true");
     await expect(form.getByLabel("Agent command", { exact: true })).toHaveValue("sleep 300");
-    await expect(form.getByRole("combobox", { name: "Host", exact: true })).toContainText("New sandbox · session-ready");
+    await expect(form.getByRole("combobox", { name: "Recipe", exact: true })).toHaveValue("session-ready");
     await expect.poll(() => form.evaluate(node => node.contains(document.activeElement)),
       { message: "the recipe refusal restores its modal draft's keyboard ownership" }).toBe(true);
     expect(bodies).toHaveLength(1);
-    expect(bodies[0]).toMatchObject({ recipe: "session-ready", confirmed: true, request: { cwd: "~" } });
+    expect(bodies[0]).toMatchObject({ recipe: "session-ready", place: {kind:"tensorlake_account"}, confirmed: true, request: { cwd: "~" } });
     expect(bodies[0].request).not.toHaveProperty("host");
     expect(bodies[0].request).not.toHaveProperty("expected_incarnation");
     expect(ordinaryCreates).toBe(0);
@@ -280,7 +282,7 @@ test("a recipe template quick launch asks before one recipe request", async ({ p
     await route.fulfill({ response, json: { ...preferences, template_shortcuts: { "1": name } } });
   }));
   const bodies: any[] = [];
-  stops.push(await drainedRoute(page, "**/api/sandbox-sessions", async (route) => {
+  stops.push(await drainedRoute(page, "**/api/environment-sessions", async (route) => {
     bodies.push(route.request().postDataJSON());
     await route.fulfill({ status: 409, headers: { "x-farhelm-build": build }, body: "template recipe fixture refused" });
   }));
@@ -307,14 +309,19 @@ test("a recipe template quick launch asks before one recipe request", async ({ p
   }
 });
 
-/** The editor must display a stored recipe on mount and distinguish a newly
- * added, empty Host field from a target that disappeared after it was saved. */
-test("template Host selection retains a recipe and starts an added field empty", async ({ page, request }, testInfo) => {
+/** Leaving an environment keeps Host editable so the selected installed host
+ * can be saved. An active Existing host click must retain that identity.
+ * A separately added Host field still starts present and empty. */
+test("template placement keeps Host editable after leaving an environment", async ({ page, request }, testInfo) => {
   const name = `e2e-recipe-editor-${Date.now()}`;
   const ordinary = `${name}-ordinary`;
   const response = await request.get("/api/hosts");
+  expect(response.ok()).toBe(true);
   const build = response.headers()["x-farhelm-build"];
   expect(build).toBeTruthy();
+  const remote = (await response.json()).hosts.find((host: any) => host.kind === "ssh" && host.state.phase === "connected");
+  expect(remote, "the owned stack has a connected ordinary remote host").toBeTruthy();
+  expect(remote.identity, "the selected host has an installed identity to store").toBeTruthy();
   for (const [target, fields] of [
     [name, { recipe: "session-ready" }], [ordinary, { kind: "command", command: "sleep 300", yolo: false }],
   ] as const) {
@@ -328,13 +335,33 @@ test("template Host selection retains a recipe and starts an added field empty",
     const dialog = page.locator('.templates-dialog[role="dialog"]');
     await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
     await dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) }).click();
+    const recipe = dialog.getByRole("combobox", { name: "Recipe", exact: true });
+    await expect(recipe).toHaveValue("session-ready");
+    await expect(dialog.getByRole("button", {name:"New sandbox",exact:true})).toHaveAttribute("aria-pressed","true");
+    await dialog.getByRole("button", { name: "Existing host", exact: true }).click();
     const host = dialog.getByRole("combobox", { name: "Host", exact: true });
-    await expect(host).toHaveValue("recipe:session-ready");
-    await expect(host.locator("option:checked")).toHaveText("New sandbox · session-ready");
+    await expect(host).toBeVisible();
+    await expect(host).toHaveValue("");
+    await expect(host.locator("option:checked")).toHaveText("Choose a host");
+    await host.selectOption(remote.identity);
+    await expect(host).toHaveValue(remote.identity);
+    await dialog.getByRole("button", { name: "Existing host", exact: true }).click();
+    await expect(host).toBeVisible();
+    await expect(host).toHaveValue(remote.identity);
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    const saved = await request.get("/api/templates");
+    expect(saved.ok()).toBe(true);
+    const stored = (await saved.json()).templates.find((template: any) => template.name === name);
+    expect(stored, "the edited template remains stored").toBeTruthy();
+    expect(stored.fields.host).toBe(remote.identity);
+    expect(stored.fields.target ?? null).toBeNull();
+    expect(stored.fields.recipe ?? null).toBeNull();
     await dialog.locator(".templates-row").filter({ has: page.getByText(ordinary, { exact: true }) }).click();
     await dialog.locator(".templates-add").click();
     await dialog.locator(".templates-add-menu").getByRole("button", { name: "Host", exact: true }).click();
-    await expect(host).toHaveValue("host:");
+    await expect(host).toBeVisible();
+    await expect(host).toHaveValue("");
     await expect(host.locator("option:checked")).toHaveText("Choose a host");
   } finally {
     await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
@@ -500,7 +527,9 @@ test("an owned session's pending Resume survives switching and excludes its comp
 });
 
 /** Suspension preserves the real session while its owned-machine presentation
- * disables supervisor actions. Delete must still ask with the global skip on,
+ * disables supervisor actions. The card describes preserved processes and
+ * Tensorlake's session idle timeout, independently of Suspend's action help.
+ * Delete must still ask with the global skip on,
  * and then explicitly authorize whole-resource destruction without Resume. */
 test("owned suspended sessions keep Hosts visibility and mandatory whole-sandbox Delete", async ({ page, request }, testInfo) => {
   const fixture = await ownedHost(page, request);
@@ -518,7 +547,9 @@ test("owned suspended sessions keep Hosts visibility and mandatory whole-sandbox
     await page.goto("/");
     const card = page.getByRole("region", { name: "Session unavailable", exact: true });
     await expect(card).toContainText("Session suspended");
-    await expect(card).toContainText("processes are preserved");
+    await expect(card).toContainText("This session's sandbox is suspended. Its processes are preserved, including the agent's running command, and continue when you resume it. Only snapshot storage bills while suspended.");
+    await expect(card).toContainText("Suspended outside Farhelm, noticed at");
+    await expect(card).toContainText("Tensorlake suspends this sandbox after 30 minutes without a connection from Farhelm.");
     await expect(page.locator(".header-stop")).toBeDisabled();
     await expect(page.locator(".restart-primary")).toBeDisabled();
     await expect(page.locator(".header-replace")).toBeDisabled();

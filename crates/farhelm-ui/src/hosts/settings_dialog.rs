@@ -948,22 +948,21 @@ pub(super) struct RemoveCopy {
 
 impl RemoveCopy {
     pub(super) fn for_host(host: &Host) -> Self {
-        if host.kind.removal_deletes_machine() {
-            let sandbox = host
-                .tensorlake
-                .as_ref()
-                .map(|binding| binding.sandbox.escaped())
-                .unwrap_or_else(|| "this host's sandbox".to_string());
+        if let Some(provider) = host.kind.environment_provider() {
+            let ui = crate::environment_ui::ProviderUi(provider);
+            let label = crate::sandbox_sessions::label(host);
+            // Recipes can name several machines. Destructive consent keeps the
+            // resource identity from either generation of the host reply.
+            let name = crate::sandbox_sessions::resource_name(host).unwrap_or(&label);
             return Self {
-                title: "Delete sandbox",
+                title: ui.host_delete_label(),
                 explanation: format!(
-                    "Farhelm will terminate the Tensorlake sandbox {sandbox} and delete its \
-                     snapshots, then remove the host. The sandbox's files and the sessions on it \
-                     will be gone."
+                    "{} {}",
+                    crate::peer::display_peer(name),
+                    ui.delete_consequence()
                 ),
-                confirm_label: "Delete sandbox",
-                confirm_tooltip: "Delete sandbox: terminate it and delete its snapshots; its \
-                                  files and sessions are gone",
+                confirm_label: ui.host_delete_label(),
+                confirm_tooltip: ui.host_delete_help(),
                 offers_dont_ask: false,
             };
         }

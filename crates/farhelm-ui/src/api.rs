@@ -74,11 +74,16 @@ use serde::Deserialize;
 mod credentials;
 mod save_order;
 pub(crate) use credentials::{delete_credential, fetch_credentials, write_credential};
+mod environments;
 mod sandbox_sessions;
+pub(crate) use environments::{
+    delete_container_leftover, fetch_container_leftovers, fetch_environment_history,
+    fetch_environment_places, fetch_recipe_places, rebuild_recipe_at, refresh_environment_places,
+};
 /// The Tensorlake recipe calls (see the module's own docs).
 mod tensorlake_recipes;
 pub(crate) use sandbox_sessions::{
-    create_sandbox_session, delete_sandbox_session, sandbox_launch_body, stop_and_suspend,
+    create_environment_session, delete_sandbox_session, sandbox_launch_body, stop_and_suspend,
 };
 pub(crate) use tensorlake_recipes::{
     build_recipe, create_recipe, delete_orphan_sandbox, delete_recipe, fetch_orphan_sandboxes,
@@ -128,6 +133,9 @@ struct SessionListBody {
 /// HTTP representation and must still guard a later create by incarnation.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub(crate) struct LaunchHistoryEntry {
+    /// Fresh recipe/place intent survives deletion of its originating machine.
+    #[serde(default)]
+    pub(crate) target: Option<farhelm_proto::LaunchTarget>,
     pub(crate) host: HostId,
     /// Accepted fresh-checkout intent. When present, reuse must request a new
     /// preview for this repository; `cwd` describes the previous launch only.
@@ -390,6 +398,10 @@ impl ListSort {
 /// gets everywhere else in this codebase.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, Deserialize)]
 pub(crate) struct Preferences {
+    /// The helm records accepted container placement, including raw commands.
+    /// It is a default only; an explicit template or Clone keeps its own place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) last_container_host: Option<HostId>,
     /// Shared authorization for helm-owned remote updates; absent stays off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) auto_update_remote_hosts: Option<bool>,

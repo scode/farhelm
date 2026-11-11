@@ -124,6 +124,7 @@ pub(super) async fn run_paced(work: Vec<(Option<HostId>, RowWork)>) {
 #[derive(Clone, PartialEq)]
 pub(super) struct DeleteSnapshot {
     pub(super) sandbox: bool,
+    pub(super) provider: Option<farhelm_proto::ProviderKind>,
     pub(super) id: PeerText,
     pub(super) host: Option<HostId>,
     title: PeerText,
@@ -140,6 +141,7 @@ impl DeleteSnapshot {
     pub(super) fn for_session(session: &Session, local_host: Option<HostId>) -> Self {
         Self {
             sandbox: false,
+            provider: None,
             id: session.id.clone(),
             host: session.host,
             title: session.title.clone(),
@@ -165,6 +167,7 @@ impl DeleteSnapshot {
     pub(super) fn with_sandbox(mut self, host: Option<&crate::Host>) -> Self {
         if let Some(host) = host {
             self.sandbox = true;
+            self.provider = host.kind.environment_provider();
             self.host_name = Some(crate::sandbox_sessions::label(host).into());
         }
         self
@@ -221,6 +224,7 @@ pub(super) fn reconcile(
                 Some(session) => {
                     let mut refreshed = DeleteSnapshot::for_session(session, local_host);
                     refreshed.sandbox = target.sandbox;
+                    refreshed.provider = target.provider;
                     if target.sandbox {
                         refreshed.host_name = target.host_name.clone();
                     }
@@ -279,18 +283,18 @@ pub(super) fn DeleteDialog(
     let includes_sandbox =
         action == LifecycleAction::Delete && targets.iter().any(|target| target.sandbox);
     let label = if includes_sandbox {
-        "Delete marked sessions and their sandboxes?".to_owned()
+        "Delete marked sessions and their environments?".to_owned()
     } else {
         format!("{verb} {count} {noun}?")
     };
     let confirm_label = if includes_sandbox {
-        "Delete sessions and sandboxes".to_owned()
+        "Delete sessions and environments".to_owned()
     } else {
         format!("{verb} {noun}")
     };
     let cancel_label = format!("Cancel bulk {}", verb.to_lowercase());
     let confirm_tooltip = if includes_sandbox {
-        "Delete every process, file and snapshot in each named sandbox".to_owned()
+        "Delete every session, process and file in each named environment".to_owned()
     } else {
         format!("{verb} the sessions listed in this question")
     };
@@ -346,8 +350,8 @@ pub(super) fn DeleteDialog(
                             }
                             p { class: "bulk-delete-consequence", {match action {
                                 LifecycleAction::Stop => format!("{} {}", crate::status::stop_consequence(&target.status, target.tabs),
-                                    if target.sandbox { crate::sandbox_sessions::STOP_BILLING } else { "" }),
-                                LifecycleAction::Delete if target.sandbox => crate::sandbox_sessions::DELETE_CONSEQUENCE.into(),
+                                    target.provider.map(|provider| crate::environment_ui::ProviderUi(provider).stop_help()).unwrap_or("")),
+                                LifecycleAction::Delete if target.sandbox => target.provider.map(|provider| crate::environment_ui::ProviderUi(provider).delete_consequence()).unwrap_or("Delete the whole environment and all its sessions, processes and files?").into(),
                                 LifecycleAction::Delete => confirm_consequence(&target.status, target.tabs),
                             }} }
                             if target.managed && !target.sandbox && action == LifecycleAction::Delete {

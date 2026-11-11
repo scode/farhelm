@@ -145,6 +145,7 @@ fn problem_words(host: &Host, update: Option<bool>, unseen: bool) -> Option<Stri
         | HostPhase::IdentityUnverified { .. }
         | HostPhase::Duplicate { .. }
         | HostPhase::Retired { .. }
+        | HostPhase::Stopped { .. }
         | HostPhase::Unrecognized => Some(phase_display_label(&host.state)),
         HostPhase::VersionSkew {
             peer_protocol,
@@ -422,6 +423,8 @@ mod tests {
             icon: Default::default(),
             color: Default::default(),
             tensorlake: None,
+
+            environment: None,
         }
     }
 
@@ -539,6 +542,7 @@ mod tests {
                 HostPhase::TensorlakeChanging {
                     direction,
                     requested_at: 1,
+                    starting: false,
                 },
             );
             assert_eq!(problem_words(&host, None, false), None);

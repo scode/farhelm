@@ -350,12 +350,15 @@ for (const palette of ["dark", "light"] as const) {
 /** Saved recipe facts must remain legible through the form and shared plan.
  * Captures use intercepted, build-stamped plans and a refusing provision route:
  * Back, Copy, Cancel and Escape can then prove their no-create contract without
- * registering a sandbox host or making a gateway connection for a screenshot. */
+ * registering a sandbox host or making a gateway connection for a screenshot.
+ * A second recipe exposes native first-option fallback when Back remounts the
+ * form; keeping only the chosen recipe would hide that selection regression. */
 for (const palette of ["dark", "light"] as const) {
   test(
     `Tensorlake Add host structures its form and creation plan in ${palette}`,
     async ({ page, request }, info) => {
       const recipe = `e2e-plan-recipe-${palette}`;
+      const alternative = `e2e-a-plan-alternative-${palette}`;
       const hostName = `e2e-plan-${palette}`;
       const accountResponse = await request.get("/api/tensorlake");
       expect(accountResponse.ok(), await accountResponse.text()).toBe(true);
@@ -366,10 +369,9 @@ for (const palette of ["dark", "light"] as const) {
       ).toBe(false);
       const listedResponse = await request.get("/api/tensorlake/recipes");
       expect(listedResponse.ok(), await listedResponse.text()).toBe(true);
+      const beforeRecipes = (await listedResponse.json()).recipes;
       expect(
-        (await listedResponse.json()).recipes.some((row: any) =>
-          row.name === recipe
-        ),
+        beforeRecipes.some((row: any) => row.name === recipe || row.name === alternative),
         "fixture owns its recipe name",
       ).toBe(false);
       const fleetResponse = await request.get("/api/hosts");
@@ -404,6 +406,10 @@ for (const palette of ["dark", "light"] as const) {
           data: { name: recipe, recipe: definition },
         });
         expect(created.ok(), await created.text()).toBe(true);
+        const other = await request.post("/api/tensorlake/recipes", {
+          data: { name: alternative, recipe: definition },
+        });
+        expect(other.ok(), await other.text()).toBe(true);
         const stored = await request.get("/api/tensorlake/recipes");
         expect(stored.ok(), await stored.text()).toBe(true);
         expect(
@@ -510,7 +516,11 @@ for (const palette of ["dark", "light"] as const) {
         await expect(dialog.locator(".add-tensorlake-recipe-summary"))
           .toHaveCount(0);
         await name.fill(hostName);
+        await expect(select.locator(`option[value="${alternative}"]`)).toHaveCount(1);
+        expect(await select.locator("option:not([disabled])").first().getAttribute("value"),
+          "fixture must offer another recipe before the selected one").not.toBe(recipe);
         await select.selectOption(recipe);
+        await expect(select, "the chosen recipe must remain selected after its summary renders").toHaveValue(recipe);
         const summary = dialog.locator(".add-tensorlake-recipe-summary");
         await expect(summary).toHaveText(
           "4 CPU · 16 GB · 50 GB · base: Tensorlake Ubuntu · 2 packages · 1 tunnel",
@@ -748,6 +758,10 @@ for (const palette of ["dark", "light"] as const) {
             expect([200, 404], await response.text()).toContain(
               response.status(),
             );
+          }],
+          ["alternative recipe", async () => {
+            const response = await request.delete(`/api/tensorlake/recipes/${alternative}`);
+            expect([200, 404], await response.text()).toContain(response.status());
           }],
           ["Tensorlake account", async () => {
             const response = await request.put("/api/tensorlake", {

@@ -1147,6 +1147,18 @@ pub(super) fn SessionRow(
             .cloned()
     });
     let sandbox = sandbox_host.as_ref().map(|host| host.id);
+    let environment_ui = sandbox_host
+        .as_ref()
+        .map(crate::sandbox_sessions::provider_ui);
+    let environment_stop_help = environment_ui
+        .map(crate::environment_ui::ProviderUi::stop_help)
+        .unwrap_or("");
+    let environment_delete_consequence = environment_ui
+        .map(crate::environment_ui::ProviderUi::delete_consequence)
+        .unwrap_or("");
+    let environment_delete_label = environment_ui
+        .map(crate::environment_ui::ProviderUi::delete_label)
+        .unwrap_or("Delete");
     let sandbox_frozen = sandbox_host
         .as_ref()
         .is_some_and(crate::sandbox_sessions::frozen);
@@ -1362,7 +1374,9 @@ pub(super) fn SessionRow(
     let pin_neighbors = pin_neighbors.unwrap_or_default();
     let move_up = pin_neighbors.up.is_some();
     let move_down = pin_neighbors.down.is_some();
-    let sandbox_menu_state = sandbox_host.as_ref().map(|_| sandbox_suspended);
+    let sandbox_menu_state = sandbox_host
+        .as_ref()
+        .map(|host| sandbox_suspended || matches!(host.state, crate::HostPhase::Stopped { .. }));
     let menu_order =
         session_menu_order_with_sandbox(controls, move_up, move_down, sandbox_menu_state);
     // Whether the panel is currently showing its item list rather than a
@@ -1917,8 +1931,8 @@ pub(super) fn SessionRow(
                         // since the icon itself is `aria-hidden`.
                         span { class: "session-locality-slot",
                             if sandbox.is_some() {
-                                crate::icons::SandboxMark { session_row: true }
-                                span { class: "visually-hidden", "Sandbox" }
+                                {environment_ui.map(|ui| ui.mark(true)).unwrap_or_else(|| rsx! {})}
+                                span { class: "visually-hidden", "{environment_ui.map(crate::environment_ui::ProviderUi::locality_label).unwrap_or_default()}" }
                             }
                             else { SessionHostIcon { locality, icon: host_icon, color: host_color, session_row: true } }
                         }
@@ -2040,7 +2054,7 @@ pub(super) fn SessionRow(
                             }
                             if sandbox_suspended {
                                 span { class: "status-badge",
-                                    "data-tooltip": "Suspended: this session's sandbox is frozen; Resume continues its processes",
+                                    "data-tooltip": "Suspended: this session's environment is frozen; Resume continues its processes",
                                     "data-tooltip-anchor": "session-row",
                                     crate::icons::SandboxPause {} "Suspended"
                                 }
@@ -2323,7 +2337,7 @@ pub(super) fn SessionRow(
                                 class: "confirm-consequence",
                                 onmounted: move |_| { document::eval(&crate::dialog_focus::install_js(".session-row-menu-panel.menu-prompt", crate::dialog_focus::ContainerEnter::None)); },
                                 "{crate::status::stop_consequence(&session.status, session.tabs.len())}"
-                                if sandbox.is_some() { " {crate::sandbox_sessions::STOP_BILLING} Stop and suspend freezes the remaining processes; they continue on Resume. The stopped agent and closed tabs do not continue." }
+                                if sandbox.is_some() { " {environment_stop_help} Stop and suspend freezes the remaining processes; they continue on Resume. The stopped agent and closed tabs do not continue." }
                             }
                             PeerTitle { class: "confirm-title", title: session.title.clone(), quoted: true }
                             crate::modal_dialog::DialogActions {
@@ -2351,7 +2365,7 @@ pub(super) fn SessionRow(
                                 }
                                 if sandbox.is_some() {
                                     button { r#type: "button", class: "btn btn-danger", disabled: busy || host_ops.busy(),
-                                        "data-tooltip": "Stop this session's agent and close its terminal tabs, then suspend the whole sandbox",
+                                        "data-tooltip": "Stop this session's agent and close its terminal tabs, then suspend the whole environment",
                                         onkeydown: crate::guard_confirmation_enter,
                                         onclick: move |_| {
                                             if let (Some(answer), Some(token)) = (on_confirm_stop_suspend, suspend_stop_question.clone()) {
@@ -2371,11 +2385,11 @@ pub(super) fn SessionRow(
                                 // The panel also hosts an ordinary menu; arm
                                 // its gap rule when confirmation first mounts.
                                 onmounted: move |_| { document::eval(&crate::dialog_focus::install_js(".session-row-menu-panel.menu-prompt", crate::dialog_focus::ContainerEnter::None)); },
-                                if sandbox.is_some() { "{crate::sandbox_sessions::DELETE_CONSEQUENCE}" }
+                                if sandbox.is_some() { "{environment_delete_consequence}" }
                                 else { "{confirm_consequence(&session.status, session.tabs.len())}" }
-                                if let Some(host) = &sandbox_host && let Some(binding) = &host.tensorlake {
-                                    " Sandbox: {binding.sandbox.escaped()}"
-                                }
+                                if let Some(host) = &sandbox_host && let Some(name) = crate::sandbox_sessions::resource_name(host) {
+                                     "{crate::sandbox_sessions::provider_ui(host).resource_label(name)}"
+                                 }
                             }
                             // The last check before an irreversible action:
                             // an override or invisible character in a title
@@ -2435,7 +2449,7 @@ pub(super) fn SessionRow(
                                             ));
                                         }
                                     },
-                                    if sandbox.is_some() { "Delete session and sandbox" } else { "Confirm delete" }
+                                    if sandbox.is_some() { {environment_delete_label} } else { "Confirm delete" }
                                 }
                             }
                         } else if confirming_replace {
@@ -2778,7 +2792,7 @@ pub(super) fn SessionRow(
                                                         menu_panel::MenuItemCopy {
                                                             label: rsx! { if controls.resume { "Resume" } else { "Suspend" } },
                                                             description_id: "session-menu-sandbox-description",
-                                                            description: rsx! { if controls.resume { "Continue the sandbox's preserved processes" } else { "Freeze every process; everything continues on Resume" } },
+                                                            description: rsx! { if controls.resume { "Continue the environment's preserved processes" } else { "Freeze every process; everything continues on Resume" } },
                                                         }
                                                     }
                                                     if !controls.resume {
@@ -2798,7 +2812,7 @@ pub(super) fn SessionRow(
                                                             menu_panel::MenuItemCopy {
                                                                 label: rsx! { "Stop and suspend" },
                                                                 description_id: "session-menu-stop-suspend-description",
-                                                                description: rsx! { "End this session's agent and tabs, then suspend the whole sandbox" },
+                                                                description: rsx! { "End this session's agent and tabs, then suspend the whole environment" },
                                                             }
                                                         }
                                                     }
@@ -2852,7 +2866,7 @@ pub(super) fn SessionRow(
                                     menu_panel::MenuItemCopy {
                                         label: rsx! { "Clone" },
                                         description_id: "session-menu-clone-description",
-                                        description: rsx! { if sandbox.is_some() { "New session in a new sandbox, keep this one" } else { "New session, keep this one" } },
+                                        description: rsx! { if sandbox.is_some() { "New session in a new environment, keep this one" } else { "New session, keep this one" } },
                                     }
                                 }
                                 // Between clone and replace: clone's exact
@@ -2997,7 +3011,7 @@ pub(super) fn SessionRow(
                                         menu_panel::MenuItemCopy {
                                             label: rsx! { "Stop" },
                                             description_id: "session-menu-stop-description",
-                                            description: rsx! { if sandbox.is_some() { "Ends the agent and its processes; the sandbox keeps running and billing" } else { "Ends the agent and its processes, and closes terminal tabs" } },
+                                            description: rsx! { if sandbox.is_some() { {environment_stop_help} } else { "Ends the agent and its processes, and closes terminal tabs" } },
                                         }
                                     }
                                 }
@@ -3047,7 +3061,7 @@ pub(super) fn SessionRow(
                                         menu_panel::MenuItemCopy {
                                             label: rsx! { "Delete" },
                                             description_id: "session-menu-delete-description",
-                                            description: rsx! { if sandbox.is_some() { "Destroys the whole sandbox, all processes, files and snapshots" } else { "Removes the session and its state" } },
+                                            description: rsx! { if sandbox.is_some() { {environment_delete_consequence} } else { "Removes the session and its state" } },
                                         }
                                     }
                                 }
