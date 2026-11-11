@@ -12,10 +12,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
   same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.
 
-- [`sandbox-stop-refresh-weakens-click-guards.md`](sandbox-stop-refresh-weakens-click-guards.md) — Stop and suspend can
-  close a terminal tab opened during its activity check even though the initiating click showed no tabs and no
-  tab-closing question was shown.
-
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An

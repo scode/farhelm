@@ -15,8 +15,10 @@ import { hostChoice } from "./helpers/host-rail";
 /** Every controlled response retains the serving build stamp. Owned remote
  * identity and session transport stay real; only its presentation is replaced.
  * Ordinary-host mode exercises Resume-before-create without New choosing the
- * fresh recipe that a session-owned sandbox deliberately defaults to. */
-async function ownedHost(page: Page, request: APIRequestContext, sessionOwned = true) {
+ * fresh recipe that a session-owned sandbox deliberately defaults to. A host that
+ * is not suspended at start offers Suspend and Stop and suspend directly, and
+ * `refresh` announces a new revision so the page reads its listings again. */
+async function ownedHost(page: Page, request: APIRequestContext, sessionOwned = true, suspendedAtStart = true) {
   const response = await request.get("/api/hosts");
   expect(response.ok()).toBe(true);
   const build = response.headers()["x-farhelm-build"];
@@ -26,7 +28,7 @@ async function ownedHost(page: Page, request: APIRequestContext, sessionOwned = 
   const feed = await stubFeed(page);
   feed.notifyOnConnect(1);
   let revision = 1;
-  let suspended = true;
+  let suspended = suspendedAtStart;
   const stops: Array<() => Promise<void>> = [];
   const calls: string[] = [];
   stops.push(await drainedRoute(page, "**/api/hosts", async (route) => {
@@ -66,7 +68,7 @@ async function ownedHost(page: Page, request: APIRequestContext, sessionOwned = 
       feed.notify(++revision);
     }));
   }
-  return { remote, build, calls, stops };
+  return { remote, build, calls, stops, refresh: () => feed.notify(++revision) };
 }
 
 /** A ready recipe and an unbuilt recipe differ only in the prerequisite the
@@ -443,6 +445,71 @@ test("Resume restores owned controls and Stop and suspend keeps its host-wide qu
       ...fixture.stops.map((stop, index): [string, () => Promise<void>] => [`resume route ${index}`, stop]),
       ["session", () => cleanupSession(request, session.id)],
       ["preferences", () => patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null })],
+    ]);
+  }
+});
+
+/** SPEC.md "Lifecycle operations": a Stop whose click showed no tabs is refused if
+ * any tab is open, and one whose click showed an ended agent is refused if the
+ * agent is alive again. Stop and suspend reads activity between the click and its
+ * request; a listing refresh landing in that wait (a tab opened in another window,
+ * the agent restarted from the command line) must not weaken either guard. The
+ * activity read is held until the refreshed row is drawn, then the skipped
+ * question's request must still carry both refusals. */
+test("Stop and suspend sends the guards its click saw when the listing refreshes during its activity read", async ({ page, request }, testInfo) => {
+  const fixture = await ownedHost(page, request, true, false);
+  const session = await createSession(request, { title: "owned-click-guards", host: fixture.remote.id });
+  const activity = routeGate();
+  let activityHeld = false;
+  let refreshed = false;
+  const bodies: any[] = [];
+  // Newest route: it serves both the sidebar listing and the activity read, which
+  // differ only by the activity read's host filter.
+  fixture.stops.push(await drainedRoute(page, /\/api\/sessions(\?|$)/, async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const isActivity = new URL(route.request().url()).searchParams.get("host") === String(fixture.remote.id);
+    if (isActivity) {
+      activityHeld = true;
+      await activity.wait();
+    }
+    const reply = await route.fetch();
+    const json = await reply.json();
+    json.sessions = json.sessions.map((current: any) => {
+      if (isActivity && current.host === fixture.remote.id) {
+        // Nothing working on the sandbox: Suspend's activity question is skipped.
+        return { ...current, stale: false, status: { state: "exited", exit_code: 0 }, tabs: [] };
+      }
+      if (current.id !== session.id) return current;
+      return refreshed
+        ? { ...current, stale: false, status: { state: "running" }, tabs: [{ id: "e2e-opened-elsewhere" }] }
+        : { ...current, stale: false, status: { state: "exited", exit_code: 0 }, tabs: [] };
+    });
+    await route.fulfill({ response: reply, json });
+  }));
+  fixture.stops.push(await drainedRoute(page, `**/api/sessions/${encodeURIComponent(session.id)}/stop-and-suspend`, async (route) => {
+    bodies.push(route.request().postDataJSON());
+    await route.fulfill({ status: 409, headers: { "x-farhelm-build": fixture.build }, body: "guard fixture refused" });
+  }));
+  try {
+    await page.goto("/");
+    const row = page.locator(".session-row").filter({ hasText: "owned-click-guards" });
+    await expect(row).toContainText("Exited");
+    await openRowMenu(row);
+    await page.getByRole("menuitem", { name: /^Stop and suspend/ }).click();
+    await expect.poll(() => activityHeld).toBe(true);
+    refreshed = true;
+    fixture.refresh();
+    // The refreshed render replaced the row's controls before the wait ends.
+    await expect(row).toHaveCount(1);
+    await expect(row).not.toContainText("Exited");
+    activity.release();
+    await expect.poll(() => bodies.length).toBe(1);
+    expect(bodies[0]).toEqual({ refuse_if_tabs_open: true, refuse_if_agent_running: true });
+  } finally {
+    activity.release();
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ...fixture.stops.map((stop, index): [string, () => Promise<void>] => [`guard route ${index}`, stop]),
+      ["session", () => cleanupSession(request, session.id)],
     ]);
   }
 });

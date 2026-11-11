@@ -226,6 +226,11 @@ pub(crate) fn Controls(
     let mut error = use_signal(|| None::<String>);
     let mut question = use_signal(|| None::<Operation>);
     let mut held = use_signal(|| None::<crate::session_ops::SessionGuard>);
+    // Stop's no-tabs and ended-agent guards as the clicked render showed them
+    // (SPEC.md "Lifecycle operations"). The listing can refresh during the
+    // activity read, and `execute` then runs with the newer render's session.
+    // Every click sets it; the default refuses the most.
+    let mut stop_guards = use_signal(|| (true, true));
     let operations = use_context::<crate::session_ops::SessionOps>();
     let suspended = matches!(
         host.state,
@@ -254,12 +259,9 @@ pub(crate) fn Controls(
         let guard = held.write().take();
         if let Some(guard) = guard {
             if operation == Operation::StopAndSuspend {
+                let (no_tabs, ended) = *stop_guards.peek();
                 operations.send(crate::session_ops::HeaderAction::Stop(
-                    session.clone(),
-                    session.tabs.is_empty(),
-                    session.status.has_ended(),
-                    true,
-                    guard,
+                    session, no_tabs, ended, true, guard,
                 ));
             } else {
                 operations.send(crate::session_ops::HeaderAction::Sandbox(
@@ -270,7 +272,8 @@ pub(crate) fn Controls(
         busy.set(false);
         on_done.call(());
     });
-    let stop_asks = !skip && !session.tabs.is_empty();
+    let clicked_guards = (session.tabs.is_empty(), session.status.has_ended());
+    let stop_asks = !skip && !clicked_guards.0;
     let start = use_callback(move |stop: bool| {
         if disabled || changing || *busy.peek() || question.peek().is_some() {
             return;
@@ -282,6 +285,7 @@ pub(crate) fn Controls(
             return;
         };
         held.set(Some(guard.with_host_guard(host_guard)));
+        stop_guards.set(clicked_guards);
         error.set(None);
         let operation = Operation::requested(stop, suspended);
         if operation == Operation::Resume {
