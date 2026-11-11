@@ -94,12 +94,13 @@ those from **Add host**, and use **Delete sandbox** in the host's menu yourself.
 
 For edit and remove, use the host's name from `farhelm agent hosts`. Both offer **Allow** and **Deny**.
 
-An add request opens the ordinary **Add host** dialog in your focused Farhelm window, with the destination and alias
-filled in and the asking session and host shown. You can change either field before choosing **Add** to approve, or
-**Cancel** to decline. Other windows show a card that opens the dialog there. Approval starts the ordinary
-[add host flow](/docs/get-started/add-a-remote-host/) with the values you chose. If Farhelm needs to be installed on the
-host, it still asks you to confirm setup, even with **Set up new hosts without asking** turned on. The settings that
-skip setup or removal questions apply to actions you start in the UI; they do not approve an agent's request.
+An add request waits as a card in every Farhelm window, and never opens anything over what you are doing. Choose **Open
+add dialog** on the card to open the ordinary **Add host** dialog, with the destination and alias filled in and the
+asking session and host shown. You can change either field before choosing **Add** to approve, or **Cancel** to decline.
+Approval starts the ordinary [add host flow](/docs/get-started/add-a-remote-host/) with the values you chose. If Farhelm
+needs to be installed on the host, it still asks you to confirm setup, even with **Set up new hosts without asking**
+turned on. The settings that skip setup or removal questions apply to actions you start in the UI; they do not approve
+an agent's request.
 
 The agent gets `accepted` when you approve and Farhelm starts adding the host. That does not mean Farhelm is installed
 or that the host is ready: adding can still fail, need setup, or be cancelled at the setup question. The agent must run

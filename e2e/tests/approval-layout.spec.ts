@@ -91,33 +91,15 @@ async function stageApprovals(page: Page, initial: Approval[]) {
   };
 }
 
-/** Control only the window-focus input at the DOM boundary. Playwright treats
- * every page as focused, so bringToFront cannot establish an inactive window
- * (https://playwright.dev/docs/pages#multiple-pages). The real application still
- * samples this API on arrival and admission; restoring focus removes the override
- * rather than replacing the native positive result. Visibility stays native. */
-async function setWindowFocused(page: Page, focused: boolean) {
-  await page.evaluate((active) => {
-    if (active) Reflect.deleteProperty(document, "hasFocus");
-    else {
-      const samples = { count: 0 };
-      Object.defineProperty(document, "__inactiveFocusSamples", { configurable: true, value: samples });
-      Object.defineProperty(document, "hasFocus", { configurable: true, value: () => {
-        samples.count++;
-        return false;
-      } });
-    }
-    window.dispatchEvent(new Event(active ? "focus" : "blur"));
-  }, focused);
-  await expect.poll(() => page.evaluate(() => ({
-    focused: document.hasFocus(), visible: document.visibilityState !== "hidden",
-  })), { message: "premise: document focus input changed without hiding the page" })
-    .toEqual({ focused, visible: true });
-}
-
-/** Observe a fresh production read without calling the focus API from the assertion. */
-async function inactiveFocusSamples(page: Page): Promise<number> {
-  return page.evaluate(() => Reflect.get(document, "__inactiveFocusSamples").count);
+/** Select the requested card before explicitly opening its add draft. Queue
+ * tests use the same action while another draft holds the modal owner. */
+async function openHostAdd(page: Page, id: string) {
+  const card = page.locator(".approval-card");
+  if (await card.getAttribute("data-approval-id") !== id) {
+    await page.locator(`.approval-waiting[data-approval-id="${id}"]`).click();
+  }
+  await expect(card).toHaveAttribute("data-approval-id", id);
+  await card.getByRole("button", { name: "Open add dialog", exact: true }).click();
 }
 
 let session: SessionRow | undefined;
@@ -160,7 +142,7 @@ async function placement(page: Page) {
 
 /** The positive answer must retain edits while its own listing entry disappears,
  * and must await the receipt response before any ordinary discovery request. */
-test("focused host add preserves edited fields and waits for its own answer receipt", async ({ page }) => {
+test("explicit host add preserves edited fields and waits for its own answer receipt", async ({ page }) => {
   const staged = await stageApprovals(page, []);
   const gate = routeGate();
   const answers: unknown[] = [];
@@ -175,13 +157,11 @@ test("focused host add preserves edited fields and waits for its own answer rece
     await fulfillAsHelm(route, { json: { result: "manual", reason: "controlled discovery refusal" } });
   });
   await page.goto("/");
-  await page.bringToFront();
-  await expect.poll(() => page.evaluate(() => document.hasFocus() && document.visibilityState !== "hidden"),
-    { message: "premise: this window is live and focused before request arrival" }).toBe(true);
   const hostile = { ...hostAddRequest("add-edited"), action: {
     kind: "host_add", destination: "user@or\u202eiginal.invalid", alias: "or\u202eiginal alias",
   } };
   await staged.replace([hostile]);
+  await openHostAdd(page, "add-edited");
   const form = page.locator(".add-host-form");
   try {
     await expect(form).toBeVisible();
@@ -215,36 +195,52 @@ test("focused host add preserves edited fields and waits for its own answer rece
   } finally { gate.release(); }
 });
 
-/** A request first observed in the background stays a card; explicitly opening
- * it never grants approval, and Escape sends the same route's Deny once. */
-test("inactive host add stays a card and explicit opening cancels through Deny", async ({ page }) => {
+/** An unsolicited host request must not turn terminal input into an approval.
+ * Wait until its card is armed, so Enter is tested after the old automatic
+ * dialog would have been able to answer, not just during its safety pause. */
+test("host add arrival keeps terminal focus and Enter answers nothing", async ({ page }) => {
   const staged = await stageApprovals(page, []);
   await page.goto("/");
-  await setWindowFocused(page, false);
-  try {
-    await staged.replace([hostAddRequest("add-inactive")]);
-    const card = page.locator('[data-approval-id="add-inactive"]');
-    await expect(card.locator(".approval-allow")).toBeEnabled();
-    await expect(page.locator(".add-host-form")).toHaveCount(0);
-    await setWindowFocused(page, true);
-    await card.getByRole("button", { name: "Open add dialog", exact: true }).click();
-    const form = page.locator(".add-host-form");
-    await expect(form).toBeVisible();
-    expect(staged.answers, "opening is not approval").toEqual([]);
-    await expect(form.locator(".add-host-ssh")).toBeFocused();
-    await form.locator(".add-host-ssh").press("Escape");
-    await expect(form).toHaveCount(0);
-    expect(staged.answers).toEqual([{ id: "add-inactive", answer: "deny" }]);
-  } finally { await setWindowFocused(page, true); }
+  await attachSession(page, session!.id);
+  const terminal = terminalInput(page);
+  await terminal.focus();
+  await expect(terminal).toBeFocused();
+  await expect.poll(() => page.evaluate(() => document.hasFocus() && document.visibilityState !== "hidden"),
+    { message: "premise: request arrives in the live focused window" }).toBe(true);
+  await staged.replace([hostAddRequest("add-card-only")]);
+  const card = page.locator('[data-approval-id="add-card-only"]');
+  await expect(card.getByRole("button", { name: "Open add dialog", exact: true })).toBeEnabled();
+  await expect(page.locator(".add-host-form")).toHaveCount(0);
+  await expect(terminal).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(terminal).toBeFocused();
+  await expect(page.locator(".add-host-form")).toHaveCount(0);
+  expect(staged.answers, "terminal Enter is not an answer to the waiting request").toEqual([]);
 });
 
-/** Automatic admission must preserve a manual draft and recheck focus after
- * that draft closes. Returning focus later does not auto-open an old card. */
-test("host add admission keeps a manual draft and rechecks live focus", async ({ page }) => {
+/** Explicit opening never grants approval, and Escape sends the same route's
+ * Deny once. Window activity no longer changes this card-only contract. */
+test("host add card opens explicitly and cancels through Deny", async ({ page }) => {
   const staged = await stageApprovals(page, []);
   await page.goto("/");
-  await page.bringToFront();
-  await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
+  await staged.replace([hostAddRequest("add-explicit")]);
+  await expect(page.locator(".approval-allow")).toBeEnabled();
+  await expect(page.locator(".add-host-form")).toHaveCount(0);
+  await openHostAdd(page, "add-explicit");
+  const form = page.locator(".add-host-form");
+  await expect(form).toBeVisible();
+  expect(staged.answers, "opening is not approval").toEqual([]);
+  await expect(form.locator(".add-host-ssh")).toBeFocused();
+  await form.locator(".add-host-ssh").press("Escape");
+  await expect(form).toHaveCount(0);
+  expect(staged.answers).toEqual([{ id: "add-explicit", answer: "deny" }]);
+});
+
+/** Arrival cannot replace or queue behind a manual draft. An explicit card
+ * click still waits for that draft to close, preserving the user's edits. */
+test("host add preserves a manual draft and defers only an explicit open", async ({ page }) => {
+  const staged = await stageApprovals(page, []);
+  await page.goto("/");
   await page.locator(".host-rail-add").click();
   const form = page.locator(".add-host-form");
   await form.locator(".add-host-ssh").fill("user@manual-draft.invalid");
@@ -254,45 +250,68 @@ test("host add admission keeps a manual draft and rechecks live focus", async ({
   await expect(form).toHaveCount(1);
   await expect(form.locator(".add-host-ssh")).toHaveValue("user@manual-draft.invalid");
   await expect(form.locator(".add-host-alias")).toHaveValue("manual alias");
-  await setWindowFocused(page, false);
-  try {
-    const beforeAdmission = await inactiveFocusSamples(page);
-    // Invoke the owned manual cancellation without bringing its background
-    // window forward; the queued agent opening must now fail admission.
-    await form.locator(".add-host-cancel").evaluate((button: HTMLButtonElement) => button.click());
-    await expect(form).toHaveCount(0);
-    // Rejection must finish before native focus is restored; otherwise a late
-    // admission sample could observe the restored value and open the old card.
-    await expect.poll(() => inactiveFocusSamples(page),
-      { message: "queued admission sampled inactive focus after the manual dialog closed" }).toBeGreaterThan(beforeAdmission);
-    await expect(page.locator('[id^="host-modal-"]')).toHaveCount(0);
-    await expect(page.locator('[data-approval-id="add-deferred"]')).toBeVisible();
-    await setWindowFocused(page, true);
-    await expect(form).toHaveCount(0);
-    await page.locator(".approval-allow").click();
-    await expect(form.locator(".add-host-ssh")).toHaveValue("user@original.invalid");
-    expect(staged.answers).toEqual([]);
-    await form.locator(".add-host-cancel").click();
-    await expect(form).toHaveCount(0);
-    expect(staged.answers).toEqual([{ id: "add-deferred", answer: "deny" }]);
-  } finally { await setWindowFocused(page, true); }
+  await form.locator(".add-host-cancel").click();
+  await expect(form).toHaveCount(0);
+  await expect(page.locator('[id^="host-modal-"]')).toHaveCount(0);
+  await expect(page.locator('[data-approval-id="add-deferred"]')).toBeVisible();
+  await page.locator(".host-rail-add").click();
+  await form.locator(".add-host-ssh").fill("user@second-draft.invalid");
+  await openHostAdd(page, "add-deferred");
+  await expect(form.locator(".add-host-ssh")).toHaveValue("user@second-draft.invalid");
+  await form.locator(".add-host-cancel").click();
+  await expect(form.locator(".add-host-ssh")).toHaveValue("user@original.invalid");
+  expect(staged.answers).toEqual([]);
+  await form.locator(".add-host-cancel").click();
+  await expect(form).toHaveCount(0);
+  expect(staged.answers).toEqual([{ id: "add-deferred", answer: "deny" }]);
 });
 
-/** A focused listing may contain several arrivals. Present them in order
- * without replacing the current draft, and omit a queued request once a
- * successful refresh proves that it expired. */
-test("simultaneous host adds open in order and omit expired queued requests", async ({ page }) => {
+/** The card stays live over another dialog, but even an explicit open must
+ * wait for that modal owner rather than replacing its focus trap. */
+test("explicit host add waits behind the quick switcher", async ({ page }) => {
   const staged = await stageApprovals(page, []);
   await page.goto("/");
-  await page.bringToFront();
-  await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
+  await attachSession(page, session!.id);
+  const terminal = terminalInput(page);
+  await terminal.focus();
+  await expect(terminal).toBeFocused();
+  const mac = await page.evaluate(() => navigator.platform.includes("Mac"));
+  await page.keyboard.press(mac ? "Meta+k" : "Control+Shift+k");
+  const switcher = page.getByRole("dialog", { name: "Quick switcher" });
+  await expect(switcher).toBeVisible();
+  await expect(switcher.getByRole("combobox")).toBeFocused();
+  await staged.replace([hostAddRequest("add-behind-switcher")]);
+  await expect(page.locator(".approval-allow")).toBeEnabled();
+  await expect(switcher.getByRole("combobox")).toBeFocused();
+  await expect(page.locator(".add-host-form")).toHaveCount(0);
+  await openHostAdd(page, "add-behind-switcher");
+  await expect(switcher).toBeVisible();
+  await expect(page.locator(".add-host-form")).toHaveCount(0);
+  await switcher.getByRole("combobox").press("Escape");
+  const form = page.locator(".add-host-form");
+  await expect(form).toBeVisible();
+  await expect(form.locator(".add-host-ssh")).toHaveValue("user@original.invalid");
+  expect(staged.answers, "a deferred explicit opening still answers nothing").toEqual([]);
+  await form.locator(".add-host-cancel").click();
+  await expect(form).toHaveCount(0);
+  expect(staged.answers).toEqual([{ id: "add-behind-switcher", answer: "deny" }]);
+});
+
+/** Only explicit opens enter the queue. Keep their order without replacing
+ * the current draft, and drop a queued request once its listing entry expires. */
+test("explicit host add opens stay ordered and omit expired queued requests", async ({ page }) => {
+  const staged = await stageApprovals(page, []);
+  await page.goto("/");
   const cards = ["first", "expired", "last"].map((id) => ({
     ...hostAddRequest(id), action: { kind: "host_add", destination: `user@${id}.invalid`, alias: id },
   }));
   await staged.replace(cards);
   const form = page.locator(".add-host-form");
+  await openHostAdd(page, "first");
   await expect(form.locator(".add-host-ssh")).toHaveValue("user@first.invalid");
   await expect(form.locator(".add-host-cancel")).toBeEnabled();
+  await openHostAdd(page, "expired");
+  await openHostAdd(page, "last");
   await staged.expire("expired");
   await expect(page.locator('[data-approval-id="expired"]')).toHaveCount(0);
   await expect(form.locator(".add-host-ssh")).toHaveValue("user@first.invalid");
@@ -320,9 +339,8 @@ for (const status of [200, 409, 410]) {
       await route.abort();
     });
     await page.goto("/");
-    await page.bringToFront();
-    await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
     await staged.replace([hostAddRequest("add-refused")]);
+    await openHostAdd(page, "add-refused");
     const form = page.locator(".add-host-form");
     await expect(form).toBeVisible();
     await form.locator(".add-host-submit").click();
@@ -362,17 +380,12 @@ test("only the winning host add window probes its captured edited fields", async
       });
       await window.goto("/");
     }
-    await other.bringToFront();
-    await expect.poll(() => other.evaluate(() => document.hasFocus())).toBe(true);
-    await setWindowFocused(page, false);
     await staged[0].replace([hostAddRequest("add-race")]);
     await staged[1].replace([hostAddRequest("add-race")]);
-    await expect(other.locator(".add-host-form")).toBeVisible();
-    await expect(page.locator(".approval-allow")).toBeEnabled();
-    await expect(page.locator(".add-host-form")).toHaveCount(0);
-    await setWindowFocused(page, true);
-    await page.locator(".approval-allow").click();
     for (const [index, window] of windows.entries()) {
+      await expect(window.locator(".approval-allow")).toBeEnabled();
+      await expect(window.locator(".add-host-form")).toHaveCount(0);
+      await openHostAdd(window, "add-race");
       await expect(window.locator(".add-host-form")).toBeVisible();
       await window.locator(".add-host-ssh").fill(`user@window-${index}.invalid`);
       await window.locator(".add-host-alias").fill(`window ${index}`);
@@ -541,63 +554,68 @@ for (const paneWidth of [960, 650, 320]) {
     await setPaneWidth(page, paneWidth);
     await page.evaluate(() => document.fonts.ready);
     const anchor = (await placement(page)).card;
-    await setWindowFocused(page, false);
-    try {
-      for (const fixture of fixtures) {
-        await test.step(`${fixture.id}: ${(fixture.action as { kind: string }).kind}`, async () => {
-          await staged.replace([fixture]);
-          const card = page.locator(".approval-card");
-          await expect(card).toHaveAttribute("data-approval-id", fixture.id);
-          await expect(card).toHaveAttribute("data-approval-kind", (fixture.action as { kind: string }).kind);
-          await expect(card.locator(".approval-card-actions .approval-allow")).toHaveCount(1);
-          await expect(card.locator(".approval-card-actions .approval-deny")).toHaveCount(1);
-          await expect.poll(() => cardGeometry(page), { message: `${fixture.id}: header, From and every answer stay inside the unscrolled region` }).toMatchObject({
-            regionOverflowX: 0, regionScrollTop: 0, headerInside: true, fromInside: true,
-            actionsInside: true, horizontalLeaks: [], bodyOverflowX: 0,
-          });
-          const geometry = await cardGeometry(page);
-          const current = (await placement(page)).card;
-          expect(current.x, "kind changes preserve the horizontal anchor").toBeCloseTo(anchor.x, 0);
-          expect(current.y, "kind changes preserve the terminal anchor").toBeCloseTo(anchor.y, 0);
-          expect(current.width, "all kinds use the same card width").toBeCloseTo(anchor.width, 0);
-          expect(geometry.buttonsInside.length).toBeGreaterThanOrEqual(2);
-          expect(geometry.buttonsInside.every(Boolean), "every answer is fully visible before any scrolling").toBe(true);
-          for (const block of await card.locator(".approval-card-block").all()) {
-            await expect(block).toHaveAttribute("tabindex", "0");
-            await expect(block).toHaveAttribute("aria-label", /.+/);
-            expect(await block.evaluate(node => getComputedStyle(node).overflowY), "long text owns its scroll").toBe("auto");
-          }
-          const singleLines = await card.locator(".approval-fact-scroll").evaluateAll(nodes => nodes.map(node => ({
-            label: node.closest(".approval-card-row")!.querySelector("dt")!.textContent,
-            overflowing: node.scrollWidth > node.clientWidth,
-            wrap: getComputedStyle(node).whiteSpace,
-            overflow: getComputedStyle(node).overflowX,
-            tabStop: node.hasAttribute("tabindex"),
-            mono: getComputedStyle(node.querySelector(".peer-value")!).fontFamily.toLowerCase().includes("mono"),
-          })));
-          for (const value of singleLines) {
-            expect(value).toMatchObject({ wrap: "nowrap", overflow: "auto", tabStop: false, mono: true });
-            expect(["Folder", "Managed checkout of", "SSH destination", "Destination", "Container GitHub token file",
-              "Session ID", "Copied session ID", "Site", "Host install"], "sideways scrolling is reserved for technical identities and destinations")
-              .toContain(value.label);
-          }
-          if ((fixture.action as { kind: string }).kind !== "open_url") {
-            expect(singleLines.some(value => value.overflowing), "premise: a long path, repository, destination or target ID needs its own sideways scroll").toBe(true);
-          }
-          const flags = approvalValue(page, "permission flags");
-          if (await flags.count()) {
-            await expect(flags).toContainText(`--security-tail=${"flag".repeat(65)}`);
-            expect(await flags.evaluate(node => node.scrollWidth - node.clientWidth), "permission flag tails wrap in full").toBe(0);
-          }
-          if ((fixture.action as { kind: string }).kind === "open_url") {
-            const url = approvalValue(page, "URL");
-            await expect(url).toContainText("security-tail=END");
-            expect(await url.evaluate(node => node.scrollWidth - node.clientWidth), "URL tails wrap inside the fact").toBe(0);
-          }
+    for (const fixture of fixtures) {
+      await test.step(`${fixture.id}: ${(fixture.action as { kind: string }).kind}`, async () => {
+        await staged.replace([fixture]);
+        const card = page.locator(".approval-card");
+        await expect(card).toHaveAttribute("data-approval-id", fixture.id);
+        await expect(card).toHaveAttribute("data-approval-kind", (fixture.action as { kind: string }).kind);
+        await expect(card.locator(".approval-card-actions .approval-allow")).toHaveCount(1);
+        await expect(card.locator(".approval-card-actions .approval-deny")).toHaveCount(1);
+        await expect.poll(() => cardGeometry(page), { message: `${fixture.id}: header, From and every answer stay inside the unscrolled region` }).toMatchObject({
+          regionOverflowX: 0, regionScrollTop: 0, headerInside: true, fromInside: true,
+          actionsInside: true, horizontalLeaks: [], bodyOverflowX: 0,
         });
-      }
-      expect(staged.answers, "layout inspection cannot approve a request").toEqual([]);
-    } finally { await setWindowFocused(page, true); }
+        const geometry = await cardGeometry(page);
+        const current = (await placement(page)).card;
+        expect(current.x, "kind changes preserve the horizontal anchor").toBeCloseTo(anchor.x, 0);
+        expect(current.y, "kind changes preserve the terminal anchor").toBeCloseTo(anchor.y, 0);
+        expect(current.width, "all kinds use the same card width").toBeCloseTo(anchor.width, 0);
+        expect(geometry.buttonsInside.length).toBeGreaterThanOrEqual(2);
+        expect(geometry.buttonsInside.every(Boolean), "every answer is fully visible before any scrolling").toBe(true);
+        // Sample passive facts together: per-block protocol round trips can
+        // otherwise consume the whole audit deadline in WebKit. Keep each
+        // accessibility and scrolling assertion over the same rendered blocks.
+        const blocks = await card.locator(".approval-card-block").evaluateAll(nodes => nodes.map(node => ({
+          tabindex: node.getAttribute("tabindex"),
+          label: node.getAttribute("aria-label"),
+          overflowY: getComputedStyle(node).overflowY,
+        })));
+        for (const block of blocks) {
+          expect(block.tabindex).toBe("0");
+          expect(block.label).toMatch(/.+/);
+          expect(block.overflowY, "long text owns its scroll").toBe("auto");
+        }
+        const singleLines = await card.locator(".approval-fact-scroll").evaluateAll(nodes => nodes.map(node => ({
+          label: node.closest(".approval-card-row")!.querySelector("dt")!.textContent,
+          overflowing: node.scrollWidth > node.clientWidth,
+          wrap: getComputedStyle(node).whiteSpace,
+          overflow: getComputedStyle(node).overflowX,
+          tabStop: node.hasAttribute("tabindex"),
+          mono: getComputedStyle(node.querySelector(".peer-value")!).fontFamily.toLowerCase().includes("mono"),
+        })));
+        for (const value of singleLines) {
+          expect(value).toMatchObject({ wrap: "nowrap", overflow: "auto", tabStop: false, mono: true });
+          expect(["Folder", "Managed checkout of", "SSH destination", "Destination", "Container GitHub token file",
+            "Session ID", "Copied session ID", "Site", "Host install"], "sideways scrolling is reserved for technical identities and destinations")
+            .toContain(value.label);
+        }
+        if ((fixture.action as { kind: string }).kind !== "open_url") {
+          expect(singleLines.some(value => value.overflowing), "premise: a long path, repository, destination or target ID needs its own sideways scroll").toBe(true);
+        }
+        const flags = approvalValue(page, "permission flags");
+        if (await flags.count()) {
+          await expect(flags).toContainText(`--security-tail=${"flag".repeat(65)}`);
+          expect(await flags.evaluate(node => node.scrollWidth - node.clientWidth), "permission flag tails wrap in full").toBe(0);
+        }
+        if ((fixture.action as { kind: string }).kind === "open_url") {
+          const url = approvalValue(page, "URL");
+          await expect(url).toContainText("security-tail=END");
+          expect(await url.evaluate(node => node.scrollWidth - node.clientWidth), "URL tails wrap inside the fact").toBe(0);
+        }
+      });
+    }
+    expect(staged.answers, "layout inspection cannot approve a request").toEqual([]);
   });
 }
 

@@ -3064,15 +3064,6 @@ pub(crate) fn HostsPanel(
                 if let Some(opening) = (agent_add.opening)() {
                     crate::modal_isolation::HostModal {
                         key: "{opening.card.id}",
-                        require_active: opening.automatic,
-                        on_rejected: {
-                            let shown_id = opening.card.id.clone();
-                            move |_| {
-                                if agent_add.opening.peek().as_ref().is_some_and(|current| current.card.id == shown_id) {
-                                    agent_add.opening.set(None);
-                                }
-                            }
-                        },
                         AddHostForm {
                             agent_request: Some(opening.card.clone()),
                             reopen: None,

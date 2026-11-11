@@ -1172,9 +1172,10 @@ things the user has moved on from, across the whole UI” covers them.
 SPEC.md, "Keyboard focus" (confirmed 2026-11-10), now states the product rules in toolkit-neutral terms, and this code
 does not yet follow all of them. In particular, a launcher owed back after the user moved on should wait behind a notice
 instead of returning by itself; focus left on the document body on the main screen should go to the selected session's
-terminal; an agent's host-add request should no longer be admitted as a dialog automatically; and the guard above admits
-focus on the document body where the spec now leaves a moved-on result quiet. Treat the spec as the target when changing
-any of these paths.
+terminal; an explicit click on an agent host-add card still opens its dialog after an existing dialog, manual add draft
+or pending add submission clears, even if the user has moved on meanwhile, and without a fresh arm pause; and the guard
+above admits focus on the document body where the spec now leaves a moved-on result quiet. Treat the spec as the target
+when changing any of these paths.
 
 `launch_activity::LaunchActivity` observes one window-owned key/pointer press count installed before page shortcuts. Its
 capture listener publishes a scalar through an ordered hidden-input relay before the original event reaches Rust;
@@ -9201,18 +9202,20 @@ and permits no browser probe. Sending the positive receipt is the last fallible 
 or later origin veto. Other actions keep their existing answer semantics.
 
 The UI keeps a page-local opening between approval cards and the hosts panel, without another pending registry or
-installer. Newly observed requests automatically open only in the live focused visible window; `HostModal` admission
-waits for existing dialogs and samples that predicate again before opening. Inactive windows keep an explicit open
-action. Several focused arrivals are presented in order after the current form closes; successful reads drop queued ids
-that no longer wait. Admission also preserves a setup submission's draft until its POST has resolved and any definite
-refusal has reopened it. One shared synchronous answer guard and the existing 700ms arm pause cover the card and dialog.
-Successful listing absence can retire a pending dialog, but failed reads prove nothing and an answering dialog waits for
-its own reply. Only the successful receipt continues the same form's ordinary probe with captured edited fields. An
-immutable agent-origin bit travels through setup submission and definite refusal/reopen; the provisionable branch skips
-setup only for a user-originated add whose preference is true. The receipt attests to approval, not discovery or
-installation: browser or reply loss can interrupt the continuation before a probe reaches the helm. There is no
-correlation, persistence, or automatic replay across that gap; once a probe or setup request itself accepts work, its
-ordinary server-owned lifetime applies.
+installer. Newly observed requests show their cards in every window without opening a dialog or moving focus. Only the
+card's explicit open action queues the ordinary add dialog. `HostModal` admission waits for existing dialogs, and the
+hosts panel keeps a manual add draft or pending submission ahead of an agent opening. Explicit opens are presented in
+click order after the current form closes; successful reads drop queued ids that no longer wait. Admission also
+preserves a setup submission's draft until its POST has resolved and any definite refusal has reopened it. One shared
+synchronous answer guard and the existing 700ms arm pause cover the card and dialog. The pause restarts only when the
+card list or selection changes, so a dialog admitted after waiting behind another dialog, draft or submission opens
+already armed. Successful listing absence can retire a pending dialog, but failed reads prove nothing and an answering
+dialog waits for its own reply. Only the successful receipt continues the same form's ordinary probe with captured
+edited fields. An immutable agent-origin bit travels through setup submission and definite refusal/reopen; the
+provisionable branch skips setup only for a user-originated add whose preference is true. The receipt attests to
+approval, not discovery or installation: browser or reply loss can interrupt the continuation before a probe reaches the
+helm. There is no correlation, persistence, or automatic replay across that gap; once a probe or setup request itself
+accepts work, its ordinary server-owned lifetime applies.
 
 Protocol 63 adds `AgentVerb::HostEdit` and `HostRemove`, answered by `AgentReply::HostEdited` and `HostRemoved`, with
 the approval kinds `ApprovalAction::HostEdit` and `HostRemove`. Both kinds return true from
