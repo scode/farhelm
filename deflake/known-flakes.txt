@@ -20,9 +20,6 @@ playwright terminal-create-idempotency.spec.ts editing the working directory aft
 playwright provisioning.spec.ts changed-host advice while following: identity  # update-progress-step-name-late
 playwright provisioning.spec.ts a first identity learned while following: replacement  # update-progress-step-name-late
 playwright provisioning.spec.ts a first identity learned while following: completion  # update-progress-step-name-late
-playwright quick-launch.spec.ts a sequence refused at its prefix leaves later sequences their own bindings  # quick-launch-body-focus-chromium
-playwright quick-launch.spec.ts typed page refusals are atomic and empty Enter leaves later bindings paired  # quick-launch-body-focus-chromium
-playwright provisioning.spec.ts expanded setup failure closes the menu below it  # expanded-setup-failure-menu-absent
 playwright provisioning.spec.ts incarnation churn keeps a followed run while a target change detaches it  # update-progress-step-name-late
 playwright provisioning.spec.ts a progress read failure during an update recovers on retry demand alone  # update-progress-step-name-late
 playwright provisioning.spec.ts changed-host advice while following: destination  # update-progress-step-name-late

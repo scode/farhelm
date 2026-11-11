@@ -26,16 +26,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
-- **Revisit letting a plain Replace's YOLO question take focus while the user has pressed nothing since.** Decided by
-  the landing monitor on 2026-11-10 while landing nonblocking-session-actions, under the maintainer's instruction to fix
-  that landing's problems itself. The plan's rule was that a question arriving after a reply takes focus only when
-  nothing else holds it. In WebKit, the desktop app's engine family, a header button click does not take focus, so after
-  a header Replace refused as a YOLO launch focus was still in the session's terminal and Cancel was left unfocused (7
-  of 10 runs). Now the question focuses Cancel outright while the page's key/pointer press count still equals the count
-  at the user's Replace click, and keeps the guard otherwise. The alternative was to record which element held focus at
-  the click and let the question take focus only from that element, which needs per-request focus bookkeeping. Plan:
-  `plans/queue/yolo-focus-origin.md`.
-
 - **Revisit keeping a sandbox session's Suspend and Resume exclusive with launches.** Decided on the maintainer's behalf
   on 2026-11-10 when landing nonblocking-session-actions stopped: that plan lets you act on other sessions while a
   launch or a session action is pending, and as delivered it also let Suspend and Resume from a sandbox session's row or
@@ -66,25 +56,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   quick launches and host changes stay refused and the hidden launcher has no Cancel. Before that plan the launcher was
   visible and could be cancelled there. Give that wait a limit that returns the launcher with an error.
 
-- **Replace the session-menu geometry probe with a heading-resize check.** nonblocking-session-actions keeps open row
-  menus open when the session count above the list changes (a finished New, Clone or Delete changes it) by measuring
-  whether each menu's anchor really moved, about 600 lines in `crates/farhelm-ui/src/anchored_popovers.rs` plus its
-  tests and callers in `list/row.rs` and `list/bell.rs`. Its landing review found a design of about 30 lines in
-  `list/view.rs` that does the same job: when the count changes, note the menus open at that moment (as main did before
-  that plan), and close those only when the session heading's resize event reports a real size change. A menu opened
-  after the count change is not in that set and survives a late resize, which keeps the guarantee of #2547 (close menus
-  a wrapping heading would leave floating). It loses only re-measuring a menu whose first measurement was still in
-  flight when the heading resized, which main closes too. The browser test of the heading change keeps passing once its
-  probe-counting assertion goes.
-
-- **Make the nonblocking session-action browser tests wait for the reply before asserting nothing moved.** Three tests
-  in `e2e/tests/nonblocking-launch.spec.ts` (the first test, the Rename one and the held YOLO one) check that a
-  returning launcher waits behind a newer dialog after only the HTTP response and two animation frames, which does not
-  show the reply was processed, so they can pass when the behavior is broken; the Restart/Replace test there waits for
-  the row's settled state first and is the model. Its first test's synthetic clicks on disabled buttons also never reach
-  the handlers, so the handler-side refusals are untested. `e2e/tests/session-action-completion.spec.ts`
-  (`settleMountedFocus`) uses the same two-frame wait as its oracle that focus did not move.
-
 - **Fix two leftover session-action state bugs from nonblocking-session-actions.** Found by its landing review
   (2026-11-10). A Restart that succeeded while the user was on another session is remembered until that session is next
   opened; if the host reboots again before then, opening it shows a terminal for a dead pane instead of the interrupted
@@ -93,61 +64,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (`create_form.rs`), so an abandoned request would leave it shown for the life of the page; plain Replace already uses
   a guard for this.
 
-- **Stop a finishing bulk Stop from closing a Delete confirmation left open on another marked row.** Seen in the landing
-  of nonblocking-session-actions (2026-11-10): `bulk Stop reports an engaged row without skipping its eligible sibling`
-  in `e2e/tests/bulk-session-actions.spec.ts` failed 4 of 20 and 2 of 20 WebKit runs on Tensorlake (Chromium 20 of 20),
-  and passed on main before that plan. With a temporary state report, every failure had the engaged row's Delete
-  confirmation closed while the row showed "Stop: not started, another operation is in progress": the batch finishing
-  the other row closes it. Nothing is deleted and the refusal stays visible, but closing a surface the user opened is
-  what that plan's rules forbid, and the test stays flaky in WebKit until this is fixed. Likely suspects are the row
-  menu's movement closes and the geometry probe in `crates/farhelm-ui/src/anchored_popovers.rs`.
-
 - **Find out why double-clicking the version text sometimes selects nothing in Chromium.**
   `header controls stay interactive and text stays selectable beside the forced-class spacer` in
   `e2e/tests/window-chrome.spec.ts` failed once in a whole browser run and 1 of 20 repeats (Chromium, Tensorlake) during
   the landing of nonblocking-session-actions on 2026-11-10, which changed header CSS and added a window-level key and
   pointer capture listener. Not diagnosed, and not checked on main; first establish whether it predates that plan.
-
-- **Stop asynchronous completions from moving focus or closing things the user has moved on from, across the whole UI.**
-  The plan that lets session actions and launches stop blocking the page (`plans/queue/nonblocking-session-actions.md`)
-  stopped at landing twice on one class of problem. Code that runs when something finishes later (a request's reply, a
-  timer, a feed event) still assumes the user is where the action left them, because it was written when a pending
-  action locked the page. Its second landing found, by reading the code, a launch that finishes moving keyboard focus to
-  New and closing the Hosts panel and open menus, wherever the user is. The focus move to New and the Hosts panel
-  closing were confirmed in the code; none of it was seen in a browser. In the worst case, someone typing into another
-  session's terminal when the launch finishes has their next keystrokes stop reaching that agent, and Enter opens a new
-  launcher. On 2026-11-10 the maintainer revised that plan to fix its own scope with rules rather than case by case.
-  Each completion is split into settling the action (its session's state at once, the rest once no dialog is owed back),
-  bringing a dialog back (for failures, questions and the naming dialog) and leaving everything else alone. A shared
-  helper moves focus after an asynchronous event only when nothing holds focus or focus is still inside the surface
-  being left. A New or Clone opens its new session only if the user has not moved on. The plan writes these into
-  SPEC_impl.md, "GUI: Dioxus", once it lands; use what landed there, not this summary. This entry is the rest of the UI,
-  which that plan deliberately leaves alone. Sweep `crates/farhelm-ui/` for every place that, from an asynchronous
-  callback rather than the user's own event handler, does any of these:
-  - moves focus;
-  - closes or opens a panel, menu or dialog;
-  - changes the selected session;
-  - clears state the user may be using.
-
-  That covers three kinds of code. First, handlers: dozens of focus moves in Rust (`FocusTarget::focus`,
-  `SavedFocus::restore`, `DialogHandle::close` and `focus_surface`, `RecoveryFocus`, direct `document::eval` calls),
-  plus the focus rules in `assets/terminal.js`, `assets/menu-focus.js` and `assets/grid-terminal.js`. Second, reactive
-  effects that close surfaces when some state changes, like the one in `list/view.rs` that closes every open row, host
-  and sort menu whenever the launcher mounts or unmounts. Third, dialogs that open asynchronously (a host dialog
-  admitted later, say), which take the keyboard as soon as they open. The launcher coming back for a failure or question
-  is decided behavior in that plan, and the sweep does not revisit it without the maintainer. Places to check include
-  the host dialogs (`hosts.rs`, `hosts/settings_dialog.rs`), adding a Tensorlake host (`tensorlake/add_host.rs`),
-  Templates (`list/templates.rs`), Trash, Settings (`settings.rs`), provisioning progress (`provisioning.rs`) and
-  approvals (`approvals.rs`). Classify each as the user's own handling (fine as is) or an asynchronous completion. Bring
-  the completions under the plan's rules and helper, with browser tests for the cases a user can realistically hit:
-  focus in a terminal or another dialog when the reply lands. The sweep should also decide whether to make the rule
-  structural rather than a convention. One way is a lint or test that fails when an asynchronous path moves focus
-  without the helper. Another is to give surfaces like the launcher, the Hosts panel and the row menus components that
-  own their own open state, instead of the shared signals in `list/view.rs` (about 7,000 lines) that any handler can
-  change. Isolation while a dialog is open (`modal_dialog.rs`, `modal_isolation.rs`) is not the problem. When a dialog
-  may open asynchronously is in scope. Plan it to run after that plan lands, so the helper and the SPEC_impl.md rule
-  exist. If that plan is abandoned, or its launch half is split off and dropped, this entry adds the helper and the rule
-  itself.
 
 - **Bootstrap a Podman image on a remote host.** Automatically bootstrap a Podman image on a remote host, with some
   reasonable defaults, as a supported flow. Plan: `plans/queue/podman-environments.md`.
@@ -644,14 +565,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   by reducing report payload or changing the inspection strategy. Raw report and console evidence remain in the retained
   run and expire with temporary-file cleanup; do not turn an over-limit report into a claimed validation pass.
 
-- **Host menu fixture sometimes never opens before an expanded setup failure.**
-  `expanded setup failure closes the menu below it` in `e2e/tests/provisioning.spec.ts` failed in Chromium browser sweep
-  run `b0269440-1711-4470-8e18-f6f7ef88bec3`: the second host's menu flyout was absent through a five-second wait,
-  before the assertion about closing it when failure details grow. All three isolated classification reruns passed on
-  both engines (`1d205cfb-1e97-4479-96bf-d07b22e5dc3a`, `33e6b9ea-fbe3-49a5-a93b-acced1730ff3`,
-  `919edd50-a83c-4c2a-a5f1-ee90f7387526`). Cause unknown; preserve the growth and menu-closing assertions (FLAKES.md,
-  2026-11-05).
-
 - **Visit-history deletion fixture stops in error instead of exited.**
   `visit history chooses and remembers the next session after row deletion` in `e2e/tests/sidebar.spec.ts` failed its
   stopped-session premise in Chromium sweep run `ceac5813-b025-478a-9019-a370b5fc97e5`: expected `exited`, observed
@@ -706,16 +619,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `896bd5a1-3017-4c84-b942-687f9676e056`: its wait accepted an earlier unmarked host-list response, while the trace's
   next response carried the requested reconnect marker; three exact unchanged WebKit repetitions passed in
   `d600f92e-e638-4260-83d0-99d8e35f80e6`, and this distinct race remains open under the existing exclusion.
-
-- **Quick launch's focus does not return to the page body on Chromium.** Two tests in `e2e/tests/quick-launch.spec.ts`
-  poll for the body to hold focus after a blur and sometimes never see it (runs `2d338903-2d70-4c8c-99c4-3d4044d78670`,
-  `ffe0693e-0a67-4039-a8e4-4621365c4561`, `4b6e1aad-91ab-4aee-b721-f760fb42b0cf`,
-  `443ebd09-f5c5-4cd3-8ad1-d27e96a75532`). Hypothesis: a focus handoff in the page takes focus back (FLAKES.md,
-  2026-11-05). Both cases passed five attempts per engine on 2026-11-05 across ordinary and host terminals. A delayed
-  focus return remains a hypothesis; neither the body-focus premise nor the exclusion was removed. The
-  typed-page-refusals case recurred on Chromium in the host-terminal run `b8e18c76-972f-4e97-bf66-828778581c59` at
-  `0563c44f`; WebKit passed, and the failure snapshot still had terminal input focused after the blur. No additional
-  reproduction or fix was attempted (FLAKES.md, 2026-11-05).
 
 ### Difficult deflake
 
@@ -871,21 +774,6 @@ are not.
   and do on macOS, and how much of that machinery earns its keep: for example whether the walk from the terminals'
   process numbers is worth it, and whether the short process-number reuse races SPEC_impl.md accepted on 2026-10-05 as
   an interim measure should stay accepted for good.
-
-- **Native `<dialog>` for the app's modal dialogs.** The restart-with dialog, the rename dialog (`rename.rs`), and the
-  session launcher (`list/create_form.rs`, `install_composer_focus_trap`) are each a plain `div` with `role="dialog"`, a
-  fixed backdrop, and a keydown-based Tab trap written in JavaScript. The restart-with dialog also marks the rest of the
-  page `inert` while it is open and has a capture-phase keydown safety net, because it sits over a live agent terminal
-  and three separate reviews found three different ways keyboard focus could escape it into that terminal. Converting
-  these dialogs to a native `<dialog>` opened with `showModal()` would hand focus containment, inertness of the rest of
-  the page, Escape handling, and top-layer stacking to the browser, and could replace most of that hand-written focus
-  code. What a conversion needs: an imperative `showModal()` call after the element mounts (Dioxus renders the element
-  but does not open it); a `cancel` event handler that refuses Escape while a request is in flight, matching today's
-  busy rule; restoring focus to the triggering button on close, as the current code does; and checking that the desktop
-  app's webview supports `<dialog>` and `showModal()` (the shipped macOS app uses the system WKWebView; the Linux
-  development build uses WebKitGTK). It departs from the pattern all three dialogs share today, so convert them together
-  rather than one at a time. Not urgent: the restart-with dialog's `inert` guard already closes the practical focus
-  leaks.
 
 - **Goose foreground ownership.** Keep the basic Goose reporter for now; it does not distinguish a native or shelled-out
   child that inherits the reporter from the foreground conversation. The stricter database-backed implementation is
