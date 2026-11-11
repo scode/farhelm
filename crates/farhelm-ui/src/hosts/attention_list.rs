@@ -321,6 +321,9 @@ fn AttentionHostRow(
     rsx! {
         div { class: "host-attention-row", "data-attention-host-id": "{id}",
             "data-attention-kind": row.kind.attribute(), "data-update-kind": update_kind,
+            // The whole working row shares its identity button's hover owner,
+            // including the progress bar and the space between grid children.
+            "data-tooltip-host-progress": working.then_some("true"),
             onclick: move |_| on_show_host.call(id),
             button { r#type: "button", class: "btn host-attention-open",
                 aria_label: tooltip.clone(),

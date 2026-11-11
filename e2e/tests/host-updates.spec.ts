@@ -534,7 +534,7 @@ test("host progress cards agree across surfaces and follow connection detail", a
   await expect(page.locator(`[id="${attentionSource}"]`)).toBeHidden();
   const tip = page.locator(".farhelm-tooltip");
   const card = tip.locator(".host-progress-card");
-  await open.hover();
+  await attention.getByRole("progressbar").hover();
   await expect(card).toBeVisible();
   await expect(card.locator(".host-progress-title")).toHaveText("busy");
   await expect(card).toContainText("Setting up: 0 of 3 steps done");
@@ -545,6 +545,15 @@ test("host progress cards agree across surfaces and follow connection detail", a
   })));
   expect(steps).toHaveLength(3);
   await expect(tip).toHaveAttribute("data-side", "right");
+  await expect(open).toHaveClass(/tooltip-target-ring/);
+  const placement = await tip.boundingBox();
+  await open.hover();
+  await expect(card).toBeVisible();
+  expect(await tip.boundingBox()).toEqual(placement);
+  await attention.getByRole("progressbar").hover();
+  await expect(card).toBeVisible();
+  expect(await tip.boundingBox()).toEqual(placement);
+  await expect(open).toHaveClass(/tooltip-target-ring/);
 
   // The run is unchanged: only the freshly read host phase supplies this line.
   fixture.setAge(IDS.busy, "connecting");
