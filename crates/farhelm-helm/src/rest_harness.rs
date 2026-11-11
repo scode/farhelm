@@ -861,7 +861,7 @@ impl Harness {
         state.file_opener = old_state.file_opener.clone();
         state.feedback = old_state.feedback.clone();
         state.tensorlake = old_state.tensorlake.clone();
-        state.providers = old_state.providers.clone();
+        state.podman = old_state.podman.clone();
         let state = Arc::new(state);
         let device_secret = state
             .auth
@@ -1013,13 +1013,6 @@ impl Harness {
         let store = HelmStore::open(&_dir.path().join("helm.db"))
             .await
             .expect("reopen helm.db");
-        let manager = ConnectionManager::start(
-            store.clone(),
-            Arc::clone(&fleet) as Arc<dyn HostTransport>,
-            test_cadence(),
-        )
-        .await
-        .expect("start the restarted manager");
         let sources = crate::provisioning::ProductionProvisioning::new(
             store.clone(),
             _dir.path(),
@@ -1027,6 +1020,24 @@ impl Harness {
             cfg!(farhelm_release_build),
         )
         .expect("select restarted provisioning seams");
+        // Assemble immutable provider slots before actors can observe them.
+        // Tests may later replace the adapter's real service while preserving
+        // scripted observations; that requires this same registry on restart.
+        let tensorlake = crate::tensorlake::Tensorlake::production_with_delivery(
+            store.clone(),
+            _dir.path(),
+            Arc::clone(&sources.delivery),
+            sources.snapshot_preparer(_dir.path()),
+        )
+        .expect("build the restarted Tensorlake service");
+        let manager = ConnectionManager::start_with_providers(
+            store.clone(),
+            Arc::clone(&fleet) as Arc<dyn HostTransport>,
+            test_cadence(),
+            crate::environment::Providers::with_tensorlake(Arc::new(tensorlake.clone())),
+        )
+        .await
+        .expect("start the restarted manager");
         Harness {
             served: Vec::new(),
             store: store.clone(),
@@ -1035,13 +1046,8 @@ impl Harness {
                 ..AppState::new(
                     Arc::clone(&manager),
                     store.clone(),
-                    crate::tensorlake::Tensorlake::production_with_delivery(
-                        store,
-                        _dir.path(),
-                        Arc::clone(&sources.delivery),
-                        sources.snapshot_preparer(_dir.path()),
-                    )
-                    .expect("build the restarted Tensorlake service"),
+                    tensorlake,
+                    None,
                     _dir.path().to_path_buf(),
                     sources,
                     crate::ServingMode::Standalone,
@@ -1382,32 +1388,47 @@ impl FleetBuilder {
             refresh: self.refresh.unwrap_or(test_cadence().refresh),
             ..test_cadence()
         };
+        let mut tensorlake = crate::tensorlake::Tensorlake::production_with_delivery(
+            self.store.clone(),
+            &state_dir,
+            Arc::clone(&sources.delivery),
+            sources.snapshot_preparer(&state_dir),
+        )
+        .expect("build the harness Tensorlake service");
+        if let Some(api) = self.tensorlake_api {
+            tensorlake = tensorlake.with_api(api);
+        }
+        if let Some(shell) = self.tensorlake_shell {
+            tensorlake = tensorlake.with_shell(shell);
+        }
+        let providers = if let Some(observations) = self.sandboxes {
+            crate::environment::Providers::with_scripted_tensorlake(
+                observations,
+                Arc::new(tensorlake.clone()),
+            )
+        } else {
+            crate::environment::Providers::with_tensorlake(Arc::new(tensorlake.clone()))
+        };
         let manager = if let Some(client) = self.ntfy_client {
-            ConnectionManager::start_with_ntfy(
+            ConnectionManager::start_with_ntfy_and_providers(
                 self.store.clone(),
                 Arc::clone(&self.fleet) as Arc<dyn HostTransport>,
                 cadence,
                 client,
+                providers,
             )
             .await
-        } else if let Some(sandboxes) = self.sandboxes {
+        } else {
             ConnectionManager::start_with_providers(
                 self.store.clone(),
                 Arc::clone(&self.fleet) as Arc<dyn HostTransport>,
                 cadence,
-                crate::environment::Providers::with_tensorlake(sandboxes),
-            )
-            .await
-        } else {
-            ConnectionManager::start(
-                self.store.clone(),
-                Arc::clone(&self.fleet) as Arc<dyn HostTransport>,
-                cadence,
+                providers,
             )
             .await
         }
         .expect("start manager");
-        let mut state = AppState {
+        let state = AppState {
             // The only override any fixture makes, and it exists so the
             // feed's own bound can be exhausted through real sockets — see
             // `AppState::event_subscriber_cap`.
@@ -1428,27 +1449,14 @@ impl FleetBuilder {
             ..AppState::new(
                 Arc::clone(&manager),
                 self.store.clone(),
-                crate::tensorlake::Tensorlake::production_with_delivery(
-                    self.store,
-                    &state_dir,
-                    Arc::clone(&sources.delivery),
-                    sources.snapshot_preparer(&state_dir),
-                )
-                .expect("build the harness Tensorlake service"),
+                tensorlake,
+                None,
                 state_dir,
                 sources,
                 crate::ServingMode::Standalone,
             )
             .expect("build harness app state")
         };
-        if let Some(api) = self.tensorlake_api {
-            state.tensorlake = state.tensorlake.with_api(api);
-        }
-        if let Some(shell) = self.tensorlake_shell {
-            state.tensorlake = state.tensorlake.with_shell(shell);
-        }
-        state.providers =
-            crate::environment::Providers::with_tensorlake(Arc::new(state.tensorlake.clone()));
         let state = Arc::new(state);
         let device_secret = state
             .auth

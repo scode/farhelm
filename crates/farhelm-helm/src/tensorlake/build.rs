@@ -19,6 +19,10 @@
 //!
 //! The shared state also holds Podman artifacts by place. Every Tensorlake
 //! read-modify-write preserves those fields in the same immediate transaction.
+//! This registry admits both engines: Tensorlake jobs remain recipe-scoped;
+//! Podman jobs join per recipe/place and cancel only between owned commands.
+//! One recipe-wide deletion guard excludes new work in either engine, while
+//! stable source locks protect selection through a clone's first Running.
 //!
 //!
 //! - the builder's sandbox ID is persisted right after create returns. Its
@@ -88,7 +92,10 @@ use super::recipes::{StoredRecipe, decode_spec, now_secs};
 use super::shell::{SandboxShell, ShellFailure, ShellOutput};
 use super::ssh::TensorlakeSshAccess;
 use super::ssh_key::SshKeyStore;
-use crate::{feed::FleetEvents, store::HelmStore};
+use crate::{
+    feed::FleetEvents,
+    store::{HelmStore, HostRow},
+};
 
 /// The standard Tensorlake Ubuntu base. The one place its image
 /// is named: goal D1's fallback, should Tensorlake's ssh to CAS-format
@@ -290,6 +297,32 @@ impl HelmStore {
         name: &str,
         change: impl FnOnce(&StoredRecipe, &mut RecipeState) -> T + Send + 'static,
     ) -> anyhow::Result<Option<T>> {
+        self.write_recipe_state(name, None, change).await
+    }
+
+    /// A place-backed engine records helper intent before run. Validate its
+    /// current place in that same write transaction, so place removal cannot
+    /// leave newly recorded ownership at an already forgotten endpoint. Entry
+    /// UUID, kind and destination bind the row paired with its probe/commands;
+    /// decorative edits and supervisor install paths do not select Podman I/O.
+    pub(crate) async fn update_recipe_place_state<T: Send + 'static>(
+        &self,
+        name: &str,
+        place: &HostRow,
+        change: impl FnOnce(&StoredRecipe, &mut RecipeState) -> T + Send + 'static,
+    ) -> anyhow::Result<Option<T>> {
+        self.write_recipe_state(name, Some(place.clone()), change)
+            .await
+    }
+
+    /// Definition and both providers' state still share one transactional
+    /// writer. The optional guard adds no independent state or cleanup engine.
+    async fn write_recipe_state<T: Send + 'static>(
+        &self,
+        name: &str,
+        place: Option<HostRow>,
+        change: impl FnOnce(&StoredRecipe, &mut RecipeState) -> T + Send + 'static,
+    ) -> anyhow::Result<Option<T>> {
         let name = name.to_string();
         self.conn()
             .call("Tensorlake recipe state write task panicked", move |conn| {
@@ -297,6 +330,15 @@ impl HelmStore {
                 let tx = conn
                     .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                     .context("starting the Tensorlake recipe state write")?;
+                if let Some(place) = place {
+                    let (kind, environment, provider, identity, destination): (String, Option<String>, Option<String>, String, Option<String>) = tx.query_row(
+                        "SELECT kind, tensorlake_sandbox, environment_provider, entry_uuid, destination FROM hosts WHERE id = ?1",
+                        [place.id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+                    ).context("the container place was removed before its ownership could be recorded")?;
+                    let kind = crate::store::HostKind::from_columns(&kind, environment.as_deref(), provider.as_deref())?;
+                    anyhow::ensure!(kind.can_host_environments() && kind == place.kind && identity == place.entry_uuid && destination == place.destination,
+                        "the container place changed before its ownership could be recorded; retry at the current place");
+                }
                 let row: Option<(String, String)> = tx
                     .query_row(
                         "SELECT spec_json, state_json FROM tensorlake_recipes WHERE name = ?1",
@@ -372,6 +414,39 @@ struct Registry {
     snapshot_use: HashMap<String, Arc<tokio::sync::Mutex<()>>>,
     /// Recipes a delete is cleaning up; no build may start for them.
     deleting: HashSet<String>,
+    /// Place work shares deletion admission with Tensorlake. Job-owned watch
+    /// senders bound retained progress and let concurrent launches join one
+    /// outcome rather than starting another build after the first one fails.
+    podman_jobs: HashMap<(String, crate::store::HostId), PodmanJob>,
+}
+
+/// A Rebuild may accept launch joiners, while a preparation-only job cannot
+/// claim that a Rebuild click will replace software. Cancellation is checked
+/// between bounded commands, never by aborting a mutating command halfway.
+struct PodmanJob {
+    progress: watch::Receiver<PodmanProgress>,
+    rebuild: bool,
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// One owned place job's latest named step and eventual result.
+#[derive(Clone, Default)]
+pub(crate) struct PodmanProgress {
+    pub(crate) line: String,
+    pub(crate) result: Option<Result<crate::environment::recipes::PreparedImage, String>>,
+}
+
+/// A panic or runtime cancellation cannot leave admission permanently busy.
+/// Durable container/image ownership remains for explicit later cleanup.
+struct PodmanJobAdmission {
+    owner: Arc<RecipeBuilds>,
+    key: (String, crate::store::HostId),
+}
+
+impl Drop for PodmanJobAdmission {
+    fn drop(&mut self) {
+        self.owner.registry().podman_jobs.remove(&self.key);
+    }
 }
 
 /// Why a build did not start.
@@ -468,6 +543,255 @@ fn storage(step: BuildStep, error: anyhow::Error) -> Stop {
 }
 
 impl RecipeBuilds {
+    /// Settings reads shared durable state and this registry synchronously.
+    /// The Place match and recipe-state layout are exhaustive provider homes;
+    /// image existence belongs to actual reuse, never a list's probe fan-out.
+    #[warn(clippy::wildcard_enum_match_arm)]
+    pub(crate) fn place_view(
+        &self,
+        name: &str,
+        state: &RecipeState,
+        place: farhelm_proto::Place,
+    ) -> farhelm_proto::recipes::RecipePlaceView {
+        let (built_at, prepared_at, stale, present, building, step, failure, cleanup_pending) =
+            match place {
+                farhelm_proto::Place::TensorlakeAccount => {
+                    let (building, step) = {
+                        let registry = self.registry();
+                        let step = registry
+                            .active
+                            .get(name)
+                            .map(|job| job.progress.borrow().step.label().to_owned())
+                            .or_else(|| {
+                                registry
+                                    .preparing
+                                    .get(name)
+                                    .map(|job| job.progress.borrow().step.label().to_owned())
+                            });
+                        (
+                            registry.active.contains_key(name)
+                                || registry.preparing.contains_key(name),
+                            step,
+                        )
+                    };
+                    let stale = state.prepared.as_ref().and_then(|prepared| {
+                        prepared.stale_reason(
+                            now_secs(),
+                            &self.helm_version,
+                            state.snapshot.as_ref().map(|image| image.id.as_str()),
+                        )
+                    });
+                    let failure = state
+                        .last_prepare_failure
+                        .as_ref()
+                        .map(|failure| failure.message.clone())
+                        .or_else(|| {
+                            state
+                                .last_failure
+                                .as_ref()
+                                .map(|failure| failure.message.clone())
+                        });
+                    (
+                        state.snapshot.as_ref().map(|image| image.built_at),
+                        state.prepared.as_ref().map(|image| image.prepared_at),
+                        stale,
+                        state.prepared.is_some(),
+                        building,
+                        step,
+                        failure,
+                        self.view(name, state).2,
+                    )
+                }
+                farhelm_proto::Place::PodmanHost(host) => {
+                    let current = state.podman.get(&host);
+                    let (building, step) = {
+                        let registry = self.registry();
+                        let job = registry.podman_jobs.get(&(name.to_owned(), host));
+                        (
+                            job.is_some(),
+                            job.map(|job| job.progress.borrow().line.clone())
+                                .filter(|line| !line.is_empty()),
+                        )
+                    };
+                    let stale = current
+                        .and_then(|state| state.prepared.as_ref().map(|prepared| (state, prepared)))
+                        .and_then(|(state, prepared)| {
+                            crate::environment::recipes::prepared_stale_reason(
+                                prepared.prepared_at,
+                                &prepared.farhelm_version,
+                                &prepared.source_image,
+                                now_secs(),
+                                &self.helm_version,
+                                state.image.as_ref().map(|image| image.id.as_str()),
+                            )
+                        });
+                    let cleanup_pending = !building
+                        && current.is_some_and(|state| {
+                            state.builder_container_id.is_some()
+                                || state.preparer_container_id.is_some()
+                                || state.build_started_at.is_some()
+                                || state.prepare_started_at.is_some()
+                                || !state.retired_images.is_empty()
+                        });
+                    (
+                        current.and_then(|state| state.image.as_ref().map(|image| image.built_at)),
+                        current.and_then(|state| {
+                            state.prepared.as_ref().map(|image| image.prepared_at)
+                        }),
+                        stale,
+                        current.is_some_and(|state| state.prepared.is_some()),
+                        building,
+                        step,
+                        current.and_then(|state| state.last_failure.clone()),
+                        cleanup_pending,
+                    )
+                }
+            };
+        let freshness = stale.map(|reason| {
+            match reason {
+                farhelm_proto::recipes::PreparedStaleReason::FarhelmUpdated => {
+                    "Farhelm updated; preparation runs at next launch"
+                }
+                farhelm_proto::recipes::PreparedStaleReason::SnapshotRebuilt => {
+                    "the software image changed; preparation runs at next launch"
+                }
+                farhelm_proto::recipes::PreparedStaleReason::Expired => {
+                    "preparation is more than 24 hours old; it runs at next launch"
+                }
+            }
+            .to_owned()
+        });
+        farhelm_proto::recipes::RecipePlaceView {
+            recipe: name.to_owned(),
+            place,
+            ready: built_at.is_some() && present && freshness.is_none(),
+            building,
+            reason: failure.or(freshness),
+            built_at,
+            prepared_at,
+            step,
+            cleanup_pending,
+        }
+    }
+    /// Admit place work under the same lock as recipe deletion. The owned
+    /// task survives its initiating waiter, and every joiner observes its
+    /// actual outcome. A new later attempt may retry a finished failure.
+    pub(crate) fn start_podman<F, Fut>(
+        self: &Arc<Self>,
+        name: &str,
+        place: crate::store::HostId,
+        rebuild: bool,
+        work: F,
+    ) -> anyhow::Result<watch::Receiver<PodmanProgress>>
+    where
+        F: FnOnce(watch::Sender<PodmanProgress>, Arc<std::sync::atomic::AtomicBool>) -> Fut
+            + Send
+            + 'static,
+        Fut: Future<Output = anyhow::Result<crate::environment::recipes::PreparedImage>>
+            + Send
+            + 'static,
+    {
+        let key = (name.to_owned(), place);
+        let mut registry = self.registry();
+        anyhow::ensure!(
+            !registry.deleting.contains(name),
+            "the recipe is being deleted"
+        );
+        if let Some(job) = registry.podman_jobs.get(&key) {
+            anyhow::ensure!(
+                !rebuild || job.rebuild,
+                "the recipe is already preparing here; wait for it before rebuilding"
+            );
+            return Ok(job.progress.clone());
+        }
+        let (progress, receiver) = watch::channel(PodmanProgress::default());
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        registry.podman_jobs.insert(
+            key.clone(),
+            PodmanJob {
+                progress: receiver.clone(),
+                rebuild,
+                cancel: cancel.clone(),
+            },
+        );
+        let owner = Arc::clone(self);
+        tokio::spawn(async move {
+            let _admission = PodmanJobAdmission { owner, key };
+            let result = work(progress.clone(), cancel)
+                .await
+                .map_err(|error| super::shell::shown(&error.to_string()));
+            progress.send_modify(|view| view.result = Some(result));
+        });
+        Ok(receiver)
+    }
+
+    /// Select/create and publication share stable place-specific source
+    /// exclusion. Deletion still keys by recipe across every provider/place.
+    pub(crate) async fn lock_podman_use(
+        &self,
+        name: &str,
+        place: crate::store::HostId,
+    ) -> anyhow::Result<tokio::sync::OwnedMutexGuard<()>> {
+        let guard = self
+            .snapshot_mutex(&format!("\0podman:{place}:{name}"))
+            .lock_owned()
+            .await;
+        anyhow::ensure!(
+            !self.registry().deleting.contains(name),
+            "the recipe is being deleted"
+        );
+        anyhow::ensure!(
+            self.store.tensorlake_recipe_row(name).await?.is_some(),
+            "the recipe no longer exists"
+        );
+        Ok(guard)
+    }
+
+    /// Deletion alone may acquire source exclusion after admission has closed.
+    /// A caller cannot turn this into a new launch by omitting the guard.
+    pub(crate) async fn lock_podman_cleanup(
+        &self,
+        name: &str,
+        place: crate::store::HostId,
+        deletion: &DeleteGuard,
+    ) -> anyhow::Result<tokio::sync::OwnedMutexGuard<()>> {
+        deletion.check(self, name)?;
+        Ok(self
+            .snapshot_mutex(&format!("\0podman:{place}:{name}"))
+            .lock_owned()
+            .await)
+    }
+
+    /// Source cleanup waits until each owned task's sender closes, including
+    /// its failure cleanup. Commands already running settle before cancellation.
+    pub(crate) async fn cancel_podman(
+        &self,
+        name: &str,
+        deletion: &DeleteGuard,
+    ) -> anyhow::Result<()> {
+        deletion.check(self, name)?;
+        let jobs: Vec<_> = self
+            .registry()
+            .podman_jobs
+            .iter()
+            .filter(|((recipe, _), _)| recipe == name)
+            .map(|(_, job)| {
+                job.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+                job.progress.clone()
+            })
+            .collect();
+        for mut job in jobs {
+            while job.changed().await.is_ok() {}
+        }
+        Ok(())
+    }
+
+    /// Leftover deletion must not race a helper's live preparation owner.
+    pub(crate) fn podman_job_active(&self, name: &str, place: crate::store::HostId) -> bool {
+        self.registry()
+            .podman_jobs
+            .contains_key(&(name.to_owned(), place))
+    }
     /// Inject the exact installer and version selected at helm assembly. Detached
     /// tests use an explicit unavailable installer; production has no late fallback.
     pub(crate) fn new(
@@ -1431,15 +1755,42 @@ impl RecipeBuilds {
     ///
     /// The returned guard keeps builds of `name` from starting until it is
     /// dropped, so the caller can delete the row with nothing new recorded.
+    #[cfg(test)]
     pub(crate) async fn clean_for_delete(
         self: &Arc<Self>,
         name: &str,
     ) -> Result<DeleteGuard, CleanupRefusal> {
+        let guard = self.begin_delete(name)?;
+        self.clean_tensorlake(name, &guard).await?;
+        Ok(guard)
+    }
+
+    /// Admission is shared by every provider, before any cleanup observes work.
+    pub(crate) fn begin_delete(
+        self: &Arc<Self>,
+        name: &str,
+    ) -> Result<DeleteGuard, CleanupRefusal> {
+        if !self.registry().deleting.insert(name.to_owned()) {
+            return Err(CleanupRefusal::Deleting);
+        }
+        Ok(DeleteGuard {
+            builds: Arc::clone(self),
+            name: name.to_owned(),
+        })
+    }
+
+    /// Tensorlake keeps its current cancellation/reconciliation semantics under
+    /// admission held by the common catalog deletion operation.
+    pub(crate) async fn clean_tensorlake(
+        self: &Arc<Self>,
+        name: &str,
+        deletion: &DeleteGuard,
+    ) -> Result<(), CleanupRefusal> {
+        deletion
+            .check(self, name)
+            .map_err(CleanupRefusal::Storage)?;
         let tasks = {
-            let mut registry = self.registry();
-            if !registry.deleting.insert(name.to_string()) {
-                return Err(CleanupRefusal::Deleting);
-            }
+            let registry = self.registry();
             let build = registry.active.get(name).and_then(|active| {
                 active.cancel.send_replace(true);
                 active.task.lock().expect("build task slot poisoned").take()
@@ -1454,10 +1805,6 @@ impl RecipeBuilds {
             });
             (build, prepare)
         };
-        let guard = DeleteGuard {
-            builds: Arc::clone(self),
-            name: name.to_string(),
-        };
         for task in [tasks.0, tasks.1].into_iter().flatten() {
             // The task stops at its next wait and writes its end; a panic in
             // it has nothing left to wait for.
@@ -1471,8 +1818,8 @@ impl RecipeBuilds {
             .ok_or(CleanupRefusal::Missing)?;
         // An interrupted start still has progress state to clear, even when
         // no create record authorizes looking up or deleting its name.
-        if !state.needs_cleanup() {
-            return Ok(guard);
+        if !state.tensorlake_needs_cleanup() {
+            return Ok(());
         }
         let key = self
             .api_key()
@@ -1520,7 +1867,7 @@ impl RecipeBuilds {
             })
             .await
             .map_err(CleanupRefusal::Storage)?;
-        Ok(guard)
+        Ok(())
     }
 }
 
@@ -2265,6 +2612,17 @@ enum ReconcileFailure {
 pub(crate) struct DeleteGuard {
     builds: Arc<RecipeBuilds>,
     name: String,
+}
+
+impl DeleteGuard {
+    /// A guard from another registry or recipe grants no cleanup authority.
+    pub(crate) fn check(&self, builds: &RecipeBuilds, name: &str) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            std::ptr::eq(self.builds.as_ref(), builds) && self.name == name,
+            "recipe cleanup requires this recipe's shared deletion admission"
+        );
+        Ok(())
+    }
 }
 
 impl Drop for DeleteGuard {

@@ -38,8 +38,14 @@ pub(crate) struct PreparedInstallFacts {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub(crate) struct PodmanRecipeState {
+    /// Bounded failure context is presentation only, never cache freshness or
+    /// ownership. A later successful attempt clears it.
+    pub(crate) last_failure: Option<String>,
     pub(crate) image: Option<BuiltImage>,
     pub(crate) prepared: Option<PreparedImage>,
+    /// Each field first records its fresh reserved name before run, then the
+    /// observed canonical ID. A name authorizes only ownership-checked lookup;
+    /// it never permits deleting a collision or forgetting an unanswered send.
     pub(crate) builder_container_id: Option<String>,
     pub(crate) preparer_container_id: Option<String>,
     /// As with Tensorlake's starts, a durable start without a live task is an
@@ -49,6 +55,8 @@ pub(crate) struct PodmanRecipeState {
     pub(crate) prepare_started_at: Option<i64>,
     /// Replacements are recorded before their predecessors are retired. Only
     /// Farhelm-owned images belong here, never a user-supplied base reference.
+    /// A fresh commit tag precedes its send and becomes a canonical image ID
+    /// after observation. An unresolved absent tag retains ambiguous ownership.
     pub(crate) retired_images: Vec<String>,
 }
 
@@ -89,6 +97,7 @@ pub(crate) struct PreparedImage {
     pub(crate) farhelm_version: String,
     pub(crate) source_image: String,
     pub(crate) facts: PreparedInstallFacts,
+    pub(crate) login: crate::access::ContainerUser,
 }
 
 /// An endpoint's persisted selection; the value belongs to the credential table.
@@ -245,11 +254,22 @@ pub(crate) struct RecipeState {
 }
 
 impl RecipeState {
-    /// Whether billed resources or an interrupted build still need settling
-    /// before the recipe can be forgotten. A build start keeps deletion on
-    /// the cleanup path, but does not authorize adopting a sandbox by name;
-    /// that needs the pending-create marker written before the request.
-    pub(crate) fn needs_cleanup(&self) -> bool {
+    /// Session launches never start a billed Tensorlake software build.
+    /// Host-backed recipes build lazily under their provider's shared job.
+    pub(crate) fn require_launch_source(&self, place: farhelm_proto::Place) -> anyhow::Result<()> {
+        match place {
+            farhelm_proto::Place::TensorlakeAccount => anyhow::ensure!(
+                self.snapshot.is_some(),
+                "this recipe has no built snapshot; build it in Settings first"
+            ),
+            farhelm_proto::Place::PodmanHost(_) => {}
+        }
+        Ok(())
+    }
+
+    /// Tensorlake cleanup must not demand an account key for Podman-only
+    /// ownership. The store's final guard still aggregates every provider.
+    pub(crate) fn tensorlake_needs_cleanup(&self) -> bool {
         self.snapshot.is_some()
             || self.prepared.is_some()
             || self.preparer_sandbox_id.is_some()
@@ -259,7 +279,63 @@ impl RecipeState {
             || self.pending_create_at.is_some()
             || self.build_started_at.is_some()
             || !self.retired_snapshots.is_empty()
+    }
+
+    /// Recorded places remain available to cleanup even when a probe is
+    /// unusable. This shared layout is an exhaustive provider decision home.
+    #[warn(clippy::wildcard_enum_match_arm)]
+    pub(crate) fn recorded_places(&self) -> Vec<farhelm_proto::Place> {
+        let mut places = vec![farhelm_proto::Place::TensorlakeAccount];
+        places.extend(
+            self.podman
+                .keys()
+                .map(|host| farhelm_proto::Place::PodmanHost(*host)),
+        );
+        places.retain(|place| self.has_resources(*place));
+        places
+    }
+
+    /// The shared state layout is exhaustive: a new place must decide how
+    /// its recorded resources participate in catalog cleanup and projection.
+    #[warn(clippy::wildcard_enum_match_arm)]
+    pub(crate) fn has_resources(&self, place: farhelm_proto::Place) -> bool {
+        match place {
+            farhelm_proto::Place::TensorlakeAccount => self.tensorlake_needs_cleanup(),
+            farhelm_proto::Place::PodmanHost(host) => self
+                .podman
+                .get(&host)
+                .is_some_and(PodmanRecipeState::needs_cleanup),
+        }
+    }
+    /// Whether billed resources or an interrupted build still need settling
+    /// before the recipe can be forgotten. A build start keeps deletion on
+    /// the cleanup path, but does not authorize adopting a sandbox by name;
+    /// that needs the pending-create marker written before the request.
+    pub(crate) fn needs_cleanup(&self) -> bool {
+        self.tensorlake_needs_cleanup()
             || self.podman.values().any(PodmanRecipeState::needs_cleanup)
+    }
+}
+
+/// Shared freshness has exactly three inputs. Version wins display precedence,
+/// then source, then strictly-more-than24hours; clock rollback adds no rule.
+pub(crate) fn prepared_stale_reason(
+    prepared_at: i64,
+    prepared_version: &str,
+    prepared_source: &str,
+    now: i64,
+    version: &str,
+    source: Option<&str>,
+) -> Option<farhelm_proto::recipes::PreparedStaleReason> {
+    use farhelm_proto::recipes::PreparedStaleReason;
+    if prepared_version != version {
+        Some(PreparedStaleReason::FarhelmUpdated)
+    } else if source != Some(prepared_source) {
+        Some(PreparedStaleReason::SnapshotRebuilt)
+    } else if now.saturating_sub(prepared_at) > 86_400 {
+        Some(PreparedStaleReason::Expired)
+    } else {
+        None
     }
 }
 

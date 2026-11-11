@@ -1,7 +1,7 @@
 //! Session controls adapt existing whole-machine operations for disposable
-//! Tensorlake hosts. Explicit Delete owns the resource, while Replace's internal
+//! environments. Explicit Delete owns the resource, while Replace's internal
 //! source removal remains a supervisor session operation. No member count is
-//! needed to decide whether the user authorized destroying the whole sandbox.
+//! needed to decide whether the user authorized destroying the whole environment.
 
 use super::*;
 
@@ -26,15 +26,55 @@ pub(crate) async fn create_sandbox_session(
     State(state): State<Arc<AppState>>,
     axum::Json(request): axum::Json<SandboxCreateRequest>,
 ) -> axum::response::Response {
+    create_environment_session(
+        State(state),
+        axum::Json(EnvironmentCreateRequest {
+            recipe: request.recipe,
+            place: farhelm_proto::Place::TensorlakeAccount,
+            confirmed: request.confirmed,
+            name_kind: request.name_kind,
+            request: request.request,
+        }),
+    )
+    .await
+}
+
+/// Protected admission never falls through to an older ordinary-host decoder.
+/// Provider I/O and task lifetime remain in the existing provisioning service.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct EnvironmentCreateRequest {
+    recipe: String,
+    place: farhelm_proto::Place,
+    #[serde(default)]
+    confirmed: bool,
+    name_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
+    request: CreateReq,
+}
+
+/// Admit one captured environment target and stream the existing task result.
+/// Headers identify recovery progress before the ordinary session reply is ready.
+pub(crate) async fn create_environment_session(
+    State(state): State<Arc<AppState>>,
+    axum::Json(request): axum::Json<EnvironmentCreateRequest>,
+) -> axum::response::Response {
     let result = crate::run_owned(async move {
-        let settings = state.tensorlake.settings().await?;
-        if !request.confirmed && !settings.create_without_asking {
+        if request.place.provider().asks_before_creating()
+            && !request.confirmed
+            && !state.tensorlake.settings().await?.create_without_asking
+        {
             return Err(invalid_request(
                 "confirm creation of a billed sandbox before launching".into(),
             ));
         }
         Arc::clone(&state.provisioning)
-            .start_session_sandbox(state, request.recipe, request.request, request.name_kind)
+            .start_session_environment(
+                state,
+                request.recipe,
+                request.place,
+                request.request,
+                request.name_kind,
+            )
             .await
     })
     .await;
@@ -51,13 +91,15 @@ pub(crate) async fn create_sandbox_session(
             Ok(Ok(session)) => serde_json::json!({ "session": session }),
             Ok(Err(error)) => serde_json::json!({ "error": error.to_string() }),
             Err(_) => {
-                serde_json::json!({ "error": "The launch task ended without a result. Check Hosts for the named sandbox before launching again.", "uncertain": true })
+                serde_json::json!({ "error": "The launch task ended without a result. Check Hosts for the named environment before launching again.", "uncertain": true })
             }
         };
         Ok::<_, std::io::Error>(reply.to_string())
     });
     axum::response::Response::builder()
         .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .header("x-farhelm-environment-host", accepted.host_id.to_string())
+        .header("x-farhelm-environment-run", accepted.run_id.clone())
         .header("x-farhelm-sandbox-host", accepted.host_id.to_string())
         .header("x-farhelm-sandbox-run", accepted.run_id)
         .body(axum::body::Body::from_stream(prefix.chain(body)))
@@ -69,7 +111,7 @@ pub(crate) async fn create_sandbox_session(
 pub(super) fn user_only_delete() -> anyhow::Error {
     anyhow::Error::new(SupervisorError::helm(
         ErrorKind::Conflict,
-        "Only the user can delete a sandbox session; confirm Delete session and sandbox in Farhelm"
+        "Only the user can delete a session-owned environment; confirm whole-environment Delete in Farhelm"
             .to_string(),
     ))
 }
@@ -88,7 +130,7 @@ pub(super) async fn delete_if_owned(
         if confirmed {
             return Err(anyhow::Error::new(SupervisorError::helm(
                 ErrorKind::Conflict,
-                "this session no longer belongs to a disposable sandbox".into(),
+                "this session no longer belongs to a disposable environment".into(),
             )));
         }
         return Ok(None);
@@ -123,7 +165,7 @@ pub(crate) async fn stop_and_suspend(
             .await?
             .is_session_owned()
         {
-            return Err(invalid_request("Stop and suspend is available only for sandbox sessions".into()));
+            return Err(invalid_request("Stop and suspend is available only for environment sessions".into()));
         }
         let outcome = do_stop_session(
             &state,
@@ -134,11 +176,11 @@ pub(crate) async fn stop_and_suspend(
         .await?;
         if let Some(notice) = outcome.notice {
             return Err(anyhow::Error::new(SupervisorError::helm(
-                ErrorKind::Conflict, format!("The agent stopped, but cleanup was incomplete; the sandbox was not suspended: {notice}"),
+                ErrorKind::Conflict, format!("The agent stopped, but cleanup was incomplete; the environment was not suspended: {notice}"),
             )));
         }
-        crate::tensorlake::lifecycle::change(&state, key.host, false).await
-            .context("The agent stopped, but the sandbox was not suspended")
+        crate::environment::lifecycle::change(&state, key.host, false).await
+            .context("The agent stopped, but the environment was not suspended")
     })
     .await;
     match result {

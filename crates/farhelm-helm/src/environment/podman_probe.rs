@@ -63,9 +63,44 @@ pub(crate) struct ProbeView {
 /// PATH or any process environment, or touching a real user manager.
 #[async_trait::async_trait]
 pub(crate) trait PlaceCommands: Send + Sync {
+    /// Probe text must come from a successful command within twenty seconds.
+    /// Use the bounded result seam when nonzero statuses are meaningful data.
     async fn run(&self, route: &BaseRoute, argv: &[String]) -> anyhow::Result<String>;
+
+    /// Lifecycle and image work needs the actual exit status and a bound
+    /// appropriate to the operation. Probe-only fakes can retain their text
+    /// seam; runtime fakes override this method to exercise nonzero exits.
+    async fn run_bounded(
+        &self,
+        route: &BaseRoute,
+        argv: &[String],
+        timeout: Duration,
+    ) -> anyhow::Result<crate::provisioning::CommandResult> {
+        let stdout = tokio::time::timeout(timeout, self.run(route, argv)).await??;
+        Ok(crate::provisioning::CommandResult {
+            code: Some(0),
+            signal: None,
+            stdout: stdout.into_bytes(),
+            stderr: String::new(),
+        })
+    }
+
+    /// Sensitive input shares ordinary argv lowering and bounded capture, but
+    /// never becomes an argument at any shell or SSH layer. Fakes must opt in
+    /// rather than silently dropping credential-bearing input.
+    async fn run_with_input(
+        &self,
+        _route: &BaseRoute,
+        _argv: &[String],
+        _input: &[u8],
+        _timeout: Duration,
+    ) -> anyhow::Result<crate::provisioning::CommandResult> {
+        anyhow::bail!("this place backend cannot send private command input")
+    }
 }
 
+/// Execute through the place's ordinary route while keeping private helm and
+/// tmux inputs away from helpers that Podman may leave running after the call.
 struct SystemPlaceCommands {
     control_dir: PathBuf,
 }
@@ -73,42 +108,157 @@ struct SystemPlaceCommands {
 #[async_trait::async_trait]
 impl PlaceCommands for SystemPlaceCommands {
     async fn run(&self, route: &BaseRoute, argv: &[String]) -> anyhow::Result<String> {
+        let result = self
+            .run_bounded(route, argv, Duration::from_secs(20))
+            .await?;
+        anyhow::ensure!(result.code == Some(0), "the place command was refused");
+        String::from_utf8(result.stdout)
+            .map_err(|_| anyhow::anyhow!("the place command returned invalid text"))
+    }
+
+    async fn run_bounded(
+        &self,
+        route: &BaseRoute,
+        argv: &[String],
+        timeout: Duration,
+    ) -> anyhow::Result<crate::provisioning::CommandResult> {
+        self.execute(route, argv, None, timeout).await
+    }
+
+    async fn run_with_input(
+        &self,
+        route: &BaseRoute,
+        argv: &[String],
+        input: &[u8],
+        timeout: Duration,
+    ) -> anyhow::Result<crate::provisioning::CommandResult> {
+        self.execute(route, argv, Some(input), timeout).await
+    }
+}
+
+impl SystemPlaceCommands {
+    /// Both input policies use the same route and scrubbing. Keeping this
+    /// description separate lets tests inspect every actual argv layer without
+    /// starting an SSH connection or a container.
+    fn process(
+        &self,
+        route: &BaseRoute,
+        argv: &[String],
+    ) -> anyhow::Result<crate::access::ProcessCommand> {
         // The remote login has its own environment too. Only validated variable
         // names are unset, and argv remains positional data through this shell.
-        let mut clean = vec!["sh".into(), "-c".into(),
-            "for name in $(env | sed -n 's/^\\(FARHELM_[A-Za-z0-9_]*\\)=.*/\\1/p'); do unset \"$name\"; done; unset TMUX TMUX_PANE; exec \"$@\"".into(),
-            "farhelm-place-command".into()];
+        let mut clean = vec![
+            "sh".into(),
+            "-c".into(),
+            crate::access::CLEAN_PLACE_EXEC.into(),
+            "farhelm-place-command".into(),
+        ];
         clean.extend_from_slice(argv);
-        let process = route.command(&self.control_dir, RemoteCommand::Argv(&clean))?;
-        let mut command = process.command();
+        let mut process = route.command(&self.control_dir, RemoteCommand::Argv(&clean))?;
+        if let BaseRoute::Ssh { .. } = route {
+            // Quiet user config must not erase the mux refusal before a
+            // failed fallback login. Other SSH sharing options stay intact.
+            process
+                .args
+                .splice(0..0, ["-o".into(), "LogLevel=ERROR".into()]);
+        }
+        Ok(process)
+    }
+
+    /// Feed private bytes while the existing capture drains both output pipes.
+    /// A bounded/cancelled command must also drop its feeder; a full stdin pipe
+    /// cannot retain the secret or keep the operation alive after capture ends.
+    async fn execute(
+        &self,
+        route: &BaseRoute,
+        argv: &[String],
+        input: Option<&[u8]>,
+        timeout: Duration,
+    ) -> anyhow::Result<crate::provisioning::CommandResult> {
+        let mut command = self.process(route, argv)?.command();
         command
-            .stdin(Stdio::null())
+            .stdin(if input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
         // A local probe can initialize shared Podman helpers. Private helm and
         // tmux inputs must not become those helpers' inherited environment.
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("FARHELM_")
-                || matches!(name.to_str(), Some("TMUX" | "TMUX_PANE"))
+                || matches!(name.to_str(), Some("TMUX" | "TMUX_PANE" | "TMUX_TMPDIR"))
             {
                 command.env_remove(name);
             }
         }
         crate::provisioning::isolate_process_group(&mut command);
-        let child = command
+        let mut child = command
             .spawn()
             .map_err(|_| anyhow::anyhow!("could not start the place command"))?;
-        let result = crate::provisioning::capture_child(
-            child,
-            Duration::from_secs(20),
-            "container place probe",
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("the place command failed or timed out"))?;
-        anyhow::ensure!(result.code == Some(0), "the place command was refused");
-        String::from_utf8(result.stdout)
-            .map_err(|_| anyhow::anyhow!("the place command returned invalid text"))
+        // As with the credential uploader, stdin is a byte stream with no
+        // terminal. Cancellation drops this future and therefore its pipe too.
+        // Move the pipe out before capture takes the child. The input future
+        // owns no task, so cancellation cannot leave a detached writer behind.
+        let stdin = child.stdin.take();
+        let send = async move {
+            if let (Some(input), Some(mut stdin)) = (input, stdin) {
+                use tokio::io::AsyncWriteExt as _;
+                stdin.write_all(input).await?;
+                stdin.shutdown().await?;
+            }
+            Ok::<_, std::io::Error>(())
+        };
+        tokio::pin!(send);
+        let capture = crate::provisioning::capture_child(child, timeout, "container place command");
+        tokio::pin!(capture);
+        let (result, sent) = tokio::select! {
+            biased;
+            sent = &mut send => (capture.await, sent),
+            result = &mut capture => (result, Err(std::io::Error::other("command ended before private input completed"))),
+        };
+        let result =
+            result.map_err(|_| anyhow::anyhow!("the place command failed or timed out"))?;
+        if let BaseRoute::Ssh { destination, .. } = route
+            && result.code == Some(255)
+            && crate::transport::ssh_session_refused(result.stderr.as_bytes())
+        {
+            return Err(crate::transport::SessionLimitRefusal::at(destination).into());
+        }
+        sent.map_err(|_| anyhow::anyhow!("the place command did not receive its private input"))?;
+        Ok(result)
     }
+}
+
+/// Provider tests inspect the exact system runner's complete process argv,
+/// including SSH wrapping, without starting a process or using ambient PATH.
+#[cfg(test)]
+pub(super) fn lowered_command_for_test(
+    control_dir: &Path,
+    route: &BaseRoute,
+    argv: &[String],
+) -> anyhow::Result<crate::access::ProcessCommand> {
+    SystemPlaceCommands {
+        control_dir: control_dir.into(),
+    }
+    .process(route, argv)
+}
+
+/// The stdin/temporary cleanup contract can be exercised without a container
+/// engine. Only an owned local shell is started; the route and capture are real.
+#[cfg(test)]
+pub(super) async fn private_input_for_test(
+    control_dir: &Path,
+    argv: &[String],
+    input: &[u8],
+) -> anyhow::Result<crate::provisioning::CommandResult> {
+    SystemPlaceCommands {
+        control_dir: control_dir.into(),
+    }
+    .run_with_input(&BaseRoute::Local, argv, input, Duration::from_secs(10))
+    .await
 }
 
 struct CachedProbe {
@@ -129,6 +279,7 @@ struct Cache {
 pub(crate) struct PodmanPlaces {
     commands: Arc<dyn PlaceCommands>,
     cache: Mutex<Cache>,
+    changed: tokio::sync::Notify,
 }
 
 impl PodmanPlaces {
@@ -144,6 +295,7 @@ impl PodmanPlaces {
         Arc::new(Self {
             commands,
             cache: Mutex::new(Cache::default()),
+            changed: tokio::sync::Notify::new(),
         })
     }
 
@@ -169,10 +321,6 @@ impl PodmanPlaces {
 
     /// Preparation consumes exactly the place observation that passed the probe.
     /// Stale results and retargeted endpoints require a background refresh first.
-    #[allow(
-        dead_code,
-        reason = "the next provider unit consumes prepared place inputs"
-    )]
     pub(crate) fn ready(&self, row: &HostRow) -> anyhow::Result<ReadyPlace> {
         let route = base_route(row)?;
         let cache = self.cache.lock().unwrap();
@@ -182,6 +330,103 @@ impl PodmanPlaces {
             .filter(|probe| probe.route == route && probe.observed.elapsed() <= FRESH_FOR)
             .context("the container host needs a fresh Podman check")?;
         probe.result.clone().map_err(anyhow::Error::msg)
+    }
+
+    /// Reconnection cannot depend on somebody opening the launcher. Runtime
+    /// accepts an older success for the current endpoint, and refreshes only
+    /// this place on a miss. The refresh survives a timed-out actor attempt.
+    pub(crate) async fn runtime(
+        self: &Arc<Self>,
+        store: &HelmStore,
+        host: HostId,
+    ) -> anyhow::Result<(BaseRoute, ReadyPlace)> {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            let mut requested = false;
+            loop {
+                let changed = self.changed.notified();
+                tokio::pin!(changed);
+                changed.as_mut().enable();
+                let row = current_row(store, host).await?;
+                let route = base_route(&row)?;
+                let cached = {
+                    self.cache
+                        .lock()
+                        .unwrap()
+                        .probes
+                        .get(&host)
+                        .filter(|probe| probe.route == route)
+                        .map(|probe| probe.result.clone())
+                };
+                if let Some(result) = cached {
+                    match result {
+                        Ok(ready) => return Ok((route, ready)),
+                        Err(reason)
+                            if requested
+                                && !self.cache.lock().unwrap().refreshing.contains(&host) =>
+                        {
+                            return Err(anyhow::Error::msg(reason));
+                        }
+                        Err(_) => {}
+                    }
+                }
+                self.refresh(store.clone(), host).await?;
+                requested = true;
+                changed.await;
+            }
+        })
+        .await
+        .context("the container host's Podman check did not finish in time")?
+    }
+
+    /// Launch/preparation needs recent capabilities. Refresh one stale place
+    /// and join its current task without waiting on any unrelated host.
+    pub(crate) async fn fresh(
+        self: &Arc<Self>,
+        store: &HelmStore,
+        host: HostId,
+    ) -> anyhow::Result<ReadyPlace> {
+        if let Ok(ready) = self.ready(&current_row(store, host).await?) {
+            return Ok(ready);
+        }
+        tokio::time::timeout(Duration::from_secs(30), async {
+            self.refresh(store.clone(), host).await?;
+            loop {
+                let changed = self.changed.notified();
+                tokio::pin!(changed);
+                changed.as_mut().enable();
+                if !self.cache.lock().unwrap().refreshing.contains(&host) {
+                    return self.ready(&current_row(store, host).await?);
+                }
+                changed.await;
+            }
+        })
+        .await
+        .context("the container host's fresh Podman check did not finish in time")?
+    }
+
+    /// All provider commands retain the probe's lowering, scrub and capture
+    /// contract, with operation-specific bounds and truthful exit statuses.
+    pub(crate) async fn command(
+        &self,
+        route: &BaseRoute,
+        argv: &[String],
+        timeout: Duration,
+    ) -> anyhow::Result<crate::provisioning::CommandResult> {
+        self.commands.run_bounded(route, argv, timeout).await
+    }
+
+    /// Private script bytes never enter the command description. Callers keep
+    /// the same place route, output bounds and cleanup ownership as commands.
+    pub(crate) async fn command_with_input(
+        &self,
+        route: &BaseRoute,
+        argv: &[String],
+        input: &[u8],
+        timeout: Duration,
+    ) -> anyhow::Result<crate::provisioning::CommandResult> {
+        self.commands
+            .run_with_input(route, argv, input, timeout)
+            .await
     }
 
     /// Schedule only this host and return immediately. The current row is read
@@ -245,6 +490,7 @@ impl Drop for Refreshing {
             .unwrap()
             .refreshing
             .remove(&self.host);
+        self.service.changed.notify_waiters();
     }
 }
 
@@ -284,7 +530,13 @@ async fn run(
                 .collect::<Vec<_>>(),
         )
         .await
-        .map_err(|_| anyhow::anyhow!(reason))
+        .map_err(|error| {
+            if error.is::<crate::transport::SessionLimitRefusal>() {
+                error
+            } else {
+                anyhow::anyhow!(reason)
+            }
+        })
 }
 
 /// Retain the exact executable and manager environment from this observation.
@@ -444,6 +696,47 @@ fn validate_info(text: &str) -> anyhow::Result<String> {
 mod tests {
     use super::*;
     use std::collections::VecDeque;
+
+    /// Manager environment commands may contain secrets in their failures,
+    /// but a locally classified mux refusal must still identify the place.
+    /// The distinction is typed rather than inferred from untrusted text.
+    #[farhelm_testtrace::test]
+    async fn probe_redacts_peer_errors_but_keeps_typed_session_limit_reason() {
+        let route = BaseRoute::Ssh {
+            destination: "place.example".into(),
+            access: crate::ssh::SshAccessKind::UserConfig,
+        };
+        let commands = FakeCommands {
+            replies: Mutex::new(VecDeque::from([
+                (
+                    "uname".into(),
+                    Err(crate::transport::SessionLimitRefusal::at("place.example").into()),
+                ),
+                (
+                    "uname".into(),
+                    Err(anyhow::anyhow!("secret proxy credentials")),
+                ),
+            ])),
+            seen: Mutex::new(Vec::new()),
+        };
+        let limit = probe(&commands, &route)
+            .await
+            .err()
+            .expect("the command must fail");
+        assert!(
+            limit.contains("place.example") && limit.contains("SSH session limit"),
+            "{limit}"
+        );
+        let redacted = probe(&commands, &route)
+            .await
+            .err()
+            .expect("the command must fail");
+        assert_eq!(
+            redacted,
+            "could not identify the container host's operating system"
+        );
+        assert!(commands.replies.lock().unwrap().is_empty());
+    }
 
     /// Each answer belongs to one expected command. An unexpected command
     /// fails the fixture instead of silently obtaining a successful response.

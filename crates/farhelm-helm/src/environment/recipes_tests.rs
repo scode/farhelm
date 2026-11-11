@@ -53,6 +53,7 @@ fn podman_places_round_trip_independently_of_tensorlake_state() {
                 "prepared": {
                     "id": "sha256:prepared", "prepared_at": 11,
                     "farhelm_version":"test-version", "source_image":"sha256:built",
+                    "login": {"name":"dev", "home":"/home/dev", "uid":1000},
                     "facts": {"home":"/home/dev", "farhelm_path":"/home/dev/bin/farhelm", "state_dir":"/home/dev/state", "farhelm_version":"test-version"}
                 },
                 "retired_images": ["sha256:old"]
@@ -87,7 +88,7 @@ fn every_owned_podman_resource_blocks_recipe_removal() {
     assert!(!RecipeState::default().needs_cleanup());
     for resource in [
         serde_json::json!({"image":{"id":"built","built_at":10,"base":{"kind":"tensorlake_ubuntu"},"packages":[]}}),
-        serde_json::json!({"prepared":{"id":"prepared","prepared_at":11,"farhelm_version":"test","source_image":"built","facts":{"home":"/home/dev","farhelm_path":"/home/dev/bin/farhelm","state_dir":"/home/dev/state","farhelm_version":"test"}}}),
+        serde_json::json!({"prepared":{"id":"prepared","prepared_at":11,"farhelm_version":"test","source_image":"built","facts":{"home":"/home/dev","farhelm_path":"/home/dev/bin/farhelm","state_dir":"/home/dev/state","farhelm_version":"test"},"login":{"name":"dev","home":"/home/dev","uid":1000}}}),
         serde_json::json!({"builder_container_id":"builder"}),
         serde_json::json!({"preparer_container_id":"preparer"}),
         serde_json::json!({"build_started_at":10}),

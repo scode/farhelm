@@ -578,18 +578,30 @@ pub enum HostState {
         /// without a second lookup.
         identity: String,
     },
-    /// Farhelm owns an explicit Tensorlake lifecycle request under a connection
-    /// hold. The direction is intent, not evidence of the sandbox's final state.
+    /// A provider lifecycle request owns a connection hold. The legacy name
+    /// preserves existing projection/wire compatibility for Tensorlake. Intent
+    /// is separate from provider confirmation; starting distinguishes a stopped
+    /// container start from resuming paused processes.
     /// The request time (unix ms) lets clients show elapsed work without
     /// inventing a suspension time. Release hands presentation back to the actor.
+    /// The legacy Rust/wire name is retained for existing Tensorlake clients;
+    /// it describes both providers. starting is true only for an actual start
+    /// from Stopped, never for unpause or Tensorlake resume.
     TensorlakeChanging {
         direction: farhelm_proto::tensorlake::LifecycleDirection,
         requested_at: i64,
+        starting: bool,
     },
-    /// The host is a Tensorlake sandbox that Tensorlake reports suspended
-    /// (or failed to resume), so nothing is dialed: a new ssh connection to
-    /// a suspended sandbox is refused, and a new session on an old one
-    /// hangs.
+    /// The provider reports a stopped resource, distinct from suspended live
+    /// processes. One actor-local automatic attempt waits for its place, then
+    /// a failure requires explicit Resume; unanswered reads never re-arm it.
+    Stopped {
+        start_failed: Option<String>,
+        waiting_for_place: bool,
+    },
+    /// The provider reports suspended processes or a failed resume. Nothing
+    /// is dialed: a paused container blocks exec, and a suspended Tensorlake
+    /// sandbox refuses a new gateway channel or hangs an old one.
     ///
     /// Entered from any attempt whose status check before the dial gets that
     /// answer (see [`crate::environment::EnvironmentProvider`]), whoever suspended the sandbox:
@@ -652,6 +664,7 @@ impl HostState {
             HostState::IdentityUnverified { .. } => "identity-unverified",
             HostState::Duplicate { .. } => "duplicate",
             HostState::TensorlakeChanging { .. } => "tensorlake-changing",
+            HostState::Stopped { .. } => "stopped",
             HostState::Suspended { .. } => "suspended",
             HostState::Retired { .. } => "retired",
         }
@@ -1145,6 +1158,8 @@ enum ActorCompletion {
 /// and the only mutable state is the actor map behind a short-held std
 /// mutex (never across an await).
 pub struct ConnectionManager {
+    /// Actors hold only Weak so shutdown can still drop the manager/actor map.
+    self_ref: std::sync::Weak<ConnectionManager>,
     /// One bounded ntfy sender for the whole fleet, shared with configuration routes.
     pub(crate) ntfy: crate::ntfy::Alerts,
     /// Source of [`ActorStatus::incarnation`] tokens: monotonic, never
@@ -1476,27 +1491,23 @@ impl ConnectionManager {
         cadence: Cadence,
         providers: Providers,
     ) -> anyhow::Result<Arc<ConnectionManager>> {
-        let mut manager = Self::unstarted(store, transport, cadence);
-        Arc::get_mut(&mut manager)
-            .expect("unstarted manager has one owner")
-            .providers = providers;
+        let ntfy = crate::ntfy::Alerts::new(store.clone());
+        let manager = Self::unstarted_with(store, transport, cadence, providers, ntfy);
         manager.sync_registry().await?;
         Ok(manager)
     }
 
-    /// Start a fixture with its outbound capability installed before any actor
-    /// observes a list. Ordinary test managers remain offline by construction.
+    /// Harness assembly selects both immutable seams before actor startup.
     #[cfg(test)]
-    pub(crate) async fn start_with_ntfy(
+    pub(crate) async fn start_with_ntfy_and_providers(
         store: HelmStore,
         transport: Arc<dyn HostTransport>,
         cadence: Cadence,
         client: reqwest::Client,
+        providers: Providers,
     ) -> anyhow::Result<Arc<ConnectionManager>> {
-        let mut manager = Self::unstarted(store.clone(), transport, cadence);
-        Arc::get_mut(&mut manager)
-            .expect("unstarted manager has one owner")
-            .ntfy = crate::ntfy::Alerts::with_client(store, Some(client));
+        let ntfy = crate::ntfy::Alerts::with_client(store.clone(), Some(client));
+        let manager = Self::unstarted_with(store, transport, cadence, providers, ntfy);
         manager.sync_registry().await?;
         Ok(manager)
     }
@@ -1510,13 +1521,27 @@ impl ConnectionManager {
         transport: Arc<dyn HostTransport>,
         cadence: Cadence,
     ) -> Arc<ConnectionManager> {
-        Arc::new(ConnectionManager {
-            ntfy: crate::ntfy::Alerts::new(store.clone()),
+        let ntfy = crate::ntfy::Alerts::new(store.clone());
+        Self::unstarted_with(store, transport, cadence, Providers::default(), ntfy)
+    }
+
+    /// Immutable service selection precedes Weak actor ownership: get_mut
+    /// cannot patch an Arc after its Weak references have been constructed.
+    fn unstarted_with(
+        store: HelmStore,
+        transport: Arc<dyn HostTransport>,
+        cadence: Cadence,
+        providers: Providers,
+        ntfy: crate::ntfy::Alerts,
+    ) -> Arc<ConnectionManager> {
+        Arc::new_cyclic(|weak| ConnectionManager {
+            self_ref: weak.clone(),
+            ntfy,
             incarnations: Arc::new(std::sync::atomic::AtomicU64::new(initial_incarnation())),
             attempts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             store,
             transport,
-            providers: Providers::default(),
+            providers,
             cadence,
             #[cfg(test)]
             duplicate_gate: DuplicateGateSlot::default(),
@@ -1642,6 +1667,17 @@ impl ConnectionManager {
     /// connections before its sandbox is deleted.
     pub(crate) fn transport(&self) -> &Arc<dyn HostTransport> {
         &self.transport
+    }
+
+    /// Lifecycle and provider assembly use the manager's original services.
+    /// A second registry would split runtime probes from Settings refreshes.
+    pub(crate) fn providers(&self) -> &Providers {
+        &self.providers
+    }
+
+    /// Re-read ownership under the ordinary provisioning lock before I/O.
+    pub(crate) fn store(&self) -> &HelmStore {
+        &self.store
     }
 
     /// The fleet's revision counter — what the invalidation socket
@@ -1939,6 +1975,7 @@ impl ConnectionManager {
         let cache_lock = self.cache_lock_entry(row.id);
         let seed_epoch = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let actor = HostActor {
+            manager: self.self_ref.clone(),
             ntfy: self.ntfy.clone(),
             id: row.id,
             store: self.store.clone(),
@@ -3113,6 +3150,7 @@ impl Drop for ConnectionManager {
 /// One host's connection actor: the loop that owns its transport
 /// connection, its state machine, and its cache slice.
 struct HostActor {
+    manager: std::sync::Weak<ConnectionManager>,
     /// Refresh only enqueues; outbound network work belongs to the fleet sender.
     ntfy: crate::ntfy::Alerts,
     id: HostId,
@@ -3178,6 +3216,16 @@ struct HostActor {
     /// handed to each connection this one opens. See
     /// [`ConnectionManager::set_agent_requests`].
     agent_requests: crate::agent_requests::AgentRequestSlot,
+}
+
+/// An actor episode owns one automatic attempt, never a timed retry loop.
+/// Dropping a JoinHandle detaches the lifecycle task so its hold still settles.
+/// Only Connected/Suspended prove the resource ran again and re-arm a start.
+#[derive(Default)]
+struct StoppedEpisode {
+    attempted: bool,
+    start: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
+    failed: Option<String>,
 }
 
 /// What [`HostActor::reload_row`] found, distinguishing "removed" from
@@ -3310,9 +3358,14 @@ const HOLD_PARK_TIMEOUT: Duration = Duration::from_secs(15);
 enum EnvironmentGate {
     /// Dial. `unanswered` holds why the provider could not answer, when it
     /// could not, for the failure text should the dial fail too.
-    Dial { unanswered: Option<String> },
+    Dial {
+        unanswered: Option<String>,
+    },
     /// Do not dial; the host is suspended.
-    Suspended { resume_failed: Option<String> },
+    Suspended {
+        resume_failed: Option<String>,
+    },
+    Stopped,
     /// Do not dial; the attempt fails with this text and the ladder retries.
     Refuse(String),
 }
@@ -3326,6 +3379,7 @@ fn environment_gate(
 ) -> EnvironmentGate {
     match observed {
         Ok(EnvironmentStatus::Running) => EnvironmentGate::Dial { unanswered: None },
+        Ok(EnvironmentStatus::Stopped) => EnvironmentGate::Stopped,
         Ok(EnvironmentStatus::Suspended { resume_failed }) => {
             EnvironmentGate::Suspended { resume_failed }
         }
@@ -3364,16 +3418,27 @@ enum AttemptOutcome {
     /// The peer answered and refused: protocol skew.
     Skew(VersionSkew),
     /// The peer answered with an identity that is not this row's.
-    Mismatch { recorded: String, reported: String },
+    Mismatch {
+        recorded: String,
+        reported: String,
+    },
     /// The peer answered with NO identity, against a row that has one on
     /// record — so there is nothing to compare and nothing to adopt.
-    Unverified { recorded: String },
+    Unverified {
+        recorded: String,
+    },
     /// The peer's identity belongs to another registry row.
-    Duplicate { twin: HostId, identity: String },
+    Duplicate {
+        twin: HostId,
+        identity: String,
+    },
     /// Tensorlake reports the host's sandbox suspended (or failed to
     /// resume); nothing was dialed. Settles at once, like a refusal: retrying
     /// within the ladder would only ask Tensorlake the same question again.
-    Suspended { resume_failed: Option<String> },
+    Suspended {
+        resume_failed: Option<String>,
+    },
+    Stopped,
     /// No usable connection was established, including a hello that succeeded
     /// but whose identity recording or browser-link setup then failed.
     Failed {
@@ -3386,7 +3451,9 @@ enum AttemptOutcome {
     ///
     /// Produced only by [`HostActor::connect_phase`], never by a single
     /// attempt: an attempt either answers or fails.
-    Interrupted { fresh_window: bool },
+    Interrupted {
+        fresh_window: bool,
+    },
 }
 
 /// Attempt evidence that outlives cancellation of the work under its deadline.
@@ -3574,6 +3641,7 @@ impl HostActor {
         mut refresh: watch::Receiver<u64>,
     ) {
         let mut active = true;
+        let mut stopped = StoppedEpisode::default();
         loop {
             // Read BEFORE the reload: see `PublishGuard::WhileIncarnation`.
             let incarnation = self.status.borrow().incarnation;
@@ -3644,6 +3712,7 @@ impl HostActor {
                     identity,
                     build_version,
                 } => {
+                    stopped = StoppedEpisode::default();
                     // Drop the forwards before acknowledging a suspend or
                     // removal hold, including cancellation of this task.
                     // Recipe loading can wait on storage. A hold must cancel
@@ -3748,6 +3817,7 @@ impl HostActor {
                     active = self.hold(&mut nudge, self.cadence.reprobe).await;
                 }
                 AttemptOutcome::Suspended { resume_failed } => {
+                    stopped = StoppedEpisode::default();
                     let previous = match &self.status.borrow().state {
                         HostState::Suspended { observed_at, .. } => Some(*observed_at),
                         _ => None,
@@ -3761,13 +3831,65 @@ impl HostActor {
                     self.set_state(HostState::Suspended {
                         observed_at: previous.unwrap_or_else(unix_millis),
                         suspended_by_farhelm_at: suspended_by_farhelm_at.or_else(|| {
-                            row.tensorlake
-                                .as_ref()
-                                .and_then(|binding| binding.suspended_at)
+                            row.environment_binding()
+                                .and_then(|binding| binding.handle.suspended_at())
                         }),
                         resume_failed,
                     });
                     active = self.hold(&mut nudge, self.cadence.reprobe).await;
+                }
+                AttemptOutcome::Stopped => {
+                    if !matches!(self.status.borrow().state, HostState::Stopped { .. }) {
+                        self.transport.release_shared_connections(&row).await;
+                    }
+                    let manager = self.manager.upgrade();
+                    let gate = row
+                        .environment_binding()
+                        .and_then(|binding| binding.handle.place_host())
+                        .is_none_or(|place| {
+                            manager.as_ref().is_some_and(|manager| {
+                                manager
+                                    .status(place)
+                                    .is_some_and(|status| status.state.is_connected())
+                            })
+                        });
+                    // Publish first. The owned operation may immediately take
+                    // a hold, whose intent must not be overwritten afterwards.
+                    self.set_state(HostState::Stopped {
+                        start_failed: stopped.failed.clone(),
+                        waiting_for_place: !gate,
+                    });
+                    if !stopped.attempted
+                        && gate
+                        && let Some(manager) = manager
+                    {
+                        stopped.attempted = true;
+                        let host = row.id;
+                        stopped.start = Some(tokio::spawn(async move {
+                            crate::environment::lifecycle::change_with_manager(&manager, host, true)
+                                .await
+                        }));
+                    }
+                    loop {
+                        tokio::select! {
+                            request = next_nudge(&mut nudge) => { active = request.fresh_window; break; }
+                            _ = tokio::time::sleep(self.cadence.reprobe) => { active = false; break; }
+                            result = async {
+                                match stopped.start.as_mut() {
+                                    Some(task) => task.await,
+                                    None => std::future::pending().await,
+                                }
+                            } => {
+                                stopped.start = None;
+                                stopped.failed = match result {
+                                    Ok(Ok(())) => None,
+                                    Ok(Err(error)) => Some(diagnostic_excerpt(&error.to_string(), 2000)),
+                                    Err(_) => Some("the automatic start task did not finish; use Resume to try again".into()),
+                                };
+                                self.set_state(HostState::Stopped { start_failed: stopped.failed.clone(), waiting_for_place: !gate });
+                            }
+                        }
+                    }
                 }
                 AttemptOutcome::Interrupted { fresh_window } => {
                     // Nothing was settled and nothing was published: start
@@ -4094,6 +4216,7 @@ impl HostActor {
             EnvironmentGate::Suspended { resume_failed } => AttemptOutcome::Suspended {
                 resume_failed: resume_failed.map(|details| peer_text(&details)),
             },
+            EnvironmentGate::Stopped => AttemptOutcome::Stopped,
             EnvironmentGate::Refuse(error) => AttemptOutcome::Failed {
                 cause: UnreachableCause::TransportFailure,
                 error,
@@ -11922,6 +12045,7 @@ mod tests {
         // No previously released actor may publish into this observation.
         // Build the manager before registry reconciliation starts any actors.
         let manager = ConnectionManager {
+            self_ref: std::sync::Weak::new(),
             ntfy: crate::ntfy::Alerts::new(store.clone()),
             incarnations: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             attempts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -12755,11 +12879,13 @@ mod tests {
 
     /// A scripted Tensorlake status source: answers whatever the test last
     /// set, and logs the virtual time of every check so a test can count
-    /// them and see their spacing.
+    /// them and see their spacing. Its stopped-state test also exercises the
+    /// real manager hold from an owned resume task, with a counted refusal.
     struct ScriptedEnvironments {
         answer: Mutex<Result<EnvironmentStatus, StatusUnanswered>>,
         checks: watch::Sender<Vec<Duration>>,
         origin: tokio::time::Instant,
+        starts: watch::Sender<u64>,
     }
 
     impl ScriptedEnvironments {
@@ -12769,6 +12895,7 @@ mod tests {
                 answer: Mutex::new(answer),
                 checks: watch::Sender::new(Vec::new()),
                 origin: tokio::time::Instant::now(),
+                starts: watch::Sender::new(0),
             })
         }
 
@@ -12792,6 +12919,59 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::environment::EnvironmentProvider for ScriptedEnvironments {
+        /// This observation fixture must fail if production sends creation or Settings work here.
+        async fn places(&self) -> anyhow::Result<Vec<crate::environment::EnvironmentPlace>> {
+            unreachable!("observation fixture")
+        }
+        async fn rebuild_recipe(
+            &self,
+            _: &str,
+            _: farhelm_proto::Place,
+            _: std::sync::Arc<crate::feed::FleetEvents>,
+        ) -> anyhow::Result<()> {
+            unreachable!("observation fixture")
+        }
+        async fn clean_recipe(
+            &self,
+            _: &str,
+            _: &crate::tensorlake::build::DeleteGuard,
+        ) -> anyhow::Result<()> {
+            unreachable!("observation fixture")
+        }
+        async fn ensure_prepared(
+            &self,
+            _: &str,
+            _: &crate::environment::recipes::Recipe,
+            _: farhelm_proto::Place,
+            _: std::sync::Arc<crate::feed::FleetEvents>,
+            _: &dyn crate::environment::PreparationProgress,
+        ) -> anyhow::Result<crate::environment::PreparedArtifact> {
+            unreachable!("observation fixture")
+        }
+        async fn create(
+            &self,
+            _: &crate::environment::EnvironmentBinding,
+            _: Option<crate::environment::PreparedArtifact>,
+            _: &dyn crate::environment::PreparationProgress,
+        ) -> anyhow::Result<crate::environment::CreatedEnvironment> {
+            unreachable!("observation fixture")
+        }
+        async fn list_owned(
+            &self,
+            _: farhelm_proto::Place,
+        ) -> anyhow::Result<Vec<crate::environment::OwnedEnvironment>> {
+            unreachable!("observation fixture")
+        }
+        /// This fixture scripts status only; it intentionally acquires no connection resources.
+        async fn connected(
+            &self,
+            _: &crate::store::HostRow,
+            _: std::sync::Arc<crate::client::SupervisorClient>,
+            _: std::sync::Arc<crate::feed::FleetEvents>,
+        ) -> crate::environment::ConnectedResources {
+            crate::environment::ConnectedResources::default()
+        }
+
         async fn status(
             &self,
             _binding: &crate::environment::EnvironmentBinding,
@@ -12803,7 +12983,7 @@ mod tests {
 
         async fn suspend(
             &self,
-            _state: &crate::AppState,
+            _manager: &crate::manager::ConnectionManager,
             _binding: &crate::environment::EnvironmentBinding,
         ) -> anyhow::Result<()> {
             unreachable!("the scripted actor fixture performs no lifecycle operations")
@@ -12811,10 +12991,28 @@ mod tests {
 
         async fn resume(
             &self,
-            _state: &crate::AppState,
-            _binding: &crate::environment::EnvironmentBinding,
+            manager: &crate::manager::ConnectionManager,
+            binding: &crate::environment::EnvironmentBinding,
         ) -> anyhow::Result<()> {
-            unreachable!("the scripted actor fixture performs no lifecycle operations")
+            // A real lifecycle adapter waits for this actor to park. Running
+            // this wait inside the actor would deadlock until the hold bound.
+            assert!(
+                matches!(manager.state(binding.host), Some(HostState::Stopped { .. })),
+                "Stopped must be published before the owned start task runs"
+            );
+            self.starts.send_modify(|starts| *starts += 1);
+            manager
+                .hold_connection(
+                    binding.host,
+                    HostState::TensorlakeChanging {
+                        starting: true,
+                        direction: farhelm_proto::tensorlake::LifecycleDirection::Resuming,
+                        requested_at: unix_millis(),
+                    },
+                )
+                .await;
+            manager.release_hold(binding.host, true);
+            anyhow::bail!("scripted automatic start failed; use Resume to try again")
         }
 
         async fn destroy(
@@ -12871,14 +13069,13 @@ mod tests {
             .admit_tensorlake_install(host, "/fixture/farhelm", "/fixture/state")
             .await
             .expect("record admitted install coordinates");
-        let mut manager = ConnectionManager::unstarted(
+        let manager = ConnectionManager::unstarted_with(
             store.clone(),
             Arc::clone(&transport) as Arc<dyn HostTransport>,
             Cadence::default(),
+            Providers::with_tensorlake(sandboxes),
+            crate::ntfy::Alerts::new(store.clone()),
         );
-        Arc::get_mut(&mut manager)
-            .expect("unstarted manager has one owner")
-            .providers = Providers::with_tensorlake(sandboxes);
         manager.sync_registry().await.expect("start manager");
         (
             Fixture {
@@ -12900,6 +13097,10 @@ mod tests {
             WhenStatusUnanswered::DialAnyway,
             WhenStatusUnanswered::RetryLater,
         ] {
+            assert_eq!(
+                environment_gate(Ok(EnvironmentStatus::Stopped), policy),
+                EnvironmentGate::Stopped
+            );
             assert_eq!(
                 environment_gate(Ok(EnvironmentStatus::Running), policy),
                 EnvironmentGate::Dial { unanswered: None }
@@ -12949,6 +13150,219 @@ mod tests {
             ),
             EnvironmentGate::Refuse("could not ask".into())
         );
+    }
+
+    /// A stopped container cannot start until its ordinary place actor is
+    /// actually connected. Registry presence and repeated provider observations
+    /// cannot stand in for that connection. Once the place connects, the same
+    /// episode may make its first owned attempt and retain its failure.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn stopped_container_waits_for_its_place_connection_before_starting() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = HelmStore::open(&directory.path().join("helm.db"))
+            .await
+            .unwrap();
+        let place = store
+            .add_ssh_host("place.example", None, None)
+            .await
+            .unwrap();
+        let host = store
+            .register_session_container(crate::store::NewPodmanHost {
+                name: "farhelm-sess-stopped-gate".into(),
+                recipe: "dev".into(),
+                place_host: place,
+                user: "ubuntu".into(),
+                home: "/home/ubuntu".into(),
+                uid: 1000,
+            })
+            .await
+            .unwrap();
+        store
+            .set_podman_container_id(host, &"a".repeat(64))
+            .await
+            .unwrap();
+        let row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        assert!(
+            store
+                .admit_podman_install(
+                    crate::store::PodmanInstallGuard::of(&row).unwrap(),
+                    "/fixture/farhelm",
+                    "/fixture/state"
+                )
+                .await
+                .unwrap()
+        );
+        let transport = ScriptedTransport::new();
+        for target in [local_id(&store).await, place, host] {
+            transport.set_script(
+                target,
+                Script {
+                    reachable: false,
+                    ..Default::default()
+                },
+            );
+        }
+        let source = ScriptedEnvironments::new(Ok(EnvironmentStatus::Stopped));
+        let manager = ConnectionManager::unstarted_with(
+            store.clone(),
+            transport.clone(),
+            Cadence::default(),
+            Providers::new(source.clone(), source.clone()),
+            crate::ntfy::Alerts::new(store.clone()),
+        );
+        manager.sync_registry().await.unwrap();
+        manager
+            .wait_for_state(place, |state| {
+                matches!(state, HostState::Unreachable { .. })
+            })
+            .await
+            .unwrap();
+        manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Stopped {
+                        waiting_for_place: true,
+                        ..
+                    }
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            *source.starts.borrow(),
+            0,
+            "premise: an unavailable place authorizes no start"
+        );
+        let observations = source.checks().len();
+        manager.retry_now(host).await.unwrap();
+        source.wait_for_checks(observations + 1).await;
+        assert_eq!(
+            *source.starts.borrow(),
+            0,
+            "another Stopped observation cannot bypass the place gate"
+        );
+
+        transport.set_script(place, Script::default());
+        manager.retry_now(place).await.unwrap();
+        manager
+            .wait_for_state(place, HostState::is_connected)
+            .await
+            .unwrap();
+        assert!(
+            manager.status(place).unwrap().client.is_some(),
+            "the place has a real scripted supervisor connection"
+        );
+        manager.retry_now(host).await.unwrap();
+        manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Stopped {
+                        start_failed: Some(_),
+                        waiting_for_place: false
+                    }
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            *source.starts.borrow(),
+            1,
+            "the previously gated episode makes exactly its first attempt"
+        );
+    }
+
+    /// A stopped episode permits one owned start, even when later status
+    /// reads fail. The provider's real actor hold must park without deadlock,
+    /// and its failure survives unanswered reads until Suspended resets it.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn stopped_autostart_is_owned_once_and_retains_failure_across_unanswered_reads() {
+        let source = ScriptedEnvironments::new(Ok(EnvironmentStatus::Stopped));
+        let (fixture, host) = sandbox_fixture(
+            source.clone(),
+            Script {
+                reachable: false,
+                ..Default::default()
+            },
+        )
+        .await;
+        fixture
+            .manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Stopped {
+                        start_failed: Some(_),
+                        ..
+                    }
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            *source.starts.borrow(),
+            1,
+            "premise: the first owned start failed after its hold parked"
+        );
+        let checked = source.checks().len();
+        source.answer(Err(StatusUnanswered("scripted unanswered read".into())));
+        source.wait_for_checks(checked + 2).await;
+        source.answer(Ok(EnvironmentStatus::Stopped));
+        fixture.manager.retry_now(host).await.unwrap();
+        let state = fixture
+            .manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Stopped {
+                        start_failed: Some(_),
+                        ..
+                    }
+                )
+            })
+            .await
+            .unwrap();
+        assert!(
+            matches!(state, HostState::Stopped { start_failed: Some(reason), .. } if reason.contains("use Resume"))
+        );
+        assert_eq!(
+            *source.starts.borrow(),
+            1,
+            "status retries cannot become start retries"
+        );
+        source.answer(Ok(EnvironmentStatus::Suspended {
+            resume_failed: None,
+        }));
+        fixture.manager.retry_now(host).await.unwrap();
+        fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::Suspended { .. }))
+            .await
+            .unwrap();
+        source.answer(Ok(EnvironmentStatus::Stopped));
+        fixture.manager.retry_now(host).await.unwrap();
+        let mut starts = source.starts.subscribe();
+        starts.wait_for(|starts| *starts == 2).await.unwrap();
+        fixture
+            .manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Stopped {
+                        start_failed: Some(_),
+                        ..
+                    }
+                )
+            })
+            .await
+            .unwrap();
     }
 
     /// Why: dialing a suspended sandbox is refused by the gateway at best

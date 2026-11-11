@@ -42,12 +42,20 @@ mod uninstall_refusal;
 pub use backend::{LocalSupervisorDiscovery, discover_local_supervisor};
 // The bounded child capture and spawn seam, shared with the Tensorlake
 // snapshot builder's ssh runner rather than copied there.
-pub(crate) use backend::{CommandLauncher, SystemLauncher, capture_child, isolate_process_group};
+pub(crate) use backend::{
+    CommandLauncher, CommandResult, ProvisioningBackend, SystemLauncher, capture_child,
+    isolate_process_group,
+};
 pub(crate) use http::{
     probe_host, provision_host, provisioning_error, provisioning_state, uninstall_host, update_host,
 };
 pub(crate) use payloads::PayloadSelection;
+pub(crate) use plan::ProvisioningTarget;
 pub use release_payloads::{RELEASE_KEY_RING, verify_signed_metadata, verify_signed_sums};
+#[cfg(test)]
+// Keep private installer/backend construction in provisioning while provider
+// tests reuse the same complete launch fixture without widening production APIs.
+pub(crate) use service::session_launch_failure_tests;
 pub(crate) use service::{AutomaticUpdates, ProductionProvisioning, ProvisioningService, RunTask};
 
 #[cfg(test)]
@@ -4169,6 +4177,59 @@ mod tests {
 
     #[async_trait]
     impl crate::environment::EnvironmentProvider for SwitchedSandboxes {
+        /// This observation fixture must fail if production sends creation or Settings work here.
+        async fn places(&self) -> anyhow::Result<Vec<crate::environment::EnvironmentPlace>> {
+            unreachable!("observation fixture")
+        }
+        async fn rebuild_recipe(
+            &self,
+            _: &str,
+            _: farhelm_proto::Place,
+            _: std::sync::Arc<crate::feed::FleetEvents>,
+        ) -> anyhow::Result<()> {
+            unreachable!("observation fixture")
+        }
+        async fn clean_recipe(
+            &self,
+            _: &str,
+            _: &crate::tensorlake::build::DeleteGuard,
+        ) -> anyhow::Result<()> {
+            unreachable!("observation fixture")
+        }
+        async fn ensure_prepared(
+            &self,
+            _: &str,
+            _: &crate::environment::recipes::Recipe,
+            _: farhelm_proto::Place,
+            _: std::sync::Arc<crate::feed::FleetEvents>,
+            _: &dyn crate::environment::PreparationProgress,
+        ) -> anyhow::Result<crate::environment::PreparedArtifact> {
+            unreachable!("observation fixture")
+        }
+        async fn create(
+            &self,
+            _: &crate::environment::EnvironmentBinding,
+            _: Option<crate::environment::PreparedArtifact>,
+            _: &dyn crate::environment::PreparationProgress,
+        ) -> anyhow::Result<crate::environment::CreatedEnvironment> {
+            unreachable!("observation fixture")
+        }
+        async fn list_owned(
+            &self,
+            _: farhelm_proto::Place,
+        ) -> anyhow::Result<Vec<crate::environment::OwnedEnvironment>> {
+            unreachable!("observation fixture")
+        }
+        /// This fixture scripts status only; it intentionally acquires no connection resources.
+        async fn connected(
+            &self,
+            _: &crate::store::HostRow,
+            _: std::sync::Arc<crate::client::SupervisorClient>,
+            _: std::sync::Arc<crate::feed::FleetEvents>,
+        ) -> crate::environment::ConnectedResources {
+            crate::environment::ConnectedResources::default()
+        }
+
         async fn status(
             &self,
             _binding: &crate::environment::EnvironmentBinding,
@@ -4179,7 +4240,7 @@ mod tests {
 
         async fn suspend(
             &self,
-            _state: &crate::AppState,
+            _manager: &crate::manager::ConnectionManager,
             _binding: &crate::environment::EnvironmentBinding,
         ) -> anyhow::Result<()> {
             unreachable!("the provisioning fixture scripts status only")
@@ -4187,7 +4248,7 @@ mod tests {
 
         async fn resume(
             &self,
-            _state: &crate::AppState,
+            _manager: &crate::manager::ConnectionManager,
             _binding: &crate::environment::EnvironmentBinding,
         ) -> anyhow::Result<()> {
             unreachable!("the provisioning fixture scripts status only")
@@ -4276,7 +4337,10 @@ mod tests {
             PlanLayout::production(root.path().to_path_buf()),
             "/fixture/farhelm".into(),
         );
-        let tensorlake = tensorlake.with_preparer(sandbox_service.snapshot_preparer());
+        let tensorlake = tensorlake.with_preparer(
+            sandbox_service.snapshot_preparer(),
+            sandbox_service.credential_delivery(),
+        );
         let ProbeResponse::TensorlakeProvisionable {
             probe_id,
             destination,
@@ -4442,6 +4506,12 @@ mod tests {
             format!("{update:#}").contains("resume the sandbox first"),
             "{update:#}"
         );
+        // Tensorlake users read this refusal as it was before container
+        // sessions shared the gate: it names the provider.
+        assert!(
+            format!("{update:#}").contains("this host's Tensorlake sandbox is suspended"),
+            "{update:#}"
+        );
         let setup = service
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
@@ -4488,6 +4558,7 @@ mod tests {
                     HostState::TensorlakeChanging {
                         direction,
                         requested_at: 1,
+                        starting: false,
                     },
                 )
                 .await;

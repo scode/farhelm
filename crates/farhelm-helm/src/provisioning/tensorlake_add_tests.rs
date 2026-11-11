@@ -97,7 +97,8 @@ async fn fixture(build_on_add: bool) -> Fixture {
         PlanLayout::production(root.path().to_path_buf()),
         "/fixture/farhelm".into(),
     );
-    let tensorlake = tensorlake.with_preparer(service.snapshot_preparer());
+    let tensorlake =
+        tensorlake.with_preparer(service.snapshot_preparer(), service.credential_delivery());
     Fixture {
         harness,
         root,
@@ -121,8 +122,10 @@ impl Fixture {
             self.harness.state.mode,
         );
         state.tensorlake = self.tensorlake.clone();
-        state.providers =
-            crate::environment::Providers::with_tensorlake(Arc::new(state.tensorlake.clone()));
+        state
+            .manager
+            .providers()
+            .set_test_tensorlake(Arc::new(state.tensorlake.clone()));
         self.harness.state = Arc::new(state);
     }
 
@@ -394,7 +397,7 @@ impl Fixture {
             .unwrap()
             .with_api(api.clone())
             .with_shell(api)
-            .with_preparer(service.snapshot_preparer());
+            .with_preparer(service.snapshot_preparer(), service.credential_delivery());
         Self {
             harness,
             root,
@@ -467,6 +470,68 @@ impl Fixture {
     }
 }
 
+/// A fresh checkpoint skips preparation's SSH-access check, so protected
+/// session admission must independently retain the local-key prerequisite.
+/// Missing or unreadable keys cannot create a billed sandbox or regenerate a
+/// key whose public half may already be registered with the account.
+#[farhelm_testtrace::test]
+async fn recipe_session_fresh_checkpoint_refuses_missing_or_unreadable_key_before_billing() {
+    for unreadable in [false, true] {
+        let mut f = fixture(false).await;
+        f.seed_prepared().await;
+        f.bind_session_launch().await;
+        assert!(matches!(
+            f.tensorlake.settings().await.unwrap().ssh_key,
+            farhelm_proto::tensorlake::SshKeyStatus::Ready { .. }
+        ));
+        assert!(
+            f.tensorlake
+                .builds()
+                .fresh_prepared_snapshot("test-recipe")
+                .await
+                .unwrap()
+                .is_some(),
+            "premise: preparation can return through its fresh-checkpoint shortcut"
+        );
+        let private = f.root.path().join("tensorlake/ssh-key/id_ed25519");
+        std::fs::remove_file(&private).unwrap();
+        if unreadable {
+            // A directory is unreadable as key bytes on every supported host,
+            // including test runners with permission to read mode-000 files.
+            std::fs::create_dir(&private).unwrap();
+        }
+        assert!(!matches!(
+            f.tensorlake.settings().await.unwrap().ssh_key,
+            farhelm_proto::tensorlake::SshKeyStatus::Ready { .. }
+        ));
+        let response = f.session_launch(true).await;
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&body).contains("SSH key"),
+            "{body:?}"
+        );
+        assert!(
+            f.model().sandboxes.is_empty(),
+            "the key refusal precedes billed creation"
+        );
+        assert!(
+            f.backend_events().is_empty(),
+            "no preparation or attachment was attempted"
+        );
+        assert_eq!(
+            f.harness.store.list_hosts().await.unwrap().len(),
+            1,
+            "the failed fresh launch confirms removal of its never-created row"
+        );
+        assert!(
+            !private.is_file(),
+            "session admission cannot generate a replacement key"
+        );
+    }
+}
+
 /// Recipe launch must refuse before billing when its software has not been
 /// built. The same fixture's ordinary Add path may build, so this distinguishes
 /// the new launch contract from merely reusing Add without a preflight.
@@ -523,6 +588,13 @@ async fn recipe_session_task_publishes_success_and_cleans_a_connected_create_fai
         let mut f = fixture(false).await;
         f.seed_prepared().await;
         f.bind_session_launch().await;
+        assert!(
+            matches!(
+                f.tensorlake.settings().await.unwrap().ssh_key,
+                farhelm_proto::tensorlake::SshKeyStatus::Ready { .. }
+            ),
+            "premise: a readable local key admits this fresh prepared source"
+        );
         f.backend_config(serde_json::json!({"default": {"hold_actions": true}}));
         let response = f.session_launch(true).await;
         assert_eq!(response.status(), axum::http::StatusCode::OK);

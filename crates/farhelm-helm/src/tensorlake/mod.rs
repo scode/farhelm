@@ -37,7 +37,7 @@
 
 pub(crate) mod api;
 pub(crate) mod build;
-mod build_script;
+pub(crate) mod build_script;
 pub(crate) mod config;
 pub(crate) mod e2e;
 pub(crate) mod hosts;
@@ -241,17 +241,23 @@ impl Tensorlake {
         &self.0.builds
     }
 
-    /// Inject checkpoint preparation without changing API, shell or key storage.
-    /// Like the other seams, already-running jobs stay with the old registry.
+    /// Select one fixture's installer and delivery/backend together. Creation
+    /// uses that backend for gateway readiness after Running, so replacing
+    /// only preparation would silently lose the fixture's readiness oracle.
+    /// Already-running jobs stay with the old registry, as with other seams.
     #[cfg(test)]
-    pub(crate) fn with_preparer(&self, preparer: Arc<dyn prepared::SnapshotPreparer>) -> Self {
+    pub(crate) fn with_preparer(
+        &self,
+        preparer: Arc<dyn prepared::SnapshotPreparer>,
+        delivery: Arc<crate::provisioning::credential_delivery::CredentialDelivery>,
+    ) -> Self {
         Self(Arc::new(Inner::new(
             self.0.store.clone(),
             Arc::clone(&self.0.api),
             Arc::clone(&self.0.shell),
             self.0.ssh_keys.clone(),
             self.0.tunnel_fake.clone(),
-            Arc::clone(&self.0.delivery),
+            delivery,
             preparer,
         )))
     }

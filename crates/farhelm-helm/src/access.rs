@@ -11,6 +11,10 @@ use anyhow::Context as _;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
+/// Shared helpers outlive the invoking helm or SSH login. Strip only valid
+/// Farhelm variable names, plus private tmux coordinates, before they start.
+pub(crate) const CLEAN_PLACE_EXEC: &str = "for name in $(env | sed -n 's/^\\(FARHELM_[A-Za-z0-9_]*\\)=.*/\\1/p'); do unset \"$name\"; done; unset TMUX TMUX_PANE TMUX_TMPDIR; exec \"$@\"";
+
 /// The local supervisor uses its socket. Every other machine runs a child
 /// process, including a container whose Podman itself runs locally.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +76,7 @@ impl BaseRoute {
                 Ok(ProcessCommand {
                     program: program.into(),
                     args: argv.collect(),
+                    scrub_environment: false,
                 })
             }
             Self::Ssh {
@@ -93,7 +98,7 @@ impl BaseRoute {
 /// The login identity established when a container is created. Podman exec
 /// does not perform a login, so its user, home and runtime directory must be
 /// supplied together for provisioning and the supervisor proxy alike.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub(crate) struct ContainerUser {
     pub(crate) name: String,
     pub(crate) home: String,
@@ -112,6 +117,10 @@ pub(crate) enum RemoteRoute {
     },
     PodmanExec {
         via: BaseRoute,
+        /// Current private probe input, never a persisted binding or public
+        /// plan field. Empty/default paths are refused before execution.
+        #[serde(skip)]
+        podman: PathBuf,
         container: String,
         user: ContainerUser,
     },
@@ -156,6 +165,7 @@ impl RemoteCommand<'_> {
 pub(crate) struct ProcessCommand {
     pub(crate) program: PathBuf,
     pub(crate) args: Vec<String>,
+    scrub_environment: bool,
 }
 
 impl ProcessCommand {
@@ -163,11 +173,64 @@ impl ProcessCommand {
     pub(crate) fn command(&self) -> tokio::process::Command {
         let mut command = tokio::process::Command::new(&self.program);
         command.args(&self.args);
+        if self.scrub_environment {
+            for (name, _) in std::env::vars_os() {
+                if name.to_string_lossy().starts_with("FARHELM_")
+                    || matches!(name.to_str(), Some("TMUX" | "TMUX_PANE" | "TMUX_TMPDIR"))
+                {
+                    command.env_remove(name);
+                }
+            }
+        }
         command
     }
 }
 
 impl RemoteRoute {
+    /// Builder/preparer commands have no host row, but still use the exact
+    /// same exec argv as supervisor transport and provisioning. The place
+    /// command runner owns its outer SSH/capture policy.
+    pub(crate) fn container_argv(&self, payload: RemoteCommand<'_>) -> anyhow::Result<Vec<String>> {
+        let Self::PodmanExec {
+            podman,
+            container,
+            user,
+            ..
+        } = self
+        else {
+            anyhow::bail!("this route is not a container execution");
+        };
+        anyhow::ensure!(
+            podman.is_absolute(),
+            "container execution requires the current absolute Podman executable"
+        );
+        Ok(vec![
+            podman
+                .to_str()
+                .context("Podman's executable path is not text")?
+                .into(),
+            "exec".into(),
+            "-i".into(),
+            "--user".into(),
+            user.name.clone(),
+            "--workdir".into(),
+            user.home.clone(),
+            "--env".into(),
+            format!("HOME={}", user.home),
+            "--env".into(),
+            format!("USER={}", user.name),
+            "--env".into(),
+            format!("LOGNAME={}", user.name),
+            "--env".into(),
+            format!("XDG_RUNTIME_DIR=/run/user/{}", user.uid),
+            "--".into(),
+            container.clone(),
+            "sh".into(),
+            "-c".into(),
+            payload.script(),
+        ])
+    }
+
     /// Environments establish a writer-heartbeat contract with the helper.
     /// Ordinary user SSH access keeps its existing unbounded stdin lifetime.
     fn stdin_idle_limit_secs(&self) -> Option<u64> {
@@ -208,6 +271,7 @@ impl RemoteRoute {
                 let access = SshAccess::resolve(*access, control_dir)?;
                 Ok(ProcessCommand {
                     program: "ssh".into(),
+                    scrub_environment: false,
                     args: ssh_command_args(
                         destination,
                         control_dir,
@@ -219,41 +283,37 @@ impl RemoteRoute {
             }
             Self::PodmanExec {
                 via,
-                container,
-                user,
+                podman,
+                container: _,
+                user: _,
             } => {
-                let argv = vec![
-                    "exec".into(),
-                    "-i".into(),
-                    "--user".into(),
-                    user.name.clone(),
-                    "--workdir".into(),
-                    user.home.clone(),
-                    "--env".into(),
-                    format!("HOME={}", user.home),
-                    "--env".into(),
-                    format!("USER={}", user.name),
-                    "--env".into(),
-                    format!("LOGNAME={}", user.name),
-                    "--env".into(),
-                    format!("XDG_RUNTIME_DIR=/run/user/{}", user.uid),
-                    "--".into(),
-                    container.clone(),
-                    "sh".into(),
-                    "-c".into(),
-                    payload.script(),
-                ];
+                anyhow::ensure!(
+                    podman.is_absolute(),
+                    "container execution requires the current absolute Podman executable"
+                );
+                let mut argv = self.container_argv(payload)?;
+                argv.remove(0);
                 match via {
                     BaseRoute::Local => Ok(ProcessCommand {
-                        program: "podman".into(),
+                        program: podman.clone(),
                         args: argv,
+                        scrub_environment: true,
                     }),
                     BaseRoute::Ssh {
                         destination,
                         access,
                     } => {
                         let access = SshAccess::resolve(*access, control_dir)?;
-                        let mut remote = vec!["podman".into()];
+                        let mut remote = vec![
+                            "sh".into(),
+                            "-c".into(),
+                            CLEAN_PLACE_EXEC.into(),
+                            "farhelm-container-exec".into(),
+                            podman
+                                .to_str()
+                                .context("Podman's executable path is not text")?
+                                .into(),
+                        ];
                         remote.extend(argv);
                         let mut args = ssh_command_args(
                             destination,
@@ -268,6 +328,7 @@ impl RemoteRoute {
                         Ok(ProcessCommand {
                             program: "ssh".into(),
                             args,
+                            scrub_environment: true,
                         })
                     }
                 }
@@ -336,6 +397,7 @@ pub(crate) fn host_access(row: &HostRow) -> anyhow::Result<HostAccess> {
 pub(crate) async fn resolve_host_access(
     store: &HelmStore,
     host: HostId,
+    places: &std::sync::Arc<crate::environment::podman_probe::PodmanPlaces>,
 ) -> anyhow::Result<HostAccess> {
     let rows = store.list_hosts().await?;
     let row = rows
@@ -353,13 +415,15 @@ pub(crate) async fn resolve_host_access(
                 .iter()
                 .find(|place| place.id == binding.place_host)
                 .context("the container's place host is no longer registered")?;
+            let (via, ready) = places.runtime(store, place.id).await?;
             Ok(HostAccess::Remote(RemoteRoute::PodmanExec {
-                via: base_route(place)?,
+                via,
+                podman: ready.podman,
                 container: binding
                     .container_id
                     .clone()
                     .context("the container create has no confirmed identity")?,
-                user: binding.login_user(),
+                user: binding.login_user()?,
             }))
         }
     }
@@ -387,6 +451,25 @@ pub(crate) fn base_route(row: &HostRow) -> anyhow::Result<BaseRoute> {
 mod tests {
     use super::*;
 
+    /// A current endpoint must establish its own executable observation.
+    /// No process or user manager is consulted by route-resolution tests.
+    struct ProbeCommands;
+
+    #[async_trait::async_trait]
+    impl crate::environment::podman_probe::PlaceCommands for ProbeCommands {
+        async fn run(&self, _: &BaseRoute, argv: &[String]) -> anyhow::Result<String> {
+            Ok(match argv[0].as_str() {
+                "uname" if argv[1] == "-s" => "Linux".into(),
+                "uname" => "x86_64".into(),
+                "sh" => "/usr/bin/podman".into(),
+                "/usr/bin/podman" => r#"{"version":{"Version":"4.9.3"},"host":{"security":{"rootless":true},"cgroupVersion":"v2","cgroupManager":"systemd"}}"#.into(),
+                "busctl" => r#"{"type":"as","data":[]}"#.into(),
+                "systemd-run" | "systemctl" => String::new(),
+                other => panic!("unexpected probe command {other}"),
+            })
+        }
+    }
+
     /// Container access must resolve the current place row on every attempt.
     /// A raw endpoint edit models externally changed registry input and catches
     /// accidental caching even though the ordinary UI refuses such a retarget.
@@ -395,6 +478,9 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("helm.db");
         let store = HelmStore::open(&path).await.unwrap();
+        let places = crate::environment::podman_probe::PodmanPlaces::with_commands(
+            std::sync::Arc::new(ProbeCommands),
+        );
         let place = store
             .add_ssh_host("before.example", None, None)
             .await
@@ -421,6 +507,7 @@ mod tests {
                     destination: destination.into(),
                     access: SshAccessKind::UserConfig,
                 },
+                podman: "/usr/bin/podman".into(),
                 container: container_id.clone(),
                 user: ContainerUser {
                     name: "developer".into(),
@@ -430,7 +517,7 @@ mod tests {
             })
         };
         assert_eq!(
-            resolve_host_access(&store, host).await.unwrap(),
+            resolve_host_access(&store, host, &places).await.unwrap(),
             route("before.example")
         );
         let conn = rusqlite::Connection::open(path).unwrap();
@@ -440,7 +527,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            resolve_host_access(&store, host).await.unwrap(),
+            resolve_host_access(&store, host, &places).await.unwrap(),
             route("after.example")
         );
     }
@@ -450,6 +537,7 @@ mod tests {
     fn container_route(via: BaseRoute) -> RemoteRoute {
         RemoteRoute::PodmanExec {
             via,
+            podman: "/usr/bin/podman".into(),
             container: "container's $name; echo wrong".into(),
             user: ContainerUser {
                 name: "user's $name".into(),
@@ -471,7 +559,7 @@ mod tests {
                 RemoteCommand::Script(script),
             )
             .unwrap();
-        assert_eq!(local.program, Path::new("podman"));
+        assert_eq!(local.program, Path::new("/usr/bin/podman"));
         assert_eq!(
             local.args,
             [
@@ -509,8 +597,12 @@ mod tests {
         let separator = nested.args.iter().position(|arg| arg == "--").unwrap();
         assert_eq!(nested.args[separator + 1], "place's $host");
         let parsed = shell_words::split(&nested.args[separator + 2..].join(" ")).unwrap();
-        assert_eq!(parsed[0], "podman");
-        assert_eq!(&parsed[1..], local.args);
+        assert_eq!(
+            &parsed[..4],
+            ["sh", "-c", CLEAN_PLACE_EXEC, "farhelm-container-exec"]
+        );
+        assert_eq!(parsed[4], "/usr/bin/podman");
+        assert_eq!(&parsed[5..], local.args);
         assert!(
             nested.args.contains(&"ControlPath=\"/state/%C\"".into()),
             "nested exec always borrows the supervisor master"

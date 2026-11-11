@@ -15,20 +15,34 @@ pub struct PodmanBinding {
     pub recipe: String,
     pub place_host: HostId,
     pub container_id: Option<String>,
+    /// Pending registration precedes preparation, so the image's account is
+    /// unknown until observation. All login fields become durable together
+    /// with pending-send/install facts, before run or canonical ID admission.
+    pub login: Option<PodmanLogin>,
+    pub pending_create_at: Option<i64>,
+}
+
+/// The account actually observed inside the selected image, never guessed
+/// from a recipe's literal user selection. Stored nullable columns are all-or-none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PodmanLogin {
     pub user: String,
     pub home: String,
     pub uid: u32,
-    pub pending_create_at: Option<i64>,
 }
 
 impl PodmanBinding {
     /// Exec needs the whole login identity because Podman does no login setup.
-    pub(crate) fn login_user(&self) -> ContainerUser {
-        ContainerUser {
-            name: self.user.clone(),
-            home: self.home.clone(),
-            uid: self.uid,
-        }
+    pub(crate) fn login_user(&self) -> anyhow::Result<ContainerUser> {
+        let login = self
+            .login
+            .as_ref()
+            .context("the container's image account has not been observed")?;
+        Ok(ContainerUser {
+            name: login.user.clone(),
+            home: login.home.clone(),
+            uid: login.uid,
+        })
     }
 }
 
@@ -114,6 +128,7 @@ pub(super) fn decode_binding(
     uid: Option<u32>,
     pending_create_at: Option<i64>,
     session_owned: bool,
+    admitted: bool,
 ) -> anyhow::Result<Option<PodmanBinding>> {
     match kind {
         HostKind::Local | HostKind::Ssh | HostKind::Tensorlake => {
@@ -130,12 +145,24 @@ pub(super) fn decode_binding(
                 recipe: recipe.context("a Podman row has no recipe")?.into(),
                 place_host: place_host.context("a Podman row has no place host")?,
                 container_id,
-                user: user.context("a Podman row has no login user")?,
-                home: home.context("a Podman row has no login home")?,
-                uid: uid.context("a Podman row has no login uid")?,
+                login: match (user, home, uid) {
+                    (Some(user), Some(home), Some(uid)) => Some(PodmanLogin { user, home, uid }),
+                    (None, None, None) => None,
+                    _ => anyhow::bail!("a Podman row has only part of its login identity"),
+                },
                 pending_create_at,
             };
-            validate_identity(&binding.name, &binding.user, &binding.home)?;
+            validate_name(&binding.name)?;
+            if let Some(login) = &binding.login {
+                validate_identity(&binding.name, &login.user, &login.home)?;
+            }
+            anyhow::ensure!(
+                binding.login.is_some()
+                    || (binding.container_id.is_none()
+                        && binding.pending_create_at.is_none()
+                        && !admitted),
+                "a created or admitted container has no observed login identity"
+            );
             if let Some(id) = &binding.container_id {
                 validate_container_id(id)?;
             }
@@ -147,14 +174,7 @@ pub(super) fn decode_binding(
 /// Restrict the persisted identity to the provider's reserved-name namespace.
 /// Shell quoting still applies later, but validation catches corrupt state here.
 fn validate_identity(name: &str, user: &str, home: &str) -> anyhow::Result<()> {
-    anyhow::ensure!(
-        name.starts_with("farhelm-sess-")
-            && name.len() > "farhelm-sess-".len()
-            && name
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"_.-".contains(&byte)),
-        "invalid reserved container name"
-    );
+    validate_name(name)?;
     anyhow::ensure!(
         !user.is_empty() && user.len() <= 4096 && !user.contains(char::is_control),
         "invalid container login user"
@@ -162,6 +182,18 @@ fn validate_identity(name: &str, user: &str, home: &str) -> anyhow::Result<()> {
     anyhow::ensure!(
         home.starts_with('/') && !home.contains('\0') && !home.contains('\n'),
         "invalid container login home"
+    );
+    Ok(())
+}
+
+fn validate_name(name: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        name.starts_with("farhelm-sess-")
+            && name.len() > "farhelm-sess-".len()
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"_.-".contains(&byte)),
+        "invalid reserved container name"
     );
     Ok(())
 }
@@ -191,10 +223,75 @@ pub(super) fn refuse_referenced_place(conn: &Connection, host: HostId) -> anyhow
         "this host runs environments that must be deleted first: {}",
         names.join(", ")
     );
+    let mut statement =
+        conn.prepare("SELECT name, state_json FROM tensorlake_recipes ORDER BY name")?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut recipes = Vec::new();
+    for (name, json) in rows {
+        let state: crate::environment::recipes::RecipeState = serde_json::from_str(&json)
+            .map_err(|_| anyhow::anyhow!("could not read resource ownership for recipe {name}; this host was left unchanged"))?;
+        if state
+            .podman
+            .get(&host)
+            .is_some_and(crate::environment::recipes::PodmanRecipeState::needs_cleanup)
+        {
+            recipes.push(name);
+        }
+    }
+    anyhow::ensure!(
+        recipes.is_empty(),
+        "this host holds recipe images or helpers for {}; clean up those recipes on this host before removing or retargeting it",
+        recipes.join(", ")
+    );
     Ok(())
 }
 
 impl HelmStore {
+    /// Freeze the installation selected for this exact create before sending
+    /// Podman any request. A retry must use these facts even after renewal.
+    pub(crate) async fn set_podman_prepared_create(
+        &self,
+        expected: PodmanInstallGuard,
+        sent: i64,
+        facts: &crate::environment::recipes::PreparedInstallFacts,
+        login: &ContainerUser,
+    ) -> anyhow::Result<bool> {
+        validate_identity(&expected.binding.name, &login.name, &login.home)?;
+        let json = serde_json::to_string(facts)?;
+        let login = login.clone();
+        let binding = expected.binding;
+        let old = binding.login;
+        self.conn.call("record prepared container create task panicked", move |conn| {
+            Ok(conn.execute("UPDATE hosts SET podman_pending_create_at = ?2, tensorlake_prepared_install_json = ?3,
+                    podman_user = ?4, podman_home = ?5, podman_uid = ?6
+                WHERE id = ?1 AND entry_uuid = ?7 AND environment_provider = 'podman' AND podman_container_id IS NULL
+                  AND remote_farhelm IS NULL AND remote_state_dir IS NULL AND tensorlake_sandbox = ?8
+                  AND place_host = ?9 AND tensorlake_recipe = ?10 AND podman_pending_create_at IS ?11
+                  AND podman_user IS ?12 AND podman_home IS ?13 AND podman_uid IS ?14",
+                rusqlite::params![expected.host, sent, json, login.name, login.home, login.uid, expected.entry_uuid,
+                    binding.name, binding.place_host, binding.recipe, binding.pending_create_at,
+                    old.as_ref().map(|login| &login.user), old.as_ref().map(|login| &login.home), old.as_ref().map(|login| login.uid)])? == 1)
+        }).await
+    }
+
+    /// Recovery reads the created container's own selected installation,
+    /// never the recipe's newer prepared image. Admission clears this record.
+    pub(crate) async fn podman_prepared_install(
+        &self,
+        host: HostId,
+    ) -> anyhow::Result<Option<crate::environment::recipes::PreparedInstallFacts>> {
+        self.conn.call("read prepared container create task panicked", move |conn| {
+            let json: Option<String> = conn.query_row(
+                "SELECT tensorlake_prepared_install_json FROM hosts WHERE id = ?1 AND environment_provider = 'podman'",
+                [host], |row| row.get(0)).optional()?.flatten();
+            json.map(|json| serde_json::from_str(&json).map_err(|_| anyhow::anyhow!("this container has unreadable prepared installation facts"))).transpose()
+        }).await
+    }
+
     /// Admit only the same container and install coordinates the provisioning
     /// phase inspected. A changed row must be probed again before publishing.
     pub(crate) async fn admit_podman_install(
@@ -210,102 +307,111 @@ impl HelmStore {
             binding.container_id.is_some(),
             "the container create has no confirmed identity"
         );
+        let login = binding
+            .login
+            .context("the container has no observed login identity")?;
         let farhelm = farhelm.to_string();
         let state_dir = state_dir.to_string();
-        self.conn
-            .call("admit container install task panicked", move |conn| {
-                Ok(conn.execute(
-                    "UPDATE hosts SET remote_farhelm = ?1, remote_state_dir = ?2
+        self.conn.call("admit container install task panicked", move |conn| {
+            Ok(conn.execute(
+                "UPDATE hosts SET remote_farhelm = ?1, remote_state_dir = ?2, tensorlake_prepared_install_json = NULL
                  WHERE id = ?3 AND entry_uuid = ?4 AND environment_provider = 'podman'
                    AND session_owned = 1 AND tensorlake_sandbox = ?5
                    AND place_host = ?6 AND podman_container_id IS ?7
                    AND podman_user = ?8 AND podman_home = ?9 AND podman_uid = ?10
                    AND remote_farhelm IS ?11 AND remote_state_dir IS ?12
                    AND tensorlake_recipe = ?13 AND podman_pending_create_at IS ?14",
-                    rusqlite::params![
-                        farhelm,
-                        state_dir,
-                        expected.host,
-                        expected.entry_uuid,
-                        binding.name,
-                        binding.place_host,
-                        binding.container_id,
-                        binding.user,
-                        binding.home,
-                        binding.uid,
-                        expected.farhelm,
-                        expected.state_dir,
-                        binding.recipe,
-                        binding.pending_create_at
-                    ],
-                )? == 1)
-            })
-            .await
+                rusqlite::params![farhelm, state_dir, expected.host, expected.entry_uuid,
+                    binding.name, binding.place_host, binding.container_id, login.user,
+                    login.home, login.uid, expected.farhelm, expected.state_dir,
+                    binding.recipe, binding.pending_create_at],
+            )? == 1)
+        }).await
     }
 
-    /// Own the reserved resource before sending create. This transaction also
-    /// prevents a concurrent place removal or retarget from invalidating it.
-    #[allow(dead_code, reason = "the next provider unit owns container creation")]
+    /// Complete-coordinate fixtures preserve the existing registration seam.
+    /// Production registers pending ownership before observing an image login.
+    #[cfg(test)]
     pub(crate) async fn register_session_container(
         &self,
         new: NewPodmanHost,
     ) -> anyhow::Result<HostId> {
         validate_identity(&new.name, &new.user, &new.home)?;
-        anyhow::ensure!(!new.recipe.is_empty(), "a container requires a recipe");
-        self.conn
-            .call("register container task panicked", move |conn| {
-                let tx = conn.transaction()?;
-                let (kind, name, provider): (String, Option<String>, Option<String>) = tx.query_row(
+        self.register_container(
+            new.name,
+            new.recipe,
+            new.place_host,
+            Some(PodmanLogin {
+                user: new.user,
+                home: new.home,
+                uid: new.uid,
+            }),
+        )
+        .await
+    }
+
+    /// Launch progress owns a host row before preparation observes a custom
+    /// image's account. No guessed home or UID becomes an execution route.
+    pub(crate) async fn register_pending_session_container(
+        &self,
+        name: String,
+        recipe: String,
+        place: HostId,
+    ) -> anyhow::Result<HostId> {
+        self.register_container(name, recipe, place, None).await
+    }
+
+    async fn register_container(
+        &self,
+        name: String,
+        recipe: String,
+        place: HostId,
+        login: Option<PodmanLogin>,
+    ) -> anyhow::Result<HostId> {
+        validate_name(&name)?;
+        anyhow::ensure!(!recipe.is_empty(), "a container requires a recipe");
+        self.conn.call("register container task panicked", move |conn| {
+            let tx = conn.transaction()?;
+            let (kind, environment_name, provider): (String, Option<String>, Option<String>) = tx.query_row(
                 "SELECT kind, tensorlake_sandbox, environment_provider FROM hosts WHERE id = ?1",
-                [new.place_host], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                [place], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             ).context("reading the container place")?;
-                anyhow::ensure!(
-                    HostKind::from_columns(&kind, name.as_deref(), provider.as_deref())?
-                        .can_host_environments(),
-                    "only a local or ordinary SSH host can hold containers"
-                );
-                let destination = format!("podman:{}", new.name);
-                new_entry_conflict(&tx, &destination, &NewHostEntry::new(None)?)?;
-                tx.execute(
-                    "INSERT INTO hosts (kind, destination, entry_uuid, yolo_without_asking,
+            anyhow::ensure!(HostKind::from_columns(&kind, environment_name.as_deref(), provider.as_deref())?.can_host_environments(),
+                "only a local or ordinary SSH host can hold containers");
+            let destination = format!("podman:{name}");
+            new_entry_conflict(&tx, &destination, &NewHostEntry::new(None)?)?;
+            tx.execute(
+                "INSERT INTO hosts (kind, destination, entry_uuid, yolo_without_asking,
                  tensorlake_sandbox, tensorlake_recipe, session_owned, environment_provider,
                  place_host, podman_user, podman_home, podman_uid)
                  VALUES ('ssh', ?1, ?2, 1, ?3, ?4, 1, 'podman', ?5, ?6, ?7, ?8)",
-                    rusqlite::params![
-                        destination,
-                        uuid::Uuid::new_v4().to_string(),
-                        new.name,
-                        new.recipe,
-                        new.place_host,
-                        new.user,
-                        new.home,
-                        new.uid
-                    ],
-                )?;
-                let host = tx.last_insert_rowid();
-                tx.commit()?;
-                Ok(host)
-            })
-            .await
+                rusqlite::params![destination, uuid::Uuid::new_v4().to_string(), name, recipe,
+                    place, login.as_ref().map(|login| &login.user), login.as_ref().map(|login| &login.home), login.as_ref().map(|login| login.uid)],
+            )?;
+            let host = tx.last_insert_rowid();
+            tx.commit()?;
+            Ok(host)
+        }).await
     }
 
     /// Persist an unanswered create before the provider sends it. Clearing the
     /// marker requires a definite refusal or a settled provider observation.
-    #[allow(dead_code, reason = "the next provider unit owns container creation")]
+    /// Production writes selected facts/login in the same transaction instead.
+    #[cfg(test)]
     pub(crate) async fn set_podman_pending_create(
         &self,
         host: HostId,
         sent: Option<i64>,
     ) -> anyhow::Result<bool> {
         self.conn.call("record pending container create task panicked", move |conn| {
-            Ok(conn.execute("UPDATE hosts SET podman_pending_create_at = ?2 WHERE id = ?1 AND environment_provider = 'podman'",
+            Ok(conn.execute("UPDATE hosts SET podman_pending_create_at = ?2 WHERE id = ?1 AND environment_provider = 'podman'
+                AND (?2 IS NULL OR (podman_user IS NOT NULL AND podman_home IS NOT NULL AND podman_uid IS NOT NULL))",
                 rusqlite::params![host, sent])? == 1)
         }).await
     }
 
     /// Record the canonical ID once create or an ownership-checked lookup
     /// observes it. Repeated observations must agree with the original ID.
-    #[allow(dead_code, reason = "the next provider unit owns container creation")]
     pub(crate) async fn set_podman_container_id(
         &self,
         host: HostId,
@@ -318,10 +424,45 @@ impl HelmStore {
                 Ok(conn.execute(
                     "UPDATE hosts SET podman_container_id = ?2, podman_pending_create_at = NULL
                  WHERE id = ?1 AND environment_provider = 'podman'
+                 AND podman_user IS NOT NULL AND podman_home IS NOT NULL AND podman_uid IS NOT NULL
                  AND (podman_container_id IS NULL OR podman_container_id = ?2)",
                     rusqlite::params![host, id],
                 )? == 1)
             })
+            .await
+    }
+
+    /// Clear only the send whose completed refusal and absence the provider
+    /// just confirmed. Selected image/login facts remain available, but no
+    /// possible resource is owned by this send anymore. A replaced row or a
+    /// newer create cannot be settled by an earlier command's result.
+    pub(crate) async fn clear_refused_podman_create(
+        &self,
+        expected: PodmanInstallGuard,
+        sent: i64,
+    ) -> anyhow::Result<bool> {
+        let binding = expected.binding;
+        self.conn
+            .call(
+                "settle refused container create task panicked",
+                move |conn| {
+                    Ok(conn.execute(
+                        "UPDATE hosts SET podman_pending_create_at = NULL
+                WHERE id = ?1 AND entry_uuid = ?2 AND environment_provider = 'podman'
+                  AND tensorlake_sandbox = ?3 AND place_host = ?4 AND tensorlake_recipe = ?5
+                  AND podman_container_id IS NULL AND podman_pending_create_at = ?6
+                  AND remote_farhelm IS NULL AND remote_state_dir IS NULL",
+                        rusqlite::params![
+                            expected.host,
+                            expected.entry_uuid,
+                            binding.name,
+                            binding.place_host,
+                            binding.recipe,
+                            sent
+                        ],
+                    )? == 1)
+                },
+            )
             .await
     }
 }
@@ -329,6 +470,87 @@ impl HelmStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pending row owns cleanup before a custom image reveals its account.
+    /// Neither pending-send nor canonical ID can skip that observation, and
+    /// the observed account/facts write must reject a changed binding.
+    #[farhelm_testtrace::test]
+    async fn pending_login_and_selected_facts_are_admitted_atomically_before_send() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = HelmStore::open(&directory.path().join("helm.db"))
+            .await
+            .unwrap();
+        let place = store.list_hosts().await.unwrap()[0].id;
+        let host = store
+            .register_pending_session_container("farhelm-sess-observed".into(), "dev".into(), place)
+            .await
+            .unwrap();
+        let row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        assert!(row.podman.as_ref().unwrap().login.is_none());
+        assert!(
+            !store
+                .set_podman_pending_create(host, Some(42))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .set_podman_container_id(host, &"a".repeat(64))
+                .await
+                .unwrap()
+        );
+        let facts = crate::environment::recipes::PreparedInstallFacts {
+            home: "/home/image-user".into(),
+            farhelm_path: "/home/image-user/farhelm".into(),
+            state_dir: "/home/image-user/state".into(),
+            farhelm_version: "fixture-version".into(),
+        };
+        let login = ContainerUser {
+            name: "image-user".into(),
+            home: "/home/image-user".into(),
+            uid: 1234,
+        };
+        let guard = PodmanInstallGuard::of(&row).unwrap();
+        assert!(
+            store
+                .set_podman_prepared_create(guard.clone(), 42, &facts, &login)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .set_podman_prepared_create(guard, 43, &facts, &login)
+                .await
+                .unwrap(),
+            "the old no-login binding cannot overwrite a sent create"
+        );
+        let current = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        let binding = current.podman.unwrap();
+        assert_eq!(binding.login_user().unwrap(), login);
+        assert_eq!(binding.pending_create_at, Some(42));
+        assert_eq!(
+            store.podman_prepared_install(host).await.unwrap(),
+            Some(facts)
+        );
+        assert!(
+            store
+                .set_podman_container_id(host, &"a".repeat(64))
+                .await
+                .unwrap()
+        );
+    }
 
     /// A fixture chooses all creation coordinates before provider work, so
     /// roundtrip assertions can distinguish durable intent from inferred state.

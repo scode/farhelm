@@ -70,7 +70,7 @@ use std::sync::Arc;
 use tracing::warn;
 
 mod sandbox;
-pub(crate) use sandbox::{create_sandbox_session, stop_and_suspend};
+pub(crate) use sandbox::{create_environment_session, create_sandbox_session, stop_and_suspend};
 
 /// Query parameters for `GET /api/sessions`: the filters and order. There is
 /// no cursor and no page size, by contract (SPEC.md's
@@ -996,7 +996,10 @@ fn refusal_text(host: store::HostId, state: &manager::HostState) -> String {
             "this entry reaches the machine host {twin} already holds, so nothing is connected; \
              remove that entry or change this one's destination, then press Retry"
         ),
-        manager::HostState::TensorlakeChanging { .. } => "the host's Tensorlake sandbox is \
+        manager::HostState::Stopped { start_failed, .. } => start_failed
+            .clone()
+            .unwrap_or_else(|| "the host's container is stopped; use Resume to start it".into()),
+        manager::HostState::TensorlakeChanging { .. } => "the host's environment is \
             changing its running state; wait for that operation to finish"
             .to_string(),
         manager::HostState::Suspended { resume_failed, .. } => match resume_failed {
@@ -1058,6 +1061,10 @@ impl RetiredCreateFields {
 
 #[derive(Clone, Deserialize)]
 pub(crate) struct CreateReq {
+    /// Set only by protected environment admission; never accepted from JSON.
+    /// It survives fresh-checkout reconciliation as trusted reusable intent.
+    #[serde(skip)]
+    environment_target: Option<farhelm_proto::LaunchTarget>,
     /// Sent only by this create, never retained as a recent setup or launch.
     prompt: Option<String>,
     /// A selector for this start only, never part of history or templates.
@@ -1141,10 +1148,26 @@ pub(crate) struct CreateReq {
 }
 
 impl CreateReq {
+    /// Attach placement captured by the helm before resource creation. Ordinary
+    /// HTTP callers cannot deserialize this authority or manufacture recents.
+    pub(crate) fn with_environment_target(mut self, target: farhelm_proto::LaunchTarget) -> Self {
+        self.environment_target = Some(target);
+        self
+    }
+
     /// Refuse an invalid recipe launch before any sandbox can start billing.
     /// Placement belongs to the recipe route, and Folder means the new home;
     /// accepting an installed host or stale folder here would disguise reuse.
     pub(crate) async fn validate_sandbox_launch(&self, state: &AppState) -> anyhow::Result<()> {
+        if self
+            .launch
+            .as_ref()
+            .is_some_and(|selection| selection.container.is_some())
+        {
+            return Err(invalid_request(
+                "An environment launch cannot use the retired containerized-session choice".into(),
+            ));
+        }
         if self.host.is_some() || self.expected_incarnation.is_some() {
             return Err(invalid_request(
                 "a recipe launch cannot also select an installed host".into(),
@@ -1739,7 +1762,8 @@ async fn create_session_request(
         .map(|value| launches::named_start(mode.as_launch(), value))
         .transpose()
         .map_err(invalid_request)?;
-    let session = do_create_session(
+    let environment_target = req.environment_target.clone();
+    let session = do_create_session_with_environment(
         state,
         &claim,
         &client,
@@ -1765,6 +1789,7 @@ async fn create_session_request(
             spawned: false,
             request_fingerprint: None,
         },
+        environment_target,
     )
     .await?;
     Ok((claim, session))
@@ -1818,6 +1843,18 @@ pub(crate) async fn do_create_session(
     claim: &manager::SessionClaim,
     client: &SupervisorClient,
     spec: CreateSpec,
+) -> anyhow::Result<farhelm_proto::SessionInfo> {
+    do_create_session_with_environment(state, claim, client, spec, None).await
+}
+
+/// Preserve helm-captured placement through ordinary create without teaching
+/// agent or Replace callers to manufacture new environment history.
+async fn do_create_session_with_environment(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    client: &SupervisorClient,
+    spec: CreateSpec,
+    environment_target: Option<farhelm_proto::LaunchTarget>,
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
     let CreateSpec {
         prompt,
@@ -1936,6 +1973,7 @@ pub(crate) async fn do_create_session(
         claim,
         session,
         CreateAcceptance {
+            environment_target,
             github_repo: github_checkout.map(|checkout| checkout.repo),
             requested_cwd,
             accept_result,
@@ -1949,6 +1987,8 @@ pub(crate) async fn do_create_session(
 /// Reconciliation uses the original request's provenance without recompiling a
 /// structured selection whose catalog may have changed since acceptance.
 struct CreateAcceptance {
+    /// Only protected launch admission supplies this; SessionInfo cannot.
+    environment_target: Option<farhelm_proto::LaunchTarget>,
     /// Trusted request intent, retained across lookup-only reconciliation.
     /// SessionInfo's descriptive repo field cannot establish this authority.
     github_repo: Option<farhelm_proto::GithubRepo>,
@@ -1967,42 +2007,73 @@ struct CreateAcceptance {
 /// best-effort suggestion writes (history, remembered launch settings) never turn an
 /// accepted create into a failure. Cache writes are best effort too: every
 /// accepted reply remains bound to the operation's captured entry.
+/// A reconnect or adoption may revoke convenience bookkeeping while this
+/// successful reply still belongs to its original captured entry.
 async fn accept_created_session(
     state: &AppState,
     claim: &manager::SessionClaim,
     session: farhelm_proto::SessionInfo,
     acceptance: CreateAcceptance,
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
-    let CreateAcceptance {
-        github_repo,
-        requested_cwd,
-        accept_result,
-        explicit_selection,
-    } = acceptance;
     // The caller's veto, BEFORE anything durable is written for this row —
     // see this function's own "Two phases" note for why the seam is here and
     // not after the seed.
-    if let Some(accept_result) = &accept_result {
+    if let Some(accept_result) = &acceptance.accept_result {
         accept_result(&session)?;
     }
     record_session(state, claim, &session).await;
+    match record_created_history(state, claim, &session, acceptance).await {
+        Ok(true) => state.manager.events().bump(),
+        Ok(false) => {}
+        Err(error) => warn!(
+            host = claim.host,
+            session = %manager::peer_text(&session.id),
+            error = %error,
+            "could not record post-create launch history"
+        ),
+    }
+    Ok(session)
+}
+
+/// Publish convenience data only while this successful create's claim is current.
+/// Cache seeding is independent: its failure cannot revoke create success or
+/// decide whether history has authority. A normal reconnect revokes an older
+/// claim too, so its late completion skips history without failing the create.
+/// The initial environment launch can hold its separate provisioning lock;
+/// cache seeding has returned before this acquires the cache/registry writer.
+/// Consume the acceptance after its veto ran: borrowing its Send-only callback
+/// across this await would require Sync and make ordinary create futures unsendable.
+async fn record_created_history(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    session: &farhelm_proto::SessionInfo,
+    acceptance: CreateAcceptance,
+) -> anyhow::Result<bool> {
+    let CreateAcceptance {
+        environment_target,
+        github_repo,
+        requested_cwd,
+        explicit_selection,
+        ..
+    } = acceptance;
     // A fresh request's cwd is not its accepted destination: the target
     // allocated that path. Keep the actual path for diagnostics while repo
     // intent, independently captured from the request, controls reuse.
     // Suggestions are a convenience written only after the session exists.
     // A database failure here must not turn a successful supervisor create
     // into an HTTP error that tempts the caller to submit it again.
-    if let Some(identity) = claim.identity.as_deref()
-        && !state
-            .manager
-            .status(claim.host)
-            .is_some_and(|status| status.is_session_owned)
-    {
-        let history = match store::CachedRow::new(claim.host, session.clone()) {
+    if let Some(identity) = claim.identity.as_deref() {
+        let Some(registry_guard) = state.manager.host_write_lock(claim.host).await else {
+            return Ok(false);
+        };
+        let manager = Arc::clone(&state.manager);
+        let captured = claim.clone();
+        let environment = environment_target.is_some();
+        match store::CachedRow::new(claim.host, session.clone()) {
             Ok(checked) => {
                 state
                     .store
-                    .record_create_history_with_destination(
+                    .record_create_history_with_environment_if_current(
                         claim.host,
                         identity,
                         &checked,
@@ -2011,30 +2082,37 @@ async fn accept_created_session(
                             display_cwd: if github_repo.is_some() {
                                 &session.cwd
                             } else {
-                                &requested_cwd
+                                requested_cwd.as_str()
                             },
                         },
                         github_repo.as_ref(),
                         explicit_selection.as_ref(),
+                        environment_target.as_ref(),
+                        move || {
+                            // Db::call owns SQLite before this check. Adoption
+                            // cannot commit between it and the transaction;
+                            // SQL identity still catches commit before publication.
+                            let current = manager.status(captured.host).is_some_and(|status| {
+                                status.entry_uuid == captured.entry_uuid
+                                    && status.incarnation == captured.incarnation
+                                    && status.client.is_some()
+                                    && (environment || !status.is_session_owned)
+                                    && matches!(status.state,
+                                        manager::HostState::Connected { identity, .. }
+                                            if identity == captured.identity)
+                            });
+                            current.then_some(registry_guard)
+                        },
                     )
                     .await
             }
             Err(problem) => Err(anyhow::anyhow!(
                 "{problem}; this helm cannot record or address its session references"
             )),
-        };
-        match history {
-            Ok(true) => state.manager.events().bump(),
-            Ok(false) => {}
-            Err(error) => warn!(
-                host = claim.host,
-                session = %manager::peer_text(&session.id),
-                error = %error,
-                "could not record post-create launch history"
-            ),
         }
+    } else {
+        Ok(false)
     }
-    Ok(session)
 }
 
 /// Everything one create carries once its host is chosen and its launch is
@@ -2237,6 +2315,7 @@ async fn create_fresh_session_resolved(
         .expect("fresh request has checkout intent");
     let preview_incarnation = accepted_checkout_preview(checkout, claim)?.incarnation;
     let acceptance = CreateAcceptance {
+        environment_target: req.environment_target.clone(),
         github_repo: Some(farhelm_proto::parse_github_repo(&checkout.repo)?),
         requested_cwd: req.cwd.clone(),
         accept_result,
@@ -2328,7 +2407,7 @@ async fn create_fresh_session_resolved(
             };
         }
     };
-    do_create_session(
+    do_create_session_with_environment(
         state,
         claim,
         client,
@@ -2350,6 +2429,7 @@ async fn create_fresh_session_resolved(
             spawned: false,
             request_fingerprint: None,
         },
+        acceptance.environment_target,
     )
     .await
 }
@@ -2425,6 +2505,7 @@ pub(crate) async fn create_agent_checkout(
     client_identity: String,
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
     let req = CreateReq {
+        environment_target: None,
         prompt: resolution.prompt,
         conversation: None,
         cwd: String::new(),
@@ -4381,3 +4462,14 @@ pub(crate) async fn close_tab(
 #[cfg(test)]
 #[path = "sessions_tests.rs"]
 mod tests;
+
+/// Reusable environment intent survives deletion of its disposable host.
+/// Listing it reads only helm-owned history and requires no supervisor dial.
+pub(crate) async fn environment_launch_history(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    match state.store.environment_launch_history().await {
+        Ok(entries) => axum::Json(entries).into_response(),
+        Err(error) => http_error(error),
+    }
+}

@@ -55,17 +55,23 @@ pub(crate) async fn change(state: &AppState, host: HostId, resume: bool) -> anyh
 /// the existing provisioning lock before any provider operation.
 pub(super) async fn change_tensorlake(
     service: &super::Tensorlake,
-    state: &AppState,
+    manager: &crate::manager::ConnectionManager,
     host: HostId,
     resume: bool,
 ) -> anyhow::Result<()> {
-    let _lock = state.manager.try_host_provision_lock(host).ok_or_else(|| {
+    let _lock = manager.try_host_provision_lock(host).ok_or_else(|| {
         refusal(
             ErrorKind::Conflict,
             "This host is busy; try again after its current operation finishes",
         )
     })?;
-    let row = crate::hosts::registry_row(state, host).await?;
+    let row = manager
+        .store()
+        .list_hosts()
+        .await?
+        .into_iter()
+        .find(|row| row.id == host)
+        .ok_or(crate::store::HostStoreError::HostNotFound(host))?;
     let binding = row.tensorlake.as_ref().ok_or_else(|| {
         refusal(
             ErrorKind::Conflict,
@@ -78,6 +84,7 @@ pub(super) async fn change_tensorlake(
         .map_err(|reason| refusal(ErrorKind::Conflict, &reason))?;
     let sandbox = binding.sandbox_id.as_deref().unwrap_or(&binding.sandbox);
     let changing = HostState::TensorlakeChanging {
+        starting: false,
         direction: if resume {
             LifecycleDirection::Resuming
         } else {
@@ -85,93 +92,40 @@ pub(super) async fn change_tensorlake(
         },
         requested_at: now_ms(),
     };
-    // An already-running, connected host must keep its viewers when Resume
-    // is repeated. Every other caller publishes its intent before the API
-    // request, while the hold prevents a retry from racing the operation.
-    let held_before_request = !resume
-        || !state
-            .manager
-            .status(host)
-            .is_some_and(|status| status.state.is_connected());
-    if held_before_request {
-        state.manager.hold_connection(host, changing.clone()).await;
-        state
-            .manager
-            .transport()
-            .release_shared_connections(&row)
-            .await;
-    }
-    let result = async {
-        let transitioned = transition(service, &key, sandbox, resume).await?;
-        if resume && transitioned && !held_before_request {
-            // An external suspension may precede the actor's next refresh.
-            // Its still-published Connected label then describes the old
-            // channel, not recovery. Withdraw it before returning success,
-            // and discard both masters so launchers must await a fresh token.
-            state.manager.hold_connection(host, changing).await;
-            state
-                .manager
-                .transport()
-                .release_shared_connections(&row)
-                .await;
-        }
-        let suspended_at = if resume {
-            None
-        } else {
-            Some(if transitioned {
-                now_ms()
+    crate::environment::lifecycle::perform(
+        manager,
+        &row,
+        resume,
+        changing,
+        transition(service, &key, sandbox, resume),
+        |transitioned| async move {
+            let suspended_at = if resume {
+                None
             } else {
-                binding.suspended_at.unwrap_or_else(now_ms)
-            })
-        };
-        if !state
-            .store
-            .set_tensorlake_suspended_at(host, suspended_at)
-            .await?
-        {
-            return Err(refusal(
-                ErrorKind::Conflict,
-                "This Tensorlake host is no longer registered",
-            ));
-        }
-        if let Some(observed_at) = suspended_at {
-            // Persist for recovery, and carry attribution in the published
-            // state too: a host-list read may have captured the old row
-            // before this write and then observe the new confirmation.
-            state
-                .manager
-                .hold_connection(
-                    host,
-                    HostState::Suspended {
-                        observed_at,
-                        suspended_by_farhelm_at: Some(observed_at),
-                        resume_failed: None,
-                    },
-                )
-                .await;
-        }
-        Ok(())
-    }
-    .await;
-    // Resume also clears a hold left by an earlier lifecycle operation. The
-    // lock excludes another lifecycle caller, so it cannot release theirs.
-    // A real resume above withdrew any pre-suspension connection. Only an
-    // already-running sandbox with a connected actor can take the shortcut;
-    // repeated Resume must leave those live viewers attached.
-    if !resume
-        || !state
-            .manager
-            .status(host)
-            .is_some_and(|status| status.state.is_connected())
-    {
-        state.manager.release_hold(host, result.is_err());
-        if resume && result.is_ok() {
-            // Releasing a hold only wakes a live actor. Resume must also
-            // revive one that died while the sandbox was unavailable.
-            let _ = state.manager.retry_now_with_fresh_window(host).await?;
-        }
-    }
-    result
+                Some(if transitioned {
+                    now_ms()
+                } else {
+                    binding.suspended_at.unwrap_or_else(now_ms)
+                })
+            };
+            if !manager
+                .store()
+                .set_tensorlake_suspended_at(host, suspended_at)
+                .await?
+            {
+                return Err(refusal(
+                    ErrorKind::Conflict,
+                    "This Tensorlake host is no longer registered",
+                ));
+            }
+            Ok(suspended_at.map(|observed_at| HostState::Suspended {
+                observed_at,
+                suspended_by_farhelm_at: Some(observed_at),
+                resume_failed: None,
+            }))
+        },
+    )
+    .await
 }
 
 /// Reconcile conflicts with the actual status rather than guessing what a

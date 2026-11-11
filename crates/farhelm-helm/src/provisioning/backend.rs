@@ -55,7 +55,7 @@ pub(super) const PAYLOAD_COPY_BUFFER: usize = 64 * 1024;
 /// Probe-time transport plus the binary and state directory the stdio proxy
 /// must use before any install plan exists.
 #[derive(Debug, Clone)]
-pub(super) struct ProbeTarget {
+pub(crate) struct ProbeTarget {
     pub(super) transport: ProvisioningTarget,
     pub(super) probe_farhelm: PathBuf,
     pub(super) probe_state_dir: Option<PathBuf>,
@@ -63,7 +63,7 @@ pub(super) struct ProbeTarget {
 
 /// What completing the protocol hello proves about discovery.
 #[derive(Debug)]
-pub(super) enum ProbeObservation {
+pub(crate) enum ProbeObservation {
     Supervisor {
         build_version: String,
         host_identity: Option<String>,
@@ -142,7 +142,7 @@ pub async fn discover_local_supervisor(
 /// Host facts needed to select payloads and render absolute install paths,
 /// including the native service-file directory and, on a Mac, launchd domain.
 #[derive(Debug, Clone)]
-pub(super) struct Reach {
+pub(crate) struct Reach {
     pub(super) home: PathBuf,
     pub(super) user_unit_dir: PathBuf,
     pub(super) arch: PayloadTarget,
@@ -174,7 +174,7 @@ pub(super) struct Reach {
 /// Supported hosts continue to a plan; refusals retain a reason for the panel.
 /// A Mac owned by its desktop app is refused without a competing-start remedy.
 #[derive(Debug, Clone)]
-pub(super) enum ReachOutcome {
+pub(crate) enum ReachOutcome {
     Supported(Reach),
     Manual(String),
     /// The host's supervisor unit carries `farhelm helm setup`'s managed-by
@@ -196,7 +196,7 @@ pub(super) enum ReachOutcome {
 /// ([`HostPath::under_removed`], which can only refuse). Aliases of other
 /// folders remain distinct, per SPEC.md's narrow uninstall exception.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct UninstallInspection {
+pub(crate) struct UninstallInspection {
     /// One entry per asked path, in the order asked.
     pub(super) paths: Vec<HostPath>,
     /// The state directory a supervisor started without `--state-dir`
@@ -257,7 +257,7 @@ impl UninstallInspection {
 /// Idempotent actions distinguish useful no-ops and optional degradation
 /// from ordinary completion in the progress record.
 #[derive(Debug)]
-pub(super) enum ActionOutcome {
+pub(crate) enum ActionOutcome {
     Completed,
     Skipped(String),
     Degraded(String),
@@ -269,6 +269,7 @@ pub(super) enum ActionOutcome {
 pub(crate) struct BackendFailure {
     pub(crate) context: String,
     stderr: String,
+    safe_refusal: Option<crate::transport::SessionLimitRefusal>,
 }
 
 /// Internal refusal identity, assigned from the final guard rather than peer text.
@@ -287,6 +288,39 @@ impl BackendFailure {
         Self {
             context: context.into(),
             stderr: stderr.into(),
+            safe_refusal: None,
+        }
+    }
+
+    /// Preserve locally classified transport context through sensitive reads.
+    /// Arbitrary peer diagnostics still use the caller's fixed redaction.
+    fn session_limit(reason: crate::transport::SessionLimitRefusal, stderr: String) -> Self {
+        Self {
+            context: reason.to_string(),
+            stderr,
+            safe_refusal: Some(reason),
+        }
+    }
+
+    /// A credential-bearing command must never return its stderr. Only the
+    /// typed local diagnosis survives; matching peer text grants no exception.
+    pub(super) fn redacted(mut self, fallback: Self) -> Self {
+        if self.safe_refusal.is_some() {
+            self.stderr.clear();
+            self
+        } else {
+            fallback
+        }
+    }
+
+    /// Credential delivery and proxy inheritance redact at their warning
+    /// boundary. Preserve only the locally typed session-limit diagnosis there;
+    /// arbitrary backend or peer text must use the caller's fixed sentence.
+    pub(crate) fn redacted_reason(&self, fallback: &str) -> String {
+        if self.safe_refusal.is_some() {
+            self.context.clone()
+        } else {
+            fallback.to_owned()
         }
     }
 
@@ -303,7 +337,7 @@ impl BackendFailure {
 /// for failure taxonomy and linger behavior; real transport tests use the
 /// production implementation with only linger faked.
 #[async_trait]
-pub(super) trait ProvisioningBackend: Send + Sync {
+pub(crate) trait ProvisioningBackend: Send + Sync {
     /// Remove only the Farhelm-owned token path, with absence already clean.
     /// No other GitHub authentication or user configuration is removed.
     async fn remove_github_token(
@@ -902,7 +936,17 @@ impl SystemBackend {
             .launcher
             .spawn(&mut command)
             .map_err(|error| BackendFailure::new("spawning the host command", error.to_string()))?;
-        capture_child(child, timeout, "the host command").await
+        let output = capture_child(child, timeout, "the host command").await?;
+        if let ProvisioningTarget::Remote(route) = target
+            && let Some(reason) = crate::transport::nested_session_failure(
+                route,
+                output.code,
+                output.stderr.as_bytes(),
+            )
+        {
+            return Err(BackendFailure::session_limit(reason, output.stderr));
+        }
+        Ok(output)
     }
 
     /// Require a zero exit status while preserving the host's stderr.
@@ -1524,6 +1568,11 @@ impl SystemBackend {
         }
         let fed = feeder.await;
         let output = output?;
+        if let Some(reason) =
+            crate::transport::nested_session_failure(route, output.code, output.stderr.as_bytes())
+        {
+            return Err(BackendFailure::session_limit(reason, output.stderr));
+        }
         if output.code != Some(0) {
             return Err(BackendFailure::new(
                 format!("transferring {} to the host", source.display()),
@@ -1662,7 +1711,7 @@ pub(super) struct TargetMetadata {
 
 /// One payload snapshot whose digest and install bytes come from the same
 /// read. The temporary file stays alive until every plan action is done.
-pub(super) struct PreparedPayload {
+pub(crate) struct PreparedPayload {
     file: tempfile::NamedTempFile,
     hash: String,
 }
@@ -2324,7 +2373,7 @@ impl ProvisioningBackend for SystemBackend {
         let output = self
             .run_shell(target, "printf '%s' \"$HOME\"", COMMAND_TIMEOUT)
             .await
-            .map_err(|_| failure())?;
+            .map_err(|error| error.redacted(failure()))?;
         if output.code != Some(0) {
             return Err(failure());
         }
@@ -2605,6 +2654,15 @@ impl ProvisioningBackend for SystemBackend {
                     && (!remote || stderr.command_started)
                 {
                     return Ok(ProbeObservation::Absent);
+                }
+                if let ProvisioningTarget::Remote(route) = &target.transport
+                    && let Some(reason) = crate::transport::nested_session_failure(
+                        route,
+                        status.code(),
+                        &stderr.prefix,
+                    )
+                {
+                    return Err(BackendFailure::session_limit(reason, stderr.diagnostic()));
                 }
                 Err(BackendFailure::new(
                     format!(
@@ -4014,6 +4072,189 @@ mod macos_reach_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Proxy environment files use the credential installer's exact bytes,
+    /// private mode and atomic replacement. A failed replacement must preserve
+    /// the earlier environment and remove its sensitive transfer temporary.
+    #[farhelm_testtrace::test]
+    async fn private_environment_file_install_preserves_bytes_mode_and_failed_replacement() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("90-farhelm-proxy.conf");
+        let temporary = root.path().join(format!(
+            ".90-farhelm-proxy.conf.farhelm-tmp-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let content = b"HTTP_PROXY=\"\"\nhttps_proxy=\"https://u:private-file-marker@proxy.example/\nline\"\n";
+        assert!(
+            !path.exists() && !temporary.exists(),
+            "installation starts from absent owned paths"
+        );
+        let mut backend = SystemBackend::new(root.path().to_owned());
+        backend
+            .install_bytes(
+                &ProvisioningTarget::Local,
+                content,
+                &path,
+                &temporary,
+                0o600,
+            )
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), content);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert!(
+            !temporary.exists(),
+            "success must consume the private temporary"
+        );
+        backend.fail_before_rename = true;
+        assert!(
+            backend
+                .install_bytes(
+                    &ProvisioningTarget::Local,
+                    b"replacement",
+                    &path,
+                    &temporary,
+                    0o600
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            content,
+            "a failed transfer cannot erase the selected proxy settings"
+        );
+        assert!(
+            !temporary.exists(),
+            "failure must remove its sensitive temporary too"
+        );
+    }
+
+    /// Model a full master followed by either a failed fallback login or a
+    /// remote Podman failure. The real backend still owns route lowering,
+    /// upload/probe pipes, exit classification and bounded stderr capture.
+    struct MuxRefusalLauncher(i32);
+
+    impl CommandLauncher for MuxRefusalLauncher {
+        fn spawn(
+            &self,
+            command: &mut tokio::process::Command,
+        ) -> std::io::Result<tokio::process::Child> {
+            let args: Vec<_> = command
+                .as_std()
+                .get_args()
+                .map(|arg| arg.to_string_lossy())
+                .collect();
+            assert!(args.iter().any(|arg| arg == "LogLevel=ERROR"));
+            assert!(
+                args.iter().any(|arg| arg == "ControlMaster=auto")
+                    || args.iter().any(|arg| arg == "ControlMaster=no")
+            );
+            let script = format!(
+                "printf '%s\\n' 'mux_client_request_session: session request failed: Session open refused by peer' 'actual remote command failure' >&2; exit {}",
+                self.0,
+            );
+            let mut remote = tokio::process::Command::new("sh");
+            remote.args(["-c", &script]);
+            super::super::ssh_stand_in::spawn_remote(command, remote)
+        }
+    }
+
+    /// Launch setup can fail before any supervisor hello, through a normal
+    /// command, payload upload, or discovery. All three must name the place's
+    /// session limit only when the refused mux channel ends in SSH exit 255.
+    /// A successful fallback followed by exit 125 retains its actual failure.
+    #[farhelm_testtrace::test]
+    async fn nested_setup_paths_preserve_mux_refusal_without_masking_remote_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("payload");
+        tokio::fs::write(&source, b"payload").await.unwrap();
+        let route = crate::access::RemoteRoute::PodmanExec {
+            via: crate::access::BaseRoute::Ssh {
+                destination: "place.example".into(),
+                access: crate::ssh::SshAccessKind::UserConfig,
+            },
+            podman: "/usr/bin/podman".into(),
+            container: "a".repeat(64),
+            user: crate::access::ContainerUser {
+                name: "developer".into(),
+                home: "/home/developer".into(),
+                uid: 1000,
+            },
+        };
+        for code in [255, 125] {
+            let mut backend = SystemBackend::new(root.path().to_path_buf());
+            backend.launcher = Arc::new(MuxRefusalLauncher(code));
+            let target = ProvisioningTarget::Remote(route.clone());
+            let shell = backend
+                .require_shell(&target, "true", "fixture command")
+                .await
+                .unwrap_err();
+            let upload = backend
+                .remote_put(&route, &source, &root.path().join("uploaded"))
+                .await
+                .unwrap_err();
+            let probe = backend
+                .probe(&ProbeTarget {
+                    transport: target,
+                    probe_farhelm: "farhelm".into(),
+                    probe_state_dir: None,
+                })
+                .await
+                .unwrap_err();
+            for error in [shell, upload, probe] {
+                let message = error.rendered();
+                assert_eq!(
+                    message.contains("SSH session limit"),
+                    code == 255,
+                    "{message}"
+                );
+                if code == 255 {
+                    assert!(message.contains("place.example"), "{message}");
+                } else {
+                    assert!(
+                        message.contains("actual remote command failure"),
+                        "{message}"
+                    );
+                }
+            }
+            // Credential reads deliberately discard peer diagnostics. The
+            // locally classified place diagnosis survives that redaction,
+            // while a remote exit never gains the same trusted exception.
+            let sensitive_target = ProvisioningTarget::Remote(route.clone());
+            let home = backend.host_home(&sensitive_target).await.unwrap_err();
+            let settings = backend
+                .read_small_file(&sensitive_target, Path::new("/home/developer/settings"))
+                .await
+                .unwrap_err();
+            for error in [home, settings] {
+                let message = error.rendered();
+                assert_eq!(
+                    message.contains("SSH session limit"),
+                    code == 255,
+                    "{message}"
+                );
+                assert!(
+                    !message.contains("actual remote command failure"),
+                    "{message}"
+                );
+                let warning = error.redacted_reason("fixed credential warning");
+                assert_eq!(
+                    warning.contains("SSH session limit"),
+                    code == 255,
+                    "{warning}"
+                );
+                assert!(!warning.contains("actual remote command failure"));
+                if code != 255 {
+                    assert_eq!(warning, "fixed credential warning");
+                }
+            }
+        }
+    }
 
     /// Stands in for an upload process that exits with status 7 at once while
     /// a detached holder (its own session, so outside the upload's process
