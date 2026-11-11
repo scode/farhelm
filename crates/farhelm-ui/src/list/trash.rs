@@ -50,40 +50,17 @@ const SETTLE_MS: u64 = 700;
 /// A failed read preserves progress, so a temporary outage cannot imply completion.
 const REMOVAL_POLL_MS: u64 = 3_000;
 
-/// Preserve each trigger's authority until a host's effect delivers it to its
-/// reader. A single last-trigger value would lose an explicit request when a
-/// scheduled tick arrived before the render effect ran. These are delivery
-/// counters only; SurfaceReader owns all demand, retry and task policy.
+/// Preserve explicit demand across reactive batching. Host epochs supply news;
+/// the per-host removal timer delivers scheduled demand directly to its reader.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct TrashRefresh {
     explicit: u64,
-    notice: u64,
-    scheduled: u64,
 }
 
 impl TrashRefresh {
     /// Record the cause at its existing call site without spawning a read.
-    pub(super) fn request(&mut self, trigger: Trigger) {
-        let counter = match trigger {
-            Trigger::Explicit => &mut self.explicit,
-            Trigger::Notice => &mut self.notice,
-            Trigger::Scheduled => &mut self.scheduled,
-        };
-        *counter = counter.wrapping_add(1);
-    }
-
-    /// Coalesced reactive writes deliver their strongest changed cause. Weak
-    /// ticks cannot erase attended work that has not reached the reader yet.
-    fn since(self, previous: Self) -> Option<Trigger> {
-        if self.explicit != previous.explicit {
-            Some(Trigger::Explicit)
-        } else if self.notice != previous.notice {
-            Some(Trigger::Notice)
-        } else if self.scheduled != previous.scheduled {
-            Some(Trigger::Scheduled)
-        } else {
-            None
-        }
+    pub(super) fn request(&mut self) {
+        self.explicit = self.explicit.wrapping_add(1);
     }
 }
 
@@ -710,6 +687,15 @@ fn HostTrashReader(
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let reader = use_signal(SurfaceReader::default);
+    let epoch = use_memo(move || {
+        hosts
+            .read()
+            .hosts()
+            .unwrap_or_default()
+            .iter()
+            .find(|entry| entry.id == host)
+            .map_or(0, |entry| entry.trash_epoch)
+    });
     let eligible = use_memo(move || {
         let hosts = hosts.read();
         hosts.refresh_error().is_none()
@@ -735,7 +721,7 @@ fn HostTrashReader(
     // Remember only delivered counters. A paused host must retain the cause
     // of an explicit request; registry recovery supplies unattended news,
     // rather than turning unrelated registry refreshes into attended reads.
-    let delivered = use_hook(|| Rc::new(RefCell::new(None::<(TrashRefresh, bool, bool)>)));
+    let delivered = use_hook(|| Rc::new(RefCell::new(None::<(TrashRefresh, u64, bool, bool)>)));
     // Pull-only browser observation establishes delivery and retirement without
     // another effect that could change the scheduling boundary being tested.
     let observed_delivery = delivered.clone();
@@ -744,32 +730,32 @@ fn HostTrashReader(
             "role": "trash",
             "host": host,
             "incarnation": incarnation,
-            "caught_up": observed_delivery.borrow().is_some_and(|(seen, measure, ready)|
-                ready && seen == *revision.peek() && measure == *open.peek()),
+            "caught_up": observed_delivery.borrow().is_some_and(|(seen, news, measure, ready)|
+                ready && seen == *revision.peek() && news == *epoch.peek() && measure == *open.peek()),
             "readers": [reader.peek().test_snapshot()],
         })
     });
     use_effect(move || {
         let next = revision();
+        let news = epoch();
         let measure = open();
         let ready = eligible();
         if !ready {
             if let Some(previous) = delivered.borrow_mut().as_mut() {
-                previous.2 = false;
+                previous.3 = false;
             }
             return;
         }
-        let previous = delivered.borrow_mut().replace((next, measure, true));
+        let previous = delivered.borrow_mut().replace((next, news, measure, true));
         let trigger = match previous {
             None => Some(Trigger::Explicit),
-            Some((previous, old_measure, was_ready)) => {
-                let changed = next.since(previous);
-                if measure != old_measure || changed == Some(Trigger::Explicit) {
+            Some((previous, old_news, old_measure, was_ready)) => {
+                if measure != old_measure || next != previous {
                     Some(Trigger::Explicit)
-                } else if !was_ready {
+                } else if !was_ready || news != old_news {
                     Some(Trigger::Notice)
                 } else {
-                    changed
+                    None
                 }
             }
         };
@@ -980,7 +966,7 @@ pub(super) fn TrashControl(
         if !valid {
             refuse("The host connection changed. Wait for Trash to refresh before retrying.");
             confirmation.clear();
-            refresh.write().request(Trigger::Explicit);
+            refresh.write().request();
             return;
         }
         if !selection.commit(&mut confirmation) {
@@ -1087,7 +1073,7 @@ pub(super) fn TrashControl(
                 }
                 deletion.write().remove(&target.host);
                 if deletion.peek().is_empty() {
-                    refresh.write().request(Trigger::Explicit);
+                    refresh.write().request();
                 }
                 if let Some(completion) = completion {
                     completion.call(outcome);
@@ -1572,27 +1558,6 @@ pub(super) fn finish_row_cue(id: &str, archived: bool) {
 mod tests {
     use super::*;
     use farhelm_proto::ArchivedCheckout;
-
-    /// Reactive delivery may combine several causes before an effect runs.
-    /// A fallback tick must not erase a user's pending read, and consuming one
-    /// batch must leave genuinely later news distinguishable from that batch.
-    #[farhelm_testtrace::test]
-    fn refresh_delivery_preserves_stronger_undelivered_authority() {
-        let mut refresh = TrashRefresh::default();
-        let initial = refresh;
-        refresh.request(Trigger::Explicit);
-        refresh.request(Trigger::Scheduled);
-        refresh.request(Trigger::Notice);
-        assert_eq!(refresh.since(initial), Some(Trigger::Explicit));
-        let delivered = refresh;
-        assert_eq!(refresh.since(delivered), None);
-        refresh.request(Trigger::Notice);
-        refresh.request(Trigger::Scheduled);
-        assert_eq!(refresh.since(delivered), Some(Trigger::Notice));
-        let delivered = refresh;
-        refresh.request(Trigger::Scheduled);
-        assert_eq!(refresh.since(delivered), Some(Trigger::Scheduled));
-    }
 
     /// Lost replies can cover several IDs. Resolving one or starting a later
     /// uncertain attempt for a neighbour must preserve every unresolved ID;

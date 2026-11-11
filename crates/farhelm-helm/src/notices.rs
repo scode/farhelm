@@ -69,13 +69,17 @@ pub(crate) struct Notices {
 /// The gate exists only while a host has live or waiting trash requests.
 /// Registry/cache locks cannot span these RPCs: older hosts may take minutes.
 #[derive(Default)]
-pub(crate) struct TrashRequests(Mutex<HashMap<HostId, Weak<AsyncMutex<()>>>>);
+pub(crate) struct TrashRequests {
+    gates: Mutex<HashMap<HostId, Weak<AsyncMutex<()>>>>,
+    /// Retained between requests: dropping an idle gate must not erase news.
+    epochs: Mutex<HashMap<HostId, u64>>,
+}
 
 impl TrashRequests {
     /// Serialize a host's reads and deletes across all clients of this helm.
     pub(crate) async fn lock(&self, host: HostId) -> OwnedMutexGuard<()> {
         let gate = {
-            let mut gates = self.0.lock().expect("trash request map poisoned");
+            let mut gates = self.gates.lock().expect("trash request map poisoned");
             gates.retain(|_, gate| gate.strong_count() != 0);
             match gates.get(&host).and_then(Weak::upgrade) {
                 Some(gate) => gate,
@@ -87,6 +91,24 @@ impl TrashRequests {
             }
         };
         gate.lock_owned().await
+    }
+
+    /// Compare only within this helm process; connection incarnations remount
+    /// readers after restart. A status or acknowledgement changes no Trash.
+    pub(crate) fn epoch(&self, host: HostId) -> u64 {
+        self.epochs
+            .lock()
+            .expect("trash epochs poisoned")
+            .get(&host)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Publish before the fleet wake, so its hosts read cannot miss this change.
+    pub(crate) fn changed(&self, host: HostId) {
+        let mut epochs = self.epochs.lock().expect("trash epochs poisoned");
+        let epoch = epochs.entry(host).or_default();
+        *epoch = epoch.wrapping_add(1);
     }
 }
 
@@ -228,6 +250,7 @@ pub(crate) async fn observe_trash(
         return Ok(());
     };
     let manager = Arc::clone(&state.manager);
+    let trash_requests = Arc::clone(&state.trash_requests);
     state.store.conn().call("trash notice observation task panicked", move |conn| {
         let _guards = (request_guard, registry_guard);
         let current = manager.status(claim.host).is_some_and(|status| {
@@ -238,7 +261,10 @@ pub(crate) async fn observe_trash(
         if !current { return Ok(()); }
         match record_trash(conn, &claim, &listing) {
             Ok(changed) => {
-                if changed { manager.events().bump(); }
+                if changed {
+                    trash_requests.changed(claim.host);
+                    manager.events().bump();
+                }
                 Ok(())
             }
             Err(error) => {
@@ -708,6 +734,11 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(harness.store.notices().await.unwrap().notices.len(), 1);
+        assert_eq!(
+            harness.state.trash_requests.epoch(host),
+            1,
+            "cancellation cannot lose the committed observation's wake"
+        );
     }
 
     /// A reply from a disconnected incarnation must not create shared evidence,
@@ -729,6 +760,7 @@ mod tests {
             .await
             .unwrap();
         assert!(harness.store.notices().await.unwrap().notices.is_empty());
+        assert_eq!(harness.state.trash_requests.epoch(host), 0);
     }
 
     /// Different clients must pass through one host's ordering gate before
@@ -786,8 +818,9 @@ mod tests {
     }
 
     /// The real HTTP/RPC seam records notices and wakes other clients after an
-    /// accepted Delete. A storage failure preserves actual checkout evidence
-    /// and carries a visible error instead of disguising it as an empty list.
+    /// accepted Delete, with only that host's epoch changing. A storage failure
+    /// preserves actual checkout evidence and carries a visible error instead
+    /// of disguising it as an empty list.
     #[farhelm_testtrace::test]
     async fn forwarded_lists_and_delete_receipts_drive_changed_only_notices_and_errors() {
         let (client, peer) = tokio::io::duplex(64 * 1024);
@@ -834,6 +867,7 @@ mod tests {
         let mut id = None;
         for step in 0..6 {
             let before = harness.manager.events().revision();
+            let epoch = harness.state.trash_requests.epoch(host);
             if step == 5 {
                 harness
                     .store
@@ -863,6 +897,35 @@ mod tests {
                 before + u64::from(matches!(step, 0 | 2 | 4)),
                 "step {step}"
             );
+            let expected = epoch + u64::from(matches!(step, 0 | 2 | 4));
+            let views = crate::hosts::host_views(&harness.state).await.unwrap();
+            assert_eq!(
+                views
+                    .iter()
+                    .find(|view| view.id == host)
+                    .unwrap()
+                    .trash_epoch,
+                expected
+            );
+            assert_eq!(harness.state.trash_requests.epoch(i64::MAX), 0);
+            if step == 0 {
+                let notice = harness.store.notices().await.unwrap().notices.remove(0);
+                let response = marks(
+                    State(Arc::clone(&harness.state)),
+                    axum::Json(Marks {
+                        action: MarkAction::Read,
+                        ids: vec![notice.id],
+                    }),
+                )
+                .await
+                .into_response();
+                assert_eq!(response.status(), StatusCode::NO_CONTENT);
+                assert_eq!(
+                    harness.state.trash_requests.epoch(host),
+                    expected,
+                    "acknowledging a notice does not change Trash"
+                );
+            }
             if step == 5 {
                 assert_eq!(value["checkouts"][0]["id"], "first");
                 assert!(

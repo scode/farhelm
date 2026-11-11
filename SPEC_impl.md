@@ -4535,17 +4535,20 @@ task, whose scheduled ticks share that host's single-flight reader and add no de
 owed. Reads stay suspended during this page's delete requests. A same-connection count remains visible during
 measurement, but an old read generation cannot overwrite this client's deletion result. Host-local request ordering also
 prevents an older poll from replacing a newer measurement or completed removal, without invalidating unrelated hosts'
-reads. The existing content-free fleet revision also invalidates Trash, so another client's accepted cleanup starts this
-client's existing removal poll; the initiator need not remain open. The page's existing feed/fallback owner requests
-shared notice reads too, with an explicit initial read and the existing SurfaceReader retry/coalescing policy. No
-additional timer or channel is mounted. Per-host read children are keyed by host and connection incarnation, retaining
-independent demand and retry lifetimes. Explicit, feed and scheduled delivery counters preserve the strongest
-undelivered cause across reactive batching; registry uncertainty retains the owner without dispatching RPCs, and a
-recovered registry supplies unattended news. Each attempt samples current measurement mode and mutation generation. A
-discarded pre-mutation reply is not an answer unless a replacement actually satisfies that demand. Host-list refresh
-failures are disclosed rather than treated as proof of current reachability. Unknown host counts stay unknown; the
-global cleanup requires successful, settled listings from every reachable host, and refuses a host above the protocol's
-10,000-ID batch limit rather than silently omitting it.
+reads. A per-host in-memory Trash epoch advances on accepted nonempty Delete or Retry, on a session Delete or Replace
+that archived a checkout, and on a recorded notice change, before the existing fleet wake. Hosts listings carry it; only
+its change invalidates an idle host's Trash reader, so another client's cleanup starts the existing removal poll even
+after the initiator closes. Ordinary fleet events and fallback ticks do not themselves read Trash. Changes through
+another helm are noticed on reconnect, app load or dialog open. The page's existing feed/fallback owner requests shared
+notice reads too, with an explicit initial read and the existing SurfaceReader retry/coalescing policy. No additional
+timer or channel is mounted. Per-host read children are keyed by host and connection incarnation, retaining independent
+demand and retry lifetimes. An explicit delivery counter and the host epoch preserve pending causes across reactive
+batching; registry uncertainty retains the owner without dispatching RPCs, and a recovered registry supplies unattended
+news. Each attempt samples current measurement mode and mutation generation. A discarded pre-mutation reply is not an
+answer unless a replacement actually satisfies that demand. Host-list refresh failures are disclosed rather than treated
+as proof of current reachability. Unknown host counts stay unknown; the global cleanup requires successful, settled
+listings from every reachable host, and refuses a host above the protocol's 10,000-ID batch limit rather than silently
+omitting it.
 
 Confirmations freeze deduplicated IDs and observed host incarnations. Diagnostic IDs are selectable for explicit
 forgetting, while every diagnostic remains visible, including several for one ID. Before dispatch the UI rechecks

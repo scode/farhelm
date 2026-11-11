@@ -630,6 +630,7 @@ pub(crate) async fn delete_checkout_trash(
             // Acceptance is enough to make other clients re-read this host;
             // it is never evidence that the underlying files are gone.
             if !deleted.removed.is_empty() {
+                state.trash_requests.changed(claim.host);
                 state.manager.events().bump();
             }
             axum::Json(deleted).into_response()
@@ -3369,6 +3370,12 @@ pub(crate) async fn do_delete_session(
     let outcome = client
         .delete_session_fenced(id, guard, agent_connection.is_some())
         .await?;
+    // An archived checkout is new Trash content. Windows whose listing cannot
+    // prove the session vanished (a filter, a truncated fleet) learn of it only
+    // through the host's Trash epoch, published before the fleet wake below.
+    if outcome.archived {
+        state.trash_requests.changed(claim.host);
+    }
     forget_deleted_session(state, &claim, id).await;
     Ok(outcome)
 }
@@ -4185,7 +4192,13 @@ async fn finish_replacement(
         state.manager.events().bump();
     }
     let delete_notice = match client.delete_session_with(id, guard).await {
-        Ok(outcome) => outcome.notice,
+        Ok(outcome) => {
+            // As for Delete: an archived source checkout is new Trash content.
+            if outcome.archived {
+                state.trash_requests.changed(claim.host);
+            }
+            outcome.notice
+        }
         Err(delete_error) => {
             // Two shapes of failure here, and they earn different words because
             // they answer a different question: did the delete happen?

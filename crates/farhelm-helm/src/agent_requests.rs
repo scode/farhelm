@@ -4572,6 +4572,7 @@ mod tests {
             color: Default::default(),
             state,
             incarnation: 1,
+            trash_epoch: 0,
         }
     }
 
