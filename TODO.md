@@ -432,6 +432,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
+- **Add common image formats to the default Cmd-click open list.** The desktop app's **File types to open with
+  Cmd-click** field defaults to `md, txt, json`; add jpeg, png and a few more common safe image formats to that default
+  (gif, webp, bmp and avif are the obvious candidates; svg stays out, being HTML-like and already warned about). The
+  default is `DEFAULT` in `crates/farhelm-proto/src/open_extensions.rs`, and its warning classification needs to treat
+  the new types as safe, or the settings dialog warns about its own default.
+
 ## Mid term
 
 - **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
