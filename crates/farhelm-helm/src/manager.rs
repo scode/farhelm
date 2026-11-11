@@ -70,13 +70,16 @@ pub use crate::transport::{
 use crate::transport::{SshDiagnostics, SshExit, SshObservation, SshSnapshot};
 
 use crate::client::{SessionListing, SupervisorClient, SupervisorError, SupervisorTransportError};
+use crate::environment::{ConnectedResources, EnvironmentStatus, Providers, StatusUnanswered};
 use crate::session_cache::{creation_order, eviction_victim, merge_cached_session};
 use crate::store::{
     DialedAs, FirstContactOutcome, HelmStore, HostId, HostKind, HostRow, HostStoreError,
 };
 use anyhow::Context as _;
 use farhelm_proto::io::VersionSkew;
-use farhelm_proto::{ErrorKind, SESSIONS_CHANGED_MIN_GAP, SessionInfo, SessionStatus};
+use farhelm_proto::{
+    ErrorKind, SESSIONS_CHANGED_MIN_GAP, SessionInfo, SessionStatus, WhenStatusUnanswered,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -589,7 +592,7 @@ pub enum HostState {
     /// hangs.
     ///
     /// Entered from any attempt whose status check before the dial gets that
-    /// answer (see [`SandboxStatusSource`]), whoever suspended the sandbox:
+    /// answer (see [`crate::environment::EnvironmentProvider`]), whoever suspended the sandbox:
     /// the user, Tensorlake's idle timeout, or the `tl` CLI. Entering it also
     /// closes the host's shared ssh connections. Re-probed on
     /// [`Cadence::reprobe`], one status call each time and no dial, so a
@@ -1162,8 +1165,8 @@ pub struct ConnectionManager {
     attempts: Arc<std::sync::atomic::AtomicU64>,
     store: HelmStore,
     transport: Arc<dyn HostTransport>,
-    /// Where actors ask about a Tensorlake host's sandbox before dialing it.
-    sandboxes: Arc<dyn SandboxStatusSource>,
+    /// Provider I/O is installed before actors begin checking resource status.
+    providers: Providers,
     cadence: Cadence,
     /// The test gate every actor of this manager checks before publishing
     /// a duplicate result; see [`DuplicateGateSlot`].
@@ -1465,19 +1468,18 @@ impl ConnectionManager {
         Ok(manager)
     }
 
-    /// [`Self::start`] with the source every actor asks before dialing a
-    /// Tensorlake host, installed before any actor runs. What the helm
-    /// itself uses; plain `start` serves managers with no Tensorlake hosts.
-    pub(crate) async fn start_with_sandboxes(
+    /// Install provider services before the first actor can read status or
+    /// acquire connected resources. Plain `start` serves ordinary-host managers.
+    pub(crate) async fn start_with_providers(
         store: HelmStore,
         transport: Arc<dyn HostTransport>,
         cadence: Cadence,
-        sandboxes: Arc<dyn SandboxStatusSource>,
+        providers: Providers,
     ) -> anyhow::Result<Arc<ConnectionManager>> {
         let mut manager = Self::unstarted(store, transport, cadence);
         Arc::get_mut(&mut manager)
             .expect("unstarted manager has one owner")
-            .sandboxes = sandboxes;
+            .providers = providers;
         manager.sync_registry().await?;
         Ok(manager)
     }
@@ -1514,7 +1516,7 @@ impl ConnectionManager {
             attempts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             store,
             transport,
-            sandboxes: Arc::new(NoTensorlake),
+            providers: Providers::default(),
             cadence,
             #[cfg(test)]
             duplicate_gate: DuplicateGateSlot::default(),
@@ -1941,7 +1943,7 @@ impl ConnectionManager {
             id: row.id,
             store: self.store.clone(),
             transport: Arc::clone(&self.transport),
-            sandboxes: Arc::clone(&self.sandboxes),
+            providers: self.providers.clone(),
             cadence: self.cadence.clone(),
             status: Arc::clone(&status),
             #[cfg(test)]
@@ -3116,8 +3118,8 @@ struct HostActor {
     id: HostId,
     store: HelmStore,
     transport: Arc<dyn HostTransport>,
-    /// Asked before each attempt on a Tensorlake host; see [`HostActor::attempt`].
-    sandboxes: Arc<dyn SandboxStatusSource>,
+    /// Asked before each environment attempt and on entry to Connected.
+    providers: Providers,
     cadence: Cadence,
     status: Arc<watch::Sender<ActorStatus>>,
     /// This actor's manager's test gate; see [`DuplicateGateSlot`].
@@ -3303,81 +3305,10 @@ type DuplicateGateSlot = Arc<Mutex<Option<Arc<DuplicatePublicationGate>>>>;
 /// this only has to outlast those.
 const HOLD_PARK_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// What Tensorlake says about a host's sandbox, as the dial gate reads it
-/// ([`SandboxStatusSource::check`]).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum SandboxCheck {
-    /// Tensorlake answered with the sandbox's state, and its diagnosis when
-    /// it has one (a failed resume's, say).
-    Status {
-        status: crate::tensorlake::api::SandboxStatus,
-        error_details: Option<String>,
-    },
-    /// Tensorlake has no sandbox by that name.
-    Missing,
-    /// Tensorlake could not answer: no API key saved, a rejected key, the
-    /// network, a timeout. The sentence says which.
-    Unavailable(String),
-}
-
-/// Where the connection actors learn a Tensorlake host's sandbox status.
-///
-/// A trait the manager owns, so the actor's state machine can be tested
-/// against scripted answers under a paused clock; production implements it
-/// for [`crate::tensorlake::Tensorlake`], which asks the API. Asked once per
-/// attempt on a Tensorlake host and never while the host is connected, so a
-/// connected host costs no API traffic and a suspended one costs one call
-/// per re-probe.
-/// The same service reconciles credentials and acquires recipe forwards on
-/// entry to the connected phase; their leases drop before a hold acknowledges
-/// parking, including while the hook is still acquiring those resources.
-#[async_trait::async_trait]
-pub(crate) trait SandboxStatusSource: Send + Sync {
-    async fn check(&self, sandbox: &str) -> SandboxCheck;
-
-    /// Acquire resources that must end with this connected phase. Scripted
-    /// status sources need none; production delivers credentials and starts
-    /// recipe relays before the supervisor becomes routable. The supplied
-    /// client is the connection those resources belong to. Dropping them may
-    /// retire it: a listener claim has no separate release operation, so
-    /// retaining another Arc cannot preserve a claim past lease teardown.
-    async fn connected(
-        &self,
-        _row: &HostRow,
-        _client: Arc<SupervisorClient>,
-        _events: Arc<FleetEvents>,
-    ) -> ConnectedResources {
-        ConnectedResources::default()
-    }
-}
-
-/// Keep all resources alive across the hook-to-Connected publication gap and
-/// until serving ends. Dropping acquisition on a hold cancels them together.
-/// A recipe lease also retires its claiming client on Drop, before the hold
-/// acknowledges; this ends its listeners even if another owner retains an Arc.
-#[derive(Default)]
-pub(crate) struct ConnectedResources {
-    pub(crate) _tunnels: Option<crate::tensorlake::tunnels::TunnelLease>,
-    pub(crate) _credentials: Option<crate::provisioning::credential_delivery::ConnectionLease>,
-}
-
-/// The status source of a manager started without one ([`ConnectionManager::start`]):
-/// every check is unavailable, so a Tensorlake row would be dialed as the
-/// gate's fallback says. Only test managers and helms with no Tensorlake
-/// service use it, and none of their rows are sandboxes.
-struct NoTensorlake;
-
-#[async_trait::async_trait]
-impl SandboxStatusSource for NoTensorlake {
-    async fn check(&self, _sandbox: &str) -> SandboxCheck {
-        SandboxCheck::Unavailable("this helm has no Tensorlake account to ask".to_string())
-    }
-}
-
-/// What a Tensorlake host's attempt does with its status check.
+/// The actor's provider-neutral decision after a status read.
 #[derive(Debug, PartialEq, Eq)]
-enum SandboxGate {
-    /// Dial. `unanswered` holds why Tensorlake could not answer, when it
+enum EnvironmentGate {
+    /// Dial. `unanswered` holds why the provider could not answer, when it
     /// could not, for the failure text should the dial fail too.
     Dial { unanswered: Option<String> },
     /// Do not dial; the host is suspended.
@@ -3386,61 +3317,30 @@ enum SandboxGate {
     Refuse(String),
 }
 
-/// Decide an attempt from its status check. Pure, so the table is pinned by
-/// tests on its own.
-///
-/// Running dials. Suspended, suspending and a failed resume are Suspended.
-/// A sandbox that is starting or snapshotting, or in a state this build
-/// does not know, is not dialed but retried, since it may be running in a
-/// moment. A missing or terminated sandbox fails with the remedy, deleting
-/// the host, because nothing Farhelm can do brings it back.
-///
-/// When Tensorlake cannot answer, the gate dials anyway (a decision recorded
-/// in the design): a NEW ssh connection to a suspended sandbox is refused
-/// promptly by Tensorlake's gateway, so dialing blind costs a failed
-/// attempt at worst, while refusing to dial would turn a cleared API key or
-/// an API outage into every Tensorlake host going dark.
-fn sandbox_gate(check: SandboxCheck, sandbox: &str) -> SandboxGate {
-    use crate::tensorlake::api::SandboxStatus;
-    match check {
-        SandboxCheck::Status {
-            status,
-            error_details,
-        } => match status {
-            SandboxStatus::Running => SandboxGate::Dial { unanswered: None },
-            SandboxStatus::Suspended | SandboxStatus::Suspending => SandboxGate::Suspended {
-                resume_failed: None,
+/// Preserve the distinction between an unknown answer and an unanswered read.
+/// Provider implementations supply state and wording. Static provider policy
+/// decides whether a failed status channel also prevents the dial.
+fn environment_gate(
+    observed: Result<EnvironmentStatus, StatusUnanswered>,
+    when_unanswered: WhenStatusUnanswered,
+) -> EnvironmentGate {
+    match observed {
+        Ok(EnvironmentStatus::Running) => EnvironmentGate::Dial { unanswered: None },
+        Ok(EnvironmentStatus::Suspended { resume_failed }) => {
+            EnvironmentGate::Suspended { resume_failed }
+        }
+        Ok(
+            EnvironmentStatus::Changing(reason)
+            | EnvironmentStatus::Missing(reason)
+            | EnvironmentStatus::Unknown(reason),
+        ) => EnvironmentGate::Refuse(reason),
+        Err(StatusUnanswered(reason)) => match when_unanswered {
+            WhenStatusUnanswered::DialAnyway => EnvironmentGate::Dial {
+                unanswered: Some(reason),
             },
-            SandboxStatus::ResumeFailed => SandboxGate::Suspended {
-                resume_failed: Some(
-                    error_details.unwrap_or_else(|| "Tensorlake gave no reason".to_string()),
-                ),
-            },
-            SandboxStatus::Pending | SandboxStatus::Snapshotting | SandboxStatus::Unknown => {
-                SandboxGate::Refuse(format!(
-                    "sandbox {sandbox} is {}; Farhelm connects once it is running",
-                    match status {
-                        SandboxStatus::Pending => "starting",
-                        SandboxStatus::Snapshotting => "taking a snapshot",
-                        _ => "in a state Farhelm does not know",
-                    }
-                ))
-            }
-            SandboxStatus::Terminated => SandboxGate::Refuse(gone(sandbox)),
-        },
-        SandboxCheck::Missing => SandboxGate::Refuse(gone(sandbox)),
-        SandboxCheck::Unavailable(reason) => SandboxGate::Dial {
-            unanswered: Some(reason),
+            WhenStatusUnanswered::RetryLater => EnvironmentGate::Refuse(reason),
         },
     }
-}
-
-/// The failure text for a sandbox Tensorlake no longer runs.
-fn gone(sandbox: &str) -> String {
-    format!(
-        "Tensorlake has no running sandbox {sandbox}; it was deleted outside Farhelm. Delete \
-         this host to remove it from the list"
-    )
 }
 
 /// Wall-clock now in unix milliseconds, for timestamps the UI shows. A clock
@@ -3754,7 +3654,7 @@ impl HostActor {
                             active |= request.fresh_window;
                             continue;
                         }
-                        resources = self.sandboxes.connected(&row, Arc::clone(&client), Arc::clone(&self.events)) => resources,
+                        resources = self.connected_resources(&row, Arc::clone(&client)) => resources,
                     };
                     self.serve(
                         client,
@@ -4158,7 +4058,7 @@ impl HostActor {
                 HostKind::Ssh | HostKind::Tensorlake => ConnectionStage::ConnectingToHost,
             },
         );
-        let Some(binding) = row.tensorlake.as_ref() else {
+        let Some(binding) = row.environment_binding() else {
             return self.dial(row, progress).await;
         };
         // A reused image can already answer as a copied supervisor. Only
@@ -4168,15 +4068,16 @@ impl HostActor {
         if row.remote_farhelm.is_none() || row.remote_state_dir.is_none() {
             return AttemptOutcome::Failed {
                 cause: UnreachableCause::TransportFailure,
-                error: "initial Tensorlake setup has not passed the supervisor state check; run setup again to continue".into(),
+                error: binding.handle.initial_setup_refusal().into(),
             };
         }
-        match sandbox_gate(
-            self.sandboxes.check(&binding.sandbox).await,
-            &binding.sandbox,
-        ) {
-            SandboxGate::Dial { unanswered: None } => self.dial(row, progress).await,
-            SandboxGate::Dial {
+        let observed = match self.providers.get(binding.provider()) {
+            Ok(provider) => provider.status(&binding).await,
+            Err(reason) => Err(reason),
+        };
+        match environment_gate(observed, binding.provider().when_status_unanswered()) {
+            EnvironmentGate::Dial { unanswered: None } => self.dial(row, progress).await,
+            EnvironmentGate::Dial {
                 unanswered: Some(reason),
             } => match self.dial(row, progress).await {
                 // The dial is what failed, but the user also needs to know
@@ -4184,21 +4085,37 @@ impl HostActor {
                 // even running.
                 AttemptOutcome::Failed { cause, error } => AttemptOutcome::Failed {
                     cause,
-                    error: format!(
-                        "{error} (Farhelm could not ask Tensorlake whether the sandbox is \
-                         running: {})",
-                        peer_text(&reason)
-                    ),
+                    error: format!("{error} ({})", peer_text(&reason)),
                 },
                 outcome => outcome,
             },
-            SandboxGate::Suspended { resume_failed } => AttemptOutcome::Suspended {
+            EnvironmentGate::Suspended { resume_failed } => AttemptOutcome::Suspended {
                 resume_failed: resume_failed.map(|details| peer_text(&details)),
             },
-            SandboxGate::Refuse(error) => AttemptOutcome::Failed {
+            EnvironmentGate::Refuse(error) => AttemptOutcome::Failed {
                 cause: UnreachableCause::TransportFailure,
                 error,
             },
+        }
+    }
+
+    /// Acquire provider-owned leases inside the actor's cancellable hook.
+    /// Ordinary hosts and managers assembled without a provider own none.
+    async fn connected_resources(
+        &self,
+        row: &HostRow,
+        client: Arc<SupervisorClient>,
+    ) -> ConnectedResources {
+        let Some(kind) = row.kind.environment_provider() else {
+            return ConnectedResources::default();
+        };
+        match self.providers.get(kind) {
+            Ok(provider) => {
+                provider
+                    .connected(row, client, Arc::clone(&self.events))
+                    .await
+            }
+            Err(_) => ConnectedResources::default(),
         }
     }
 
@@ -4235,7 +4152,7 @@ impl HostActor {
             writer,
             Arc::clone(&self.agent_requests),
             self.id,
-            row.kind == HostKind::Tensorlake,
+            row.kind.environment_provider().is_some(),
         );
         tokio::pin!(hello);
         let ssh = progress.ssh.clone();
@@ -11866,7 +11783,7 @@ mod tests {
             attempts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             store,
             transport: ScriptedTransport::new(),
-            sandboxes: Arc::new(NoTensorlake),
+            providers: Providers::default(),
             cadence: Cadence::default(),
             duplicate_gate: DuplicateGateSlot::default(),
             refresh_gate: DuplicateGateSlot::default(),
@@ -12693,14 +12610,15 @@ mod tests {
     /// A scripted Tensorlake status source: answers whatever the test last
     /// set, and logs the virtual time of every check so a test can count
     /// them and see their spacing.
-    struct ScriptedSandboxes {
-        answer: Mutex<SandboxCheck>,
+    struct ScriptedEnvironments {
+        answer: Mutex<Result<EnvironmentStatus, StatusUnanswered>>,
         checks: watch::Sender<Vec<Duration>>,
         origin: tokio::time::Instant,
     }
 
-    impl ScriptedSandboxes {
-        fn new(answer: SandboxCheck) -> Arc<Self> {
+    impl ScriptedEnvironments {
+        /// Start with one observation shared by every later attempt.
+        fn new(answer: Result<EnvironmentStatus, StatusUnanswered>) -> Arc<Self> {
             Arc::new(Self {
                 answer: Mutex::new(answer),
                 checks: watch::Sender::new(Vec::new()),
@@ -12708,14 +12626,17 @@ mod tests {
             })
         }
 
-        fn answer(&self, answer: SandboxCheck) {
+        /// Switch the provider observation without nudging the retry ladder.
+        fn answer(&self, answer: Result<EnvironmentStatus, StatusUnanswered>) {
             *self.answer.lock().unwrap() = answer;
         }
 
+        /// Inspect only this fixture's virtual-time observations.
         fn checks(&self) -> Vec<Duration> {
             self.checks.borrow().clone()
         }
 
+        /// Wait on the provider boundary, avoiding guesses about actor timing.
         async fn wait_for_checks(&self, n: usize) -> Vec<Duration> {
             let mut rx = self.checks.subscribe();
             let _ = rx.wait_for(|log| log.len() >= n).await;
@@ -12724,26 +12645,56 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl SandboxStatusSource for ScriptedSandboxes {
-        async fn check(&self, _sandbox: &str) -> SandboxCheck {
+    impl crate::environment::EnvironmentProvider for ScriptedEnvironments {
+        async fn status(
+            &self,
+            _binding: &crate::environment::EnvironmentBinding,
+        ) -> Result<EnvironmentStatus, StatusUnanswered> {
             let at = self.origin.elapsed();
             self.checks.send_modify(|log| log.push(at));
             self.answer.lock().unwrap().clone()
         }
+
+        async fn suspend(
+            &self,
+            _state: &crate::AppState,
+            _binding: &crate::environment::EnvironmentBinding,
+        ) -> anyhow::Result<()> {
+            unreachable!("the scripted actor fixture performs no lifecycle operations")
+        }
+
+        async fn resume(
+            &self,
+            _state: &crate::AppState,
+            _binding: &crate::environment::EnvironmentBinding,
+        ) -> anyhow::Result<()> {
+            unreachable!("the scripted actor fixture performs no lifecycle operations")
+        }
+
+        async fn destroy(
+            &self,
+            _binding: &crate::environment::EnvironmentBinding,
+        ) -> anyhow::Result<crate::environment::Destroyed> {
+            unreachable!("the scripted actor fixture performs no resource destruction")
+        }
     }
 
-    fn sandbox_status(status: crate::tensorlake::api::SandboxStatus) -> SandboxCheck {
-        SandboxCheck::Status {
+    /// Reuse the provider's state translation while the fixture scripts I/O.
+    fn sandbox_status(
+        status: crate::tensorlake::api::SandboxStatus,
+    ) -> Result<EnvironmentStatus, StatusUnanswered> {
+        Ok(crate::tensorlake::hosts::environment_status(
+            "farhelm-host-k7q2-x-m3x9",
             status,
-            error_details: None,
-        }
+            None,
+        ))
     }
 
     /// A fixture whose registry holds one Tensorlake host (besides the
     /// local row), with `sandboxes` installed before any actor runs.
     /// Returns the fixture and the Tensorlake host's id.
     async fn sandbox_fixture(
-        sandboxes: Arc<ScriptedSandboxes>,
+        sandboxes: Arc<ScriptedEnvironments>,
         script: Script,
     ) -> (Fixture, HostId) {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -12781,7 +12732,7 @@ mod tests {
         );
         Arc::get_mut(&mut manager)
             .expect("unstarted manager has one owner")
-            .sandboxes = sandboxes;
+            .providers = Providers::with_tensorlake(sandboxes);
         manager.sync_registry().await.expect("start manager");
         (
             Fixture {
@@ -12794,75 +12745,63 @@ mod tests {
         )
     }
 
-    /// Why: the dial decision for a Tensorlake host is this table, and each
-    /// row is a promise to the user (goal criterion 4, P7): a suspended
-    /// sandbox is never dialed, a deleted one says how to get rid of the
-    /// host, and an API outage does not take running hosts down with it.
-    ///
-    /// Spec: running dials; suspended and suspending are Suspended with no
-    /// diagnosis; a failed resume is Suspended with Tensorlake's diagnosis
-    /// (or a stand-in when it gave none); starting, snapshotting and unknown
-    /// states refuse with "connects once it is running"; terminated and
-    /// missing refuse with the delete remedy; an unanswered check dials,
-    /// carrying the reason.
+    /// A provider's unknown answer must never inherit an unanswered read's
+    /// fallback. Every answered state keeps the same gate under either policy,
+    /// while failed reads either dial with context or refuse and retry.
     #[farhelm_testtrace::test]
-    fn the_sandbox_gate_decides_every_status() {
-        use crate::tensorlake::api::SandboxStatus;
-        let name = "farhelm-host-k7q2-x-m3x9";
-        assert_eq!(
-            sandbox_gate(sandbox_status(SandboxStatus::Running), name),
-            SandboxGate::Dial { unanswered: None }
-        );
-        for status in [SandboxStatus::Suspended, SandboxStatus::Suspending] {
+    fn the_environment_gate_decides_every_status() {
+        for policy in [
+            WhenStatusUnanswered::DialAnyway,
+            WhenStatusUnanswered::RetryLater,
+        ] {
             assert_eq!(
-                sandbox_gate(sandbox_status(status), name),
-                SandboxGate::Suspended {
-                    resume_failed: None
-                }
+                environment_gate(Ok(EnvironmentStatus::Running), policy),
+                EnvironmentGate::Dial { unanswered: None }
             );
+            for resume_failed in [None, Some("restore failed".to_string())] {
+                assert_eq!(
+                    environment_gate(
+                        Ok(EnvironmentStatus::Suspended {
+                            resume_failed: resume_failed.clone()
+                        }),
+                        policy
+                    ),
+                    EnvironmentGate::Suspended { resume_failed }
+                );
+            }
+            for status in [
+                EnvironmentStatus::Changing("still starting".into()),
+                EnvironmentStatus::Missing("delete this host".into()),
+                EnvironmentStatus::Unknown("unknown answer".into()),
+            ] {
+                let expected = match &status {
+                    EnvironmentStatus::Changing(reason)
+                    | EnvironmentStatus::Missing(reason)
+                    | EnvironmentStatus::Unknown(reason) => reason.clone(),
+                    other => panic!("fixture contains a dialable status: {other:?}"),
+                };
+                assert_eq!(
+                    environment_gate(Ok(status), policy),
+                    EnvironmentGate::Refuse(expected)
+                );
+            }
         }
+        let unanswered = Err(StatusUnanswered("could not ask".into()));
         assert_eq!(
-            sandbox_gate(
-                SandboxCheck::Status {
-                    status: SandboxStatus::ResumeFailed,
-                    error_details: Some("restore failed".into()),
-                },
-                name
+            environment_gate(
+                unanswered.clone(),
+                farhelm_proto::ProviderKind::Tensorlake.when_status_unanswered()
             ),
-            SandboxGate::Suspended {
-                resume_failed: Some("restore failed".into())
+            EnvironmentGate::Dial {
+                unanswered: Some("could not ask".into())
             }
         );
-        assert!(matches!(
-            sandbox_gate(sandbox_status(SandboxStatus::ResumeFailed), name),
-            SandboxGate::Suspended {
-                resume_failed: Some(_)
-            }
-        ));
-        for status in [
-            SandboxStatus::Pending,
-            SandboxStatus::Snapshotting,
-            SandboxStatus::Unknown,
-        ] {
-            assert!(matches!(
-                sandbox_gate(sandbox_status(status), name),
-                SandboxGate::Refuse(text) if text.contains(name) && text.contains("once it is running")
-            ));
-        }
-        for check in [
-            sandbox_status(SandboxStatus::Terminated),
-            SandboxCheck::Missing,
-        ] {
-            assert!(matches!(
-                sandbox_gate(check, name),
-                SandboxGate::Refuse(text) if text.contains(name) && text.contains("Delete this host")
-            ));
-        }
         assert_eq!(
-            sandbox_gate(SandboxCheck::Unavailable("no key".into()), name),
-            SandboxGate::Dial {
-                unanswered: Some("no key".into())
-            }
+            environment_gate(
+                unanswered,
+                farhelm_proto::ProviderKind::Podman.when_status_unanswered()
+            ),
+            EnvironmentGate::Refuse("could not ask".into())
         );
     }
 
@@ -12881,7 +12820,7 @@ mod tests {
     #[farhelm_testtrace::test(start_paused = true)]
     async fn a_suspended_sandbox_is_never_dialed_and_resumes_by_itself() {
         use crate::tensorlake::api::SandboxStatus;
-        let sandboxes = ScriptedSandboxes::new(sandbox_status(SandboxStatus::Suspended));
+        let sandboxes = ScriptedEnvironments::new(sandbox_status(SandboxStatus::Suspended));
         let (fixture, host) = sandbox_fixture(Arc::clone(&sandboxes), Script::default()).await;
         let first = fixture
             .manager
@@ -12972,7 +12911,7 @@ mod tests {
     #[farhelm_testtrace::test(start_paused = true)]
     async fn a_running_sandbox_is_dialed_and_not_checked_while_connected() {
         use crate::tensorlake::api::SandboxStatus;
-        let sandboxes = ScriptedSandboxes::new(sandbox_status(SandboxStatus::Running));
+        let sandboxes = ScriptedEnvironments::new(sandbox_status(SandboxStatus::Running));
         let (fixture, host) = sandbox_fixture(Arc::clone(&sandboxes), Script::default()).await;
         fixture
             .manager
@@ -13000,7 +12939,7 @@ mod tests {
     #[farhelm_testtrace::test(start_paused = true)]
     async fn tensorlake_heartbeats_survive_cache_work_beyond_the_proxy_budget() {
         use crate::tensorlake::api::SandboxStatus;
-        let sandboxes = ScriptedSandboxes::new(sandbox_status(SandboxStatus::Running));
+        let sandboxes = ScriptedEnvironments::new(sandbox_status(SandboxStatus::Running));
         let (fixture, host) = sandbox_fixture(
             sandboxes,
             Script {
@@ -13085,9 +13024,9 @@ mod tests {
     /// failure and the check's reason in its error.
     #[farhelm_testtrace::test(start_paused = true)]
     async fn an_unanswered_status_check_dials_anyway() {
-        let sandboxes = ScriptedSandboxes::new(SandboxCheck::Unavailable(
+        let sandboxes = ScriptedEnvironments::new(Err(crate::tensorlake::hosts::unanswered(
             "no Tensorlake API key is saved".into(),
-        ));
+        )));
         let (fixture, host) = sandbox_fixture(Arc::clone(&sandboxes), Script::default()).await;
         fixture
             .manager
@@ -13095,9 +13034,9 @@ mod tests {
             .await
             .expect("a reachable host connects without an answer");
 
-        let sandboxes = ScriptedSandboxes::new(SandboxCheck::Unavailable(
+        let sandboxes = ScriptedEnvironments::new(Err(crate::tensorlake::hosts::unanswered(
             "no Tensorlake API key is saved".into(),
-        ));
+        )));
         let (fixture, host) = sandbox_fixture(
             Arc::clone(&sandboxes),
             Script {
@@ -13136,7 +13075,9 @@ mod tests {
     /// delete remedy.
     #[farhelm_testtrace::test(start_paused = true)]
     async fn a_deleted_sandbox_is_unreachable_with_the_remedy() {
-        let sandboxes = ScriptedSandboxes::new(SandboxCheck::Missing);
+        let sandboxes = ScriptedEnvironments::new(Ok(crate::tensorlake::hosts::missing(
+            "farhelm-host-k7q2-x-m3x9",
+        )));
         let (fixture, host) = sandbox_fixture(Arc::clone(&sandboxes), Script::default()).await;
         let state = fixture
             .manager

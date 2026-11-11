@@ -1243,7 +1243,11 @@ async fn a_cancelled_record_write_keeps_serialization_until_sqlite_finishes() {
     assert!(f.claude().await.contains(FIRST));
 }
 
-use crate::manager::{ConnectedResources, HostState, SandboxCheck, SandboxStatusSource};
+use crate::environment::{
+    ConnectedResources, Destroyed, EnvironmentBinding, EnvironmentProvider, EnvironmentStatus,
+    StatusUnanswered,
+};
+use crate::manager::HostState;
 use crate::rest_harness::{FleetBuilder, Harness};
 use crate::tensorlake::Tensorlake;
 use axum::{
@@ -1265,9 +1269,34 @@ struct HookGate {
 }
 
 #[async_trait::async_trait]
-impl SandboxStatusSource for HookGate {
-    async fn check(&self, _sandbox: &str) -> SandboxCheck {
-        SandboxCheck::Unavailable("fixture asks the supervisor directly".into())
+impl EnvironmentProvider for HookGate {
+    async fn status(
+        &self,
+        _binding: &EnvironmentBinding,
+    ) -> Result<EnvironmentStatus, StatusUnanswered> {
+        Err(StatusUnanswered(
+            "fixture asks the supervisor directly".into(),
+        ))
+    }
+
+    async fn suspend(
+        &self,
+        _state: &crate::AppState,
+        _binding: &EnvironmentBinding,
+    ) -> anyhow::Result<()> {
+        unreachable!("the hook fixture exercises connection resources only")
+    }
+
+    async fn resume(
+        &self,
+        _state: &crate::AppState,
+        _binding: &EnvironmentBinding,
+    ) -> anyhow::Result<()> {
+        unreachable!("the hook fixture exercises connection resources only")
+    }
+
+    async fn destroy(&self, _binding: &EnvironmentBinding) -> anyhow::Result<Destroyed> {
+        unreachable!("the hook fixture exercises connection resources only")
     }
 
     async fn connected(
@@ -1280,7 +1309,7 @@ impl SandboxStatusSource for HookGate {
             return ConnectedResources::default();
         }
         let service = self.service.lock().unwrap().clone().unwrap();
-        let resources = SandboxStatusSource::connected(&service, row, client, events).await;
+        let resources = EnvironmentProvider::connected(&service, row, client, events).await;
         if self.hold.swap(false, Ordering::SeqCst) {
             self.entered.notify_one();
             self.release.notified().await;

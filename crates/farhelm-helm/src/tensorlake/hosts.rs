@@ -11,12 +11,15 @@
 //!   the host as Suspended instead of dialing ([`Tensorlake::check_sandbox`]).
 //! - How to make it stop billing. Removing the host terminates the sandbox and
 //!   deletes the snapshots it left behind before the row is forgotten
-//!   ([`Tensorlake::delete_sandbox`]); the store refuses to forget the row
+//!   ([`EnvironmentProvider::destroy`]); the store refuses to forget the row
 //!   without the proof this returns.
 
 use super::Tensorlake;
 use super::api::{ApiKey, SandboxStatus, TensorlakeApi, TensorlakeError};
-use crate::manager::{SandboxCheck, SandboxStatusSource};
+use crate::environment::{
+    ConnectedResources, Destroyed, EnvironmentBinding, EnvironmentProvider, EnvironmentStatus,
+    ProviderHandle, StatusUnanswered,
+};
 use crate::store::{HostId, HostRow};
 use farhelm_proto::ErrorKind;
 use std::time::Duration;
@@ -42,44 +45,107 @@ const TERMINATION_WAIT: Duration = Duration::from_secs(30);
 /// How often a removal asks whether the sandbox has terminated.
 const TERMINATION_POLL: Duration = Duration::from_secs(1);
 
-/// Permission to forget this row under Farhelm's recorded-ownership policy.
-/// A recorded sandbox must be terminated (or conclusively absent) and its
-/// snapshots deleted before teardown issues this proof. Without either a
-/// recorded ID or an outstanding create, [`Self::never_created`] permits
-/// forgetting the entry without touching a same-name sandbox. A legacy row
-/// or power loss that lost both records can therefore leave a billed
-/// resource for explicit cleanup; this is not an account-wide absence proof.
-/// [`crate::store::HelmStore::remove_host_row`] accepts it only for this row.
-/// The field and teardown constructor remain private to this module.
+/// Confirmed cleanup or a never-sent create permits forgetting this host row.
+/// Successful cleanup is attested only inside this provider module. The
+/// registration rollback exception requires its caller to establish that no
+/// sandbox ID or outstanding create is recorded. Neither case establishes
+/// absence of unrecorded legacy or power-loss leftovers in the account.
 #[derive(Debug)]
 pub(crate) struct SandboxDeleted {
     host: HostId,
 }
 
 impl SandboxDeleted {
-    /// Forget a row with no recorded create, including registration rollback.
-    /// Callers must establish that neither a sandbox ID nor an outstanding
-    /// create is recorded. Missing records are not proof of vendor absence:
-    /// legacy or power-loss leftovers are deliberately left for explicit cleanup.
+    /// Roll back a registration after establishing that no create was recorded.
     pub(crate) fn never_created(host: HostId) -> Self {
         Self { host }
     }
-    /// Attest that `host`'s sandbox and its snapshots are gone. Only after
-    /// Tensorlake has said so.
+
+    /// Issue successful-cleanup evidence only after the provider confirms it.
     fn attest(host: HostId) -> Self {
         Self { host }
     }
 
-    /// The host this proof is for.
+    /// Bind the shared removal gate to this proof's original registry row.
     pub(crate) fn host(&self) -> HostId {
         self.host
     }
 }
 
+/// Translate vendor states once, at the provider boundary. Suspending already
+/// forbids dialing, while pending/snapshotting remain ordinary ladder failures.
+pub(crate) fn environment_status(
+    sandbox: &str,
+    status: SandboxStatus,
+    error_details: Option<String>,
+) -> EnvironmentStatus {
+    match status {
+        SandboxStatus::Running => EnvironmentStatus::Running,
+        SandboxStatus::Suspended | SandboxStatus::Suspending => EnvironmentStatus::Suspended {
+            resume_failed: None,
+        },
+        SandboxStatus::ResumeFailed => EnvironmentStatus::Suspended {
+            resume_failed: Some(
+                error_details.unwrap_or_else(|| "Tensorlake gave no reason".into()),
+            ),
+        },
+        SandboxStatus::Pending => EnvironmentStatus::Changing(format!(
+            "sandbox {sandbox} is starting; Farhelm connects once it is running"
+        )),
+        SandboxStatus::Snapshotting => EnvironmentStatus::Changing(format!(
+            "sandbox {sandbox} is taking a snapshot; Farhelm connects once it is running"
+        )),
+        SandboxStatus::Unknown => EnvironmentStatus::Unknown(format!(
+            "sandbox {sandbox} is in a state Farhelm does not know; Farhelm connects once it is running"
+        )),
+        SandboxStatus::Terminated => missing(sandbox),
+    }
+}
+
+/// Definitive absence carries the existing host-removal remedy.
+pub(crate) fn missing(sandbox: &str) -> EnvironmentStatus {
+    EnvironmentStatus::Missing(format!(
+        "Tensorlake has no running sandbox {sandbox}; it was deleted outside Farhelm. Delete \
+         this host to remove it from the list"
+    ))
+}
+
+/// Keep vendor context in the provider so the actor can append it unchanged.
+pub(crate) fn unanswered(reason: String) -> StatusUnanswered {
+    StatusUnanswered(format!(
+        "Farhelm could not ask Tensorlake whether the sandbox is running: {reason}"
+    ))
+}
+
 #[async_trait::async_trait]
-impl SandboxStatusSource for Tensorlake {
-    async fn check(&self, sandbox: &str) -> SandboxCheck {
-        self.check_sandbox(sandbox).await
+impl EnvironmentProvider for Tensorlake {
+    async fn status(
+        &self,
+        binding: &EnvironmentBinding,
+    ) -> Result<EnvironmentStatus, StatusUnanswered> {
+        let ProviderHandle::Tensorlake(binding) = &binding.handle;
+        self.check_sandbox(&binding.sandbox).await
+    }
+
+    async fn suspend(
+        &self,
+        state: &crate::AppState,
+        binding: &EnvironmentBinding,
+    ) -> anyhow::Result<()> {
+        super::lifecycle::change_tensorlake(self, state, binding.host, false).await
+    }
+
+    async fn resume(
+        &self,
+        state: &crate::AppState,
+        binding: &EnvironmentBinding,
+    ) -> anyhow::Result<()> {
+        super::lifecycle::change_tensorlake(self, state, binding.host, true).await
+    }
+
+    async fn destroy(&self, binding: &EnvironmentBinding) -> anyhow::Result<Destroyed> {
+        let ProviderHandle::Tensorlake(tensorlake) = &binding.handle;
+        self.delete_binding(binding.host, tensorlake).await
     }
 
     async fn connected(
@@ -87,15 +153,15 @@ impl SandboxStatusSource for Tensorlake {
         row: &HostRow,
         client: std::sync::Arc<crate::client::SupervisorClient>,
         events: std::sync::Arc<crate::feed::FleetEvents>,
-    ) -> crate::manager::ConnectedResources {
+    ) -> ConnectedResources {
         if row.tensorlake.is_none() {
-            return crate::manager::ConnectedResources::default();
+            return ConnectedResources::default();
         }
         // Registration precedes every credential read, and the returned lease
         // covers the later Connected publication as well as serving itself.
         let lease = self.0.delivery.enter(row);
         self.0.delivery.connect(row, &events).await;
-        crate::manager::ConnectedResources {
+        ConnectedResources {
             _tunnels: self.start_tunnels(row, client, events).await,
             _credentials: Some(lease),
         }
@@ -104,27 +170,26 @@ impl SandboxStatusSource for Tensorlake {
 
 impl Tensorlake {
     /// What Tensorlake says about `sandbox` right now, for the actor's dial
-    /// gate. Never fails: anything that keeps Tensorlake from answering (no
-    /// key saved, a rejected key, the network) is [`SandboxCheck::Unavailable`]
-    /// with a sentence saying why, and the actor decides what that means.
-    pub(crate) async fn check_sandbox(&self, sandbox: &str) -> SandboxCheck {
+    /// gate. Failed reads carry a complete sentence while successful unknown
+    /// states stay answers. The actor applies the provider's static policy.
+    pub(crate) async fn check_sandbox(
+        &self,
+        sandbox: &str,
+    ) -> Result<EnvironmentStatus, StatusUnanswered> {
         let key = match self.api_key().await {
             Ok(key) => key,
-            Err(reason) => return SandboxCheck::Unavailable(reason),
+            Err(reason) => return Err(unanswered(reason)),
         };
         match tokio::time::timeout(STATUS_CHECK_TIMEOUT, self.0.api.get_sandbox(&key, sandbox))
             .await
         {
-            Ok(Ok(info)) => SandboxCheck::Status {
-                status: info.status,
-                error_details: info.error_details,
-            },
-            Ok(Err(TensorlakeError::NotFound { .. })) => SandboxCheck::Missing,
-            Ok(Err(error)) => SandboxCheck::Unavailable(error.to_string()),
-            Err(_) => SandboxCheck::Unavailable(format!(
+            Ok(Ok(info)) => Ok(environment_status(sandbox, info.status, info.error_details)),
+            Ok(Err(TensorlakeError::NotFound { .. })) => Ok(missing(sandbox)),
+            Ok(Err(error)) => Err(unanswered(error.to_string())),
+            Err(_) => Err(unanswered(format!(
                 "Tensorlake did not answer within {} seconds",
                 STATUS_CHECK_TIMEOUT.as_secs()
-            )),
+            ))),
         }
     }
 
@@ -143,10 +208,21 @@ impl Tensorlake {
     /// There is deliberately no way around a missing API key (D6): without
     /// one Farhelm cannot delete the sandbox, and forgetting the row anyway
     /// would leave it billing with nothing in Farhelm pointing at it.
-    pub(crate) async fn delete_sandbox(&self, row: &HostRow) -> anyhow::Result<SandboxDeleted> {
+    #[cfg(test)]
+    pub(crate) async fn delete_sandbox(&self, row: &HostRow) -> anyhow::Result<Destroyed> {
         let Some(binding) = row.tensorlake.as_ref() else {
             anyhow::bail!("host {} is not a Tensorlake host", row.id);
         };
+        self.delete_binding(row.id, binding).await
+    }
+
+    /// Preserve recorded ownership through every retry. The saved ID survives
+    /// name disappearance and the pending marker bounds ambiguous creates.
+    async fn delete_binding(
+        &self,
+        host: HostId,
+        binding: &crate::store::TensorlakeBinding,
+    ) -> anyhow::Result<Destroyed> {
         let key = self.api_key().await.map_err(|_| {
             refusal(
                 ErrorKind::Conflict,
@@ -164,7 +240,7 @@ impl Tensorlake {
         let id = match &binding.sandbox_id {
             Some(id) => id.clone(),
             None if binding.pending_create_at.is_none() => {
-                return Ok(SandboxDeleted::never_created(row.id));
+                return Ok(Destroyed::Tensorlake(SandboxDeleted::never_created(host)));
             }
             None => match bounded(api.get_sandbox(&key, sandbox)).await {
                 Ok(info) => {
@@ -176,16 +252,11 @@ impl Tensorlake {
                     // the "never existed" answer below and leave them
                     // billing. If the id cannot be saved, nothing is
                     // terminated.
-                    match self
-                        .0
-                        .store
-                        .set_tensorlake_sandbox_id(row.id, &info.id)
-                        .await
-                    {
+                    match self.0.store.set_tensorlake_sandbox_id(host, &info.id).await {
                         Ok(true) => info.id,
                         Ok(false) => anyhow::bail!(
                             "host {} is no longer a Tensorlake host in the registry",
-                            row.id
+                            host
                         ),
                         Err(error) => {
                             return Err(error.context(format!(
@@ -202,7 +273,7 @@ impl Tensorlake {
                         return Err(refusal(ErrorKind::Unavailable,
                             "a sandbox Farhelm asked Tensorlake for may still be starting; the host stays in the list. Try Delete sandbox again in a few minutes".into()));
                     }
-                    return Ok(SandboxDeleted::attest(row.id));
+                    return Ok(Destroyed::Tensorlake(SandboxDeleted::attest(host)));
                 }
                 Err(error) => return Err(api_failure("look up", sandbox, error)),
             },
@@ -234,7 +305,7 @@ impl Tensorlake {
                 }
             }
         }
-        Ok(SandboxDeleted::attest(row.id))
+        Ok(Destroyed::Tensorlake(SandboxDeleted::attest(host)))
     }
 
     /// The saved API key, or a sentence saying why there is none.

@@ -861,6 +861,7 @@ impl Harness {
         state.file_opener = old_state.file_opener.clone();
         state.feedback = old_state.feedback.clone();
         state.tensorlake = old_state.tensorlake.clone();
+        state.providers = old_state.providers.clone();
         let state = Arc::new(state);
         let device_secret = state
             .auth
@@ -1174,7 +1175,7 @@ pub(crate) struct FleetBuilder {
     tensorlake_shell: Option<Arc<dyn crate::tensorlake::shell::SandboxShell>>,
     /// What the actors ask before dialing a Tensorlake host, when a test
     /// scripts it; otherwise the manager's "cannot ask" default.
-    sandboxes: Option<Arc<dyn crate::manager::SandboxStatusSource>>,
+    sandboxes: Option<Arc<dyn crate::environment::EnvironmentProvider>>,
 }
 
 impl FleetBuilder {
@@ -1206,7 +1207,7 @@ impl FleetBuilder {
     /// a test can put a planted Tensorlake host into the Suspended state.
     pub(crate) fn sandboxes(
         mut self,
-        sandboxes: Arc<dyn crate::manager::SandboxStatusSource>,
+        sandboxes: Arc<dyn crate::environment::EnvironmentProvider>,
     ) -> Self {
         self.sandboxes = Some(sandboxes);
         self
@@ -1390,11 +1391,11 @@ impl FleetBuilder {
             )
             .await
         } else if let Some(sandboxes) = self.sandboxes {
-            ConnectionManager::start_with_sandboxes(
+            ConnectionManager::start_with_providers(
                 self.store.clone(),
                 Arc::clone(&self.fleet) as Arc<dyn HostTransport>,
                 cadence,
-                sandboxes,
+                crate::environment::Providers::with_tensorlake(sandboxes),
             )
             .await
         } else {
@@ -1446,6 +1447,8 @@ impl FleetBuilder {
         if let Some(shell) = self.tensorlake_shell {
             state.tensorlake = state.tensorlake.with_shell(shell);
         }
+        state.providers =
+            crate::environment::Providers::with_tensorlake(Arc::new(state.tensorlake.clone()));
         let state = Arc::new(state);
         let device_secret = state
             .auth

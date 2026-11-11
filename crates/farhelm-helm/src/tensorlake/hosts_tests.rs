@@ -19,6 +19,55 @@ use std::sync::{Arc, Mutex};
 
 const KEY: &str = "tl_test_key";
 
+/// Provider translation preserves every existing dial decision and diagnosis.
+/// In particular, Suspending must remain suspended while an unknown successful
+/// answer refuses. Neither may inherit the API-error dial-anyway fallback.
+#[farhelm_testtrace::test]
+fn tensorlake_status_translation_preserves_every_state() {
+    let name = "farhelm-host-fixture";
+    assert_eq!(
+        environment_status(name, SandboxStatus::Running, None),
+        EnvironmentStatus::Running
+    );
+    for status in [SandboxStatus::Suspended, SandboxStatus::Suspending] {
+        assert_eq!(
+            environment_status(name, status, None),
+            EnvironmentStatus::Suspended {
+                resume_failed: None
+            }
+        );
+    }
+    for details in [None, Some("restore failed".to_string())] {
+        assert_eq!(
+            environment_status(name, SandboxStatus::ResumeFailed, details.clone()),
+            EnvironmentStatus::Suspended {
+                resume_failed: Some(details.unwrap_or_else(|| "Tensorlake gave no reason".into()))
+            }
+        );
+    }
+    for (status, state) in [
+        (SandboxStatus::Pending, "starting"),
+        (SandboxStatus::Snapshotting, "taking a snapshot"),
+    ] {
+        assert_eq!(
+            environment_status(name, status, None),
+            EnvironmentStatus::Changing(format!(
+                "sandbox {name} is {state}; Farhelm connects once it is running"
+            ))
+        );
+    }
+    assert_eq!(
+        environment_status(name, SandboxStatus::Unknown, None),
+        EnvironmentStatus::Unknown(format!(
+            "sandbox {name} is in a state Farhelm does not know; Farhelm connects once it is running"
+        ))
+    );
+    assert_eq!(
+        environment_status(name, SandboxStatus::Terminated, None),
+        missing(name)
+    );
+}
+
 /// One scripted failure: the call named `call` (as recorded in
 /// [`FakeState::calls`]) answers `error` instead of doing its work.
 type Failure = (&'static str, TensorlakeError);
@@ -69,36 +118,58 @@ struct FakeApi(Arc<Mutex<FakeState>>);
 /// service mutates. A separate offline status source would dial blindly
 /// after a successful Suspend and hide the persistent-state contract.
 #[async_trait::async_trait]
-impl SandboxStatusSource for FakeApi {
+impl EnvironmentProvider for FakeApi {
     async fn connected(
         &self,
         row: &HostRow,
         client: Arc<crate::client::SupervisorClient>,
         events: Arc<crate::feed::FleetEvents>,
-    ) -> crate::manager::ConnectedResources {
+    ) -> ConnectedResources {
         let (service, gate) = {
             let state = self.0.lock().unwrap();
             (state.tunnels.clone(), state.connected_gate.clone())
         };
         let Some(service) = service else {
-            return crate::manager::ConnectedResources::default();
+            return ConnectedResources::default();
         };
         if let Some(gate) = gate {
             gate.entered.notify_one();
             gate.release.notified().await;
         }
-        SandboxStatusSource::connected(&service, row, client, events).await
+        EnvironmentProvider::connected(&service, row, client, events).await
     }
 
-    async fn check(&self, sandbox: &str) -> SandboxCheck {
+    async fn status(
+        &self,
+        binding: &EnvironmentBinding,
+    ) -> Result<EnvironmentStatus, StatusUnanswered> {
+        let ProviderHandle::Tensorlake(binding) = &binding.handle;
+        let sandbox = &binding.sandbox;
         match self.get_sandbox(&ApiKey::new(KEY.into()), sandbox).await {
-            Ok(info) => SandboxCheck::Status {
-                status: info.status,
-                error_details: info.error_details,
-            },
-            Err(TensorlakeError::NotFound { .. }) => SandboxCheck::Missing,
-            Err(error) => SandboxCheck::Unavailable(error.to_string()),
+            Ok(info) => Ok(environment_status(sandbox, info.status, info.error_details)),
+            Err(TensorlakeError::NotFound { .. }) => Ok(missing(sandbox)),
+            Err(error) => Err(unanswered(error.to_string())),
         }
+    }
+
+    async fn suspend(
+        &self,
+        _state: &crate::AppState,
+        _binding: &EnvironmentBinding,
+    ) -> anyhow::Result<()> {
+        unreachable!("lifecycle dispatch uses the test AppState's Tensorlake service")
+    }
+
+    async fn resume(
+        &self,
+        _state: &crate::AppState,
+        _binding: &EnvironmentBinding,
+    ) -> anyhow::Result<()> {
+        unreachable!("lifecycle dispatch uses the test AppState's Tensorlake service")
+    }
+
+    async fn destroy(&self, _binding: &EnvironmentBinding) -> anyhow::Result<Destroyed> {
+        unreachable!("destruction dispatch uses the test AppState's Tensorlake service")
     }
 }
 
@@ -743,25 +814,23 @@ async fn the_status_check_tells_answers_from_unavailability() {
     let (_dir, store, tensorlake) = service(&api).await;
     assert!(matches!(
         tensorlake.check_sandbox("farhelm-host-a").await,
-        SandboxCheck::Unavailable(reason) if reason.contains("rejected the API key")
+        Err(StatusUnanswered(reason)) if reason.contains("rejected the API key")
     ));
     assert_eq!(
         tensorlake.check_sandbox("farhelm-host-a").await,
-        SandboxCheck::Status {
-            status: SandboxStatus::Suspended,
-            error_details: None,
-        }
+        Ok(EnvironmentStatus::Suspended {
+            resume_failed: None
+        })
     );
     assert_eq!(
         tensorlake.check_sandbox("farhelm-host-b").await,
-        SandboxCheck::Status {
-            status: SandboxStatus::ResumeFailed,
-            error_details: Some("the snapshot could not be restored".into()),
-        }
+        Ok(EnvironmentStatus::Suspended {
+            resume_failed: Some("the snapshot could not be restored".into())
+        })
     );
     assert_eq!(
         tensorlake.check_sandbox("farhelm-host-gone").await,
-        SandboxCheck::Missing
+        Ok(missing("farhelm-host-gone"))
     );
     store
         .save_tensorlake_config(SaveSettings {
@@ -775,7 +844,7 @@ async fn the_status_check_tells_answers_from_unavailability() {
     let calls = api.calls().len();
     assert!(matches!(
         tensorlake.check_sandbox("farhelm-host-a").await,
-        SandboxCheck::Unavailable(reason) if reason.contains("no Tensorlake API key")
+        Err(StatusUnanswered(reason)) if reason.contains("no Tensorlake API key")
     ));
     assert_eq!(api.calls().len(), calls, "no key, no call");
 }
@@ -1162,7 +1231,10 @@ async fn the_store_refuses_to_lose_a_sandbox() {
     ));
     assert_eq!(row(&store, host).await, before);
 
-    for proof in [None, Some(SandboxDeleted::attest(ssh))] {
+    for proof in [
+        None,
+        Some(Destroyed::Tensorlake(SandboxDeleted::attest(ssh))),
+    ] {
         let refused = store
             .remove_host_row(host, proof.as_ref())
             .await

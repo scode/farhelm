@@ -91,6 +91,7 @@ use tracing::warn;
 
 mod client;
 mod downloads;
+mod environment;
 pub use client::{
     CreateExtras, Detach, DownloadGuard, ErrorOrigin, PeerHello, SessionListing, SupervisorClient,
     SupervisorError, SupervisorTransportError, TcpTunnelAccepted, TermDetachSignal, TermEvent,
@@ -576,6 +577,9 @@ struct AppState {
     /// key. A field rather than a global so each test helm has its own, and
     /// so a test can put a stub API behind it.
     tensorlake: tensorlake::Tensorlake,
+    /// The same concrete services dispatch lifecycle and resource destruction.
+    /// Actor status fakes remain independently injectable in test managers.
+    providers: environment::Providers,
     /// Acting agent requests waiting for the user's answer (see
     /// `approvals`). A field rather than a global so each helm in a test
     /// process has its own table, and so a test can shorten the wait.
@@ -629,6 +633,7 @@ impl AppState {
             sources,
         )?;
         Ok(AppState {
+            providers: environment::Providers::with_tensorlake(Arc::new(tensorlake.clone())),
             tensorlake,
             ..Self::with_provisioning(manager, store, provisioning, mode)
         })
@@ -643,16 +648,18 @@ impl AppState {
         provisioning: Arc<provisioning::ProvisioningService>,
         mode: ServingMode,
     ) -> AppState {
+        let tensorlake = tensorlake::Tensorlake::detached_with_delivery(
+            store.clone(),
+            provisioning.credential_delivery(),
+        );
         AppState {
             _automatic_updates: provisioning::AutomaticUpdates::start(&provisioning),
             mode,
             ntfy: manager.ntfy.clone(),
             // No state directory reaches this seam, so no ssh key and no
             // API; `new` replaces it with the production service.
-            tensorlake: tensorlake::Tensorlake::detached_with_delivery(
-                store.clone(),
-                provisioning.credential_delivery(),
-            ),
+            providers: environment::Providers::with_tensorlake(Arc::new(tensorlake.clone())),
+            tensorlake,
             manager,
             store: store.clone(),
             auth: auth::AuthState::for_mode(store, mode),
@@ -2418,7 +2425,7 @@ async fn serve_with_ready(
         Arc::clone(&sources.delivery),
         sources.snapshot_preparer(&state_dir),
     )?;
-    let manager = manager::ConnectionManager::start_with_sandboxes(
+    let manager = manager::ConnectionManager::start_with_providers(
         store.clone(),
         Arc::new(manager::SystemTransport::new(&state_dir)),
         manager::Cadence {
@@ -2427,7 +2434,7 @@ async fn serve_with_ready(
                 .map_or(manager::REFRESH_INTERVAL, std::time::Duration::from_secs),
             ..manager::Cadence::default()
         },
-        Arc::new(tensorlake.clone()),
+        environment::Providers::with_tensorlake(Arc::new(tensorlake.clone())),
     )
     .await?;
 

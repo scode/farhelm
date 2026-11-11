@@ -4103,27 +4103,55 @@ mod tests {
 
     /// A Tensorlake status source whose answer a test switches between
     /// running and suspended.
-    struct SwitchedSandboxes(Mutex<crate::manager::SandboxCheck>);
+    struct SwitchedSandboxes(Mutex<crate::environment::EnvironmentStatus>);
 
     impl SwitchedSandboxes {
+        /// Seed the provider observation before the first actor starts.
         fn new(status: crate::tensorlake::api::SandboxStatus) -> Arc<Self> {
-            let switched = Arc::new(Self(Mutex::new(crate::manager::SandboxCheck::Missing)));
-            switched.set(status);
-            switched
+            Arc::new(Self(Mutex::new(
+                crate::tensorlake::hosts::environment_status("fixture", status, None),
+            )))
         }
 
+        /// Change only the observation. The test still exercises the actor's
+        /// normal retry cadence and the binding's real static status policy.
         fn set(&self, status: crate::tensorlake::api::SandboxStatus) {
-            *self.0.lock().unwrap() = crate::manager::SandboxCheck::Status {
-                status,
-                error_details: None,
-            };
+            *self.0.lock().unwrap() =
+                crate::tensorlake::hosts::environment_status("fixture", status, None);
         }
     }
 
     #[async_trait]
-    impl crate::manager::SandboxStatusSource for SwitchedSandboxes {
-        async fn check(&self, _sandbox: &str) -> crate::manager::SandboxCheck {
-            self.0.lock().unwrap().clone()
+    impl crate::environment::EnvironmentProvider for SwitchedSandboxes {
+        async fn status(
+            &self,
+            _binding: &crate::environment::EnvironmentBinding,
+        ) -> Result<crate::environment::EnvironmentStatus, crate::environment::StatusUnanswered>
+        {
+            Ok(self.0.lock().unwrap().clone())
+        }
+
+        async fn suspend(
+            &self,
+            _state: &crate::AppState,
+            _binding: &crate::environment::EnvironmentBinding,
+        ) -> anyhow::Result<()> {
+            unreachable!("the provisioning fixture scripts status only")
+        }
+
+        async fn resume(
+            &self,
+            _state: &crate::AppState,
+            _binding: &crate::environment::EnvironmentBinding,
+        ) -> anyhow::Result<()> {
+            unreachable!("the provisioning fixture scripts status only")
+        }
+
+        async fn destroy(
+            &self,
+            _binding: &crate::environment::EnvironmentBinding,
+        ) -> anyhow::Result<crate::environment::Destroyed> {
+            unreachable!("the provisioning fixture scripts status only")
         }
     }
 

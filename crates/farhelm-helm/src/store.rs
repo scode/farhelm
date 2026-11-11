@@ -710,12 +710,21 @@ pub enum HostKind {
     /// its destination belongs to the sandbox and cannot be retargeted, and
     /// removing it deletes the sandbox: [`HelmStore::remove_host_row`]
     /// refuses to forget one without a
-    /// [`crate::tensorlake::hosts::SandboxDeleted`] proof.
+    /// [`crate::environment::Destroyed`] proof.
     Tensorlake,
 }
 
 #[warn(clippy::wildcard_enum_match_arm)]
 impl HostKind {
+    /// Disposable resources use the provider seam for status and lifecycle.
+    /// Ordinary hosts retain their direct connection behavior.
+    pub(crate) fn environment_provider(self) -> Option<farhelm_proto::ProviderKind> {
+        match self {
+            HostKind::Local | HostKind::Ssh => None,
+            HostKind::Tensorlake => Some(farhelm_proto::ProviderKind::Tensorlake),
+        }
+    }
+
     /// The kind a row's columns describe: the inverse of what
     /// [`ensure_local_row`], [`HelmStore::add_ssh_host`] and
     /// [`HelmStore::register_tensorlake_host`] write. Refuses rather than
@@ -967,6 +976,18 @@ pub struct HostRow {
 }
 
 impl HostRow {
+    /// Decode the current resource binding without changing its storage shape.
+    /// The provider handle keeps the saved ID and pending-create evidence that
+    /// deletion needs after the resource's name has stopped resolving.
+    pub(crate) fn environment_binding(&self) -> Option<crate::environment::EnvironmentBinding> {
+        self.tensorlake
+            .as_ref()
+            .map(|binding| crate::environment::EnvironmentBinding {
+                host: self.id,
+                handle: crate::environment::ProviderHandle::Tensorlake(binding.clone()),
+            })
+    }
+
     /// Whether a session launch owns this sandbox's whole-resource lifecycle.
     ///
     /// Ownership is fixed at registration and survives ordinary row changes.
@@ -7845,7 +7866,7 @@ impl HelmStore {
     /// id nothing currently holds.
     ///
     /// A Tensorlake host is forgotten only with `deleted`, the teardown's
-    /// proof ([`crate::tensorlake::hosts::SandboxDeleted`]) that its sandbox
+    /// proof ([`crate::environment::Destroyed`]) that its sandbox
     /// and snapshots are gone, for this very row;
     /// without one it is refused with [`HostStoreError::SandboxNotDeleted`].
     /// The row is Farhelm's only record that the sandbox exists (D6, P3),
@@ -7857,7 +7878,7 @@ impl HelmStore {
     pub(crate) async fn remove_host_row(
         &self,
         host: HostId,
-        deleted: Option<&crate::tensorlake::hosts::SandboxDeleted>,
+        deleted: Option<&crate::environment::Destroyed>,
     ) -> anyhow::Result<()> {
         let proven = deleted.is_some_and(|proof| proof.host() == host);
         self.conn

@@ -556,7 +556,9 @@ impl ProvisioningService {
                     self.sync_registry().await
                 }.await;
                 if let Err(error) = reconciled {
-                    let proof = crate::tensorlake::hosts::SandboxDeleted::never_created(host);
+                    let proof = crate::environment::Destroyed::Tensorlake(
+                        crate::tensorlake::hosts::SandboxDeleted::never_created(host),
+                    );
                     self.store.remove_host_row(host, Some(&proof)).await?;
                     self.manager.stop_actor(host).await;
                     self.manager.forget_cache_lock(host);

@@ -198,6 +198,12 @@ over harnesses in shared code: each of those hands a new harness whatever the br
 Read `docs/harness-marks.md` before adding or changing a harness mark (`crates/farhelm-ui/src/icons.rs` and the geometry
 under `crates/farhelm-ui/src/icons/`); vendored geometry gets an entry in `THIRD_PARTY_NOTICES.md`.
 
+Every disposable-environment provider decision belongs in its implementation or an exhaustive method on the provider
+kind, place, binding, recipe base, recipe state, host kind or shared recipe projection. Read the module-doc map in
+`crates/farhelm-helm/src/environment/mod.rs` before changing provider behavior. Shared code must not compare individual
+providers, use `matches!` over providers or add a wildcard provider arm. UI wording, marks and help belong in one
+exhaustive UI module. Adding a provider must require an implementation and a decision at every exhaustive match.
+
 ## TODO.md and FLAKES.md
 
 `TODO.md` is the maintainer's running list of wanted fixes and features. When a PR addresses an entry, remove that entry
