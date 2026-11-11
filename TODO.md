@@ -26,6 +26,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
+- **Revisit letting a plain Replace's YOLO question take focus while the user has pressed nothing since.** Decided by
+  the landing monitor on 2026-11-10 while landing nonblocking-session-actions, under the maintainer's instruction to fix
+  that landing's problems itself. The plan's rule was that a question arriving after a reply takes focus only when
+  nothing else holds it. In WebKit, the desktop app's engine family, a header button click does not take focus, so after
+  a header Replace refused as a YOLO launch focus was still in the session's terminal and Cancel was left unfocused (7
+  of 10 runs). Now the question focuses Cancel outright while the page's key/pointer press count still equals the count
+  at the user's Replace click, and keeps the guard otherwise. The alternative was to record which element held focus at
+  the click and let the question take focus only from that element, which needs per-request focus bookkeeping.
+
 - **Revisit accepting the agent-only SSH key fix for Tensorlake hosts.** Decided on the maintainer's behalf on
   2026-11-10 when tensorlake-skip-ssh-agent blocked: Tensorlake snapshot builds and sandbox-host connections could offer
   a key from your SSH agent before Farhelm's registered key, which fails if Tensorlake's gateway rejects the first
@@ -61,6 +70,58 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   dismissal and keyboard handling).
 
 ## Near term
+
+- **Stop two launch paths from leaving the page stuck after waking a host.** Found by the landing review of
+  nonblocking-session-actions (2026-11-10) and landed unfixed as narrow cases. First: a quick launch whose template
+  checks out a GitHub repository on a suspended sandbox host, if its retry after the wake is refused without an error
+  message, leaves an invisible launcher over the page that blocks every click and key until Escape is pressed. The
+  reveal check runs while the launch token is still held and never runs again once it is released
+  (`crates/farhelm-ui/src/list/create_form.rs`, the quick-launch reveal effect and the continued-submit branch). Second:
+  a launch that woke a host waits with no time limit for the page to see that host connected; if it never does, New,
+  quick launches and host changes stay refused and the hidden launcher has no Cancel. Before that plan the launcher was
+  visible and could be cancelled there. Give that wait a limit that returns the launcher with an error.
+
+- **Replace the session-menu geometry probe with a heading-resize check.** nonblocking-session-actions keeps open row
+  menus open when the session count above the list changes (a finished New, Clone or Delete changes it) by measuring
+  whether each menu's anchor really moved, about 600 lines in `crates/farhelm-ui/src/anchored_popovers.rs` plus its
+  tests and callers in `list/row.rs` and `list/bell.rs`. Its landing review found a design of about 30 lines in
+  `list/view.rs` that does the same job: when the count changes, note the menus open at that moment (as main did before
+  that plan), and close those only when the session heading's resize event reports a real size change. A menu opened
+  after the count change is not in that set and survives a late resize, which keeps the guarantee of #2547 (close menus
+  a wrapping heading would leave floating). It loses only re-measuring a menu whose first measurement was still in
+  flight when the heading resized, which main closes too. The browser test of the heading change keeps passing once its
+  probe-counting assertion goes.
+
+- **Make the nonblocking session-action browser tests wait for the reply before asserting nothing moved.** Three tests
+  in `e2e/tests/nonblocking-launch.spec.ts` (the first test, the Rename one and the held YOLO one) check that a
+  returning launcher waits behind a newer dialog after only the HTTP response and two animation frames, which does not
+  show the reply was processed, so they can pass when the behavior is broken; the Restart/Replace test there waits for
+  the row's settled state first and is the model. Its first test's synthetic clicks on disabled buttons also never reach
+  the handlers, so the handler-side refusals are untested. `e2e/tests/session-action-completion.spec.ts`
+  (`settleMountedFocus`) uses the same two-frame wait as its oracle that focus did not move.
+
+- **Fix two leftover session-action state bugs from nonblocking-session-actions.** Found by its landing review
+  (2026-11-10). A Restart that succeeded while the user was on another session is remembered until that session is next
+  opened; if the host reboots again before then, opening it shows a terminal for a dead pane instead of the interrupted
+  card with its Restart offer (`crates/farhelm-ui/src/session_view.rs`). Clear the remembered outcome when the listing
+  shows the session running or its host gone. And Replace with's "Replacing…" progress has no cleanup guard
+  (`create_form.rs`), so an abandoned request would leave it shown for the life of the page; plain Replace already uses
+  a guard for this.
+
+- **Stop a finishing bulk Stop from closing a Delete confirmation left open on another marked row.** Seen in the landing
+  of nonblocking-session-actions (2026-11-10): `bulk Stop reports an engaged row without skipping its eligible sibling`
+  in `e2e/tests/bulk-session-actions.spec.ts` failed 4 of 20 and 2 of 20 WebKit runs on Tensorlake (Chromium 20 of 20),
+  and passed on main before that plan. With a temporary state report, every failure had the engaged row's Delete
+  confirmation closed while the row showed "Stop: not started, another operation is in progress": the batch finishing
+  the other row closes it. Nothing is deleted and the refusal stays visible, but closing a surface the user opened is
+  what that plan's rules forbid, and the test stays flaky in WebKit until this is fixed. Likely suspects are the row
+  menu's movement closes and the geometry probe in `crates/farhelm-ui/src/anchored_popovers.rs`.
+
+- **Find out why double-clicking the version text sometimes selects nothing in Chromium.**
+  `header controls stay interactive and text stays selectable beside the forced-class spacer` in
+  `e2e/tests/window-chrome.spec.ts` failed once in a whole browser run and 1 of 20 repeats (Chromium, Tensorlake) during
+  the landing of nonblocking-session-actions on 2026-11-10, which changed header CSS and added a window-level key and
+  pointer capture listener. Not diagnosed, and not checked on main; first establish whether it predates that plan.
 
 - **Stop asynchronous completions from moving focus or closing things the user has moved on from, across the whole UI.**
   The plan that lets session actions and launches stop blocking the page (`plans/queue/nonblocking-session-actions.md`)
