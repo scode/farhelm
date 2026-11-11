@@ -1020,9 +1020,11 @@ pub(crate) fn ListView(
     let mut deleting = deleting;
     let mut listing = use_signal(|| None::<Result<SessionListing, String>>);
     let replace_progress = use_context::<crate::replace::ReplaceProgress>();
-    // Deliver local archive changes, content-free feed news and weak fallback
-    // ticks without losing their authority before the per-host reader sees them.
-    // Only hosts already removing files have a separate completion cadence.
+    // Deliver this window's own explicit Trash requests (its archiving Delete,
+    // a vanished managed session, a refused or finished cleanup) without losing
+    // them before the per-host reader sees them. Other windows' changes arrive
+    // as each host's Trash epoch; only hosts already removing files have a
+    // separate completion cadence.
     let mut trash_revision = use_signal(super::trash::TrashRefresh::default);
     let trash_actions = use_signal(|| None::<super::trash::TrashActions>);
     let notices_reader = crate::notices::use_notice_reader();
@@ -1972,7 +1974,7 @@ pub(crate) fn ListView(
                     })
                 });
             if managed_disappeared {
-                trash_revision.write().request(Trigger::Explicit);
+                trash_revision.write().request();
             }
             // Close any row question whose session is gone from
             // this fetch entirely — the counterpart to the "a poll
@@ -2316,10 +2318,6 @@ pub(crate) fn ListView(
         feed_listing(Trigger::Notice);
         feed_hosts(Trigger::Notice);
         notices_reader.request.call(Trigger::Notice);
-        // The feed is content-free. Another client's accepted cleanup must
-        // start this idle client's existing Trash reader, even if that client
-        // closes before recursive removal fails. No new timer or channel.
-        trash_revision.write().request(Trigger::Notice);
     });
 
     // The documented fallback (PLAN_M6_75.md item 6). The timer runs
@@ -2354,7 +2352,6 @@ pub(crate) fn ListView(
                     listing(Trigger::Scheduled);
                     hosts(Trigger::Scheduled);
                     notices_reader.request.call(Trigger::Scheduled);
-                    trash_revision.write().request(Trigger::Scheduled);
                 }
             }
         }
@@ -2739,7 +2736,7 @@ pub(crate) fn ListView(
                 if let Ok(reply) = &outcome {
                     delete_notice.publish(reply.notice.clone());
                     if reply.archived {
-                        trash_revision.write().request(Trigger::Explicit);
+                        trash_revision.write().request();
                     }
                 }
                 match outcome.err() {

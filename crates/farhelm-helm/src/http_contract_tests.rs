@@ -137,6 +137,7 @@ fn host_list_body() -> serde_json::Value {
         color: Default::default(),
         state,
         incarnation: 4,
+        trash_epoch: 0,
     };
     let hosts = vec![
         host(

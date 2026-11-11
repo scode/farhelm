@@ -17,8 +17,8 @@ type Notice = {
     bytes: number | null; reason: string; at: number };
 };
 
-/** Real connection metadata supplies the incarnation frozen by Retry. Only the
- * display name, notice history and archive facts are controlled at HTTP edges. */
+/** Real connection metadata supplies the incarnation frozen by Retry. Trash
+ * epochs and observations are controlled independently of ordinary fleet news. */
 async function fixture(page: Page, request: APIRequestContext, extraHost = false) {
   const host = await localHostId(request);
   const otherHost = 9030;
@@ -29,6 +29,7 @@ async function fixture(page: Page, request: APIRequestContext, extraHost = false
     deletes: [] as { host: number; ids: string[]; expected_incarnation: number }[],
     listingReads: 0,
     listingHosts: [] as number[],
+    epochs: new Map<number, number>(),
     noticeError: null as string | null,
   };
   const feed = await stubFeed(page);
@@ -38,10 +39,10 @@ async function fixture(page: Page, request: APIRequestContext, extraHost = false
     const body = await response.json();
     const local = body.hosts.find((entry: { id: number }) => entry.id === host);
     expect(local, "the fixture retains a real registered host").toBeTruthy();
-    body.hosts = [{ ...local, name: "Build host" }];
+    body.hosts = [{ ...local, name: "Build host", trash_epoch: model.epochs.get(host) ?? 0 }];
     // A display-only peer exercises independent readers; its archive routes
     // are intercepted and no session or terminal is served from this identity.
-    if (extraHost) body.hosts.push({ ...local, id: otherHost, name: "Other host" });
+    if (extraHost) body.hosts.push({ ...local, id: otherHost, name: "Other host", trash_epoch: model.epochs.get(otherHost) ?? 0 });
     await route.fulfill({ response, json: body });
   });
   await page.route("**/api/notices", async (route) => {
@@ -78,6 +79,7 @@ async function fixture(page: Page, request: APIRequestContext, extraHost = false
     const selected = route.request().postDataJSON();
     model.deletes.push(selected);
     model.phase = "removing";
+    if (selected.ids.length) model.epochs.set(selected.host, (model.epochs.get(selected.host) ?? 0) + 1);
     await fulfillAsHelm(route, { json: { removed: selected.ids, issues: [] } });
   });
   return { host, otherHost, model, feed };
@@ -96,8 +98,8 @@ function notice(host: number, id = 1): Notice {
 for (const palette of ["dark", "light"] as const) {
   /** Independently pinned computed fills catch an outline bell accidentally
    * painted red, or a correct CSS token inherited by the wrong SVG element.
-   * The idle client's trash count must refresh from the same content-free feed,
-   * even though it issued no Delete and had no active completion poll. */
+   * The idle client's trash count follows its host's changed epoch, even
+   * though it issued no Delete and had no active completion poll. */
   test(`rail notices quiet, alerting and resolved in ${palette}`, async ({ page, request }, info) => {
     await page.addInitScript((appearance) => localStorage.setItem("farhelm.appearance", appearance), palette);
     const { host, model, feed } = await fixture(page, request);
@@ -122,6 +124,7 @@ for (const palette of ["dark", "light"] as const) {
 
     model.phase = "stuck";
     model.notices = [notice(host)];
+    model.epochs.set(host, 1);
     const before = model.listingReads;
     feed.notify(1);
     await expect(bell).toHaveAccessibleName("Notifications: 1 unread");
@@ -148,10 +151,12 @@ for (const palette of ["dark", "light"] as const) {
     // Repeated failure retains the shared read state rather than re-alerting.
     model.notices[0].content.at++;
     model.notices[0].content.reason = "Still denied";
+    model.epochs.set(host, 2);
     feed.notify(2);
     await expect(fill).toHaveCSS("fill", "none");
     model.notices = [{ ...notice(host), resolved: true }];
     model.phase = "gone";
+    model.epochs.set(host, 3);
     feed.notify(3);
     await bell.click();
     await expect(panel.locator(".rail-notice.resolved")).toHaveCount(1);
@@ -189,6 +194,7 @@ test("rail close marks only shown notices and preserves independent focus", asyn
       await fulfillAsHelm(route, { json: { notices: observed } });
     });
     model.notices.unshift(notice(host, 2));
+    model.epochs.set(host, 1);
     feed.notify(1);
     await expect.poll(() => waiting).toBe(true);
     await bell.click();
@@ -216,16 +222,26 @@ test("rail close marks only shown notices and preserves independent focus", asyn
   }
 });
 
-/** A burst received behind an old snapshot must retain one repair, without
- * queueing a request per revision or holding a healthy host behind the slow
- * one. Pull-only reader snapshots establish delivery before negative counts
- * and retirement before the final exact count; elapsed silence proves neither. */
-test("fleet news coalesces Trash reads independently for each host", async ({ page, request }) => {
+/** A session status change owes no Trash read. Changed host epochs still retain
+ * one repair behind an old snapshot, independently for each host. Pull-only
+ * reader snapshots prove delivery and retirement before exact read counts. */
+test("Trash reads follow host epochs and coalesce independently", async ({ page, request }) => {
   await observeFeedReaders(page);
   const { host, otherHost, model, feed } = await fixture(page, request, true);
   let release!: () => void;
   const held = new Promise<void>((resolve) => { release = resolve; });
   let localReads = 0;
+  let running = false;
+  let changedStatusReads = 0;
+  // Keep the real sessions and connection metadata, changing only their status.
+  await page.route((url) => url.pathname === "/api/sessions", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    expect(body.sessions.length, "a real session must carry the status transition").toBeGreaterThan(0);
+    body.sessions[0].status = { state: running ? "running" : "idle" };
+    if (running) changedStatusReads++;
+    await route.fulfill({ response, json: body });
+  });
   try {
     await page.goto("/");
     await feed.waitForConnection(1);
@@ -242,6 +258,16 @@ test("fleet news coalesces Trash reads independently for each host", async ({ pa
     expect(initial.healthy).toBe(true);
     expect(initial.acted_on).toBe(initial.notices);
     const initialNotices = Number(initial.notices);
+    const before = [...model.listingHosts];
+    running = true;
+    for (let revision = 1; revision <= 20; revision++) feed.notify(revision);
+    await expect.poll(async () => {
+      const list = (await readFeedReaders(page)).find((entry) => entry.role === "list");
+      return Number(list?.notices) >= initialNotices + 20 && list?.acted_on === list?.notices &&
+        list.readers.every((reader) => !reader.running && !reader.task && reader.demand === "None") && await idleTrash();
+    }).toBe(true);
+    expect(changedStatusReads).toBeGreaterThan(0);
+    expect(model.listingHosts, "unrelated fleet news never reads either host's Trash").toEqual(before);
     await page.route("**/api/checkout-trash/list", async (route) => {
       if (route.request().postDataJSON().host !== host) return route.fallback();
       localReads++;
@@ -252,16 +278,27 @@ test("fleet news coalesces Trash reads independently for each host", async ({ pa
         reports_retired: true, removing: false, issues: [], checkouts: [],
       } });
     });
-    feed.notify(1);
+    model.epochs.set(host, 1);
+    feed.notify(21);
     await expect.poll(() => localReads).toBe(1);
+    await expect.poll(async () => {
+      const snapshots = await readFeedReaders(page);
+      const list = snapshots.find((entry) => entry.role === "list");
+      const slow = snapshots.find((entry) => entry.role === "trash" && entry.host === host);
+      return Number(list?.notices) >= initialNotices + 21 && list?.acted_on === list?.notices &&
+        list.readers.every((reader) => !reader.running && !reader.task && reader.demand === "None") && slow?.caught_up === true;
+    }).toBe(true);
+    expect(model.listingHosts, "one changed epoch leaves the other host's Trash idle").toEqual(before);
     model.phase = "stuck";
-    for (let revision = 2; revision <= 20; revision++) feed.notify(revision);
+    model.epochs.set(host, 2);
+    model.epochs.set(otherHost, 1);
+    for (let revision = 22; revision <= 40; revision++) feed.notify(revision);
     await expect.poll(async () => {
       const snapshots = await readFeedReaders(page);
       const list = snapshots.find((entry) => entry.role === "list");
       const slow = snapshots.find((entry) => entry.role === "trash" && entry.host === host);
       const fast = snapshots.find((entry) => entry.role === "trash" && entry.host === otherHost);
-      return Number(list?.notices) >= initialNotices + 20 && list?.acted_on === list?.notices &&
+      return Number(list?.notices) >= initialNotices + 40 && list?.acted_on === list?.notices &&
         slow?.caught_up === true && slow.readers[0].running && slow.readers[0].demand === "Notice" &&
         fast?.caught_up === true && !fast.readers[0].running && !fast.readers[0].task &&
         fast.readers[0].demand === "None";
@@ -327,6 +364,7 @@ test("rail Retry and Open Trash share the permanent guarded cleanup owner", asyn
   await expect(trigger).toHaveAttribute("data-count", "1");
   model.phase = "gone";
   model.notices[0].resolved = true;
+  model.epochs.set(host, (model.epochs.get(host) ?? 0) + 1);
   feed.notify(1);
   await expect(panel.locator(".rail-notice.resolved")).toHaveCount(1);
   await expect(trigger).toHaveAttribute("data-count", "0");

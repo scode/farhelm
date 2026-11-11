@@ -35,15 +35,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   that a suspend or resume running beside a launch on the same host cannot leave either in a wrong state. Plan:
   `plans/queue/sandbox-suspend-overlap.md`.
 
-- **Revisit the rail bell re-reading every host's Trash on each status change.** Decided on the maintainer's behalf on
-  2026-11-09 when landing rail-notification-bell: it landed with each open window re-reading every connected host's
-  Trash whenever any session's status changes and on the client's periodic catch-up refresh. Each read uses one of the
-  host's two folder-browsing slots (shared with the launcher's folder picker), a per-host lock on the helm and a
-  database transaction, even when nothing is stuck. It is bounded and does not feed on itself. The alternative was to
-  change it before landing; the cheap mitigation is to skip the lock and the transaction when nothing is stuck and the
-  host has no unresolved notice, or to read Trash only when a host reports a change. Plan:
-  `plans/queue/bell-trash-reads.md`.
-
 ## Near term
 
 - **Stop an agent's host-add request from opening its dialog by itself.** Found by a code reading on 2026-11-10 while

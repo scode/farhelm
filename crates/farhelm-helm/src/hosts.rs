@@ -119,6 +119,8 @@ pub(crate) struct HostView {
     ///
     /// `0` is "never connected".
     pub(crate) incarnation: u64,
+    /// This helm's last observed Trash change, independent of session status.
+    pub(crate) trash_epoch: u64,
 }
 
 /// A Tensorlake host's sandbox as `GET /api/hosts` reports it: its name in
@@ -542,6 +544,7 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                 color: registry.map(|row| row.color).unwrap_or_default(),
                 state: state_view(&snapshot.state, registry),
                 incarnation: snapshot.incarnation,
+                trash_epoch: state.trash_requests.epoch(snapshot.id),
             }
         })
         .collect())

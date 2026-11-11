@@ -821,6 +821,10 @@ pub struct Host {
     /// process's connections and means nothing across a restart.
     #[serde(default)]
     pub incarnation: u64,
+    /// Only this host's observed cleanup changes invalidate idle Trash reads.
+    /// Older helms omit the epoch; reconnect and explicit reads still work.
+    #[serde(default)]
+    pub trash_epoch: u64,
     /// Whether the host starts YOLO sessions without asking; `false` (ask first) until the
     /// user changes it, and for a helm that predates the field. The host settings dialog
     /// shows and flips it.

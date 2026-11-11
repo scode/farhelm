@@ -1345,7 +1345,8 @@ async fn stop_session_unknown_id_returns_404_with_supervisor_message() {
 /// `DELETE /api/sessions/{id}` happy path, mirroring the stop test
 /// above: a scripted `SessionDeleted` reply must reach the caller as
 /// 200, preserving bare successes and carrying a true archive fact through
-/// to the client that will decide whether to animate its own Delete.
+/// to the client that will decide whether to animate its own Delete. An
+/// archive also advances the host's Trash epoch, which a bare delete leaves.
 #[farhelm_testtrace::test]
 async fn delete_session_happy_path_returns_200_with_the_archive_fact() {
     use farhelm_proto::ControlMsg;
@@ -1403,6 +1404,16 @@ async fn delete_session_happy_path_returns_200_with_the_archive_fact() {
                 serde_json::json!({})
             }
         );
+        // An archived checkout is new Trash content: windows that cannot see the
+        // session vanish (a filtered or truncated listing) learn of it only
+        // through the host's Trash epoch. A bare delete changes no Trash.
+        let epochs: u64 = crate::hosts::host_views(&harness.state)
+            .await
+            .unwrap()
+            .iter()
+            .map(|view| view.trash_epoch)
+            .sum();
+        assert_eq!(epochs, u64::from(archived), "archived={archived}");
 
         peer.await.unwrap();
     }

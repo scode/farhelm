@@ -526,7 +526,7 @@ struct AppState {
     event_subscriber_cap: usize,
     /// Order trash observations across clients without holding the host's
     /// session/cache or provisioning locks during remote work.
-    trash_requests: notices::TrashRequests,
+    trash_requests: Arc<notices::TrashRequests>,
     /// The one in-flight provisioning authority shared by every browser.
     provisioning: Arc<provisioning::ProvisioningService>,
     /// Own the event-driven updater independently of any connected interface.
@@ -657,7 +657,7 @@ impl AppState {
             store: store.clone(),
             auth: auth::AuthState::for_mode(store, mode),
             event_subscriber_cap: events::MAX_SUBSCRIBERS,
-            trash_requests: notices::TrashRequests::default(),
+            trash_requests: Arc::default(),
             provisioning,
             client_log_rate: std::sync::Mutex::new(client_log::RateWindow::new(
                 std::time::Instant::now(),
