@@ -1752,7 +1752,7 @@
 
 ## guarded-answer-loses-launcher-focus.md
 
-- Outcome: `fix spec+code`.
+- Outcome: `discard` (revised 2026-11-10 from `fix spec+code`; see Decision).
 - Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: Claim:
   answering Guarded in an ordinary launcher removes the focused control while the checkout preview refreshes, with no
   focus handoff; a failed preview leaves it that way. SPEC.md:794 sets a "focus returns to the launcher's search" rule
@@ -1760,18 +1760,17 @@
   browser fallback unexercised.
 - Decision: the user picked "Write one rule and apply it" (2026-10-26 ten-question triage page, Q9), and added in chat:
   "on that focus rule apply complexity gate to the fixes i'm worried about it getting uber complicated and i want to
-  know if that happens by having plans blocked"
-- Completion criteria: SPEC.md states one focus rule: when the focused control goes away, focus moves to the selected
-  terminal if one is shown, otherwise to the enclosing dialog or list; reselecting the already selected session returns
-  focus to its terminal; and automatic focus never takes focus from a control the user focused. This item's case follows
-  it. Complexity gate (the maintainer's): if applying the rule here turns out to need more than a small, local change
-  (roughly 50 lines of non-test code, or any new focus-tracking mechanism), block the plan or execution with what it
-  would take, rather than building it or quietly dropping it. Remove the feedback file and its index entry.
+  know if that happens by having plans blocked" Superseded 2026-11-10: the focus rule landed in revised form as SPEC.md,
+  "Keyboard focus" (#3316), and the user then said of this item and the three that point to it: "all of those seem ok to
+  just discard, please do so, none seem critical".
+- Completion criteria: remove the feedback file and its index entry; no code or spec change. (The superseded criteria
+  were: SPEC.md states one focus rule, and this case follows it under the maintainer's complexity gate of roughly 50
+  lines of non-test code or any new focus-tracking mechanism.)
 - Execution: `pending`.
 
 ## notification-bell-removal-skips-focus-return.md
 
-- Outcome: `fix code`.
+- Outcome: `discard` (revised 2026-11-10 from `fix code`; see Decision).
 - Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: When
   another window clears the last notification, the row drops the bell component entirely, so its close effect never runs
   and focus is not returned. The finding offers two fix routes ("from a surviving owner or an appropriate unmount path")
@@ -1779,18 +1778,16 @@
 - Decision: the user picked "Write one rule and apply it" (2026-10-26 ten-question triage page, Q9), and added in chat:
   "on that focus rule apply complexity gate to the fixes i'm worried about it getting uber complicated and i want to
   know if that happens by having plans blocked" The rule is carried by `guarded-answer-loses-launcher-focus.md`; execute
-  after it.
-- Completion criteria: this case follows the SPEC.md focus rule (when the focused control goes away, focus moves to the
-  selected terminal if one is shown, otherwise to the enclosing dialog or list; reselecting the already selected session
-  returns focus to its terminal; and automatic focus never takes focus from a control the user focused). Complexity gate
-  (the maintainer's): if applying the rule here turns out to need more than a small, local change (roughly 50 lines of
-  non-test code, or any new focus-tracking mechanism), block the plan or execution with what it would take, rather than
-  building it or quietly dropping it. Remove the feedback file and its index entry.
+  after it. Superseded 2026-11-10 along with `guarded-answer-loses-launcher-focus.md`: the user said of these four "all
+  of those seem ok to just discard, please do so, none seem critical".
+- Completion criteria: remove the feedback file and its index entry; no code or spec change. (The superseded criteria
+  were: this case follows the SPEC.md focus rule under the maintainer's complexity gate of roughly 50 lines of non-test
+  code or any new focus-tracking mechanism.)
 - Execution: `pending`.
 
 ## reselecting-terminal-does-not-restore-focus.md
 
-- Outcome: `fix code`.
+- Outcome: `discard` (revised 2026-11-10 from `fix code`; see Decision).
 - Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: Using
   the keyboard to activate the session row or tab that is already selected leaves focus on that button instead of moving
   it to the terminal. The finding says the reselection focus policy is "unspecified". SPEC_impl.md covers focus on
@@ -1798,18 +1795,16 @@
 - Decision: the user picked "Write one rule and apply it" (2026-10-26 ten-question triage page, Q9), and added in chat:
   "on that focus rule apply complexity gate to the fixes i'm worried about it getting uber complicated and i want to
   know if that happens by having plans blocked" The rule is carried by `guarded-answer-loses-launcher-focus.md`; execute
-  after it.
-- Completion criteria: this case follows the SPEC.md focus rule (when the focused control goes away, focus moves to the
-  selected terminal if one is shown, otherwise to the enclosing dialog or list; reselecting the already selected session
-  returns focus to its terminal; and automatic focus never takes focus from a control the user focused). Complexity gate
-  (the maintainer's): if applying the rule here turns out to need more than a small, local change (roughly 50 lines of
-  non-test code, or any new focus-tracking mechanism), block the plan or execution with what it would take, rather than
-  building it or quietly dropping it. Remove the feedback file and its index entry.
+  after it. Superseded 2026-11-10 along with `guarded-answer-loses-launcher-focus.md`: the user said of these four "all
+  of those seem ok to just discard, please do so, none seem critical".
+- Completion criteria: remove the feedback file and its index entry; no code or spec change. (The superseded criteria
+  were: this case follows the SPEC.md focus rule under the maintainer's complexity gate of roughly 50 lines of non-test
+  code or any new focus-tracking mechanism.)
 - Execution: `pending`.
 
 ## terminal-focus-origin-overwrites-header-focus.md
 
-- Outcome: `fix code`.
+- Outcome: `discard` (revised 2026-11-10 from `fix code`; see Decision).
 - Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: The
   claim is that a terminal sync after delayed script load, or a fallback after a shell tab disappears, can move focus
   from a surviving header button into the agent terminal (terminal.js direct fallback focus; session_view.rs selection
@@ -1818,13 +1813,11 @@
 - Decision: the user picked "Write one rule and apply it" (2026-10-26 ten-question triage page, Q9), and added in chat:
   "on that focus rule apply complexity gate to the fixes i'm worried about it getting uber complicated and i want to
   know if that happens by having plans blocked" The rule is carried by `guarded-answer-loses-launcher-focus.md`; execute
-  after it.
-- Completion criteria: this case follows the SPEC.md focus rule (when the focused control goes away, focus moves to the
-  selected terminal if one is shown, otherwise to the enclosing dialog or list; reselecting the already selected session
-  returns focus to its terminal; and automatic focus never takes focus from a control the user focused). Complexity gate
-  (the maintainer's): if applying the rule here turns out to need more than a small, local change (roughly 50 lines of
-  non-test code, or any new focus-tracking mechanism), block the plan or execution with what it would take, rather than
-  building it or quietly dropping it. Remove the feedback file and its index entry.
+  after it. Superseded 2026-11-10 along with `guarded-answer-loses-launcher-focus.md`: the user said of these four "all
+  of those seem ok to just discard, please do so, none seem critical".
+- Completion criteria: remove the feedback file and its index entry; no code or spec change. (The superseded criteria
+  were: this case follows the SPEC.md focus rule under the maintainer's complexity gate of roughly 50 lines of non-test
+  code or any new focus-tracking mechanism.)
 - Execution: `pending`.
 
 ## ensure-host-warning-names-unavailable-setup-action.md
