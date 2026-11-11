@@ -1430,15 +1430,16 @@ host. The shared tooltip clones the source on changes, including its run-keyed e
 `[data-tooltip-follow]` list on its `[data-current]` item after layout. Session cards have no follow marker. Only the
 steps shrink in short windows until the current step needs their remaining height. Before placement, the tooltip
 measures that step and each diagnostic at the card's wrapped width. Only diagnostics too tall for the remaining space
-are clipped to a bounded preview, with a visible `Full details in Hosts` notice; smaller messages stay whole. Each fresh
-clone repeats this sizing, so a larger window or shorter diagnosis restores the whole text. The card remains
-pointer-inert, and the expanded Hosts row retains the full diagnosis. The terminal's link-target display keeps its own
-shape and carries no `data-tooltip`, so two popups never stack. Coverage is guarded by a browser sweep
-(`e2e/tests/tooltip-coverage.spec.ts`) that visits the states the suite's fixtures reach and fails on any visible
-`button`, `[role=button]`, `[role=tab]`, `[role=menuitem]`, `a[href]`, `select`, `summary`, checkbox or radio button
-without hover text (for the last two, on the `label` that wraps them), exempting only described items in the session and
-host rows' menus and described template-number options. The local and remote host marks carry their hover text inside
-the icon component itself, so the session rows and the host rows both get it without either row's layout changing.
+are clipped to whole final lines using their definite line height and bottom scroll position, with a visible
+`Full details in Hosts` notice. Smaller messages stay whole. Each fresh clone repeats this sizing, so a larger window or
+shorter diagnosis restores the whole text. The card remains pointer-inert, and the expanded Hosts row retains the full
+diagnosis. The terminal's link-target display keeps its own shape and carries no `data-tooltip`, so two popups never
+stack. Coverage is guarded by a browser sweep (`e2e/tests/tooltip-coverage.spec.ts`) that visits the states the suite's
+fixtures reach and fails on any visible `button`, `[role=button]`, `[role=tab]`, `[role=menuitem]`, `a[href]`, `select`,
+`summary`, checkbox or radio button without hover text (for the last two, on the `label` that wraps them), exempting
+only described items in the session and host rows' menus and described template-number options. The local and remote
+host marks carry their hover text inside the icon component itself, so the session rows and the host rows both get it
+without either row's layout changing.
 
 Known risks, accepted deliberately:
 

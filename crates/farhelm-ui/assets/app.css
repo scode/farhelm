@@ -5907,7 +5907,9 @@ a:any-link,
   color: var(--warn-bright);
 }
 .host-progress-connection > strong { display: block; margin-bottom: 3px; color: var(--fg-0); }
-.host-progress-connection-detail, .host-progress-run-detail { overflow: hidden; }
+/* A definite line height lets the hover preview retain whole final lines.
+   Both surfaces and every clock-driven clone use the same line geometry. */
+.host-progress-connection-detail, .host-progress-run-detail { overflow: hidden; line-height: 1.5; }
 .host-progress-preview-notice {
   flex: none;
   padding: 6px 10px;

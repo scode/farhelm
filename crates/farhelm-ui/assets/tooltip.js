@@ -269,7 +269,13 @@
     notice.hidden = false;
     budget -= notice.getBoundingClientRect().height;
     diagnosticPreviewHeights(heights, budget).forEach((height, index) => {
-      if (height < heights[index]) texts[index].style.maxHeight = `${Math.floor(height)}px`;
+      if (height >= heights[index]) return;
+      const text = texts[index];
+      // CSS gives these boxes a definite line height. Round down to full lines
+      // and align their end, keeping the final diagnosis readable on each clone.
+      const lineHeight = parseFloat(win.getComputedStyle(text).lineHeight);
+      text.style.maxHeight = `${Math.floor(height / lineHeight) * lineHeight}px`;
+      text.scrollTop = text.scrollHeight;
     });
   }
 

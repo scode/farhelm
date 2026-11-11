@@ -138,26 +138,26 @@ host's mark and name, operation and completed-step count with elapsed time, ever
 the current step highlighted, and any degraded or failed step's reason. Connection detail follows the steps while the
 host is not connected, including the attempt and last connection error, and the run's own message follows when present.
 In a short window the step list shrinks, keeping the current step in view as it changes. If connection detail or a run
-message cannot fit beside a readable current step, only the oversized text becomes a bounded preview and the card says
-`Full details in Hosts`. Messages that fit stay whole. The card remains non-interactive; opening Hosts through the host
-identity gives access to the whole diagnosis. This is the narrow exception to full detail on hover. The card uses the
-shared hover delay and beside-the-sidebar placement, is absent on touch, and adds no keyboard stop to the status label.
-The sidebar is too narrow to show a long step name, let alone the rest of the run. Reduced-motion settings replace the
-animated indicator with a static one. Remote binary upload appears as a separate step before installation, so the user
-can tell when network transfer is still underway. The row and its hover use the helm's readable names for the same steps
-in the plan, with completed work checked green, the running step pulsing amber (static under reduced motion), pending
-work grey, unchanged work grey, degraded work as an amber warning, and failure red with the helm's reason. Success
-returns the status spot to its normal label and leaves the row folded unless global details are on. Failure or an
-uncertain outcome still expands the row so its step list and diagnostic remain visible in Hosts. When setup or Update
-fails or has an uncertain outcome while Hosts is closed, the host's rail avatar shows a warning mark until Hosts is
-opened or a later run of that same action succeeds. Starting a retry does not acknowledge the warning, and an unrelated
-successful action does not clear it. Setup recovery by discovery can resolve the same failed setup run. Hosts never
-opens by itself. The Hosts header's `Update all` action makes the same authorized Update request for each remote host
-whose individual Update action is available at the click. A host already busy with setup or another run is skipped
-rather than queued for a later update; the local host is excluded. Each remote host keeps its own validation, progress,
-and result, so one failure does not hide or delay the others. Having an available Update action does not itself mean the
-host needs an update: the rail's update badge and the attention list's Update rows require a compatible older build or a
-lower protocol, as well as an available remote Update action.
+message cannot fit beside a readable current step, only the oversized text becomes a preview of whole lines from its end
+and the card says `Full details in Hosts`. Messages that fit stay whole. The card remains non-interactive; opening Hosts
+through the host identity gives access to the whole diagnosis. This is the narrow exception to full detail on hover. The
+card uses the shared hover delay and beside-the-sidebar placement, is absent on touch, and adds no keyboard stop to the
+status label. The sidebar is too narrow to show a long step name, let alone the rest of the run. Reduced-motion settings
+replace the animated indicator with a static one. Remote binary upload appears as a separate step before installation,
+so the user can tell when network transfer is still underway. The row and its hover use the helm's readable names for
+the same steps in the plan, with completed work checked green, the running step pulsing amber (static under reduced
+motion), pending work grey, unchanged work grey, degraded work as an amber warning, and failure red with the helm's
+reason. Success returns the status spot to its normal label and leaves the row folded unless global details are on.
+Failure or an uncertain outcome still expands the row so its step list and diagnostic remain visible in Hosts. When
+setup or Update fails or has an uncertain outcome while Hosts is closed, the host's rail avatar shows a warning mark
+until Hosts is opened or a later run of that same action succeeds. Starting a retry does not acknowledge the warning,
+and an unrelated successful action does not clear it. Setup recovery by discovery can resolve the same failed setup run.
+Hosts never opens by itself. The Hosts header's `Update all` action makes the same authorized Update request for each
+remote host whose individual Update action is available at the click. A host already busy with setup or another run is
+skipped rather than queued for a later update; the local host is excluded. Each remote host keeps its own validation,
+progress, and result, so one failure does not hide or delay the others. Having an available Update action does not
+itself mean the host needs an update: the rail's update badge and the attention list's Update rows require a compatible
+older build or a lower protocol, as well as an available remote Update action.
 
 **Update remote hosts automatically** in Settings is off by default for new and existing installations. While on, the
 helm starts that same authorized Update for each host with an update by the badge's test, including required protocol

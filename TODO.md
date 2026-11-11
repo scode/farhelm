@@ -66,13 +66,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   host has no unresolved notice, or to read Trash only when a host reports a change. Plan:
   `plans/queue/bell-trash-reads.md`.
 
-- **Revisit cutting long connection errors short in the host progress hover card.** Decided on the maintainer's behalf
-  on 2026-11-09 when host-progress-hover blocked: when a host's connection detail or a run's message is too long to fit
-  beside a readable current step, the hover card for a working host shows a shortened preview and says the full details
-  are in Hosts, and stays a plain, non-interactive tooltip. A message that fits is shown whole. The alternative was a
-  scrollable area inside the card, which keeps the whole text readable on hover but makes the card interactive (pointer,
-  dismissal and keyboard handling). Plan: `plans/queue/host-progress-card-fixes.md`.
-
 ## Near term
 
 - **Stop two launch paths from leaving the page stuck after waking a host.** Found by the landing review of
@@ -389,10 +382,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the owner (restarts, updates, reconnects, and the desktop app and a standalone helm taking turns on one state
   directory). Asked for on 2026-11-08, when agent commands from sessions that were not on screen turned out to fail
   because the supervisor's routing was built on the assumption that several helms might share one supervisor.
-
-- **Open the host update hover card from the progress bar too.** Hovering a host's update flow in the sidebar shows its
-  step list only when the pointer is over the message above the progress bar; make the progress bar itself show the same
-  hover. Plan: `plans/queue/host-progress-card-fixes.md`.
 
 ### Tensorlake
 
