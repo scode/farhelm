@@ -20,6 +20,10 @@
 //!   It never translates vendor states or decides policy by provider identity.
 //!   The connected hook's leases span acquisition through serving and end
 //!   before a connection hold acknowledges parking.
+//! - [`crate::access`] owns the common execution route and command lowering
+//!   used by supervisor transport, provisioning and credential delivery.
+//!   Registry access is resolved afresh for each operation, so a place host's
+//!   editable destination cannot become a stale container route.
 //!
 //! The initial adapter covers the operations existing actors and lifecycle
 //! callers consume. Places, prepared selection, create and owned-resource

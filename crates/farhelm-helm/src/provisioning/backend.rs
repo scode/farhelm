@@ -1,5 +1,5 @@
 //! The system-facing half of provisioning executes the same action vocabulary
-//! for a local host or through the user's SSH access.
+//! for the local machine or through a remote machine's execution route.
 
 use super::plan::{DirectorySpec, PayloadKind, PayloadTarget, ProvisioningTarget};
 use crate::manager::peer_text;
@@ -703,7 +703,7 @@ impl SystemBackend {
                     }
                 }
             }
-            ProvisioningTarget::Ssh { .. } => {
+            ProvisioningTarget::Remote(_) => {
                 let Some(parent) = destination.parent() else {
                     return Ok(());
                 };
@@ -766,7 +766,7 @@ impl SystemBackend {
         }
     }
 
-    /// Build every remote operation with the selected SSH connection policy.
+    /// Build every remote operation through the shared route lowering.
     /// Ordinary host work rides provisioning's own shared connection;
     /// preparation uses one-shot connections because its sandbox name recurs.
     ///
@@ -777,41 +777,44 @@ impl SystemBackend {
     /// this file goes through here, including inspect and uploads, so no
     /// preparation step can accidentally reuse a previous sandbox's master.
     ///
-    /// `access` is the target's: a Tensorlake sandbox is provisioned with
-    /// Farhelm's own key, like every other connection to it, and the payload
-    /// uploads and probes inherit that by coming through here too.
+    /// Nested container commands borrow the place's supervisor master, as
+    /// defined by the route. They never open a provisioning master there.
+    pub(super) fn remote_command(
+        &self,
+        route: &crate::access::RemoteRoute,
+        remote_command: String,
+    ) -> anyhow::Result<tokio::process::Command> {
+        let policy = if self.one_shot {
+            crate::access::ConnectionPolicy::OneShot
+        } else {
+            crate::access::ConnectionPolicy::Shared(crate::ssh::SharedConnection::Provisioning)
+        };
+        let script = format!("{REMOTE_RUNTIME_PREFIX}{remote_command}");
+        Ok(route
+            .command(
+                &self.control_dir,
+                policy,
+                crate::access::RemoteCommand::Script(&script),
+            )?
+            .command())
+    }
+
+    /// Existing SSH-focused fixtures exercise the same route lowering while
+    /// keeping their authentication and destination inputs explicit.
+    #[cfg(test)]
     pub(super) fn ssh_command(
         &self,
         destination: &str,
         access: crate::ssh::SshAccessKind,
-        remote_command: String,
+        script: String,
     ) -> anyhow::Result<tokio::process::Command> {
-        let mut command = tokio::process::Command::new("ssh");
-        let access = crate::ssh::SshAccess::resolve(access, &self.control_dir)?;
-        if self.one_shot {
-            let options = match &access {
-                crate::ssh::SshAccess::UserConfig => Vec::new(),
-                crate::ssh::SshAccess::Tensorlake(access) => {
-                    access.oneshot_options().map_err(anyhow::Error::msg)?
-                }
-            };
-            command.args(crate::ssh::ssh_oneshot_args(destination, &options));
-        } else {
-            command.args(crate::ssh::ssh_base_args(
-                destination,
-                &self.control_dir,
-                crate::ssh::SharedConnection::Provisioning,
-                &access,
-            )?);
-        }
-        // ssh concatenates its trailing argv and reparses it remotely. Keep
-        // the complete `sh -c` invocation in one shell-quoted string so the
-        // script cannot absorb words from a destination or path.
-        command.arg(format!(
-            "sh -c {}",
-            crate::ssh::shell_quote(&format!("{REMOTE_RUNTIME_PREFIX}{remote_command}"))
-        ));
-        Ok(command)
+        self.remote_command(
+            &crate::access::RemoteRoute::Ssh {
+                destination: destination.into(),
+                access,
+            },
+            script,
+        )
     }
 
     /// Fetch the user manager's `XDG_CONFIG_HOME` from the host and choose
@@ -869,7 +872,7 @@ impl SystemBackend {
         manager_unit_dir_from_probe(&output.stdout)
     }
 
-    /// Run one bounded shell script locally or through SSH, retaining output
+    /// Run one bounded shell script locally or through a route, retaining output
     /// for structured parsing and escaped diagnostics.
     async fn run_shell(
         &self,
@@ -883,13 +886,10 @@ impl SystemBackend {
                 command.args(["-c", script]);
                 command
             }
-            ProvisioningTarget::Ssh {
-                destination,
-                access,
-            } => self
-                .ssh_command(destination, *access, script.to_string())
+            ProvisioningTarget::Remote(route) => self
+                .remote_command(route, script.to_string())
                 .map_err(|error| {
-                    BackendFailure::new("building the ssh command", error.to_string())
+                    BackendFailure::new("building the remote command", error.to_string())
                 })?,
         };
         command
@@ -983,7 +983,7 @@ impl SystemBackend {
                     error.to_string(),
                 )),
             },
-            ProvisioningTarget::Ssh { .. } => {
+            ProvisioningTarget::Remote(_) => {
                 let path = shell_path(path)?;
                 // Read the file through stdin. GNU coreutils escapes a
                 // backslash or newline in a filename in its output, so
@@ -1058,7 +1058,7 @@ impl SystemBackend {
     ) -> Result<(), BackendFailure> {
         match target {
             ProvisioningTarget::Local => set_mode(path, mode).await,
-            ProvisioningTarget::Ssh { .. } => {
+            ProvisioningTarget::Remote(_) => {
                 self.require_shell(
                     target,
                     // BSD chmod ends option parsing at the mode. Its `--`
@@ -1089,7 +1089,7 @@ impl SystemBackend {
                     error.to_string(),
                 )),
             },
-            ProvisioningTarget::Ssh { .. } => {
+            ProvisioningTarget::Remote(_) => {
                 self.require_shell(
                     target,
                     &format!("rm -f -- {}", shell_path(path)?),
@@ -1217,12 +1217,9 @@ impl SystemBackend {
                 }
                 .await
             }
-            ProvisioningTarget::Ssh {
-                destination: ssh_destination,
-                access,
-            } => {
+            ProvisioningTarget::Remote(route) => {
                 async {
-                    self.ssh_put(ssh_destination, *access, source, temporary)
+                    self.remote_put(route, source, temporary)
                         .await?;
                     // Same first-line test as `units::is_managed`, run in the
                     // command that renames so no plan can outlive it.
@@ -1310,11 +1307,7 @@ impl SystemBackend {
         destination: &Path,
         temporary: &Path,
     ) -> Result<ActionOutcome, BackendFailure> {
-        let ProvisioningTarget::Ssh {
-            destination: ssh_destination,
-            access,
-        } = target
-        else {
+        let ProvisioningTarget::Remote(route) = target else {
             return Err(BackendFailure::new(
                 "uploading a local payload",
                 "local plans have no upload action",
@@ -1337,8 +1330,7 @@ impl SystemBackend {
         }
         self.remove_owned_file(target, temporary).await?;
         let upload = async {
-            self.ssh_put(ssh_destination, *access, source, temporary)
-                .await?;
+            self.remote_put(route, source, temporary).await?;
             self.require_shell(
                 target,
                 &format!(
@@ -1454,8 +1446,8 @@ impl SystemBackend {
         }
     }
 
-    /// Stream one local file to `remote` over the same `ssh` command every
-    /// other provisioning step uses, by running `cat > <remote>` there with
+    /// Stream one local file to `remote` over the same route every other
+    /// provisioning step uses, by running `cat > <remote>` there with
     /// the file on its stdin. The same session reports the temporary file's
     /// size, so supervising an upload never needs a second remote command.
     ///
@@ -1474,10 +1466,9 @@ impl SystemBackend {
     /// byte growth is the only progress signal, reported on upload stdout.
     /// Local writes into ssh can run ahead of the host and cannot renew the
     /// deadline, including while the final buffered bytes drain remotely.
-    async fn ssh_put(
+    async fn remote_put(
         &self,
-        destination: &str,
-        access: crate::ssh::SshAccessKind,
+        route: &crate::access::RemoteRoute,
         source: &Path,
         remote: &Path,
     ) -> Result<(), BackendFailure> {
@@ -1486,7 +1477,7 @@ impl SystemBackend {
             .map_err(|error| BackendFailure::new("reading staged payload size", error.to_string()))?
             .len();
         let mut command = self
-            .ssh_command(destination, access, upload_script(remote)?)
+            .remote_command(route, upload_script(remote)?)
             .map_err(|error| {
                 BackendFailure::new("building the payload transfer command", error.to_string())
             })?;
@@ -1535,7 +1526,7 @@ impl SystemBackend {
         let output = output?;
         if output.code != Some(0) {
             return Err(BackendFailure::new(
-                format!("transferring {} over ssh", source.display()),
+                format!("transferring {} to the host", source.display()),
                 output.stderr,
             ));
         }
@@ -1596,10 +1587,7 @@ impl SystemBackend {
                 }
                 command
             }
-            ProvisioningTarget::Ssh {
-                destination,
-                access,
-            } => {
+            ProvisioningTarget::Remote(route) => {
                 let farhelm = shell_path(&target.probe_farhelm)?;
                 let state = target
                     .probe_state_dir
@@ -1607,10 +1595,9 @@ impl SystemBackend {
                     .map(|path| shell_path(path))
                     .transpose()?;
                 let script = Self::probe_script(&farhelm, state.as_deref());
-                self.ssh_command(destination, *access, script)
-                    .map_err(|error| {
-                        BackendFailure::new("building the ssh probe", error.to_string())
-                    })?
+                self.remote_command(route, script).map_err(|error| {
+                    BackendFailure::new("building the remote probe", error.to_string())
+                })?
             }
         };
         command
@@ -1624,7 +1611,7 @@ impl SystemBackend {
         })?;
         Ok((
             child,
-            matches!(target.transport, ProvisioningTarget::Ssh { .. }),
+            matches!(target.transport, ProvisioningTarget::Remote(_)),
         ))
     }
 }
@@ -2765,7 +2752,7 @@ impl ProvisioningBackend for SystemBackend {
                     set_mode(&directory.path, directory.mode).await?;
                 }
             }
-            ProvisioningTarget::Ssh { .. } => {
+            ProvisioningTarget::Remote(_) => {
                 // `install -d -m` chmods a directory that already exists, so a
                 // shared one is only handed to it when it is missing.
                 let commands = directories
@@ -2834,7 +2821,7 @@ impl ProvisioningBackend for SystemBackend {
                 )
                 .await
             }
-            ProvisioningTarget::Ssh { .. } => {
+            ProvisioningTarget::Remote(_) => {
                 self.install_uploaded_source(target, &payload.hash, destination, temporary, mode)
                     .await
             }
@@ -3539,7 +3526,7 @@ pub(super) fn parse_uninstall_inspection(
 /// keeps the local executor from growing an implementation nothing can call.
 fn require_remote(target: &ProvisioningTarget, what: &str) -> Result<(), BackendFailure> {
     match target {
-        ProvisioningTarget::Ssh { .. } => Ok(()),
+        ProvisioningTarget::Remote(_) => Ok(()),
         ProvisioningTarget::Local => Err(BackendFailure::new(
             format!("{what} is not done on the helm's own machine; use farhelm uninstall there"),
             "",
@@ -4101,9 +4088,11 @@ mod tests {
         };
         let result = tokio::time::timeout(
             CAPTURE_PIPE_GRACE + Duration::from_secs(10),
-            backend.ssh_put(
-                "held.example",
-                crate::ssh::SshAccessKind::UserConfig,
+            backend.remote_put(
+                &crate::access::RemoteRoute::Ssh {
+                    destination: "held.example".into(),
+                    access: crate::ssh::SshAccessKind::UserConfig,
+                },
                 &source,
                 &root.path().join("upload"),
             ),

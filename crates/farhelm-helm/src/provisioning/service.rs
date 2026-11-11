@@ -595,10 +595,10 @@ impl ProvisioningService {
                 };
                 Ok((
                     ProbeTarget {
-                        transport: ProvisioningTarget::Ssh {
+                        transport: ProvisioningTarget::Remote(crate::access::RemoteRoute::Ssh {
                             destination: destination.clone(),
                             access,
-                        },
+                        }),
                         probe_farhelm: PathBuf::from(
                             request.remote_farhelm.as_deref().unwrap_or("farhelm"),
                         ),
@@ -1300,7 +1300,7 @@ impl ProvisioningService {
         }
         self.require_update_trusted(host)
             .map_err(anyhow::Error::new)?;
-        let original_target = self.probe_target_for_row(&row);
+        let original_target = self.probe_target_for_row(&row).await?;
         let observation = self
             .backend
             .probe(&original_target)
@@ -1643,7 +1643,7 @@ impl ProvisioningService {
             .as_ref()
             .filter(|status| status.state.is_connected())
             .and_then(|status| status.client.clone());
-        let target = self.probe_target_for_row(row);
+        let target = self.probe_target_for_row(row).await?;
         let (dialed, state_dir) = match &client {
             Some(client) => {
                 require_no_running_sessions(client).await?;
@@ -2164,7 +2164,7 @@ impl ProvisioningService {
                     probe_state_dir: Some(pending.plan.state_dir.clone()),
                 };
                 if matches!(observation, ProbeObservation::Absent)
-                    && matches!(original_target.transport, ProvisioningTarget::Ssh { .. })
+                    && matches!(original_target.transport, ProvisioningTarget::Remote(_))
                     && (original_target.probe_farhelm != installed_target.probe_farhelm
                         || original_target.probe_state_dir != installed_target.probe_state_dir)
                 {
@@ -2907,25 +2907,25 @@ impl ProvisioningService {
         &self.layout.local_state_dir
     }
 
-    fn probe_target_for_row(&self, row: &HostRow) -> ProbeTarget {
-        match row.kind {
-            HostKind::Local => ProbeTarget {
-                transport: ProvisioningTarget::Local,
-                probe_farhelm: self.local_farhelm.clone(),
-                probe_state_dir: Some(self.layout.local_state_dir.clone()),
-            },
-            HostKind::Ssh | HostKind::Tensorlake => ProbeTarget {
-                transport: ProvisioningTarget::Ssh {
-                    destination: row.destination.clone().expect("ssh row destination"),
-                    access: row
-                        .kind
-                        .ssh_access()
-                        .expect("every remote kind is reached over ssh"),
+    /// Resolve execution access afresh for each probe. Installation coordinates
+    /// stay those of the admitted host, while its route comes from the store.
+    async fn probe_target_for_row(&self, row: &HostRow) -> anyhow::Result<ProbeTarget> {
+        Ok(
+            match crate::access::resolve_host_access(&self.store, row.id).await? {
+                crate::access::HostAccess::Local => ProbeTarget {
+                    transport: ProvisioningTarget::Local,
+                    probe_farhelm: self.local_farhelm.clone(),
+                    probe_state_dir: Some(self.layout.local_state_dir.clone()),
                 },
-                probe_farhelm: PathBuf::from(row.remote_farhelm.as_deref().unwrap_or("farhelm")),
-                probe_state_dir: row.remote_state_dir.as_deref().map(PathBuf::from),
+                crate::access::HostAccess::Remote(route) => ProbeTarget {
+                    transport: ProvisioningTarget::Remote(route),
+                    probe_farhelm: PathBuf::from(
+                        row.remote_farhelm.as_deref().unwrap_or("farhelm"),
+                    ),
+                    probe_state_dir: row.remote_state_dir.as_deref().map(PathBuf::from),
+                },
             },
-        }
+        )
     }
 }
 

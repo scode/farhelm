@@ -3,7 +3,7 @@
 
 use super::backend::{BackendFailure, Reach};
 use super::http::ProvisioningRequestError;
-use crate::ssh::SshAccessKind;
+use crate::access::RemoteRoute;
 use crate::store::HostRow;
 use crate::units::{SupervisorUnitInputs, render_supervisor_unit};
 use serde::Serialize;
@@ -51,22 +51,29 @@ impl ProvisioningOperation {
 }
 
 /// Transport facts retained in the plan so execution cannot silently switch
-/// from the local no-SSH path to SSH-to-self, or vice versa.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
+/// machines or access policies between confirmation and execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ProvisioningTarget {
     Local,
-    /// A remote host over ssh. A Tensorlake sandbox is one of these, with
-    /// `access` naming Farhelm's own key; it is deliberately not a variant
-    /// of its own, so every `Ssh { .. }` decision (upload the payloads,
-    /// ride the provisioning connection) holds for sandboxes too. `access`
-    /// is left out of a serialized plan for an ordinary ssh host, which
-    /// keeps that plan's shape as it was.
-    Ssh {
-        destination: String,
-        #[serde(skip_serializing_if = "SshAccessKind::is_user_config")]
-        access: SshAccessKind,
-    },
+    /// Remote filesystem operations and probes always execute through their
+    /// route, including a container reached by a local Podman process.
+    Remote(RemoteRoute),
+}
+
+impl Serialize for ProvisioningTarget {
+    /// Confirmation plans retain the established flat SSH shape. Wrapping a
+    /// route in Rust must not change their serialized comparison material.
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Local => {
+                use serde::ser::SerializeStruct as _;
+                let mut value = serializer.serialize_struct("ProvisioningTarget", 1)?;
+                value.serialize_field("kind", "local")?;
+                value.end()
+            }
+            Self::Remote(route) => route.serialize(serializer),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -74,10 +81,36 @@ impl ProvisioningTarget {
     /// An ordinary ssh host reached with the user's own ssh setup, for the
     /// tests' plan and backend fixtures.
     pub(super) fn ssh(destination: impl Into<String>) -> Self {
-        Self::Ssh {
+        Self::Remote(RemoteRoute::Ssh {
             destination: destination.into(),
-            access: SshAccessKind::UserConfig,
-        }
+            access: crate::ssh::SshAccessKind::UserConfig,
+        })
+    }
+}
+
+#[cfg(test)]
+mod target_serialization_tests {
+    use super::*;
+
+    /// Plans are frozen confirmation material. Route refactoring must retain
+    /// the flat SSH tag and omit ordinary access exactly as earlier plans did.
+    #[farhelm_testtrace::test]
+    fn remote_routes_keep_existing_plan_json() {
+        assert_eq!(
+            serde_json::to_value(ProvisioningTarget::Local).unwrap(),
+            serde_json::json!({"kind": "local"})
+        );
+        assert_eq!(
+            serde_json::to_value(ProvisioningTarget::ssh("user@host")).unwrap(),
+            serde_json::json!({"kind": "ssh", "destination": "user@host"})
+        );
+        assert_eq!(
+            serde_json::to_value(ProvisioningTarget::Remote(crate::tensorlake::ssh::route(
+                "sandbox"
+            )))
+            .unwrap(),
+            serde_json::json!({"kind": "ssh", "destination": "sandbox", "access": "tensorlake"})
+        );
     }
 }
 
@@ -546,7 +579,7 @@ impl ProvisioningPlan {
             },
             match &self.target {
                 ProvisioningTarget::Local => "the local host".to_string(),
-                ProvisioningTarget::Ssh { destination, .. } => destination.clone(),
+                ProvisioningTarget::Remote(route) => route.destination().to_string(),
             },
             if self.host_distro_id.is_empty() {
                 "unknown distribution"
@@ -769,7 +802,7 @@ impl PlanLayout {
                 ])
                 .collect(),
         }];
-        let remote = matches!(&target, ProvisioningTarget::Ssh { .. });
+        let remote = matches!(&target, ProvisioningTarget::Remote(_));
         let farhelm_temporary = temporary(&farhelm_path, farhelm_name);
         if remote {
             actions.push(ProvisioningAction::UploadPayload {

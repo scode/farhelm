@@ -138,7 +138,13 @@ impl E2eProvisioningBackend {
     fn target_key(target: &ProvisioningTarget) -> String {
         match target {
             ProvisioningTarget::Local => "local".to_string(),
-            ProvisioningTarget::Ssh { destination, .. } => format!("ssh:{destination}"),
+            ProvisioningTarget::Remote(crate::access::RemoteRoute::Ssh { destination, .. }) => {
+                format!("ssh:{destination}")
+            }
+            ProvisioningTarget::Remote(crate::access::RemoteRoute::PodmanExec {
+                container,
+                ..
+            }) => format!("podman:{container}"),
         }
     }
 

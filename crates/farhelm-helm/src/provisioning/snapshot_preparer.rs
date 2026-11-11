@@ -76,10 +76,9 @@ impl SnapshotPreparer for InstallerSnapshotPreparer {
             *access == TensorlakeSshAccess::for_state_dir(&self.layout.local_state_dir)?,
             "the snapshot preparer's SSH access differs from the selected helm access"
         );
-        let target = ProvisioningTarget::Ssh {
-            destination: crate::tensorlake::ssh::destination(sandbox),
-            access: crate::ssh::SshAccessKind::Tensorlake,
-        };
+        let target = ProvisioningTarget::Remote(crate::tensorlake::ssh::route(
+            crate::tensorlake::ssh::destination(sandbox),
+        ));
         let home = self.backend.prepare_tensorlake_sandbox(&target).await?;
         let reach = match self
             .backend
@@ -156,10 +155,9 @@ mod tests {
         )
         .unwrap();
         let backend = Arc::new(E2eProvisioningBackend::new(fixture.clone(), root.path()).unwrap());
-        let target = ProvisioningTarget::Ssh {
-            destination: crate::tensorlake::ssh::destination("fixture-preparer"),
-            access: crate::ssh::SshAccessKind::Tensorlake,
-        };
+        let target = ProvisioningTarget::Remote(crate::tensorlake::ssh::route(
+            crate::tensorlake::ssh::destination("fixture-preparer"),
+        ));
         assert!(
             backend.enable_linger(&target).await.is_err(),
             "premise: this image refuses the redundant ordinary linger action"
@@ -250,10 +248,9 @@ mod tests {
         let plan = layout
             .plan(
                 ProvisioningOperation::Add,
-                ProvisioningTarget::Ssh {
-                    destination: crate::tensorlake::ssh::destination("fixture-preparer"),
-                    access: crate::ssh::SshAccessKind::Tensorlake,
-                },
+                ProvisioningTarget::Remote(crate::tensorlake::ssh::route(
+                    crate::tensorlake::ssh::destination("fixture-preparer"),
+                )),
                 &reach,
                 "fixture-nonce",
             )

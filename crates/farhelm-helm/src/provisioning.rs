@@ -2938,7 +2938,7 @@ mod tests {
         };
         assert!(matches!(
             plan.target,
-            ProvisioningTarget::Ssh { destination, .. } if destination == "local"
+            ProvisioningTarget::Remote(crate::access::RemoteRoute::Ssh { destination, .. }) if destination == "local"
         ));
     }
 
@@ -10393,7 +10393,7 @@ mod tests {
             assert_eq!(directories[0].path, lib);
             assert_eq!(directories[1].path, expected_state);
             assert_eq!(directories[2].path, user_units);
-            let install_index = if matches!(plan.target, ProvisioningTarget::Ssh { .. }) {
+            let install_index = if matches!(plan.target, ProvisioningTarget::Remote(_)) {
                 assert!(matches!(
                     &plan.actions[1],
                     ProvisioningAction::UploadPayload { destination, temporary, .. }
@@ -13683,7 +13683,7 @@ mod tests {
             (accepted, planned.plan)
         };
         assert_eq!(
-            matches!(plan.target, ProvisioningTarget::Ssh { .. }),
+            matches!(plan.target, ProvisioningTarget::Remote(_)),
             use_ssh,
             "the local case must never silently become SSH-to-self"
         );
