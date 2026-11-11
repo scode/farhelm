@@ -72,3 +72,56 @@ The required fresh gpt-6.1-sol reviewer at high effort found no actionable issue
 source compatibility analysis and retained local authentication evidence. The commit-message cold read passed. The first
 cold reader disclosed reading instructions too early and its assessment was discarded. A fresh reader identified an
 unclear compatibility sentence, the body was rewritten, and the final fresh reader understood every intended point.
+
+### Landing
+
+#### What landed with it
+
+This plan landed in the same round as host-progress-card-fixes, which changes the sidebar's hover card for hosts being
+set up or updated. The two touch separate code and separate sections of the specs, and nothing else besides plan
+bookkeeping and a TODO.md entry (#3313) reached main while they were in flight. A second, independent review of the two
+diffs together found no interaction.
+
+#### Fixes made while landing
+
+None.
+
+#### Possible follow-up
+
+On OpenSSH 7.6 to 7.9 (Ubuntu 18.04's version, for example; macOS ships a much newer one), every Tensorlake connection
+prints a harmless `dlopen none failed` line: the change turns hardware-token loading off with the value `none`, and
+those clients try to load a library by that name. The plan accepted that line. What the answer did not cover is where
+that line ends up. A snapshot build step that fails with no other error output then shows this line instead of its exit
+status. A host whose connection fails carries the line in its connection error. Either can point the user at a
+hardware-token problem that does not exist. The fix would be to drop that one line from the error text Farhelm shows, or
+to mention it in the release note; dropping it is the better of the two, since a release note does not help someone
+reading an error. Few users run a helm on a client that old.
+
+#### Checks
+
+These checks ran on the round's combined tree: host-progress-card-fixes with tensorlake-key-order stacked above it, on
+main before either landed. Test runs went through the recorder with the pinned tmux first on `PATH`, and none printed a
+runtime `SKIPPED` line. Since then main has gained only a TODO.md entry (#3313), so what merged is the tested tree.
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format` and
+  `cargo clippy -p farhelm-ui -p farhelm-helm --all-targets -- -D warnings` passed.
+- `node --test` in `crates/farhelm-ui/js-tests` passed with no failures.
+- Browser: `npx playwright test --project=<engine>-<spec> --repeat-each=3 --retries=0` for `host-updates`, `tooltip` and
+  `tooltip-coverage` on Chromium and WebKit ran 234 tests, and all passed. They ran on Tensorlake sandboxes at the
+  maintainer's request, one project per sandbox. The sandboxes run Node 24.16 against 24.20 locally. Run ids:
+  `2d4b9620-510e-4d01-ae1a-205dceb4db55`, `8008bcd0-4d70-4904-b694-943ec79afae2`,
+  `ae9ca261-c478-4d0d-90f0-939975240076`, `a662159e-e9d3-411f-b958-f73dc54f6d48`, `58770221-2996-452b-9453-ee93b6fd02fe`
+  and `5e49b5ad-f42a-46b3-b6c3-4a950e3d09a4`.
+- Rust: the seven focused Tensorlake SSH option tests that tensorlake-key-order's executor ran passed again (run
+  `f57c4baa-0379-4214-a338-534766140639`). So did every test in the helm's `tensorlake::`, `provisioning::`, `ssh::` and
+  `transport::` modules (`cargo nextest run -p farhelm-helm --lib -E <filter>`: 515 passed, run
+  `0dcbabeb-54bd-4c29-9f1a-3efce5acdc88`), which covers each caller that builds the Tensorlake ssh options.
+
+Reused from host-progress-card-fixes' executor: its browser run of the provisioning spec's
+`single Update shows inline progress` test on both engines, which the hover change does not reach beyond what the
+repeated runs above cover.
+
+Skipped: the rest of the browser suite and the workspace's other Rust tests, because neither change reaches beyond the
+sidebar's hover card and the Tensorlake ssh options. Also skipped: a live Tensorlake gateway, an OpenSSH 7.6–7.9 client
+(the executor checked those from upstream source), and hosted CI (manual-only, not dispatched).
