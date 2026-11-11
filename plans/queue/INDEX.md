@@ -7,6 +7,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `sandbox-stop-click-guards.md` — A sandbox session's Stop and suspend keeps the no-tabs and agent-ended guards the click saw, so a refresh during its activity check cannot close a new tab or stop a restarted agent unasked
 - [in-flight 0f0196] `host-progress-card-fixes.md` — The sidebar's host progress card opens from anywhere on a working row, bar included, and a too-long error shows whole lines from its end
 - [pending] `yolo-focus-origin.md` — Replace's YOLO question and a sandbox session's Suspend and Stop-and-suspend questions take focus only if nothing was pressed since the click and focus is still where the click left it
-- [pending] `tensorlake-key-order.md` — Tensorlake connections accept only ed25519 keys and load no hardware-token provider, so Farhelm's key is always offered first; the documented exceptions go
+- [in-flight 7b0221] `tensorlake-key-order.md` — Tensorlake connections accept only ed25519 keys and load no hardware-token provider, so Farhelm's key is always offered first; the documented exceptions go
 - [pending] `sandbox-suspend-overlap.md` — A sandbox Suspend or Resume no longer blocks launches on other hosts (refused only while this page launches on or wakes that host), and a launch's wake waits out a busy host and fails fast if the host is suspended again
 - [pending] `bell-trash-reads.md` — Windows re-read a host's Trash only when the helm saw a Trash change there, not on every session status change or fallback poll
