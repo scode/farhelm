@@ -178,7 +178,7 @@ pub(crate) async fn tunnel_origin_matches(
     origin: AgentOrigin,
     session: &crate::store::SessionKey,
 ) -> anyhow::Result<bool> {
-    let (claim, client) = crate::sessions::route_session(state, session).await?;
+    let (claim, client) = crate::sessions::route_active_session(state, session).await?;
     Ok(claim.host == origin.host && client.connection_id() == origin.connection)
 }
 

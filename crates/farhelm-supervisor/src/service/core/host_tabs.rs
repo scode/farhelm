@@ -418,22 +418,20 @@ impl Supervisor {
     /// Called by `Supervisor::open_tab` on its supervisor-owned task, under
     /// the session's lifecycle claim, once the gate passed and the working
     /// directory was checked: `agent` is the session's agent terminal, which
-    /// gives the tab's size, `cwd` the directory the tab enters, and
-    /// `container` the session's container for a containerized session.
+    /// gives the tab's size and `cwd` the directory the tab enters.
     pub(super) async fn open_host_tab(
         &self,
         entry: &SessionEntry,
         session_token: &str,
         agent: &Terminal,
         cwd: &str,
-        container: Option<&crate::container::ContainerRuntime>,
     ) -> Result<TabInfo, RequestError> {
         let session_id = entry.info.id.as_str();
         let tab_id = uuid::Uuid::new_v4().to_string();
         let (scope_prefix, _unit) = self.tab_scope_prefix(session_id, &tab_id).await;
         let scoped = !scope_prefix.is_empty();
         let env = self.tab_environment(session_id, session_token, &tab_id);
-        let (argv, shell) = self.tab_command(cwd, container, scope_prefix).await?;
+        let (argv, shell) = self.tab_command(cwd, scope_prefix).await;
         let size = self
             .agent_terminal_size(session_id, agent)
             .await

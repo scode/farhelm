@@ -456,9 +456,7 @@ impl Supervisor {
                 cols,
                 rows,
                 scope.as_deref(),
-                // A restart never prepares a checkout, never types an
-                // initial prompt, and is refused for containers.
-                None,
+                // A restart never prepares a checkout or types an initial prompt.
                 None,
                 None,
                 blob,

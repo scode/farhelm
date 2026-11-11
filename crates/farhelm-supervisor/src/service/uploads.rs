@@ -918,19 +918,27 @@ enum StageFailure {
 }
 
 /// [`stage_upload`] once the session's lifecycle claim is held, which it
-/// keeps until the staging file exists.
+/// keeps until the staging file exists. Recheck retirement under that claim:
+/// admission must grant no filesystem authority from an old container row.
 async fn stage_claimed(
     sup: &Arc<Supervisor>,
     request: &UploadRequest,
     _lifecycle: super::core::KeyedGuard,
 ) -> Result<crate::files::StagedStream, RequestError> {
     let session_id = &request.session_id;
-    if sup.sessions.lock().await.get(session_id).is_none() {
-        return Err(RequestError::new(
-            ErrorKind::NotFound,
-            format!("no such session: {}", truncate_for_error(session_id)),
-        ));
-    }
+    let entry = sup
+        .sessions
+        .lock()
+        .await
+        .get(session_id)
+        .cloned()
+        .ok_or_else(|| {
+            RequestError::new(
+                ErrorKind::NotFound,
+                format!("no such session: {}", truncate_for_error(session_id)),
+            )
+        })?;
+    super::core::require_active_launch(&entry.info.launch)?;
     let dir = crate::attachments::session_dir(&sup.state_dir, session_id);
     crate::attachments::ensure_session_dirs(&sup.state_dir, session_id)
         .await

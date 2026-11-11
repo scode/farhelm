@@ -15,7 +15,8 @@
  *   the target directory), so the checkout is unpacked on the sandbox at this checkout's own absolute path and the
  *   archive is extracted over it. Nothing needs remapping.
  * - Nextest's setup script for the e2e tests runs `cargo build -p farhelm-fixtures`, which cannot run there, so the
- *   shard uses a copy of `.config/nextest.toml` without it and the locally built fixtures binary goes along.
+ *   shard removes only that setup hook. Matching static Podman provisioning payloads are prepared locally and staged
+ *   with the tools. The retained Podman setup exposes those files to its matching test on the clone.
  *
  * Usage:
  *   rust-tests.ts run --scratch <dir> --template <snapshot> --prefix <name-prefix> --shards <n>
@@ -42,9 +43,11 @@ async function nextestDir() {
   return dir.slice(REPO.length + 1);
 }
 
-/** Tracked files, a one-commit Git checkout (the recorder identifies the tested commit through Git), the pinned tmux
- * and nextest, and the prebuilt fixtures binary that the e2e harness looks for beside `farhelm`. */
-async function pack(scratch: string, nextest: string) {
+/** Stage this source's ordinary static installer inputs beside the archive tools. Cargo is unavailable on clones.
+ * Published releases can carry an older protocol, so matching payloads are prepared locally. An explicit Podman opt-out
+ * skips this build and is forwarded to every shard. The payload producer also accepts an operator-supplied matching
+ * directory. Payloads travel with the staging snapshot for reuse by later filters of the same archive. */
+async function pack(scratch: string, nextest: string, skipPodman: boolean) {
   const out = `${scratch}/rust-pack`;
   await $`rm -rf ${out}`;
   await $`mkdir -p ${out}`;
@@ -53,22 +56,39 @@ async function pack(scratch: string, nextest: string) {
   await $`tar -czf ${out}/git.tar.gz -C ${out}/shallow .git`;
   await $`rm -rf ${out}/shallow`;
   await $`tar -czf ${out}/tools.tar.gz .ci-tmux ${nextest} target/debug/farhelm-fixtures`.cwd(REPO);
+  if (skipPodman) {
+    await $`tar -czf ${out}/payloads.tar.gz --files-from /dev/null`;
+  } else {
+    const payloads = (await $`bash scripts/build-podman-test-payloads.sh`.cwd(REPO).text()).trim();
+    await $`tar -czf ${out}/payloads.tar.gz -C ${payloads} .`;
+  }
   return out;
 }
 
 /** Uploads everything once to a staging sandbox, unpacks it at this checkout's path, and snapshots it. */
-async function stage(scratch: string, template: string, name: string, archive: string, nextest: string) {
-  const p = await pack(scratch, nextest);
+async function stage(
+  scratch: string,
+  template: string,
+  name: string,
+  archive: string,
+  nextest: string,
+  skipPodman: boolean,
+) {
+  const p = await pack(scratch, nextest, skipPodman);
   await create(scratch, name, DISK_MB, template);
   try {
     await $`tl sbx exec ${name} sh -c ${`mkdir -p ${HOME}/stage && sudo -n install -d -o tl-user -g tl-user ${REPO}`}`;
-    for (const f of ["src.tar.gz", "git.tar.gz", "tools.tar.gz"]) await uploadChunked(name, `${p}/${f}`, `${HOME}/stage/${f}`);
+    for (const f of ["src.tar.gz", "git.tar.gz", "tools.tar.gz", "payloads.tar.gz"]) {
+      await uploadChunked(name, `${p}/${f}`, `${HOME}/stage/${f}`);
+    }
     const t0 = Date.now();
     await uploadChunked(name, archive, `${HOME}/stage/archive.tar.zst`);
     console.log(`archive uploaded in ${Math.round((Date.now() - t0) / 1000)} s`);
     await $`tl sbx cp ${HERE}/run-rust-shard.sh ${name}:${HOME}/stage/run-rust-shard.sh`.quiet();
     const unpack = `cd ${REPO} && tar -xzf ${HOME}/stage/src.tar.gz && tar -xzf ${HOME}/stage/git.tar.gz ` +
-      `&& tar -xzf ${HOME}/stage/tools.tar.gz && rm ${HOME}/stage/src.tar.gz ${HOME}/stage/git.tar.gz ${HOME}/stage/tools.tar.gz`;
+      `&& tar -xzf ${HOME}/stage/tools.tar.gz && mkdir -p target/podman-test-payloads ` +
+      `&& tar -xzf ${HOME}/stage/payloads.tar.gz -C target/podman-test-payloads ` +
+      `&& rm ${HOME}/stage/src.tar.gz ${HOME}/stage/git.tar.gz ${HOME}/stage/tools.tar.gz ${HOME}/stage/payloads.tar.gz`;
     await $`tl sbx exec -t 1800 ${name} sh -c ${unpack}`;
     const snap = (await $`tl sbx checkpoint ${name}`.text()).trim().split(/\s+/).pop()!;
     while (!snapshotRows(await $`tl sbx checkpoint ls`.text()).some(([s, , st]) => s === snap && st === "completed")) {
@@ -91,10 +111,13 @@ async function shard(
   nextest: string,
   filter: string[],
   out: string,
+  skipPodman: boolean,
 ) {
   await create(scratch, name, DISK_MB, snap);
   try {
-    const r = await $`tl sbx exec -t 14400 ${name} bash ${HOME}/stage/run-rust-shard.sh ${REPO} ${HOME}/stage/archive.tar.zst ${nextest}/cargo-nextest ${k} ${n} ${filter}`
+    const r = await $`tl sbx exec -t 14400 ${name} env FARHELM_TEST_SKIP_PODMAN=${
+      skipPodman ? "1" : "0"
+    } bash ${HOME}/stage/run-rust-shard.sh ${REPO} ${HOME}/stage/archive.tar.zst ${nextest}/cargo-nextest ${k} ${n} ${filter}`
       .noThrow().captureCombined();
     const dir = `${out}/shard${k}`;
     await $`mkdir -p ${dir}`;
@@ -127,6 +150,7 @@ if (import.meta.main) {
   if (!args.staged && !args.archive) throw new Error("--archive is required unless --staged names a staging snapshot");
   const n = Number(args.shards);
   const filter = (args["--"] ?? []).map(String);
+  const skipPodman = Deno.env.get("FARHELM_TEST_SKIP_PODMAN") === "1";
   await $`mkdir -p ${args.scratch!}`;
   const nextest = await nextestDir();
   const names = await freeNames(args.prefix!, n + 1);
@@ -134,11 +158,14 @@ if (import.meta.main) {
   try {
     if (!snap) {
       console.log(`staging on ${names[0]}`);
-      snap = await stage(args.scratch!, args.template!, names[0], args.archive!, nextest);
+      snap = await stage(args.scratch!, args.template!, names[0], args.archive!, nextest, skipPodman);
     }
     console.log(`staging snapshot ${snap}; ${n} shards`);
     const codes = await Promise.all(
-      Array.from({ length: n }, (_, i) => shard(args.scratch!, snap, names[i + 1], i + 1, n, nextest, filter, args.out!)),
+      Array.from(
+        { length: n },
+        (_, i) => shard(args.scratch!, snap, names[i + 1], i + 1, n, nextest, filter, args.out!, skipPodman),
+      ),
     );
     console.log(codes.every((c) => c === 0) ? "ALL SHARDS PASSED" : "SOME SHARDS FAILED");
   } finally {
@@ -146,3 +173,38 @@ if (import.meta.main) {
     await sweep(args.scratch!, [args.template!, ...(snap ? [snap] : [])]);
   }
 }
+
+/** Archive workers consume staged payloads through nextest's scoped setup environment. Exercise the worker's actual
+ * rewrite against the repository configuration to verify fixture-builder removal and retention of Podman's setup,
+ * experimental support and long-test resource budget. This test operates on local temporary files. */
+Deno.test("the archive config removes only the local fixture builder and keeps scoped Podman payload setup", async () => {
+  const worker = await Deno.readTextFile(`${HERE}/run-rust-shard.sh`);
+  const rewrite = worker.match(/<<'PY'[^\n]*\n([\s\S]*?)\nPY\n/)?.[1];
+  if (!rewrite) throw new Error("the worker's config rewrite was not found");
+  const scratch = await Deno.makeTempDir({ prefix: "farhelm-rust-config-" });
+  try {
+    const input = `${scratch}/nextest.toml`;
+    const output = `${scratch}/archive.toml`;
+    await Deno.writeTextFile(input, await Deno.readTextFile(`${REPO}/.config/nextest.toml`));
+    await $`python3 -c ${rewrite} ${input} ${output}`;
+    const retained = await Deno.readTextFile(output);
+    for (
+      const required of [
+        "[scripts.setup.podman-payloads]",
+        'setup = "podman-payloads"',
+        'experimental = ["setup-scripts"]',
+        "test(/^podman_environments::/)",
+        "terminate-after = 40",
+      ]
+    ) {
+      if (!retained.includes(required)) throw new Error(`archive configuration lost ${required}`);
+    }
+    if (retained.includes("[scripts.setup.build-fixtures]") || retained.includes('setup = "build-fixtures"')) {
+      throw new Error("the archive worker would still try to build fixtures with Cargo");
+    }
+    // The worker consumes the complete configuration. Parse its syntax as well as checking retained settings.
+    await $`python3 -c 'import sys,tomllib; tomllib.load(open(sys.argv[1], "rb"))' ${output}`;
+  } finally {
+    await Deno.remove(scratch, { recursive: true });
+  }
+});

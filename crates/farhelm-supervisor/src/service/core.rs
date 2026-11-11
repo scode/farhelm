@@ -1075,11 +1075,6 @@ pub struct SupervisorSeams {
     /// supervisor that resolves to nothing refuses `~` creates with a
     /// clear error rather than guessing.
     pub user_home: Option<PathBuf>,
-    /// Image-account tests supply a host identity without changing process-wide
-    /// USER/HOME or needing custom images. Production always reads getpwuid_r;
-    /// only the creation ticket carries this value, never stored exec state.
-    #[cfg(any(test, feature = "test-seams"))]
-    pub container_host_account: Option<crate::container::HostAccount>,
     /// How often the supervisor's own periodic task fires — see
     /// [`crate::service::ticker`] for what rides that cadence and
     /// [`TICKER_INTERVAL`] for why production picks the value it does.
@@ -1170,8 +1165,6 @@ pub struct SupervisorSeams {
     /// Applied to the AGENT launch as well as to ordinary tabs, deliberately: the
     /// two share one shell-resolution contract, and a seam that covered
     /// only one of them would be a second place for that contract to live.
-    /// Container tabs deliberately bypass this host shell: their login shell
-    /// runs inside the container and must not source host startup files first.
     pub launch_shell: Option<String>,
     /// The filesystem an attachment upload stages through
     /// (`crate::files::FaultSeam`). [`crate::files::RealFs`] in
@@ -1350,8 +1343,6 @@ impl Default for SupervisorSeams {
             agent_instructions: crate::agent_kind::AgentInstructions::default(),
             faults: FaultHooks::default(),
             user_home: None,
-            #[cfg(any(test, feature = "test-seams"))]
-            container_host_account: None,
             ticker_interval: TICKER_INTERVAL,
             activity_quantum: ACTIVITY_STAMP_QUANTUM,
             work_start_clock: Arc::new(work_start_now),
@@ -3735,6 +3726,18 @@ fn canonical_cwd_text(cwd: &str, resolved: std::path::PathBuf) -> anyhow::Result
 const RELAUNCH_COLS: u16 = 80;
 const RELAUNCH_ROWS: u16 = 24;
 
+/// Legacy container rows remain readable for Delete, but no current operation
+/// may execute or mutate them through the retired outside-supervisor model.
+pub(super) fn require_active_launch(launch: &SessionLaunch) -> Result<(), RequestError> {
+    if crate::container::is_retired(launch) {
+        return Err(RequestError::new(
+            ErrorKind::InvalidRequest,
+            crate::container::RETIRED_MESSAGE,
+        ));
+    }
+    Ok(())
+}
+
 /// Hold Restart with's replacement launch to create's input checks, before
 /// the session is looked up or anything is stopped (SPEC.md: "The edited
 /// launch is validated exactly as a create validates it before anything is
@@ -3748,14 +3751,7 @@ const RELAUNCH_ROWS: u16 = 24;
 /// session and is checked once it has been read.
 fn validate_restart_with(launch: &SessionLaunch) -> Result<(), RequestError> {
     let invalid = |message: String| RequestError::new(ErrorKind::InvalidRequest, message);
-    if launch
-        .agent_selection()
-        .is_some_and(|selection| selection.container.is_some())
-    {
-        return Err(invalid(
-            "Restart with cannot add or change container isolation; use Replace with".into(),
-        ));
-    }
+    require_active_launch(launch)?;
     // Create's byte bound, applied to the one field Restart with changes:
     // the launch is stored on success and echoed in every listing, which
     // is the reply growth `CREATE_FIELD_CAP` exists to keep bounded.
@@ -3815,7 +3811,7 @@ mod container_restart_validation_tests {
         launch.validate_new().unwrap();
         let error =
             super::validate_restart_with(&launch).expect_err("container restart must refuse");
-        assert!(error.to_string().contains("container isolation"));
+        assert!(error.to_string().contains("retired"));
     }
 }
 
@@ -3975,8 +3971,7 @@ struct Spawned {
 /// kinds cannot drift on the spec, the hook policy, the login shell or the
 /// shim command line; they differ only in what runs `cmd`.
 struct PreparedLaunch {
-    /// The directory the terminal starts in: the caller's, or for a
-    /// container launch the resolved directory its bind names.
+    /// The verified directory the terminal starts in.
     cwd: String,
     /// The files this launch owns (see [`Spawned`]).
     artifacts: LaunchArtifacts,
@@ -5963,23 +5958,6 @@ impl Supervisor {
             };
             listing.managed_checkout = crate::working_copies::cwd_is_managed(&conn, &listing.cwd)?;
             Ok(listing)
-        })
-        .await
-    }
-
-    /// Find the whole verified checkout shared with a container, independently
-    /// of its working subdirectory. File admission uses this same bounded lookup
-    /// so it cannot mistake cwd for the bind root or fall back past a replaced
-    /// inner checkout. Callers supply the session's canonical working directory.
-    pub(super) async fn container_checkout_root(
-        &self,
-        canonical_cwd: &str,
-    ) -> anyhow::Result<PathBuf> {
-        let cwd = canonical_cwd.to_owned();
-        let conn = self.store.conn.clone();
-        Self::run_directory_worker(Arc::clone(&self.directory_browse_workers), move || {
-            crate::working_copies::managed_checkout_root(&conn, &cwd)?
-                .context("containerized launches require a verified managed checkout")
         })
         .await
     }
@@ -9298,6 +9276,9 @@ impl Supervisor {
         claim: Option<IntentClaim>,
         guards: CreateGuards,
     ) -> anyhow::Result<SessionInfo> {
+        // Recovery callers share this gate with direct creates. An accepted
+        // old reservation is no longer authority to launch the retired model.
+        require_active_launch(&inputs.launch)?;
         // `~` expansion lives at the head of `validate_create`, and its
         // reach is exactly validation's reach: a replay answers from the
         // reservation without expanding anything (expansion reads
@@ -9488,6 +9469,7 @@ impl Supervisor {
     /// One validation and snapshot path serves raw creates and derived
     /// spawn bundles alike.
     async fn validate_create(&self, inputs: CreateInputs<'_>) -> anyhow::Result<LaunchRequest> {
+        require_active_launch(&inputs.launch)?;
         let CreateInputs {
             prompt,
             named_start,
@@ -9550,19 +9532,6 @@ impl Supervisor {
         launch
             .validate_new()
             .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
-        if let Some(container) = launch
-            .agent_selection()
-            .and_then(|selection| selection.container.as_ref())
-        {
-            crate::container::preflight(container).await?;
-            if !destination.is_fresh() {
-                let listing = self.inspect_directory(&cwd, true).await?;
-                anyhow::ensure!(
-                    listing.managed_checkout,
-                    "containerized launches require a managed checkout"
-                );
-            }
-        }
         launch
             .validate_initial_prompt(prompt.as_deref(), named_start.is_some())
             .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
@@ -10140,6 +10109,22 @@ impl Supervisor {
         inputs: CreateInputs<'_>,
         reservation: &Reservation,
     ) -> anyhow::Result<LaunchRequest> {
+        let row = self
+            .store
+            .session(&reservation.session_id)
+            .await
+            .context("reading the interrupted attempt's session row")?;
+        if row
+            .as_ref()
+            .is_some_and(|row| crate::container::is_retired(&row.launch))
+        {
+            // A changed prompt can also refuse an agent retry. Classify stored
+            // container ownership first so every refusal retains the row and
+            // checkout until Delete revokes its ticket and confirms removal.
+            return Err(anyhow::Error::new(RetainedCreateRefusal(
+                crate::container::RETIRED_MESSAGE.into(),
+            )));
+        }
         if let Some((_, recorded_prompt)) =
             crate::store::agent_request_parts(&reservation.fingerprint)
             && recorded_prompt != inputs.prompt.as_deref().map(prompt_digest)
@@ -10147,11 +10132,6 @@ impl Supervisor {
             return Err(RequestError::new(ErrorKind::Conflict,
                 "this intent key's interrupted attempt recorded a different initial prompt; send a new key to create from the request as it resolves now").into());
         }
-        let row = self
-            .store
-            .session(&reservation.session_id)
-            .await
-            .context("reading the interrupted attempt's session row")?;
         let Some(row) = row else {
             if inputs.github_checkout.is_some() {
                 return Err(anyhow::Error::new(RetainedCreateRefusal(
@@ -11920,10 +11900,6 @@ impl Supervisor {
                 text,
             )
         });
-        let container_config = info
-            .launch
-            .agent_selection()
-            .and_then(|selection| selection.container.as_ref());
         // Both kinds share everything but the start itself (see
         // `Self::prepare_launch`), and their failures are brought to one
         // shape here: the spec never landed, or the start failed and either
@@ -11958,7 +11934,6 @@ impl Supervisor {
                         launch_scope.as_deref(),
                         preparation,
                         initial_prompt,
-                        container_config,
                     )
                     .await
                 {
@@ -12035,7 +12010,6 @@ impl Supervisor {
                     launch_scope.as_deref(),
                     preparation,
                     initial_prompt,
-                    container_config,
                     // A create's terminal starts empty; only Restart seeds
                     // a new host with the history it keeps.
                     None,
@@ -12107,27 +12081,6 @@ impl Supervisor {
                 spawning,
             }) => (terminal, artifacts, hooked, launch_excerpt, spawning),
             Err(FailedStart::Spec(error)) => {
-                // A fresh spec failure launched nothing, but a create retry can
-                // inherit a container from its earlier, ambiguous generation.
-                // Confirm that prior ownership is gone before dropping the row.
-                if let Err(cleanup) = self
-                    .cleanup_failed_container(&info, generation, launch_scope.clone())
-                    .await
-                {
-                    self.publish_retained_launch(
-                        &info,
-                        None,
-                        &snapshot,
-                        canonical_cwd.as_deref(),
-                        LastOutcome::Launching,
-                        generation,
-                        launch_scope.clone(),
-                        None,
-                    )
-                    .await;
-                    return Err(error.context(format!(
-                        "container cleanup was unconfirmed ({cleanup:#}); session {id} is retained for retry")));
-                }
                 // For an ordinary launch the spec was the FIRST external side
                 // effect and did not land, so its row can be rolled back. A
                 // crash here would leave it instead, which is the case
@@ -12177,27 +12130,6 @@ impl Supervisor {
                 let mut error = error;
                 match left {
                     None => {
-                        // A pane can disappear while its separately scoped image
-                        // creator survives. Revoke and confirm removal before the
-                        // row or process cleanup drops this launch's final handle.
-                        let container_cleanup = self
-                            .cleanup_failed_container(&info, generation, launch_scope.clone())
-                            .await;
-                        if let Err(cleanup) = &container_cleanup {
-                            self.publish_retained_launch(
-                                &info,
-                                None,
-                                &snapshot,
-                                canonical_cwd.as_deref(),
-                                LastOutcome::Launching,
-                                generation,
-                                launch_scope.clone(),
-                                None,
-                            )
-                            .await;
-                            return Err(error.context(format!(
-                                "container cleanup was unconfirmed ({cleanup:#}); session {id} is retained for retry")));
-                        }
                         // Reaped BEFORE the row is discarded, and this is
                         // the ordering the whole rollback rests on:
                         // removing the row is removing the last handle
@@ -12211,16 +12143,15 @@ impl Supervisor {
                         // An unconfirmed reap RETAINS the row
                         // (the same rule the ambiguous arms below follow)
                         // rather than orphaning what it could not reach.
-                        if !container_cleanup.expect("error returned above")
-                            && let Err(sweep) = reap_process_tree(
-                                &self.seams.scopes,
-                                ScopeUnits::recorded(launch_scope.clone()),
-                                None,
-                                &id,
-                                &SweepTarget::AgentOnly,
-                                ScopeKillFailure::Warn,
-                            )
-                            .await
+                        if let Err(sweep) = reap_process_tree(
+                            &self.seams.scopes,
+                            ScopeUnits::recorded(launch_scope.clone()),
+                            None,
+                            &id,
+                            &SweepTarget::AgentOnly,
+                            ScopeKillFailure::Warn,
+                        )
+                        .await
                         {
                             self.publish_retained_launch(
                                 &info,
@@ -12658,7 +12589,7 @@ impl Supervisor {
     /// then has something to lose by proceeding: restart and delete would
     /// kill a live agent without consent, stop would record a plain exit
     /// that never happened, and delete or close-tab would leave the
-    /// renamed container, its scrollback, and its tabs behind while
+    /// renamed tmux session, its scrollback, and its tabs behind while
     /// reporting success. So the verbs fail closed there, exactly as they
     /// did before the probe was made classifying.
     ///
@@ -12728,6 +12659,7 @@ impl Supervisor {
             .ok_or_else(|| {
                 RequestError::new(ErrorKind::NotFound, "the target session does not exist")
             })?;
+        require_active_launch(&entry.info.launch)?;
         let delivery = crate::agent_kind::prompt_delivery(entry.snapshot.kind).ok_or_else(|| {
             let name = entry.snapshot.kind.display_name().map(str::to_string)
                 .or_else(|| entry.info.launch.agent_type().map(|harness| format!("{harness:?}")))
@@ -13082,14 +13014,7 @@ impl Supervisor {
             )
             .into());
         };
-        anyhow::ensure!(
-            entry
-                .info
-                .launch
-                .agent_selection()
-                .is_none_or(|selection| selection.container.is_none()),
-            "Restart and Restart with are unavailable for containerized sessions; replace the session instead"
-        );
+        require_active_launch(&entry.info.launch)?;
         if let Some(expected) = &expected_launch
             && *expected != entry.info.launch
         {
@@ -14140,7 +14065,6 @@ impl Supervisor {
                 // Ready one never clones again) — this parameter belongs to
                 // the create path only. The refusal wiring arrives with the
                 // restart-against-preparation slice.
-                None,
                 None,
                 None,
             )
@@ -15474,6 +15398,7 @@ impl Supervisor {
                 let Some(entry) = sup.sessions.lock().await.get(&id).cloned() else {
                     return Err(not_found());
                 };
+                require_active_launch(&entry.info.launch)?;
                 if let Some(expected) = expected_title.as_deref()
                     && entry.info.title != expected
                 {
@@ -15627,22 +15552,13 @@ impl Supervisor {
                 format!("no such session: {}", truncate_for_error(session_id)),
             ));
         };
+        require_active_launch(&entry.info.launch)?;
         let restart_first = || {
             RequestError::new(
                 ErrorKind::Conflict,
                 format!(
-                    "session {} has no terminals to add a tab to; {}",
+                    "session {} has no terminals to add a tab to; restart the session first",
                     truncate_for_error(session_id),
-                    if entry
-                        .info
-                        .launch
-                        .agent_selection()
-                        .is_some_and(|selection| selection.container.is_some())
-                    {
-                        "containerized sessions must be replaced or deleted"
-                    } else {
-                        "restart the session first"
-                    }
                 ),
             )
         };
@@ -15710,24 +15626,7 @@ impl Supervisor {
                 ));
             }
         };
-        // The container bind uses the accepted canonical checkout. A copied
-        // host symlink spelling need not exist inside that filesystem, and a
-        // later symlink edit must not retarget a tab's working directory.
-        let cwd = if entry
-            .info
-            .launch
-            .agent_selection()
-            .is_some_and(|selection| selection.container.is_some())
-        {
-            entry.canonical_cwd.clone().ok_or_else(|| {
-                RequestError::new(
-                    ErrorKind::Conflict,
-                    "container working-directory identity is unavailable; use Replace or Delete",
-                )
-            })?
-        } else {
-            entry.info.cwd.clone()
-        };
+        let cwd = entry.info.cwd.clone();
         ensure_cwd_usable(&cwd)
             .await
             .map_err(|e| RequestError::new(error_kind(&e), format!("{e:#}")))?;
@@ -15749,38 +15648,15 @@ impl Supervisor {
         // not.
         let sup = Arc::clone(self);
         let session_id = session_id.to_string();
-        let container = crate::container::ContainerRuntime::for_session(
-            &self.state_dir,
-            &session_id,
-            entry.generation,
-            &cwd,
-            &entry.info.launch,
-        )
-        .map_err(|error| RequestError::new(error_kind(&error), format!("{error:#}")))?;
         let task = tokio::spawn(async move {
             let _lifecycle = lifecycle;
-            // The initial creator lives outside the agent scope. Its fence must
-            // also cover an existing-container start, so Stop/Delete cannot
-            // confirm teardown while a late tab helper starts it again.
-            let container_guard = match container.as_ref() {
-                Some(runtime) => Some(runtime.acquire().await.map_err(|error| {
-                    RequestError::new(error_kind(&error), format!("{error:#}"))
-                })?),
-                None => None,
-            };
-            if let Some(guard) = &container_guard {
-                guard
-                    .start_existing(&sup.seams.scopes)
-                    .await
-                    .map_err(|error| RequestError::new(error_kind(&error), format!("{error:#}")))?;
-            }
             let opened = match &target {
                 NewTab::Window(tmux) => {
-                    sup.open_tab_window(&session_id, &session_token, tmux, &cwd, container.as_ref())
+                    sup.open_tab_window(&session_id, &session_token, tmux, &cwd)
                         .await
                 }
                 NewTab::Host => {
-                    sup.open_host_tab(&entry, &session_token, &agent, &cwd, container.as_ref())
+                    sup.open_host_tab(&entry, &session_token, &agent, &cwd)
                         .await
                 }
             };
@@ -15839,34 +15715,15 @@ impl Supervisor {
 
     /// The command a new tab runs, inside `scope_prefix`, and a name for
     /// its shell for the dead-at-open refusal: the tab helper, which enters
-    /// `cwd` and execs the user's login shell, or for a containerized
-    /// session the helper that execs `bash` in the session's container. The
+    /// `cwd` and execs the user's login shell. The
     /// helper runs at once and immediately execs the shell. It starts
     /// through the forwarder in the app's version layout, so its version is
     /// claimed from before it runs (see `Self::session_farhelm_exe`). The
     /// same for both kinds of tab: a tmux window and a tab host run it
     /// alike.
-    async fn tab_command(
-        &self,
-        cwd: &str,
-        container: Option<&crate::container::ContainerRuntime>,
-        scope_prefix: Vec<String>,
-    ) -> Result<(Vec<String>, String), RequestError> {
-        Ok(match container {
-            Some(runtime) => (
-                crate::launch::container_tab_window_command(
-                    runtime,
-                    &self.session_farhelm_exe,
-                    scope_prefix,
-                )
-                .map_err(|error| RequestError::new(error_kind(&error), format!("{error:#}")))?,
-                "bash in the session container".to_string(),
-            ),
-            None => {
-                let shell = self.launch_shell().await;
-                (self.tab_window_command(&shell, cwd, scope_prefix), shell)
-            }
-        })
+    async fn tab_command(&self, cwd: &str, scope_prefix: Vec<String>) -> (Vec<String>, String) {
+        let shell = self.launch_shell().await;
+        (self.tab_window_command(&shell, cwd, scope_prefix), shell)
     }
 
     /// [`Self::open_tab`]'s side-effecting half, split out so the whole of
@@ -15948,7 +15805,6 @@ impl Supervisor {
         session_token: &str,
         agent: &TmuxTerminal,
         cwd: &str,
-        container: Option<&crate::container::ContainerRuntime>,
     ) -> Result<TabInfo, RequestError> {
         let tab_id = uuid::Uuid::new_v4().to_string();
         let (scope_prefix, unit) = self.tab_scope_prefix(session_id, &tab_id).await;
@@ -15962,7 +15818,7 @@ impl Supervisor {
             TabScope::Scoped
         };
         let env = self.tab_environment(session_id, session_token, &tab_id);
-        let (window_cmd, shell) = self.tab_command(cwd, container, scope_prefix).await?;
+        let (window_cmd, shell) = self.tab_command(cwd, scope_prefix).await;
         let (window, pane) = self
             .tmux
             .new_window(&agent.tmux_name, cwd, &env, &window_cmd)
@@ -16298,6 +16154,7 @@ impl Supervisor {
                 format!("no such session: {}", truncate_for_error(session_id)),
             ));
         };
+        require_active_launch(&entry.info.launch)?;
         // The close-capable resolver: an exited-but-unreaped tab is exactly
         // what this path (the user's close, and the ticker's reap through
         // it) must still be able to find and destroy, while attach and
@@ -16984,43 +16841,6 @@ impl Supervisor {
         )
     }
 
-    /// A failed create cannot discard the last handle to an earlier container.
-    /// Even a definitive spec-write failure on a retry can follow an older shim
-    /// that already imported its image. Return whether this performed the strict
-    /// container-and-agent cleanup, so ordinary unwind does not repeat its sweep.
-    async fn cleanup_failed_container(
-        &self,
-        info: &SessionInfo,
-        generation: i64,
-        scope: Option<String>,
-    ) -> anyhow::Result<bool> {
-        let Some(runtime) = crate::container::ContainerRuntime::for_session(
-            &self.state_dir,
-            &info.id,
-            generation,
-            &info.cwd,
-            &info.launch,
-        )?
-        else {
-            return Ok(false);
-        };
-        let guard = runtime.acquire().await?;
-        guard.revoke()?;
-        guard.remove().await?;
-        let mut units = ScopeUnits::recorded(scope);
-        units.extend_derived([crate::container::unit_name(&info.id)?]);
-        reap_process_tree(
-            &self.seams.scopes,
-            units,
-            None,
-            &info.id,
-            &SweepTarget::AgentOnly,
-            ScopeKillFailure::Refuse,
-        )
-        .await?;
-        Ok(true)
-    }
-
     /// End the terminal of a create that will not be published (it lost to
     /// Delete, or its confirmation failed), once its process tree has been
     /// swept: kill its tmux session, or end its host, through the protocol
@@ -17081,13 +16901,7 @@ impl Supervisor {
     /// started nothing, so it carries no artifact owner: publication did not
     /// complete. Each kind's start classifies its own failures beyond that
     /// ([`SpawnFailure`], `HostSpawnFailure`), because a failed start is
-    /// AMBIGUOUS where a failed spec is not. Container creation also needs
-    /// fenced cleanup of any earlier attempt before its row is lost; failure
-    /// to publish this spec says nothing about a predecessor's helper.
-    ///
-    /// `container_config` changes this launch's hook policy before reporter assets
-    /// or argv are composed. The resulting spec retains only token-file paths;
-    /// the shim reads the credential immediately before its Podman exec.
+    /// AMBIGUOUS where a failed spec is not.
     ///
     /// `shell_source` selects command phase text or a wrapped agent's raw prefix.
     /// Its literal `argv` has already decoded the resume identity but still
@@ -17107,7 +16921,6 @@ impl Supervisor {
         scope: Option<&str>,
         preparation: Option<crate::launch::CheckoutPreparation>,
         initial_prompt: Option<(farhelm_proto::LaunchHarness, &str)>,
-        container_config: Option<&farhelm_proto::ContainerConfig>,
     ) -> anyhow::Result<PreparedLaunch> {
         // Start and Restart share this boundary, but a refusal must name the
         // field the user can correct, including when an old row reaches spawn.
@@ -17130,15 +16943,6 @@ impl Supervisor {
             farhelm_proto::check_wrapper_prefix(Some(prefix))
                 .map_err(|message| anyhow::anyhow!(message))?;
         }
-        // An alias is not a second bind inside the container. Resolve before
-        // filling argv so its cwd placeholders and actual workdir name the same
-        // canonical directory within the shared checkout.
-        let container_cwd = if container_config.is_some() {
-            Some(self.inspect_directory(cwd, true).await?.cwd)
-        } else {
-            None
-        };
-        let cwd = container_cwd.as_deref().unwrap_or(cwd);
         // Placeholder substitution is the FIRST transformation and hook
         // injection the second, so the injected tail — literals this crate
         // wrote, never re-validated — is never itself a substitution
@@ -17166,11 +16970,7 @@ impl Supervisor {
         // vendor's artifact published; one vendor's asset can never serve
         // the other because the reporters carry different event surfaces
         // and different `vendor` payloads.
-        let hook_policy = if container_config.is_some() {
-            &crate::agent_kind::AgentHooks::None
-        } else {
-            &self.seams.agent_hooks
-        };
+        let hook_policy = &self.seams.agent_hooks;
         let vendor_asset = crate::pi_extension::reporter_asset(snapshot.kind)
             .filter(|_| hook_policy.allows(snapshot.kind));
         let vendor_extension = match vendor_asset {
@@ -17190,20 +16990,8 @@ impl Supervisor {
             }
             None => None,
         };
-        let (argv, env, hooked, hook_skip, shell_arguments) = if container_config.is_some() {
-            with_farhelm_args_using(
-                argv,
-                args_mode,
-                snapshot,
-                hook_policy,
-                self.seams.agent_instructions,
-                Some(self.session_farhelm_exe_str.as_str()),
-                vendor_extension.as_deref(),
-                id,
-            )
-        } else {
-            self.with_farhelm_args(argv, args_mode, snapshot, vendor_extension.as_deref(), id)
-        };
+        let (argv, env, hooked, hook_skip, shell_arguments) =
+            self.with_farhelm_args(argv, args_mode, snapshot, vendor_extension.as_deref(), id);
         // The message is literal user data, including whole arguments that
         // resemble {cwd} or {farhelm_args}. Append it only after both fills;
         // neither hooks nor a later Restart may reinterpret or repeat it.
@@ -17268,44 +17056,8 @@ impl Supervisor {
         // including for the failure
         // classes (missing/malformed spec) where the shim never gets to
         // read this struct's own `status_file` field at all.
-        let container = match container_config {
-            Some(config) => {
-                let checkout_root = self.container_checkout_root(cwd).await?;
-                let runtime = crate::container::ContainerRuntime {
-                    config: config.clone(),
-                    podman: crate::container::executable()?,
-                    session_id: id.to_owned(),
-                    generation,
-                    cwd: cwd.into(),
-                    state_dir: self.state_dir.clone(),
-                };
-                #[cfg(any(test, feature = "test-seams"))]
-                let host_account = self.seams.container_host_account.clone();
-                #[cfg(not(any(test, feature = "test-seams")))]
-                let host_account: Option<crate::container::HostAccount> = None;
-                // NSS may consult a remote database. Keep that synchronous C
-                // lookup off the runtime worker that drives session lifecycle.
-                let host_account = match host_account {
-                    Some(account) => account,
-                    None => tokio::task::spawn_blocking(crate::container::HostAccount::current)
-                        .await
-                        .map_err(|error| anyhow::anyhow!(error))??,
-                };
-                Some(
-                    crate::container::ContainerLaunch::publish(
-                        runtime,
-                        checkout_root,
-                        host_account,
-                        &self.session_farhelm_exe,
-                        &self.seams.scopes,
-                    )
-                    .await?,
-                )
-            }
-            None => None,
-        };
         let spec = LaunchSpec {
-            container,
+            container: None,
             argv: executable_argv,
             working_directory: Some(PathBuf::from(cwd)),
             status_file: artifacts.status().to_path_buf(),
@@ -17446,7 +17198,6 @@ impl Supervisor {
         scope: Option<&str>,
         preparation: Option<crate::launch::CheckoutPreparation>,
         initial_prompt: Option<(farhelm_proto::LaunchHarness, &str)>,
-        container_config: Option<&farhelm_proto::ContainerConfig>,
     ) -> Result<Spawned, SpawnFailure> {
         let PreparedLaunch {
             cwd,
@@ -17468,7 +17219,6 @@ impl Supervisor {
                 scope,
                 preparation,
                 initial_prompt,
-                container_config,
             )
             .await
             .map_err(SpawnFailure::Spec)?;
@@ -19545,7 +19295,6 @@ pub(crate) mod tests {
                     None,
                     None,
                     None,
-                    None,
                 )
                 .await;
             let Err(SpawnFailure::Tmux {
@@ -19591,7 +19340,6 @@ pub(crate) mod tests {
                     80,
                     24,
                     SpawnTarget::ExistingSession("unused"),
-                    None,
                     None,
                     None,
                     None,
@@ -19838,7 +19586,6 @@ pub(crate) mod tests {
                     None,
                     None,
                     prompt.map(|text| (LaunchHarness::Claude, text)),
-                    None,
                 )
                 .await;
             let Err(SpawnFailure::Tmux {
@@ -29301,7 +29048,6 @@ exit 0
                 None,
                 None,
                 None,
-                None,
             ),
             async {
                 // Panics in here are caught, never left to unwind
@@ -32232,6 +31978,308 @@ exit 0
             sup.store.load_all().await.expect("load").len(),
             before,
             "a refused create must not leave a row behind"
+        );
+    }
+
+    /// Prompt drift must not turn a retired pending retry into ordinary rollback.
+    /// The same agent request digest reaches retry validation even when a template
+    /// changes its prompt. A second checkout member makes borrower rollback legal,
+    /// so only retirement classification can preserve the old session's Delete
+    /// handle, creation ticket and initialization marker through real settlement.
+    #[farhelm_testtrace::test]
+    async fn a_retired_agent_retry_with_prompt_drift_retains_its_borrower_and_creation_fences() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir(&root).unwrap();
+        let checkout = checkout_fixture(&root);
+        let launches = Arc::new(AtomicUsize::new(0));
+        let observed_launches = Arc::clone(&launches);
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                faults: FaultHooks {
+                    create_crash: Some(Arc::new(move |stage| {
+                        if stage == CreateStage::BeforeRecord {
+                            observed_launches.fetch_add(1, Ordering::SeqCst);
+                            anyhow::bail!("unexpected launch after retired retry validation");
+                        }
+                        Ok(())
+                    })),
+                    ..FaultHooks::default()
+                },
+                ..scopeless_seams()
+            },
+        )
+        .await
+        .unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let owner_id = uuid::Uuid::new_v4().to_string();
+        let plan_id = uuid::Uuid::new_v4().to_string();
+        let launch: SessionLaunch = serde_json::from_value(serde_json::json!({
+            "kind": "agent", "selection": {
+                "harness": "codex", "container": {
+                    "engine": "podman", "image_file": "/gone/old-image.tar", "api_proxy_port": 43117
+                }
+            }, "start": ["true", "{farhelm_args}"], "resume": null
+        }))
+        .unwrap();
+        let digest = "e".repeat(64);
+        let recorded_prompt = "the prompt before the template edit";
+        let retry_prompt = "the prompt after the template edit";
+        let original_claim = IntentClaim {
+            intent_key: "retired-prompt-retry".into(),
+            fingerprint: agent_create_fingerprint(&digest, Some(recorded_prompt)),
+            dedup_scope: DedupScope::SessionLifetime,
+        };
+        let retry_claim = IntentClaim {
+            fingerprint: agent_create_fingerprint(&digest, Some(retry_prompt)),
+            ..original_claim.clone()
+        };
+        assert_ne!(original_claim.fingerprint, retry_claim.fingerprint);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&original_claim.fingerprint).unwrap()[0],
+            "agent_prompt_request_v1"
+        );
+        assert_eq!(
+            crate::store::agent_request_parts(&original_claim.fingerprint),
+            Some((digest.clone(), Some(prompt_digest(recorded_prompt))))
+        );
+        assert_eq!(
+            crate::store::agent_request_parts(&retry_claim.fingerprint),
+            Some((digest, Some(prompt_digest(retry_prompt))))
+        );
+
+        // Store primitives reproduce the interrupted old create without running
+        // a retired creator, checkout preparation or an agent. Hold ordinary
+        // directory/key admission across membership setup and the actual retry.
+        let guards = sup
+            .admit_create(Some(&original_claim.intent_key))
+            .await
+            .unwrap();
+        let row = StoredSession {
+            conversation_source: None,
+            capture_ownership_version: 0,
+            omp_reporter_asset: None,
+            omp_launch_program: None,
+            launch_hooked: false,
+            launch_boot_ended: false,
+            id: id.clone(),
+            parent: None,
+            title: "retired borrower".into(),
+            created_at: now_unix(),
+            last_activity_at: now_unix(),
+            last_work_started_at: 0,
+            creation_seq: 0,
+            cwd: checkout.preview.cwd.clone(),
+            launch: launch.clone(),
+            terminal_address: String::new(),
+            terminal_kind: crate::store::TerminalKind::Tmux,
+            outcome: LastOutcome::Launching,
+            canonical_cwd: Some(checkout.preview.cwd.clone()),
+            captured_conversation: None,
+            generation: 0,
+            launch_scoped: false,
+        };
+        sup.store
+            .insert_session_with_plan(
+                StoredSession {
+                    id: owner_id.clone(),
+                    title: "checkout owner".into(),
+                    launch: SessionLaunch::plain_command("agent"),
+                    ..row.clone()
+                },
+                None,
+                Some(crate::working_copies::PlannedWorkingCopy {
+                    id: plan_id.clone(),
+                    canonical_root: checkout.root.clone(),
+                    repo_owner: checkout.repo.owner.clone(),
+                    repo_name: checkout.repo.name.clone(),
+                    original_basename: checkout.preview.basename.clone(),
+                    origin_session_id: owner_id.clone(),
+                    root_identity: None,
+                    preparation_snapshot: None,
+                }),
+            )
+            .await
+            .unwrap();
+        sup.store
+            .allocate_working_copy(&plan_id, None, None)
+            .await
+            .unwrap();
+        sup.store
+            .insert_session(row, Some(original_claim.clone()))
+            .await
+            .unwrap();
+        let original = sup.store.session(&id).await.unwrap().unwrap();
+        let owner = sup.store.session(&owner_id).await.unwrap().unwrap();
+        let membership = sup.store.member_working_copies_all(&id).await.unwrap();
+        assert_eq!(membership.len(), 1);
+        assert_eq!(membership[0].id, plan_id);
+        assert_eq!(
+            membership[0].allocation_state,
+            crate::working_copies::AllocationState::Allocated
+        );
+        assert!(sup.store.origin_working_copy(&id).await.unwrap().is_none());
+        assert_eq!(
+            sup.store.working_copy_member_count(&plan_id).await.unwrap(),
+            2,
+            "premise: ordinary retry rollback may remove this borrower because another member remains"
+        );
+        assert_eq!(
+            sup.store
+                .member_working_copies_all(&owner_id)
+                .await
+                .unwrap()[0]
+                .id,
+            plan_id
+        );
+        let pending = sup
+            .store
+            .reservation(&original_claim.intent_key)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(pending.outcome, ReservationOutcome::Pending);
+        assert_eq!(pending.session_id, id);
+        assert_eq!(pending.fingerprint, original_claim.fingerprint);
+        assert_eq!(pending.dedup_scope, DedupScope::SessionLifetime);
+        assert_eq!(original.launch, launch);
+        assert!(crate::container::is_retired(&original.launch));
+        assert_eq!(original.outcome, LastOutcome::Launching);
+        assert_eq!(original.generation, 0);
+        assert!(!original.launch_scoped);
+        assert!(original.terminal_address.is_empty());
+        assert!(original.conversation_source.is_none());
+        let spec = crate::launch::spec_path_for_launch(state.path(), &id, 0);
+        let sentinel = crate::launch::status_path_for_spec(&spec);
+        assert!(!spec.exists() && !sentinel.exists());
+        assert!(
+            matches!(
+                sup.reserved_launch_evidence(&pending).await,
+                LaunchEvidence::Absent
+            ),
+            "premise: the Pending retry must reach validation rather than replay or unresolved evidence"
+        );
+
+        let fences = state.path().join("container-launch");
+        std::fs::create_dir(&fences).unwrap();
+        let ticket = fences.join(format!("{id}.json"));
+        let marker = fences.join(format!("{id}.initializing"));
+        let lock = fences.join(format!("{id}.lock"));
+        std::fs::write(&ticket, b"legacy creation permit").unwrap();
+        std::fs::write(&marker, b"pending initialization").unwrap();
+        assert_eq!(std::fs::read(&ticket).unwrap(), b"legacy creation permit");
+        assert_eq!(std::fs::read(&marker).unwrap(), b"pending initialization");
+        assert!(!lock.exists());
+        assert_eq!(launches.load(Ordering::SeqCst), 0);
+
+        // The incoming launch is active, so the front-door retirement gate
+        // passes. Same-digest prompt drift must then retain the stored old row
+        // through create_session_admitted's refusal transaction and publication.
+        let incoming = named_test_launch();
+        assert!(!crate::container::is_retired(&incoming));
+        let refusal = sup
+            .create_session_admitted(
+                CreateInputs {
+                    prompt: Some(retry_prompt.into()),
+                    named_start: None,
+                    github_checkout: None,
+                    cwd: &original.cwd,
+                    parent: None,
+                    launch: incoming,
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                },
+                Some(retry_claim),
+                guards,
+            )
+            .await
+            .expect_err("a retired pending retry must be refused without ordinary rollback");
+        let detail = format!("{refusal:#}");
+        let retained = sup
+            .store
+            .session(&id)
+            .await
+            .unwrap()
+            .expect("prompt drift must preserve the old session's Delete handle");
+        assert!(
+            refusal.downcast_ref::<RetainedCreateRefusal>().is_some(),
+            "{refusal:#}"
+        );
+        assert_eq!(detail, crate::container::RETIRED_MESSAGE);
+        let expected = StoredSession {
+            outcome: LastOutcome::Error {
+                detail: detail.clone(),
+            },
+            ..original
+        };
+        assert_eq!(
+            retained, expected,
+            "only the retained refusal outcome may change"
+        );
+        assert_eq!(
+            sup.store
+                .reservation(&original_claim.intent_key)
+                .await
+                .unwrap()
+                .unwrap(),
+            Reservation {
+                outcome: ReservationOutcome::Failed {
+                    kind: error_kind(&refusal),
+                    message: detail
+                },
+                ..pending
+            }
+        );
+        let retained_memberships = sup.store.member_working_copies_all(&id).await.unwrap();
+        assert_eq!(retained_memberships.len(), 1);
+        assert_eq!(retained_memberships[0].id, plan_id);
+        assert_eq!(
+            retained_memberships[0].allocation_state,
+            membership[0].allocation_state
+        );
+        assert_eq!(
+            retained_memberships[0].canonical_path,
+            membership[0].canonical_path
+        );
+        assert_eq!(
+            retained_memberships[0].path_identity,
+            membership[0].path_identity
+        );
+        assert_eq!(
+            sup.store.working_copy_member_count(&plan_id).await.unwrap(),
+            2
+        );
+        assert_eq!(sup.store.session(&owner_id).await.unwrap().unwrap(), owner);
+        let visible = sup
+            .sessions
+            .lock()
+            .await
+            .get(&id)
+            .cloned()
+            .expect("retained row published");
+        assert!(visible.terminal.is_none());
+        assert_eq!(visible.info.launch, expected.launch);
+        assert_eq!(*visible.run.outcome.lock().unwrap(), expected.outcome);
+        assert_eq!(
+            launches.load(Ordering::SeqCst),
+            0,
+            "no launch pipeline was dispatched"
+        );
+        assert!(!spec.exists() && !sentinel.exists());
+        assert_eq!(std::fs::read(&ticket).unwrap(), b"legacy creation permit");
+        assert_eq!(std::fs::read(&marker).unwrap(), b"pending initialization");
+        // Container removal requires acquiring its guard, which creates this
+        // permanent lock inode. Its absence proves no removal was dispatched;
+        // checking only ticket bytes could miss an incomplete cleanup attempt.
+        assert!(
+            !lock.exists(),
+            "retry refusal must not dispatch container removal"
         );
     }
 

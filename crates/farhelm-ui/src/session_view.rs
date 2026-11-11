@@ -74,6 +74,9 @@ const COPY_COMMAND_DESCRIPTION_ID: &str = "header-copy-command-description";
 /// Remount native listener state when ownership changes, even for a retained session id.
 #[component]
 fn NativeTunnelStrip(session: Session) -> Element {
+    if session.is_retired_container() {
+        return rsx! {};
+    }
     #[cfg(native_desktop)]
     {
         // PeerText's Debug deliberately matches String. This ownership key is
@@ -133,13 +136,12 @@ fn restart_with_unavailable(session: &Session) -> Option<String> {
     }
 }
 
-/// Hooks are deliberately absent inside containers; a named conversation does
-/// not opt them back into resuming. Keep both restart surfaces explicit even
-/// if an old or stale peer happens to advertise an ordinary restart offer.
+/// Retired sessions cannot regain lifecycle or terminal access through a stale
+/// restart offer. Provider-backed container sessions use ordinary launch intent.
 fn container_restart_reason(session: &Session) -> Option<&'static str> {
-    session.agent_selection().filter(|selection| selection.container.is_some()).map(|_| {
-        "Containerized sessions cannot restart or resume through Farhelm; use Replace or Replace with to start over"
-    })
+    session
+        .is_retired_container()
+        .then_some(farhelm_proto::RETIRED_CONTAINER_REASON)
 }
 
 /// Why this dialog cannot change the session's launch, when it cannot: a
@@ -1760,7 +1762,6 @@ pub(crate) fn SessionView(
         let mut specs = vec![serde_json::json!({
             "el": AGENT_TERMINAL_ELEMENT_ID,
             "sessionId": spec_session_id,
-            "containerized": session.agent_selection().is_some_and(|selection| selection.container.is_some()),
             "unavailable": session.stale,
             "banner": AGENT_BANNER_ELEMENT_ID,
             // Where this terminal's connecting placeholder is written
@@ -1806,7 +1807,6 @@ pub(crate) fn SessionView(
             specs.push(serde_json::json!({
                 "el": tab_terminal_element_id(id),
                 "sessionId": spec_session_id,
-                "containerized": session.agent_selection().is_some_and(|selection| selection.container.is_some()),
                 "unavailable": session.stale,
                 "banner": tab_banner_element_id(id),
                 "connecting": tab_connecting_element_id(id),
@@ -2353,6 +2353,7 @@ pub(crate) fn SessionView(
                             TerminalTextSize {}
                         }
                     }
+                    if !shown.is_retired_container() {
                     div { class: "restart-offer header-stop-anchor",
                         if let Some(host) = &sandbox_host {
                             crate::sandbox_sessions::Controls {
@@ -2645,6 +2646,7 @@ pub(crate) fn SessionView(
                         ActionIcon { glyph: ActionGlyph::Clone }
                         "Clone"
                     }
+                    }
                     // A shortcut for deleting the open session without finding
                     // its row in the sidebar. Unless session questions are skipped,
                     // it confirms even for an ended session the row would delete
@@ -2845,11 +2847,12 @@ pub(crate) fn SessionView(
             // remains unconfirmed because nothing is running. A session that
             // cannot resume offers only Replace, and the notice says why
             // (SPEC.md, Durability and resume).
-            if interrupted_card_shown() {
+            if shown.is_retired_container() {div {class:"interrupted-card retired-container-card",role:"status", "{farhelm_proto::RETIRED_CONTAINER_REASON}"}}
+            if interrupted_card_shown() && !shown.is_retired_container() {
                 div { class: "interrupted-card",
                     span { class: "interrupted-card-text",
                         if container_restart.is_some() {
-                            "A host reboot ended this session's terminals. Containerized sessions cannot restart; use Replace to start over, or Delete."
+                            "{farhelm_proto::RETIRED_CONTAINER_REASON}"
                         } else {
                             "{interrupted_surface_text(shown.restart_offer, card_offers_replace_with, shown.agent_kind)}"
                         }
@@ -3388,7 +3391,8 @@ fn drag_copy_notice_element_id(terminal_element_id: &str) -> String {
 }
 
 /// Whether `session` is a candidate for the automatic "mark seen" effect
-/// at all — independent of whether it currently has anything unseen.
+/// at all — independent of whether it currently has anything unseen. Retired
+/// containers keep their stored metadata unchanged, even on selection.
 ///
 /// Pulled out as its own function (rather than inlined in the effect's
 /// `use_memo` key) so the eligibility computation itself is unit-testable
@@ -3399,7 +3403,10 @@ fn drag_copy_notice_element_id(terminal_element_id: &str) -> String {
 /// Dioxus re-run the effect to act on that transition — see the effect's
 /// own comment for the edge case this trades for.
 fn seen_effect_eligible(session: &Session) -> bool {
-    !session.stale && !session.status.has_ended() && session.seen_activity_at.is_some()
+    !session.is_retired_container()
+        && !session.stale
+        && !session.status.has_ended()
+        && session.seen_activity_at.is_some()
 }
 
 /// Where this session's status badge belongs on the session chrome
@@ -3714,6 +3721,9 @@ fn terminal_absence(session: &Session, relaunched: bool) -> Option<TerminalAbsen
 /// interrupted session must still lose its destroyed terminals, even when
 /// the same view retained them during the host outage.
 fn keep_terminal_surface(session: &Session, relaunched: bool, had_terminal: bool) -> bool {
+    if session.is_retired_container() {
+        return false;
+    }
     match terminal_absence(session, relaunched) {
         None => true,
         Some(TerminalAbsence::Stale) => had_terminal,
@@ -4298,7 +4308,7 @@ mod tests {
             "ordinary offer is not widened"
         );
         // A known conversation cannot opt container sessions back into Restart.
-        // Even a stale ordinary offer must retain the explicit Replace advice.
+        // Even a stale ordinary offer must retain the Delete-only retirement refusal.
         if let Some(crate::SessionLaunch::Agent { selection, .. }) = &mut session.launch {
             selection.container = Some(farhelm_proto::ContainerConfig {
                 engine: farhelm_proto::ContainerEngine::Podman,
@@ -4310,8 +4320,12 @@ mod tests {
         for offer in [RestartOffer::NotCaptured, RestartOffer::Resume] {
             session.restart_offer = offer;
             let reason = restart_with_reason(&session).expect("container restart is unavailable");
-            assert!(reason.contains("Containerized") && reason.contains("Replace"));
+            assert!(reason.contains("retired") && reason.contains("Delete only"));
             assert_eq!(container_restart_reason(&session), Some(reason.as_str()));
+            assert!(
+                !keep_terminal_surface(&session, true, true),
+                "retirement withdraws even a previously retained screen"
+            );
         }
         if let Some(crate::SessionLaunch::Agent { selection, .. }) = &mut session.launch {
             selection.container = None;

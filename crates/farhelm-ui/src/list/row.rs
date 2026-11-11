@@ -74,11 +74,18 @@ pub(super) enum IdentityFlowText {
 /// Share the row's actual title, pin, bell and delete-progress decisions.
 fn session_identity_copy(session: &Session, deleting: bool) -> SessionIdentityCopy {
     SessionIdentityCopy {
-        title: session.title.clone(),
+        // The title track survives compact mode and managed-checkout metadata.
+        // Prefixing its display copy keeps retirement visible in every density.
+        title: if session.is_retired_container() {
+            format!("Retired container · {}", session.title.raw()).into()
+        } else {
+            session.title.clone()
+        },
         pinned: session.pinned,
         delete_progress: deleting
             .then(|| crate::status::delete_progress_label(&session.status, session.tabs.len())),
-        has_bell: !session.notifications.is_empty(),
+        // Closing the bell writes a read mark; retired rows permit Delete only.
+        has_bell: !session.is_retired_container() && !session.notifications.is_empty(),
     }
 }
 
@@ -1141,6 +1148,7 @@ pub(super) fn SessionRow(
     /// number the list showed.
     on_bell_clear: EventHandler<(String, u64)>,
 ) -> Element {
+    let retired = session.is_retired_container();
     let sidebar_hosts = try_use_context::<Signal<crate::hosts::HostsRead>>();
     let sandbox_host = sidebar_hosts.and_then(|hosts| {
         crate::sandbox_sessions::owned_host(&session, hosts.read().hosts().unwrap_or_default())
@@ -1242,6 +1250,12 @@ pub(super) fn SessionRow(
     let card_session = session.clone();
     let menu_state = badge.as_ref().map(crate::status::StatusBadge::label);
     let mut menu_summary_parts = menu_header_summary_parts(&session, menu_state);
+    if retired {
+        menu_summary_parts.extend([
+            DetailPart::text(" · "),
+            DetailPart::text(farhelm_proto::RETIRED_CONTAINER_REASON),
+        ]);
+    }
     if let Some(host) = &sandbox_host {
         menu_summary_parts.extend([
             DetailPart::text(" · "),
@@ -1335,7 +1349,7 @@ pub(super) fn SessionRow(
     // unreachable host still has a last-known dot to toggle, and the route
     // that serves this write is itself helm-local with nothing to refuse for
     // an unreachable host (SPEC_impl.md's `session_seen` paragraph).
-    let offers_mark_seen = session.status.is_live() && unseen.is_some();
+    let offers_mark_seen = !retired && session.status.is_live() && unseen.is_some();
     let controls = row_control_visibility(offers_mark_seen);
     // "mark read" when the row currently has unseen output, "mark unread"
     // otherwise — the label follows the CURRENT predicate every render,
@@ -1364,7 +1378,8 @@ pub(super) fn SessionRow(
     // held below (or contiguous with) the original run. Keep that distinction
     // before menu rendering reduces absent directions to hidden actions.
     let pin_drag_eligible = pin_neighbors.is_some();
-    let pin_drag_disabled = busy
+    let pin_drag_disabled = retired
+        || busy
         || nav_disabled
         || deleting
         || renaming
@@ -1378,7 +1393,7 @@ pub(super) fn SessionRow(
         .as_ref()
         .map(|host| sandbox_suspended || matches!(host.state, crate::HostPhase::Stopped { .. }));
     let menu_order =
-        session_menu_order_with_sandbox(controls, move_up, move_down, sandbox_menu_state);
+        session_menu_order_for_session(controls, move_up, move_down, sandbox_menu_state, retired);
     // Whether the panel is currently showing its item list rather than a
     // confirmation prompt. Rename immediately closes this panel and mounts
     // ListView's stable dialog, so it is not a panel sub-state.
@@ -1636,13 +1651,20 @@ pub(super) fn SessionRow(
     // a Move item shifts surviving actions while focus may remain in bounds.
     let withdrawal_close_id = session.id.raw().to_owned();
     use_effect(use_reactive(
-        (&offers_mark_seen, &move_up, &move_down, &sandbox_menu_state),
-        move |(offers_mark_seen, move_up, move_down, sandbox_menu_state)| {
-            let order = session_menu_order_with_sandbox(
+        (
+            &offers_mark_seen,
+            &move_up,
+            &move_down,
+            &sandbox_menu_state,
+            &retired,
+        ),
+        move |(offers_mark_seen, move_up, move_down, sandbox_menu_state, retired)| {
+            let order = session_menu_order_for_session(
                 row_control_visibility(offers_mark_seen),
                 move_up,
                 move_down,
                 sandbox_menu_state,
+                retired,
             );
             let mut focused_position = *menu_focus.peek();
             if order != *previous_menu_order.peek() {
@@ -2578,6 +2600,7 @@ pub(super) fn SessionRow(
                                 // class beside it stays exactly what it
                                 // was, since the browser suite keys off
                                 // those.
+                                if !retired {
                                 if controls.rename {
                                     button {
                                         r#type: "button",
@@ -3014,6 +3037,7 @@ pub(super) fn SessionRow(
                                             description: rsx! { if sandbox.is_some() { {environment_stop_help} } else { "Ends the agent and its processes, and closes terminal tabs" } },
                                         }
                                     }
+                                }
                                 }
                                 // Delete has its own final group. The
                                 // separator describes that boundary to
@@ -5076,6 +5100,69 @@ mod tests {
             "\"unbalanced --yolo",
             "an unclosed quote is something shell_words itself cannot resolve, so this falls \
              back to the trimmed raw text rather than guessing at structure that was never there"
+        );
+    }
+}
+
+/// A retired row keeps Delete's stable identity and focus bookkeeping while
+/// withdrawing every other command. It never fabricates a second menu owner.
+fn session_menu_order_for_session(
+    controls: RowControlVisibility,
+    up: bool,
+    down: bool,
+    sandbox: Option<bool>,
+    retired: bool,
+) -> MenuOrder {
+    if retired {
+        MenuOrder::pack(MENU_ACTIONS, |action| {
+            action == MenuAction::Delete && controls.delete
+        })
+    } else {
+        session_menu_order_with_sandbox(controls, up, down, sandbox)
+    }
+}
+
+#[cfg(test)]
+mod retired_menu_tests {
+    use super::*;
+    /// Keyboard and rendered menus must agree on the single surviving action.
+    #[test]
+    fn retired_menu_keeps_only_delete_in_the_existing_order() {
+        let menu = session_menu_order_for_session(
+            row_control_visibility(true),
+            true,
+            true,
+            Some(false),
+            true,
+        );
+        assert_eq!(menu.get(0), Some(MenuAction::Delete));
+        assert_eq!(menu.get(1), None);
+    }
+    /// Retirement wording belongs to the persistent title track, because compact
+    /// rows and managed checkouts can both omit the ordinary directory text.
+    #[test]
+    fn retired_identity_is_visible_without_directory_metadata() {
+        let mut session = row_specimen("historical");
+        session.title = "historical".into();
+        session.launch = Some(serde_json::from_value(serde_json::json!({
+            "kind":"agent", "selection":{"harness":"codex","model":null,"effort":null,
+                "permissions":null,"container":{"engine":"podman","image_file":"old.tar","api_proxy_port":42000}},
+            "start":["codex","{farhelm_args}"],"resume":null
+        })).unwrap());
+        assert_eq!(
+            session_identity_copy(&session, false).title.raw(),
+            "Retired container · historical"
+        );
+        if let Some(crate::SessionLaunch::Agent { selection, .. }) = &mut session.launch {
+            selection.container = None;
+        }
+        assert_eq!(
+            session_identity_copy(&session, false).title.raw(),
+            "historical"
+        );
+        assert!(
+            !session.is_retired_container(),
+            "ordinary launches stay normal on provider-backed hosts too"
         );
     }
 }

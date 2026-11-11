@@ -7,8 +7,8 @@
 // `hasSelection()`) and speaks link-lines ranges. A new terminal's grid
 // hosts `FileLinks` directly (terminal.js's `createGridLinks`); an old
 // terminal's xterm.js loads `XtermFileLinksAddon`, the adapter that registers
-// an xterm.js link provider, converts its ranges, and wraps xterm.js's own
-// OSC 8 provider for containers.
+// an xterm.js link provider and converts its ranges. Native OSC 8 links keep
+// xterm.js's ordinary provider; every supervisor owns its actual filesystem.
 (function () {
   const MAX_BYTES = 100000000;
 
@@ -298,7 +298,7 @@
    * reopens the disclosed canonical path; that still is not a file snapshot.
    */
   class FileLinks {
-    constructor({ endpoint, secret, native, isMac = false, containerized = false, isClick = () => false, coveringRects = () => [], view = null,
+    constructor({ endpoint, secret, native, isMac = false, isClick = () => false, coveringRects = () => [], view = null,
       // Browser timers require their global receiver. Wrappers keep the
       // defaults out of this object's method-call context while allowing clocks.
       setTimeout: schedule = (callback, delay) => setTimeout(callback, delay),
@@ -308,9 +308,6 @@
       this.secret = secret;
       this.native = native;
       this.isMac = isMac;
-      this.containerized = containerized;
-      this.linkLookups = { prose: null, osc: null };
-      this.disposed = false;
       // The terminal owns primary-gesture admission across all link providers.
       // A `FileLinks` without that evidence cannot authorize a transfer.
       this.isClick = isClick;
@@ -327,82 +324,6 @@
       this.dismissFailure = () => {
         if (this.failureMessage) this.hideMessage();
       };
-    }
-
-    /** Keep original OSC link objects, whose callbacks support arbitrary labels
-     * and filenames with spaces. Each item is `{uri, range, link}`: the
-     * program's target, its link-lines range, and the surface's own link
-     * object, which is what an admitted candidate offers. URI, range and
-     * displayed text all participate in admission identity; any one can
-     * change during a host lookup.
-     */
-    oscCandidates(items) {
-      return (items || []).flatMap(({ uri, range, link }) => {
-        const target = oscTarget(uri);
-        if (!target) return [];
-        return [{
-          path: target.kind === 'file' ? target.path : null,
-          signature: JSON.stringify([uri, range,
-            window.farhelmTerminalLinks.linkRangeText(this.view.lines(), range)]),
-          link,
-        }];
-      });
-    }
-
-    /** Re-recognition supplies live cell identity without a path cache.
-     * `makeLink(candidate)` turns a `{path, range}` into the surface's own
-     * link object.
-     */
-    proseCandidates(abs, makeLink) {
-      return pathLinks(this.view.lines(), abs).map(candidate => ({
-        path: candidate.path,
-        signature: JSON.stringify(candidate),
-        link: makeLink(candidate),
-      }));
-    }
-
-    /** Container output names its own filesystem. Ask the host to admit each
-     * target before offering a link, including symlink resolution; a hover-time
-     * refusal would already have offered a misleading host path. Each provider
-     * owns one bounded batch: the terminal asks for OSC and prose links
-     * independently, so sharing
-     * cancellation would make valid providers cancel each other's answers.
-     */
-    async checkoutLinks(slot, candidates, current, callback) {
-      this.linkLookups[slot]?.abort();
-      if (this.disposed) return;
-      const files = candidates.filter(candidate => candidate.path !== null);
-      if (files.length === 0 || files.length > 32) {
-        callback(candidates.filter(candidate => candidate.path === null).map(candidate => candidate.link));
-        return;
-      }
-      const controller = new AbortController();
-      this.linkLookups[slot] = controller;
-      try {
-        const admitted = await Promise.all(candidates.map(async candidate => {
-          if (candidate.path === null) return candidate;
-          try {
-            const response = await this.request('stat', candidate.path, controller.signal);
-            const info = await response.json();
-            return info.status === 'ready' ? candidate : null;
-          } catch (_) {
-            return null;
-          }
-        }));
-        // Even an empty late callback could replace a newer reply for this same
-        // row in the terminal. A superseded or disposed request publishes nothing.
-        if (controller.signal.aborted || this.disposed) return;
-        // A slow response cannot publish a link for cells replaced meanwhile.
-        // Hover and download still make their own independent fresh checks.
-        const present = new Set((await current()).map(candidate => candidate.signature));
-        if (controller.signal.aborted || this.disposed) return;
-        callback(admitted.filter(candidate => candidate && present.has(candidate.signature))
-          .map(candidate => candidate.link));
-      } catch (_) {
-        if (!controller.signal.aborted && !this.disposed) callback([]);
-      } finally {
-        if (this.linkLookups[slot] === controller) this.linkLookups[slot] = null;
-      }
     }
 
     /** A text-only disclosure stays inside its terminal; remote values cannot
@@ -720,8 +641,6 @@
 
     /** Disposing the terminal cancels owned work and releases completed Blobs. */
     dispose() {
-      this.disposed = true;
-      for (const controller of Object.values(this.linkLookups)) controller?.abort();
       this.leave();
       this.clearHover();
       this.hideMessage();
@@ -739,8 +658,6 @@
    * reads the terminal through terminal-links.js's `xtermLines` and registers
    * a link provider below OSC 8 and web links, preserving their existing
    * precedence, with xterm.js's 1-based ranges converted at this boundary.
-   * In a container it also wraps xterm.js's own OSC 8 provider so file
-   * targets pass the host's admission before xterm.js offers them.
    */
   class XtermFileLinksAddon extends FileLinks {
     activate(term) {
@@ -752,15 +669,10 @@
         lines: () => window.farhelmTerminalLinks.xtermLines(term),
         hasSelection: () => !!term.getSelection(),
       };
-      if (this.containerized) this.admitOscLinks();
       this.provider = term.registerLinkProvider({
         provideLinks: (row, callback) => {
           const abs = row - 1;
-          if (this.containerized) {
-            const current = () => this.proseCandidates(abs, candidate => this.fileLink(candidate));
-            void this.checkoutLinks('prose', current(), current, callback);
-          }
-          else callback(pathLinks(this.view.lines(), abs).map(candidate => this.fileLink(candidate)));
+          callback(pathLinks(this.view.lines(), abs).map(candidate => this.fileLink(candidate)));
         },
       });
     }
@@ -780,36 +692,7 @@
       return link;
     }
 
-    /** Pin one narrow seam in the shipped xterm 6.0.0 bundle. The native OSC
-     * provider already knows targets, arbitrary labels, ranges and precedence;
-     * wrapping its callback avoids another parser or delaying terminal writes.
-     * The real-bundle test must be revisited when replacing the vendor asset.
-     */
-    admitOscLinks() {
-      const provider = this.term._core?._linkProviderService?.linkProviders?.[0];
-      if (typeof provider?.provideLinks !== 'function') {
-        throw new Error('Container file-link admission requires the pinned xterm OSC provider');
-      }
-      const items = links => (links || []).map(link => ({
-        uri: link.text, range: window.farhelmTerminalLinks.fromXtermRange(link.range), link,
-      }));
-      this.oscProvider = provider;
-      this.oscProvideLinks = provider.provideLinks;
-      this.oscWrappedProvideLinks = (row, callback) => {
-        this.oscProvideLinks.call(provider, row, links => {
-          const current = () => new Promise(resolve => {
-            this.oscProvideLinks.call(provider, row, latest => resolve(this.oscCandidates(items(latest))));
-          });
-          void this.checkoutLinks('osc', this.oscCandidates(items(links)), current, callback);
-        });
-      };
-      provider.provideLinks = this.oscWrappedProvideLinks;
-    }
-
     dispose() {
-      if (this.oscProvider && this.oscProvider.provideLinks === this.oscWrappedProvideLinks) {
-        this.oscProvider.provideLinks = this.oscProvideLinks;
-      }
       super.dispose();
       this.provider?.dispose();
     }

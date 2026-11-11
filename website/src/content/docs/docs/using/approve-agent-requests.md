@@ -14,8 +14,10 @@ another, rename, stop, restart, or delete sessions, change your [launch template
 your browser ([Open links from a remote session](#open-links-from-a-remote-session)). Farhelm asks you before any of
 those changes happens by default, whoever typed the command; a command you type yourself in a session's terminal is
 asked about the same way. You can [stop asking for a host](/docs/using/approve-agent-requests/#stop-asking-for-a-host).
-Looking never asks. An agent in a [containerized session](/docs/agents/containerized-sessions/) cannot make any of these
-requests.
+Looking on ordinary hosts never asks. Farhelm refuses these requests from agents in
+[container sessions](/docs/agents/containerized-sessions/) and
+[session-owned sandboxes](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox). It also refuses agents'
+requests from other hosts to Delete or Clone those sessions or launch into new environments.
 
 An agent starting another session can supply its first message with `--prompt` or `--prompt-file` (`-` reads stdin). The
 approval card shows the full message. It is sent once when the new agent starts; restarting, copying or replacing that
@@ -150,7 +152,8 @@ When an agent or a command in a remote session tries to open a web link through 
 your machine. The card names the session and host and shows the site it would open and the full URL. Only HTTP and HTTPS
 links are accepted. **Allow** opens it in your default browser from the Mac app, or in a new tab from Farhelm's web UI.
 **Deny** opens nothing. Commands can also ask directly with `farhelm agent open-url -- https://example.com`, from any
-session except a [containerized](/docs/agents/containerized-sessions/) one, including ones on your Mac.
+ordinary host session, including ones on your Mac. Container and session-owned sandbox environments keep the
+[request restriction above](/docs/using/approve-agent-requests/).
 
 The host settings have two separate permissions, both off initially. **Open links without asking** covers public
 addresses. **Open local-network links without asking** covers addresses on your own machine or private network; those

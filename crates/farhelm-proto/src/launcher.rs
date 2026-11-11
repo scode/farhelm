@@ -269,7 +269,8 @@ pub struct TemplateFields {
         skip_serializing_if = "Option::is_none"
     )]
     pub wrapper_prefix: Option<Option<Vec<String>>>,
-    /// Absent preserves isolation settings; null returns to an ordinary host launch.
+    /// Decode-only retired container choice. A stored object refuses application;
+    /// explicit null may remove it, while omission leaves the current draft alone.
     #[serde(
         default,
         deserialize_with = "present",
@@ -663,6 +664,9 @@ pub fn apply_template(
         field,
         reason,
     };
+    if fields.container.as_ref().is_some_and(Option::is_some) {
+        return Err(refuse("container", crate::RETIRED_CONTAINER_REASON.into()));
+    }
     let mut next = state.clone();
     if fields.name_kind.is_some() && fields.name.is_none() {
         return Err(refuse("session name kind", "needs a session name".into()));
@@ -677,11 +681,6 @@ pub fn apply_template(
             .map_err(|reason| refuse("wrapper prefix", reason))?;
     }
 
-    if let Some(Some(container)) = &fields.container {
-        container
-            .validate()
-            .map_err(|reason| refuse("container", reason))?;
-    }
     // 1. The launch kind.
     if let Some(kind) = fields.kind {
         next.kind = Some(kind);
@@ -1530,11 +1529,11 @@ mod tests {
         }
     }
 
-    /// Isolation edits need all three wire states: an omitted field preserves the
-    /// current agent, an object sets the choice, and null returns it to the host.
-    /// Command templates must refuse the edit atomically, including explicit null.
+    /// Historical fields keep their three wire states, but an object is now
+    /// decode-only and refuses application. Omission preserves stored state;
+    /// explicit null can remove it. Command templates still refuse null edits.
     #[test]
-    fn container_template_preserves_sets_clears_and_refuses_command_edits() {
+    fn container_template_preserves_clears_and_refuses_retired_edits() {
         let config = crate::ContainerConfig {
             engine: crate::ContainerEngine::Podman,
             image: "localhost/agent:latest".into(),
@@ -1560,8 +1559,14 @@ mod tests {
             let decoded: TemplateFields = serde_json::from_value(encoded).unwrap();
             assert_eq!(decoded.container, edit);
             let template = template("isolation", fields);
-            let applied = apply_template(&state, &template, &context(&[], &[], false)).unwrap();
-            assert_eq!(applied.container, expected);
+            if edit.as_ref().is_some_and(Option::is_some) {
+                let error =
+                    apply_template(&state, &template, &context(&[], &[], false)).unwrap_err();
+                assert!(error.to_string().contains("Delete only"));
+            } else {
+                let applied = apply_template(&state, &template, &context(&[], &[], false)).unwrap();
+                assert_eq!(applied.container, expected);
+            }
             let command = LauncherState {
                 kind: Some(LauncherKind::Command),
                 ..state.clone()
@@ -1572,10 +1577,10 @@ mod tests {
         }
     }
 
-    /// An archive-era template must still apply as containerized, leaving the
-    /// launcher's ordinary required-field gate to ask for a local image.
+    /// Archive-era settings must still decode without a list-wide failure,
+    /// then refuse use rather than silently launching without the old isolation.
     #[test]
-    fn container_archive_template_applies_with_an_empty_image() {
+    fn container_archive_template_decodes_and_refuses_application() {
         let fields: TemplateFields = serde_json::from_value(serde_json::json!({
             "container": {"engine": "podman", "image_file": "/images/old.oci", "api_proxy_port": 42000}
         })).unwrap();
@@ -1584,11 +1589,12 @@ mod tests {
             harness: Some(LaunchHarness::Codex),
             ..Default::default()
         };
-        let applied =
-            apply_template(&state, &template("old", fields), &context(&[], &[], false)).unwrap();
-        let container = applied.container.expect("old template preserves isolation");
+        let container = fields.container.as_ref().unwrap().as_ref().unwrap();
         assert!(container.image.is_empty());
         assert_eq!(container.api_proxy_port, 42000);
+        let error = apply_template(&state, &template("old", fields), &context(&[], &[], false))
+            .unwrap_err();
+        assert!(error.to_string().contains("Delete only"));
     }
 
     /// A missing wrapper edit must preserve New's remembered prefix, while a

@@ -22,7 +22,8 @@ use super::connection::{
 };
 use super::core::{
     CreateInputs, RequestError, SessionEntry, Supervisor, create_fingerprint,
-    ensure_title_printable, error_kind, terminal_less_launch_may_be_live, truncate_for_error,
+    ensure_title_printable, error_kind, require_active_launch, terminal_less_launch_may_be_live,
+    truncate_for_error,
 };
 use super::launch_artifacts::{
     append_launch_excerpt, cleanup_error_once, read_launch_sentinel, sentinel_could_still_apply,
@@ -192,7 +193,8 @@ use crate::store::RESUME_TEMPLATE_ELEMENT_CAP;
 /// launch. The inheritance selector on the wire is a session-authenticated
 /// spawn's, and those are now relayed to the helm instead of answered here
 /// (protocol 41; see `handle_restricted_control`), so a create carrying it is
-/// refused. A launch is held to its shape rules here
+/// refused. Retired container choices are also refused before a reservation can
+/// grant them recovery authority. A launch is held to its shape rules here
 /// ([`SessionLaunch::validate_new`]), so a malformed one is refused before a
 /// reservation exists and stays correctable under the same key. Every refusal
 /// is `ErrorKind::InvalidRequest`, and the `Err` is the user-facing message
@@ -203,6 +205,7 @@ fn create_launch(
 ) -> Result<SessionLaunch, String> {
     match (launch, inherit_agent) {
         (Some(launch), false) => {
+            require_active_launch(&launch).map_err(|error| error.message)?;
             launch.validate_new()?;
             Ok(launch)
         }
@@ -803,6 +806,10 @@ async fn handle_stop_session(
             .await;
             return;
         };
+        if let Err(error) = require_active_launch(&entry.info.launch) {
+            reply_error(&tx, req_id, error.kind, error.message).await;
+            return;
+        }
         // A display with an ended agent authorizes no new agent's death.
         // An interrupted, unconfirmed launch may have started a program
         // even though there is no terminal to probe. Treat that uncertainty
@@ -1117,35 +1124,6 @@ async fn handle_stop_session(
                 .await;
                 return;
             }
-            let container_runtime = match crate::container::ContainerRuntime::for_session(
-                &sup.state_dir,
-                &session_id,
-                entry.generation,
-                &entry.info.cwd,
-                &entry.info.launch,
-            ) {
-                Ok(runtime) => runtime,
-                Err(error) => {
-                    reply_error(&tx, req_id, ErrorKind::Internal, format!("{error:#}")).await;
-                    return;
-                }
-            };
-            let container_guard = match container_runtime.as_ref() {
-                Some(runtime) => match runtime.acquire().await {
-                    Ok(guard) => Some(guard),
-                    Err(error) => {
-                        reply_error(&tx, req_id, ErrorKind::Internal, format!("{error:#}")).await;
-                        return;
-                    }
-                },
-                None => None,
-            };
-            if let Some(container) = &container_guard
-                && let Err(error) = container.revoke()
-            {
-                reply_error(&tx, req_id, ErrorKind::Internal, format!("{error:#}")).await;
-                return;
-            }
             // A durable Error can finish cleanup now, including residue
             // from an earlier failed settlement. Share the ticker's success
             // latch so repeated Stops do not redo evidence preservation
@@ -1191,12 +1169,6 @@ async fn handle_stop_session(
                 // must be able to tell "nothing was running" from
                 // "the sweep could not confirm nothing is running".
                 reply_error(&tx, req_id, ErrorKind::Internal, format!("{e:#}")).await;
-                return;
-            }
-            if let Some(container) = &container_guard
-                && let Err(error) = container.stop().await
-            {
-                reply_error(&tx, req_id, ErrorKind::Internal, format!("{error:#}")).await;
                 return;
             }
             None
@@ -1550,6 +1522,10 @@ async fn handle_attach(
         .await;
         return;
     };
+    if let Err(error) = require_active_launch(&entry.info.launch) {
+        reply_error(tx, req_id, error.kind, error.message).await;
+        return;
+    }
     // Which terminal this attach is FOR, resolved once here and
     // used for everything below: the tmux handles to drive, and
     // the second half of the attachment key.
@@ -2645,7 +2621,7 @@ async fn handle_begin_upload(
         reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
         return;
     }
-    // The unknown-session refusal is made HERE rather than left to
+    // Unknown and retired sessions are refused HERE rather than left to
     // the transfer's task, even though the task must re-check it
     // anyway (under the session's lifecycle claim, which is what
     // makes the check race-tight against a concurrent delete —
@@ -2655,7 +2631,8 @@ async fn handle_begin_upload(
     // otherwise only reclaimed once the task it points at has been
     // observed to finish (`prune_finished_uploads`), which is
     // eventual rather than immediate.
-    if !sup.sessions.lock().await.contains_key(&session_id) {
+    let entry = sup.sessions.lock().await.get(&session_id).cloned();
+    let Some(entry) = entry else {
         reply_error(
             tx,
             req_id,
@@ -2663,6 +2640,10 @@ async fn handle_begin_upload(
             format!("no such session: {}", truncate_for_error(&session_id)),
         )
         .await;
+        return;
+    };
+    if let Err(error) = require_active_launch(&entry.info.launch) {
+        reply_error(tx, req_id, error.kind, error.message).await;
         return;
     }
 

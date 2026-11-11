@@ -470,11 +470,11 @@ impl AgentRequestHandler for HelmAgentRequests {
                     Ok(target) => target,
                     Err(error) => return outcome_of(Err(error), mutating),
                 };
-                let (target_claim, _) = match crate::sessions::route_session(&state, &target).await
-                {
-                    Ok(route) => route,
-                    Err(unroutable) => return outcome_of(Err(unroutable), mutating),
-                };
+                let (target_claim, _) =
+                    match crate::sessions::route_active_session(&state, &target).await {
+                        Ok(route) => route,
+                        Err(unroutable) => return outcome_of(Err(unroutable), mutating),
+                    };
                 let action = ApprovalAction::Rename {
                     target: crate::approvals::describe_session(
                         &state,
@@ -514,11 +514,11 @@ impl AgentRequestHandler for HelmAgentRequests {
                         Ok(target) => target,
                         Err(error) => return outcome_of(Err(error), mutating),
                     };
-                let (target_claim, _) = match crate::sessions::route_session(&state, &target).await
-                {
-                    Ok(route) => route,
-                    Err(unroutable) => return outcome_of(Err(unroutable), mutating),
-                };
+                let (target_claim, _) =
+                    match crate::sessions::route_active_session(&state, &target).await {
+                        Ok(route) => route,
+                        Err(unroutable) => return outcome_of(Err(unroutable), mutating),
+                    };
                 let action = ApprovalAction::Stop {
                     target: crate::approvals::describe_session(
                         &state,
@@ -621,11 +621,11 @@ impl AgentRequestHandler for HelmAgentRequests {
                     Ok(target) => target,
                     Err(error) => return outcome_of(Err(error), mutating),
                 };
-                let (target_claim, _) = match crate::sessions::route_session(&state, &target).await
-                {
-                    Ok(route) => route,
-                    Err(unroutable) => return outcome_of(Err(unroutable), mutating),
-                };
+                let (target_claim, _) =
+                    match crate::sessions::route_active_session(&state, &target).await {
+                        Ok(route) => route,
+                        Err(unroutable) => return outcome_of(Err(unroutable), mutating),
+                    };
                 // A plain restart resumes the session's own stored launch, so
                 // the YOLO rule does not apply (SPEC.md); the card shows that
                 // launch, resume command included, as the cache knows it.
@@ -2440,11 +2440,12 @@ async fn agent_prompt(
     target: &SessionKey,
     prompt: &str,
 ) -> anyhow::Result<AgentReply> {
-    let (claim, client) = crate::sessions::route_session(state, target).await?;
+    let (claim, client) = crate::sessions::route_active_session(state, target).await?;
     let (shown, attached) = client
         .prompt_target_info(&target.session_id)
         .await
         .context(ReadOnlyPhase("reading the session to prompt"))?;
+    crate::sessions::refuse_retired_source(&shown)?;
     let snapshot =
         state.manager.snapshots().into_iter().find(|snapshot| {
             snapshot.id == claim.host && snapshot.incarnation == claim.incarnation
@@ -2472,7 +2473,8 @@ async fn agent_prompt(
     };
     // Prompt is deliberately outside the own-host grant, even if re-enabled.
     approved(state, origin, asking, false, action).await?;
-    let (current_claim, current_client) = crate::sessions::route_session(state, target).await?;
+    let (current_claim, current_client) =
+        crate::sessions::route_active_session(state, target).await?;
     if current_claim.host != claim.host
         || current_claim.incarnation != claim.incarnation
         || current_client.connection_id() != client.connection_id()
@@ -15330,5 +15332,44 @@ mod tests {
         stop.send(())
             .expect("peer stayed connected through the positive controls");
         join_responder(responder, &created).await;
+    }
+    /// Clone must classify the live source before approval or destination create.
+    /// A stored retired choice cannot become ordinary execution by recompilation.
+    #[farhelm_testtrace::test]
+    async fn clone_of_a_retired_container_source_dispatches_nothing() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let selection=serde_json::from_value(serde_json::json!({"harness":"codex","model":null,"effort":null,"permissions":null,"container":{"engine":"podman","image_file":"old.tar","api_proxy_port":43210}})).unwrap();
+        let source = SessionInfo {
+            launch: farhelm_proto::SessionLaunch::Agent {
+                selection,
+                start: vec!["codex".into(), "{farhelm_args}".into()],
+                resume: None,
+            },
+            ..session("source", 1)
+        };
+        let (h, local, _) = creating_fleet(client_side, vec![session("asker", 0), source]).await;
+        let outcome = HelmAgentRequests::for_state(&h.state)
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Clone {
+                    source_session_id: Some(full_id(&h, local, "source")),
+                    host: Some("user@builder".into()),
+                    cwd: None,
+                    title: None,
+                    intent_key: Some("retired-clone".into()),
+                    confirm_yolo: false,
+                },
+            )
+            .await;
+        match outcome {
+            AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, ErrorKind::InvalidRequest);
+                assert!(message.contains("Delete only"), "{message}");
+            }
+            other => panic!("expected retired source refusal, got {other:?}"),
+        }
+        assert!(seen.lock().expect("seen mutex").is_empty());
     }
 }

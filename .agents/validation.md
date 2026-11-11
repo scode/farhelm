@@ -62,13 +62,41 @@ four global slots, zero retries and failure on empty selection, and retains each
 Runtime `SKIPPED` messages still require reading the retained output: an early-return test is a JUnit pass, not proof
 that its required systemd or SSH substrate ran.
 
-- The Linux `containerized_sessions` e2e tests require rootless Podman and the offline image
-  `docker.io/library/ubuntu:24.04`. They never pull images and fail if either prerequisite is missing. An intentional
-  run without this coverage sets `FARHELM_TEST_SKIP_PODMAN=1` and passes `--keep-farhelm-env FARHELM_TEST_SKIP_PODMAN`
-  to the recorder. The explicit SKIPPED output is not isolation evidence. A focused selection is
-  `cargo nextest run -p farhelm --test e2e -E 'test(containerized_sessions::)'`; creator-fence, timeout and
-  token-privacy unit tests are selected by
+- The Linux `containerized_sessions` e2e module covers decoding historical stored choices, refusing creation and
+  terminal/lifecycle/file access, and Delete. Its fixtures use stored rows without creating a container or base image.
+  Delete uses installed Podman to confirm absence, or succeeds when Podman is missing. Select it with
+  `cargo nextest run -p farhelm --test e2e -E 'test(containerized_sessions::)'`. Minimal cleanup/revocation unit tests,
+  including missing-engine and unconfirmed-absence cases, use
   `cargo nextest run -p farhelm-supervisor --lib -E 'test(container::tests::)'`.
+- The real Linux `podman_environments` e2e module uses a throwaway helm, the production provider and the ordinary
+  in-container supervisor/installer. One recipe build covers a public GitHub managed checkout, endpoint credential
+  delivery, ordinary grid/tab/file/upload/download protocols, a nonce-proven loopback HTTP relay, pause/Resume process
+  survival, Stop and conversation Restart with a stand-in, helm reconnection, external-stop automatic start once,
+  confirmed Delete and nonforcing cleanup of an image held by another owned container. The explicitly ignored
+  `real_ssh_environment_managed_checkout_and_ordinary_features` variant runs the same scenario through a real localhost
+  SSH place on an owned, preconfigured machine. Select it with `--run-ignored only` and its exact test name when SSH
+  acceptance is requested. It fails if strict passwordless localhost SSH is unavailable. This protocol coverage leaves
+  native desktop opening and browser file-link gestures to their own checks. It requires the production rootless Podman
+  probe to pass (Linux, at least 4.9.3, cgroup v2, systemd cgroup manager and usable user scopes), a working engine
+  event backend, and the cached managed base
+  `docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852`. The fixture
+  requires that image to be present before it starts. Its production recipe build uses the network for apt and both
+  official agent installers and clones the public repository from GitHub. Agent turns use a stand-in. Select it with
+  `cargo nextest run -p farhelm --test e2e -E 'test(/^podman_environments::/)'`. Nextest reserves all four slots and
+  allows 40 minutes for its 30-minute scenario, five-minute cleanup and teardown. The matching setup runs
+  `bash scripts/build-podman-test-payloads.sh` once per selected suite. By default it adds the native musl Rust target,
+  builds this source's CLI, reuses/builds the pinned static tmux, checks both ELF payloads and stages the ordinary
+  release-shaped files under `target/podman-test-payloads/`. Build tools include `musl-tools`, `file`, binutils and the
+  pinned tmux builder's prerequisites. Only selections containing this module trigger that payload build.
+  `FARHELM_HELM_PAYLOAD_DIR` can supply an absolute directory of matching staged payloads. Retain it intentionally with
+  `--keep-farhelm-env FARHELM_HELM_PAYLOAD_DIR`. Automatic setup exposes that variable only to matching tests through
+  nextest's setup environment. Archive workers receive prebuilt matching payloads from the Rust packer and retain its
+  private `FARHELM_TEST_PODMAN_PAYLOAD_DIR` through the recorder. Cargo is unavailable on those workers. An intentional
+  opt-out sets `FARHELM_TEST_SKIP_PODMAN=1` and passes `--keep-farhelm-env FARHELM_TEST_SKIP_PODMAN` to the recorder.
+  Setup then skips the payload build and the test prints SKIPPED. Report that as missing real-environment coverage and
+  exclude it from runtime pass evidence.
+- `bash -n scripts/build-podman-test-payloads.sh` and `shellcheck scripts/build-podman-test-payloads.sh` inspect the
+  focused payload producer. Its real artifact/install contract is exercised by the Podman e2e selection above.
 - `cargo fmt --all -- --check`
 - `cargo clippy --all-targets -- -D warnings`
 - `cargo clippy -p farhelm --bins -- -D warnings` — lints the shipped binary's configuration, in which the supervisor's
@@ -77,15 +105,15 @@ that its required systemd or SSH substrate ran.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'workspace Rust targets' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run --workspace --exclude farhelm-desktop`
   — executes applicable unit and integration targets, including the support crates omitted from default-members. Nextest
   starts a process per test and bounds concurrency across binaries; the e2e group has four slots, supervisor tmux
-  modules share two, the two-host fixture reserves two, and RSS reserves all four. The release gate runs this same
-  selection, including the farhelm integration targets, after preparing rootless Podman and its offline Ubuntu image. It
-  narrows every later Rust step with a filter rather than `-p`, so those steps share one build; ordinary CI does not run
-  this suite. Do not also run the old full libtest battery. The e2e suite's in-process harness and its real supervisor
-  process fixture create new terminals unless a test asks for old ones by name (`harness_tmux`,
-  `supervisor_process_tmux`, `SupervisorSeams::tmux_terminals()`), as the supervisor's own unit tests that need a real
-  terminal do; those, and the tests of tmux itself, are what the pinned tmux is for. On Linux it needs Python 3 at
-  `/usr/bin/python3`: besides the e2e stand-ins named below, the supervisor's `managed_supervisor::` stop test runs a
-  Python stand-in whose main thread exits before its other thread.
+  modules share two, the two-host fixture reserves two, and RSS and the real Podman fixture reserve all four. The
+  release gate runs this same selection, including the farhelm integration targets, after preparing rootless Podman and
+  its offline Ubuntu image. It narrows every later Rust step with a filter rather than `-p`, so those steps share one
+  build; ordinary CI does not run this suite. Do not also run the old full libtest battery. The e2e suite's in-process
+  harness and its real supervisor process fixture create new terminals unless a test asks for old ones by name
+  (`harness_tmux`, `supervisor_process_tmux`, `SupervisorSeams::tmux_terminals()`), as the supervisor's own unit tests
+  that need a real terminal do; those, and the tests of tmux itself, are what the pinned tmux is for. On Linux it needs
+  Python 3 at `/usr/bin/python3`: besides the e2e stand-ins named below, the supervisor's `managed_supervisor::` stop
+  test runs a Python stand-in whose main thread exits before its other thread.
 - `python3 scripts/record-test-run.py --kind development --selection 'workspace doctests' --concurrency '4 doctest threads' --tmux required -- cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4`
   — preserves doctest coverage separately because nextest does not execute it.
 - `scripts/test-tmux-pinned-shutdown.sh` — the x86_64 Linux release gate builds the exact checksummed release named by
@@ -291,9 +319,9 @@ that its required systemd or SSH substrate ran.
   ended by the verified signal and rolled back, or kept as a launching record when the signal must not touch them; and a
   retry keeping its row's kind with the switch flipped either way across a restart. Needs the pinned tmux first on
   `PATH` and Python 3 at `/usr/bin/python3` (the stand-in hosts). Linux only, two or three minutes (several tests wait
-  out client deadlines); part of the workspace nextest run. The container launch kind's test is in the containerized
-  suite above (`containerized_sessions::podman_agent_runs_from_a_terminal_host`). Run it when the create path, the
-  launch spec's composition, the host spawn or the launch identity's rollback or evidence changes.
+  out client deadlines); part of the workspace nextest run. Environment supervisors use the same ordinary host launch
+  path, exercised by the real Podman suite above. Run this selection when the create path, the launch spec's
+  composition, the host spawn or the launch identity's rollback or evidence changes.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'restarting host agents' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/host_handover::tests::/) | test(a_terminal_less_host_row_restarts_in_a_host_never_in_tmux) | test(/a_restart_seed_|_seed_of_an?_|a_seed_whose_runtime|a_stop_during_a_restarts_seed|a_restart_without_consent_touches_no_program|a_restart_asks_again_for_consent/) | test(a_failed_host_restart_after_a_stop_began_restores_a_placeholder) | test(restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts) | test(/^host_relaunches::/)'`
   — Restart of an agent in a terminal host (`crates/farhelm-supervisor/src/service/core/host_restart.rs`) and the
   startup rules for the hosts a restart left (`host_handover`, "Superseded agent hosts" and a restart that never started
@@ -873,12 +901,14 @@ that its required systemd or SSH substrate ran.
 - `deno test -A scripts/serve-page.ts` — the legacy standalone static server (agent pages use the `interactive-artifact`
   skill): that it answers with `Cache-Control: no-store` and moves past a taken port. Run it, with `deno check` on the
   same file, when the script changes; seconds. Needs Deno, and fetches `jsr:@std/http` the first time.
-- `deno test -A scripts/tensorlake/sandbox-tests.ts`, `deno check scripts/tensorlake/rust-tests.ts` and
+- `deno test -A scripts/tensorlake/sandbox-tests.ts`, `deno test -A scripts/tensorlake/rust-tests.ts`,
+  `deno check scripts/tensorlake/rust-tests.ts` and
   `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-shard.sh scripts/tensorlake/run-rust-shard.sh` —
   the Tensorlake harness's own checks (browser and Rust runners): how projects are balanced into shards, how the
   snapshot listing is read, which projects each run of the suite has (the ordinary one, or the old-terminal set's),
-  loading the set's account from the tested checkout, and how an old-terminal run's shard summary is checked. Run them,
-  with `deno check`, when the harness changes; seconds, no sandbox. Using the harness itself is described in
+  loading the set's account from the tested checkout, how an old-terminal run's shard summary is checked, and archive
+  configuration retaining the scoped prebuilt-Podman setup while removing only the local fixture build. Run them, with
+  `deno check`, when the harness changes; seconds, no sandbox. Using the harness itself is described in
   `.agents/tensorlake.md`.
 - `python3 scripts/record-test-run.py --kind development --selection 'portable brick-test harness' --concurrency 'one unittest process' --tmux none -- python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v`
   — validates owned Tart lifecycle, signed-input planning, Rust/Python upgrade-floor agreement and fixed-floor baseline

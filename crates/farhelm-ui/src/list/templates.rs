@@ -694,7 +694,8 @@ impl Field {
     }
 
     /// Decide which edits can be added under this switch, using harness-owned
-    /// capability answers rather than a second list of per-agent facts.
+    /// capability answers rather than a second list of per-agent facts. Retired
+    /// container fields stay removable on loaded templates but cannot be added.
     pub(super) fn offered(self, f: &TemplateFields) -> bool {
         match self {
             Self::Prompt => {
@@ -716,7 +717,8 @@ impl Field {
             Self::Permissions => {
                 f.kind == Some(LauncherKind::Agent) && f.agent.is_none_or(|a| !a.offers_only_yolo())
             }
-            Self::Wrapper | Self::Container => f.kind == Some(LauncherKind::Agent),
+            Self::Wrapper => f.kind == Some(LauncherKind::Agent),
+            Self::Container => false,
         }
     }
 
@@ -724,6 +726,9 @@ impl Field {
     /// Arbitrary model text is accepted even when the catalog does not know it;
     /// final launcher application retains its own stricter rules.
     fn refusal(self, f: &TemplateFields, catalog: Option<&[LaunchCatalogModel]>) -> Option<String> {
+        if self == Self::Container {
+            return Some(farhelm_proto::RETIRED_CONTAINER_REASON.into());
+        }
         let fits = if self == Self::Model {
             f.kind == Some(LauncherKind::Agent)
         } else {
@@ -733,11 +738,6 @@ impl Field {
             return Some(
                 "does not fit this launcher switch or agent type; remove it to save".into(),
             );
-        }
-        if self == Self::Container
-            && let Some(Some(config)) = &f.container
-        {
-            return config.validate().err();
         }
         if self == Self::Permissions
             && let Some(Some(value)) = f.permissions
@@ -825,9 +825,6 @@ struct Draft {
     /// An incomplete shell quote stays visible and blocks save without
     /// replacing the last valid word list in the wire fields.
     wrapper_input: Option<String>,
-    /// Keep an invalid port or incomplete path visible without losing the last
-    /// valid wire choice. Save must refuse until corrected or removed.
-    container_input: Option<crate::container_controls::ContainerDraft>,
 }
 impl Default for Draft {
     fn default() -> Self {
@@ -838,7 +835,6 @@ impl Default for Draft {
                 ..Default::default()
             },
             wrapper_input: None,
-            container_input: None,
         }
     }
 }
@@ -857,16 +853,12 @@ impl Draft {
             name: t.name.clone(),
             fields,
             wrapper_input: None,
-            container_input: None,
         }
     }
 
     /// Refuse incompatible or unfinished fields without requiring a complete
     /// launch. Another stacked template may supply the missing agent or command.
     fn refusal(&self, catalog: Option<&[LaunchCatalogModel]>) -> Option<String> {
-        if let Some(value) = &self.container_input {
-            return value.config().err();
-        }
         if let Some(text) = &self.wrapper_input {
             return Some(
                 farhelm_proto::split_wrapper_prefix(text)
@@ -974,7 +966,6 @@ pub(super) fn saved_fields_refusal(
         name: template.name.clone(),
         fields: template.fields.clone(),
         wrapper_input: None,
-        container_input: None,
     }
     .refusal(catalog)
 }
@@ -1057,9 +1048,9 @@ fn template_summary_parts(fields: &TemplateFields) -> Vec<DetailPart> {
     }
     if let Some(container) = &fields.container {
         push(vec![DetailPart::text(if container.is_some() {
-            "Containerized"
+            "Retired containerized setting"
         } else {
-            "Containerized off"
+            "Retired containerized reset"
         })]);
     }
     if let Some(yolo) = fields.yolo {
@@ -1244,23 +1235,9 @@ fn FieldEditor(
     // while Remove and Add compose the same names into an existing sentence.
     let noun = label.to_ascii_lowercase();
     let controls = match field {
-        Field::Container => rsx! {
-            crate::container_controls::ContainerControls {
-                value: draft().container_input.unwrap_or_else(|| crate::container_controls::ContainerDraft::from_config(current.container.as_ref().and_then(Option::as_ref))),
-                busy: disabled,
-                on_change: move |edit: crate::container_controls::ContainerEdit| {
-                    if disabled { return; }
-                    draft.with_mut(|d| {
-                        let mut value = d.container_input.take().unwrap_or_else(|| crate::container_controls::ContainerDraft::from_config(d.fields.container.as_ref().and_then(Option::as_ref)));
-                        value.apply(edit);
-                        match value.config() {
-                            Ok(config) => { d.fields.container = Some(config); }
-                            Err(_) => d.container_input = Some(value),
-                        }
-                    });
-                },
-            }
-        },
+        Field::Container => {
+            rsx! {p {class:"templates-hint", "This containerized-session setting is retired. Remove this field to save an ordinary template."}}
+        }
         Field::Wrapper => {
             let value = escaped.unwrap_or_else(|| {
                 draft().wrapper_input.unwrap_or_else(|| {
@@ -1500,7 +1477,6 @@ fn FieldEditor(
                 onclick: move |_| draft.with_mut(|d| {
                     field.remove(&mut d.fields);
                     if field == Field::Wrapper { d.wrapper_input = None; }
-                    if field == Field::Container { d.container_input = None; }
                 }), "✕"
             }
         }
@@ -1582,7 +1558,6 @@ fn leave_editor(
                 name: template.name.clone(),
                 fields: template.fields.clone(),
                 wrapper_input: None,
-                container_input: None,
             });
             draft.set(Draft::from_template(&template));
             previous.set(Some(template.name));
@@ -2990,39 +2965,16 @@ mod tests {
         assert!(!Field::Wrapper.offered(&fields));
     }
 
-    /// Container edits distinguish absence from an explicit off reset. Partial
-    /// templates need no agent or destination, but invalid configuration and
-    /// command-tab use must refuse instead of silently dropping isolation.
+    /// Old container fields remain inspectable but cannot become a launch or a
+    /// newly authored setting. Explicitly removing the field repairs the template.
     #[test]
-    fn container_field_preserves_presence_and_refuses_invalid_choices() {
-        let mut draft = Draft::default();
-        assert!(!Field::Container.is_set(&draft.fields));
-        Field::Container.add(&mut draft.fields);
-        assert_eq!(draft.fields.container, Some(None));
-        assert_eq!(draft.refusal(None), None);
-        let config = farhelm_proto::ContainerConfig {
-            engine: farhelm_proto::ContainerEngine::Podman,
-            image: "localhost/agent:latest".into(),
-            api_proxy_port: 43210,
-            github_token_file: Some("/tokens/github".into()),
-        };
-        draft.fields.container = Some(Some(config.clone()));
-        assert_eq!(draft.refusal(None), None);
-        assert!(template_summary(&draft.fields).contains("Containerized"));
-        draft
-            .fields
-            .container
-            .as_mut()
-            .unwrap()
-            .as_mut()
-            .unwrap()
-            .api_proxy_port = 0;
-        assert!(draft.refusal(None).unwrap().contains("65535"));
-        draft.fields.container = Some(Some(config));
-        draft.fields.kind = Some(LauncherKind::Command);
-        assert!(draft.refusal(None).unwrap().contains("Containerized"));
+    fn retired_container_field_remains_readable_and_requires_removal() {
+        let template:LaunchTemplate=serde_json::from_value(serde_json::json!({"name":"old","fields":{"agent":"codex","container":{"engine":"podman","image_file":"old.tar","api_proxy_port":43210}}})).unwrap();
+        let mut draft = Draft::from_template(&template);
+        assert!(Field::Container.is_set(&draft.fields));
+        assert!(!Field::Container.offered(&draft.fields));
+        assert!(draft.refusal(None).unwrap().contains("Delete only"));
         Field::Container.remove(&mut draft.fields);
-        assert_eq!(draft.fields.container, None);
         assert_eq!(draft.refusal(None), None);
     }
 
@@ -3394,7 +3346,6 @@ mod tests {
                         name: stored.name,
                         fields: stored.fields,
                         wrapper_input: None,
-                        container_input: None,
                     },
                 kind.is_some()
             );
@@ -3443,7 +3394,6 @@ mod tests {
                 ..Default::default()
             },
             wrapper_input: None,
-            container_input: None,
         };
         assert!(Field::Resume.offered(&draft.fields));
         assert!(!Field::Effort.offered(&draft.fields));
@@ -3476,7 +3426,6 @@ mod tests {
                 ..Default::default()
             },
             wrapper_input: None,
-            container_input: None,
         };
         assert_eq!(draft.refusal(None), None);
         draft.fields.agent = Some(LaunchHarness::Claude);
@@ -3537,7 +3486,6 @@ mod tests {
                     ..Default::default()
                 },
                 wrapper_input: None,
-                container_input: None,
             };
             assert_eq!(draft.refusal(None), None);
             check_template_shape(&LaunchTemplate {

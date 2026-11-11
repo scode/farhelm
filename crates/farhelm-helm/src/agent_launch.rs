@@ -403,23 +403,16 @@ mod tests {
     ///
     /// Why: this is SPEC.md's definition of how the CLI combines templates
     /// and flags, and the reason required flags may be omitted at all.
-    /// Isolation intent must also survive this projection: dropping a template's
-    /// container choice here would execute its command on the host instead.
+    /// Use a supported ordinary-host template here: retired container choices
+    /// are refused before resolution and have their own refusal coverage.
     #[farhelm_testtrace::test]
     fn flags_edit_the_templates_result_and_win_over_it() {
-        let container = farhelm_proto::ContainerConfig {
-            engine: farhelm_proto::ContainerEngine::Podman,
-            image: "localhost/template-agent:latest".into(),
-            api_proxy_port: 42000,
-            github_token_file: Some("/credentials/github-token".into()),
-        };
         let stored = [template(
             "my-codex",
             TemplateFields {
                 agent: Some(LaunchHarness::Codex),
                 model: Some(Some("gpt-6.1-sol".to_string())),
                 effort: Some(Some(LaunchEffort::High)),
-                container: Some(Some(container.clone())),
                 destination: folder("/srv/a"),
                 name: Some("from-template".to_string()),
                 ..Default::default()
@@ -446,7 +439,7 @@ mod tests {
         assert_eq!(selection.harness, LaunchHarness::Codex);
         assert_eq!(selection.model.as_deref(), Some("gpt-6-luna"));
         assert_eq!(selection.effort, Some(LaunchEffort::High));
-        assert_eq!(selection.container, Some(container.clone()));
+        assert_eq!(selection.container, None);
 
         let resolved = resolve(
             &stored,
@@ -464,10 +457,7 @@ mod tests {
         assert_eq!(resolved.cwd, "/srv/b", "an explicit --cwd wins");
         assert_eq!(resolved.title.as_deref(), Some("explicit"));
         assert_eq!(resolved.title_kind, Some(TemplateNameKind::Fixed));
-        assert_eq!(
-            resolved.launch.agent_selection().unwrap().container,
-            Some(container)
-        );
+        assert_eq!(resolved.launch.agent_selection().unwrap().container, None);
     }
 
     /// Template policy applies with its name, but an agent's own title is

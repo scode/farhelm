@@ -88,6 +88,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - `scripts/check-desktop-assets.sh` (including its head-product-assets parity fixtures)
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh`
 - `bash -n scripts/devbuild-mac.sh && bash -n scripts/test-provision-centos.sh`, and `shellcheck` on both scripts
+- `bash -n scripts/build-podman-test-payloads.sh` and `shellcheck scripts/build-podman-test-payloads.sh` (the focused
+  nextest producer). Its actual payload/install contract runs in the sweep's real Podman selection.
 - The CI install-script job's Alpine/BusyBox run (the `docker run ... alpine:3` step in `.github/workflows/ci.yml`, with
   a static musl `farhelm` from `cargo build -p farhelm --target x86_64-unknown-linux-musl` passed as `--farhelm`; the
   sweep runs `test-install-sh.sh` only under the host's GNU userland). Both runs include the installer's scenario-scoped
@@ -120,10 +122,12 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - `python3 scripts/test-todo-picker.py` (TODO extraction and legacy standalone checklist)
 - `python3 -B scripts/test-capture-agent-screens.py` (fixture URL privacy guard; no vendor turns)
 - `deno test -A scripts/serve-page.ts` (legacy standalone server; agent pages use the `interactive-artifact` skill)
-- `deno test -A scripts/tensorlake/sandbox-tests.ts`, `deno check scripts/tensorlake/rust-tests.ts` and
+- `deno test -A scripts/tensorlake/sandbox-tests.ts`, `deno test -A scripts/tensorlake/rust-tests.ts`,
+  `deno check scripts/tensorlake/rust-tests.ts` and
   `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-shard.sh scripts/tensorlake/run-rust-shard.sh` (the
-  Tensorlake harness's own checks, among them loading the old-terminal set's account from the checkout; running the
-  harness is only on the maintainer's request, `.agents/tensorlake.md`)
+  Tensorlake harness's own checks, including old-terminal accounting and archive configuration preserving the scoped
+  Podman payload setup while removing the local fixture build). Run the harness only on the maintainer's request, per
+  `.agents/tensorlake.md`.
 - `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py`
 - `python3 -B scripts/test-install-pinned-nextest.py` and `python3 -B scripts/test-install-pinned-dx.py`
 - The vendored terminal crates' three recorded test commands from `.agents/validation.md` (`vendor/vte`,
@@ -162,10 +166,23 @@ and the stop command) runs only with `gh workflow run ci.yml --ref <branch> -f s
 part of the sweep's workspace nextest. The same goes for that job's desktop supervisor record and stop tests and the
 stop's macOS process-exit check (`managed_supervisor::`, `procs::tests::finished_exiting`).
 
-The workspace nextest selection includes Linux `containerized_sessions` coverage. Rootless Podman and the offline
-`docker.io/library/ubuntu:24.04` image are required; tests never pull. An intentional opt-out uses
-`FARHELM_TEST_SKIP_PODMAN=1` retained through the recorder's `--keep-farhelm-env FARHELM_TEST_SKIP_PODMAN` option. Read
-and report its explicit SKIPPED output as missing coverage, not a runtime pass.
+The workspace nextest selection includes historical `containerized_sessions` compatibility and the real Linux
+`podman_environments` managed-checkout and lifecycle fixture. It covers credential delivery and ordinary tab, file,
+transfer and TCP-relay protocols with a stand-in agent. Its ignored SSH acceptance variant runs only when explicitly
+selected on a preconfigured owned localhost SSH substrate. Historical coverage uses stored rows without creating a
+container or image and keeps them readable with Delete only. Real coverage requires rootless Podman at least 4.9.3,
+cgroup v2, the systemd cgroup manager, a usable user manager and engine events, plus the cached exact production Ubuntu
+base `docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852`. The fixture
+requires that image to be present before it starts. The production recipe then uses network apt and official agent
+installers, and the managed checkout clones a public GitHub repository. Its focused nextest setup automatically builds
+matching static native-musl CLI/tmux payloads once per selected suite, using `musl-tools`, `file`, binutils and the
+pinned tmux build prerequisites. It exposes the staged path only to that module, which reserves four slots and has a
+40-minute nextest limit. An explicit `FARHELM_HELM_PAYLOAD_DIR` override is kept through the recorder by name. Automatic
+setup supplies the payload variable by default. Tensorlake Rust packs stage matching payloads locally and pass the
+private staged path through the worker recorder. Cargo is unavailable on clones. An intentional opt-out uses
+`FARHELM_TEST_SKIP_PODMAN=1` retained through the recorder's `--keep-farhelm-env FARHELM_TEST_SKIP_PODMAN` option. Setup
+then skips the payload build. Read and report explicit SKIPPED output as missing real-environment coverage and exclude
+it from runtime pass evidence. `.agents/validation.md` gives focused selections.
 
 The opt-in `DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh` checks four native fresh/stored dark/light cases:
 startup palette, ordinary Settings choices, private-profile persistence, fonts and same-attachment terminal input. Its
@@ -207,7 +224,9 @@ through the recorder with `--keep-farhelm-env FARHELM_E2E_SUITE_TERMINALS`, or o
 ## 4. Release gate and CI in GitHub
 
 The Linux release gate includes the full farhelm integration selection as well as the other workspace targets. Its setup
-prepares rootless Podman and the offline Ubuntu image, alongside loopback SSH and the pinned tmux.
+prepares rootless Podman and the exact cached Ubuntu digest, alongside loopback SSH, pinned static tmux and musl build
+tools before the workspace selection. The focused nextest setup builds the same-source installer payload before
+cargo-dist has produced a release artifact. The real recipe's network bootstrap is part of the gate.
 
 Only once the static checks pass and the sweep has finished with every failure fixed or recorded. On top of the stack
 (or of `main` when all fixes have already landed):

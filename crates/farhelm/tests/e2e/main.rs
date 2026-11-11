@@ -72,8 +72,12 @@ mod structured_launches;
 #[cfg(target_os = "linux")]
 mod wrapper_launch;
 
+// Historical row compatibility and real environment lifecycle have separate
+// fixtures: only the latter creates containers through the current provider.
 #[cfg(target_os = "linux")]
 mod containerized_sessions;
+#[cfg(target_os = "linux")]
+mod podman_environments;
 
 #[cfg(target_os = "linux")]
 mod marker_model;

@@ -69,11 +69,12 @@
 - **Change one thing.** Want this session again, but with Codex instead of Claude? **clone** opens the launcher with
   everything already filled in, so you change just the agent and launch. **replace with** does the same, and swaps the
   new session in for this one.
-- **Agents start sessions.** Tell your agent
+- **Agents start sessions.** On an ordinary host, tell your agent
   `$farhelm for each of the TODO items above, start a session in a new managed checkout of acme/web, named after the item`,
   and it will. Farhelm asks you before each one starts, unless you have told it to trust that host.
 - **Version control.** Farhelm works in any directory, whatever it uses for version control. It can also manage
-  checkouts of your GitHub repositories: a fresh clone for each session, moved to the trash when you are done with it.
+  checkouts of your GitHub repositories. Each session gets a fresh clone, moved to the trash when you are done with it
+  on an ordinary host. In a disposable container or sandbox, Delete permanently removes it with the environment.
 
 ## How it works
 
@@ -90,8 +91,10 @@
 
 Farhelm has two parts. The **helm** is what you look at, usually the Farhelm app on your Mac: it keeps your list of
 hosts and shows every session. A **supervisor** runs on each machine, your Mac included, and keeps that machine's agents
-and their terminals running. The helm reaches each supervisor over SSH. Nothing listens beyond your own machine, nothing
-goes through a relay, and every box in the diagram can restart without losing a session.
+and their terminals running. The helm reaches remote hosts over SSH. Experimental
+[container sessions](https://farhelm.io/docs/agents/containerized-sessions/) run their own supervisor and checkout
+inside rootless Podman on a Linux host, reached through that host. Nothing listens beyond your own machine, nothing goes
+through a relay, and every box in the diagram can restart without losing a session.
 
 <details>
 <summary>More details (architecture diagram)</summary>

@@ -533,8 +533,6 @@ impl Supervisor {
         let container_runtime = crate::container::ContainerRuntime::for_session(
             &self.state_dir,
             session_id,
-            entry.generation,
-            &entry.info.cwd,
             &entry.info.launch,
         )
         .map_err(TeardownError::Sweep)?;
@@ -566,6 +564,9 @@ impl Supervisor {
         // directory teardown below; cancellation itself is not rollback.
         abort_session_uploads(self, session_id, "the session was deleted").await;
 
+        // An already-running old creator may still own or await its original
+        // lock. Hold that permanent inode through revocation and confirmed
+        // removal, so it cannot recreate the container after Delete returns.
         let container_guard = match container_runtime.as_ref() {
             Some(runtime) => Some(runtime.acquire().await.map_err(TeardownError::Sweep)?),
             None => None,

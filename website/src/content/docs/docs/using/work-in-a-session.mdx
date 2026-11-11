@@ -42,7 +42,7 @@ button or Cmd+Q.
 />
 
 Click **+** after the tabs to open a shell. Each shell tab is named **Terminal 1**, **Terminal 2**, and so on, and runs on the same host as the agent, in the
-session's directory. In a [containerized session](/docs/agents/containerized-sessions/), it opens inside the session's
+session's directory. In a [container session](/docs/agents/containerized-sessions/), it opens inside the session's
 container. It belongs to the session: it keeps running when you switch to another session or restart the agent.
 Stopping or deleting the session closes it. Closing a tab yourself asks you to confirm first, since it ends whatever is running in it; press Enter
 to confirm, or **Cancel** to keep it open. You can skip that question with
@@ -107,7 +107,10 @@ The terminal keeps at least the last 10,000 lines for scrolling back. How much o
 
 In the Mac app, **Cmd-click** a localhost link in a remote session to open the service running on that host. Farhelm
 connects a port on your Mac to the service and opens it in your browser. The hover names the host and port; a plain click
-still opens the address on your Mac. Browser clients and sessions on your Mac have no tunnel action.
+still opens the address on your Mac. The tunnel action is available in the Mac app for remote sessions and container
+sessions.
+A [container session](/docs/agents/containerized-sessions/#working-inside-the-container) reaches the container's loopback,
+even when its container host is the helm's own machine.
 
 The first time, Farhelm asks you to accept a security warning. A page opened this way runs as a local page in your
 browser: it can read cookies from other services on `127.0.0.1`, since ports do not separate cookies, and it bypasses

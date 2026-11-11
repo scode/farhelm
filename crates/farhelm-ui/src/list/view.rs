@@ -1019,6 +1019,17 @@ pub(crate) fn ListView(
     let skip_session_confirmations = preferences.0.read().skip_session_confirmations == Some(true);
     let mut deleting = deleting;
     let mut listing = use_signal(|| None::<Result<SessionListing, String>>);
+    // Metadata shortcuts share this fence with row controls: hiding a menu
+    // item alone would still leave keyboard and batch entry points active.
+    let retired_row = move |id: &str| {
+        listing
+            .peek()
+            .as_ref()
+            .and_then(|reply| reply.as_ref().ok())
+            .and_then(|current| current.sessions.iter().find(|row| row.id.raw() == id))
+            .is_some_and(Session::is_retired_container)
+    };
+
     let replace_progress = use_context::<crate::replace::ReplaceProgress>();
     // Deliver this window's own explicit Trash requests (its archiving Delete,
     // a vanished managed session, a refused or finished cleanup) without losing
@@ -2463,7 +2474,8 @@ pub(crate) fn ListView(
         //
         // The same argument covers an open RENAME field, which replaces
         // the same buttons for the same reason.
-        if row_questions.peek_key(&id).is_some()
+        if retired_row(&id)
+            || row_questions.peek_key(&id).is_some()
             || rename_editor
                 .read()
                 .as_ref()
@@ -2613,7 +2625,8 @@ pub(crate) fn ListView(
     // Capture consent from the clicked render, never a fresh listing. The
     // question keeps the menu open so its ordinary prompt layout owns focus.
     let on_stop = move |target: DeleteTarget| {
-        if operations.busy_now(&target.id)
+        if retired_row(&target.id)
+            || operations.busy_now(&target.id)
             || row_questions.peek_key(&target.id).is_some()
             || rename_editor
                 .peek()
@@ -3168,6 +3181,9 @@ pub(crate) fn ListView(
     });
     use_effect(move || operations.dispatch.set(Some(header_actions)));
     let on_replace = move |session: Session| {
+        if session.is_retired_container() {
+            return;
+        }
         if clone_is_refused(
             operations.busy_now(session.id.raw()),
             session.id.raw(),
@@ -3260,6 +3276,9 @@ pub(crate) fn ListView(
     // into a fresh clone right now.
     let clone_popovers = popovers.clone();
     let on_clone = move |session: Session| {
+        if session.is_retired_container() {
+            return;
+        }
         if clone_is_refused(
             ops.busy_now() || operations.busy_now(session.id.raw()),
             session.id.raw(),
@@ -3413,6 +3432,9 @@ pub(crate) fn ListView(
     // rather than by the form.
     let replace_with_popovers = popovers.clone();
     let on_replace_with = move |session: Session| {
+        if session.is_retired_container() {
+            return;
+        }
         if clone_is_refused(
             ops.busy_now() || operations.busy_now(session.id.raw()),
             session.id.raw(),
@@ -3518,7 +3540,8 @@ pub(crate) fn ListView(
         // reaches this handler), and opening the field while the other
         // pane's operation owns the gate would present an editor whose
         // submit is guaranteed to be refused.
-        if operations.busy_now(&id)
+        if retired_row(&id)
+            || operations.busy_now(&id)
             || row_questions.peek_key(&id).is_some()
             || rename_editor.peek().is_some()
         {
@@ -3984,7 +4007,7 @@ pub(crate) fn ListView(
         else {
             return;
         };
-        if closed.shown <= closed.read_through {
+        if retired_row(&closed.id) || closed.shown <= closed.read_through {
             return;
         }
         let (closed, through) = (closed.id, closed.shown);
@@ -4021,6 +4044,9 @@ pub(crate) fn ListView(
     let clear_base = base.clone();
     let clear_refresh = request_listing.clone();
     let clear_bell = use_callback(move |(id, through): (String, u64)| {
+        if retired_row(&id) {
+            return;
+        }
         if bell_open.peek().as_ref().is_some_and(|open| open.id == id) {
             bell_open.set(None);
         }
@@ -4049,6 +4075,9 @@ pub(crate) fn ListView(
     // back from the helm. It closes the menu at acceptance like Mark read;
     // the pointer hold still decides when that new membership may move it.
     let on_pin = use_callback(move |(id, pinned): (String, bool)| {
+        if retired_row(&id) {
+            return;
+        }
         menu_open.set(None);
         let base = pin_base.clone();
         let refresh = pin_refresh.clone();
@@ -4074,6 +4103,9 @@ pub(crate) fn ListView(
     // Keep the visible-neighbor intent intact while the request runs. The
     // helm owns order; a refusal stays on this row and a success re-reads it.
     let on_move_pin = use_callback(move |(id, neighbor, before): (String, String, bool)| {
+        if retired_row(&id) {
+            return;
+        }
         menu_open.set(None);
         let base = move_pin_base.clone();
         let refresh = move_pin_refresh.clone();
@@ -4143,6 +4175,9 @@ pub(crate) fn ListView(
     // too. Success bumps list state through try_write; the list's effect
     // above turns that into the same explicit refresh as the bell actions.
     let on_mark_seen = move |(id, seen_activity_at): (String, Option<i64>)| {
+        if retired_row(&id) {
+            return;
+        }
         // The status dot shares this handler. Only dismiss this row's menu,
         // and do it at acceptance rather than when the queued write returns.
         if menu_open.peek().as_deref() == Some(id.as_str()) {
@@ -4284,6 +4319,7 @@ pub(crate) fn ListView(
             .map(|host| host.id);
         let targets: Vec<_> = targets
             .iter()
+            .filter(|row| action == LifecycleAction::Delete || !row.is_retired_container())
             .map(|row| {
                 DeleteSnapshot::for_session(row, local).with_sandbox(
                     crate::sandbox_sessions::owned_host(
@@ -4373,6 +4409,9 @@ pub(crate) fn ListView(
             marking::admitted_targets(drawn, &displayed, &marked.peek())
         };
         for row in targets {
+            if row.is_retired_container() {
+                continue;
+            }
             let id = row.id.raw().to_owned();
             if row_questions.peek_key(&id).is_some()
                 || rename_editor

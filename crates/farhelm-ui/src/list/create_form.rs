@@ -670,7 +670,7 @@ fn launcher_snapshot(
             &draft.permission_flags(),
         ),
         wrapper_prefix: wrapper_words(&draft.wrapper()).ok().flatten(),
-        container: draft.container().config().ok().flatten(),
+        container: draft.container(),
         workspace_trust: None,
         command: submitted_field(
             &draft.invocation(),
@@ -2353,57 +2353,6 @@ pub(super) struct CreatePrefill {
     /// rules; [`IntentBinding::replace_source`] carries the endpoint projection
     /// through asynchronous submission.
     pub(super) mode: LauncherMode,
-}
-
-/// Replace with reuses its source directory, even when that directory is a
-/// managed checkout. Preserve that copy without offering arbitrary folder
-/// launches: only the unchanged path on the same confirmed installation earns
-/// this UI affordance. The supervisor independently checks actual membership.
-fn container_destination_available(
-    draft: &LaunchDraft,
-    prefill: Option<&CreatePrefill>,
-    hosts: &[HostOption],
-    selected: Option<HostId>,
-) -> bool {
-    if !matches!(draft.destination(), DestinationDraft::Existing { .. }) {
-        return true;
-    }
-    let Some(prefill) = prefill else { return false };
-    let Some(host) = prefill.host.filter(|host| Some(*host) == selected) else {
-        return false;
-    };
-    prefill.repo.is_some()
-        && matches!(prefill.host_identity, Some(Some(_)))
-        && draft.submitted_cwd() == prefill.cwd
-        && matching_host_option(
-            &OpenHost {
-                id: host,
-                identity: prefill.host_identity.clone(),
-            },
-            hosts,
-        )
-        .is_some()
-}
-
-/// A successful container setup already proved managed membership on its
-/// installation. History may restore its existing directory without carrying
-/// fresh-checkout intent. Use that as a UI hint only while the offering install
-/// and literal directory still match; admission rechecks current ownership.
-fn container_recent_destination_available(
-    draft: &LaunchDraft,
-    offered: Option<&(CreateTarget, api::LaunchHistory)>,
-    live: Option<&CreateTarget>,
-) -> bool {
-    let Some((target, history)) = offered else {
-        return false;
-    };
-    Some(target) == live
-        && history.launches.iter().any(|entry| {
-            entry.host == target.host
-                && entry.github_repo.is_none()
-                && entry.selection.container.is_some()
-                && entry.cwd.raw() == draft.submitted_cwd()
-        })
 }
 
 /// Build the prefill a clone click seeds the create form with, from the
@@ -4622,18 +4571,7 @@ pub(super) fn CreateSessionForm(
         invalid_wrapper: launch_tab() == LaunchTab::Agent
             && wrapper_words(&structured_wrapper()).is_err(),
     };
-    let container_available = recipe().is_none()
-        && (container_destination_available(
-            &draft.snapshot(),
-            prefill_for_submit.as_ref(),
-            &hosts,
-            selected,
-        ) || container_recent_destination_available(
-            &draft.snapshot(),
-            offered_history.peek().as_ref(),
-            live_destination.peek().as_ref(),
-        ));
-    let container_refusal = draft.snapshot().container_refusal(container_available);
+    let container_refusal = draft.snapshot().container_refusal();
     let sandbox_reason = environment_target()
         .and_then(|target| {
             let name = target.recipe().to_string();
@@ -5504,7 +5442,7 @@ pub(super) fn CreateSessionForm(
     let initial_setup_pending =
         pending_initial_action().is_some() || !pending_initial_templates.read().is_empty();
     // The effect needs readiness, not a borrow of this render's owned refusal
-    // text. Container validation can produce a fresh String on every render.
+    // text. Compatibility refusals can produce a fresh String on every render.
     let launch_has_refusal = launch_refusal.is_some();
     let environment_place_pending = place_catalog_pending.call(environment_target());
     use_effect(use_reactive(
@@ -5923,24 +5861,7 @@ pub(super) fn CreateSessionForm(
                     return;
                 }
                 let launch = if current.tab() == LaunchTab::Agent {
-                    if let Some(reason) = current.container_refusal(
-                        (current.recipe().is_some() && current.destination().is_managed())
-                            || container_destination_available(
-                                &current,
-                                prefill_for_submit.as_ref(),
-                                &hosts,
-                                effective_create_host(
-                                    &hosts,
-                                    *chosen_host.peek(),
-                                    open_host.as_ref(),
-                                ),
-                            )
-                            || container_recent_destination_available(
-                                &current,
-                                offered_history.peek().as_ref(),
-                                live_destination.peek().as_ref(),
-                            ),
-                    ) {
+                    if let Some(reason) = current.container_refusal() {
                         error.set(Some(reason));
                         return;
                     }
@@ -6778,8 +6699,6 @@ pub(super) fn CreateSessionForm(
                 folder_refusal.set(None);
                 let catalog_for_recheck = catalog_for_submit.clone();
                 let hosts = hosts.clone();
-                let open_host = open_host.clone();
-                let prefill_for_submit = prefill_for_submit.clone();
                 let SubmitGuards {
                     launch: op_guard,
                     source: session_claim,
@@ -6815,7 +6734,7 @@ pub(super) fn CreateSessionForm(
                             // Suspension deliberately invalidates the connection token.
                             // Resume first, then bind both minting and the create to the
                             // new connection, preserving the selected installation.
-                            let (hosts, expected_incarnation, created_host_identity) = if hosts
+                            let (_hosts, expected_incarnation, created_host_identity) = if hosts
                                 .iter()
                                 .any(|host| host.id == binding.host && host.suspended)
                             {
@@ -6910,22 +6829,7 @@ pub(super) fn CreateSessionForm(
                                 // exactly what the person now sees.
                                 let launch = if matches!(binding.agent, LaunchIntent::Structured(_)) {
                                     let current = draft.snapshot();
-                                    if let Some(reason) = current.container_refusal(
-                                        container_destination_available(
-                                            &current,
-                                            prefill_for_submit.as_ref(),
-                                            &hosts,
-                                            effective_create_host(
-                                                &hosts,
-                                                *chosen_host.peek(),
-                                                open_host.as_ref(),
-                                            ),
-                                        ) || container_recent_destination_available(
-                                            &current,
-                                            offered_history.peek().as_ref(),
-                                            live_destination.peek().as_ref(),
-                                        ),
-                                    ) {
+                                    if let Some(reason) = current.container_refusal() {
                                         launch_attempted.set(LaunchAttempt::Refused);
                                         error.set(Some(reason));
                                         return;
@@ -8848,11 +8752,6 @@ pub(super) fn CreateSessionForm(
                                 permissions: structured_permissions(),
                                 permission_flags: structured_permission_flags(),
                                 wrapper_prefix: structured_wrapper(),
-                                container: container(),
-                                container_available,
-                                on_container: (!restart_mode).then(|| EventHandler::new(move |value| {
-                                    draft.edit_container(value);
-                                })),
                                 on_wrapper_prefix: move |text| {
                                     draft.edit_wrapper(text);
                                 },
@@ -9204,8 +9103,8 @@ pub(super) fn CreateSessionForm(
                     if let Some(lines) = summary_prompt_lines {
                         " · Prompt: {lines} lines"
                     }
-                    if container().enabled {
-                        " · container"
+                    if container().is_some() {
+                        " · retired container"
                     }
                 }
             }
@@ -9288,7 +9187,7 @@ pub(super) fn CreateSessionForm(
                             // its candidate while retaining its checkbox draft.
                             if !draft_transition_allowed(ops) || template_saving() || template_panel().is_some() { return; }
                             if draft.snapshot().tab() == LaunchTab::Agent
-                                && let Err(reason) = draft.snapshot().container().config() {
+                                && let Some(reason) = draft.snapshot().container_refusal() {
                                 launch_attempted.set(LaunchAttempt::None);
                                 error.set(Some(reason));
                                 return;
@@ -11860,132 +11759,6 @@ mod tests {
             assert!(!mark_restart_with(&mut prefill, &session));
             assert_eq!(prefill.mode, LauncherMode::Create);
         }
-    }
-
-    /// Replace with must reuse a copied managed checkout without exposing the
-    /// switch for another folder or host. This is only UI evidence: the host
-    /// rechecks actual membership before starting any container.
-    #[test]
-    fn container_controls_recognize_only_the_unchanged_copied_checkout() {
-        let hosts = [option(1, "source", true), option(2, "other", false)];
-        let session = Session {
-            host: Some(1),
-            host_identity: Some(Some("install-1".into())),
-            cwd: "/work/project/subdir".into(),
-            working_copy: Some(crate::github_checkout::WorkingCopyInfo {
-                id: "checkout-1".into(),
-                repo: GithubRepo::parse("acme/project").unwrap(),
-                canonical_path: "/work/project".into(),
-                origin_session_id: "origin".into(),
-            }),
-            ..row_specimen("source")
-        };
-        let prefill = prefill_from(&session, 1);
-        let mut draft = LaunchDraft::new(None);
-        draft.seed_folder(&prefill.cwd);
-        assert!(container_destination_available(
-            &draft,
-            Some(&prefill),
-            &hosts,
-            Some(1)
-        ));
-        assert!(!container_destination_available(
-            &draft,
-            None,
-            &hosts,
-            Some(1)
-        ));
-        assert!(!container_destination_available(
-            &draft,
-            Some(&prefill),
-            &hosts,
-            Some(2)
-        ));
-        let mut successor = hosts.clone();
-        successor[0].identity = Some("successor".into());
-        assert!(!container_destination_available(
-            &draft,
-            Some(&prefill),
-            &successor,
-            Some(1)
-        ));
-        draft.choose_existing_folder("/work/other");
-        assert!(!container_destination_available(
-            &draft,
-            Some(&prefill),
-            &hosts,
-            Some(1)
-        ));
-        draft.choose_destination_type(true);
-        assert!(container_destination_available(
-            &draft,
-            None,
-            &hosts,
-            Some(1)
-        ));
-    }
-
-    /// Replace's successful setup enters history as an existing destination.
-    /// Reusing it must retain container controls, while a replaced installation
-    /// or another directory cannot inherit that historical membership hint.
-    #[test]
-    fn container_recents_keep_their_existing_destination_hint_installation_bound() {
-        let target = CreateTarget::new(1, "install-1".into());
-        let offered = (
-            target.clone(),
-            api::LaunchHistory {
-                launches: vec![api::LaunchHistoryEntry {
-                    target: None,
-                    host: 1,
-                    github_repo: None,
-                    canonical_cwd: Some("/work/project".into()),
-                    cwd: "/work/project".into(),
-                    selection: LaunchSelection {
-                        harness: LaunchHarness::Codex,
-                        model: None,
-                        effort: None,
-                        permissions: None,
-                        permission_flags: None,
-                        wrapper_prefix: None,
-                        workspace_trust: None,
-                        container: Some(farhelm_proto::ContainerConfig {
-                            engine: farhelm_proto::ContainerEngine::Podman,
-                            image: "localhost/agent:latest".into(),
-                            api_proxy_port: 43210,
-                            github_token_file: None,
-                        }),
-                    },
-                    created_at: 1,
-                    creation_seq: Some(1),
-                }],
-                folders: Vec::new(),
-                checkout_config_revision: 0,
-            },
-        );
-        let mut draft = LaunchDraft::new(None);
-        draft.seed_folder("/work/project");
-        assert!(container_recent_destination_available(
-            &draft,
-            Some(&offered),
-            Some(&target)
-        ));
-        assert!(!container_recent_destination_available(
-            &draft,
-            Some(&offered),
-            None
-        ));
-        let successor = CreateTarget::new(1, "install-2".into());
-        assert!(!container_recent_destination_available(
-            &draft,
-            Some(&offered),
-            Some(&successor)
-        ));
-        draft.choose_existing_folder("/work/other");
-        assert!(!container_recent_destination_available(
-            &draft,
-            Some(&offered),
-            Some(&target)
-        ));
     }
 
     /// Checkout association chooses Clone's new repository, including a

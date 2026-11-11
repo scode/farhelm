@@ -123,11 +123,10 @@ async function unaccepted(route: Route) {
     json: { error: "fixture preview conflict" } });
 }
 
-/** Container intent must survive the mounted launcher's validation and request
- * projection. A bad port cannot fall back to host execution; changing to a
- * folder cannot discard the selected isolation. Only the final create is
- * intercepted, so no container creation or network clone belongs to this UI proof. */
-test("container choices require a managed checkout and reach the create intact", async ({ page, request }, testInfo) => {
+/** The retired supervisor-outside container fields must not return through
+ * checkout selection. Ordinary managed-checkout launch still uses its existing
+ * create path, which is intercepted before any clone or agent allocation. */
+test("managed checkout offers no retired container controls", async ({ page, request }) => {
   const host = await localHost(request);
   await unavailableDiscovery(page, host);
   await page.route("**/api/github-checkout-preview", async route => {
@@ -140,71 +139,19 @@ test("container choices require a managed checkout and reach the create intact",
     await unaccepted(route);
   });
   const form = await openComposer(page, host);
-  const enabled = form.getByRole("checkbox", { name: "Containerized", exact: true });
-  await expect(enabled).not.toBeChecked();
-  await expect(enabled).toBeDisabled();
-  await expect(form.locator(".launch-composer-container-choice")).toContainText("require a managed checkout");
+  await expect(form.getByRole("checkbox", { name: "Containerized", exact: true })).toHaveCount(0);
   await selectRepo(page);
   await expect(form.locator(".launch-composer-checkout-preview")).toHaveAttribute("data-preview-state", "ready");
-  await expect(enabled).toBeEnabled();
-  await enabled.check();
-  const image = form.getByLabel("Image", { exact: true });
-  const port = form.getByLabel("API proxy port", { exact: true });
-  const token = form.getByLabel("GitHub token file", { exact: true });
-  await expect(image).toHaveValue("");
-  await expect(port).toHaveValue("");
-  await expect(token).toHaveValue("");
-  // The launch grid flattens ordinary field labels. Its checkbox row must stay
-  // intact, and text-field borders must fit their column at either width.
-  const viewport = page.viewportSize()!;
-  for (const width of [1100, 390]) {
-    await page.setViewportSize({ width, height: viewport.height });
-    await expect.poll(() => enabled.evaluate(input => {
-      const box = input.getBoundingClientRect();
-      const badge = input.closest("label")!.querySelector("span")!.getBoundingClientRect();
-      return Math.abs(box.y + box.height / 2 - badge.y - badge.height / 2);
-    })).toBeLessThan(2);
-    for (const field of [image, port, token]) {
-      await expect.poll(() => field.evaluate(input => input.getBoundingClientRect().right -
-        input.closest(".launch-composer-container-choice")!.getBoundingClientRect().right)).toBeLessThanOrEqual(1);
-    }
-    await image.scrollIntoViewIfNeeded();
-    await page.screenshot({ path: testInfo.outputPath(`container-launcher-${width}.png`), animations: "disabled" });
+  for (const name of ["Image", "API proxy port", "GitHub token file"]) {
+    await expect(form.getByLabel(name, { exact: true })).toHaveCount(0);
   }
-  await page.setViewportSize(viewport);
   const launch = form.locator(".create-session-submit");
-  await port.fill("43210");
-  await expect(launch).toHaveAttribute("aria-disabled", "true");
-  await launch.click({ force: true });
-  await expect(form.locator(".launch-composer-refusal")).toContainText("image is required");
-  expect(creates).toHaveLength(0);
-  await image.fill("localhost/agent:latest");
-  await port.fill("65536");
-  await token.fill("/tokens/github");
-  await expect(launch).toHaveAttribute("aria-disabled", "true");
-  await launch.click({ force: true });
-  await expect(form.locator(".launch-composer-refusal")).toContainText("between 1 and 65535");
-  expect(creates).toHaveLength(0);
-  await port.fill("43210");
-  await expect(form.locator(".launch-composer-summary")).toContainText("container");
-  await form.getByRole("group", { name: "Destination type", exact: true }).getByRole("button", { name: "Folder", exact: true }).click();
-  await expect(enabled).toBeChecked();
-  await expect(enabled).toBeDisabled();
-  await expect(launch).toHaveAttribute("aria-disabled", "true");
-  await selectRepo(page);
-  await expect(port).toHaveValue("43210");
   await expect(launch).toHaveAttribute("aria-disabled", "false");
   await launch.click();
-  await expect.poll(() => creates.length).toBe(1);
-  expect(creates[0].launch.container).toEqual({
-    engine: "podman", image: "localhost/agent:latest", api_proxy_port: 43210, github_token_file: "/tokens/github",
-  });
   await expect(form.locator(".create-session-error")).toContainText("fixture preview conflict");
-  await form.getByRole("button", { name: "Cancel", exact: true }).click();
-  await page.locator(".new-session-button").click();
-  await expect(enabled).not.toBeChecked();
-  await form.getByRole("tab", { name: "Command", exact: true }).click();
-  await expect(enabled).toHaveCount(0);
+  expect(creates).toHaveLength(1);
+  expect(creates[0].launch.container ?? null).toBeNull();
+  expect(creates[0].github_checkout.repo).toBe("acme/bar");
 });
 
 /** Arrow navigation must reveal the row Enter would choose in an overflowing

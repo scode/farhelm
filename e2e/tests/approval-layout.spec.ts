@@ -596,7 +596,7 @@ for (const paneWidth of [960, 650, 320]) {
         })));
         for (const value of singleLines) {
           expect(value).toMatchObject({ wrap: "nowrap", overflow: "auto", tabStop: false, mono: true });
-          expect(["Folder", "Managed checkout of", "SSH destination", "Destination", "Container GitHub token file",
+          expect(["Folder", "Managed checkout of", "SSH destination", "Destination",
             "Session ID", "Copied session ID", "Site", "Host install"], "sideways scrolling is reserved for technical identities and destinations")
             .toContain(value.label);
         }

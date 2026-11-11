@@ -39,6 +39,12 @@ it keeps the host, directory, and name.
   alt="The launcher's destination part: the folder or managed checkout choice, the host menu, the directory field, and directory history dropdown."
 />
 
+**Runs on** chooses **Existing host**, **New container** or **New sandbox** when those destinations are available.
+[Container sessions](/docs/agents/containerized-sessions/) use a recipe and a Linux container host.
+[session-owned sandboxes](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox) use a recipe and your
+Tensorlake account. Both can clone a managed checkout inside or start in the new environment's home. The host and
+directory controls below apply to **Existing host**.
+
 With no session open, the host menu starts on the machine you are using, listed as **Local (this machine)**. A host that
 is not connected right now shows its state next to its name, such as "Unreachable, retrying", and you cannot launch on
 it until it is back. A **Suspended** [Tensorlake host](/docs/using/tensorlake-sandboxes/) is the exception: launching
@@ -83,9 +89,6 @@ tab, covered in [Custom commands](/docs/agents/custom-commands/).
 To start a known agent through another command, enter a **Wrapper prefix** on the **Agent** tab. Farhelm places it
 before the command it builds for that agent; [Agent wrappers](/docs/agents/agent-wrappers/) explains what the wrapper
 must pass through and when to use a custom command instead.
-
-The **Agent** tab also has an experimental **Containerized** switch for running a session in a managed checkout inside a
-Podman container on a Linux host; [Containerized sessions](/docs/agents/containerized-sessions/) covers what it needs.
 
 NOTE: The launcher remembers the permissions of your last launch from its **Agent** tab and the last wrapper prefix
 used with each agent, in any Farhelm window. After one YOLO launch, the next launcher opens on **YOLO** too;
@@ -156,9 +159,13 @@ them.
   alt="The recent setups list under the launcher's search box, showing three setups for the chosen directory."
 />
 
-A setup is the agent, model, effort, permissions, wrapper prefix, container settings, and directory of a launch you made on the launcher's **Agent**
-tab, however you filled it in.
-Farhelm keeps them separately for each host, and shows up to three; type `recent:` in the search box to find older ones.
+A setup keeps the agent, model, effort, permissions, wrapper prefix and destination of a launch you made on the
+launcher's **Agent** tab, however you filled it in. Farhelm keeps ordinary setups separately for each host and shows up
+to three. Type `recent:` in the search box to find older ones.
+
+For a new container or sandbox, a setup keeps the recipe, where it runs, and the repository-or-home choice after the old
+environment is deleted. Applying it creates a fresh environment from the recipe. A missing recipe or container host
+stays unavailable until you change that choice.
 
 To start another session like one you already have, choose **Clone** from that session's menu instead. It opens the
 launcher with that session's choices already filled in. [Stop, restart, and resume](/docs/using/stop-restart-resume/)
@@ -221,14 +228,19 @@ in the launcher's text fields when no text is selected; selected text keeps Cut 
 ## Start from a managed checkout
 
 A session can also start in a new clone of a GitHub repository instead of an existing directory. Farhelm calls this a
-managed checkout: it makes the directory for the session and moves it into the trash when its last session is deleted
-(see [Stop or delete](/docs/using/stop-restart-resume/#stop-or-delete)). The
+managed checkout. It makes the directory for the session. On an ordinary host, deleting its last session moves it into
+the trash (see [Stop or delete](/docs/using/stop-restart-resume/#stop-or-delete)). The
 [trash](/docs/using/session-list/#managed-checkout-trash) at the top of the session list shows where those directories are and lets you
-clean them up. Choose **Managed checkout** under destination, enter the repository as `owner/repo`, and select its
+clean them up. In a new [container](/docs/agents/containerized-sessions/) or
+[sandbox](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox), the clone lives inside and Delete
+permanently destroys it with the environment, without trash.
+
+Choose **Managed checkout** under destination, enter the repository as `owner/repo`, and select its
 suggestion. You can also type `gh:owner/repo` in the search box and choose **Managed checkout: owner/repo**. Farhelm
 suggests repositories you have launched or cloned before, but it does not search GitHub, so type a new one in full.
 
-Before you launch, the launcher shows the directory the clone will go into, and the launch button waits until it does.
+On an existing connected host, the launcher shows the directory the clone will go into before launch, and the launch
+button waits until it does. A new container or sandbox picks its directory inside after the environment is ready.
 On a suspended Tensorlake host there is no directory to show yet: one press resumes the host, picks the directory
 once it is ready and launches.
 [Quick launch](/docs/using/launch-templates/#quick-launch) creates that directory directly: marking the template means
@@ -239,8 +251,9 @@ back to an ordinary directory.
 
 **Clone** on a session in a managed checkout starts a managed checkout of the same repository, even if the session runs
 in a subdirectory. The name starts as the source's name plus `-clone`, then `-clone-2`, `-clone-3`, and so on when
-taken. Editing the name keeps exactly the name you enter and reports a conflict if its directory is taken. **Folder**
-restores the source's directory and name. **Replace with** and **Replace** keep the existing directory.
+taken. Editing the name keeps exactly the name you enter and reports a conflict if its directory is taken. On an
+ordinary host, **Folder** restores the source's directory and name. For a fresh environment, it uses the new
+environment's home. **Replace with** and **Replace** keep the existing directory.
 
 When no [prepared checkout](/docs/using/start-a-session/#prepared-checkouts) is ready, Git brings the host's cache of the repository up to date, then clones the default branch in the
 session's terminal. The agent starts once that finishes. Both commands use the host's own Git credentials, so anything
@@ -248,7 +261,8 @@ Git asks for, such as a password, shows up in the terminal for you to answer. A 
 helper can ask twice. If either command fails, the session's status shows error, the terminal says what went wrong,
 and any partial clone stays where it is.
 
-On a [Tensorlake sandbox](/docs/using/tensorlake-sandboxes/#managed-checkouts), private repositories need a
+In a [container session](/docs/agents/containerized-sessions/) or
+[Tensorlake sandbox](/docs/using/tensorlake-sandboxes/#managed-checkouts), private repositories need a
 GitHub token that the host's recipe selects from **Settings → Credentials**; public repositories need none.
 
 The cache makes repeated managed checkouts faster and takes roughly the disk space of one extra copy of each repository
@@ -261,11 +275,11 @@ place so concurrent checkouts still take turns. Git tidies the cache in the back
 its terminal; another launch of the same repository may wait while that finishes. A cache failure names its path in
 the terminal and stops the clone.
 
-An agent in one of your sessions can also start a session in a new managed checkout when you ask it to, with your
+An agent on an ordinary host can also start a session in a new managed checkout when you ask it to, with your
 approval ([Approve what agents do](/docs/using/approve-agent-requests/)).
 
-Managed checkouts need one setup step first: telling Farhelm which directory new checkouts go into. Until you have,
-choosing **Managed checkout** asks for it.
+On ordinary hosts, first tell Farhelm which directory new checkouts go into.
+Until you have, choosing **Managed checkout** asks for it.
 
 <Screenshot
   name="start-a-session/checkout-setup"

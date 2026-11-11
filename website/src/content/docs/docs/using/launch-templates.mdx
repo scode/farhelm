@@ -44,9 +44,16 @@ template receives that message; you can edit it in the launcher before starting.
 accept an initial prompt, or while the template leaves the agent type unset. It is not offered for command templates.
 
 The destination can be a directory or a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout),
-chosen with the same **Folder** and **Managed checkout** control as the launcher. The editor explains that each session
-gets its own checkout and that its directory moves to the trash when its last session is deleted. A model or a
-destination can stand on its own: another template can supply the agent or host.
+chosen with the same **Folder** and **Managed checkout** control as the launcher. On an ordinary host, its directory
+moves to the trash when its last session is deleted. A model or a destination can stand on its own. Another template can
+supply the agent or host.
+
+The editor's **Host** field can also choose **New container** with a recipe and container host, or **New sandbox**
+with a recipe. The same choices appear under **Runs on** in the launcher. Applying one restores the recipe and where it
+runs. A removed container host or deleted recipe makes it unavailable. For these destinations, **Folder** means the new
+environment's home and a managed checkout is cloned inside. Deleting that environment removes the checkout permanently,
+without trash. See [Container sessions](/docs/agents/containerized-sessions/) and
+[session-owned sandboxes](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox).
 
 A **Session name** can be a **Base name** or a **Fixed name**. When you apply a base name in the session launcher or a
 quick launch, or an agent starts a session from the template, a managed checkout uses it as-is when free, then adds `-2`, `-3`, and so on up to `-50` when taken. The
@@ -71,8 +78,9 @@ without opening the session launcher. Only one template is marked, and in the Te
 while the others are outlines: selecting another template's bolt moves the mark, and selecting the filled one clears it. An **Agent** template needs an agent to be marked; a **Command** template needs a nonblank command. With **Don't
 switch**, it is judged as an agent launch.
 
-Choices the template leaves out use **New**'s defaults: the open session's host, and the
-[directory **New** starts in](/docs/using/start-a-session/#choose-where-it-runs) on the launch's host. A template can
+Choices the template leaves out use the defaults of **+** (New session), including the open session's destination and
+the [directory it starts in](/docs/using/start-a-session/#choose-where-it-runs). For a session-owned environment, that means
+its recipe and where it runs for a fresh environment, starting in its home. A template can
 start a fresh [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) this way too: marking it
 means you choose to create its new directory without first seeing the path. If Farhelm asks about YOLO or the launch
 fails, the session launcher opens with that setup and the question or error. With no marked template, the shortcut opens
@@ -165,7 +173,7 @@ choices**.
   alt="The save as template panel with a name typed and the agent and effort checked, with the name, checkboxes, and save explained."
 />
 
-Agent, model and effort choices are checked when set, as are an initial prompt you typed, a container setup you turned on, and command choices. Approvals
+Agent, model and effort choices are checked when set, as are an initial prompt you typed and command choices. Approvals
 and a wrapper prefix are checked when you chose them; a host and directory only when you picked or typed them. A session
 name is checked after you type it or apply a template that sets it.
 A selected managed checkout's repository is checked too; unselected repository text is left out. Remembered defaults and
@@ -176,7 +184,8 @@ a template keeps that template's choice. Saving a numbered base keeps the origin
 `app-review`, ready to find the next free checkout when you use it again.
 
 The template keeps the current **Agent** or **Command** tab and only the choices you check. Saving closes the launcher.
-**Cancel** or Escape returns to the setup without saving. This action is not offered in **Replace with**.
+**Cancel** or Escape returns to the setup without saving. **Save as template** is unavailable in **Replace with** and
+for a new container or sandbox launch. Use the template editor to save the recipe and where it runs.
 
 ## Edit a template
 
@@ -234,7 +243,8 @@ directory or session name; changing one is refused. A first message is always re
 
 ## Templates and your agents
 
-Agents in your sessions can apply templates too, when they start sessions of their own with the `farhelm` command:
+Agents on ordinary hosts can apply templates too, when they start sessions of their own with the `farhelm` command.
+This command combines two templates.
 
 ```sh
 farhelm agent create --template codex-deep --template api-repo
@@ -244,7 +254,10 @@ Here `api-repo` supplies the host and directory, so the command needs neither `-
 as `--model` act as further changes after the templates, and `farhelm agent templates` lists the templates and what each
 sets.
 
-An agent can start a fresh managed checkout with a template too, or give `farhelm agent create --gh acme/web` directly
+Recipe-based environment launches are available through the UI. Agent requests for those launches remain unavailable.
+Farhelm also refuses requests from agents inside session-owned containers or sandboxes.
+
+An agent on an ordinary host can start a fresh managed checkout with a template too, or give `farhelm agent create --gh acme/web` directly
 (`--github` is an alias). `--title "Fix parser"` names its directory `web-fix-parser`; without a title Farhelm picks
 the next free `web-N`. The approval card shows the repository and exact directory before starting it.
 

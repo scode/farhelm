@@ -1719,6 +1719,15 @@ async fn create_session_request(
             ),
         )));
     }
+    if req
+        .launch
+        .as_ref()
+        .is_some_and(|selection| selection.container.is_some())
+    {
+        return Err(invalid_request(
+            farhelm_proto::RETIRED_CONTAINER_REASON.into(),
+        ));
+    }
     // Mode compilation consumes selector fields. Retain the original request
     // first so later reconciliation does not depend on mutable catalogs.
     let client_identity = fresh_create_request_identity(&req);
@@ -2232,6 +2241,7 @@ pub(crate) fn mode_from_source(
     source: &farhelm_proto::SessionInfo,
     remedy: &str,
 ) -> anyhow::Result<SessionLaunch> {
+    refuse_retired_source(source)?;
     match &source.launch {
         SessionLaunch::Agent { .. } | SessionLaunch::Command(_) => Ok(source.launch.clone()),
         SessionLaunch::Legacy { .. } => Err(invalid_request(format!(
@@ -2576,6 +2586,11 @@ fn create_mode(req: &mut CreateReq) -> anyhow::Result<SessionLaunch> {
 pub(crate) fn resolve_launch_request(request: LaunchRequest) -> anyhow::Result<SessionLaunch> {
     match request {
         LaunchRequest::Agent { mut selection } => {
+            if selection.container.is_some() {
+                return Err(invalid_request(
+                    farhelm_proto::RETIRED_CONTAINER_REASON.into(),
+                ));
+            }
             // Keep the strict wire field for stored data and old clients,
             // but only Settings may supply it for a newly composed launch.
             selection.workspace_trust = None;
@@ -2767,7 +2782,7 @@ pub(crate) async fn do_stop_session(
     refuse_if_tabs_open: bool,
     refuse_if_agent_running: bool,
 ) -> anyhow::Result<farhelm_proto::SessionStopOutcome> {
-    let (_claim, client) = route_session(state, key).await?;
+    let (_claim, client) = route_active_session(state, key).await?;
     client
         .stop_session_guarded(
             &key.session_id,
@@ -3156,7 +3171,7 @@ async fn resolve_and_restart_session(
         // again below after Settings has supplied the final trust choice.
         launches::named_start(launch, value.clone()).map_err(invalid_request)?;
     }
-    let (claim, client) = route_session(state, key).await?;
+    let (claim, client) = route_active_session(state, key).await?;
     // Only the trust-capable branch reads Settings or checkout identity. Plain
     // restart carries no replacement launch, and literal commands stay intact.
     let with = if let Some(launch) = with {
@@ -3307,7 +3322,7 @@ pub(crate) async fn do_rename_session(
     title: &str,
     expected_title: Option<&str>,
 ) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
-    let (claim, client) = route_session(state, key).await?;
+    let (claim, client) = route_active_session(state, key).await?;
     let session = client
         .rename_session(&key.session_id, title, expected_title)
         .await?;
@@ -3566,6 +3581,9 @@ pub(crate) async fn mark_seen(
         Ok(key) => key,
         Err(error) => return http_error(error),
     };
+    if let Err(error) = refuse_cached_retired(&state, &key).await {
+        return http_error(error);
+    }
     match resolve_owner(&state, &key).await {
         Ok(owner) => owner,
         Err(e) => return http_error(e),
@@ -3604,6 +3622,9 @@ pub(crate) async fn set_pin(
         Ok(key) => key,
         Err(error) => return http_error(error),
     };
+    if let Err(error) = refuse_cached_retired(&state, &key).await {
+        return http_error(error);
+    }
     match resolve_owner(&state, &key).await {
         Ok(owner) => owner,
         Err(e) => return http_error(e),
@@ -3648,6 +3669,9 @@ pub(crate) async fn move_pin(
         Ok(key) => key,
         Err(error) => return http_error(error),
     };
+    if let Err(error) = refuse_cached_retired(&state, &moved).await {
+        return http_error(error);
+    }
     let neighbor = match resolve_session_ref(&state, &req.neighbor).await {
         Ok(key) => key,
         Err(error) => return http_error(error),
@@ -3762,6 +3786,11 @@ async fn raise_notification_marks(
             Err(e) => return http_error(e),
         },
     };
+    if let Some(info) = known.as_ref()
+        && let Err(error) = refuse_retired_source(info)
+    {
+        return http_error(error);
+    }
     let newest = known
         .iter()
         .flat_map(|info| info.notifications.iter().map(|n| n.seq))
@@ -4077,6 +4106,7 @@ async fn replace_session_inner(
                     .to_string(),
             ))
         })?;
+    refuse_retired_source(&source)?;
     // The create half's fields: from the override body when "replace with"
     // supplied one (its mode already resolved at the top of this function,
     // ahead of routing), otherwise derived from the source's own live row
@@ -4216,18 +4246,19 @@ async fn replace_with_fresh_checkout(
     )?;
     // Lookup may resume an accepted pending create, so establish the source's
     // continued existence first. This read does not resolve launch settings.
-    if !manager::drain_sessions(client, claim.host)
+    let source = manager::drain_sessions(client, claim.host)
         .await?
         .sessions
-        .iter()
-        .any(|session| session.info().id == id)
-    {
-        return Err(SupervisorError::helm(
-            ErrorKind::NotFound,
-            "this session's own host no longer lists it, so there is nothing to replace".into(),
-        )
-        .into());
-    }
+        .into_iter()
+        .map(store::CachedRow::into_info)
+        .find(|session| session.id == id)
+        .ok_or_else(|| {
+            SupervisorError::helm(
+                ErrorKind::NotFound,
+                "this session's own host no longer lists it, so there is nothing to replace".into(),
+            )
+        })?;
+    refuse_retired_source(&source)?;
     let created = create_fresh_session(
         state,
         claim,
@@ -4422,7 +4453,7 @@ pub(crate) async fn open_tab(
         Ok(key) => key,
         Err(error) => return http_error(error),
     };
-    let (_claim, client) = match route_session(&state, &key).await {
+    let (_claim, client) = match route_active_session(&state, &key).await {
         Ok(routed) => routed,
         Err(e) => return http_error(e),
     };
@@ -4447,7 +4478,7 @@ pub(crate) async fn close_tab(
         Ok(key) => key,
         Err(error) => return http_error(error),
     };
-    let (_claim, client) = match route_session(&state, &key).await {
+    let (_claim, client) = match route_active_session(&state, &key).await {
         Ok(routed) => routed,
         Err(e) => return http_error(e),
     };
@@ -4472,4 +4503,45 @@ pub(crate) async fn environment_launch_history(
         Ok(entries) => axum::Json(entries).into_response(),
         Err(error) => http_error(error),
     }
+}
+
+/// Historical container choices remain readable but cannot authorize new work
+/// or metadata writes. Read this from the source before Clone or either Replace
+/// path can dispatch a create, including a fresh checkout's recovery lookup.
+pub(crate) fn refuse_retired_source(source: &farhelm_proto::SessionInfo) -> anyhow::Result<()> {
+    if source
+        .launch
+        .agent_selection()
+        .is_some_and(|selection| selection.container.is_some())
+    {
+        return Err(invalid_request(
+            farhelm_proto::RETIRED_CONTAINER_REASON.into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Withdraw conveniences for a known retired row without adding supervisor
+/// requests to ordinary terminal/file admission. This cache is only a negative
+/// fence: the supervisor still checks its actual stored launch on dispatch.
+pub(crate) async fn route_active_session(
+    state: &AppState,
+    key: &store::SessionKey,
+) -> anyhow::Result<(manager::SessionClaim, Arc<SupervisorClient>)> {
+    let routed = route_session(state, key).await?;
+    refuse_cached_retired(state, key).await?;
+    Ok(routed)
+}
+
+/// Helm-local metadata mutations have the same Delete-only retirement boundary.
+/// Cached absence grants no lifecycle authority; ordinary owning-host checks remain.
+async fn refuse_cached_retired(state: &AppState, key: &store::SessionKey) -> anyhow::Result<()> {
+    if let Some(source) = state
+        .store
+        .cached_session(key.host, &key.session_id)
+        .await?
+    {
+        refuse_retired_source(&source)?;
+    }
+    Ok(())
 }
