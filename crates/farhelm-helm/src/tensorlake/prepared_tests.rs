@@ -536,7 +536,7 @@ async fn prepared_snapshot_is_protected_by_sweeps_and_owned_base_refusal() {
         .unwrap();
     assert!(f.snapshot_ids().contains(&id));
     let mut save = tests_support::save();
-    save.base = RecipeBase::Snapshot { snapshot_id: id };
+    save.base = RecipeBase::TensorlakeSnapshot { snapshot_id: id };
     assert!(matches!(
         f.store
             .create_tensorlake_recipe("other".into(), save)

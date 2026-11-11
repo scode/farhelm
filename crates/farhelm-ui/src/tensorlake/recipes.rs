@@ -64,9 +64,14 @@ pub(crate) fn recipe_summary(view: &RecipeView) -> String {
         format!("{} GB", view.size.disk_gb),
     ];
     parts.push(match &view.base {
-        RecipeBase::TensorlakeUbuntu => "base: Tensorlake Ubuntu".into(),
-        RecipeBase::Image { image } => format!("base: your image {image}"),
-        RecipeBase::Snapshot { snapshot_id } => format!("base: your snapshot {snapshot_id}"),
+        RecipeBase::ManagedUbuntu => "base: Tensorlake Ubuntu".into(),
+        RecipeBase::TensorlakeImage { image } => format!("base: your image {image}"),
+        RecipeBase::TensorlakeSnapshot { snapshot_id } => {
+            format!("base: your snapshot {snapshot_id}")
+        }
+        RecipeBase::ContainerImage { reference, user } => {
+            format!("base: container image {reference} as {user} (Podman only)")
+        }
     });
     parts.push(plural(view.packages.len(), "package", "packages"));
     if !view.tunnels.is_empty() {
@@ -187,7 +192,7 @@ fn snapshot_status(view: &RecipeView) -> SnapshotStatus {
             )));
         }
     }
-    let (building, action) = match &view.build {
+    let (building, mut action) = match &view.build {
         BuildView::Building { step, .. } => {
             lines.push(StatusLine::Plain(format!(
                 "Building snapshot: {} ({})",
@@ -221,6 +226,12 @@ fn snapshot_status(view: &RecipeView) -> SnapshotStatus {
             "Farhelm could not delete an old build or preparation sandbox or snapshot yet; it tries again at the next build or preparation, whichever left it, and when the recipe is deleted"
                 .into(),
         ));
+    }
+    if !view.base.supports(farhelm_proto::ProviderKind::Tensorlake) {
+        lines.push(StatusLine::Warning(
+            "This recipe's base cannot run on Tensorlake".into(),
+        ));
+        action = None;
     }
     SnapshotStatus {
         lines,
@@ -569,21 +580,21 @@ mod tests {
     fn summaries_follow_the_mockup() {
         let packages = |n: usize| RecipeView {
             packages: (0..n).map(|n| format!("pkg{n}")).collect(),
-            ..view(RecipeBase::TensorlakeUbuntu, 1)
+            ..view(RecipeBase::ManagedUbuntu, 1)
         };
         assert_eq!(
             recipe_summary(&packages(12)),
             "4 CPU · 8 GB · 50 GB · base: Tensorlake Ubuntu · 12 packages · 1 tunnel"
         );
         let mut one_package = packages(1);
-        one_package.tunnels = view(RecipeBase::TensorlakeUbuntu, 2).tunnels;
+        one_package.tunnels = view(RecipeBase::ManagedUbuntu, 2).tunnels;
         assert_eq!(
             recipe_summary(&one_package),
             "4 CPU · 8 GB · 50 GB · base: Tensorlake Ubuntu · 1 package · 2 tunnels"
         );
         assert_eq!(
             recipe_summary(&view(
-                RecipeBase::Image {
+                RecipeBase::TensorlakeImage {
                     image: "team-base".into()
                 },
                 0
@@ -592,13 +603,34 @@ mod tests {
         );
         assert_eq!(
             recipe_summary(&view(
-                RecipeBase::Snapshot {
+                RecipeBase::TensorlakeSnapshot {
                     snapshot_id: "abc123".into()
                 },
                 0
             )),
             "4 CPU · 8 GB · 50 GB · base: your snapshot abc123 · 0 packages"
         );
+    }
+
+    /// A shared-catalog container base remains visible in the staged list, with
+    /// its login account and refusal reason. Offering Build here could incur
+    /// Tensorlake work for a base that belongs to a different provider.
+    #[test]
+    fn container_bases_explain_their_provider_and_offer_no_tensorlake_build() {
+        let recipe = view(
+            RecipeBase::ContainerImage {
+                reference: "example.test/team/dev:latest".into(),
+                user: "dev".into(),
+            },
+            0,
+        );
+        assert!(
+            recipe_summary(&recipe)
+                .contains("container image example.test/team/dev:latest as dev (Podman only)")
+        );
+        let status = snapshot_status(&recipe);
+        assert!(status.action.is_none());
+        assert!(status.lines.iter().any(|line| matches!(line, StatusLine::Warning(reason) if reason.contains("cannot run on Tensorlake"))));
     }
 
     /// A Tensorlake Ubuntu recipe whose current build inputs match the normal
@@ -608,7 +640,7 @@ mod tests {
             snapshot,
             build,
             packages: vec!["git".into(), "ripgrep".into()],
-            ..view(RecipeBase::TensorlakeUbuntu, 0)
+            ..view(RecipeBase::ManagedUbuntu, 0)
         }
     }
 
@@ -617,7 +649,7 @@ mod tests {
         SnapshotView {
             id: "snap1".into(),
             built_at: 1_793_714_525,
-            base: RecipeBase::TensorlakeUbuntu,
+            base: RecipeBase::ManagedUbuntu,
             disk_gb: 50,
             packages: packages.iter().map(|p| p.to_string()).collect(),
             claude_version: Some("2.0.1 (Claude Code)".into()),
@@ -633,7 +665,7 @@ mod tests {
     /// A ready record carries deliberately opaque IDs: none belongs in the
     /// user-facing preparation line, which needs only age, version and state.
     fn prepared_recipe() -> RecipeView {
-        let mut recipe = view(RecipeBase::TensorlakeUbuntu, 0);
+        let mut recipe = view(RecipeBase::ManagedUbuntu, 0);
         recipe.prepared = Some(PreparedSnapshotView {
             id: "private-prepared-id".into(),
             prepared_at: 100,
@@ -752,7 +784,7 @@ mod tests {
     /// tick changes age, including after expiry, but only the helm marks stale.
     #[test]
     fn prepared_status_keeps_readiness_last_checked_and_ages_display_only() {
-        let missing = view(RecipeBase::TensorlakeUbuntu, 0);
+        let missing = view(RecipeBase::ManagedUbuntu, 0);
         assert_eq!(
             prepared_status(&missing, Some(100)),
             PreparedStatus {
@@ -971,10 +1003,10 @@ mod tests {
         assert!(matches!(&stale.lines[3], StatusLine::Muted(_)));
 
         for base in [
-            RecipeBase::Image {
+            RecipeBase::TensorlakeImage {
                 image: "team-base".into(),
             },
-            RecipeBase::Snapshot {
+            RecipeBase::TensorlakeSnapshot {
                 snapshot_id: "abc".into(),
             },
         ] {
@@ -992,11 +1024,11 @@ mod tests {
     #[test]
     fn base_changes_keep_the_snapshot_and_build_actions() {
         for base in [
-            RecipeBase::TensorlakeUbuntu,
-            RecipeBase::Image {
+            RecipeBase::ManagedUbuntu,
+            RecipeBase::TensorlakeImage {
                 image: "team-base".into(),
             },
-            RecipeBase::Snapshot {
+            RecipeBase::TensorlakeSnapshot {
                 snapshot_id: "snapshot-1".into(),
             },
         ] {
@@ -1014,14 +1046,18 @@ mod tests {
             // Changing the identifier within one base kind matters too: an
             // image or snapshot choice cannot be compared by its kind alone.
             recipe.base = match &base {
-                RecipeBase::TensorlakeUbuntu => RecipeBase::Image {
+                RecipeBase::ManagedUbuntu => RecipeBase::TensorlakeImage {
                     image: "another-base".into(),
                 },
-                RecipeBase::Image { .. } => RecipeBase::Image {
+                RecipeBase::TensorlakeImage { .. } => RecipeBase::TensorlakeImage {
                     image: "another-base".into(),
                 },
-                RecipeBase::Snapshot { .. } => RecipeBase::Snapshot {
+                RecipeBase::TensorlakeSnapshot { .. } => RecipeBase::TensorlakeSnapshot {
                     snapshot_id: "another-snapshot".into(),
+                },
+                RecipeBase::ContainerImage { .. } => RecipeBase::ContainerImage {
+                    reference: "example.test/another-base:latest".into(),
+                    user: "dev".into(),
                 },
             };
             let status = snapshot_status(&recipe);

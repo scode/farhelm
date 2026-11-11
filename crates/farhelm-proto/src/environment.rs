@@ -15,6 +15,30 @@ pub enum ProviderKind {
     Podman,
 }
 
+/// The durable location of a provider's artifacts and environments.
+/// Host IDs use the helm registry's i64 representation. Keeping the provider
+/// inside the place prevents a target from pairing a host with another provider.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "host", rename_all = "snake_case")]
+pub enum Place {
+    #[serde(rename = "tensorlake_account")]
+    TensorlakeAccount,
+    #[serde(rename = "podman_host")]
+    PodmanHost(i64),
+}
+
+#[warn(clippy::wildcard_enum_match_arm)]
+impl Place {
+    /// Provider identity follows the place, including when its host is absent.
+    /// Resolving or validating the current host remains the helm's responsibility.
+    pub fn provider(self) -> ProviderKind {
+        match self {
+            Self::TensorlakeAccount => ProviderKind::Tensorlake,
+            Self::PodmanHost(_) => ProviderKind::Podman,
+        }
+    }
+}
+
 /// Whether a failed status read leaves the connection path worth trying.
 /// This applies only when the provider could not answer. A successful answer
 /// with an unknown state always withholds the dial.

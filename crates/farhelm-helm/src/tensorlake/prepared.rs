@@ -2,23 +2,14 @@
 //! supervisor state. Provisioning owns installation and verification; the recipe
 //! engine owns the billed sandbox and snapshot lifecycle.
 
-use std::path::PathBuf;
-
 use async_trait::async_trait;
 use farhelm_proto::tensorlake::recipes::{PreparedSnapshotView, PreparedStaleReason};
 use serde::{Deserialize, Serialize};
 
 use super::ssh::TensorlakeSshAccess;
 
-/// Coordinates from the actual install plan, retained for a clone's admission.
-/// They carry no supervisor identity. Each clone learns its identity at hello.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub(crate) struct PreparedInstallFacts {
-    pub(crate) home: PathBuf,
-    pub(crate) farhelm_path: PathBuf,
-    pub(crate) state_dir: PathBuf,
-    pub(crate) farhelm_version: String,
-}
+// Existing snapshot consumers keep their import path for these shared facts.
+pub(crate) use crate::environment::recipes::PreparedInstallFacts;
 
 /// Install and leave a sandbox safe to checkpoint without delivering credentials.
 ///

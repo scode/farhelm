@@ -3,6 +3,132 @@
 
 use super::*;
 
+/// Renaming Rust variants must preserve recipe, template and snapshot JSON.
+/// The compatibility import names the same type, so old callers can read the
+/// shared catalog without a second model or translation step.
+#[test]
+fn shared_bases_preserve_stored_tags_and_provider_compatibility() {
+    let cases = [
+        (
+            serde_json::json!({"kind":"tensorlake_ubuntu"}),
+            RecipeBase::ManagedUbuntu,
+            true,
+            true,
+        ),
+        (
+            serde_json::json!({"kind":"image","image":"team/base"}),
+            RecipeBase::TensorlakeImage {
+                image: "team/base".into(),
+            },
+            true,
+            false,
+        ),
+        (
+            serde_json::json!({"kind":"snapshot","snapshot_id":"abc123"}),
+            RecipeBase::TensorlakeSnapshot {
+                snapshot_id: "abc123".into(),
+            },
+            true,
+            false,
+        ),
+        (
+            serde_json::json!({"kind":"container_image","reference":"example.test/team/base@sha256:abc","user":"dev"}),
+            RecipeBase::ContainerImage {
+                reference: "example.test/team/base@sha256:abc".into(),
+                user: "dev".into(),
+            },
+            false,
+            true,
+        ),
+    ];
+    for (json, expected, tensorlake, podman) in cases {
+        let base: crate::tensorlake::recipes::RecipeBase =
+            serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(base, expected);
+        assert_eq!(serde_json::to_value(&base).unwrap(), json);
+        assert_eq!(base.supports(ProviderKind::Tensorlake), tensorlake);
+        assert_eq!(base.supports(ProviderKind::Podman), podman);
+        let mut save = serde_json::to_value(recipe()).unwrap();
+        save["base"] = json;
+        let decoded: RecipeSave = serde_json::from_value(save.clone()).unwrap();
+        assert_eq!(decoded.base, expected);
+        assert!(check_recipe(&decoded).is_ok());
+        save["base"]["unrecognized"] = true.into();
+        assert!(serde_json::from_value::<RecipeSave>(save).is_err());
+    }
+}
+
+/// Container bases preserve literal provider inputs, including IPv6 registries
+/// and account spellings outside the recipe-name grammar. Required fields and
+/// process-argument NUL exclusion are the catalog's structural contract. Podman
+/// and image inspection decide whether those values resolve at runtime.
+#[test]
+fn container_base_validation_preserves_literal_inputs() {
+    let mut save = recipe();
+    for (reference, user) in [
+        (
+            "example.test:5000/team/dev@sha256:abc123".to_string(),
+            "dev_user-2".to_string(),
+        ),
+        (
+            "[2001:db8::1]:5000/team/dev:latest".into(),
+            "Dev.User".into(),
+        ),
+        ("example.test/team/dev:latest".into(), "_dev".into()),
+        ("example.test/team/dev:latest".into(), "1001".into()),
+        ("literal-reference".repeat(40), "literal-user".repeat(4)),
+        (
+            "-provider-validates-this".into(),
+            "literal account spelling".into(),
+        ),
+    ] {
+        let base = RecipeBase::ContainerImage { reference, user };
+        save.base = base.clone();
+        assert!(check_recipe(&save).is_ok());
+        let decoded: RecipeSave =
+            serde_json::from_value(serde_json::to_value(&save).unwrap()).unwrap();
+        assert_eq!(decoded.base, base);
+    }
+    for (reference, user) in [
+        ("", "dev"),
+        ("image", ""),
+        ("image\0suffix", "dev"),
+        ("image", "dev\0suffix"),
+    ] {
+        save.base = RecipeBase::ContainerImage {
+            reference: reference.into(),
+            user: user.into(),
+        };
+        assert!(check_recipe(&save).is_err(), "{reference:?} {user:?}");
+    }
+}
+
+/// A place carries provider identity durably, while its host remains a registry
+/// reference that the helm validates when resolving a launch target.
+#[test]
+fn places_round_trip_with_their_provider() {
+    for (place, json, provider) in [
+        (
+            crate::Place::TensorlakeAccount,
+            serde_json::json!({"kind":"tensorlake_account"}),
+            ProviderKind::Tensorlake,
+        ),
+        (
+            crate::Place::PodmanHost(7),
+            serde_json::json!({"kind":"podman_host","host":7}),
+            ProviderKind::Podman,
+        ),
+    ] {
+        assert_eq!(serde_json::to_value(place).unwrap(), json);
+        assert_eq!(serde_json::from_value::<crate::Place>(json).unwrap(), place);
+        assert_eq!(place.provider(), provider);
+    }
+    assert!(
+        serde_json::from_value::<crate::Place>(serde_json::json!({"kind":"future_provider"}))
+            .is_err()
+    );
+}
+
 /// A valid managed recipe that each test varies in one field.
 fn recipe() -> RecipeSave {
     RecipeSave {
@@ -11,7 +137,7 @@ fn recipe() -> RecipeSave {
             memory_gb: 4,
             disk_gb: 20,
         },
-        base: RecipeBase::TensorlakeUbuntu,
+        base: RecipeBase::ManagedUbuntu,
         packages: vec!["ripgrep".into()],
         claude: None,
         codex: None,
@@ -153,26 +279,26 @@ fn reused_images_and_snapshots_have_narrow_shapes() {
     };
     for good in ["team-base", "tensorlake/ubuntu-systemd", "org/img:v1.2_3"] {
         assert_eq!(
-            check(RecipeBase::Image { image: good.into() }),
+            check(RecipeBase::TensorlakeImage { image: good.into() }),
             Ok(()),
             "{good:?}"
         );
     }
     for bad in ["", "-x", "a b", "a;b", &"a".repeat(201)] {
         assert!(
-            check(RecipeBase::Image { image: bad.into() }).is_err(),
+            check(RecipeBase::TensorlakeImage { image: bad.into() }).is_err(),
             "{bad:?}"
         );
     }
     assert_eq!(
-        check(RecipeBase::Snapshot {
+        check(RecipeBase::TensorlakeSnapshot {
             snapshot_id: "ov8u0zj19vjgt1n66pnid".into()
         }),
         Ok(())
     );
     for bad in ["", "ABC", "a-b", &"a".repeat(65)] {
         assert!(
-            check(RecipeBase::Snapshot {
+            check(RecipeBase::TensorlakeSnapshot {
                 snapshot_id: bad.into()
             })
             .is_err(),
@@ -187,11 +313,11 @@ fn reused_images_and_snapshots_have_narrow_shapes() {
 #[test]
 fn every_base_accepts_optional_packages_and_refuses_apt_options() {
     for base in [
-        RecipeBase::TensorlakeUbuntu,
-        RecipeBase::Image {
+        RecipeBase::ManagedUbuntu,
+        RecipeBase::TensorlakeImage {
             image: "team/base".into(),
         },
-        RecipeBase::Snapshot {
+        RecipeBase::TensorlakeSnapshot {
             snapshot_id: "usersnapshot".into(),
         },
     ] {
@@ -334,7 +460,7 @@ fn tunnels_are_checked() {
 #[test]
 fn wire_shapes_are_tagged_and_saves_are_strict() {
     assert_eq!(
-        serde_json::to_value(RecipeBase::Snapshot {
+        serde_json::to_value(RecipeBase::TensorlakeSnapshot {
             snapshot_id: "abc".into()
         })
         .unwrap(),
@@ -407,7 +533,7 @@ fn wire_shapes_are_tagged_and_saves_are_strict() {
     let view = serde_json::from_value::<RecipeView>(view).expect("unknown fields are tolerated");
     assert_eq!(
         view.snapshot.as_ref().unwrap().base,
-        RecipeBase::TensorlakeUbuntu,
+        RecipeBase::ManagedUbuntu,
         "older snapshot metadata describes the standard base"
     );
     assert_eq!(

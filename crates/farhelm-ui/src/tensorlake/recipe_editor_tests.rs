@@ -4,6 +4,23 @@
 
 use super::*;
 
+/// The staged Tensorlake editor must preserve a Podman-only base when reopening
+/// the shared catalog. Saving another field cannot silently change its image.
+#[test]
+fn reopening_a_container_base_preserves_its_reference_and_user() {
+    let mut view = saved_view();
+    view.base = RecipeBase::ContainerImage {
+        reference: "example.test/team/dev@sha256:abc123".into(),
+        user: "dev".into(),
+    };
+    let mut draft = Draft::from_view(&view);
+    assert_eq!(draft.base, Base::ContainerImage);
+    draft.packages = "git jq".into();
+    let save = draft.to_save().unwrap();
+    assert_eq!(save.base, view.base);
+    assert_eq!(save.packages, ["git", "jq"]);
+}
+
 /// A saved recipe as the list hands it to the editor, with a Claude Code
 /// endpoint that names a saved credential.
 fn saved_view() -> RecipeView {
@@ -14,7 +31,7 @@ fn saved_view() -> RecipeView {
             memory_gb: 8,
             disk_gb: 50,
         },
-        base: RecipeBase::TensorlakeUbuntu,
+        base: RecipeBase::ManagedUbuntu,
         packages: vec!["git".into(), "ripgrep".into()],
         claude: Some(EndpointView {
             base_url: "http://127.0.0.1:8080".into(),
@@ -70,13 +87,13 @@ fn drafts_become_requests_or_local_refusals() {
     let mut draft = Draft::new_recipe();
     draft.packages = "git ripgrep\njq  git".into();
     let save = draft.to_save().unwrap();
-    assert_eq!(save.base, RecipeBase::TensorlakeUbuntu);
+    assert_eq!(save.base, RecipeBase::ManagedUbuntu);
     assert_eq!(save.packages, vec!["git", "ripgrep", "jq"]);
     draft.base = Base::Image;
     draft.image = " team-base ".into();
     assert_eq!(
         draft.to_save().unwrap().base,
-        RecipeBase::Image {
+        RecipeBase::TensorlakeImage {
             image: "team-base".into()
         }
     );
@@ -85,7 +102,7 @@ fn drafts_become_requests_or_local_refusals() {
     let save = draft.to_save().unwrap();
     assert_eq!(
         save.base,
-        RecipeBase::Snapshot {
+        RecipeBase::TensorlakeSnapshot {
             snapshot_id: "snapshot1".into()
         }
     );
@@ -124,11 +141,11 @@ fn drafts_become_requests_or_local_refusals() {
 #[test]
 fn all_bases_reopen_with_their_packages() {
     for base in [
-        RecipeBase::TensorlakeUbuntu,
-        RecipeBase::Image {
+        RecipeBase::ManagedUbuntu,
+        RecipeBase::TensorlakeImage {
             image: "team-base".into(),
         },
-        RecipeBase::Snapshot {
+        RecipeBase::TensorlakeSnapshot {
             snapshot_id: "snapshot1".into(),
         },
     ] {

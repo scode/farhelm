@@ -61,7 +61,7 @@ async fn fixture(build_on_add: bool) -> Fixture {
         .unwrap();
     let mut recipe: RecipeSave = crate::tensorlake::recipes::tests_support::save();
     if !build_on_add {
-        recipe.base = RecipeBase::Image {
+        recipe.base = RecipeBase::TensorlakeImage {
             image: "example/systemd".into(),
         };
     }
@@ -848,7 +848,7 @@ async fn credential_delivery_warning_does_not_abort_tensorlake_setup() {
         .await
         .unwrap();
     let mut recipe = crate::tensorlake::recipes::tests_support::save();
-    recipe.base = RecipeBase::Image {
+    recipe.base = RecipeBase::TensorlakeImage {
         image: "example/systemd".into(),
     };
     recipe.claude = Some(farhelm_proto::tensorlake::recipes::EndpointSave {
@@ -919,7 +919,7 @@ async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
     for subscription in [true, false] {
         let f = fixture(false).await;
         let mut recipe = crate::tensorlake::recipes::tests_support::save();
-        recipe.base = RecipeBase::Image {
+        recipe.base = RecipeBase::TensorlakeImage {
             image: "example/systemd".into(),
         };
         if subscription {
@@ -1001,7 +1001,7 @@ async fn claude_subscription_setup_delivers_only_to_the_host_before_attach() {
     use farhelm_proto::credentials::{CreateCredential, CredentialKind};
     let f = fixture(false).await;
     let mut recipe = crate::tensorlake::recipes::tests_support::save();
-    recipe.base = RecipeBase::Image {
+    recipe.base = RecipeBase::TensorlakeImage {
         image: "example/systemd".into(),
     };
     f.harness
@@ -1072,7 +1072,7 @@ async fn github_only_setup_delivers_only_to_the_host_before_attach() {
             .await
             .unwrap();
         let mut recipe = crate::tensorlake::recipes::tests_support::save();
-        recipe.base = RecipeBase::Image {
+        recipe.base = RecipeBase::TensorlakeImage {
             image: "example/systemd".into(),
         };
         recipe.github_token_credential = Some("github".into());
@@ -1203,6 +1203,55 @@ async fn tensorlake_probe_is_free_and_validates_outer_fields() {
         .await
         .unwrap_err();
     assert!(error.to_string().contains("API key"));
+}
+
+/// A fresh cached Tensorlake checkpoint must not bypass a shared recipe's
+/// Podman-only base. Refusal happens before a host row, SSH key or provider
+/// operation is created, even though the old checkpoint remains owned.
+#[farhelm_testtrace::test]
+async fn container_recipe_probe_refuses_a_retained_tensorlake_checkpoint() {
+    let f = fixture(false).await;
+    f.seed_prepared().await;
+    let mut recipe = crate::tensorlake::recipes::tests_support::save();
+    recipe.base = RecipeBase::ContainerImage {
+        reference: "example.test/team/dev:latest".into(),
+        user: "dev".into(),
+    };
+    f.harness
+        .store
+        .update_tensorlake_recipe("test-recipe".into(), recipe)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        f.tensorlake
+            .builds()
+            .fresh_prepared_snapshot("test-recipe")
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(!f.root.path().join("tensorlake/ssh-key/id_ed25519").exists());
+    let error = f
+        .service
+        .probe_tensorlake(
+            ProbeRequest {
+                target: ProbeDestination::Tensorlake {
+                    name: "Workspace".into(),
+                    recipe: "test-recipe".into(),
+                },
+                remote_farhelm: None,
+                remote_state_dir: None,
+                new_entry: None,
+            },
+            f.tensorlake.clone(),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("cannot run on Tensorlake"));
+    assert!(!f.root.path().join("api/events.jsonl").exists());
+    assert!(!f.root.path().join("tensorlake/ssh-key/id_ed25519").exists());
+    assert_eq!(f.harness.store.list_hosts().await.unwrap().len(), 1);
 }
 
 /// A generated name is not proof that this helm created the sandbox. A
@@ -1940,11 +1989,11 @@ async fn rerun_of_an_existing_sandbox_skips_building_even_without_a_recipe_snaps
         let mut recipe = crate::tensorlake::recipes::tests_support::save();
         recipe.packages.clear();
         recipe.base = if lost_id {
-            RecipeBase::Snapshot {
+            RecipeBase::TensorlakeSnapshot {
                 snapshot_id: "oldusersnapshot".into(),
             }
         } else {
-            RecipeBase::Image {
+            RecipeBase::TensorlakeImage {
                 image: "old/base".into(),
             }
         };
@@ -2182,11 +2231,11 @@ async fn new_hosts_from_image_and_snapshot_bases_build_before_create() {
         .unwrap();
         let mut recipe = crate::tensorlake::recipes::tests_support::save();
         recipe.base = if snapshot_base {
-            RecipeBase::Snapshot {
+            RecipeBase::TensorlakeSnapshot {
                 snapshot_id: users_snapshot.clone(),
             }
         } else {
-            RecipeBase::Image {
+            RecipeBase::TensorlakeImage {
                 image: "team/base".into(),
             }
         };

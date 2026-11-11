@@ -1,10 +1,10 @@
-//! The helm's Tensorlake recipes: storage and the `/api/tensorlake/recipes`
-//! routes.
+//! Shared recipe storage behind the compatibility `/api/tensorlake/recipes` routes.
 //!
-//! A recipe is a named description of the sandboxes Farhelm creates for
-//! Tensorlake hosts (size, base, packages, agent endpoints, outbound
-//! tunnels); the wire shapes and their validation live in
-//! `farhelm_proto::tensorlake::recipes`. This module stores recipes in the
+//! The shared definition lives in `environment::recipes::Recipe`, with wire
+//! shapes and validation in `farhelm_proto::recipes`. Tensorlake callers keep
+//! their existing imports through re-exports. The historical table and routes
+//! retain their names so saved recipes and existing clients keep working.
+//! This module stores recipes in the
 //! `tensorlake_recipes` table and serves them:
 //!
 //! - `GET /api/tensorlake/recipes` lists every recipe, without secrets, with
@@ -48,127 +48,27 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use farhelm_proto::tensorlake::recipes::{
-    BuildView, CreateRecipe, EndpointSave, EndpointView, PrepareView, RecipeBase, RecipeSave,
-    RecipeSize, RecipeView, RecipesView, Tunnel, check_recipe, check_recipe_name,
+    CreateRecipe, RecipeBase, RecipeSave, RecipeView, RecipesView, check_recipe_name,
 };
 use rusqlite::{Connection, OptionalExtension as _};
-use serde::{Deserialize, Serialize};
 
 use super::build::{CleanupRefusal, RecipeState, StartRefusal, decode_state};
 use crate::{AppState, store::HelmStore};
 
 /// The request body cap for recipe writes. 500 typical package names, a few
-/// tunnels and two endpoints fit with room to spare; the per-field caps in
-/// `check_recipe` bound what a body within this cap can store.
+/// tunnels and two endpoints fit with room to spare. This also bounds literal
+/// container image references and login users, whose syntax belongs to Podman
+/// and image inspection. Other field caps are checked in `check_recipe`.
 pub(crate) const BODY_LIMIT: usize = 64 * 1024;
 
 // ---------------------------------------------------------------------------
 // Stored shape
 // ---------------------------------------------------------------------------
 
-/// An endpoint's persisted selection; the value belongs to the credential table.
-#[derive(Clone, Deserialize, Serialize)]
-pub(crate) struct StoredEndpoint {
-    pub(crate) base_url: String,
-    pub(crate) token_credential: Option<String>,
-}
-
-/// Secret-bearing input to the pure settings merges, never persisted as a recipe
-/// or returned by a route. Only delivery resolves a named value into this shape.
-pub(crate) struct ResolvedEndpoint {
-    pub(crate) base_url: String,
-    pub(crate) token: Option<String>,
-    /// Bound to the token by the same catalog read; never inferred from time.
-    pub(crate) revision: Option<u64>,
-    /// A deleted catalog name may be reused at revision1. Delivery compares
-    /// this hidden identity too, so the new value cannot match an old stamp.
-    pub(crate) incarnation: Option<String>,
-}
-
-/// A recipe's `spec_json`: user choices and credential names, without values.
-///
-/// Never crosses the HTTP boundary; [`Self::view`] is the only way out.
-/// Rows are written only through [`Self::saved`], so a stored recipe has
-/// passed `check_recipe` with this build's or an older build's rules.
-#[derive(Clone, Deserialize, Serialize)]
-pub(crate) struct StoredRecipe {
-    pub(crate) size: RecipeSize,
-    pub(crate) base: RecipeBase,
-    pub(crate) packages: Vec<String>,
-    pub(crate) claude: Option<StoredEndpoint>,
-    pub(crate) codex: Option<StoredEndpoint>,
-    pub(crate) claude_login_credential: Option<String>,
-    pub(crate) codex_login_credential: Option<String>,
-    pub(crate) github_token_credential: Option<String>,
-    pub(crate) tunnels: Vec<Tunnel>,
-}
-
-impl StoredRecipe {
-    /// Validate and normalize choices without resolving secret values. The caller
-    /// checks credential references inside its write transaction. Packages keep
-    /// their given order with exact duplicates removed.
-    fn saved(mut save: RecipeSave) -> Result<Self, String> {
-        check_recipe(&save)?;
-        let mut seen = std::collections::HashSet::new();
-        save.packages.retain(|package| seen.insert(package.clone()));
-        let claude =
-            resolve_endpoint(save.claude).map_err(|reason| format!("Claude Code: {reason}"))?;
-        let codex = resolve_endpoint(save.codex).map_err(|reason| format!("Codex: {reason}"))?;
-        Ok(Self {
-            size: save.size,
-            base: save.base,
-            packages: save.packages,
-            claude,
-            codex,
-            claude_login_credential: save.claude_login_credential,
-            codex_login_credential: save.codex_login_credential,
-            github_token_credential: save.github_token_credential,
-            tunnels: save.tunnels,
-        })
-    }
-
-    /// The secret-free read shape of this recipe.
-    pub(crate) fn view(&self, name: &str) -> RecipeView {
-        let endpoint = |endpoint: &Option<StoredEndpoint>| {
-            endpoint.as_ref().map(|endpoint| EndpointView {
-                base_url: endpoint.base_url.clone(),
-                token_credential: endpoint.token_credential.clone(),
-            })
-        };
-        RecipeView {
-            name: name.to_string(),
-            size: self.size,
-            base: self.base.clone(),
-            packages: self.packages.clone(),
-            claude: endpoint(&self.claude),
-            codex: endpoint(&self.codex),
-            claude_login_credential: self.claude_login_credential.clone(),
-            codex_login_credential: self.codex_login_credential.clone(),
-            github_token_credential: self.github_token_credential.clone(),
-            tunnels: self.tunnels.clone(),
-            snapshot: None,
-            build: BuildView::Idle,
-            prepared: None,
-            preparation: PrepareView::Idle,
-            cleanup_pending: false,
-        }
-    }
-}
-
-/// Parse the URL with the server's full parser after the shared structural
-/// check. The selected credential name survives a URL change deliberately:
-/// the editor selects an identity, not an unseen token-preservation action.
-fn resolve_endpoint(save: Option<EndpointSave>) -> Result<Option<StoredEndpoint>, &'static str> {
-    let Some(save) = save else {
-        return Ok(None);
-    };
-    reqwest::Url::parse(&save.base_url)
-        .map_err(|_| "use an http or https base URL without credentials, query or fragment")?;
-    Ok(Some(StoredEndpoint {
-        base_url: save.base_url,
-        token_credential: save.token_credential,
-    }))
-}
+// Existing delivery and Tensorlake callers use the shared catalog types.
+pub(crate) use crate::environment::recipes::{
+    Recipe as StoredRecipe, ResolvedEndpoint, StoredEndpoint,
+};
 
 /// Name/kind admission belongs to the same transaction that saves the recipe;
 /// a separate catalog preflight would race deletion on another connection.
@@ -263,7 +163,7 @@ fn hosts_using_recipe(conn: &Connection, name: &str) -> anyhow::Result<u32> {
 /// owning recipe moves on. Until snapshots can have several owners, using
 /// one as a base is refused, including a recipe's own snapshot.
 fn refuse_owned_snapshot(conn: &Connection, base: &RecipeBase) -> anyhow::Result<Option<Refusal>> {
-    let RecipeBase::Snapshot { snapshot_id } = base else {
+    let RecipeBase::TensorlakeSnapshot { snapshot_id } = base else {
         return Ok(None);
     };
     let mut stmt = conn
@@ -761,6 +661,11 @@ pub(crate) async fn build_recipe(
             view_response(&state, &name, StatusCode::ACCEPTED).await
         }
         Err(StartRefusal::Missing) => refusal_response(&name, Refusal::Missing),
+        Err(StartRefusal::UnsupportedBase) => (
+            StatusCode::BAD_REQUEST,
+            "this recipe's base cannot run on Tensorlake",
+        )
+            .into_response(),
         Err(StartRefusal::NoApiKey) => (
             StatusCode::BAD_REQUEST,
             "save a Tensorlake API key in Settings first",
@@ -780,6 +685,7 @@ pub(crate) async fn build_recipe(
 #[cfg(test)]
 pub(crate) mod tests_support {
     use super::*;
+    use farhelm_proto::recipes::RecipeSize;
 
     /// A small valid Ubuntu recipe, with packages to witness layer preservation.
     pub(crate) fn save() -> RecipeSave {
@@ -789,7 +695,7 @@ pub(crate) mod tests_support {
                 memory_gb: 4,
                 disk_gb: 20,
             },
-            base: RecipeBase::TensorlakeUbuntu,
+            base: RecipeBase::ManagedUbuntu,
             packages: vec!["git".into(), "ripgrep".into()],
             claude: None,
             codex: None,

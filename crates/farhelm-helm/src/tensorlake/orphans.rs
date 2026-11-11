@@ -420,7 +420,7 @@ mod tests {
                         memory_gb: 1,
                         disk_gb: 10,
                     },
-                    base: RecipeBase::TensorlakeUbuntu,
+                    base: RecipeBase::ManagedUbuntu,
                     packages: vec![],
                     claude: None,
                     codex: None,

@@ -2064,7 +2064,7 @@ async fn lifecycle_holds_end_tunnels_and_resume_reads_the_recipe_again() {
             disk_gb: 20,
         },
         packages: vec![],
-        base: RecipeBase::Image {
+        base: RecipeBase::TensorlakeImage {
             image: "tensorlake/ubuntu-systemd".into(),
         },
         claude: None,

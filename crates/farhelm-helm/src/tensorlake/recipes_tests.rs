@@ -11,7 +11,7 @@ use super::*;
 use crate::rest_harness::{FleetBuilder, Harness};
 use axum::body::Body;
 use axum::http::Request;
-use farhelm_proto::tensorlake::recipes::EndpointSave;
+use farhelm_proto::recipes::{EndpointSave, EndpointView};
 use tower::ServiceExt as _;
 
 const TOKEN: &str = "private-endpoint-token-marker";
@@ -139,8 +139,8 @@ async fn create_refuses_an_existing_name_and_invalid_input() {
 /// survive byte for byte. An update or delete
 /// of a missing name is refused as missing and creates nothing.
 ///
-/// Why: `state_json` holds the only record of billed Tensorlake
-/// resources (a snapshot ID, a builder ID). A user's save racing a build must
+/// Why: `state_json` holds the only record of Tensorlake resources and each
+/// Podman place's owned artifacts. A user's save racing a build must
 /// never drop it, which is why the two live in separate columns with separate
 /// writers; this pins the user-save side of that split.
 #[farhelm_testtrace::test]
@@ -148,7 +148,7 @@ async fn updates_write_the_spec_and_never_the_build_state() {
     let (_dir, store) = store().await;
     super::tests_support::create(&store, "rust-dev").await;
     // What a build records, planted directly.
-    let state = r#"{"snapshot":{"id":"snap123"},"builder_sandbox_id":"sbx456"}"#;
+    let state = r#"{"snapshot":{"id":"snap123"},"builder_sandbox_id":"sbx456","podman":{"7":{"builder_container_id":"builder-owned","prepare_started_at":20}}}"#;
     {
         let state = state.to_string();
         store
@@ -165,8 +165,7 @@ async fn updates_write_the_spec_and_never_the_build_state() {
     }
     let (spec_before, state_before, created_before) = raw_row(&store, "rust-dev").await;
     assert_eq!(state_before, state, "premise: the build state is planted");
-    // Still a package recipe: a switch to an image is the one save that
-    // retires the snapshot (pinned in `build_tests.rs`).
+    // The definition changes while both providers retain their owned resources.
     let mut edited = save();
     edited.size.disk_gb = 77;
     store
@@ -759,19 +758,19 @@ async fn schema_78_migrates_all_recipe_sources_without_changing_build_state() {
     for (name, base, packages) in [
         (
             "packages",
-            RecipeBase::TensorlakeUbuntu,
+            RecipeBase::ManagedUbuntu,
             vec!["git", "ripgrep"],
         ),
         (
             "image",
-            RecipeBase::Image {
+            RecipeBase::TensorlakeImage {
                 image: "team/base".into(),
             },
             vec![],
         ),
         (
             "snapshot",
-            RecipeBase::Snapshot {
+            RecipeBase::TensorlakeSnapshot {
                 snapshot_id: "usersnapshot".into(),
             },
             vec![],
@@ -796,7 +795,7 @@ async fn schema_78_migrates_all_recipe_sources_without_changing_build_state() {
         if name == "packages" {
             let snapshot = state.snapshot.unwrap();
             assert_eq!(snapshot.id, "built1");
-            assert_eq!(snapshot.base, RecipeBase::TensorlakeUbuntu);
+            assert_eq!(snapshot.base, RecipeBase::ManagedUbuntu);
             assert_eq!(snapshot.packages, vec!["git", "ripgrep"]);
             assert_eq!(snapshot.claude_version.as_deref(), Some("claude old"));
             assert_eq!(snapshot.codex_version.as_deref(), Some("codex old"));
@@ -871,7 +870,7 @@ async fn schema_78_preserves_malformed_recipe_json_for_safe_listing_refusal() {
         .unwrap();
     assert_eq!(
         healthy.base,
-        RecipeBase::Image {
+        RecipeBase::TensorlakeImage {
             image: "team/base".into()
         }
     );
@@ -950,7 +949,7 @@ async fn routes_create_update_and_delete_with_distinct_refusals() {
     assert_eq!(status, StatusCode::OK, "{body}");
     let view: RecipeView = serde_json::from_str(&body).unwrap();
     assert_eq!(view.name, "rust-dev");
-    assert_eq!(view.base, RecipeBase::TensorlakeUbuntu);
+    assert_eq!(view.base, RecipeBase::ManagedUbuntu);
     assert_eq!(view.packages, vec!["git", "ripgrep"]);
 
     let (status, body) = call(
