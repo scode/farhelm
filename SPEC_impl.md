@@ -937,19 +937,20 @@ under the existing question, managed-checkout, agent-pane and occurrence-dismiss
 The dialog uses the host dialogs' framed header and footer, with a gear tile and a separately named × close control.
 Settings alone has a 780px height capped by the shared viewport margin. Its body grows to fill spare height and is the
 only scroller, containing a section-button sidebar and the selected panel. The order is Sessions, Appearance, Hosts,
-Tensorlake, Terminal, Checkouts, Agent trust, Notifications and, when the updater is active, App. Each section button
-pairs an existing decorative icon with its full sentence-case label; icons inherit the selected button's inverse color.
-The solid selection fill marks the open section. Terminal holds web-link choices and desktop tunnel consent and file
-types; checkouts holds the explicit-save folder and command; agent trust holds all four agents' blocks; notifications
-groups device sounds and helm-wide ntfy alerts. Inactive panels stay mounted with hidden, preserving field drafts,
-outcomes and pending saves. The sound asset's document-wide input query initializes even hidden inputs. No section
-choice is persisted. At 620px and below, a presentation-only signal reveals either the selected panel or the section
-list; the back button reads '‹ Settings'. Section selection focuses its heading, while back focuses the selected section
-button after the rendering frame. Neither adds a normal Tab stop or overrides platform button navigation. Both close
-controls stay visible. It uses the shared focus/isolation helper with its own selector; gear opening selects sessions
-and focuses its first switch. Existing trust props instead select agent trust before mount, focus the agent's switch and
-scroll its block into view. Escape or either close control releases isolation and returns focus to the gear. The host
-setup and removal permanent answers each name that gear as the way to turn confirmation back on.
+Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts, Agent trust, Notifications and, when the updater is
+active, App. Each section button pairs an existing decorative icon with its full sentence-case label; icons inherit the
+selected button's inverse color. The solid selection fill marks the open section. Terminal holds web-link choices and
+desktop tunnel consent and file types; checkouts holds the explicit-save folder and command; agent trust holds all four
+agents' blocks; notifications groups device sounds and helm-wide ntfy alerts. Inactive panels stay mounted with hidden,
+preserving field drafts, outcomes and pending saves. The sound asset's document-wide input query initializes even hidden
+inputs. No section choice is persisted. At 620px and below, a presentation-only signal reveals either the selected panel
+or the section list; the back button reads '‹ Settings'. Section selection focuses its heading, while back focuses the
+selected section button after the rendering frame. Neither adds a normal Tab stop or overrides platform button
+navigation. Both close controls stay visible. It uses the shared focus/isolation helper with its own selector; gear
+opening selects sessions and focuses its first switch. Existing trust props instead select agent trust before mount,
+focus the agent's switch and scroll its block into view. Escape or either close control releases isolation and returns
+focus to the gear. The host setup and removal permanent answers each name that gear as the way to turn confirmation back
+on.
 
 The default and per-host checkout folders use a shared scoped explicit-save field rather than the preference queue:
 invalid path text must have a visible refusal, and a draft is not configuration. `GET`/`PUT /api/checkout-root` is an
@@ -2335,42 +2336,41 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   tmux when `TMUX` is unset therefore runs during the agent's launch, as in any terminal outside tmux (SPEC.md, "Session
   view"); until 2026-11 the child got `TERM_PROGRAM=tmux`, the private server's version and a placeholder `TMUX` that
   held such an autostart back, and a host started then keeps that environment until its agent is restarted. The
-  containerized launch forwards only `TERM` and `COLORTERM` into the container, so a containerized agent sees no
-  `TERM_PROGRAM` either way. The host's tag binds it to the session and the launch generation, and confirming the launch
-  writes the socket's name to the row's `terminal_address`. **The launch record**: the socket's name is drawn before the
-  host's first stage starts, and before that first stage is given the spec (it starts nothing until it has read it
-  whole), the launch's artifacts record the socket's name and the first stage's process, pinned to its start identity
-  (`<state>/launch/<id>.<generation>.host`). A supervisor that dies after the record leaves a first stage that can still
-  start the host on its own, and the record is how a retry finds it; one that dies before it leaves a first stage whose
-  stdin ends without a spec, which starts nothing. A failed host start is classified from the first stage's exit status:
-  a refusal, or an unfinished start the spawn confirmed ended, leaves nothing, and the create rolls back as for an
-  absent tmux session; a host that may still run (an unfinished start not confirmed ended, or a host that reported ready
-  but cannot be used) is ended through the protocol or by the verified signal, and only when that cannot be confirmed is
-  the launching row kept (with its record). A create that lost to Delete, or whose confirmation failed, sweeps the
-  agent's process tree and then ends its host the same way: through its runtime's `Shutdown` within 15 seconds (a
-  runtime takes it up only between its other work, which a snapshot encode can hold), and otherwise, with the runtime
-  stopped so that it cannot take the host back, by its socket within `stop-terminal-hosts`'s per-host limits. The socket
-  file a host ended by a signal leaves is then removed, judged gone again first. A retried create whose row shows no
-  launch asks, in order: whether the session's published entry holds a host (a create kept as a launching record
-  publishes the host it could not end), which is the launch; whether a launch record exists, without which no host start
-  ever got its spec; whether the recorded first stage still runs, in which case it is waited for up to five seconds and
-  then ended with the verified signal; and finally what is at the recorded socket. A host whose tag names the session's
-  first launch is the launch, and anything else that answers leaves the retry unresolved. Nothing there is absence only
-  once no live process names the socket on its command line: a second stage the first stage forked before it ended still
-  binds the socket and starts the child before its readiness report finds the first stage gone and it ends both, so the
-  socket is looked at again for up to five seconds while such a process remains, and the retry is left unresolved if one
-  stays. The record stays through an agent's launch error (the error settles the agent, not its host, which may still
-  run with the failed launch's final screen and is named nowhere else while the row's `terminal_address` is empty). A
-  retry that finds the host replays the session as created and starts nothing; the interrupted attempt's host itself
-  stays running, and a restarted supervisor's reload adopts it by its tag, as it finds an interrupted tmux launch's pane
-  by its marker. The supervisor-wide `host_scan` lock keeps host spawns (holding it shared from just before the first
-  stage starts until the host's entry is published, or until the create gives the host up) apart from what must not
-  overlap them (holding it exclusively): the removal of an ended host's socket file (by a create or by Delete), whose
-  re-verifying removal requires that nothing binds sockets in the directory meanwhile, and any scan of the socket
-  directory inside a running supervisor (today `serve`'s reload), since a scan would take a host over from the create
-  that is starting it. Delete's settling of its session's launch records takes no part in it: the session's lifecycle
-  claim keeps that session's own creates out. A session kept as a launching record with its host unconfirmed ended has
-  that host ended by its Delete, which finds it by the launch record.
+  container environment uses this ordinary path inside its own supervisor. The host's tag binds it to the session and
+  the launch generation, and confirming the launch writes the socket's name to the row's `terminal_address`. **The
+  launch record**: the socket's name is drawn before the host's first stage starts, and before that first stage is given
+  the spec (it starts nothing until it has read it whole), the launch's artifacts record the socket's name and the first
+  stage's process, pinned to its start identity (`<state>/launch/<id>.<generation>.host`). A supervisor that dies after
+  the record leaves a first stage that can still start the host on its own, and the record is how a retry finds it; one
+  that dies before it leaves a first stage whose stdin ends without a spec, which starts nothing. A failed host start is
+  classified from the first stage's exit status: a refusal, or an unfinished start the spawn confirmed ended, leaves
+  nothing, and the create rolls back as for an absent tmux session; a host that may still run (an unfinished start not
+  confirmed ended, or a host that reported ready but cannot be used) is ended through the protocol or by the verified
+  signal, and only when that cannot be confirmed is the launching row kept (with its record). A create that lost to
+  Delete, or whose confirmation failed, sweeps the agent's process tree and then ends its host the same way: through its
+  runtime's `Shutdown` within 15 seconds (a runtime takes it up only between its other work, which a snapshot encode can
+  hold), and otherwise, with the runtime stopped so that it cannot take the host back, by its socket within
+  `stop-terminal-hosts`'s per-host limits. The socket file a host ended by a signal leaves is then removed, judged gone
+  again first. A retried create whose row shows no launch asks, in order: whether the session's published entry holds a
+  host (a create kept as a launching record publishes the host it could not end), which is the launch; whether a launch
+  record exists, without which no host start ever got its spec; whether the recorded first stage still runs, in which
+  case it is waited for up to five seconds and then ended with the verified signal; and finally what is at the recorded
+  socket. A host whose tag names the session's first launch is the launch, and anything else that answers leaves the
+  retry unresolved. Nothing there is absence only once no live process names the socket on its command line: a second
+  stage the first stage forked before it ended still binds the socket and starts the child before its readiness report
+  finds the first stage gone and it ends both, so the socket is looked at again for up to five seconds while such a
+  process remains, and the retry is left unresolved if one stays. The record stays through an agent's launch error (the
+  error settles the agent, not its host, which may still run with the failed launch's final screen and is named nowhere
+  else while the row's `terminal_address` is empty). A retry that finds the host replays the session as created and
+  starts nothing; the interrupted attempt's host itself stays running, and a restarted supervisor's reload adopts it by
+  its tag, as it finds an interrupted tmux launch's pane by its marker. The supervisor-wide `host_scan` lock keeps host
+  spawns (holding it shared from just before the first stage starts until the host's entry is published, or until the
+  create gives the host up) apart from what must not overlap them (holding it exclusively): the removal of an ended
+  host's socket file (by a create or by Delete), whose re-verifying removal requires that nothing binds sockets in the
+  directory meanwhile, and any scan of the socket directory inside a running supervisor (today `serve`'s reload), since
+  a scan would take a host over from the create that is starting it. Delete's settling of its session's launch records
+  takes no part in it: the session's lifecycle claim keeps that session's own creates out. A session kept as a launching
+  record with its host unconfirmed ended has that host ended by its Delete, which finds it by the launch record.
 - **Tabs in hosts** (`service/core/host_tabs.rs`): under the same switch every new tab is a terminal host of its own,
   whatever its session's agent runs in, so a tmux agent's session holds its old tmux tabs and new host tabs side by side
   (a mixed session), and a host agent's only host tabs; a tab never changes kind. The tab-open gate asks the agent's
@@ -3314,6 +3314,10 @@ sequences) get debugged at the tmux layer first; the generated config is the kno
 
 ## Helm ↔ supervisor transport: system ssh + stdio protocol
 
+Podman routes add a local or SSH-nested exec pipe to this same transport, as described under
+[Disposable environments](#disposable-environments). The SSH sharing, authentication and framing rules below continue to
+apply to the SSH layer. Container routes share the child-process connection's diagnostic handling.
+
 The helm shells out to the user's `ssh` binary (tokio::process) with connection sharing (`ControlMaster`,
 `ControlPersist`) so interactive latency stays low and reconnects are cheap. Each host gets two shared connections, one
 per purpose: the long-lived supervisor connection's master socket is the helm's state directory plus OpenSSH's own `%C`
@@ -3541,7 +3545,7 @@ The same relay pump carries supervisor-accepted connections. A full-authority co
 once for at most 32 distinct nonzero ports other than 22. The supervisor binds every IPv4 loopback listener or none, and
 a failed claim can be retried. There is no release or takeover: listeners, pending accepted sockets and active relays
 belong to the claiming connection and are withdrawn before its unrelated teardown waits. The supervisor knows neither
-Tensorlake nor the recipe's destinations; the helm restricts claims to Tensorlake hosts.
+the environment provider nor the recipe's destinations. The helm restricts claims to environment hosts.
 
 `TcpTunnelAccepted` names only the claimed port and a connection-local accepted id. The helm selects a destination from
 its own recipe snapshot, dials it with a bounded timeout, and either sends `BeginAcceptedTcpRelay` with its own fresh
@@ -4086,23 +4090,9 @@ opening was not offered. It never falls back to Blob. Tooltip and transfer outco
 isolation and visible Unicode format escapes. The addon is disposed with its terminal, cancelling pending work; retained
 reconnect terminals retain it.
 
-Container terminals pass an immutable containerized flag to both agent and tab islands. Their prose-file provider and a
-small adapter around the pinned xterm OSC provider ask the authenticated host stat endpoint before publishing file
-links, admit only Ready replies, and reject replies whose buffer cells changed or lookup was superseded. The native OSC
-objects retain their ranges, arbitrary labels, URI decoding and precedence; its callback interface waits for admission
-without delaying terminal parsing. The adapter depends on the shipped xterm 6.0.0 provider registration seam, pinned by
-a real-bundle test. Each provider owns one abortable batch of at most 32 file candidates; larger batches offer no file
-links. Separate cancellation slots keep independently requested OSC and prose answers from cancelling each other. Web
-hyperlinks remain available. Hover and transfer still recheck independently.
-
-The supervisor derives confinement from the stored launch, never from that browser flag. Both stat and BeginDownload use
-the same verified registry root as container creation, selected from the stored canonical workdir. A subdirectory does
-not shrink the bind, and a missing or replaced selected checkout never falls back to a broader ancestor. Relative paths
-resolve against that canonical workdir, not a host symlink alias. Canonical resolution first rejects paths outside the
-checkout, including dot-dot and symlink escapes. The actual Linux open uses openat2 BENEATH|NO_MAGICLINKS relative to a
-held checkout descriptor, so replacing an ancestor after resolution cannot open an outside host file. Pre-open
-nonregular checks and descriptor metadata checks retain ordinary file-kind and size rules; no hover reserves a future
-read.
+Container environments use these ordinary file rules against their in-container supervisor. The earlier
+checkout-confinement browser adapter and supervisor checks belong to the retired supervisor-outside model and are
+removed with its terminal access.
 
 ## Supervisor internals
 
@@ -5356,14 +5346,14 @@ channel records these notices.
   When the conditions for scope-only cleanup do not hold, the reaper runs the existing portable sweep unchanged. A named
   scope must be observed live before signalling and confirmed collected afterwards; an already-gone or initially
   unconfirmed scope keeps the sweep. Deleting a session whose agent or a tab already exited, a Stop or Restart after the
-  agent exited, and a containerized Delete therefore always sweep. Scope-name provenance and containment completeness
-  are separate inputs: a guessed name that is absent does not prove that a target was scoped. An unscoped launch, an
-  unscoped tab or unavailable selection keeps the sweep required even when optional scope names are added. Delete
-  combines the agent's and every tab's selection, including host tags and tmux scope markers, so a scoped agent cannot
-  hide an unscoped tab's cleanup requirement. It also keeps the sweep when discovery is incomplete: no agent terminal,
-  or an old tmux session absent from its pane listing, means historical unscoped tab jobs may remain. A systemd glob can
-  supply scope handles in those cases, but cannot prove that no such jobs exist. Existing discovery errors still refuse
-  Delete; a successful empty listing does not acquire that new meaning.
+  agent exited therefore always sweep. Scope-name provenance and containment completeness are separate inputs: a guessed
+  name that is absent does not prove that a target was scoped. An unscoped launch, an unscoped tab or unavailable
+  selection keeps the sweep required even when optional scope names are added. Delete combines the agent's and every
+  tab's selection, including host tags and tmux scope markers, so a scoped agent cannot hide an unscoped tab's cleanup
+  requirement. It also keeps the sweep when discovery is incomplete: no agent terminal, or an old tmux session absent
+  from its pane listing, means historical unscoped tab jobs may remain. A systemd glob can supply scope handles in those
+  cases, but cannot prove that no such jobs exist. Existing discovery errors still refuse Delete; a successful empty
+  listing does not acquire that new meaning.
 
   A host at generation zero cannot have migrated from tmux. A later-generation host may still have old tmux tabs, so
   when its tmux session is absent Delete conservatively keeps the sweep; current presence and host records do not retain
@@ -5819,29 +5809,30 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   loudly (the registry is authority for which hosts exist at all).
 - One connection actor per registry row, the local row included (PLAN_M6.md item 4), each owning its transport
   connection, its reconnect state machine, and its slice of the session cache. A row's connection is always in exactly
-  one of seven connection states (a Tensorlake host has two more, below), and the refusal states exist because folding
-  them into "unreachable" would throw away the only information that makes the situation fixable: **connecting** (active
-  retries in progress), **unreachable-reprobing** (the active window is spent, background probes continue forever, no
-  give-up), **connected**, **version-skew** (the hello was answered and refused; carries both protocol versions, the
-  peer's build, and the remediation text, since SPEC.md demands actionable rather than merely diagnostic errors),
-  **identity-mismatch** (frozen, carrying both identities, connecting nothing until the user adopts or fixes the
-  destination), **identity-unverified** (the peer cannot confirm the recorded identity, so nothing is connected), and
-  **duplicate** (this entry's identity is already another entry's; frozen like identity-mismatch, connecting nothing
-  until a Retry, an edit of the entry, or a helm restart asks again, while the entry stays visible naming the other
-  one), and, for a Tensorlake host only, **suspended** (Tensorlake reports the sandbox suspended or failed to resume;
-  nothing is dialed) and **tensorlake-changing** (an explicit suspend or resume is awaiting confirmation under a
-  connection hold; see "Tensorlake hosts"). First contact checks whether another entry holds the reported identity
-  before comparing it with the one this entry recorded, so an entry that recorded one install and now reaches another
-  entry's machine is a duplicate; and an adopt prompt shown before the other entry recorded the identity turns into the
-  duplicate state when its adoption is refused, because the refusal starts the entry's next attempt. The local row's
-  unreachable state additionally distinguishes "no supervisor is running on this machine" from a generic transport
-  failure, because that is the one case whose remedy is a command on the machine the user is already sitting at — a
-  manual-path hint, never an offer to install (provisioning is M7's). A separate state exists that is not about the host
-  at all — **retired** — for an entry whose actor has stopped: a panicked task, or one that outlived its own registry
-  row. Without it, an actor's last published status stands forever after the actor is gone, so a task that died
-  mid-connection would leave the entry reading connected, with a routable client, and nothing left running to ever
-  correct it. Each actor is therefore supervised by the task the manager actually holds, which publishes the retired
-  state (client dropped) when the actor it wraps finishes for any reason other than being cancelled on purpose.
+  one of the connection states below, with additional provider states for environment hosts. The refusal states exist
+  because folding them into "unreachable" would throw away the only information that makes the situation fixable:
+  **connecting** (active retries in progress), **unreachable-reprobing** (the active window is spent, background probes
+  continue forever, no give-up), **connected**, **version-skew** (the hello was answered and refused; carries both
+  protocol versions, the peer's build, and the remediation text, since SPEC.md demands actionable rather than merely
+  diagnostic errors), **identity-mismatch** (frozen, carrying both identities, connecting nothing until the user adopts
+  or fixes the destination), **identity-unverified** (the peer cannot confirm the recorded identity, so nothing is
+  connected), and **duplicate** (this entry's identity is already another entry's; frozen like identity-mismatch,
+  connecting nothing until a Retry, an edit of the entry, or a helm restart asks again, while the entry stays visible
+  naming the other one), and, for environment hosts, **suspended** (the provider reports suspension or failed resume,
+  with nothing dialed), a reason-bearing changing state during a lifecycle transition, and Podman's distinct
+  stopped/start-failed state (see "Disposable environments" and "Tensorlake hosts"). First contact checks whether
+  another entry holds the reported identity before comparing it with the one this entry recorded, so an entry that
+  recorded one install and now reaches another entry's machine is a duplicate; and an adopt prompt shown before the
+  other entry recorded the identity turns into the duplicate state when its adoption is refused, because the refusal
+  starts the entry's next attempt. The local row's unreachable state additionally distinguishes "no supervisor is
+  running on this machine" from a generic transport failure, because that is the one case whose remedy is a command on
+  the machine the user is already sitting at — a manual-path hint, never an offer to install (provisioning is M7's). A
+  separate state exists that is not about the host at all — **retired** — for an entry whose actor has stopped: a
+  panicked task, or one that outlived its own registry row. Without it, an actor's last published status stands forever
+  after the actor is gone, so a task that died mid-connection would leave the entry reading connected, with a routable
+  client, and nothing left running to ever correct it. Each actor is therefore supervised by the task the manager
+  actually holds, which publishes the retired state (client dropped) when the actor it wraps finishes for any reason
+  other than being cancelled on purpose.
 - A host's state and its live connection are read TOGETHER, from one borrow of the actor's published status. The pair
   has an invariant — a client exists exactly while the state is connected — and session routing is built on it, so two
   separate reads straddling a transition would let a caller refuse an operation against a host that is up, or route one
@@ -6373,10 +6364,9 @@ at `github_token::host_file(remote_state_dir)`, the shared `github-token` basena
 The supervisor's path-injected reader trims and rejects empty/NUL or unreadable values with fixed errors; NotFound keeps
 the ordinary child environment. Host agent and tab paths inject after `host_child_env` into `ChildSpec.env`, before the
 login shell, managed clone and launch shim. Restart reuses the agent seam. LaunchSpec, launch records, host
-argv/environment and tmux `-e` never carry this value. Container configured-file reads share validation while retaining
-their stricter missing-file refusal. The background spare-clone guard reads the same current file into only its child
-command's environment before its login shell; its persisted `BuildSpec` stays secret-free. No protocol or terminal-host
-change is needed.
+argv/environment and tmux `-e` never carry this value. Container environments use the same in-container host file. The
+background spare-clone guard reads the same current file into only its child command's environment before its login
+shell; its persisted `BuildSpec` stays secret-free. No protocol or terminal-host change is needed.
 
 Without a previous successful GitHub token stamp, delivery runs the token-free
 `gh auth setup-git --force --hostname github.com`; absence is a fixed warning after installing the file, and failure
@@ -6384,12 +6374,12 @@ leaves the slot unknown or at its previous successful stamp. Endpoint stamps com
 successful GitHub stamp also means helper setup succeeded, so ordinary token replacements do not rerun it. None does not
 edit Git configuration. There is no additional helper journal or credential cache.
 
-Production backend and payload selection happen before manager startup. Provisioning and Tensorlake share one delivery
-object and backend, including when explicitly injected. Setup records preparation's home and reconciles after install
-coordinates are admitted but before releasing the actor hold. Legacy hosts recover their home with a bounded read-only
-backend query, without rerunning user-manager preparation. A per-host mutex serializes setup, connect and replacement.
-Its owned guard moves through each noncancellable `Db::call` write, so cancelling the caller cannot let later work
-overtake a queued SQLite update. Writes require the same host entry identity and Tensorlake binding.
+Production backend and payload selection happen before manager startup. Provisioning and environment providers share one
+delivery object and backend, including when explicitly injected. Setup records preparation's home and reconciles after
+install coordinates are admitted but before releasing the actor hold. Legacy hosts recover their home with a bounded
+read-only backend query, without rerunning user-manager preparation. A per-host mutex serializes setup, connect and
+replacement. Its owned guard moves through each noncancellable `Db::call` write, so cancelling the caller cannot let
+later work overtake a queued SQLite update. Writes require the same host entry identity and environment binding.
 
 The real connect hook registers a counted lifetime lease before any await or credential read. Its returned resource
 bundle retains that lease and the tunnel lease through Connected publication and serving; the actor's existing
@@ -6414,6 +6404,191 @@ signals. A native file selection fills the Codex draft and never submits it; a g
 superseded by paste, agent selection or submission. The metadata-only catalog reader also populates endpoint pickers in
 Settings and Add host, independently of whether Credentials is mounted. Failed refreshes keep the last good list. Feed
 updates refresh an open credential editor's use metadata without replacing its secret draft.
+
+## Disposable environments
+
+Tensorlake and Podman implement one helm-owned environment-provider abstraction. Every environment runs an ordinary
+supervisor, and session-owned rows reuse the host actor, session aggregation, provisioning, credentials and tunnel
+lifecycle. Provider-specific work stays at the provider boundary. The supervisor has no provider-specific launch,
+terminal or lifecycle mechanism. `crates/farhelm-helm/src/environment/mod.rs` maps the implementation responsibilities
+for adding another provider, as the agent-kind module does for harnesses.
+
+A shared provider-kind discriminator carries exhaustive static decisions consumed by the helm and UI. Place, binding,
+recipe base and state, host kind and the shared recipe-state projection are also named exhaustive decision homes. Each
+provider implements the I/O trait for places and cached probe reasons, two-stage preparation with progress, create,
+status, suspend, resume, confirmed idempotent destruction, owned-resource discovery, Rebuild admission and recipe
+cleanup. Its required connected hook acquires connection-scoped credential and tunnel leases. The provider registry has
+an exhaustive selection method. Per-provider wording, marks and help live in one exhaustive UI module. Shared code must
+not compare individual providers, match subsets or hide a new provider under a wildcard arm. A new provider requires an
+implementation and a decision at every exhaustive match. Add static methods only when a caller consumes them.
+
+A place carries its provider, either the Tensorlake account or an ordinary local/SSH host holding rootless Podman's
+storage. A launch target carries recipe plus place as one choice. An environment binding records its chosen reserved
+name, ownership and provider-specific handle. Tensorlake retains its existing sandbox/create facts. Podman records its
+place host and canonical container identity, with the login user and uid needed for exec. Registration precedes lazy
+preparation, so a pending binding may lack all login coordinates while it has no container ID or admitted install paths.
+Preparation observes and atomically records the full login identity, prepared facts and pending-send marker before
+container creation is sent. Exec requires the canonical ID and complete login identity. Ownership is independent of
+session membership. User-owned environment hosts remain Tensorlake-only.
+
+### Environment rows and provider state
+
+Add nullable provider and place-host columns without rebuilding `hosts`. Keep the on-disk `tensorlake_sandbox` name as
+the environment-name column, renaming it only in code. NULL provider means Tensorlake for existing rows. Decode kind,
+environment name and provider together through one function, refusing unknown provider spellings. Podman keeps
+`kind = 'ssh'` and a unique synthetic destination the ordinary SSH-host add path refuses. Nothing dials that string. The
+internal host kind has a flat Podman variant next to Tensorlake, with exhaustive named predicates, including the
+environment provider and whether a host can hold environments. Only Local and ordinary SSH may hold them.
+
+The place-host foreign key has no cascade. Removing or retargeting a host is refused while any environment row refers to
+it, including stopped resources and cleanup leftovers, or recipe state records artifacts there. The refusal names the
+environments or recipes to clean up first, retaining access for confirmed cleanup. The existing credential SQL guard on
+a non-null `tensorlake_sandbox` continues to admit environment delivery for both providers. Host views retain
+session-owned rows in Hosts, update tracking and ordinary attention. Only permanent rail icons and ordinary
+launch/template/agent host choices omit them. Destruction returns provider-confirmed cleanup evidence before the store
+forgets a resource row. A missing resource counts as destroyed, and Tensorlake also removes its snapshots.
+
+Replace the Tensorlake-only status source with the provider trait while retaining its scripted fake for actor tests.
+Status returns a successful environment status separately from an unanswered lookup, represented as
+`Result<EnvironmentStatus, StatusUnanswered>`. Status distinguishes Running, reason-bearing Changing, Suspended (noticed
+time and resume-failure detail), Stopped, Missing and an unknown provider state with its reason. Tensorlake's Suspended,
+Suspending and resume-failed states retain their existing Suspended projection. Missing includes a terminated sandbox.
+An unknown vendor state is not usable and must not dial. A consumed exhaustive provider-kind method chooses what an
+unanswered lookup does, `DialAnyway` for Tensorlake and `RetryLater` for Podman. Tensorlake attaches the API error only
+if that dial fails. This preserves its outage behavior without treating a successful unknown state as an API failure.
+Podman Stopped triggers one automatic start while the place host is connected. Failure publishes its reason and an
+explicit Resume remedy, without a timed start retry. Suspended never auto-resumes.
+
+### One route for transport and provisioning
+
+Local IPC, SSH and Podman exec carry the same framed supervisor protocol. Both transport and provisioning resolve
+through one host-access representation. Its remote route is SSH destination/access or Podman exec through a local or SSH
+base route. Provisioning's remote target retains the existing serialized SSH-case spelling in confirmation plans. Host
+routes are resolved from the store on each attempt, joining the current place row. Builders and preparers obtain their
+route from the provider, since those machines have no registered host row. Credential delivery, installation, builder
+shells and preparation all use the same remote-command constructor.
+
+The constructor builds argv layers with quoting once per parsing shell. Podman exec uses `-i`, the recorded login user,
+home working directory, explicit HOME/USER/LOGNAME and `XDG_RUNTIME_DIR=/run/user/<uid>`, then `sh -c` for the script. A
+remote base wraps that invocation in the ordinary SSH command. The protocol's innermost command is
+`farhelm internal stdio`. Do not paste Podman argv into the configured remote Farhelm program. The child-process
+connection owns stderr drainage, the connected marker and exit diagnostics for SSH and local/remote Podman exec. Local
+Podman therefore uses a process pipe even though the ordinary local host uses its Unix socket directly.
+
+All environment stdio routes pass `--stdin-idle-limit-secs 120` unconditionally and emit the existing 30-second
+heartbeat. The supported environment helper has that option. Killing a Podman exec client does not reliably end its
+in-container process, so the helper's own stdin watchdog supplies the bound. Ordinary SSH hosts retain no input-idle
+deadline. Releasing a route's shared connections must never close the container host's masters on behalf of a nested
+environment. Exec channels ride the place host's supervisor master, preserving logins that need interactive second
+factor. sshd's default `MaxSessions` of ten shares that connection among the ordinary supervisor and environment
+channels. After a full master refuses a channel, OpenSSH can open another noninteractive login. Hosts that require
+interactive approval for each login therefore allow about ten concurrent container connections, with actual capacity
+depending on their configuration and other channels. When the fallback login fails, launch refusal or connection
+unavailability names the container host's SSH session limit. No supervisor relays another's protocol.
+
+### Shared recipes and prepared artifacts
+
+Generalize the existing recipe catalog, preserving its separate definition and build-state writers. One recipe base
+supports providers through an exhaustive decision. Managed Ubuntu supports both, Tensorlake image and snapshot bases
+support Tensorlake, and container image reference plus login user supports Podman. Keep the stored spellings
+`tensorlake_ubuntu`, `image` and `snapshot` for existing bases. Size stays Tensorlake-only. Recipe templates, Clone,
+quick launch and recent setups carry a recipe/place target separately from installed-host identity, never both. Missing
+recipes or place hosts are inapplicable. Ordinary creation cannot target a session-owned row. Save as template from an
+environment launch and bulk lifecycle conveniences remain deferred.
+
+Reusable environment history is a bounded projection admitted in the existing successful-create transaction from
+captured request intent. It retains recipe/place, explicit structured selection and accepted repository-or-home intent
+without a disposable-host foreign key. A shared admission order compares different supervisors, whose clocks and
+creation sequences are independent. Replayed creates cannot change the captured intent or increase its frequency.
+
+Prepared artifacts belong to (recipe, place). Tensorlake retains built and prepared snapshots, while Podman stores built
+and prepared images in the place account's Podman storage. Keep per-place state in the existing `state_json`, with
+Podman entries keyed by place-host id. Recheck Podman artifacts with `podman image exists` before trusting records,
+since a host may have been reinstalled or its storage removed. Preparation becomes stale after strictly more than 86,400
+seconds, a different Farhelm version or a rebuilt source. Concurrent requests for the same recipe/place join its build
+or preparation. A Podman session launch builds a missing software image. Tensorlake session launch retains its
+built-snapshot prerequisite because builds bill. The Tensorlake build and preparation details below remain applicable to
+that provider.
+
+Rebuild is a required provider operation that returns after admission or joining. It reads the current definition. A
+Podman Rebuild refuses as busy when a preparation-only job holds that recipe/place, so joining cannot claim a rebuild
+that never ran. Readiness is a synchronous projection over shared recipe state and the one build registry, with the same
+freshness rule for both providers and an exhaustive place decision.
+
+Recipe deletion first takes the shared registry's deletion admission, excluding new builds, preparations and source
+selection for every provider. Each provider cleans all its recorded and live places under that guard. Cleanup waits for
+active work and requests cancellation only between commands, preserving recorded ownership of partial resources. Every
+installed provider is attempted and failures retain their records. The final store transaction rechecks recipe use and
+aggregate cleanup state before deleting the catalog row. Both engines share the same registry instance. Tensorlake
+cleanup checks only Tensorlake state before requiring its key.
+
+Containers leftovers use a provider-owned operation. It rechecks canonical identity, this helm's ownership labels and
+the absence of row, recipe or active-job references before removal. Row-backed leftovers use the ordinary confirmed
+whole-host Delete path with its actor hold and provisioning lock. Image removal uses non-forcing Podman removal after
+checking ownership labels, leaving an in-use image recorded for later cleanup. User-owned base images remain separate
+from Farhelm's committed layers.
+
+Settings → Recipes owns the shared catalog/editor and per-place readiness and Rebuild. Settings → Tensorlake retains
+account/key/create-confirmation settings and sandbox leftovers. Settings → Containers exposes cached probe results and
+container leftovers. The launcher and template editor share Existing host, New container and New sandbox placement, with
+a recipe/place pair for either environment segment. Provider UI differences remain exhaustive decisions in one module.
+Launch progress and errors reuse the existing operation surfaces, with no placeholder session.
+
+### Podman places, creation and images
+
+Probe only local and ordinary SSH hosts through their base route. Cache timestamped Linux, architecture, absolute Podman
+path and the results of `podman info` and a working transient user scope. Require Podman 4.9.3 or later, rootless,
+cgroup v2 and `cgroupManager: systemd`. Refresh in the background when the launcher opens, keeping unusable hosts with
+their reasons. No synchronous probe fan-out gates opening the launcher.
+
+Lifecycle commands run on the place host. Wrap `podman run` and `podman start` in `systemd-run --user --scope --collect`
+with a reserved environment name and a per-attempt nonce. This keeps conmon and the container's network helper outside
+the helm's cgroup and a remote SSH login's lifetime. Resolve Podman to an absolute path and strip all `FARHELM_*` and
+private tmux variables from its environment before it can initialize shared Podman processes. Session and helper
+container names and all owned image tags carry the helm tag. Labels include `farhelm.helm=<tag>` and
+`farhelm.role=session|build|prepare`. Podman storage is per Unix account, so two helms or test runs must never reuse
+each other's builder, preparer or image names.
+
+Managed Ubuntu bootstraps a digest-pinned fully qualified Ubuntu image in a non-systemd container, installing systemd,
+sudo, curl, git and bash, creating its login user with passwordless sudo and enabling linger before committing. The
+shared readiness checks then require systemd running or degraded, apt and the build tools. Every systemd container run
+passes `--systemd=always`, since committing does not preserve that run flag. Preparation uses the common installer and
+login-manager/linger setup. It stops the enabled supervisor, removes and verifies absence of its entire state directory,
+and clears `/etc/machine-id`. Stop the preparer cleanly before `podman commit`. A clone starts with no supervisor
+identity and learns it through the ordinary hello. A custom image supplies its reference and login user and must meet
+the same readiness contract. The concrete managed Ubuntu digest and login user are implementation choices.
+
+Read proxy variables from `systemctl --user show-environment` on the place host during its probe. Use
+`--http-proxy=false` and write the selected variables into the container user's `environment.d` at creation. PID 1's
+container environment alone does not reliably reach its user manager. This makes each session's proxy inheritance
+deterministic and independent of the helm's or SSH command's incidental environment.
+
+After successful build/preparation replacement, remove a superseded owned image once no container uses it. Rebuild
+cleans the place's replaced images, and recipe deletion cleans owned images at every place before forgetting their
+records. Never delete a user's base image. Reject Farhelm-managed checkpoint images as recipe bases. Discover leftovers
+with Podman's label-filtered listing at usable cached places and every place referenced by an environment row. Failed
+explicit cleanup keeps its resource and reason visible for retry. No startup cleanup worker is introduced.
+
+### Environment ownership and refusal
+
+Use the landed sandbox-session contract for both providers. Record ownership and a reserved resource name before
+creation. Confirmed user Delete destroys the whole resource, including unlisted sessions and files, without membership
+proof. Replace stays inside it and uses ordinary supervisor session deletion for its source, preserving the resource and
+existing files on every failed or ambiguous outcome. A failed normal initial launch may destroy only its new
+environment. Retain failed cleanup and interrupted resources for explicit deletion. Add no session-finality state,
+membership RPC, connection handshake, transparent recovery or startup continuation protocol for these cases.
+
+Suspend closes the exec connection before Podman pause, and Resume unpauses a Suspended container or starts a Stopped
+one. Stopped auto-start is attempted once after observation with a connected place, then failures wait for explicit
+Resume. A successful start returns the ordinary supervisor's classification, with no agent respawn. Its existing
+kernel-boot comparison interrupts sessions last known live across a host reboot and preserves known exits. Same-host
+container stop/start uses ordinary exit reconciliation. Plain Stop and Stop and suspend retain their ordinary
+chosen-session semantics followed, for the latter, by provider suspension.
+
+The owning helm refuses requests from session-owned origins after the existing prompts-off and origin-liveness gates,
+before permissions or approval. Agent Delete/Clone aimed at either provider's owned sessions and recipe-target launches
+are refused too. Keep local help, conversation reporting and ordinary disconnected-helm relay behavior. No supervisor
+restriction metadata, acknowledgement, membership or notification bookkeeping is added.
 
 ## Tensorlake account
 
@@ -6600,26 +6775,31 @@ SSH callers retain their default subtitle and omit Back. Copy plan remains in th
 
 ## Tensorlake recipes
 
-Protected `/api/tensorlake/recipes` routes store recipes in the schema-71 `tensorlake_recipes` table, one row per name,
-with the user's definition in `spec_json` and the helm's snapshot-build bookkeeping in `state_json`. The two are
-separate columns because they have separate writers: a save replaces only `spec_json`, and builds write only
-`state_json`, so a recipe edit racing a build cannot drop a recorded snapshot or builder ID, each of which is the only
-record of a billed Tensorlake resource. Changing a base or packages keeps the current snapshot and its ownership record;
-only a successful build replaces it and moves it to the retired list. This is why recipes are not launch templates'
-last-write-wins "PUT creates or replaces": `POST` creates and answers 409 for an existing name, `PUT /{name}` updates
-and answers 404 for a missing one, and no route renames. `DELETE /{name}` checks host use inside its own transaction,
-counting the hosts rows whose `tensorlake_recipe` names the recipe. The store also refuses the delete while `state_json`
-records a snapshot, a builder, a retired snapshot or a build start, so no path forgets a billed resource; the route
-cleans those up first (see below).
+The shared catalog extends the existing recipe storage and validation described here. Existing table names and stored
+base spellings remain compatible. The provider and place determine which artifact is built, as specified under
+Disposable environments. Tensorlake-specific build operations below keep their own billing and ownership rules.
+
+Protected recipe routes store recipes in the schema-71 `tensorlake_recipes` table, one row per name, with the user's
+definition in `spec_json` and the helm's snapshot-build bookkeeping in `state_json`. The two are separate columns
+because they have separate writers: a save replaces only `spec_json`, and builds write only `state_json`, so a recipe
+edit racing a build cannot drop a recorded snapshot or builder ID, each of which is the only record of a billed
+Tensorlake resource. Changing a base or packages keeps the current snapshot and its ownership record; only a successful
+build replaces it and moves it to the retired list. This is why recipes are not launch templates' last-write-wins "PUT
+creates or replaces": `POST` creates and answers 409 for an existing name, `PUT /{name}` updates and answers 404 for a
+missing one, and no route renames. `DELETE /{name}` checks host use inside its own transaction, counting the hosts rows
+whose `tensorlake_recipe` names the recipe. The store also refuses the delete while `state_json` records a snapshot, a
+builder, a retired snapshot or a build start, so no path forgets a billed resource; the route cleans those up first (see
+below).
 
 The wire types and validation live in `farhelm_proto::tensorlake::recipes`, shared with the UI, which runs the same
 checks before sending. `RecipeBase` is tagged by `kind`: `tensorlake_ubuntu`, `image` with `image`, or `snapshot` with
-`snapshot_id`. Save and view payloads carry this `base` separately from `packages`; the snapshot view records the base
-and packages actually built, so staleness compares both. Schema 78 converts old package sources to the Tensorlake Ubuntu
-base with their packages and current snapshot preserved. It leaves `state_json` byte-for-byte unchanged; an old built
-snapshot without `base` reads as Tensorlake Ubuntu, the only base old builds used. Old image and snapshot sources become
-the corresponding base with empty packages and no built snapshot. Their existing hosts are unchanged. The old source
-payload shape is not accepted by the recipe API after migration.
+`snapshot_id`, extended with a container-image reference and login user. The managed Ubuntu base retains its existing
+spelling and supports both providers. Save and view payloads carry this `base` separately from `packages`. The snapshot
+view records the base and packages actually built, so staleness compares both. Schema 78 converts old package sources to
+the Tensorlake Ubuntu base with their packages and current snapshot preserved. It leaves `state_json` byte-for-byte
+unchanged; an old built snapshot without `base` reads as Tensorlake Ubuntu, the only base old builds used. Old image and
+snapshot sources become the corresponding base with empty packages and no built snapshot. Their existing hosts are
+unchanged. The old source payload shape is not accepted by the recipe API after migration.
 
 The name grammar is narrower than a template's because the name is embedded verbatim in the snapshot builder's sandbox
 name (`farhelm-build-<helm tag>-<recipe>`), so it must already be a valid part of a Tensorlake name, and mapping it
@@ -6822,8 +7002,9 @@ session membership, finality tracking, or protocol and connection changes to pro
 
 Suspend and Resume reuse host lifecycle tasks. Stop and suspend completes ordinary Stop first, then applies the host
 Suspend rule to the whole resource; failure or incomplete Stop withholds Suspend. No path automatically resumes it. Bulk
-lifecycle conveniences and recipe recent setups are deferred. The ordinary per-host provisioning/lifecycle guard
-protects conflicting resource work; do not introduce new membership-specific locks or ordering.
+lifecycle conveniences remain deferred. Recipe recent setups carry recipe and place, never the disposable host's install
+identity. The ordinary per-host provisioning/lifecycle guard protects conflicting resource work; do not introduce new
+membership-specific locks or ordering.
 
 Templates represent a recipe separately from the existing opaque install-identity host field; both together are an
 inapplicable Host field. Shared template application treats them as one placement choice. Clone resolves an owned source
@@ -6841,15 +7022,16 @@ belongs to the owning helm; the ordinary relay already refuses when no owning he
 
 ## Tensorlake hosts
 
-A Tensorlake host is a `hosts` row with `kind = 'ssh'` and a non-null `tensorlake_sandbox` (schema 72 added that column
-and four more: the sandbox's id once a create answers, the recipe's name, the size as recipe-size JSON, and the time
-Farhelm's own Suspend finished). The kind CHECK is not widened, because that needs a rebuild of `hosts`, and about ten
-tables cascade-delete from it; only the sandbox column has a CHECK (`kind = 'ssh' OR tensorlake_sandbox IS NULL`), since
-relaxing a column CHECK later costs a rebuild too (schema 58). Rust still derives a distinct `HostKind::Tensorlake` from
-the pair, in every reader, so that each exhaustive match and named predicate on `HostKind` decides what a sandbox does:
-it has a remote install and is updated like an ssh host, is remote for browser links and tunnels, has no panel
-uninstall, no editable destination and no manual 2FA connections, and its removal deletes the machine. A reader that
-decoded `kind` alone would let a sandbox row be retargeted or forgotten as an ssh row.
+A Tensorlake host is a `hosts` row with `kind = 'ssh'`, a non-null `tensorlake_sandbox`, and a NULL or Tensorlake
+environment-provider discriminator (schema 72 added the sandbox column and four more: the sandbox's id once a create
+answers, the recipe's name, the size as recipe-size JSON, and the time Farhelm's own Suspend finished). The kind CHECK
+is not widened, because that needs a rebuild of `hosts`, and about ten tables cascade-delete from it; only the sandbox
+column has a CHECK (`kind = 'ssh' OR tensorlake_sandbox IS NULL`), since relaxing a column CHECK later costs a rebuild
+too (schema 58). Rust derives a distinct `HostKind::Tensorlake` through the common kind/name/provider decode in every
+reader, so each exhaustive match and named predicate decides what a sandbox does: it has a remote install and is updated
+like an ssh host, is remote for browser links and tunnels, has no panel uninstall, no editable destination and no manual
+2FA connections, and its removal deletes the machine. A reader that decoded `kind` alone would let a sandbox row be
+retargeted or forgotten as an ssh row.
 
 Connections to a sandbox use the ordinary ssh argv, with its shared connections, plus the snapshot builder's Tensorlake
 ssh options (see "Tensorlake snapshot builds") before the option terminator, so builders and hosts share Farhelm's key,
@@ -6857,25 +7039,24 @@ one known-hosts file and one host key alias. The user's ssh config is still read
 `ProxyCommand`; command-line options win where they overlap. A state directory whose path contains `${`, `%`, `"` or `\`
 is refused with an error naming it: OpenSSH expands `${NAME}` in these options even inside quotes and has no escape for
 it, and supported older OpenSSH versions cannot carry the other three safely (see "Tensorlake snapshot builds").
-Provisioning targets keep the `Ssh` shape with an `access` field (omitted from a plan for an ordinary host), so every
-decision keyed on an ssh target, the payload uploads included, holds for sandboxes.
+Provisioning resolves the common SSH remote route with its Tensorlake access options. The serialized SSH plan spelling
+and omitted ordinary-access field remain compatible, including payload uploads.
 
 Before each connection attempt on a Tensorlake host, the connection actor asks the API for the sandbox's status through
-a source the manager owns (`SandboxStatusSource`, implemented by the Tensorlake service), inside the attempt's 20-second
-budget and bounded at 10 seconds itself. Running dials. Suspended, suspending and resume-failed publish the `suspended`
-state without dialing; the first time, the actor also runs `ssh -O exit` on both of the host's shared masters (5 seconds
-each, best effort), because a master survives the suspension and a new session on it hangs. A starting, snapshotting or
-unknown status fails the attempt so the ladder retries; a terminated or missing sandbox fails it with the advice to
-delete the host. When the API cannot answer, the actor dials anyway and adds the reason to a failed dial's text: a new
-connection to a suspended sandbox is refused promptly by the gateway, while refusing to dial would cut off every running
-sandbox whenever the key is cleared or the API is down. The check is made per attempt and never while connected, so a
-connected host costs no API traffic and a suspended one one call per re-probe (45 seconds). A sandbox suspended under a
-live connection is noticed when the 30-second refresh timeout tears the connection down. `suspended` carries the time
-this helm first saw it; the host list adds the row's own suspend time, so the UI can tell Farhelm's suspension from
-Tensorlake's idle timeout across helm restarts. Provisioning does not go through the actor's gate, so it checks the same
-state itself: Update and setting a host up again are refused for a host the manager shows suspended, before anything is
-probed and again before a confirmed run's preflight probe, with a resume-first message, and the panel offers neither
-while the host is suspended.
+a provider implementation the manager owns, inside the attempt's 20-second budget and bounded at 10 seconds itself.
+Running dials. Suspended, suspending and resume-failed publish the `suspended` state without dialing; the first time,
+the actor also runs `ssh -O exit` on both of the host's shared masters (5 seconds each, best effort), because a master
+survives the suspension and a new session on it hangs. A starting, snapshotting or unknown status fails the attempt so
+the ladder retries; a terminated or missing sandbox fails it with the advice to delete the host. When the API cannot
+answer, the actor dials anyway and adds the reason to a failed dial's text: a new connection to a suspended sandbox is
+refused promptly by the gateway, while refusing to dial would cut off every running sandbox whenever the key is cleared
+or the API is down. The check is made per attempt and never while connected, so a connected host costs no API traffic
+and a suspended one one call per re-probe (45 seconds). A sandbox suspended under a live connection is noticed when the
+30-second refresh timeout tears the connection down. `suspended` carries the time this helm first saw it; the host list
+adds the row's own suspend time, so the UI can tell Farhelm's suspension from Tensorlake's idle timeout across helm
+restarts. Provisioning does not go through the actor's gate, so it checks the same state itself: Update and setting a
+host up again are refused for a host the manager shows suspended, before anything is probed and again before a confirmed
+run's preflight probe, with a resume-first message, and the panel offers neither while the host is suspended.
 
 Removal (`DELETE /api/hosts/{id}`, the GUI's only removal) first holds the host's connection actor: the manager
 publishes a not-connected state with no client, interrupts whatever the actor was doing, and waits until it parks, after
@@ -6943,13 +7124,12 @@ The Suspend question uses the shared framed-dialog header, scroll body and foote
 lifecycle callback still owns acceptance and dispatch. Dismissal releases that modal before returning focus to the
 host's control. Sandbox metadata reuses the ordinary `host-detail` style rather than a separate type scale.
 
-The remote `internal stdio` proxy has no input deadline by default. Only Tensorlake's steady-state SSH command opts in
-with `--stdin-idle-limit-secs 120`, after probing that executable's `internal stdio --help` for the advertised option.
-The probe's stdout is captured, not forwarded into the protocol. A helper without the option receives the legacy
-invocation, so clap cannot reject an unknown flag before the usual hello/version-skew handling. An older helm never
-passes the flag; ordinary SSH argv stays unchanged.
+The remote `internal stdio` proxy has no input deadline by default. Every environment route passes
+`--stdin-idle-limit-secs 120` unconditionally, using the common host-access decision. The option shipped in the same
+release as Tensorlake host support, and new Podman environments carry a prepared helper. Ordinary SSH argv retains its
+default without an input deadline.
 
-For Tensorlake hosts the client's writer emits an empty data frame on channel zero every 30 seconds, giving due
+For environment hosts the client's writer emits an empty data frame on channel zero every 30 seconds, giving due
 heartbeats priority between queued frames. No channel can be allocated at zero, so the supervisor's data router ignores
 it, including older supervisors; there is no new control variant or protocol bump. The timer belongs to the writer,
 independently of refresh/cache/database completion. Only byte activity on the helper's stdin resets its watchdog. The
@@ -6960,7 +7140,7 @@ their child, without changing the test process's environment.
 
 ## Tensorlake recipe tunnels and unowned sandboxes
 
-The connection actor gives its Tensorlake connected-resource hook the actual `SupervisorClient`. The hook snapshots the
+The connection actor gives its environment connected-resource hook the actual `SupervisorClient`. The hook snapshots the
 recipe once and acquires a `TunnelLease` that owns a claim worker on that connection. Leaving the connected phase,
 entering a hold, removing the row or aborting the actor drops the lease: it aborts the worker, retires the claiming
 connection and withdraws the tunnel view. There is no release message or separate SSH process. The actor also races hook
@@ -7903,14 +8083,14 @@ still matters for installed apps, not only for fresh installs.
 
 ## Provisioning
 
-Implemented in the helm over the same system-ssh access: stream the target's `farhelm` binary (plus a private static
-tmux build on Linux when the host has no acceptable tmux) into `~/.local/lib/farhelm/` through the same `ssh` command
-every other step uses (`cat` into a nonce temporary, then a digest check before the rename; not sftp, whose own
-destination grammar reads an IPv6 literal or an `ssh://` URI as a different host than ssh does). On Linux, write
-user-level systemd units, `systemctl --user enable --now`, `loginctl enable-linger` as the optional-step
-(proceed-without-if-privileged per SPEC.md). Discovery-first: probe for a running supervisor via
-`farhelm internal stdio` before proposing any of this, and show the full concrete action list before touching the host
-for initial setup.
+Implemented in the helm over the common remote route, using system SSH or local/SSH-nested Podman exec. Stream the
+target's `farhelm` binary (plus a private static tmux build on Linux when the host has no acceptable tmux) into
+`~/.local/lib/farhelm/` through the same route constructor every other step uses (`cat` into a nonce temporary, then a
+digest check before the rename; not sftp, whose own destination grammar reads an IPv6 literal or an `ssh://` URI as a
+different host than ssh does). On Linux, write user-level systemd units, `systemctl --user enable --now`,
+`loginctl enable-linger` as the optional-step (proceed-without-if-privileged per SPEC.md). Discovery-first: probe for a
+running supervisor via `farhelm internal stdio` before proposing any of this, and show the full concrete action list
+before touching the host for initial setup.
 
 Inspection chooses the OS with `uname -s` before any systemd or tmux command. The combined payload target is Linux
 x86_64, Linux aarch64 or macOS aarch64; its serialized Linux architecture names remain `x86_64` and `aarch64`.
@@ -8461,86 +8641,19 @@ helm at 68 shows an older supervisor as `Needs update`.
 
 ### Rootless Podman sessions
 
-The optional launch selection `container` carries a strict Podman engine choice, local image name or ID, selected proxy
-port and optional token-file path. Matching template edits use absent/set/null semantics. Both strict wire surfaces use
-protocol 67; absent launch settings are omitted so existing fingerprints do not change. A private strict decoder accepts
-and discards the retired `image_file` field, defaulting `image` to empty; an explicit current image wins if both occur.
-This covers stored sessions, templates, recent setups and creation tickets without a migration. Portable validation
-permits empty images so stored loads and template application succeed; UI launch projection and supervisor preflight
-require one. Whitespace, controls, leading dashes and explicit image transport prefixes refuse.
+New rootless Podman environments follow [Disposable environments](#disposable-environments). Their supervisor runs
+inside the container, and every session and terminal uses its ordinary host paths.
 
-The supervisor resolves Podman by absolute executable path before login-shell startup and checks Linux, managed
-membership, an existing local image and a readable nonempty token file. The image check runs `podman image exists`
-asynchronously through the same scrubbed control runner as lifecycle operations, with its 30-second deadline and 64 KiB
-output caps. Exit 1 means the named image is absent; other failures refuse with stderr. This observation does not
-reserve the name or pin an image ID. The container's working directory is canonical; its only explicit bind is the whole
-deepest allocated containing checkout, selected before verifying its identity. Missing or replaced inner checkouts
-refuse rather than falling back to a broader outer checkout. Existing registry membership and allocation admission keep
-that root stable; file admission reuses the same bounded lookup. The private creation ticket carries the bind root,
-while control reconstruction needs no checkout filesystem observation. Host checkout preparation remains unchanged
-except that the container launch suppresses its Claude trust edit. After preparation, the terminal shim runs a
-short-lived creator through the existing scope prefix in `farhelm-<session>-container.scope`, disjoint from agent and
-tab patterns. Every Podman control command scrubs all inherited `FARHELM_*` and private tmux variables before it could
-initialize Podman's shared pause process. With no usable user manager the helper runs unscoped. The helpers keep the
-container alive outside agent containment; the agent's marked `podman exec -it` client remains in ordinary agent
-containment.
+The earlier supervisor-outside model is retired. Keep decoding stored `ContainerConfig`, including legacy `image_file`,
+so sessions, templates, recent setups and history remain readable. A retired session supports Delete only. Refuse all
+other lifecycle, terminal and exec paths, including plain Replace. Drop or refuse retired container selections when
+using a stored setup, with an explanation. No path creates another old-style session.
 
-A permanent per-session flock inode and a credential-free positive ticket serialize creation with teardown across
-processes. The ticket carries its generation; an older delayed helper cannot spend a retry's newer permit. The creator
-itself holds the CLOEXEC flock across its Podman child, ignoring ordinary terminal SIGHUP while it waits. A lock held
-only by the agent shim would drop when Stop killed that shim while the separately scoped creator kept running. A lock
-without a positive permit would let a queued creator recreate the container after Delete. The checkout-preparation flock
-is per working copy and ends too early to serve either purpose.
-
-Stop/Delete acquire with nonblocking flock attempts and async 50 ms waits, bounded by a 30-second deadline. Timeout
-revokes nothing and sends no signals. Stop revokes only after committing its intent or dead-agent classification; Delete
-revokes after read-only preflights and upload cancellation. The guard spans the Podman operation and actual state
-confirmation. The lock inode is never unlinked, since an already-open waiter could otherwise acquire a different inode
-from a future opener. Ambiguous Create unwind must also revoke and confirm removal before discarding a row; unconfirmed
-cleanup retains its ownership record.
-
-The creation ticket carries the host account's name, uid, gid and home, resolved from the supervisor's uid with
-`getpwuid_r`; environment variables are not identity evidence. Under the creation fence, the synchronous creator
-resolves the configured local image name once with `podman image inspect` to its full image ID. That creator-local ID is
-used for both the short-lived inspection container and the session container, so a concurrent retag cannot make the
-account choice describe a different image. The ID is never persisted; each new container resolves the configured name
-afresh. The inspection container runs as root with no network, mounts, keep-id or working-directory override. Its user
-and group databases and the host home path's type and owner feed a pure account choice. This must happen before the
-checkout bind: Podman can create its parent directories as root, including the host home path, and those are not facts
-about the image. The ordered choice in SPEC.md is authoritative; no existing image user is renamed and no existing home
-moved.
-
-Creation uses that image ID with `--pull=never`, keep-id mapped to the chosen uid/gid, the checkout as its only explicit
-read-write bind, `pasta:-T,<port>`, Podman's init and an idle Bash/sleep keeper, overriding any image entrypoint.
-Podman's automatic passwd injection is disabled so it cannot occupy the name or uid before Ubuntu's own tools create the
-account. A new account reuses the chosen gid's group when one exists, otherwise creates that group. Its home is prepared
-from `/etc/skel` without overwriting existing entries or recursively changing home ownership: the checkout can already
-be mounted below that home. Seeding is skipped when the home is inside the checkout bind, and preparation never modifies
-anything inside the bind. Missing homes for existing chosen accounts get the same preparation. A root-owned host home,
-or an owner absent from the image's account database, falls through to the uid rule; an unsupported rootless uid mapping
-refuses clearly.
-
-The chosen account and `HOME` are set at container creation, so the keeper, agent and every later exec inherit them.
-Terminal tabs reconstruct execs from the launch settings and need no separately persisted account or per-exec user or
-home override. Before starting the session container, the creator writes a private initialization-pending marker beside
-the lock and ticket while holding the lock. It clears the marker only after account preparation and confirmed running
-state, or confirmed container absence. Failure after `podman run -d` attempts removal and confirms absence under the
-same lock; unconfirmed cleanup retains the marker and container ownership for Delete or Replace. Every
-existing-container prepare path and terminal-tab start refuses while the marker exists, so a crash or failed cleanup
-cannot restart a partially prepared container. The marker records incomplete creation only; it stores no account or
-image ID for later execs.
-
-No image manager or registry step is added: users load or build images into Podman's storage themselves, and Farhelm
-never imports, pulls, tags or removes them. Creation also refuses an empty image from an old ticket; existing-container
-control does not recheck image availability. Exec forwards only TERM, COLORTERM and optional name-only GH_TOKEN; the
-helper reads the latter afresh and never serializes its contents. Podman's own transient exec metadata can contain it.
-Container launches select the existing hooks-off policy, which prevents reporter materialization, command injection,
-capture notifications and BROWSER forwarding for this one launch without changing other sessions.
-
-Podman's command status is not a lifecycle oracle. After an exec scope was killed, Podman 4.9.3 can stop the container
-yet fail waiting for an exec exit file. Stop accepts only inspected exited/stopped state or confirmed absence; Delete
-accepts only confirmed absence. Delete includes the dedicated container helper scope by exact derived name after
-removing the container, preserving the existing fail-closed scope checks.
+Retain only the legacy `podman rm -f` removal, confirmed-absence check and lock/ticket handling still required to
+serialize deletion with an already-started creator. Resolve Podman lazily. A host without Podman has nothing left to
+remove. Other unconfirmed cleanup keeps the session for retry. Remove creation helpers, account selection, launch fields
+and switches, hooks-off branches, special tab/attach and file-confinement paths once nothing can create or open these
+sessions. Normal container environments require no supervisor-side Podman implementation.
 
 ### What running sessions hold across versions
 
