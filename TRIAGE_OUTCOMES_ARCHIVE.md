@@ -20309,3 +20309,21 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   code or any new focus-tracking mechanism.)
 - Execution: implemented in change `uozrvpwszryskqzsomnwwwxylntnyzxq`, bookmark `triage/focus-discards/02-bell-focus`,
   [PR #3319](https://github.com/scode/farhelm/pull/3319/changes).
+
+## reselecting-terminal-does-not-restore-focus.md
+
+- Outcome: `discard` (revised 2026-11-10 from `fix code`; see Decision).
+- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: Using
+  the keyboard to activate the session row or tab that is already selected leaves focus on that button instead of moving
+  it to the terminal. The finding says the reselection focus policy is "unspecified". SPEC_impl.md covers focus on
+  reveal only.
+- Decision: the user picked "Write one rule and apply it" (2026-10-26 ten-question triage page, Q9), and added in chat:
+  "on that focus rule apply complexity gate to the fixes i'm worried about it getting uber complicated and i want to
+  know if that happens by having plans blocked" The rule is carried by `guarded-answer-loses-launcher-focus.md`; execute
+  after it. Superseded 2026-11-10 along with `guarded-answer-loses-launcher-focus.md`: the user said of these four "all
+  of those seem ok to just discard, please do so, none seem critical".
+- Completion criteria: remove the feedback file and its index entry; no code or spec change. (The superseded criteria
+  were: this case follows the SPEC.md focus rule under the maintainer's complexity gate of roughly 50 lines of non-test
+  code or any new focus-tracking mechanism.)
+- Execution: implemented in change `oovtqxuvlkxuwotonzkwxuvpruzwvxuo`, bookmark
+  `triage/focus-discards/03-reselect-focus`, [PR #3320](https://github.com/scode/farhelm/pull/3320/changes).

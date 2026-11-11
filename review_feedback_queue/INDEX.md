@@ -465,10 +465,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   origin can provide oversized checksum or signature files that are downloaded and fully read before rejection. Material
   resource exhaustion is unmeasured; this is maintainer-tooling resource scope, not a demonstrated catastrophic failure.
 
-- [`reselecting-terminal-does-not-restore-focus.md`](reselecting-terminal-does-not-restore-focus.md) — Keyboard
-  activation of an already-selected session row or tab leaves typing focus on that button rather than returning it to
-  the revealed terminal. The exact reselection policy is unspecified; no harmful input route is alleged.
-
 - [`quick-switcher-pending-read-keeps-old-shortcut-labels.md`](quick-switcher-pending-read-keeps-old-shortcut-labels.md)
   — A successful but still-pending opening read can leave old shortcut labels visible in the switcher. Existing
   decisions accept failed reads and later moves, but this interval's coverage is ambiguous; selection still captures the
